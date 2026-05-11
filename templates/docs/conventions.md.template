@@ -1,0 +1,24 @@
+> Status: Draft (wizard-generated)
+>
+> **Changes to this file require explicit human approval.**
+> Set `JIG_CONVENTIONS_APPROVED=1` in your shell session before editing, or the
+> spec-gate hook will block the edit.
+
+# Conventions: {{PROJECT_NAME}}
+
+> Each rule uses: rule → **Why:** → **How to apply:**.
+> Add rules as the project encounters real decisions worth recording.
+
+## Code style
+
+> **Deferred — no signal from initial pitch.** Will be filled in as the
+> project encounters style decisions worth recording.
+
+## Testing
+
+> **Deferred — no test framework decided yet.** Will be filled in as the
+> project encounters style decisions worth recording.
+
+## Git
+
+> **Deferred — commit message format and branch naming not yet decided.**

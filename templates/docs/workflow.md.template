@@ -1,0 +1,37 @@
+> Status: Draft (wizard-generated)
+
+# Workflow: {{PROJECT_NAME}}
+
+## How we build
+
+Spec-driven development with SPIDR slicing, independent review, and reconciliation.
+
+## Spec lifecycle
+
+```
+DRAFT → READY_FOR_REVIEW → READY_FOR_IMPLEMENTATION → IN_PROGRESS
+  → REVIEWED → RECONCILED → DONE
+```
+
+## SPIDR splitting
+
+All non-trivial specs are SPIDR-split before implementation:
+
+- **S — Spike**: last resort, only when none of P/I/D/R apply
+- **P — Path**: split by alternative paths (happy path first)
+- **I — Interface**: split by UI/platform/channel (minimal first)
+- **D — Data**: split by data subset (less data first)
+- **R — Rules**: split by business rules (simple first)
+
+**Anti-horizontal-phasing rule:** every slice must touch the user-facing layer
+and deliver end-to-end value.
+
+## Session workflow
+
+1. Check `docs/specs/README.md` for current status board.
+2. Pick up next `READY_FOR_IMPLEMENTATION` slice.
+3. Spawn the `implementer` subagent with the spec path.
+4. After deliverable is on disk, trigger `independent-review`.
+5. Reconcile: update docs, write deviation log, run reconciliation review.
+6. Run `/jig:memory-sync` to consolidate learnings.
+7. Update spec status to DONE.

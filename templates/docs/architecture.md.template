@@ -1,0 +1,24 @@
+> Status: Draft (wizard-generated)
+>
+> This document evolves as decisions are made. Open questions are explicit, not papered over.
+> Update via reconciliation after each spec slice completes.
+
+# Architecture: {{PROJECT_NAME}}
+
+## What this project does
+
+> **Deferred — no signal from initial pitch.** Will be filled in by the first feature spec.
+
+## Tech stack
+
+> **Deferred — no signal from initial pitch.** Will be decided in the first
+> spec that requires a runtime/language choice. Record via an ADR.
+
+## Module boundaries
+
+> **Deferred — no modules yet.** Boundaries become explicit when the first
+> contract is defined.
+
+## Open questions
+
+> Deferred items live in [refinement-todo.md](refinement-todo.md).

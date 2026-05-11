@@ -24,3 +24,25 @@ A spec-gate hook for `docs/conventions.md` cannot enforce itself during scaffold
 the hook only activates after scaffold-init completes. This is fine: the gate starts
 working from the second session onward. Don't fight the paradox; document it.
 Discovered: plan review (rev 2), issue #3.
+
+## `python3 - <<'EOF'` consumes stdin — fatal for hook scripts
+
+The pattern `python3 - <<'EOF' ... EOF` runs Python with `-` (script from stdin)
+where stdin is the heredoc. Python reads the script, leaving `sys.stdin` at EOF.
+So `json.load(sys.stdin)` returns "Expecting value: line 1 column 1" — there is
+no JSON to read. This silently broke ALL 5 hook scripts in the initial commit.
+
+**Fix:** Use `python3 -c "<script>"` instead. The script is a command-line argument,
+and stdin remains available for the hook payload. `docs/memory/tooling.md` was
+updated to reflect this.
+
+Discovered: slice 001-01 TDD, while running `test_conventions_gate_blocks`. The
+test failed with "Expecting value: line 1 column 1 (char 0)" — the smoking gun.
+Caught only because the spec-gate hook had a deterministic test; the other hooks
+appeared to "work" because they only ran the silent telemetry/scan paths and
+exited 0.
+
+**Generalizable lesson:** If a hook is async and exits 0 on errors (telemetry pattern),
+you cannot tell whether it works without a deterministic test that asserts a
+specific output. Every new hook needs a unit test that pipes mock stdin and
+checks behavior.

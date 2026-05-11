@@ -33,7 +33,7 @@ This spike is NOT a gate for slice 001-01. Slice 001-01 uses hardcoded defaults.
 
 ## Slice 001-01 — greenfield-scaffold
 
-**STATUS: DRAFT**
+**STATUS: DONE**
 
 **Goal:** Happy path wizard — no signal detection, default tier install (Tier 0 + Tier 1), produces complete docs/ skeleton, CLAUDE.md with Hot Cache, hooks.json, and scaffold.json manifest.
 
@@ -52,13 +52,42 @@ This spike is NOT a gate for slice 001-01. Slice 001-01 uses hardcoded defaults.
 8. Bootstrap note: the spec-gate hook for `docs/conventions.md` activates AFTER scaffold-init. Verify post-completion: editing conventions.md without approval is blocked.
 
 **DoD (Definition of Done):**
-- [ ] All ACs pass
-- [ ] Implementer test coverage for the scaffold tree output
-- [ ] Reviewed by `reviewer` subagent
-- [ ] Deviation log produced (if any deviations)
-- [ ] Reconciliation review pass
+- [x] All ACs pass (14 tests, all green)
+- [x] Implementer test coverage for the scaffold tree output
+- [x] Reviewed by `reviewer` subagent (verdict: needs-changes → all issues resolved)
+- [x] Deviation log produced (see below)
+- [x] Reconciliation review pass
 
 **Anti-horizontal-phasing check:** ✅ Running `/jig:scaffold-init` produces a complete, runnable project structure end-to-end.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. This section records what changed during implementation.
+
+**Reviewer-flagged fixes (all addressed before RECONCILED):**
+
+1. **CLAUDE.md.template leaked a maintainer-only comment** into every scaffolded project. Moved out of the template body. Smoke-tested: head of generated CLAUDE.md is clean.
+2. **AC #3 was under-implemented.** Only 4 of 9 generated .md files carried the Status marker. Added markers to glossary, learnings, tooling, inbox, specs/README, adrs/README templates. `test_draft_markers` now walks every `.md` under the scaffolded tree.
+3. **Spec-gate hook had a path-traversal weakness.** `foo/docs/conventions.md/../conventions.md` would slip past the suffix check. Fixed via `os.path.realpath` / `os.path.normpath`. Regression test `test_conventions_gate_resists_path_traversal` added.
+4. **scaffold.py would silently overwrite existing CLAUDE.md / scaffold.json.** Added `AlreadyScaffoldedError` and refuses unless `--force` is passed; exit code 3. Two tests added.
+5. **Unrendered `{{KEY}}` placeholders only emitted a warning.** Now raises `UnrenderedPlaceholderError` and exits non-zero. Test added that injects a bad template and asserts the failure.
+6. **`installed_tiers` was duplicated** between `templates/scaffold.json.template` and the `DEFAULT_TIERS` constant in `scaffold.py`. Template now carries an empty array; scaffold.py is the single source of truth.
+
+**Forward-leaning additions noted by reviewer (kept intentionally):**
+
+- `hooks.json` PreToolUse matcher includes `MultiEdit` alongside `Edit|Write`. Plan only mentioned `Edit|Write`. Locks in MultiEdit coverage before it becomes a hole.
+- `scaffold.json` includes `scaffold_signals` and `hook_profile` keys not required by AC #2. Forward-compat scaffolding for slice 001-03 (signal detection). All default values are conservative ("false" / "standard").
+- AC #1 ("empty directory") is verified by Claude (via SKILL.md instructions) rather than `scaffold.py`. Architectural split: script is dumb, the skill body is the safety layer, and scaffold.py's overwrite-refusal is the second safety layer.
+
+**Real bugs discovered during TDD (not in original review):**
+
+- **All hook scripts using `python3 - <<'EOF'` were broken.** The heredoc overrode stdin, so `json.load(sys.stdin)` got the script source, not the hook event JSON. Fixed by switching to `python3 -c "..."`. This affected all 5 hook scripts, not just the new spec-gate. Captured in `docs/memory/learnings.md`.
+
+**Doc updates from this slice:**
+
+- `docs/memory/learnings.md` extended (one new entry: the `python3 -` stdin bug).
+- No `architecture.md` changes required (no new module boundaries).
+- No ADR required (no irreversible architectural decisions).
 
 ---
 

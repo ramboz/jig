@@ -1,0 +1,10 @@
+# Spec Status Board
+
+> Status: Draft (wizard-generated)
+>
+> Current state of all specs for {{PROJECT_NAME}}. Update after each slice transition.
+
+| Spec | Slice | Status | Notes |
+|------|-------|--------|-------|
+
+<!-- Add rows as specs are created. -->

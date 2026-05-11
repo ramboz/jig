@@ -5,8 +5,8 @@
 | Spec | Slice | Status | Notes |
 |------|-------|--------|-------|
 | [001-scaffold-init](001-scaffold-init/spec.md) | Spike 001a | DRAFT | Signal detection spike |
-| [001-scaffold-init](001-scaffold-init/spec.md) | 001-01 greenfield-scaffold | DRAFT | **Next to implement** |
-| [001-scaffold-init](001-scaffold-init/spec.md) | 001-02 doc-content | DRAFT | Depends on 001-01 |
+| [001-scaffold-init](001-scaffold-init/spec.md) | 001-01 greenfield-scaffold | **DONE** | 14 tests green; reviewed + reconciled |
+| [001-scaffold-init](001-scaffold-init/spec.md) | 001-02 doc-content | DRAFT | **Next to implement** |
 | [001-scaffold-init](001-scaffold-init/spec.md) | 001-03 signal-detection | DRAFT | Depends on Spike 001a |
 | [001-scaffold-init](001-scaffold-init/spec.md) | 001-04 deferred-decisions | DRAFT | Depends on 001-02 |
 | [001-scaffold-init](001-scaffold-init/spec.md) | 001-05 wizard-qa | DRAFT | Implement last |

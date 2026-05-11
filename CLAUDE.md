@@ -20,8 +20,8 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - **Reconciliation** = post-implementation phase: deviation log, doc updates, second review pass
 
 ### Active specs
-- 001-scaffold-init: STATUS DRAFT — slice 001-01 (greenfield-scaffold) is **next to implement**
-- 002-memory-layer: STATUS DRAFT — slice 002-01 (explicit-sync) is next after 001-01
+- 001-scaffold-init: slice 001-01 **DONE**; slice 001-02 (doc-content) is next
+- 002-memory-layer: STATUS DRAFT — slice 002-01 (explicit-sync) next after 001-02
 
 ### Deferred decisions
 → See [docs/refinement-todo.md](docs/refinement-todo.md)
@@ -47,7 +47,7 @@ Building Tier 0 skills. Starting with scaffold-init (spec 001) and memory-layer 
 
 | Skill | Status | Invocable |
 |---|---|---|
-| `/jig:scaffold-init` | DRAFT — spec 001 drives it | Yes (explicit) |
+| `/jig:scaffold-init` | Slice 001-01 DONE (greenfield only); 001-02..05 pending | Yes (explicit) |
 | `/jig:memory-sync` | DRAFT — spec 002 drives it | Yes (explicit) |
 | `/jig:spec-workflow` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
 | `/jig:independent-review` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
