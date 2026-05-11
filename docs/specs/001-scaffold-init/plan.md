@@ -1,74 +1,73 @@
-# Plan: Slice 001-01 — greenfield-scaffold
+# Plan: Slice 001-02 — doc-content
 
 ## Approach
 
-scaffold-init is a hybrid skill: the SKILL.md body instructs Claude on framing, the
-deterministic file-generation runs through a Python script invoked via Bash.
+Template-only changes for 4 of 8 ACs; one new behavior in scaffold.py for AC #8 (team detection via git log) plus a new `people.md` template.
 
-- **Decision boundary:** Claude decides *where* to scaffold (target dir, confirmation
-  on non-empty) and *reports* what happened. The script does *what* gets written.
-- **Why a script:** scaffold output must be deterministic and testable. AC verification
-  needs to run as a reproducible test, not as "ask Claude to do it and check."
-- **Why a script in `skills/scaffold-init/`:** colocated with the skill that owns it.
-  Referenced via `${CLAUDE_SKILL_DIR}/scaffold.py` from the SKILL body.
+Per 001-01 audit, ACs #1, #4, #5, #6 already substantially met by current templates. This slice tightens the remaining four.
+
+## AC audit summary
+
+| AC | Status going in | Work needed |
+|---|---|---|
+| #1 architecture deferred stubs | ✅ already met | none |
+| #2 workflow has spec lifecycle + strictness | 🟡 lifecycle ✅, strictness missing | add Hook Strictness section |
+| #3 conventions uses Rule/Why/How throughout | ❌ deferred stubs don't follow format | restructure with 2-3 starter rules in format |
+| #4 refinement-todo ≥3 decisions | ✅ 5 present | none |
+| #5 memory stubs meaningful content | 🟡 acceptable | (defer — current content already explains usage) |
+| #6 inbox header | ✅ already met | none |
+| #7 Hot Cache populated with project name + empty lists | 🟡 placeholder text, not name | substitute `{{PROJECT_NAME}}` in codenames section |
+| #8 people.md conditional on team | ❌ unimplemented | add `detect_team()` + `people.md.template` |
 
 ## Files to create
 
 | Path | Purpose |
 |---|---|
-| `skills/scaffold-init/scaffold.py` | Wizard implementation |
-| `skills/scaffold-init/test_scaffold.py` | AC verification |
-| `templates/docs/*.md.template` | Target-project doc stubs (status-marked) |
-| `templates/docs/memory/*.md.template` | Memory layer stubs |
-| `templates/docs/specs/README.md.template` | Spec status board stub |
-| `templates/docs/adrs/README.md.template` | ADR index stub |
-| `templates/scaffold.json.template` | Install-state manifest format |
-| `hooks/scripts/jig-spec-gate.sh` | PreToolUse gate for conventions.md |
+| `templates/docs/memory/people.md.template` | Team-roster stub (only rendered when team detected) |
 
 ## Files to modify
 
 | Path | Change |
 |---|---|
-| `skills/scaffold-init/SKILL.md` | Body: wizard instructions + script invocation |
-| `hooks/hooks.json` | Add PreToolUse Edit\|Write gate calling jig-spec-gate.sh |
-| `docs/specs/001-scaffold-init/spec.md` | Status: DRAFT → IN_PROGRESS |
+| `templates/docs/workflow.md.template` | Add Hook Strictness Profiles section (deferred marker) |
+| `templates/docs/conventions.md.template` | Restructure with starter rules in Rule/Why/How format |
+| `templates/CLAUDE.md.template` | Substitute `{{PROJECT_NAME}}` in Project codenames bullet |
+| `skills/scaffold-init/scaffold.py` | Add `detect_team()` → conditionally render people.md |
+| `skills/scaffold-init/test_scaffold.py` | New tests for ACs #2, #3, #7, #8 (team and solo paths) |
+| `docs/specs/001-scaffold-init/spec.md` | Status: DRAFT → IN_PROGRESS → DONE |
 | `docs/specs/README.md` | Reflect new status |
 
-## Template-substitution model
+## Team detection logic
 
-`{{PROJECT_NAME}}` is the only placeholder for slice 001-01 (basename of target dir).
-Future slices add `{{TECH_STACK}}`, `{{TEAM_SIZE}}`, etc. as signal detection grows.
+```python
+def detect_team(target: Path) -> bool:
+    """Returns True iff `git log` in target shows ≥2 unique author emails.
+    Returns False on non-git dirs, missing git binary, or any failure."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(target), "log", "--format=%ae"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return False
+        authors = {line.strip() for line in out.stdout.splitlines() if line.strip()}
+        return len(authors) >= 2
+    except Exception:
+        return False
+```
 
-## Spec-gate hook design
-
-`jig-spec-gate.sh` fires on `PreToolUse` / `Edit|Write`. If the target file path matches
-`docs/conventions.md` AND the env var `JIG_CONVENTIONS_APPROVED` is not set to `1`,
-the hook blocks with exit 2 and message: "docs/conventions.md changes require human
-approval. Set JIG_CONVENTIONS_APPROVED=1 for this session if intentional."
-
-This is the simplest viable enforcement. More sophisticated approval flows (lock file,
-ADR reference) are deferred.
-
-## Bootstrap paradox handling (AC #8)
-
-The gate hook lives in the plugin (active whenever jig is enabled). It does NOT
-gate the *initial creation* of `docs/conventions.md` by scaffold-init — the hook
-only fires on `Edit|Write` to an existing path, and during scaffolding, conventions.md
-doesn't yet exist. After scaffold-init completes, the file exists and the gate
-applies on subsequent edits.
+Safe defaults: empty directory, non-git directory, missing git binary, timeout → False (solo).
 
 ## Test strategy
 
-`test_scaffold.py` uses `subprocess` + `tempfile` to:
-1. Run `scaffold.py` against an empty temp dir
-2. Verify each AC programmatically (file presence, content patterns, JSON schema)
+Two new test classes:
+- `DocContentTests` — content-shape assertions for ACs #2, #3, #7 (no git involvement)
+- `TeamDetectionTests` — uses tempfile + `git init` + commits with different author emails to exercise both branches of `detect_team()`
 
-No external test framework dependency — pure stdlib unittest.
+`git` is required for the team-detection tests. They skip gracefully if `git` isn't on PATH.
 
-## Out of scope for this slice (deferred)
+## Out of scope
 
-- Signal detection from filesystem → slice 001-03
-- Q&A wizard interaction → slice 001-05
-- Rich doc content (architecture details, conventions rules) → slice 001-02
-- Tier 1 skill bundling → slice 001-03 (currently scaffold.py writes a default tier list to scaffold.json)
-- Multiple template placeholders beyond `{{PROJECT_NAME}}` → slice 001-02
+- Memory stubs (AC #5) are already "meaningful" enough — current content explains usage, format, and lookup pattern. Promotion to full example-entries is deferred (would bloat templates without commensurate value).
+- Q&A wizard's "user confirms team context" path (AC #8 second clause) → slice 001-05.
+- Multi-language project detection in conventions starter rules → slice 001-03 (signal detection).

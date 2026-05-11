@@ -14,6 +14,7 @@ is a later slice (001-05); signal detection is 001-03.
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +63,36 @@ class AlreadyScaffoldedError(RuntimeError):
     """Raised when target already has a scaffold.json — refuses to overwrite."""
 
 
+def detect_team(target: Path) -> bool:
+    """True iff `git log` in target shows ≥2 unique author emails.
+    Solo is the safe default — returns False on non-git dirs, missing binary,
+    any git failure, or when target is inside a parent repo (avoids monorepo
+    misdetection: scaffolding a fresh subdir of a multi-author repo would
+    otherwise count the parent's authors).
+    Uses `--use-mailmap` so one person with multiple emails counts once."""
+    try:
+        # Refuse to climb to a parent repo: target itself must be the repo root.
+        toplevel = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if toplevel.returncode != 0:
+            return False
+        if Path(toplevel.stdout.strip()).resolve() != Path(target).resolve():
+            return False
+
+        out = subprocess.run(
+            ["git", "-C", str(target), "log", "--use-mailmap", "--format=%aE"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return False
+    if out.returncode != 0:
+        return False
+    authors = {line.strip().lower() for line in out.stdout.splitlines() if line.strip()}
+    return len(authors) >= 2
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
     already-scaffolded directory unless `force=True`. Plugin templates live at
@@ -89,11 +120,15 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
     # 1. CLAUDE.md from the top-level template
     copy_template(template_root / "CLAUDE.md.template", target / "CLAUDE.md", subs)
 
-    # 2. docs/ structure from templates/docs/*.md.template (recursive)
+    # 2. docs/ structure from templates/docs/*.md.template (recursive).
+    # people.md is conditional — generated only when team is detected.
+    is_team = detect_team(target)
     docs_template_root = template_root / "docs"
     for src in docs_template_root.rglob("*.md.template"):
         rel = src.relative_to(docs_template_root)
         dst_name = rel.with_suffix("")  # strip .template, leaves .md
+        if dst_name.name == "people.md" and not is_team:
+            continue
         dst = target / "docs" / dst_name
         copy_template(src, dst, subs)
 
@@ -106,10 +141,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
     rendered = render(manifest_template, subs)
     manifest = json.loads(rendered)
     manifest["installed_tiers"] = DEFAULT_TIERS
+    manifest["scaffold_signals"]["is_team"] = is_team
     (target / "scaffold.json").write_text(json.dumps(manifest, indent=2) + "\n")
-
-    # 5. Solo-project default: no people.md (signal detection lives in slice 001-03)
-    # Explicit non-action — documenting it here for clarity.
 
 
 def main(argv: list[str]) -> int:
@@ -123,7 +156,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("usage: scaffold.py [--force] <target-dir>\n")
         return 2
 
-    target = Path(args[0])
+    target = Path(args[0]).resolve()
     target.mkdir(parents=True, exist_ok=True)
 
     try:

@@ -35,3 +35,16 @@ and deliver end-to-end value.
 5. Reconcile: update docs, write deviation log, run reconciliation review.
 6. Run `/jig:memory-sync` to consolidate learnings.
 7. Update spec status to DONE.
+
+## Hook Strictness Profiles
+
+jig hooks support three enforcement levels via the `SCAFFOLD_HOOK_PROFILE` env var:
+
+- **minimal** — telemetry only, no blocking
+- **standard** — blocks on spec gates and reconciliation; warns on contract changes
+- **strict** — blocks on everything including style/lint failures
+
+> **Deferred — `SCAFFOLD_HOOK_PROFILE` is not yet read by any hook.** The default
+> behavior is currently fixed (equivalent to `standard`). Implementation lives in
+> a future jig slice. Set the env var in advance to express intent; effective
+> enforcement will catch up once the dispatch logic ships.

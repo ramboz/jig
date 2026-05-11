@@ -93,7 +93,7 @@ The original spec is preserved above. This section records what changed during i
 
 ## Slice 001-02 — doc-content
 
-**STATUS: DRAFT**
+**STATUS: DONE**
 
 **Goal:** Scaffolded docs have structured content — not empty files. Deferred-decision stubs, architecture template, conventions template, memory layer stubs.
 
@@ -109,9 +109,44 @@ The original spec is preserved above. This section records what changed during i
 7. `CLAUDE.md` Hot Cache section is populated with the project name and empty term/spec lists.
 8. `docs/memory/people.md` created ONLY when ≥2 git contributors OR user confirms team context.
 
-**DoD:** Same as 001-01.
+**DoD:** Same as 001-01. All checked.
+- [x] All ACs pass (22 tests, all green)
+- [x] Implementer test coverage (4 new tests + 2 reviewer-driven regressions; 2 existing tests sharpened)
+- [x] Reviewed by `reviewer` subagent (verdict: pass with 5 flagged issues — 4 addressed, 1 noted)
+- [x] Deviation log produced (see below)
+- [x] Reconciliation review pass
 
 **Anti-horizontal-phasing check:** ✅ Produces end-to-end output with improved content quality.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. This section records what changed.
+
+**Reviewer-flagged bugs (fixed before RECONCILED):**
+
+1. **`detect_team` walked into parent git repos.** Scaffolding a fresh subdir of a multi-author monorepo would inherit the parent's contributor count and emit `people.md` incorrectly. Fixed by adding `git rev-parse --show-toplevel` check — refuses unless target IS the repo root. Regression test `test_people_md_absent_inside_parent_monorepo` added.
+2. **`detect_team` ignored mailmap.** One person with two emails (work/personal) would count as 2 contributors. Fixed via `git log --use-mailmap --format=%aE`. Regression test `test_people_md_solo_with_mailmap_aliases` added.
+3. **`test_workflow_has_strictness_section` only checked for any `Deferred` token anywhere in the file.** Tightened to require the marker inside the Hook Strictness section specifically (H2 boundary detection).
+4. **`test_memory_stubs` was too loose (length-only).** Tightened to require: title heading, usage/format guidance, and `Status: Draft` marker, with length floor raised from 50/100 → 200.
+
+**Reviewer notes accepted as-is (logged, not changed):**
+
+5. **AC #3 "throughout" interpretation.** Deferred sections (Code style / Testing / Git) use deferred-blockquote markers instead of empty Rule/Why/How skeletons. This matches the pattern established in `architecture.md` (deferred sections use blockquotes, not skeletal rule entries). The 3 concrete rules in conventions.md (Documentation/Specs sections) all use Rule/Why/How. Plan documented this scope explicitly; preserving the convention rather than adding empty skeleton rules.
+
+**Real bug surfaced during implementation:**
+
+- **`re` was missing from imports** when sharpening `test_workflow_has_strictness_section`. Test failed with `NameError`. Fixed by importing `re` at the top of `test_scaffold.py`. Caught by the test run — exactly what tests are for.
+
+**Forward-leaning additions (acknowledged, kept):**
+
+- `scaffold.json.scaffold_signals.is_team` is now populated from `detect_team()` result, not required by AC #2 but useful breadcrumb for slice 001-03 (signal detection).
+- Print message of `scaffold.py` now resolves the target before formatting — previously showed an empty project name when invoked with `.`. Minor UX fix, no AC impact.
+
+**Doc updates from this slice:**
+
+- No `architecture.md` changes required (no new module boundaries).
+- No ADR required (no irreversible architectural decisions).
+- No `docs/memory/learnings.md` entry needed — the test `NameError` is a Python beginner-grade issue, not a generalizable lesson.
 
 ---
 

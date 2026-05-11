@@ -13,7 +13,7 @@ Frequently-referenced terms and project state. Loaded every session.
 Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown reference.
 
 ### Project codenames / active work
-- (populated by scaffold-init from wizard answers)
+- **{{PROJECT_NAME}}** — (describe what this project is once the first spec lands)
 
 ### Key terms
 - (populated as the project grows — see docs/memory/glossary.md for full glossary)

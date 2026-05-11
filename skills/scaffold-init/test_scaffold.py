@@ -1,5 +1,5 @@
 """
-AC verification tests for slice 001-01 (greenfield-scaffold).
+AC verification tests for slice 001-01 (greenfield-scaffold) and 001-02 (doc-content).
 
 Run from the repo root:
     python3 -m unittest skills.scaffold-init.test_scaffold
@@ -9,6 +9,7 @@ or directly:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -94,18 +95,22 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             rel = path.relative_to(self.target)
             self.assertIn(marker, content, f"missing draft marker in {rel}")
 
-    # AC #4: Memory stubs seeded
+    # AC #4: Memory stubs seeded with meaningful starter content (per 001-02 AC #5)
     def test_memory_stubs(self):
-        glossary = (self.target / "docs/memory/glossary.md").read_text()
-        learnings = (self.target / "docs/memory/learnings.md").read_text()
-        tooling = (self.target / "docs/memory/tooling.md").read_text()
-        # Non-empty and has explanatory header
-        self.assertGreater(len(glossary), 100, "glossary.md too thin")
-        self.assertIn("Glossary", glossary)
-        self.assertGreater(len(learnings), 50)
-        self.assertIn("Learnings", learnings)
-        self.assertGreater(len(tooling), 50)
-        self.assertIn("Tooling", tooling)
+        for name in ("glossary", "learnings", "tooling"):
+            path = self.target / f"docs/memory/{name}.md"
+            content = path.read_text()
+            self.assertGreater(len(content), 200, f"{name}.md too thin to be meaningful")
+            # Must include title heading
+            self.assertRegex(content, rf"(?im)^#\s+{name}", f"missing # {name} heading")
+            # Must explain how to use it (a usage block or format hint)
+            self.assertRegex(
+                content,
+                r"(?i)(format|update via|how to use|<!--)",
+                f"{name}.md lacks usage/format guidance",
+            )
+            # Must include the Status marker (from AC #3, but reinforced here)
+            self.assertIn("Status: Draft", content)
 
     # AC #5: inbox.md header
     def test_inbox_header(self):
@@ -223,6 +228,175 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             env=env,
         )
         self.assertEqual(result.returncode, 0, "gate should ignore non-conventions files")
+
+
+class DocContentTests(unittest.TestCase):
+    """Slice 001-02 — content-shape requirements for scaffolded docs."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-content-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # AC #2 (001-02): workflow.md documents spec lifecycle AND hook strictness (deferred)
+    def test_workflow_has_strictness_section(self):
+        content = (self.target / "docs/workflow.md").read_text()
+        self.assertIn("DRAFT", content)
+        self.assertIn("DONE", content)
+        # Locate the strictness section
+        idx = re.search(r"(?im)^##\s+hook\s+strictness", content)
+        self.assertIsNotNone(idx, "missing Hook Strictness section heading")
+        section_start = idx.start()
+        # Next H2 (or EOF) bounds the section
+        next_h2 = re.search(r"(?m)^##\s+", content[section_start + 1:])
+        section_end = (section_start + 1 + next_h2.start()) if next_h2 else len(content)
+        section = content[section_start:section_end]
+        # The Deferred marker must appear inside this section, not just anywhere
+        self.assertIn("Deferred", section,
+                      "Deferred marker missing from Hook Strictness section specifically")
+
+    # AC #3 (001-02): conventions.md uses Rule → Why → How to apply format throughout
+    def test_conventions_uses_format(self):
+        content = (self.target / "docs/conventions.md").read_text()
+        # Format markers appear in pairs — each rule has one Why and one How to apply
+        why_count = content.count("**Why:**")
+        how_count = content.count("**How to apply:**")
+        self.assertGreaterEqual(why_count, 2, "expected ≥2 Why: markers")
+        self.assertEqual(why_count, how_count,
+                         f"Why/How mismatch: {why_count} Why vs {how_count} How")
+
+    # AC #7 (001-02): CLAUDE.md Hot Cache codenames includes project name
+    def test_claude_md_codename_includes_project_name(self):
+        content = (self.target / "CLAUDE.md").read_text()
+        # Locate the codenames section
+        idx = content.find("### Project codenames")
+        self.assertGreater(idx, 0, "missing codenames section")
+        # The project name must appear within the next 300 chars (inside that section)
+        codenames_block = content[idx:idx + 300]
+        self.assertIn("demo-project", codenames_block,
+                      "project name not present in codenames section")
+
+
+def _git_available() -> bool:
+    try:
+        return subprocess.run(["git", "--version"], capture_output=True, timeout=3).returncode == 0
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_git_available(), "git not available")
+class TeamDetectionTests(unittest.TestCase):
+    """Slice 001-02 — AC #8: people.md is only created on team projects."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-team-")
+        self.target = Path(self.tmpdir) / "team-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _git(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            ["git", "-C", str(self.target), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit_as(self, name: str, email: str, filename: str):
+        (self.target / filename).write_text("seed")
+        self._git("add", filename)
+        env = {
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+        }
+        self._git("commit", "-m", f"add {filename}", env_extra=env)
+
+    def test_people_md_present_on_team_repo(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Bob", "bob@example.com", "b.txt")
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+        people = self.target / "docs/memory/people.md"
+        self.assertTrue(people.exists(), "people.md should exist when ≥2 git contributors")
+        self.assertIn("Status: Draft (wizard-generated)", people.read_text())
+
+    def test_people_md_absent_on_solo_repo(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Alice", "alice@example.com", "b.txt")
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+        self.assertFalse(
+            (self.target / "docs/memory/people.md").exists(),
+            "people.md should be absent with only one contributor",
+        )
+
+    def test_people_md_absent_inside_parent_monorepo(self):
+        """Regression: scaffolding a fresh subdir of a multi-author parent repo
+        must not inherit the parent's contributor count."""
+        # Initialize git at tmpdir root with two authors
+        parent = Path(self.tmpdir)
+        env = os.environ.copy()
+        subprocess.run(["git", "-C", str(parent), "init", "-q"],
+                       capture_output=True, env=env, check=True)
+        for name, email, fn in [("Alice", "alice@x.com", "a.txt"),
+                                 ("Bob", "bob@x.com", "b.txt")]:
+            (parent / fn).write_text("x")
+            subprocess.run(["git", "-C", str(parent), "add", fn],
+                           capture_output=True, env=env, check=True)
+            env_extra = {
+                **env,
+                "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+            }
+            subprocess.run(["git", "-C", str(parent), "commit", "-q", "-m", fn],
+                           capture_output=True, env=env_extra, check=True)
+        # Now scaffold a SUBDIR of that repo — should be treated as solo
+        sub = parent / "new-sub-project"
+        sub.mkdir()
+        result = run_scaffold(sub)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+        self.assertFalse(
+            (sub / "docs/memory/people.md").exists(),
+            "people.md must not be created when target is a subdir of a parent repo",
+        )
+
+    def test_people_md_solo_with_mailmap_aliases(self):
+        """Same person with two emails should still count as solo when mailmap maps them."""
+        self._git("init", "-q")
+        # Two commits, different emails, same person
+        self._commit_as("Alice", "alice@work.com", "a.txt")
+        self._commit_as("Alice", "alice@personal.com", "b.txt")
+        # mailmap unifies them
+        (self.target / ".mailmap").write_text(
+            "Alice <alice@work.com> <alice@personal.com>\n"
+        )
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+        self.assertFalse(
+            (self.target / "docs/memory/people.md").exists(),
+            "people.md should be absent when mailmap unifies all authors to one",
+        )
+
+    def test_people_md_absent_when_no_git(self):
+        # Don't run git init — target is a plain directory
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+        self.assertFalse(
+            (self.target / "docs/memory/people.md").exists(),
+            "people.md should be absent when target is not a git repo",
+        )
 
 
 class ScaffoldSafetyTests(unittest.TestCase):
