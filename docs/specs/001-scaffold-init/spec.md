@@ -152,11 +152,11 @@ The original spec is preserved above. This section records what changed.
 
 ## Slice 001-03 — signal-detection
 
-**STATUS: DRAFT**
+**STATUS: DONE**
 
 **Goal:** Wizard detects project signals from the filesystem and selects appropriate tiers.
 
-**DoR:** Spike 001a STATUS: DONE.
+**DoR:** Spike 001a STATUS: DONE. ✅
 
 **Acceptance Criteria:**
 1. LLM/agent file presence → Tier 2 (`eval-harness`) is offered.
@@ -165,9 +165,47 @@ The original spec is preserved above. This section records what changed.
 4. Signal detection produces a `brief.md` summary at the project root.
 5. No false positives on a bare `git init` repo (no signals → default tiers, no Tier 2 offered).
 
-**DoD:** Same as 001-01.
+**DoD:** Same as 001-01. All checked.
+- [x] All ACs pass (39 tests, all green)
+- [x] Implementer test coverage (17 new tests in `SignalDetectionTests` covering each detector category positive + negative + exclusions)
+- [x] Reviewed by `reviewer` subagent (verdict: pass with 4 non-blocking issues — 2 fixed, 2 deferred)
+- [x] Deviation log produced (see below)
+- [x] Reconciliation review pass
 
 **Anti-horizontal-phasing check:** ✅ Still end-to-end; adapts output to project context.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. This section records what changed.
+
+**Reviewer-flagged fixes (in this slice):**
+
+1. **pyproject.toml description false-positive.** Original implementation did a substring match (`"openai" in pyproject and "dependencies" in pyproject`) which would trigger on `description = "openai integration helper"` if any deps key existed. Tightened to require the lib name in dependency-position (quoted list entry with version pin or closing-quote-comma-bracket, OR poetry table-key form). Regression tests added: `test_llm_signal_not_triggered_by_pyproject_description_alone` and `test_llm_signal_via_pyproject_dep`.
+2. **`detect_signals` on non-existent target raised `FileNotFoundError`** from library callers. CLI is safe (it `mkdir`s first), but a programmatic caller would hit it. Added an existence guard that returns an all-False `Signals` for non-existent targets.
+
+**Reviewer issues deferred to `docs/refinement-todo.md`:**
+
+3. **Wall-clock time-box for signal detection** (spike calls for 3 seconds; not enforced). Theoretical concern on local-only scaffolder; deferred.
+4. **Unbounded `_read_text_safe`** could read a multi-GB requirements.txt. Same risk profile; deferred.
+5. **Transactional writes in `scaffold()`.** A crash mid-scaffold leaves partial state without `scaffold.json`. Deferred with mitigation idea.
+
+**Contract change traceability (from 001-01):**
+
+- Slice 001-01 hard-coded `installed_tiers = ["tier-0", "tier-1"]` as the happy-path default. Slice 001-03 changes this: Tier 1 is now signal-gated (only installs when test signals are present). On a bare repo, `installed_tiers` is just `["tier-0"]`.
+- Existing test `test_scaffold_json_schema` was updated from `assertIn("tier-1", installed_tiers)` to `assertNotIn("tier-1", installed_tiers)` to reflect the new contract.
+- This is a **legitimate spec evolution**: 001-01 wrote the happy-path default; 001-03 redefined what "happy path" means based on Spike 001a findings.
+
+**Forward-leaning additions:**
+
+- `scaffold.json` now has an `offered_tiers` key when Tier 2 is offered. Not strictly required by AC #1 (recording in `scaffold_signals.has_llm_agent_files` would suffice), but `offered_tiers` is a cleaner contract for downstream consumers (slice 001-05 Q&A wizard, future install-on-confirm flows).
+- `brief.md` is committed-state but Status: Draft marker isn't strictly required by AC #4. Added for consistency with all other scaffolded docs.
+
+**Doc updates from this slice:**
+
+- 2 new entries in `docs/refinement-todo.md` (time-box+unbounded read bundled into one; transactional writes a second).
+- No `architecture.md` changes (no new module boundaries; signal detection is internal to scaffold-init).
+- No ADR required.
+- No `learnings.md` entry — the pyproject regex bug was a "first attempt was too coarse" issue, not a generalizable lesson.
 
 ---
 

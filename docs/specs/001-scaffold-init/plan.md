@@ -1,73 +1,74 @@
-# Plan: Slice 001-02 — doc-content
+# Plan: Slice 001-03 — signal-detection
 
 ## Approach
 
-Template-only changes for 4 of 8 ACs; one new behavior in scaffold.py for AC #8 (team detection via git log) plus a new `people.md` template.
+Wire the spike's signal-detection findings into `scaffold.py`. Detection produces a `Signals` record; the scaffold pipeline uses it to populate `scaffold.json`, select tiers, and write a human-readable `brief.md`.
 
-Per 001-01 audit, ACs #1, #4, #5, #6 already substantially met by current templates. This slice tightens the remaining four.
+**Design constraint** from the spike: detection is permissive in offering, conservative in installing.
 
-## AC audit summary
-
-| AC | Status going in | Work needed |
-|---|---|---|
-| #1 architecture deferred stubs | ✅ already met | none |
-| #2 workflow has spec lifecycle + strictness | 🟡 lifecycle ✅, strictness missing | add Hook Strictness section |
-| #3 conventions uses Rule/Why/How throughout | ❌ deferred stubs don't follow format | restructure with 2-3 starter rules in format |
-| #4 refinement-todo ≥3 decisions | ✅ 5 present | none |
-| #5 memory stubs meaningful content | 🟡 acceptable | (defer — current content already explains usage) |
-| #6 inbox header | ✅ already met | none |
-| #7 Hot Cache populated with project name + empty lists | 🟡 placeholder text, not name | substitute `{{PROJECT_NAME}}` in codenames section |
-| #8 people.md conditional on team | ❌ unimplemented | add `detect_team()` + `people.md.template` |
-
-## Files to create
-
-| Path | Purpose |
+| Signal category | Effect |
 |---|---|
-| `templates/docs/memory/people.md.template` | Team-roster stub (only rendered when team detected) |
+| LLM/agent files present | Tier 2 **offered** (not installed). `brief.md` mentions it. |
+| CI files present | `scaffold.json.hook_profile = "strict"` (data only — dispatch deferred). |
+| Test framework present | Tier 1 `tdd-loop` **installed** (added to `installed_tiers`). |
+| ≥2 git authors (existing) | `people.md` generated (already implemented in 001-02). |
 
-## Files to modify
+Tier 1 (`tdd-loop`) is added to `installed_tiers` only when test signals are present. Default install (no signals) drops back to `["tier-0"]` only. **This changes the slice 001-01 contract**: previously `installed_tiers` was hard-coded `["tier-0", "tier-1"]`; now Tier 1 is gated on signals. Deviation logged.
+
+## Files to create/modify
 
 | Path | Change |
 |---|---|
-| `templates/docs/workflow.md.template` | Add Hook Strictness Profiles section (deferred marker) |
-| `templates/docs/conventions.md.template` | Restructure with starter rules in Rule/Why/How format |
-| `templates/CLAUDE.md.template` | Substitute `{{PROJECT_NAME}}` in Project codenames bullet |
-| `skills/scaffold-init/scaffold.py` | Add `detect_team()` → conditionally render people.md |
-| `skills/scaffold-init/test_scaffold.py` | New tests for ACs #2, #3, #7, #8 (team and solo paths) |
+| `skills/scaffold-init/scaffold.py` | Add `detect_signals()` returning `Signals` dataclass; use it for tier selection and brief.md generation |
+| `templates/brief.md.template` | Brief-summary template at project root |
+| `skills/scaffold-init/test_scaffold.py` | New tests for signal detection per category + brief.md content + tier selection |
 | `docs/specs/001-scaffold-init/spec.md` | Status: DRAFT → IN_PROGRESS → DONE |
-| `docs/specs/README.md` | Reflect new status |
+| `docs/specs/README.md` | Status update |
 
-## Team detection logic
+## detect_signals() shape
 
 ```python
-def detect_team(target: Path) -> bool:
-    """Returns True iff `git log` in target shows ≥2 unique author emails.
-    Returns False on non-git dirs, missing git binary, or any failure."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(target), "log", "--format=%ae"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if out.returncode != 0:
-            return False
-        authors = {line.strip() for line in out.stdout.splitlines() if line.strip()}
-        return len(authors) >= 2
-    except Exception:
-        return False
+@dataclass
+class Signals:
+    has_llm_agent_files: bool
+    has_ci: bool
+    has_tests: bool
+    is_team: bool
+
+def detect_signals(target: Path) -> Signals:
+    return Signals(
+        has_llm_agent_files=_detect_llm_agent(target),
+        has_ci=_detect_ci(target),
+        has_tests=_detect_tests(target),
+        is_team=detect_team(target),
+    )
 ```
 
-Safe defaults: empty directory, non-git directory, missing git binary, timeout → False (solo).
+Each `_detect_*` is a small pure function returning bool. They walk the project root and immediate subdirs only (per spike: no recursive deeper than 2 levels). Skip `node_modules`, `.git`, `dist`, `build`, `target`, `__pycache__`, `.venv`, `venv`.
+
+## brief.md content
+
+Single-page summary at the scaffolded project root. Includes:
+- What scaffold-init detected (signals)
+- What tiers got installed
+- What was OFFERED but not installed (Tier 2)
+- What was deferred (link to refinement-todo.md)
+- Immediate next steps
 
 ## Test strategy
 
-Two new test classes:
-- `DocContentTests` — content-shape assertions for ACs #2, #3, #7 (no git involvement)
-- `TeamDetectionTests` — uses tempfile + `git init` + commits with different author emails to exercise both branches of `detect_team()`
+For each signal category, two tests:
+- positive — create the signal file, run scaffold, assert detection
+- negative — bare directory, assert no detection
 
-`git` is required for the team-detection tests. They skip gracefully if `git` isn't on PATH.
+Plus integration tests:
+- `brief.md` exists at target root after scaffold
+- `installed_tiers` includes `tier-1` when test signals present, only `tier-0` when not
+- `scaffold_signals` fields in `scaffold.json` match `Signals` values
+- AC #5: bare `git init` repo produces no false positives
 
 ## Out of scope
 
-- Memory stubs (AC #5) are already "meaningful" enough — current content explains usage, format, and lookup pattern. Promotion to full example-entries is deferred (would bloat templates without commensurate value).
-- Q&A wizard's "user confirms team context" path (AC #8 second clause) → slice 001-05.
-- Multi-language project detection in conventions starter rules → slice 001-03 (signal detection).
+- Q&A wizard interaction (slice 001-05)
+- Actually installing/enforcing Tier 2 — it's just offered
+- Hook strictness dispatch logic — `hook_profile` is recorded but inert (deferred per refinement-todo)

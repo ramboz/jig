@@ -20,7 +20,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - **Reconciliation** = post-implementation phase: deviation log, doc updates, second review pass
 
 ### Active specs
-- 001-scaffold-init: slices 001-01, 001-02 **DONE**; Spike 001a next, then slice 001-03 (signal-detection)
+- 001-scaffold-init: Spike 001a + slices 001-01..001-03 **DONE**; slice 001-04 (deferred-decisions) next
 - 002-memory-layer: STATUS DRAFT — slice 002-01 (explicit-sync) queued
 
 ### Deferred decisions
@@ -47,7 +47,7 @@ Building Tier 0 skills. Starting with scaffold-init (spec 001) and memory-layer 
 
 | Skill | Status | Invocable |
 |---|---|---|
-| `/jig:scaffold-init` | Slices 001-01, 001-02 DONE; 001-03..05 pending | Yes (explicit) |
+| `/jig:scaffold-init` | Slices 001-01..001-03 DONE; 001-04, 001-05 pending | Yes (explicit) |
 | `/jig:memory-sync` | DRAFT — spec 002 drives it | Yes (explicit) |
 | `/jig:spec-workflow` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
 | `/jig:independent-review` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |

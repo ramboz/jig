@@ -70,7 +70,8 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             path = self.target / rel
             self.assertTrue(path.exists(), f"missing: {rel}")
 
-    # AC #2: scaffold.json schema
+    # AC #2 (001-01): scaffold.json schema.
+    # Note: slice 001-03 made Tier 1 signal-gated. Bare empty dir → only tier-0.
     def test_scaffold_json_schema(self):
         manifest = json.loads((self.target / "scaffold.json").read_text())
         self.assertIn("jig_version", manifest)
@@ -78,8 +79,9 @@ class GreenfieldScaffoldTests(unittest.TestCase):
         self.assertIn("installed_tiers", manifest)
         self.assertIsInstance(manifest["installed_tiers"], list)
         self.assertIn("tier-0", manifest["installed_tiers"])
-        self.assertIn("tier-1", manifest["installed_tiers"])
-        # Timestamp is ISO-8601 UTC
+        # Bare empty target — no test signals — so tier-1 should NOT be auto-installed
+        self.assertNotIn("tier-1", manifest["installed_tiers"],
+                         "bare empty dir has no test signals; tier-1 should not auto-install")
         self.assertRegex(manifest["timestamp"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
     # AC #3: Draft markers — applies to ALL scaffolded .md files
@@ -397,6 +399,164 @@ class TeamDetectionTests(unittest.TestCase):
             (self.target / "docs/memory/people.md").exists(),
             "people.md should be absent when target is not a git repo",
         )
+
+
+class SignalDetectionTests(unittest.TestCase):
+    """Slice 001-03 — detector + tier selection + brief.md."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-signal-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _scaffold(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+
+    def _manifest(self):
+        return json.loads((self.target / "scaffold.json").read_text())
+
+    # AC #5: bare repo produces no false positives
+    def test_bare_repo_no_false_positives(self):
+        self._scaffold()
+        signals = self._manifest()["scaffold_signals"]
+        self.assertFalse(signals["has_llm_agent_files"])
+        self.assertFalse(signals["has_ci"])
+        self.assertFalse(signals["has_tests"])
+        self.assertEqual(self._manifest()["installed_tiers"], ["tier-0"])
+        self.assertEqual(self._manifest()["hook_profile"], "standard")
+
+    # AC #1: LLM/agent files → Tier 2 offered (recorded in scaffold_signals; brief.md mentions)
+    def test_llm_agent_signals_record_offer(self):
+        (self.target / "AGENTS.md").write_text("# Agents\n")
+        self._scaffold()
+        signals = self._manifest()["scaffold_signals"]
+        self.assertTrue(signals["has_llm_agent_files"])
+        # Tier 2 is offered, not auto-installed
+        self.assertNotIn("tier-2", self._manifest()["installed_tiers"])
+        brief = (self.target / "brief.md").read_text().lower()
+        self.assertIn("tier 2", brief, "brief.md should mention Tier 2 offer")
+
+    def test_llm_signal_via_cursor_dir(self):
+        (self.target / ".cursor").mkdir()
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_llm_agent_files"])
+
+    def test_llm_signal_via_prompt_md(self):
+        (self.target / "user.prompt.md").write_text("test")
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_llm_agent_files"])
+
+    def test_llm_signal_via_package_json_dep(self):
+        (self.target / "package.json").write_text(json.dumps({
+            "name": "x", "dependencies": {"anthropic": "^0.1"}
+        }))
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_llm_agent_files"])
+
+    def test_llm_signal_via_requirements_txt(self):
+        (self.target / "requirements.txt").write_text("openai==1.0\nrequests\n")
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_llm_agent_files"])
+
+    def test_llm_signal_not_triggered_by_pyproject_description_alone(self):
+        """Regression: pyproject.toml that merely mentions openai in metadata
+        (no actual dep) must not trigger LLM detection."""
+        (self.target / "pyproject.toml").write_text(
+            '[project]\n'
+            'name = "my-pkg"\n'
+            'description = "openai integration helper"\n'
+            'dependencies = ["requests", "pyyaml"]\n'
+        )
+        self._scaffold()
+        self.assertFalse(self._manifest()["scaffold_signals"]["has_llm_agent_files"],
+                         "description-only mention must not count as LLM dependency")
+
+    def test_llm_signal_via_pyproject_dep(self):
+        """Companion: an actual pyproject dep DOES trigger."""
+        (self.target / "pyproject.toml").write_text(
+            '[project]\n'
+            'name = "x"\n'
+            'dependencies = ["anthropic>=0.5", "requests"]\n'
+        )
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_llm_agent_files"])
+
+    def test_llm_signal_excludes_claude_dir(self):
+        """The spike deliberately excludes .claude/ as a signal — too ambiguous."""
+        (self.target / ".claude").mkdir()
+        self._scaffold()
+        self.assertFalse(self._manifest()["scaffold_signals"]["has_llm_agent_files"])
+
+    # AC #2: CI present → strict hook profile
+    def test_ci_signals_set_strict_profile(self):
+        (self.target / ".github" / "workflows").mkdir(parents=True)
+        (self.target / ".github" / "workflows" / "ci.yml").write_text("name: ci\n")
+        self._scaffold()
+        manifest = self._manifest()
+        self.assertTrue(manifest["scaffold_signals"]["has_ci"])
+        self.assertEqual(manifest["hook_profile"], "strict")
+
+    def test_ci_signal_via_jenkinsfile(self):
+        (self.target / "Jenkinsfile").write_text("pipeline {}\n")
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_ci"])
+
+    def test_ci_signal_excludes_makefile(self):
+        """The spike excludes Makefile targets — too noisy."""
+        (self.target / "Makefile").write_text("test:\n\techo test\n")
+        self._scaffold()
+        self.assertFalse(self._manifest()["scaffold_signals"]["has_ci"])
+
+    # AC #3: tests present → tier-1 auto-installed
+    def test_test_signals_install_tier_1(self):
+        (self.target / "pytest.ini").write_text("[pytest]\n")
+        self._scaffold()
+        manifest = self._manifest()
+        self.assertTrue(manifest["scaffold_signals"]["has_tests"])
+        self.assertIn("tier-1", manifest["installed_tiers"])
+
+    def test_test_signal_via_vitest_in_package_json(self):
+        (self.target / "package.json").write_text(json.dumps({
+            "name": "x", "devDependencies": {"vitest": "^1.0"}
+        }))
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_tests"])
+
+    def test_test_signal_via_go_test_files(self):
+        (self.target / "foo_test.go").write_text("package x\n")
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_tests"])
+
+    def test_test_signal_via_conftest_py(self):
+        (self.target / "conftest.py").write_text("# pytest config\n")
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_tests"])
+
+    # AC #4: brief.md exists and summarizes
+    def test_brief_md_exists_and_summarizes(self):
+        # Multi-signal scaffold
+        (self.target / "pytest.ini").write_text("[pytest]\n")
+        (self.target / ".github" / "workflows").mkdir(parents=True)
+        (self.target / ".github" / "workflows" / "ci.yml").write_text("name: ci\n")
+        (self.target / "AGENTS.md").write_text("# Agents\n")
+        self._scaffold()
+        brief = (self.target / "brief.md")
+        self.assertTrue(brief.exists(), "brief.md must exist at project root")
+        content = brief.read_text()
+        # Brief should mention each detected signal category
+        lowered = content.lower()
+        self.assertIn("ci", lowered)
+        self.assertIn("test", lowered)
+        self.assertIn("agent", lowered)
+        # And the project name
+        self.assertIn("demo-project", content)
+        # And carry the Status marker
+        self.assertIn("Status: Draft", content)
 
 
 class ScaffoldSafetyTests(unittest.TestCase):

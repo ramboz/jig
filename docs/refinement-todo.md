@@ -34,3 +34,13 @@
 ### Decision: Scaffold.json manifest format
 **Deferred:** The `scaffold.json` install-state manifest is referenced in the design but its schema is undefined.
 **Resolution trigger:** Slice 001-01 (greenfield-scaffold). The implementer defines the schema as the first deliverable.
+
+### Decision: Signal detection time-box and resource bounds
+**Deferred:** Spike 001a calls for a 3-second wall-clock time-box and "no recursion deeper than 2 levels" with skip-dirs. The current `detect_signals()` honors the depth/skip-dir rule implicitly (no rglob in detectors) but does NOT enforce a wall-clock limit. `_read_text_safe()` reads files unboundedly — a multi-GB `requirements.txt` would be fully read into memory.
+**Resolution trigger:** First time a user reports a slow or hung scaffold-init on a real project, OR when adding network-touching detectors.
+**Risk:** Currently theoretical — local-only scaffolder on user-owned dirs.
+
+### Decision: Transactional writes in scaffold()
+**Deferred:** `scaffold()` writes CLAUDE.md, docs/*, scaffold.json, brief.md sequentially without a transaction. A crash between steps leaves partial state; the next run (without `--force`) refuses because some files exist. Currently we rely on the `scaffold.json`-present check as the "scaffolded" sentinel; if creation crashes before scaffold.json is written, a re-run succeeds but may overwrite partial files.
+**Resolution trigger:** First report of a partial-scaffold state in the wild.
+**Mitigation idea:** write everything to a temp dir, then atomically rename, OR write `scaffold.json` FIRST as an in-progress marker and finalize at the end.
