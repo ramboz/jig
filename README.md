@@ -1,0 +1,66 @@
+# jig
+
+> A Claude Code plugin that scaffolds AI-native development practices into new projects.
+
+**jig** (noun): a tool that guides other tools to work accurately and consistently.
+
+## What it does
+
+jig installs a focused, opinionated workflow layer into your project:
+
+- **Spec-driven development** — SPIDR-split vertical slices with Definition of Done per slice
+- **Independent review** — a reviewer subagent with fresh context evaluates every implementation
+- **Typed contracts** — enforced boundaries at module interfaces for AI-legible codebases
+- **Memory layer** — cross-session continuity via hot cache + deep storage + inbox
+- **Deterministic gates** — hooks enforce "this MUST happen"; skills handle "when relevant"
+
+## Design philosophy
+
+> Intuitive automated triggering at the right moments, over explicit command surfaces.
+
+- 5 Tier 0 skills (not 100+)
+- 3 subagents (not 48 like ECC)
+- Hooks are the spine; skills are the LLM layer
+- 8-12 skills total when complete
+
+See [docs/architecture.md](docs/architecture.md) for the full reasoning.
+
+## Installation
+
+```bash
+# Via Claude Code plugin manager
+claude plugins install github:ramboz/jig
+```
+
+> Not yet on the plugin marketplace. Install from source for now.
+
+## Getting started
+
+Once installed, open a new project directory in Claude Code and say:
+> "Set up this project for AI-native development"
+
+The `scaffold-init` skill will run and produce the docs/ scaffolding.
+
+## Repository structure (for contributors)
+
+```
+.claude-plugin/plugin.json    # Plugin manifest
+skills/                       # Skill definitions (SKILL.md per skill)
+agents/                       # Subagent definitions
+hooks/                        # Hook configuration + Python scripts
+templates/                    # Source templates scaffold-init generates from
+docs/                         # Dev docs for jig itself (dogfooded workflow)
+  specs/                      # Specs for jig's own features
+  memory/                     # jig's own memory layer
+  adrs/                       # Architectural decisions
+```
+
+## Contributing
+
+Read [docs/workflow.md](docs/workflow.md) before starting. Every change starts with a spec.
+
+## Status
+
+Tier 0 skills are in spec/draft phase. First implementation slice: `001-01 greenfield-scaffold`.
+
+Check [docs/specs/README.md](docs/specs/README.md) for the current status board.

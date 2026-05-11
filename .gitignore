@@ -1,0 +1,6 @@
+.claude/skill-usage.jsonl
+.claude/settings.local.json
+.DS_Store
+node_modules/
+*.pyc
+__pycache__/

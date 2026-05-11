@@ -1,0 +1,61 @@
+> Status: Draft (wizard-generated equivalent — manually seeded for jig itself)
+>
+> This document evolves as we make decisions. Open questions are explicit, not papered over.
+
+# Architecture: jig
+
+## What jig is
+
+An installable Claude Code plugin that scaffolds AI-native development practices into new projects. Tier 0 skills always install; Tier 1 installs by default; Tier 2 opts in by signal.
+
+## Plugin structure
+
+```
+jig/
+├── .claude-plugin/plugin.json     # Manifest
+├── skills/                        # Claude Code skills (auto-trigger + /menu)
+├── agents/                        # Subagent definitions (implementer, reviewer, architect)
+├── hooks/                         # Deterministic enforcement layer
+│   ├── hooks.json
+│   └── scripts/                   # Python 3 scripts (no jq dependency)
+├── templates/                     # Source templates scaffold-init reads
+└── docs/                          # Dev docs for building jig itself (dogfooded)
+```
+
+## Core architecture decisions
+
+### Hooks are the deterministic spine; skills are the LLM layer
+- Skills carry workflows and reasoning. Auto-trigger via description matching.
+- Hooks enforce gates that don't require judgment. Always run.
+- Everything that MUST happen is a hook. Everything that should happen when relevant is a skill.
+
+### Hook scripts: Python 3, never jq
+`jq` is not installed by default on macOS. All hook scripts use inline `python3 -c` for JSON parsing. Python 3 is reliably available.
+
+### Hook command paths: `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/...`
+Plugin `bin/` PATH injection is Bash-tool only, not hook commands. All hook `command` fields use the full `${CLAUDE_PLUGIN_ROOT}` path.
+
+### Context economy (the "dumb zone")
+Above ~40% context fill, model recall degrades. Practical ceiling: 8 MCP servers, ~80 active tools. The `jig-context-check` hook warns at session start. Skills use progressive disclosure — body loads only on trigger; supporting files load only when needed.
+
+### Three subagents, no more
+- `implementer`: TDD discipline, writes deliverables
+- `reviewer`: read-only, fresh context per review
+- `architect`: rare, ADR-style output
+Subagents are defined by what context they need isolated from, not by job title.
+
+## Module boundaries
+
+> **Deferred — no signal yet on what modules jig itself will have.**
+> Will be decided in the first implementation spec (001-scaffold-init, slice 001-01).
+
+## Data model
+
+> **Deferred — jig is a skill pack, not a data application.**
+> Relevant state: `scaffold.json` manifest (install state), `skill-usage.jsonl` (telemetry), spec files.
+
+## Open questions
+
+- `SubagentStart` hook event: documented in changelog (v2.0.43) but absent from official plugin docs. Deferred — see `docs/refinement-todo.md`.
+- Hook strictness profiles (`SCAFFOLD_HOOK_PROFILE`): deferred — unread env var is worse than no env var.
+- Does the `additionalContext` format differ between `UserPromptSubmit` and `Stop` hooks? Verify during implementation of 002-03.
