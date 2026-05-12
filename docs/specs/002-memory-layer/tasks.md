@@ -1,32 +1,29 @@
-# Tasks: Slice 002-03 — auto-detect-hooks
+# Tasks: Slice 002-04 — reconciliation-integration
 
-## Ordered tasks (TDD)
+## Ordered tasks
 
-- [ ] **T1** — Create `skills/memory-sync/test_hooks.py` with failing tests
-- [ ] **T2** — Tighten `jig-memory-scan.sh` heuristic (strip code blocks, URLs, paths)
-- [ ] **T3** — Verify `jig-task-capture.sh` regex covers the common patterns
-- [ ] **T4** — Add post-2-week firing-rate measurement to `docs/refinement-todo.md`
-- [ ] **T5** — Run tests, fix issues
-- [ ] **T6** — Reviewer subagent
-- [ ] **T7** — Reconcile, second reviewer pass, commit
+- [ ] **T1** — Add `IntegrationTests` class to `skills/memory-sync/test_memory.py` (failing tests)
+- [ ] **T2** — Edit `agents/reviewer.md` — add "do not write to docs/memory/" prohibition
+- [ ] **T3** — Edit `skills/spec-workflow/SKILL.md` — embed reconciliation checklist with memory-sync step
+- [ ] **T4** — Run tests
+- [ ] **T5** — Reviewer subagent
+- [ ] **T6** — Reconcile + commit
 
 ## AC → test mapping
 
 | AC | Test |
 |---|---|
-| #1 jig-memory-scan catches unknowns | `test_flags_unknown_acronym`, `test_flags_unknown_camelcase` |
-| #1 + #4 well-formed additionalContext | `test_output_is_well_formed_json` |
-| #2 jig-task-capture catches task-language | `test_flags_we_should_also`, `test_flags_todo_marker`, etc. |
-| #3 both non-blocking | `test_exits_0_always` (both hooks) |
-| #5 firing-rate health | deferred — see refinement-todo (no telemetry yet) |
+| #1 spec-workflow has memory-sync in reconciliation | `test_spec_workflow_includes_memory_sync_in_reconciliation` |
+| #2 reviewer forbids memory writes | `test_reviewer_agent_forbids_writing_to_memory` |
+| #3 new terms surfaced during reconciliation | covered by SKILL.md content + #1's test |
 
 ## Deliverable paths
 
 ```
-hooks/scripts/jig-memory-scan.sh
-hooks/scripts/jig-task-capture.sh
-skills/memory-sync/test_hooks.py
-docs/refinement-todo.md
+agents/reviewer.md
+skills/spec-workflow/SKILL.md
+skills/memory-sync/test_memory.py
 docs/specs/002-memory-layer/{spec,plan,tasks}.md
 docs/specs/README.md
+CLAUDE.md
 ```

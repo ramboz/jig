@@ -1,69 +1,43 @@
-# Plan: Slice 002-03 — auto-detect-hooks
+# Plan: Slice 002-04 — reconciliation-integration
 
 ## Approach
 
-The two hooks (`jig-memory-scan.sh` on `UserPromptSubmit`, `jig-task-capture.sh` on `Stop`) were stubbed back in the starting move and have been firing on every session since — but **they were never tested with mock stdin**. This slice writes deterministic tests, fixes any bugs surfaced, tightens the heuristics, and verifies the JSON output format.
+The cheapest, most honest slice in spec 002. Two file edits and a verification test:
 
-## What we already have
+1. **`agents/reviewer.md`** — add an explicit prohibition on writing to `docs/memory/` so the reviewer subagent doesn't try to define the glossary. This is a one-line addition to the system-prompt "What you must NOT do" section.
 
-Both hook scripts use the `python3 -c` stdin pattern (fixed in slice 001-01). The scaffold is sound:
+2. **`skills/spec-workflow/SKILL.md`** — currently a stub with `disable-model-invocation: true`. We embed the reconciliation-checklist content (including the memory-sync prompt) **now** so that when spec-workflow is promoted to a real skill (future spec 003+), the integration is already specified. This is "encode in stub form, activate later" — matches how slice 001-04 closed the loop with stocktake while spec-workflow remained a stub.
 
-- `jig-memory-scan.sh` — scans the user prompt for capitalized references not in the hot cache or glossary, emits `{"continue": true, "additionalContext": "..."}` listing unrecognized terms.
-- `jig-task-capture.sh` — scans the completed session for task-capture language patterns ("we should also", "TODO:", etc.), emits triage prompt.
+3. **Tests** — static-content assertions in `test_memory.py` confirming:
+   - `agents/reviewer.md` contains an explicit "do not write to docs/memory/" line
+   - `skills/spec-workflow/SKILL.md` contains a reconciliation-checklist that mentions memory-sync
 
-Both exit 0 unconditionally (non-blocking, per AC #3).
+## "Encode now, activate later" rationale
 
-## What needs to happen
+AC #1 literally says "spec-workflow includes a memory-sync prompt in reconciliation checklist." If we wait until spec-workflow is promoted to ship 002-04, this slice blocks indefinitely. The honest path: write the content into the stub SKILL.md so when spec-workflow becomes real, the integration is part of its first turn. The stub still shows a DRAFT warning when invoked; the content waits for promotion.
 
-1. **Deterministic tests** — pipe mock hook payloads in via stdin and assert on stdout JSON / stderr / exit code.
-2. **Heuristic improvements for `jig-memory-scan`** — currently scans the entire prompt as a flat string. False-positive surfaces:
-   - File paths (`/Users/ramboz/Projects` contains `Users`, `Projects`)
-   - URLs (`https://Foo.com`)
-   - Code blocks (` ```python\nclass MyClass\n``` `)
-   - **Mitigation**: strip code blocks, fenced and inline, before scanning. Strip URL hosts. Skip absolute paths.
-3. **`additionalContext` JSON format verification** — per the original plan review, the format for `UserPromptSubmit` and `Stop` hooks was deferred for empirical verification. The two formats we know are:
-   - `PreToolUse` style: `{"hookSpecificOutput": {"hookEventName": "X", "additionalContext": "..."}}`
-   - Other events: `{"continue": true, "additionalContext": "..."}`
-   Our hooks use the latter. We document this clearly and add a test that the JSON is at minimum *valid* and contains the expected keys. Empirical verification (does Claude Code actually inject the context?) remains a runtime concern; we cannot fully test it in CI but we can guarantee the output JSON is well-formed.
-4. **Firing-rate dogfooding (AC #5)** — we don't have telemetry data yet (the hooks have been firing but the project has no `.claude/skill-usage.jsonl` for hooks themselves, only for Task spawns). The healthier interpretation: tune the heuristic in this slice based on what we KNOW about the kind of prompts that hit it during development, and document the firing-rate target as a refinement-todo item for actual measurement.
+This is consistent with how scaffolded docs work (Draft → Stable). The integration's *behavior* is gated on spec-workflow becoming user-invocable, but its *content* is in place.
 
 ## Files to modify
 
 | Path | Change |
 |---|---|
-| `hooks/scripts/jig-memory-scan.sh` | Tighten heuristic: strip code blocks, URLs, absolute paths |
-| `hooks/scripts/jig-task-capture.sh` | Minor: ensure regex matches typed-curly-quote variants |
-| `skills/memory-sync/test_hooks.py` | NEW test file for both hook scripts |
-| `docs/refinement-todo.md` | Add post-2-week firing-rate measurement item |
+| `agents/reviewer.md` | Add a one-line "do not write to docs/memory/" prohibition |
+| `skills/spec-workflow/SKILL.md` | Embed reconciliation-checklist content with memory-sync step |
+| `skills/memory-sync/test_memory.py` | NEW `IntegrationTests` class — static-content checks |
 | `docs/specs/002-memory-layer/spec.md` | Status: DRAFT → IN_PROGRESS → DONE |
 | `docs/specs/README.md` | Status update |
+| `CLAUDE.md` | Reflect spec 002 complete |
 
 ## Test strategy
 
-`MemoryScanHookTests` (against `hooks/scripts/jig-memory-scan.sh`):
-- `test_silent_on_no_capitalized`
-- `test_silent_on_known_terms_in_hot_cache`
-- `test_silent_on_known_terms_in_glossary`
-- `test_flags_unknown_acronym`
-- `test_flags_unknown_camelcase`
-- `test_skips_common_acronyms` — `API`, `JSON`, `LLM`, etc.
-- `test_strips_code_blocks_before_scanning` — `` `MyClass` `` and ` ```...``` ` don't trigger
-- `test_strips_urls` — `https://Anthropic.com` doesn't trigger on `Anthropic`
-- `test_skips_absolute_paths` — `/Users/foo` doesn't trigger on `Users`
-- `test_output_is_well_formed_json`
-- `test_exits_0_always`
+`IntegrationTests`:
+- `test_reviewer_agent_forbids_writing_to_memory` — grep `agents/reviewer.md` for the prohibition
+- `test_spec_workflow_includes_memory_sync_in_reconciliation` — grep `skills/spec-workflow/SKILL.md` for the integration
 
-`TaskCaptureHookTests`:
-- `test_silent_on_no_capture_patterns`
-- `test_flags_we_should_also`
-- `test_flags_todo_marker`
-- `test_flags_remind_me_to`
-- `test_flags_dont_forget`
-- `test_output_is_well_formed_json`
-- `test_exits_0_always`
+These are static-content tests, the cheapest form. They guard against future edits silently removing the integration.
 
 ## Out of scope
 
-- Runtime verification that Claude Code injects `additionalContext` correctly → empirical, not testable in CI. Refinement-todo if needed.
-- Persistent firing-rate counters → requires a tracking file the hooks write to; out of scope here.
-- Auto-tuning the heuristic based on telemetry → manual tuning only.
+- Promoting spec-workflow from stub to real skill → future spec (003+ recommended).
+- Mechanism that automatically surfaces new domain terms during reconciliation — Claude judgment, per the broader memory-sync pattern.

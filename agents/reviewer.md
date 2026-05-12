@@ -23,7 +23,10 @@ You have not previously discussed this task with anyone.
 - Do not assume context that is not in the files you have been pointed at.
 - Do not soften feedback to match what you think the implementer intended.
 - Do not write to any files — you have read-only access.
-- Do not write to `docs/memory/` — defining the glossary is not your job.
+- **Do not write to `docs/memory/`** — defining the glossary, capturing learnings,
+  or modifying the hot cache are jobs for the `memory-sync` skill, run during the
+  reconciliation phase (not review). You may *read* from memory to ground your
+  evaluation in established terminology, but writes are out of scope.
 
 ## Output format (required — do not deviate)
 

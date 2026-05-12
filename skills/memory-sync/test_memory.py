@@ -7,6 +7,7 @@ Run from the repo root:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -277,6 +278,41 @@ class SelfHealingTests(unittest.TestCase):
         self.assertTrue(
             "claude.md" in combined or "fallback" in combined,
             "expected a warning about missing CLAUDE.md",
+        )
+
+
+class IntegrationTests(unittest.TestCase):
+    """Slice 002-04 — static-content checks for reconciliation-integration.
+
+    These guard against future edits silently removing the memory-layer
+    integration in the reviewer agent or spec-workflow skill stub."""
+
+    def test_reviewer_agent_forbids_writing_to_memory(self):
+        """AC #2: reviewer.md must explicitly prohibit writing to docs/memory/."""
+        reviewer = (REPO_ROOT / "agents" / "reviewer.md").read_text()
+        # Match either form of the prohibition: "docs/memory" or "memory/" path
+        self.assertRegex(
+            reviewer,
+            r"(?i)do not\s+(?:write|modify|edit|update).*(?:docs/memory|memory layer|memory/)",
+            "reviewer.md must prohibit writes to docs/memory/",
+        )
+
+    def test_spec_workflow_includes_memory_sync_in_reconciliation(self):
+        """AC #1 + #3: spec-workflow's reconciliation checklist surfaces memory-sync
+        — the memory-sync mention must be *inside* the reconciliation section,
+        not just anywhere in the file."""
+        spec_workflow = (REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md").read_text()
+        # Locate the reconciliation H2 header
+        header = re.search(r"(?im)^##\s+[^\n]*reconcil[^\n]*$", spec_workflow)
+        self.assertIsNotNone(header,
+                             "spec-workflow must have a Reconciliation-titled H2 section")
+        # Section runs from end of header line to the next H2 (or EOF)
+        rest = spec_workflow[header.end():]
+        nxt = re.search(r"(?m)^##\s", rest)
+        section = rest[: nxt.start()] if nxt else rest
+        self.assertIn(
+            "memory-sync", section,
+            "memory-sync must be referenced INSIDE the reconciliation section, not just anywhere",
         )
 
 

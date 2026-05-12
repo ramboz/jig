@@ -13,4 +13,4 @@
 | [002-memory-layer](002-memory-layer/spec.md) | 002-01 explicit-sync | **DONE** | 14 tests green; reviewed + reconciled |
 | [002-memory-layer](002-memory-layer/spec.md) | 002-02 lookup-pattern | **DONE** | 21 tests green; reviewed + reconciled |
 | [002-memory-layer](002-memory-layer/spec.md) | 002-03 auto-detect-hooks | **DONE** | 19 hook tests green; reviewed + reconciled |
-| [002-memory-layer](002-memory-layer/spec.md) | 002-04 reconciliation-integration | DRAFT | **Next** (last slice of spec 002) |
+| [002-memory-layer](002-memory-layer/spec.md) | 002-04 reconciliation-integration | **DONE** | 23 tests green; reviewed + reconciled |
