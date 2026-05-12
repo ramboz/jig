@@ -53,3 +53,8 @@
 **Deferred:** `scaffold()` writes CLAUDE.md, docs/*, scaffold.json, brief.md sequentially without a transaction. A crash between steps leaves partial state; the next run (without `--force`) refuses because some files exist. Currently we rely on the `scaffold.json`-present check as the "scaffolded" sentinel; if creation crashes before scaffold.json is written, a re-run succeeds but may overwrite partial files.
 **Resolution trigger:** First report of a partial-scaffold state in the wild.
 **Mitigation idea:** write everything to a temp dir, then atomically rename, OR write `scaffold.json` FIRST as an in-progress marker and finalize at the end.
+
+### Decision: Atomic writes across all helper scripts
+**Deferred:** `workflow.py transition` and `workflow.py status-board` use `Path.write_text()` directly, like `scaffold.py` and `memory.py`. None are crash-safe — an interrupted run can leave a half-written spec.md or README.md. Probability is low (single-call CLIs that complete in milliseconds) but the impact is "lose state."
+**Resolution trigger:** First report of a torn-write incident, OR before jig ships outside personal-dev use.
+**Mitigation idea:** add a shared `atomic_write_text(path, content)` helper across `scaffold.py`, `memory.py`, `workflow.py`. Write to `<path>.tmp` then `os.replace()` — POSIX-atomic on same-FS rename.
