@@ -46,3 +46,17 @@ exited 0.
 you cannot tell whether it works without a deterministic test that asserts a
 specific output. Every new hook needs a unit test that pipes mock stdin and
 checks behavior.
+
+## Stocktake → ADR is a working dogfood loop
+
+Slice 001-04 shipped `stocktake.py`. Running it against jig itself surfaced a
+deferred-decision item whose resolution trigger literally read "After 3 reconciled
+specs in a dogfood project. Write the `scaffold-stable` ADR then." — and jig had
+exactly hit that threshold. ADR-0001 was written in response; the deferred item
+was struck through in refinement-todo.md.
+
+**Generalizable lesson:** The pattern works. When a deferred decision's resolution
+trigger is well-specified (with a measurable condition), stocktake will surface it
+at the right moment without anyone needing to remember. Worth replicating: every
+deferred item should have a measurable trigger, not a vague "later" or "when
+relevant".

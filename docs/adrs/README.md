@@ -5,7 +5,7 @@
 
 ## Index
 
-_No ADRs yet. First ADR will be written when the first architectural decision is made._
+- [ADR-0001: scaffold-stable trigger](0001-scaffold-stable.md) — 3 reconciled slices triggers scaffold-stable promotion (2026-05-12, Accepted)
 
 ## Format
 
