@@ -22,3 +22,6 @@
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-01 — adr-helper | **DONE** | 46 tests green; first Tier 1 skill — adr-workflow active |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-02 — supersede | DRAFT | Deferred; no real supersede yet |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-03 — boundary-change-detection | DRAFT | Deferred; blocked on contracts |
+| [006-tdd-loop](006-tdd-loop/spec.md) | 006-01 — tdd-helper | **DONE** | 25 tests (23 pass + 2 pytest-skipped); detect + run with normalized exit codes |
+| [006-tdd-loop](006-tdd-loop/spec.md) | 006-02 — ac-coverage | DRAFT | Deferred; needs test-tagging convention |
+| [006-tdd-loop](006-tdd-loop/spec.md) | 006-03 — pre-commit-gate | DRAFT | Deferred; no missing-coverage incident yet |

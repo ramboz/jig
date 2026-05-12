@@ -27,6 +27,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - 003-spec-workflow-promotion: slice 003-01 (lifecycle-helper) **DONE**; spec-workflow promoted from stub to active. Slices 003-02 (anti-horizontal-phasing-check) and 003-03 (new-spec-scaffolding) explicitly deferred.
 - 004-independent-review-promotion: slice 004-01 (review-helper) **DONE**; independent-review promoted from stub to active. The skill was dogfooded by reviewing its own implementation with the helper it introduces.
 - 005-adr-workflow: **first Tier 1 spec**; slice 005-01 (adr-helper) **DONE** — `adr.py` helper (new / accept / index / resolve-todo) + active SKILL.md + template landed; 46 tests green; reviewed + reconciled. Slices 005-02 (supersede) and 005-03 (boundary-change-detection) explicitly deferred.
+- 006-tdd-loop: **second Tier 1 spec**; slice 006-01 (tdd-helper) **DONE** — `tdd.py` helper (detect + run, with exit-code normalization 0/1/2) + active SKILL.md landed; 25 tests (23 pass + 2 skipped where pytest is absent locally); pytest > vitest > jest priority; detection-only for vitest/jest; reviewed + reconciled. Slices 006-02 (ac-coverage) and 006-03 (pre-commit-gate) explicitly deferred.
 
 ### Deferred decisions
 → See [docs/refinement-todo.md](docs/refinement-todo.md)
@@ -46,7 +47,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 
 ## Current sprint focus
 
-Tier 0 is complete (4 active skills + 1 deliberate stub). Now building Tier 1, starting with `adr-workflow` (spec 005) — the first Tier 1 skill, dogfooded from the two existing ADRs.
+Tier 0 is complete (4 active skills + 1 deliberate stub). Tier 1 in progress: `adr-workflow` (spec 005) DONE; `tdd-loop` (spec 006) slice 006-01 DONE. Remaining Tier 1 candidates: `pr-review` (gated on slice-land) and `local-dev-parity` (no signal yet).
 
 ## Skills in this repo
 
@@ -58,6 +59,7 @@ Tier 0 is complete (4 active skills + 1 deliberate stub). Now building Tier 1, s
 | `/jig:independent-review` | Slice 004-01 DONE — active, auto-triggering; `review.py` helper builds standardized prompts for implementation + reconciliation review | Yes (auto + explicit) |
 | `/jig:contracts` | **Deliberate stub** (ADR-0002) — kept stubbed until a third caller needs the duplicated lookup, OR a real user reports cross-module-coupling pain | Yes (explicit only — auto-invocation disabled) |
 | `/jig:adr-workflow` | Slice 005-01 DONE — active, auto-triggering; `adr.py` helper for new / accept / index / resolve-todo across `docs/adrs/` + `docs/refinement-todo.md` | Yes (auto + explicit) |
+| `/jig:tdd-loop` | Slice 006-01 DONE — active, auto-triggering; `tdd.py` helper for detect + run with normalized exit codes (0 green / 1 red / 2 env error), pytest/vitest/jest support, priority pytest > vitest > jest. | Yes (auto + explicit) |
 
 ## Session workflow
 
