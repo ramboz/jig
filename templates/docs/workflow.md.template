@@ -36,6 +36,21 @@ and deliver end-to-end value.
 6. Run `/jig:memory-sync` to consolidate learnings.
 7. Update spec status to DONE.
 
+## Stocktake
+
+After every few reconciled slices, review what was deferred during scaffolding to see if any items now have signal:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/stocktake.py .
+```
+
+The stocktake reports:
+- Number of slices in `STATUS: DONE` or `STATUS: RECONCILED`
+- Deferred items from `docs/refinement-todo.md`, grouped by category
+- A promotion suggestion when ≥3 slices have reconciled — review which items can now be promoted to specs or ADRs
+
+This is a `skill, not a hook` (per slice 001-04 design): it requires judgment about which deferred items are now ripe. Run it manually as part of a reconciliation step, or whenever you want a snapshot.
+
 ## Hook Strictness Profiles
 
 jig hooks support three enforcement levels via the `SCAFFOLD_HOOK_PROFILE` env var:

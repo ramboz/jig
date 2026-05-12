@@ -559,6 +559,144 @@ class SignalDetectionTests(unittest.TestCase):
         self.assertIn("Status: Draft", content)
 
 
+class FormatComplianceTests(unittest.TestCase):
+    """Slice 001-04 ACs #1 + #2 — refinement-todo.md format and categories."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-fmt-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+        self.todo = (self.target / "docs/refinement-todo.md").read_text()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # AC #2: 3 categories
+    def test_refinement_todo_has_three_categories(self):
+        for category in ("Architecture", "Conventions", "Operations"):
+            self.assertRegex(
+                self.todo, rf"(?m)^##\s+{category}\b",
+                f"missing top-level category: {category}",
+            )
+
+    # AC #1: each entry has consistent format
+    def test_refinement_todo_format_compliance(self):
+        """Each '### Decision: ...' heading must be followed (within its section)
+        by a '**Deferred:**' line and a '**Resolution trigger:**' line."""
+        # Find decision headings and their bodies (up to next ### or ##)
+        chunks = re.split(r"(?m)^### Decision: ", self.todo)
+        # chunks[0] is preamble before the first decision; ignore
+        decisions = chunks[1:]
+        self.assertGreaterEqual(len(decisions), 3, "expected ≥3 deferred decisions")
+        for chunk in decisions:
+            # name appears on first line
+            name = chunk.splitlines()[0].strip()
+            self.assertTrue(name, "decision name empty")
+            # body extends until next heading or end of file
+            body = re.split(r"(?m)^(?:##|###)\s", chunk, maxsplit=1)[0]
+            self.assertIn("**Deferred:**", body,
+                          f"decision '{name}' missing **Deferred:**")
+            self.assertIn("**Resolution trigger:**", body,
+                          f"decision '{name}' missing **Resolution trigger:**")
+
+    def test_each_category_has_at_least_one_decision(self):
+        for category in ("Architecture", "Conventions", "Operations"):
+            # Find the category section and look for at least one ### Decision: inside it
+            m = re.search(rf"(?ms)^##\s+{category}\b(.*?)(?=^##\s|\Z)", self.todo)
+            self.assertIsNotNone(m, f"category {category} not found")
+            self.assertRegex(
+                m.group(1), r"(?m)^### Decision:",
+                f"category {category} has no decisions",
+            )
+
+
+REPO_ROOT_STR = str(REPO_ROOT)
+STOCKTAKE = REPO_ROOT / "skills" / "scaffold-init" / "stocktake.py"
+
+
+def run_stocktake(target: Path) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = REPO_ROOT_STR
+    return subprocess.run(
+        [sys.executable, str(STOCKTAKE), str(target)],
+        capture_output=True, text=True, env=env,
+    )
+
+
+class StocktakeTests(unittest.TestCase):
+    """Slice 001-04 AC #3 — stocktake counts reconciled slices and suggests promotion at ≥3."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-stock-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"scaffold failed: {result.stderr}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_slice(self, spec_dir_name: str, slice_name: str, status: str):
+        """Append a slice with the given status into an existing or new spec.md."""
+        spec_dir = self.target / "docs" / "specs" / spec_dir_name
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        existing = spec_md.read_text() if spec_md.exists() else f"# Spec {spec_dir_name}\n\n"
+        existing += f"\n## Slice {slice_name}\n\n**STATUS: {status}**\n\n"
+        spec_md.write_text(existing)
+
+    def test_stocktake_runs_on_fresh_scaffold(self):
+        result = run_stocktake(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr={result.stderr}")
+        out = result.stdout
+        self.assertIn("Stocktake", out)
+        # Fresh scaffold has 0 reconciled slices and ≥3 deferred items (from template)
+        self.assertIn("0", out, "expected slice count of 0 shown in report")
+        # Should NOT contain the promotion suggestion
+        self.assertNotIn("promote", out.lower(),
+                         "should not suggest promotion below threshold")
+
+    def test_stocktake_silent_below_threshold(self):
+        # Two reconciled slices — below the 3-threshold
+        self._make_slice("001-x", "001-01 alpha", "DONE")
+        self._make_slice("001-x", "001-02 beta", "RECONCILED")
+        result = run_stocktake(self.target)
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("promote", result.stdout.lower())
+
+    def test_stocktake_suggests_at_threshold(self):
+        # Three reconciled slices — should surface the suggestion
+        self._make_slice("001-x", "001-01 alpha", "DONE")
+        self._make_slice("001-x", "001-02 beta", "RECONCILED")
+        self._make_slice("002-y", "002-01 gamma", "DONE")
+        result = run_stocktake(self.target)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("promote", result.stdout.lower())
+        # Should mention specific deferred items by name
+        self.assertRegex(result.stdout, r"(?i)tech\s+stack|module\s+boundaries")
+
+    def test_stocktake_reports_deferred_items(self):
+        result = run_stocktake(self.target)
+        self.assertEqual(result.returncode, 0)
+        # Should enumerate at least the seeded deferred items
+        out = result.stdout
+        # The template has at least Architecture / Conventions / Operations sections
+        # and several decisions in each
+        self.assertGreaterEqual(out.lower().count("decision"), 3,
+                                "expected ≥3 deferred decisions enumerated")
+
+    def test_stocktake_handles_missing_refinement_todo(self):
+        # Delete the file and verify graceful behavior
+        (self.target / "docs/refinement-todo.md").unlink()
+        result = run_stocktake(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr={result.stderr}")
+        self.assertIn("0 deferred", result.stdout.lower())
+
+
 class ScaffoldSafetyTests(unittest.TestCase):
     """Reviewer-flagged safety behaviors that aren't tied to a single AC."""
 
