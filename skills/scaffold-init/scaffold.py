@@ -11,12 +11,13 @@ The script is deterministic: no network, no user prompts. Q&A interaction
 is a later slice (001-05); signal detection is 001-03.
 """
 
+import argparse
 import json
 import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +84,28 @@ class Signals:
     has_ci: bool
     has_tests: bool
     is_team: bool
+
+
+@dataclass
+class Overrides:
+    """Q&A wizard answers (slice 001-05). None = unset (defer to filesystem inference).
+    True/False = explicit user answer that overrides the corresponding detector."""
+    is_team: bool = None  # type: ignore[assignment]
+    has_ci: bool = None  # type: ignore[assignment]
+    has_tests: bool = None  # type: ignore[assignment]
+    has_llm_agent_files: bool = None  # type: ignore[assignment]
+    runtime: str = None  # type: ignore[assignment]
+
+    def apply_to(self, signals: Signals) -> Signals:
+        """Return a new Signals with overrides applied. None fields pass through."""
+        return Signals(
+            has_llm_agent_files=(self.has_llm_agent_files
+                                 if self.has_llm_agent_files is not None
+                                 else signals.has_llm_agent_files),
+            has_ci=(self.has_ci if self.has_ci is not None else signals.has_ci),
+            has_tests=(self.has_tests if self.has_tests is not None else signals.has_tests),
+            is_team=(self.is_team if self.is_team is not None else signals.is_team),
+        )
 
 
 def _read_json_safe(path: Path) -> dict:
@@ -298,10 +321,12 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
     })
 
 
-def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
+def scaffold(target: Path, plugin: Path, *, force: bool = False,
+             overrides: Overrides = None) -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
-    already-scaffolded directory unless `force=True`. Plugin templates live at
-    `plugin/templates/`."""
+    already-scaffolded directory unless `force=True`. `overrides` carries the
+    Q&A wizard answers from slice 001-05; None fields fall back to filesystem
+    inference. Plugin templates live at `plugin/templates/`."""
     target = target.resolve()
     template_root = plugin / "templates"
 
@@ -317,6 +342,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
     # Detect signals BEFORE writing any scaffold files — otherwise wizard-generated
     # docs would self-trigger detectors (e.g. *.prompt.md, copilot-instructions.md).
     signals = detect_signals(target)
+    if overrides is not None:
+        signals = overrides.apply_to(signals)
     installed_tiers, offered_tiers = _select_tiers(signals)
     hook_profile = _hook_profile(signals)
 
@@ -355,6 +382,11 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
     manifest["hook_profile"] = hook_profile
     if offered_tiers:
         manifest["offered_tiers"] = offered_tiers
+    # project_runtime is recorded only when the wizard explicitly captured an answer.
+    # `is not None` rather than truthy — empty string "" is still an explicit answer
+    # the wizard chose to record, not the same as "skipped".
+    if overrides is not None and overrides.runtime is not None:
+        manifest["project_runtime"] = overrides.runtime
     (target / "scaffold.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     # 5. brief.md — human-readable summary of detection results
@@ -363,22 +395,65 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False) -> None:
     (target / "brief.md").write_text(brief)
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    """CLI surface for scaffold.py — used both by main() and tests."""
+    p = argparse.ArgumentParser(
+        prog="scaffold.py",
+        description="jig scaffold-init — generate an AI-native dev workspace",
+    )
+    p.add_argument("target", help="target directory")
+    p.add_argument("--force", action="store_true",
+                   help="overwrite an already-scaffolded directory")
+    p.add_argument("--runtime", default=None,
+                   help="runtime/language answer from the Q&A wizard "
+                        "(stored in scaffold.json.project_runtime)")
+    for flag_name, attr in [
+        ("team", "is_team"),
+        ("ci", "has_ci"),
+        ("tests", "has_tests"),
+        ("ai", "has_llm_agent_files"),
+    ]:
+        group = p.add_mutually_exclusive_group()
+        if flag_name == "team":
+            # --team / --solo (asymmetric)
+            group.add_argument("--team", dest=attr, action="store_const", const=True,
+                               help="force is_team=true (overrides git-author detection)")
+            group.add_argument("--solo", dest=attr, action="store_const", const=False,
+                               help="force is_team=false")
+        elif flag_name == "ai":
+            group.add_argument("--plans-ai", dest=attr, action="store_const", const=True,
+                               help="force has_llm_agent_files=true (offers tier-2)")
+            group.add_argument("--no-ai", dest=attr, action="store_const", const=False)
+        else:
+            group.add_argument(f"--has-{flag_name}", dest=attr,
+                               action="store_const", const=True,
+                               help=f"force has_{flag_name}=true")
+            group.add_argument(f"--no-{flag_name}", dest=attr,
+                               action="store_const", const=False)
+    return p
+
+
 def main(argv: list[str]) -> int:
-    args = argv[1:]
-    force = False
-    if "--force" in args:
-        force = True
-        args = [a for a in args if a != "--force"]
+    parser = _build_parser()
+    try:
+        ns = parser.parse_args(argv[1:])
+    except SystemExit as exc:
+        # argparse exits 2 on usage errors; bubble through
+        return int(exc.code) if exc.code is not None else 2
 
-    if len(args) != 1:
-        sys.stderr.write("usage: scaffold.py [--force] <target-dir>\n")
-        return 2
-
-    target = Path(args[0]).resolve()
+    target = Path(ns.target).resolve()
     target.mkdir(parents=True, exist_ok=True)
 
+    overrides = Overrides(
+        is_team=ns.is_team,
+        has_ci=ns.has_ci,
+        has_tests=ns.has_tests,
+        has_llm_agent_files=ns.has_llm_agent_files,
+        runtime=ns.runtime,
+    )
+
     try:
-        scaffold(target, plugin_root(), force=force)
+        scaffold(target, plugin_root(), force=ns.force, overrides=overrides)
     except AlreadyScaffoldedError as exc:
         sys.stderr.write(f"{exc}\n")
         return 3

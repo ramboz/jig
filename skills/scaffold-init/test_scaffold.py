@@ -559,6 +559,159 @@ class SignalDetectionTests(unittest.TestCase):
         self.assertIn("Status: Draft", content)
 
 
+def run_scaffold_with_args(target: Path, *args: str) -> subprocess.CompletedProcess:
+    """Invoke scaffold.py with extra CLI flags before the target path."""
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    return subprocess.run(
+        [sys.executable, str(SCAFFOLD), *args, str(target)],
+        capture_output=True, text=True, env=env,
+    )
+
+
+class WizardQATests(unittest.TestCase):
+    """Slice 001-05 — CLI flag overrides for Q&A wizard answers."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-qa-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _manifest(self):
+        return json.loads((self.target / "scaffold.json").read_text())
+
+    # 1. Runtime flag is recorded in scaffold.json
+    def test_runtime_flag_recorded(self):
+        result = run_scaffold_with_args(self.target, "--runtime", "python")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertEqual(self._manifest().get("project_runtime"), "python")
+
+    def test_runtime_absent_when_unset(self):
+        result = run_scaffold_with_args(self.target)
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("project_runtime", self._manifest(),
+                         "project_runtime should be absent when --runtime unset")
+
+    # 2. Team / solo flag overrides detect_team
+    def test_team_flag_forces_people_md_on_solo_dir(self):
+        result = run_scaffold_with_args(self.target, "--team")
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue((self.target / "docs/memory/people.md").exists(),
+                        "--team should force people.md even without ≥2 git authors")
+        self.assertTrue(self._manifest()["scaffold_signals"]["is_team"])
+
+    @unittest.skipUnless(_git_available(), "git not available")
+    def test_solo_flag_suppresses_people_md_on_team_repo(self):
+        # Build a team git repo, then scaffold with --solo
+        env = os.environ.copy()
+        subprocess.run(["git", "-C", str(self.target), "init", "-q"],
+                       capture_output=True, env=env, check=True)
+        for name, email, fn in [("Alice", "alice@x.com", "a.txt"),
+                                 ("Bob", "bob@x.com", "b.txt")]:
+            (self.target / fn).write_text("x")
+            subprocess.run(["git", "-C", str(self.target), "add", fn],
+                           capture_output=True, env=env, check=True)
+            env_extra = {
+                **env,
+                "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+            }
+            subprocess.run(["git", "-C", str(self.target), "commit", "-q", "-m", fn],
+                           capture_output=True, env=env_extra, check=True)
+        result = run_scaffold_with_args(self.target, "--solo")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((self.target / "docs/memory/people.md").exists(),
+                         "--solo should suppress people.md even on multi-author git repo")
+        self.assertFalse(self._manifest()["scaffold_signals"]["is_team"])
+
+    # 3. CI flag overrides _detect_ci
+    def test_has_ci_flag_sets_strict_profile(self):
+        result = run_scaffold_with_args(self.target, "--has-ci")
+        self.assertEqual(result.returncode, 0)
+        manifest = self._manifest()
+        self.assertTrue(manifest["scaffold_signals"]["has_ci"])
+        self.assertEqual(manifest["hook_profile"], "strict")
+
+    def test_no_ci_flag_overrides_filesystem(self):
+        # Real CI files present
+        (self.target / ".github" / "workflows").mkdir(parents=True)
+        (self.target / ".github" / "workflows" / "ci.yml").write_text("name: ci\n")
+        result = run_scaffold_with_args(self.target, "--no-ci")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(self._manifest()["scaffold_signals"]["has_ci"])
+        self.assertEqual(self._manifest()["hook_profile"], "standard")
+
+    # 4. Tests flag overrides _detect_tests + tier-1 install
+    def test_has_tests_flag_forces_tier_1(self):
+        result = run_scaffold_with_args(self.target, "--has-tests")
+        self.assertEqual(result.returncode, 0)
+        manifest = self._manifest()
+        self.assertTrue(manifest["scaffold_signals"]["has_tests"])
+        self.assertIn("tier-1", manifest["installed_tiers"])
+
+    def test_no_tests_flag_overrides_filesystem(self):
+        # Real pytest.ini present
+        (self.target / "pytest.ini").write_text("[pytest]\n")
+        result = run_scaffold_with_args(self.target, "--no-tests")
+        self.assertEqual(result.returncode, 0)
+        manifest = self._manifest()
+        self.assertFalse(manifest["scaffold_signals"]["has_tests"])
+        self.assertNotIn("tier-1", manifest["installed_tiers"])
+
+    # 5. AI flag overrides _detect_llm_agent + tier-2 offer
+    def test_plans_ai_flag_offers_tier_2(self):
+        result = run_scaffold_with_args(self.target, "--plans-ai")
+        self.assertEqual(result.returncode, 0)
+        manifest = self._manifest()
+        self.assertTrue(manifest["scaffold_signals"]["has_llm_agent_files"])
+        self.assertIn("tier-2", manifest.get("offered_tiers", []))
+
+    def test_no_ai_flag_overrides_filesystem(self):
+        # Real LLM signal present
+        (self.target / "AGENTS.md").write_text("# Agents\n")
+        result = run_scaffold_with_args(self.target, "--no-ai")
+        self.assertEqual(result.returncode, 0)
+        manifest = self._manifest()
+        self.assertFalse(manifest["scaffold_signals"]["has_llm_agent_files"])
+        self.assertNotIn("tier-2", manifest.get("offered_tiers", []))
+
+    # Skip semantics: no flags = pure inference (slice 001-03 behavior)
+    def test_no_flags_matches_inference_baseline(self):
+        # Multi-signal scaffold
+        (self.target / "pytest.ini").write_text("[pytest]\n")
+        (self.target / "AGENTS.md").write_text("# Agents\n")
+        result = run_scaffold_with_args(self.target)
+        self.assertEqual(result.returncode, 0)
+        signals = self._manifest()["scaffold_signals"]
+        # All signals match what filesystem inference produces (verified by 001-03 tests)
+        self.assertTrue(signals["has_tests"])
+        self.assertTrue(signals["has_llm_agent_files"])
+        self.assertFalse(signals["has_ci"])
+        self.assertFalse(signals["is_team"])
+
+    # Mutually exclusive flag pairs
+    def test_team_and_solo_are_mutually_exclusive(self):
+        result = run_scaffold_with_args(self.target, "--team", "--solo")
+        self.assertNotEqual(result.returncode, 0,
+                            "should reject --team and --solo together")
+
+    def test_has_ci_and_no_ci_are_mutually_exclusive(self):
+        result = run_scaffold_with_args(self.target, "--has-ci", "--no-ci")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_has_tests_and_no_tests_are_mutually_exclusive(self):
+        result = run_scaffold_with_args(self.target, "--has-tests", "--no-tests")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_plans_ai_and_no_ai_are_mutually_exclusive(self):
+        result = run_scaffold_with_args(self.target, "--plans-ai", "--no-ai")
+        self.assertNotEqual(result.returncode, 0)
+
+
 class FormatComplianceTests(unittest.TestCase):
     """Slice 001-04 ACs #1 + #2 — refinement-todo.md format and categories."""
 

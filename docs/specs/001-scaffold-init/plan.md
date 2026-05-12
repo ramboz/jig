@@ -1,53 +1,67 @@
-# Plan: Slice 001-04 — deferred-decisions
+# Plan: Slice 001-05 — wizard-qa
 
 ## Approach
 
-Two parts:
+Q&A interaction layer. The deterministic core stays in `scaffold.py`; the **question flow lives in SKILL.md** (Claude asks the user). User answers flow back to `scaffold.py` as CLI flags. Skipped questions = no flag = falls back to filesystem inference (the slice 001-03 behavior).
 
-1. **Format compliance verification** — assert via tests that scaffolded `refinement-todo.md` matches AC #1/#2. The current template already follows the pattern: 3 H2 categories (Architecture, Conventions, Operations) with H3 `### Decision: <name>` entries containing `**Deferred:**` and `**Resolution trigger:**` lines. The AC #1 wording suggests H2 for decisions; we use H3 under category H2 (cleaner doc structure). Log this interpretation in deviation.
+This split keeps the scaffold core testable and deterministic, while letting Claude handle the natural-language interaction.
 
-2. **Stocktake helper** — a small Python script that:
-   - Counts slices in `STATUS: DONE` or `STATUS: RECONCILED` across `docs/specs/*/spec.md`
-   - Parses deferred items from `docs/refinement-todo.md`
-   - Prints a markdown report
-   - When count ≥3, surfaces an "review for promotion" suggestion
+## CLI interface
 
-Stocktake is **invoked manually** by the user. It is not a hook (per AC #3: "skill, not hook"). It lives in `skills/scaffold-init/` since it's part of the scaffold-init concern (post-scaffold operational tool). A standalone skill wrapper is deferred — `memory-sync` (spec 002) is the natural future home.
+5 questions per AC, mapped to argparse flags:
 
-## "Spec" vs "slice" interpretation
+| Question | Flag(s) | Semantics |
+|---|---|---|
+| Runtime/language? | `--runtime <name>` | Stored in `scaffold.json.project_runtime`; otherwise key absent. |
+| Team setting? | `--team` / `--solo` | Forces `is_team` true/false, overriding `detect_team`. |
+| Existing CI? | `--has-ci` / `--no-ci` | Forces `has_ci`, overriding `_detect_ci`. |
+| Existing tests? | `--has-tests` / `--no-tests` | Forces `has_tests`, overriding `_detect_tests`. Affects tier-1 install. |
+| LLM/agent work planned? | `--plans-ai` / `--no-ai` | Forces `has_llm_agent_files`, overriding `_detect_llm_agent`. Affects tier-2 offer. |
 
-AC #3 says "after 3 reconciled specs". A jig "spec" is a directory `docs/specs/NNN-name/` containing one spec.md with multiple slices. Pragmatic interpretation: **count reconciled slices, not entire specs.** A whole-spec milestone is rare; slice-level milestones are the natural pulse. This is logged in the deviation log.
-
-## Files to create
-
-| Path | Purpose |
-|---|---|
-| `skills/scaffold-init/stocktake.py` | The helper script |
+Boolean overrides are **mutually exclusive pairs** (e.g. `--team` and `--solo` can't both be passed). Both unset = inference fallback. Argparse `add_mutually_exclusive_group()` enforces this.
 
 ## Files to modify
 
 | Path | Change |
 |---|---|
-| `templates/docs/workflow.md.template` | Add a Stocktake section with invocation hint |
-| `skills/scaffold-init/test_scaffold.py` | New tests: format compliance + stocktake parsing + threshold behavior |
+| `skills/scaffold-init/scaffold.py` | Switch main() to argparse; pass overrides through to `scaffold()`; record `project_runtime` in manifest |
+| `skills/scaffold-init/SKILL.md` | New Q&A section listing the 5 questions and the invocation pattern; mark questions as skippable |
+| `skills/scaffold-init/test_scaffold.py` | New `WizardQATests` covering each flag override + skip-equivalence |
 | `docs/specs/001-scaffold-init/spec.md` | Status: DRAFT → IN_PROGRESS → DONE |
 | `docs/specs/README.md` | Status update |
 
+## SKILL.md Q&A flow
+
+Claude's question-asking, in order. Each is independently skippable:
+
+1. "What runtime/language is this project — Python, TypeScript, Go, Rust, mixed, or unsure?" → `--runtime`
+2. "Solo project or team setting?" → `--team` / `--solo`
+3. "Does the project already have CI configured?" → `--has-ci` / `--no-ci`
+4. "Does the project already have a test suite?" → `--has-tests` / `--no-tests`
+5. "Will this project involve LLM or agent work?" → `--plans-ai` / `--no-ai`
+
+If the user answers "skip" / "I don't know" / "unsure" to any question, do not pass the flag — let filesystem inference handle it.
+
+## Override semantics — clarification
+
+The override is *one-way*: user says yes/no, signal is forced. There's no "ask only if filesystem is ambiguous" mode — the wizard always asks if invoked in Q&A mode. Skip is the only way to defer to filesystem.
+
+If a user invokes scaffold-init non-interactively (no Q&A), the wizard runs in pure inference mode (slice 001-03 behavior, unchanged). The default behavior is therefore backwards-compatible.
+
 ## Test strategy
 
-`FormatComplianceTests`:
-- assert ≥3 H3 `### Decision:` entries
-- assert each entry has matching `**Deferred:**` and `**Resolution trigger:**` lines within its section
-- assert each category (Architecture, Conventions, Operations) has ≥1 decision
-
-`StocktakeTests`:
-- bare scaffold (no DONE specs) → stocktake runs, count=0, no promotion suggestion
-- fabricate 3 fake spec.md files with `**STATUS: DONE**` → stocktake count=3, suggestion appears
-- stocktake correctly parses deferred items (count + names) from refinement-todo.md
-- stocktake handles missing refinement-todo.md gracefully (returns 0 items, runs cleanly)
+`WizardQATests`:
+- `test_runtime_recorded`: `--runtime=python` writes `project_runtime: "python"` to scaffold.json
+- `test_team_flag_forces_people_md`: bare repo + `--team` creates people.md anyway
+- `test_solo_flag_suppresses_people_md`: team repo + `--solo` skips people.md
+- `test_has_tests_forces_tier_1`: bare dir + `--has-tests` installs tier-1
+- `test_no_tests_overrides_filesystem`: pytest.ini present + `--no-tests` does NOT install tier-1
+- `test_no_flags_matches_inference_baseline`: no flags = identical scaffold.json scaffold_signals to slice 001-03 behavior
+- `test_mutually_exclusive_flags_rejected`: `--team --solo` returns non-zero
+- `test_plans_ai_forces_tier_2_offer`: bare dir + `--plans-ai` offers tier-2
 
 ## Out of scope
 
-- A separate skill wrapper for stocktake → deferred (memory-sync slice 002 is the natural home).
-- Auto-running stocktake on a schedule → user invokes manually.
-- "Promotion" actually moving items from refinement-todo to spec backlog → stocktake only suggests.
+- Multi-language detection beyond a single runtime string → future (e.g. polyglot repos).
+- Interactive prompts in scaffold.py itself (e.g. argparse-based `input()`) → SKILL.md owns interaction.
+- Persisting answers for re-scaffolds → answers already recorded in scaffold.json, but re-scaffold UX (read back, re-ask) is deferred.

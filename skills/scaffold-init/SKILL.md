@@ -9,15 +9,18 @@ description: >
 user-invocable: true
 ---
 
-> Slice 001-01 (greenfield-scaffold) is implemented. Slices 001-02 (rich doc content),
-> 001-03 (signal detection), 001-04 (deferred-decision structure), and 001-05 (Q&A
-> wizard) are still pending — see [docs/specs/001-scaffold-init/spec.md](../../docs/specs/001-scaffold-init/spec.md).
+> Spec 001 is fully implemented: greenfield-scaffold, doc-content, signal-detection,
+> deferred-decisions, and Q&A wizard.
+> See [docs/specs/001-scaffold-init/spec.md](../../docs/specs/001-scaffold-init/spec.md).
 
 ## What this skill does
 
 Generates an AI-native development workspace by copying templates from
-`${CLAUDE_PLUGIN_ROOT}/templates/` into a target directory. Greenfield only in
-this slice — no signal detection, no Q&A, default tier install (Tier 0 + Tier 1).
+`${CLAUDE_PLUGIN_ROOT}/templates/` into a target directory. Detects project
+signals from the filesystem (LLM/agent files, CI, tests, team), runs an optional
+Q&A flow to let the user override those signals, and selects tiers accordingly.
+Tier 0 always installs; Tier 1 installs when test signals are present; Tier 2
+is offered (not auto-installed) when LLM/agent signals are present.
 
 ## How to use
 
@@ -26,12 +29,40 @@ this slice — no signal detection, no Q&A, default tier install (Tier 0 + Tier 
 2. Check if the target already has a `scaffold.json` or `docs/specs/` — if so,
    the project is already scaffolded. **Stop and tell the user** rather than
    overwriting.
-3. Run the wizard:
+3. **Run the Q&A flow** (see next section). Collect answers as flag values.
+4. Invoke the wizard with the collected flags:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" <target-dir>
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" \
+     [--runtime <name>] [--team|--solo] [--has-ci|--no-ci] \
+     [--has-tests|--no-tests] [--plans-ai|--no-ai] \
+     <target-dir>
    ```
-4. Read the wizard's stdout summary and report back to the user. List the files
+5. Read the wizard's stdout summary and report back to the user. List the files
    that were created and the immediate next steps.
+
+## Q&A flow (slice 001-05)
+
+Ask each question in order. **Each question is independently skippable** — if the
+user says "skip", "I don't know", "unsure", or similar, do not pass the flag
+(the wizard's filesystem inference handles it).
+
+1. **Runtime/language** — "What runtime or language is this project?
+   (e.g. Python, TypeScript, Go, Rust, mixed, unsure)"
+   → `--runtime <name>` if answered; omit if skipped or unsure.
+2. **Team context** — "Solo project or team setting?"
+   → `--team` for team, `--solo` for solo; omit if skipped (uses git-author detection).
+3. **Existing CI** — "Does the project already have CI configured?"
+   → `--has-ci` for yes, `--no-ci` for no; omit if skipped.
+4. **Existing tests** — "Does the project already have a test suite?"
+   → `--has-tests` for yes, `--no-tests` for no; omit if skipped.
+   This affects whether tier-1 (`tdd-loop` and friends) is auto-installed.
+5. **LLM/agent work planned** — "Will this project involve LLM or agent development?"
+   → `--plans-ai` for yes, `--no-ai` for no; omit if skipped.
+   This affects whether tier-2 is offered.
+
+Skipping every question is the legitimate "pure inference" mode (slice 001-03
+behavior) — the wizard infers from filesystem signals alone. Do not invent
+answers when the user is unsure.
 
 ## Output
 

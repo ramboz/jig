@@ -262,11 +262,11 @@ The original spec is preserved above. This section records what changed.
 
 ## Slice 001-05 — wizard-qa
 
-**STATUS: DRAFT** _(implement last)_
+**STATUS: DONE** _(last slice of spec 001)_
 
 **Goal:** Q&A interaction mode — wizard asks project-scoping questions before generating output.
 
-**DoR:** Slice 001-03 STATUS: DONE.
+**DoR:** Slice 001-03 STATUS: DONE. ✅
 
 **Acceptance Criteria:**
 1. 3-5 targeted questions: runtime/language, team size, existing CI, LLM/agent work planned.
@@ -274,6 +274,43 @@ The original spec is preserved above. This section records what changed.
 3. Questions are skippable — filesystem inference used as fallback if user skips.
 4. If all questions skipped, output is identical to 001-03 (pure inference mode).
 
-**DoD:** Same as 001-01.
+**DoD:** Same as 001-01. All checked.
+- [x] All ACs pass (62 tests, all green)
+- [x] Implementer test coverage: 14 new tests in `WizardQATests` (each flag override + mutex pairs + skip-equivalence)
+- [x] Reviewed by `reviewer` subagent (verdict: pass; 3 of 5 cleanup items addressed in slice, 2 deferred as documented)
+- [x] Deviation log produced (see below)
+- [x] Reconciliation review pass
 
 **Anti-horizontal-phasing check:** ✅ UX layer on top of existing functional output.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above.
+
+**Design choices logged:**
+
+1. **Q&A interaction lives in SKILL.md, not scaffold.py.** The deterministic core stays testable; Claude handles natural language. Answers flow back as CLI flags. This is consistent with the broader jig design (skills = LLM layer, hooks/scripts = deterministic spine).
+
+2. **Five questions covered, mapped to one flag group each.** AC asked for "3-5"; we shipped 5 because that's what natural project scoping needs.
+
+3. **`--runtime` accepts free-form strings.** SKILL.md enumerates Python/TypeScript/Go/Rust/mixed/unsure as suggestions but does not constrain via `choices=` because real projects use names that wouldn't appear in any whitelist (e.g. "Rust+TypeScript polyglot"). Reviewer flagged this; we kept it open-ended deliberately.
+
+**Reviewer-flagged fixes applied:**
+
+4. **Stale SKILL.md status banner.** Refreshed to reflect spec 001 fully implemented.
+
+5. **`overrides.runtime` truthiness vs `is not None`.** Was `if overrides.runtime`, which would silently drop an explicitly-passed empty string. Tightened to `is not None`.
+
+6. **Mutex coverage was uneven.** Added `test_has_tests_and_no_tests_are_mutually_exclusive` and `test_plans_ai_and_no_ai_are_mutually_exclusive` for symmetry across all four boolean pairs.
+
+**Reviewer notes accepted as-is:**
+
+7. **`test_no_flags_matches_inference_baseline` is functional-equivalence, not literal-identity.** Functional equivalence is sufficient: the no-flags codepath IS the 001-03 codepath (Overrides with all-None fields is a no-op via `apply_to`).
+
+8. **`--runtime` open-ended.** See design choice #3.
+
+**Doc updates from this slice:**
+
+- SKILL.md: refreshed status banner + added Q&A flow section.
+- No `architecture.md` changes (no new module boundaries).
+- No ADR required (no irreversible architectural decisions).
