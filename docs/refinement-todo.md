@@ -40,6 +40,15 @@
 **Resolution trigger:** First time a user reports a slow or hung scaffold-init on a real project, OR when adding network-touching detectors.
 **Risk:** Currently theoretical — local-only scaffolder on user-owned dirs.
 
+### Decision: jig-memory-scan + jig-task-capture firing-rate measurement
+**Deferred:** Slice 002-03 tuned the heuristics deterministically (strip code blocks / URLs / absolute paths; common-acronym skiplist) but did not measure actual firing rate against real session traffic. AC #5 calls for 10–40% as the healthy band; we have no telemetry yet.
+**Resolution trigger:** After ~2 weeks of jig being enabled in a real session, scan the captured stderr/stdout of these hooks (or add a lightweight counter file in `.claude/`) and either confirm we're in band, or tune the COMMON acronym set / regex specificity.
+**Mitigation idea:** add a `.claude/hook-firing.jsonl` write at the bottom of each hook (one line per fire) — cheap, gitignored, easy to grep.
+**Watch-list (reviewer-flagged low-priority items):**
+- Schemeless URLs like `example.com/FooBar` leak `FooBar` (the strip regex requires `http(s)://`)
+- Nested triple-backtick fences leak the middle content (non-greedy `.*?` pairs outermost)
+- `CSS` in COMMON skiplist could mask a frontend project's `CSS Modules` term — harmless today (single capitalized word doesn't match camelCase regex) but worth watching as the skiplist grows
+
 ### Decision: Transactional writes in scaffold()
 **Deferred:** `scaffold()` writes CLAUDE.md, docs/*, scaffold.json, brief.md sequentially without a transaction. A crash between steps leaves partial state; the next run (without `--force`) refuses because some files exist. Currently we rely on the `scaffold.json`-present check as the "scaffolded" sentinel; if creation crashes before scaffold.json is written, a re-run succeeds but may overwrite partial files.
 **Resolution trigger:** First report of a partial-scaffold state in the wild.

@@ -12,5 +12,5 @@
 | [001-scaffold-init](001-scaffold-init/spec.md) | 001-05 wizard-qa | **DONE** | 62 tests green; spec 001 is complete |
 | [002-memory-layer](002-memory-layer/spec.md) | 002-01 explicit-sync | **DONE** | 14 tests green; reviewed + reconciled |
 | [002-memory-layer](002-memory-layer/spec.md) | 002-02 lookup-pattern | **DONE** | 21 tests green; reviewed + reconciled |
-| [002-memory-layer](002-memory-layer/spec.md) | 002-03 auto-detect-hooks | DRAFT | **Next** |
-| [002-memory-layer](002-memory-layer/spec.md) | 002-04 reconciliation-integration | DRAFT | Depends on 002-01 |
+| [002-memory-layer](002-memory-layer/spec.md) | 002-03 auto-detect-hooks | **DONE** | 19 hook tests green; reviewed + reconciled |
+| [002-memory-layer](002-memory-layer/spec.md) | 002-04 reconciliation-integration | DRAFT | **Next** (last slice of spec 002) |

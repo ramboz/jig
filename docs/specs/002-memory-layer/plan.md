@@ -1,66 +1,69 @@
-# Plan: Slice 002-02 — lookup-pattern
+# Plan: Slice 002-03 — auto-detect-hooks
 
 ## Approach
 
-Two parts:
+The two hooks (`jig-memory-scan.sh` on `UserPromptSubmit`, `jig-task-capture.sh` on `Stop`) were stubbed back in the starting move and have been firing on every session since — but **they were never tested with mock stdin**. This slice writes deterministic tests, fixes any bugs surfaced, tightens the heuristics, and verifies the JSON output format.
 
-1. **Helper-side**: Add a `lookup` command to `memory.py` that searches the hot cache and glossary (in that order) and reports the result. This gives Claude a deterministic primitive for the read side of the pattern, mirroring `add-term` on the write side.
+## What we already have
 
-2. **SKILL.md-side**: Update `skills/memory-sync/SKILL.md` to teach Claude the full lookup flow: when an unknown capitalized reference appears in the conversation, look it up; if missing, ask the user once; then persist.
+Both hook scripts use the `python3 -c` stdin pattern (fixed in slice 001-01). The scaffold is sound:
 
-The "ask the user" step is pure SKILL.md instruction — there is no code primitive for it. The "≥3 references" promotion threshold (AC #4) continues to live in Claude's judgment (consistent with slice 002-01).
+- `jig-memory-scan.sh` — scans the user prompt for capitalized references not in the hot cache or glossary, emits `{"continue": true, "additionalContext": "..."}` listing unrecognized terms.
+- `jig-task-capture.sh` — scans the completed session for task-capture language patterns ("we should also", "TODO:", etc.), emits triage prompt.
 
-## `lookup` command shape
+Both exit 0 unconditionally (non-blocking, per AC #3).
 
-```bash
-python3 memory.py lookup <term> <target>
-```
+## What needs to happen
 
-Search order: CLAUDE.md Hot Cache → Key terms → docs/memory/glossary.md.
-Exit codes:
-- `0` — found; definition printed to stdout, source (hot-cache|glossary) on a second line
-- `2` — not found; nothing on stdout, brief explanation on stderr
-
-This is a tri-output-form: success/failure via exit code, content via stdout, diagnostic via stderr. Composable for SKILL.md invocation.
-
-Edge cases:
-- Term matched case-insensitively (so "Spidr" finds "SPIDR")
-- If a term appears in BOTH hot cache and glossary, return the hot-cache hit (more authoritative)
-- If neither file exists, treat as "not found" (no error)
-
-## AC #6 interpretation
-
-The literal AC says: "Persistence decision is logged (one-liner) to `docs/memory/learnings.md`."
-
-This is awkwardly worded — `learnings.md` is for "dead ends and gotchas" (per its own template), not a persistence audit log. Routine glossary adds would bloat it with non-learnings content.
-
-**Interpretation:** The helper's existing stdout output ("glossary: added 'X'", "hot cache: promoted 'Y'") IS the persistence-decision log. It's a one-liner per decision, surfaced to the caller (Claude), and captured in `skill-usage.jsonl` via the telemetry hook when invoked through Task. No additional file write needed.
-
-Documented as a deviation. If a stronger audit trail is needed later, a separate `docs/memory/.audit.log` (gitignored) is cleaner than polluting learnings.md.
+1. **Deterministic tests** — pipe mock hook payloads in via stdin and assert on stdout JSON / stderr / exit code.
+2. **Heuristic improvements for `jig-memory-scan`** — currently scans the entire prompt as a flat string. False-positive surfaces:
+   - File paths (`/Users/ramboz/Projects` contains `Users`, `Projects`)
+   - URLs (`https://Foo.com`)
+   - Code blocks (` ```python\nclass MyClass\n``` `)
+   - **Mitigation**: strip code blocks, fenced and inline, before scanning. Strip URL hosts. Skip absolute paths.
+3. **`additionalContext` JSON format verification** — per the original plan review, the format for `UserPromptSubmit` and `Stop` hooks was deferred for empirical verification. The two formats we know are:
+   - `PreToolUse` style: `{"hookSpecificOutput": {"hookEventName": "X", "additionalContext": "..."}}`
+   - Other events: `{"continue": true, "additionalContext": "..."}`
+   Our hooks use the latter. We document this clearly and add a test that the JSON is at minimum *valid* and contains the expected keys. Empirical verification (does Claude Code actually inject the context?) remains a runtime concern; we cannot fully test it in CI but we can guarantee the output JSON is well-formed.
+4. **Firing-rate dogfooding (AC #5)** — we don't have telemetry data yet (the hooks have been firing but the project has no `.claude/skill-usage.jsonl` for hooks themselves, only for Task spawns). The healthier interpretation: tune the heuristic in this slice based on what we KNOW about the kind of prompts that hit it during development, and document the firing-rate target as a refinement-todo item for actual measurement.
 
 ## Files to modify
 
 | Path | Change |
 |---|---|
-| `skills/memory-sync/memory.py` | Add `lookup` subcommand + parser entry |
-| `skills/memory-sync/test_memory.py` | New `LookupTests` class |
-| `skills/memory-sync/SKILL.md` | New "Lookup-pattern flow" section |
+| `hooks/scripts/jig-memory-scan.sh` | Tighten heuristic: strip code blocks, URLs, absolute paths |
+| `hooks/scripts/jig-task-capture.sh` | Minor: ensure regex matches typed-curly-quote variants |
+| `skills/memory-sync/test_hooks.py` | NEW test file for both hook scripts |
+| `docs/refinement-todo.md` | Add post-2-week firing-rate measurement item |
 | `docs/specs/002-memory-layer/spec.md` | Status: DRAFT → IN_PROGRESS → DONE |
 | `docs/specs/README.md` | Status update |
 
 ## Test strategy
 
-`LookupTests`:
-- `test_lookup_finds_glossary_term`
-- `test_lookup_finds_hot_cache_term`
-- `test_lookup_hot_cache_wins_when_both`
-- `test_lookup_returns_2_for_unknown`
-- `test_lookup_case_insensitive`
-- `test_lookup_on_bare_dir_returns_2` (no CLAUDE.md, no glossary → graceful "not found")
-- `test_lookup_after_add_term_round_trip` — AC #5
+`MemoryScanHookTests` (against `hooks/scripts/jig-memory-scan.sh`):
+- `test_silent_on_no_capitalized`
+- `test_silent_on_known_terms_in_hot_cache`
+- `test_silent_on_known_terms_in_glossary`
+- `test_flags_unknown_acronym`
+- `test_flags_unknown_camelcase`
+- `test_skips_common_acronyms` — `API`, `JSON`, `LLM`, etc.
+- `test_strips_code_blocks_before_scanning` — `` `MyClass` `` and ` ```...``` ` don't trigger
+- `test_strips_urls` — `https://Anthropic.com` doesn't trigger on `Anthropic`
+- `test_skips_absolute_paths` — `/Users/foo` doesn't trigger on `Users`
+- `test_output_is_well_formed_json`
+- `test_exits_0_always`
+
+`TaskCaptureHookTests`:
+- `test_silent_on_no_capture_patterns`
+- `test_flags_we_should_also`
+- `test_flags_todo_marker`
+- `test_flags_remind_me_to`
+- `test_flags_dont_forget`
+- `test_output_is_well_formed_json`
+- `test_exits_0_always`
 
 ## Out of scope
 
-- Auto-trigger via `jig-memory-scan` UserPromptSubmit hook → slice 002-03
-- Caching lookup results across invocations → not needed; reads are cheap
-- Fuzzy matching beyond case-insensitivity → out of scope
+- Runtime verification that Claude Code injects `additionalContext` correctly → empirical, not testable in CI. Refinement-todo if needed.
+- Persistent firing-rate counters → requires a tracking file the hooks write to; out of scope here.
+- Auto-tuning the heuristic based on telemetry → manual tuning only.
