@@ -1,38 +1,61 @@
 ---
 name: contracts
 description: >
-  Enforce typed contracts at module boundaries: generate stack-appropriate contract
-  scaffolding, validate contract compliance, detect breaking changes, and surface
-  cross-boundary violations. Use when work touches a module boundary, when a new
-  feature is designed that will interact with an existing module, or when an interface
-  changes in a way that might affect callers.
-  Do not use for intra-module refactoring that doesn't cross a boundary, or for
-  test-only changes.
+  Future home for typed-contract scaffolding at module boundaries — generating
+  stack-appropriate contract types, detecting breaking changes, and surfacing
+  cross-boundary violations. Currently a deliberate stub. Invoke explicitly to
+  read the deferral rationale; do not auto-trigger.
 disable-model-invocation: true
 user-invocable: true
 ---
 
-> **Status: DRAFT — not yet implemented.**
-> This skill is planned in the jig roadmap but not ready for use.
+> **Status: Deliberate stub — see [ADR-0002](../../docs/adrs/0002-contracts-stays-deferred.md).**
+>
+> This skill is **not** half-built or in progress. It is deliberately not
+> implemented yet because jig itself has no real module-boundary coupling to
+> codify, and shipping speculative `contracts/` scaffolding into target
+> projects would create the "what do I put here?" trap we explicitly want to
+> avoid.
 
-## What this skill does (when implemented)
+## Why it stays a stub
 
-1. Detects the project stack (TypeScript → interfaces + Zod; Python → Pydantic; etc.)
-2. Creates/updates typed contracts in `contracts/` at module boundaries
-3. Generates contract test scaffolding
-4. Cross-references contract type names against `docs/memory/glossary.md` for naming consistency
-5. Surfaces breaking changes: "this is a breaking contract change — update callers or version it"
+The other four Tier 0 skills (`scaffold-init`, `memory-sync`, `spec-workflow`,
+`independent-review`) were each promoted after we'd run their pattern by hand
+10+ times. We had clear shape to codify.
 
-## Why contracts are the highest-leverage thing for AI-native dev
+We have run the `contracts` pattern **zero times** in jig. The one place we
+hit cross-skill coupling — `find_slice_section` vs `find_slice_label` between
+`workflow.py` and `review.py` — we chose duplication over abstraction (see
+slice 004-01 deviation log, design choice #1). That's the exact situation
+`contracts` is meant to address, and we declined to address it. Encoding a
+rule we just chose not to follow would be incoherent.
 
-AI agents have no tribal knowledge. An untyped, boundary-free codebase is illegible
-to them — they generate well-written bugs because they can't see where one feature ends
-and another begins. Explicit typed contracts make boundaries machine-consumable.
+## When this skill gets promoted
+
+Two clear triggers, either of which is enough:
+
+1. **A third caller needs the duplicated lookup function.** That is the
+   trigger to extract `skills/_common/<module>.py` AND to introduce a real
+   contract for it. From there, the broader `contracts` skill has a concrete
+   case to design against.
+2. **A real user reports cross-module-coupling pain** their project
+   experienced and that jig could have prevented with typed contracts at
+   boundaries.
+
+Until one of those fires, this skill stays a stub.
+
+## What the eventual implementation will do
+
+See [docs/research/07-research-contracts-and-architecture.md](../../docs/research/07-research-contracts-and-architecture.md)
+for the original ambition. In short: stack-aware contract scaffolding, a
+PreToolUse hook blocking cross-boundary edits, breaking-change detection, and
+a glossary-aware naming check. Multi-slice spec. Not started.
 
 ## Gotchas
 
-- `architecture.md` declares the module boundaries; `contracts/` enforces them in code.
-  Both must stay in sync — reconciliation checks this.
-- Breaking changes require: new contract version + ADR + migration path for consumers.
-- The PreToolUse hook that blocks cross-boundary edits is paired with this skill —
-  the skill generates the contracts; the hook makes them enforceable.
+- Do **not** auto-promote this skill on the basis of "we've got all the other
+  Tier 0 skills done." That logic produced the ECC trap (kitchen-sink
+  scaffolding for its own sake). Wait for a real trigger.
+- If you find yourself extracting `skills/_common/parsing.py` to share
+  `find_slice_section`, that's the trigger — open a spec for `contracts`
+  promotion at the same time as that extraction.
