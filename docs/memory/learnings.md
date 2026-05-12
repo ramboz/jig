@@ -60,3 +60,18 @@ trigger is well-specified (with a measurable condition), stocktake will surface 
 at the right moment without anyone needing to remember. Worth replicating: every
 deferred item should have a measurable trigger, not a vague "later" or "when
 relevant".
+
+## Memory templates are coupled to summary() counting logic
+
+Slice 002-01 removed `## Adding terms` from `glossary.md.template` because
+`memory.py summary` counts `^## ` headings as glossary entries. Keeping the
+how-to as an H2 would have caused the count to be permanently off-by-one.
+The how-to text was preserved as blockquote prose at the top of the file.
+
+**Generalizable lesson:** When a template feeds into automated counting/parsing,
+the template structure is part of the contract. Mark this coupling explicitly,
+or future template edits will silently break the parser. Mitigation options:
+(a) the parser ignores everything before a known delimiter; (b) the parser
+recognizes only `add_term`-produced sections via a marker; (c) the template uses
+non-H2 styling for instructional content. We chose (c) — simplest, requires no
+parser change, and keeps the template visually distinct.
