@@ -75,3 +75,16 @@ or future template edits will silently break the parser. Mitigation options:
 recognizes only `add_term`-produced sections via a marker; (c) the template uses
 non-H2 styling for instructional content. We chose (c) — simplest, requires no
 parser change, and keeps the template visually distinct.
+
+## Python regex \s matches newlines — use [ \t]*$ for end-of-line anchors that must not consume the line terminator
+In Python regex, \s matches whitespace **including \n**. Using \s*$ as an end-of-line anchor with re.MULTILINE will silently consume the trailing newline, causing substitutions to glue the next line into the replacement.
+
+**Symptom:** A pattern like `re.sub(r'^Proposed.*\s*$', 'Accepted', text, flags=re.M)` on a Status line will eat the blank-line separator after it and merge the next section's heading into the replacement output.
+
+**Fix:** Use `[ \t]*$` (literal spaces and tabs only) when you want to anchor at end-of-line without consuming the line terminator.
+
+**Occurrences in jig:**
+- Slice 006-01 (tdd-helper): adr.py:165 cmd_accept and adr.py:307 cmd_index regen. Surfaced by dogfood (Status line glued to next section heading on first run; reformulated as [ \t]*$ + a regression test test_accept_preserves_section_separator).
+- Both occurrences were inside slice 005-01 / 006-01 reconciliation. The pattern is: locate-a-section-and-mutate-the-status-line.
+
+**Watch sites elsewhere in the codebase** (per slice 006-01 deviation log): adr.py:224 _extract_status_and_date uses \s+ in a locator-only role — currently safe but would be more defensible as [ \t]+.

@@ -16,6 +16,10 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.parsing import find_slice_section as _find_slice_section_common
+from _common.parsing import SliceLookupError
+
 
 VALID_STATUSES = (
     "DRAFT",
@@ -34,26 +38,18 @@ class WorkflowError(RuntimeError):
 
 def find_slice_section(spec_text: str, slice_fragment: str) -> tuple:
     """Locate the slice section whose H2 contains `slice_fragment`.
-    Returns (start, end) byte offsets into spec_text bounding the slice's
-    content (from end-of-header to next H2 / EOF). Raises WorkflowError
-    on miss or ambiguity."""
-    headers = list(re.finditer(r"(?im)^##\s+Slice\s+[^\n]+$", spec_text))
-    if not headers:
-        raise WorkflowError("no '## Slice ...' headings found in spec")
-    needle = slice_fragment.lower()
-    matches = [h for h in headers if needle in h.group(0).lower()]
-    if not matches:
-        raise WorkflowError(f"slice not found: '{slice_fragment}'")
-    if len(matches) > 1:
-        names = [h.group(0).strip() for h in matches]
-        raise WorkflowError(
-            f"ambiguous slice fragment '{slice_fragment}' matches: {names}"
-        )
-    header = matches[0]
-    rest = spec_text[header.end():]
-    nxt = re.search(r"(?m)^##\s", rest)
-    end = header.end() + (nxt.start() if nxt else len(rest))
-    return header.start(), end
+    Returns (start, end) byte offsets into spec_text bounding the slice
+    section from header start to next H2 / EOF. Raises WorkflowError on
+    miss or ambiguity.
+
+    Thin wrapper over `_common.parsing.find_slice_section`; preserves
+    this module's historical 2-tuple return shape and error type.
+    """
+    try:
+        start, end, _label = _find_slice_section_common(spec_text, slice_fragment)
+    except SliceLookupError as e:
+        raise WorkflowError(str(e)) from e
+    return start, end
 
 
 def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:

@@ -36,6 +36,28 @@ You are an implementer agent. Your job is to implement a single spec slice.
 2. Update spec status to `REVIEWED` (the independent-review skill handles the actual review trigger).
 3. Do not clean up TODO comments in files you didn't touch.
 
+## DoD checkbox discipline
+
+Tick each `- [ ]` box in the slice's Definition of Done **only after the
+item it describes is genuinely complete**, not pre-emptively to advertise
+intent. Specifically:
+
+- The "Reviewed by reviewer subagent" box is ticked **after** the reviewer
+  returns a non-blocking verdict, not when you spawn the reviewer.
+- The "Deviation log produced" box is ticked **after** the log is written,
+  not when you plan to write it.
+- The "Reconciliation review pass" box is ticked **after** the
+  reconciliation reviewer returns a non-blocking verdict, not when you
+  plan to run it.
+- The "status board regenerated" / "CLAUDE.md updated" boxes are ticked
+  **after** the regen / edits land, not when you intend to do them. The
+  005-01 and 006-01 reconciliation reviewers caught false-positive ticks
+  here; don't repeat that.
+
+Optimistic pre-ticking creates a deviation-log-vs-reality mismatch the
+reconciliation reviewer must catch, which is friction we can avoid by
+just-in-time ticking.
+
 ## Constraints
 
 - Do not write to `docs/memory/` — that is the memory-sync skill's job.

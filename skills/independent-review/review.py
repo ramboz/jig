@@ -16,28 +16,27 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.parsing import find_slice_section as _find_slice_section_common
+from _common.parsing import SliceLookupError
+
 
 class ReviewError(RuntimeError):
     """User-facing error; CLI exits 2."""
 
 
 def find_slice_label(spec_text: str, slice_fragment: str) -> str:
-    """Locate the `## Slice ...` H2 containing `slice_fragment`. Returns the
-    full slice label (e.g. `001-01 — greenfield-scaffold`). Raises on miss
-    or ambiguity. Mirrors workflow.py's `find_slice_section` semantics."""
-    headers = list(re.finditer(r"(?im)^##\s+Slice\s+([^\n]+)$", spec_text))
-    if not headers:
-        raise ReviewError("no '## Slice ...' headings found in spec")
-    needle = slice_fragment.lower()
-    matches = [h for h in headers if needle in h.group(0).lower()]
-    if not matches:
-        raise ReviewError(f"slice not found: '{slice_fragment}'")
-    if len(matches) > 1:
-        names = [h.group(1).strip() for h in matches]
-        raise ReviewError(
-            f"ambiguous slice fragment '{slice_fragment}' matches: {names}"
-        )
-    return matches[0].group(1).strip()
+    """Return the full label of the `## Slice ...` H2 whose text contains
+    `slice_fragment` (e.g. `001-01 — greenfield-scaffold`). Raises
+    ReviewError on miss or ambiguity.
+
+    Thin wrapper over `_common.parsing.find_slice_section`.
+    """
+    try:
+        _, _, label = _find_slice_section_common(spec_text, slice_fragment)
+    except SliceLookupError as e:
+        raise ReviewError(str(e)) from e
+    return label
 
 
 # -------- Prompt templates --------

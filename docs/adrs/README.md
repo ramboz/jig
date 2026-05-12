@@ -5,8 +5,9 @@
 
 ## Index
 
-- [ADR-0001: scaffold-stable trigger](0001-scaffold-stable.md) — 3 reconciled slices triggers scaffold-stable promotion (2026-05-12, Accepted)
-- [ADR-0002: contracts skill stays deferred](0002-contracts-stays-deferred.md) — keep `contracts` as a deliberate stub until a real trigger fires (third caller needs the shared lookup, or a real user reports cross-module-coupling pain) (2026-05-12, Accepted)
+- [ADR-0001: scaffold-stable trigger](0001-scaffold-stable.md) — scaffold-init generates docs with `Status: Draft (wizard-generated)` markers at the top. (2026-05-12, Accepted)
+- [ADR-0002: `contracts` skill stays a deliberate stub](0002-contracts-stays-deferred.md) — `contracts` is the last Tier 0 skill that remains a `disable-model-invocation: true` stub after specs 001–004 promoted the other four (`scaffold-init`, `memory-sync`, `spec-workflow`, `independent-review`). (2026-05-12, Accepted)
+- [ADR-0003: Extract `find_slice_section` to `skills/_common/parsing.py`](0003-extract-find-slice-section.md) — [ADR-0002](0002-contracts-stays-deferred.md) named "first time jig has three callers that need the same helper" as the trigger to extract `skills/_common/<module>.py`. (2026-05-12, Accepted)
 
 ## Format
 

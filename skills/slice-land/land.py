@@ -37,11 +37,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-
-# Slice-fragment lookup intentionally duplicated from workflow.py /
-# review.py / adr.py per ADR-0002 + slices 004-01 / 005-01 / 006-01
-# deviation logs. Three shapes; three implementations; one place to
-# read each is the right balance.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.parsing import find_slice_section as _find_slice_section_common
+from _common.parsing import SliceLookupError
 
 
 class LandError(RuntimeError):
@@ -54,26 +52,15 @@ DEVIATION_EXCERPT_MAX_CHARS = 500
 
 def find_slice_section(spec_text: str, slice_fragment: str) -> tuple:
     """Locate the `## Slice ...` header whose H2 contains `slice_fragment`.
-    Returns (header_start, section_end, full_label). Raises LandError on miss
-    or ambiguity. Same shape as workflow.py find_slice_section."""
-    headers = list(re.finditer(r"(?im)^##\s+Slice\s+([^\n]+)$", spec_text))
-    if not headers:
-        raise LandError("no '## Slice ...' headings found in spec")
-    needle = slice_fragment.lower()
-    matches = [h for h in headers if needle in h.group(0).lower()]
-    if not matches:
-        raise LandError(f"slice not found: '{slice_fragment}'")
-    if len(matches) > 1:
-        names = [h.group(1).strip() for h in matches]
-        raise LandError(
-            f"ambiguous slice fragment '{slice_fragment}' matches: {names}"
-        )
-    header = matches[0]
-    rest = spec_text[header.end():]
-    nxt = re.search(r"(?m)^##\s", rest)
-    end = header.end() + (nxt.start() if nxt else len(rest))
-    label = header.group(1).strip()
-    return header.start(), end, label
+    Returns (header_start, section_end, full_label). Raises LandError on
+    miss or ambiguity.
+
+    Thin wrapper over `_common.parsing.find_slice_section`.
+    """
+    try:
+        return _find_slice_section_common(spec_text, slice_fragment)
+    except SliceLookupError as e:
+        raise LandError(str(e)) from e
 
 
 # ---------- readiness checks ----------
