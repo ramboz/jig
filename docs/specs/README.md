@@ -19,3 +19,6 @@
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-02 — anti-horizontal-phasing-check | DRAFT | Deferred this session |
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-03 — new-spec-scaffolding | DRAFT | Deferred this session |
 | [004-independent-review-promotion](004-independent-review-promotion/spec.md) | 004-01 — review-helper | **DONE** |  |
+| [005-adr-workflow](005-adr-workflow/spec.md) | 005-01 — adr-helper | **DONE** | 46 tests green; first Tier 1 skill — adr-workflow active |
+| [005-adr-workflow](005-adr-workflow/spec.md) | 005-02 — supersede | DRAFT | Deferred; no real supersede yet |
+| [005-adr-workflow](005-adr-workflow/spec.md) | 005-03 — boundary-change-detection | DRAFT | Deferred; blocked on contracts |
