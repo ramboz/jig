@@ -10,9 +10,8 @@ description: >
 user-invocable: true
 ---
 
-> Slice 002-01 (explicit-sync) is implemented: helper script + invocation flow.
-> Slices 002-02 (lookup-pattern), 002-03 (auto-detect-hooks), 002-04
-> (reconciliation-integration) are pending.
+> Slices 002-01 (explicit-sync) and 002-02 (lookup-pattern) are implemented.
+> Slices 002-03 (auto-detect-hooks) and 002-04 (reconciliation-integration) are pending.
 
 ## What this skill does
 
@@ -23,9 +22,43 @@ idempotency, and self-healing of missing memory structure.
 ## When to invoke
 
 - User says "remember this", "save this for later", "add this to the glossary",
-  "note this down", or similar.
+  "note this down", or similar (→ persist flow below).
 - User explicitly invokes `/jig:memory-sync`.
+- An unknown capitalized reference appears in the conversation (→ lookup-pattern flow below).
 - Session-end consolidation (after slice 002-03 auto-trigger ships).
+
+## Lookup-pattern flow
+
+When you see a capitalized reference, acronym, or project-specific term you
+don't recognize, follow this flow **before asking the user**:
+
+```
+seen unknown reference X
+  ↓
+python3 memory.py lookup "X" .
+  ↓ exit 0 → use the printed definition; do not ask
+  ↓ exit 2 → ask the user once: "I don't recognize X — what is it?"
+  ↓ user answers
+  ↓
+python3 memory.py add-term "X" "<definition>" .   (or promote if high-frequency)
+  ↓ next time X appears, lookup hits
+```
+
+Concretely, the commands are:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" lookup "<term>" "<target>"
+# exit 0 = hit (definition + source on stdout)
+# exit 2 = miss (proceed to ask the user)
+```
+
+The lookup is case-insensitive and checks hot cache first, then glossary. Hot
+cache hits win when a term exists in both (the user has explicitly elevated it).
+
+**Do not ask twice.** Once a term is persisted (via `add-term` or `promote`),
+future lookups in the same or later sessions resolve without re-asking. If the
+user says "I told you this already," check whether you forgot to persist last
+time, then persist now.
 
 ## How to use
 

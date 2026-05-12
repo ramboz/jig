@@ -155,6 +155,56 @@ def promote(target: Path, term: str, definition: str) -> bool:
     return True
 
 
+def _find_in_hot_cache(target: Path, term: str) -> str:
+    """Search CLAUDE.md Hot Cache → Key terms section for `term`.
+    Case-insensitive. Returns the matching bullet's definition (after the em-dash
+    or first hyphen separator), or '' if not found."""
+    claude_md = _claude_md_path(target)
+    if not claude_md.exists():
+        return ""
+    text = claude_md.read_text()
+    if HOT_CACHE_KEY_TERMS_HEADING not in text:
+        return ""
+    # Scope the search to the Key terms section
+    heading_idx = text.index(HOT_CACHE_KEY_TERMS_HEADING)
+    section = text[heading_idx:]
+    # Next H3 or H2 bounds the section
+    nxt = re.search(r"(?m)^(?:##|###)\s", section[len(HOT_CACHE_KEY_TERMS_HEADING):])
+    section_body = section[: len(HOT_CACHE_KEY_TERMS_HEADING) + nxt.start()] if nxt else section
+    # Line-anchored case-insensitive match: `- **<term>** — <definition>`
+    pattern = rf"(?im)^- \*\*{re.escape(term)}\*\*\s*[—\-:]?\s*(.+?)\s*$"
+    m = re.search(pattern, section_body)
+    return m.group(1).strip() if m else ""
+
+
+def _find_in_glossary(target: Path, term: str) -> str:
+    """Search docs/memory/glossary.md for an H2 matching `term` (case-insensitive).
+    Returns the body prose under the heading, or '' if not found."""
+    path = target / "docs" / "memory" / "glossary.md"
+    if not path.exists():
+        return ""
+    text = path.read_text()
+    # Match `## <term>` heading then capture body until the next ## or end
+    pattern = rf"(?ims)^##\s+{re.escape(term)}\s*$\n+(.*?)(?=^##\s|\Z)"
+    m = re.search(pattern, text)
+    if not m:
+        return ""
+    body = m.group(1).strip()
+    return body
+
+
+def lookup(target: Path, term: str) -> tuple:
+    """Search hot cache then glossary for `term`. Returns (source, definition)
+    on hit; ('', '') on miss. `source` is 'hot-cache' or 'glossary'."""
+    hit = _find_in_hot_cache(target, term)
+    if hit:
+        return ("hot-cache", hit)
+    hit = _find_in_glossary(target, term)
+    if hit:
+        return ("glossary", hit)
+    return ("", "")
+
+
 def summary(target: Path) -> str:
     """Return a one-line-per-file count summary of the memory layer state."""
     lines = ["# Memory Summary", ""]
@@ -203,6 +253,10 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("definition")
     pp.add_argument("target")
 
+    pk = sub.add_parser("lookup")
+    pk.add_argument("term")
+    pk.add_argument("target")
+
     ps = sub.add_parser("summary")
     ps.add_argument("target")
 
@@ -240,6 +294,13 @@ def main(argv: list) -> int:
         elif ns.command == "promote":
             added = promote(target, ns.term, ns.definition)
             print(f"hot cache: {'promoted' if added else 'already present'} '{ns.term}'")
+        elif ns.command == "lookup":
+            source, definition = lookup(target, ns.term)
+            if not source:
+                sys.stderr.write(f"not found: '{ns.term}'\n")
+                return 2
+            sys.stdout.write(f"{definition}\n")
+            sys.stdout.write(f"source: {source}\n")
         elif ns.command == "summary":
             sys.stdout.write(summary(target))
     except Exception as exc:

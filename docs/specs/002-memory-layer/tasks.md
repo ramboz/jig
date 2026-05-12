@@ -1,25 +1,24 @@
-# Tasks: Slice 002-01 — explicit-sync
+# Tasks: Slice 002-02 — lookup-pattern
 
 ## Ordered tasks (TDD)
 
-- [ ] **T1** — Create `skills/memory-sync/test_memory.py` with failing tests
-- [ ] **T2** — Implement `skills/memory-sync/memory.py` (CLI + helpers)
-- [ ] **T3** — Self-healing for missing memory dirs
-- [ ] **T4** — Update `skills/memory-sync/SKILL.md` with invocation flow
-- [ ] **T5** — Run tests, fix issues
-- [ ] **T6** — Spawn reviewer subagent
-- [ ] **T7** — Reconcile, second reviewer pass, commit
+- [ ] **T1** — Extend `test_memory.py` with failing `LookupTests`
+- [ ] **T2** — Implement `lookup` subcommand in `memory.py`
+- [ ] **T3** — Update SKILL.md with the lookup-pattern flow section
+- [ ] **T4** — Run tests
+- [ ] **T5** — Spawn reviewer subagent
+- [ ] **T6** — Reconcile, commit
 
 ## AC → test mapping
 
 | AC | Test |
 |---|---|
-| #1 summary of changes | `test_summary_lists_counts` |
-| #2 new glossary terms | `test_add_term_appends_to_glossary` |
-| #3 new learnings | `test_add_learning_*` |
-| #4 high-freq terms promoted | `test_promote_writes_to_hot_cache` |
-| #5 unresolved → inbox | `test_add_inbox_dates_entry` |
-| #6 self-heal missing memory dir | `test_creates_memory_dir_if_missing`, `test_creates_inbox_md_if_missing` |
+| #1 hot cache checked first | `test_lookup_hot_cache_wins_when_both` |
+| #2 glossary fallback | `test_lookup_finds_glossary_term` |
+| #3 ask once on miss | SKILL.md flow (no test — Claude behavior) |
+| #4 promote on ≥3 | already exists from 002-01; SKILL.md guidance |
+| #5 subsequent encounters resolve | `test_lookup_after_add_term_round_trip` |
+| #6 decision logged | accepted-as-deviation: stdout = log (see plan.md) |
 
 ## Deliverable paths
 

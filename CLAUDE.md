@@ -22,7 +22,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 ### Active specs
 - 001-scaffold-init: **complete** (Spike 001a + slices 001-01..001-05 all DONE)
 - ADR-0001 (scaffold-stable) **accepted** — closes the stocktake-flagged signal
-- 002-memory-layer: slice 002-01 (explicit-sync) **DONE**; 002-02 (lookup-pattern) next
+- 002-memory-layer: slices 002-01 and 002-02 **DONE**; 002-03 (auto-detect-hooks) next
 - 002-memory-layer: STATUS DRAFT — slice 002-01 (explicit-sync) queued
 
 ### Deferred decisions
@@ -50,7 +50,7 @@ Building Tier 0 skills. Starting with scaffold-init (spec 001) and memory-layer 
 | Skill | Status | Invocable |
 |---|---|---|
 | `/jig:scaffold-init` | Spec 001 fully implemented (slices 001-01..001-05 all DONE) | Yes (explicit) |
-| `/jig:memory-sync` | Slice 002-01 DONE (explicit-sync); 002-02..04 pending | Yes (explicit) |
+| `/jig:memory-sync` | Slices 002-01, 002-02 DONE (write + lookup); 002-03, 002-04 pending | Yes (explicit) |
 | `/jig:spec-workflow` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
 | `/jig:independent-review` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
 | `/jig:contracts` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |

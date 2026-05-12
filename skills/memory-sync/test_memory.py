@@ -163,6 +163,88 @@ class MemoryHelperTests(unittest.TestCase):
         self.assertRegex(out, r"glossary.*?\b1\b|\b1\b.*?glossary")
 
 
+class LookupTests(unittest.TestCase):
+    """Slice 002-02 — lookup command: hot cache first, glossary fallback."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-lookup-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_lookup_finds_glossary_term(self):
+        run_memory(self.target, "add-term", "SPIDR", "Spike, Path, Interface, Data, Rules")
+        result = run_memory(self.target, "lookup", "SPIDR")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("Spike, Path, Interface, Data, Rules", result.stdout)
+        self.assertIn("glossary", result.stdout.lower())
+
+    def test_lookup_finds_hot_cache_term(self):
+        run_memory(self.target, "promote", "jig", "the AI-native dev scaffold plugin")
+        result = run_memory(self.target, "lookup", "jig")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("the AI-native dev scaffold plugin", result.stdout)
+        # Source should indicate hot cache (not glossary)
+        self.assertRegex(result.stdout.lower(), r"hot[\s-]?cache")
+
+    # AC #1: hot cache wins when term is in both
+    def test_lookup_hot_cache_wins_when_both(self):
+        run_memory(self.target, "add-term", "FOO", "glossary definition")
+        run_memory(self.target, "promote", "FOO", "hot cache definition")
+        result = run_memory(self.target, "lookup", "FOO")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("hot cache definition", result.stdout)
+        self.assertNotIn("glossary definition", result.stdout)
+
+    def test_lookup_returns_2_for_unknown(self):
+        result = run_memory(self.target, "lookup", "NEVER_DEFINED")
+        self.assertEqual(result.returncode, 2,
+                         "lookup miss should exit 2; got %d" % result.returncode)
+        self.assertEqual(result.stdout, "", "no stdout on miss")
+        self.assertIn("not found", result.stderr.lower())
+
+    def test_lookup_case_insensitive(self):
+        run_memory(self.target, "add-term", "SPIDR", "definition")
+        result = run_memory(self.target, "lookup", "spidr")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("definition", result.stdout)
+
+    # AC #5: after add-term, subsequent lookup succeeds
+    def test_lookup_after_add_term_round_trip(self):
+        # First lookup misses
+        miss = run_memory(self.target, "lookup", "BARQ")
+        self.assertEqual(miss.returncode, 2)
+        # Add the term (simulating "ask user, get answer, persist")
+        run_memory(self.target, "add-term", "BARQ", "Bar Q definition")
+        # Second lookup hits
+        hit = run_memory(self.target, "lookup", "BARQ")
+        self.assertEqual(hit.returncode, 0)
+        self.assertIn("Bar Q definition", hit.stdout)
+
+
+class LookupOnBareDirTests(unittest.TestCase):
+    """Slice 002-02 — lookup graceful on un-scaffolded target."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-lookup-bare-")
+        self.target = Path(self.tmpdir) / "bare-project"
+        self.target.mkdir()
+        # Do NOT scaffold
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_lookup_on_bare_dir_returns_2(self):
+        result = run_memory(self.target, "lookup", "ANYTHING")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+
 class SelfHealingTests(unittest.TestCase):
     """AC #6: memory.py creates docs/memory/ and docs/inbox.md if absent."""
 
