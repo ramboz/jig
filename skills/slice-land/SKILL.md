@@ -1,0 +1,175 @@
+---
+name: slice-land
+description: >
+  Verify a finished slice is actually ready to land (tests green, DoD ticked,
+  deviation log present, STATUS=DONE) and emit a deterministic landing
+  checklist for either direct merge-to-main or PR-shaped integration. Use
+  when the user says "land this slice", "merge back to main", "ready to
+  ship", "create a PR for this slice", "close out the slice", or "slice is
+  done — what now". The helper produces a structured report; the user runs
+  the suggested git commands themselves. No destructive git operations.
+user-invocable: true
+---
+
+> Spec 007 created this skill from scratch. The deterministic readiness
+> checks + report generation live in `land.py`; this SKILL.md drives the
+> judgment layer (when to invoke, how to interpret blockers, what mode to
+> pick).
+
+## What this skill does
+
+Closes the worktree-drift gap: every slice in jig today commits to a
+worktree branch and stays there until a human remembers to merge. The
+skill provides a deterministic landing path:
+
+- **Verify** the slice is actually done — STATUS=DONE in spec.md, full
+  test suite green, deviation log section present, DoD checkboxes all
+  ticked.
+- **Emit** a structured markdown report with four readiness checks and
+  (in `--mode direct` or `--mode pr`) a Next-steps section of suggested
+  git commands.
+
+The helper is **read-only on git state** (only `git rev-parse
+--abbrev-ref HEAD` runs, to populate the branch name in the suggested
+commands). Destructive ops (`git checkout`, `git merge`, `git push`,
+`git worktree remove`, `gh pr create`) stay user-driven. Slices 007-02
+and 007-03 will graduate to executable modes once the safety surface
+is tested.
+
+## How to use
+
+### Run the readiness check
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" prepare \
+  <path-to-spec.md> <slice-fragment> [--mode {direct,pr}]
+```
+
+- `spec.md` — path to the spec file (e.g. `docs/specs/007-slice-land/spec.md`).
+- `<slice-fragment>` — case-insensitive substring against `## Slice X — Y`
+  headings. Same lenient match as `workflow.py transition`.
+- `--mode` — optional. Without it, only the readiness check runs.
+  - `direct` — for solo / merge-to-main projects. Suggested commands:
+    `git checkout main && git merge <branch> --ff-only && git push`.
+  - `pr` — for team / PR-shaped flows. Suggested commands: `git push -u
+    origin <branch> && gh pr create --body-file <path>`. A PR body is
+    written to `/tmp/jig-slice-<NNN-NN>-pr-body.md` containing the
+    slice's ACs and a deviation-log excerpt.
+
+### Exit codes
+
+- `0` — all four readiness checks pass; the slice is ready to land.
+- `1` — at least one check failed (the report still emits; the user
+  sees exactly what's blocking).
+- `2` — user error (missing spec, ambiguous fragment, invalid `--mode`).
+
+### Test-check warnings
+
+If `tdd.py run` returns exit 2 (no test runner detected at the target),
+the readiness report marks the Tests row as a `[?]` warning rather
+than a `[ ]` blocker. Rationale: some slices are doc-only and have no
+executable tests — those slices should still be landable. Exit 1 from
+`tdd.py run` (red tests) IS a blocker.
+
+## When to invoke
+
+Auto-trigger phrases: "land this slice", "merge back to main", "ready
+to ship", "create a PR for this slice", "close out the slice", "slice
+is done — what now".
+
+Typical session flow:
+
+1. Slice transitions to `DONE` via `workflow.py transition`.
+2. Deviation log is written under the slice heading.
+3. DoD checkboxes get ticked.
+4. Run `land.py prepare ... --mode direct` (or `--mode pr`).
+5. Copy-paste the suggested commands.
+
+## End-to-end example
+
+```bash
+# 1. Verify readiness — no merge command yet.
+python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01"
+
+# 2. Get the direct-merge recipe.
+python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode direct
+
+# Expected output (when all four checks pass):
+#
+#   # Landing readiness — slice 007-01 — land-prepare
+#
+#   ## Readiness checks
+#
+#   - [x] Status: DONE
+#   - [x] Tests: green (`tdd.py run` exit 0)
+#   - [x] Deviation log: present
+#   - [x] DoD: 9/9 boxes ticked
+#
+#   ## Next steps (mode: direct)
+#
+#   Run these from the project root (NOT inside this worktree):
+#
+#       git checkout main
+#       git merge claude/eager-zhukovsky-34ebb0 --ff-only
+#       git push origin main
+#       git worktree remove .claude/worktrees/eager-zhukovsky-34ebb0
+```
+
+## Gotchas
+
+- **`land.py` does NOT mutate git state.** The Next-steps section is
+  copy-paste-ready, but the helper never runs `git checkout`, `git
+  merge`, `git push`, `git worktree remove`, or `gh pr create`. Slice
+  007-02/03 will add executable modes with explicit confirm-before-
+  destroy prompts.
+- **Test-check target = `land.py`'s cwd.** The helper invokes
+  `tdd.py run` against the current working directory by default. If
+  the slice changes a deep subdir (e.g. `skills/foo/`), run `land.py`
+  from `skills/foo/` (or pass it as cwd) to keep the test run focused.
+  Running from the project root re-tests the whole suite — slower but
+  also more honest.
+- **Substring fragment matching is identical to `workflow.py`.** A
+  fragment like `007-01` matches `## Slice 007-01 — land-prepare`.
+  Ambiguous fragments (multiple matches) refuse with exit 2.
+- **PR body file path is predictable** (`/tmp/jig-slice-NNN-NN-pr-body.md`)
+  so callers can read / edit the body before `gh pr create`. Re-running
+  `--mode pr` overwrites the same file — idempotent.
+- **The Test plan section in the PR body uses generic `[x]` lines.**
+  The helper does not detect per-AC test counts — that would require
+  the AC-coverage mapping deferred to slice 006-02. The generated
+  checkboxes are placeholders; tighten the PR body manually before
+  `gh pr create` if you want specific counts.
+- **Branch detection requires being inside a git repo.** Outside one
+  (e.g. running against a synthetic spec in `/tmp`), the helper
+  degrades to the literal placeholder `<BRANCH>` in the suggested
+  commands. Edit by hand before running.
+- **Deviation log detection is heading-based.** The helper looks for
+  `### Deviation log` (or a variant like `### Deviation log (after
+  reconciliation)`) within the slice section. Missing heading → blocker,
+  even if the slice has reconciliation content under another heading.
+  Convention: every Done slice gets the explicit subsection.
+
+## Relationship to other skills
+
+- **`spec-workflow`** owns the lifecycle state transitions
+  (`workflow.py transition`). `slice-land` runs AFTER the final DONE
+  transition; the two skills cleanly compose.
+- **`independent-review`** runs BEFORE `slice-land` — review verdicts
+  must be `pass` and reconciliation review must be done before the
+  slice goes DONE. Once the slice is DONE, `slice-land` checks
+  readiness and emits the landing recipe.
+- **`tdd-loop`** is the helper `slice-land` shells out to for the
+  test check. The test-check normalization (green / red / warn) maps
+  directly to `tdd.py run`'s exit code 0 / 1 / 2.
+- **`adr-workflow`** is orthogonal — ADRs may or may not be written
+  during reconciliation. `slice-land` doesn't gate on ADR presence.
+
+## Out of scope for slice 007-01
+
+- Actually executing the git / gh commands (slice 007-02 for direct
+  mode; slice 007-03 for PR mode).
+- `scaffold.json` `integration: "direct" | "pr"` field (slice 007-04).
+- Multi-slice batch landing (single slice at a time is the right
+  audit-trail granularity).
+- JIRA / Linear ticketing integration, Slack notifications,
+  auto-drafting ADRs from the deviation log.
