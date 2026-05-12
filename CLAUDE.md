@@ -24,6 +24,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - ADR-0001 (scaffold-stable) **accepted** — closes the stocktake-flagged signal
 - 002-memory-layer: **complete** (all 4 slices DONE)
 - 003-spec-workflow-promotion: slice 003-01 (lifecycle-helper) **DONE**; spec-workflow promoted from stub to active. Slices 003-02 (anti-horizontal-phasing-check) and 003-03 (new-spec-scaffolding) explicitly deferred.
+- 004-independent-review-promotion: slice 004-01 (review-helper) **DONE**; independent-review promoted from stub to active. The skill was dogfooded by reviewing its own implementation with the helper it introduces.
 - 002-memory-layer: STATUS DRAFT — slice 002-01 (explicit-sync) queued
 
 ### Deferred decisions
@@ -53,7 +54,7 @@ Building Tier 0 skills. Starting with scaffold-init (spec 001) and memory-layer 
 | `/jig:scaffold-init` | Spec 001 fully implemented (slices 001-01..001-05 all DONE) | Yes (explicit) |
 | `/jig:memory-sync` | Spec 002 fully implemented (all 4 slices DONE) | Yes (explicit) |
 | `/jig:spec-workflow` | Slice 003-01 DONE — active, auto-triggering; `workflow.py` helper for state transitions + status-board sync | Yes (auto + explicit) |
-| `/jig:independent-review` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
+| `/jig:independent-review` | Slice 004-01 DONE — active, auto-triggering; `review.py` helper builds standardized prompts for implementation + reconciliation review | Yes (auto + explicit) |
 | `/jig:contracts` | DRAFT — stub only | Yes (stub — shows DRAFT warning) |
 
 ## Session workflow

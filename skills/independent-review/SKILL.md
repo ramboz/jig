@@ -1,40 +1,98 @@
 ---
 name: independent-review
 description: >
-  Spawn a fresh reviewer subagent to evaluate implemented work against its spec,
-  acceptance criteria, and Definition of Done — without access to the implementation
-  conversation. Use after an implementer subagent completes a spec slice, when the
-  spec status transitions to REVIEWED, or when the user asks for a code review on
-  a spec-driven deliverable.
-  Do not use for ad-hoc code review unrelated to a spec, or for reviewing the spec
-  itself (that is the READY_FOR_REVIEW transition in spec-workflow).
-disable-model-invocation: true
+  Build the standardized prompt for a fresh reviewer subagent that evaluates
+  implemented work against its spec without access to the implementation
+  conversation. Use after an implementer subagent completes a spec slice (when
+  the slice is ready for REVIEWED), or after a deviation log is written (for
+  reconciliation review). Do not use for ad-hoc code review unrelated to a
+  spec, or for reviewing a spec's authorship (that's the READY_FOR_REVIEW step
+  in spec-workflow).
 user-invocable: true
 ---
 
-> **Status: DRAFT — not yet implemented.**
-> This skill is planned in the jig roadmap but not ready for use.
+> Spec 004 promoted this skill from stub to active. The prompt is constructed
+> by `review.py`; Claude owns the Task invocation.
 
-## What this skill does (when implemented)
+## What this skill does
 
-1. Reads the spec, deliverable path, and acceptance criteria
-2. Spawns the `reviewer` subagent with a system prompt that forbids referencing
-   prior implementation context ("You are seeing this work for the first time")
-3. Reviewer reads ONLY: spec, deliverable files, acceptance criteria
-4. Returns a structured verdict: `VERDICT: pass|fail|needs-changes` + reasoning + issues
-5. Triggers reconciliation if verdict is `pass`
-6. Also handles reconciliation review (second reviewer pass on doc changes)
+Constructs the standardized reviewer-subagent prompt and tells Claude when /
+how to spawn the Task. The skill has two modes, matching the two review passes
+every slice runs:
+
+- **Implementation review** — after the implementer writes the deliverable to
+  disk. The reviewer evaluates each acceptance criterion against the actual
+  files; returns `pass | fail | needs-changes`.
+- **Reconciliation review** — after the deviation log is written. The
+  reviewer verifies the doc changes match reality; does NOT re-review the ACs.
+
+`review.py` builds the prompt text; `agents/reviewer.md` defines the agent's
+tool restrictions and persistent system rules.
+
+## How to use
+
+### Implementation review
+
+After the implementer has written the deliverable to disk:
+
+```bash
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  implementation \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  "<deliverable-path-1>" "<deliverable-path-2>" ...)
+```
+
+Then feed `$PROMPT` to the `Task` tool with `subagent_type: "general-purpose"`
+(or `"reviewer"` if that filesystem-based agent is loaded). Wait for the
+verdict. Address any `fail`/`needs-changes` findings; rerun the helper +
+Task as needed until `pass`.
+
+### Reconciliation review
+
+After the deviation log subsection has been added under the slice in
+`spec.md`:
+
+```bash
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  reconciliation \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>")
+```
+
+Feed to `Task`. The prompt explicitly tells the reviewer NOT to re-evaluate
+against ACs — it only verifies the deviation log matches reality.
+
+### What gets put in the prompt automatically
+
+- Standard preamble ("You are seeing this work for the first time")
+- The slice's full label (helper looks it up from the spec)
+- "What you must NOT do" block (no prior reasoning, no soften, no file writes,
+  no `docs/memory/` writes)
+- Canonical output format (`VERDICT | REASONING | SPECIFIC ISSUES | RECONCILIATION NOTES`)
 
 ## Context isolation pattern
 
-Implementer writes deliverable to disk → reviewer spawned via Task with a fresh
-system prompt → reviewer reads only what it's pointed at. This is imperfect (parent
-context technically accessible) but works reliably when system prompts are sharp.
+Implementer writes deliverable to disk → `review.py` builds a self-contained
+prompt → Claude spawns the reviewer Task with that prompt → reviewer reads
+only what the prompt points at. This is imperfect (parent context is
+technically accessible to subagents — see GitHub issue #20304), but works
+reliably when the prompt is sharp.
 
 ## Gotchas
 
-- Reviewer subagent tool list is read-only (`Read`, `Glob`, `Grep`). No `Write` or `Edit`.
-- Reviewer system prompt MUST include: "You have not previously discussed this task."
-- Reviewers do not write to `docs/memory/` — defining the glossary is not their job.
-- Reconciliation review (second pass on doc changes) is also this skill's responsibility,
-  not a separate skill.
+- **`review.py` does not spawn the Task.** It only constructs the prompt
+  string. Claude is responsible for invoking the `Task` tool with the prompt
+  as the `prompt` parameter. This separation keeps `review.py` deterministic
+  and testable.
+- **Reviewer agent is read-only by definition.** `agents/reviewer.md` lists
+  only `Read`, `Glob`, `Grep` in its tool set. No `Write` or `Edit`.
+- **Reviewer must not write to `docs/memory/`.** Defining the glossary,
+  capturing learnings, or modifying the hot cache is `memory-sync`'s job,
+  not the reviewer's.
+- **Reconciliation review never re-evaluates ACs.** That's done. The
+  reconciliation prompt explicitly states this so the reviewer doesn't
+  drift into AC-re-review.
+- **Substring matching for slice fragments** is identical to `workflow.py` —
+  `001-01` matches `## Slice 001-01 — greenfield-scaffold`. Ambiguous
+  fragments are refused with exit 2.
