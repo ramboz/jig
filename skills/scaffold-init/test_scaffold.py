@@ -900,5 +900,159 @@ class ScaffoldSafetyTests(unittest.TestCase):
         self.assertIn("unrendered", result.stderr.lower())
 
 
+# ==========================================================================
+# Slice 008-05 — scaffold-init --migrate suggestion tests
+# ==========================================================================
+
+
+def _make_spec_driven_tree(root: Path, triggers: list) -> None:
+    """Build a synthetic spec-driven project tree under `root`.
+
+    Each entry in `triggers` is one of the four trigger names: 'specs',
+    'slices', 'decisions', 'adrs', 'workflow', 'architecture'. Note: 'specs'
+    and 'slices' both satisfy the spec-or-slice trigger; 'decisions' and
+    'adrs' both satisfy the decisions-or-adr trigger. The caller controls
+    exactly which the fixture exercises."""
+    (root / "docs").mkdir(parents=True, exist_ok=True)
+    for t in triggers:
+        if t == "specs":
+            (root / "docs" / "specs" / "001-sample").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "specs" / "001-sample" / "spec.md").write_text("# Sample\n")
+        elif t == "slices":
+            (root / "docs" / "slices").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "slices" / "slice-01-sample.md").write_text("# Slice\n")
+        elif t == "decisions":
+            (root / "docs" / "decisions").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "decisions" / "adr-0001-sample.md").write_text("# adr\n")
+        elif t == "adrs":
+            (root / "docs" / "adrs").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "adrs" / "0001-sample.md").write_text("# adr\n")
+        elif t == "workflow":
+            (root / "docs" / "workflow.md").write_text("# Workflow\n")
+        elif t == "architecture":
+            (root / "docs" / "architecture.md").write_text("# Architecture\n")
+        else:
+            raise ValueError(f"unknown trigger: {t}")
+
+
+class LooksAlreadySpecDrivenTests(unittest.TestCase):
+    """Slice 008-05 — scaffold-init refuses on spec-driven layout and
+    routes to /jig:migrate."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-008-05-")
+        self.target = Path(self.tmpdir) / "preexisting-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_three_triggers_refuses_and_suggests_migrate(self):
+        _make_spec_driven_tree(self.target,
+                               ["specs", "decisions", "workflow"])
+        r = run_scaffold(self.target)
+        self.assertNotEqual(r.returncode, 0,
+                            "should refuse on spec-driven layout")
+        self.assertIn("migrate", r.stderr.lower())
+        # Suggestion text must name the report command and the skill.
+        self.assertIn("migrate.py report", r.stderr)
+        self.assertIn("/jig:migrate", r.stderr)
+        # Triggers found must be named in the message.
+        for name in ("docs/specs", "docs/decisions", "docs/workflow.md"):
+            self.assertIn(name, r.stderr,
+                          f"trigger path missing from message: {name}")
+
+    def test_four_triggers_refuses_with_full_list(self):
+        _make_spec_driven_tree(self.target,
+                               ["slices", "adrs", "workflow", "architecture"])
+        r = run_scaffold(self.target)
+        self.assertNotEqual(r.returncode, 0)
+        for name in ("docs/slices", "docs/adrs", "docs/workflow.md",
+                     "docs/architecture.md"):
+            self.assertIn(name, r.stderr)
+
+    def test_two_triggers_does_not_refuse(self):
+        _make_spec_driven_tree(self.target, ["workflow", "architecture"])
+        r = run_scaffold(self.target)
+        # Two triggers is NOT enough — scaffold should proceed.
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        # And scaffold.json should now exist.
+        self.assertTrue((self.target / "scaffold.json").is_file())
+
+    def test_scaffold_json_takes_precedence_over_spec_driven_check(self):
+        """If both scaffold.json AND 3+ triggers are present, the existing
+        AlreadyScaffoldedError fires (not the new error). Tests the ordering
+        invariant from AC #3."""
+        # First, do a normal scaffold (which creates scaffold.json + the
+        # canonical structure that has 3+ triggers naturally).
+        r1 = run_scaffold(self.target)
+        self.assertEqual(r1.returncode, 0)
+        self.assertTrue((self.target / "scaffold.json").is_file())
+        # Second invocation should refuse with the OLD message (scaffold.json
+        # case), not the new spec-driven-shape message.
+        r2 = run_scaffold(self.target)
+        self.assertNotEqual(r2.returncode, 0)
+        self.assertIn("already scaffolded", r2.stderr.lower())
+        # And must NOT use the new error's specific routing text.
+        self.assertNotIn("/jig:migrate", r2.stderr)
+
+    def test_force_bypasses_spec_driven_check(self):
+        _make_spec_driven_tree(self.target,
+                               ["specs", "decisions", "workflow", "architecture"])
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        r = subprocess.run(
+            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0,
+                         f"--force should bypass the new check: {r.stderr}")
+        # Greenfield output is present.
+        self.assertTrue((self.target / "scaffold.json").is_file())
+        self.assertTrue((self.target / "CLAUDE.md").is_file())
+
+    @classmethod
+    def _load_scaffold_module(cls):
+        """Load scaffold.py as a module for direct symbol access. Cached
+        on the class so the two unit tests below share one import."""
+        if getattr(cls, "_scaffold_mod", None) is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("scaffold", SCAFFOLD)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            cls._scaffold_mod = mod
+        return cls._scaffold_mod
+
+    def test_detection_function_unit_each_single_trigger_insufficient(self):
+        """Unit-level: any single trigger alone does NOT trip the heuristic."""
+        mod = self._load_scaffold_module()
+        for t in ("specs", "slices", "decisions", "adrs",
+                  "workflow", "architecture"):
+            d = Path(tempfile.mkdtemp(prefix=f"jig-08-05-unit-{t}-"))
+            try:
+                _make_spec_driven_tree(d, [t])
+                triggered, triggers = mod._looks_already_spec_driven(d)
+                self.assertFalse(triggered,
+                                 f"single trigger '{t}' should not trip: got {triggers}")
+                self.assertEqual(len(triggers), 1,
+                                 f"trigger '{t}' should produce one entry: {triggers}")
+            finally:
+                import shutil
+                shutil.rmtree(d, ignore_errors=True)
+
+    def test_detection_function_unit_three_triggers_trips(self):
+        mod = self._load_scaffold_module()
+        d = Path(tempfile.mkdtemp(prefix="jig-08-05-unit-3-"))
+        try:
+            _make_spec_driven_tree(d, ["specs", "decisions", "workflow"])
+            triggered, triggers = mod._looks_already_spec_driven(d)
+            self.assertTrue(triggered)
+            self.assertEqual(len(triggers), 3)
+        finally:
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

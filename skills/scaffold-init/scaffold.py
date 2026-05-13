@@ -77,6 +77,57 @@ class AlreadyScaffoldedError(RuntimeError):
     """Raised when target already has a scaffold.json — refuses to overwrite."""
 
 
+class LooksAlreadySpecDrivenError(RuntimeError):
+    """Raised when target has no scaffold.json but ≥3 of the four migrate
+    triggers (specs-or-slices, decisions-or-adrs, workflow.md,
+    architecture.md). Slice 008-05 introduced this to route users to
+    `/jig:migrate` instead of polluting their tree.
+
+    The `triggers` attribute is the list of trigger paths actually found
+    (Path objects relative to target), so CLI surfaces can render them
+    verbatim in the user-facing message."""
+
+    def __init__(self, message: str, triggers: list):
+        super().__init__(message)
+        self.triggers = triggers
+
+
+def _looks_already_spec_driven(target: Path) -> tuple:
+    """Check whether `target` already has a spec-driven layout that
+    `migrate.py` would recognize as adoptable.
+
+    Returns `(triggered, triggers)` where `triggers` is a list of
+    relative-path strings of detected artifacts. `triggered` is True iff
+    ≥3 of the four trigger categories are present.
+
+    Approximates `migrate.py`'s `compute_verdict` heuristic — broader,
+    because this check fires before scaffold pollutes the tree, so a
+    false positive (route to /jig:migrate when the user meant greenfield)
+    is recoverable via --force, while a false negative (silently scaffold
+    over real specs) is destructive. Specifically: this check treats
+    `docs/specs/` and `docs/slices/` as triggers even when empty; the
+    migrate verdict only counts them when they contain content. The
+    safer side to err on is False-positive-routes-to-migrate."""
+    triggers = []
+    # 1. spec-or-slice dir
+    if (target / "docs" / "specs").is_dir():
+        triggers.append("docs/specs/")
+    elif (target / "docs" / "slices").is_dir():
+        triggers.append("docs/slices/")
+    # 2. decisions-or-adrs dir
+    if (target / "docs" / "decisions").is_dir():
+        triggers.append("docs/decisions/")
+    elif (target / "docs" / "adrs").is_dir():
+        triggers.append("docs/adrs/")
+    # 3. workflow doc
+    if (target / "docs" / "workflow.md").is_file():
+        triggers.append("docs/workflow.md")
+    # 4. architecture doc
+    if (target / "docs" / "architecture.md").is_file():
+        triggers.append("docs/architecture.md")
+    return (len(triggers) >= 3, triggers)
+
+
 @dataclass
 class Signals:
     """Detected project signals. Per Spike 001a (docs/spikes/spike-001a-signal-detection.md)."""
@@ -339,6 +390,27 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
             "Pass --force to overwrite."
         )
 
+    # Slice 008-05: detect projects that look spec-driven without a
+    # scaffold.json — route them to `/jig:migrate` instead of polluting
+    # the tree. `scaffold.json`-check above takes precedence; this fires
+    # only when scaffold.json is absent.
+    if not force:
+        triggered, triggers = _looks_already_spec_driven(target)
+        if triggered:
+            triggers_list = "\n  - ".join(triggers)
+            raise LooksAlreadySpecDrivenError(
+                f"{target} looks already-spec-driven "
+                f"({len(triggers)} migrate triggers detected, no "
+                f"scaffold.json present):\n  - {triggers_list}\n\n"
+                "Run `/jig:migrate` to adopt jig over the existing layout, "
+                "or preview the plan first with:\n"
+                f"    python3 ${{CLAUDE_PLUGIN_ROOT}}/skills/migrate/migrate.py "
+                f"report {target}\n\n"
+                "Pass --force to scaffold over the existing structure "
+                "anyway (NOT recommended — overwrites docs).",
+                triggers,
+            )
+
     # Detect signals BEFORE writing any scaffold files — otherwise wizard-generated
     # docs would self-trigger detectors (e.g. *.prompt.md, copilot-instructions.md).
     signals = detect_signals(target)
@@ -455,6 +527,9 @@ def main(argv: list[str]) -> int:
     try:
         scaffold(target, plugin_root(), force=ns.force, overrides=overrides)
     except AlreadyScaffoldedError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    except LooksAlreadySpecDrivenError as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
     except Exception as exc:

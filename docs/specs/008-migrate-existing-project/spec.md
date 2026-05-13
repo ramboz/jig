@@ -1234,16 +1234,225 @@ second project with similar flat-slice topology surfaces.
 
 ## Slice 008-05 — scaffold-init --migrate suggestion
 
-**STATUS: DRAFT** _(deferred — small wiring slice, depends on 008-01)_
+**STATUS: RECONCILED**
 
-**Goal:** Extend `scaffold-init`'s "already scaffolded" detection
-(currently checks `scaffold.json` or `docs/specs/`) to also detect
-validator-style layout (`docs/slices/`, `docs/decisions/`,
-`docs/workflow.md`, etc.). On detection, refuse with a structured
-message that invokes `migrate.py report` and suggests
-`/jig:migrate`.
+**Goal:** Close the user-facing routing gap that the spec 008 motivation
+identified: a project that looks spec-driven (validator-style or
+otherwise) but has no `scaffold.json` is currently invisible to
+`scaffold-init` — the wizard happily proceeds and pollutes the tree.
+After this slice, `scaffold-init` detects that shape, refuses with a
+structured message naming the three migrate triggers it found, and
+suggests `/jig:migrate` (with `migrate.py report` as the concrete next
+command).
 
-Deferred because: small wiring task, doesn't deliver standalone
-value until 008-01 exists.
+Concretely, `scaffold-init`'s pre-flight check grows a second arm:
 
-**Resolution trigger:** 008-01 DONE.
+1. **Existing:** if `target/scaffold.json` exists → refuse with
+   `AlreadyScaffoldedError` (current behaviour, unchanged).
+2. **New:** else if `target` has ≥3 of the four migrate triggers
+   (`docs/specs/` or `docs/slices/`; `docs/decisions/` or `docs/adrs/`;
+   `docs/workflow.md`; `docs/architecture.md`) → refuse with a new
+   `LooksAlreadySpecDrivenError`, message naming the triggers found
+   and pointing at `/jig:migrate` / `migrate.py report`.
+3. **Else** → proceed with greenfield scaffold (current behaviour).
+
+`--force` bypasses both checks (current contract preserved).
+
+**DoR:**
+- ✅ Slice 008-01 DONE — `migrate.py report` exists and is the command
+  the suggestion text points at.
+- ✅ Slice 008-03 DONE — jig itself is the cleanest example of a
+  spec-driven project (the new check would refuse to greenfield-scaffold
+  over jig's own tree).
+- ✅ The four-trigger heuristic is already validated against the
+  validator (slice 008-01 dogfood — verdict `adoptable` with all four
+  triggers present).
+- ✅ `AlreadyScaffoldedError` precedent exists — the new error class
+  follows the same shape (typed exception → CLI exit 2 → readable
+  stderr message).
+
+**Acceptance Criteria:**
+
+1. **Detection function `_looks_already_spec_driven(target)`** returns
+   `(triggered: bool, triggers: list[str])`. The list contains the
+   short names of detected triggers in fixed order
+   (`["specs", "decisions", "workflow", "architecture"]`-style — only
+   the ones present). `triggered` is `True` iff `len(triggers) >= 3`.
+   The function reads only — no mutations. Lives in `scaffold.py`,
+   not in `_common/` (small enough to inline; cross-skill extraction
+   trigger remains at three callers).
+
+2. **`scaffold()` raises a new `LooksAlreadySpecDrivenError`** when:
+   - `target/scaffold.json` does NOT exist (so it's not a jig project),
+   - AND `_looks_already_spec_driven(target)` returns `triggered=True`,
+   - AND `force=False`.
+   The error's message lists the detected trigger paths verbatim and
+   includes one paragraph naming `/jig:migrate` + the literal command
+   `migrate.py report <target>` for the user to run next.
+
+3. **Ordering:** the `scaffold.json` check fires before the
+   spec-driven-shape check. A jig-scaffolded project (has `scaffold.json`)
+   raises `AlreadyScaffoldedError`, NOT the new error, even if it also
+   happens to have 3+ triggers (which it always does — jig itself is
+   the canonical example). The two errors are distinct types, raised
+   for distinct reasons.
+
+4. **`--force` bypasses BOTH checks.** Tests assert that
+   `scaffold(target, force=True)` succeeds on a tree with 4/4 triggers
+   and no `scaffold.json` (the validator-style case), and that the
+   resulting tree contains the standard scaffolded files.
+
+5. **CLI surface:** the CLI catches `LooksAlreadySpecDrivenError` the
+   same way it catches `AlreadyScaffoldedError` — prints the message to
+   stderr, returns exit code 2. The user does NOT see a Python
+   traceback.
+
+6. **No new tests for the migrate path itself.** The suggestion text
+   names `migrate.py report` and `/jig:migrate`; tests assert the text
+   contains these strings, but do NOT run the migrate helper end-to-end
+   from `scaffold-init` (that's a separate concern, already covered by
+   the migrate skill's own tests).
+
+7. **Tests** in `skills/scaffold-init/test_scaffold.py` (extending the
+   existing 62) cover:
+   - `LooksAlreadySpecDrivenTests` — fixture with 3 triggers, no
+     `scaffold.json` → raises the new error; stderr names triggers;
+     stderr names `/jig:migrate` and `migrate.py report`.
+   - Fixture with 4 triggers → same.
+   - Fixture with exactly 2 triggers → DOES NOT raise; proceeds as
+     greenfield.
+   - Fixture with 3 triggers AND `scaffold.json` present → raises
+     `AlreadyScaffoldedError` (NOT the new error — precedence).
+   - Fixture with 3 triggers AND `--force` → succeeds; greenfield
+     output present.
+   - `_looks_already_spec_driven` unit tests against each trigger
+     individually (specs-only, slices-only, decisions-only, adrs-only,
+     workflow-only, architecture-only → all return `triggered=False`
+     with the single trigger listed; specs+decisions+workflow →
+     `triggered=True`).
+
+**DoD:**
+- [x] All 7 ACs pass; full test suite green across all 9 skills; no
+      regressions. **69 scaffold-init tests (62 existing + 7 new);
+      ~361 total across all skills; 3 pytest-skipped; zero failures.**
+- [x] Implementer test coverage exercises real tempdir trees, no mocks.
+      The new error class is raised through the CLI surface (not just
+      the library function) in at least one test. **`test_three_triggers_refuses_and_suggests_migrate`
+      and `test_four_triggers_refuses_with_full_list` exercise the CLI
+      via subprocess; the unit tests exercise the library function
+      directly via importlib.**
+- [x] Reviewed by `reviewer` subagent (fresh-context, read-only).
+      Reviewer prompt built by `review.py` (dogfood). **Verdict: `pass`
+      with three minor stylistic polish suggestions; all three
+      addressed inline (see §1–§3 below).**
+- [x] Deviation log produced under this slice heading. **See below.**
+- [x] Reconciliation review pass. **One pass: `pass` on first try.
+      All three deviation-log claims (§1 exit-code alignment, §2
+      docstring rewrite, §3 test-helper refactor) confirmed against
+      the code.**
+- [x] `docs/refinement-todo.md` left untouched (no new deferred
+      decisions expected — the trigger heuristic is settled by 008-01).
+      **Confirmed: untouched.**
+- [x] `skills/scaffold-init/SKILL.md` mentions the new refusal path
+      in its Gotchas. **Done — bullet at the bottom of the Gotchas
+      section.**
+
+### Close-out (post-DONE)
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+- [ ] `CLAUDE.md` Active-specs entry for spec 008 updated to reflect
+      008-05 DONE (spec 008 effectively complete — only 008-04 remains,
+      gated on sub-slice topology).
+
+**Anti-horizontal-phasing check:** ✅ End-to-end value in one slice.
+A user runs `scaffold-init` against a project that already has
+`docs/decisions/`, `docs/workflow.md`, and `docs/specs/` → instead of
+silently polluting the tree, they get a clear error message naming
+the triggers and pointing at `/jig:migrate`. The detection function,
+error class, CLI wiring, and tests are the same atomic transition.
+
+**Resolution trigger:** All upstream dependencies are DONE (008-01,
+008-03). This slice is the natural closing of spec 008's adoption
+arc — the missing user-facing route from "scaffold-init refused" to
+"`/jig:migrate` is the answer".
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. Implementation notes:
+
+**1. Reviewer-flagged exit-code inconsistency resolved.**
+
+Reviewer noticed that my first implementation returned exit 2 for the
+new error, but the sibling `AlreadyScaffoldedError` returns exit 3.
+The DoR stated "typed exception → CLI exit 2" as the precedent — which
+was wrong about the actual precedent. Two ways to align: change the
+sibling, or change the new error. Chose the second — preserves any
+external scripts that already check for exit 3, and keeps both
+precondition-failure errors symmetric. Fixed by changing the new
+error's CLI handler to `return 3`. Tests still pass (they only assert
+non-zero, no specific code pinned).
+
+**2. Heuristic-divergence comment tightened.**
+
+Reviewer flagged that the inline comment on `_looks_already_spec_driven`
+claimed it "matches the four-trigger heuristic in `migrate.py`'s
+`compute_verdict`" — but it doesn't quite. The migrate verdict only
+counts `docs/specs/` as a trigger when there's a `spec.md` file
+inside; the new check counts an empty `docs/specs/` directory.
+
+The divergence is intentional (broader heuristic at the scaffold
+layer errs on the safer side: refuse + suggest migrate, rather than
+silently overwrite). But the comment overstated the match. Rewrote
+the docstring to call out the broader-by-design behaviour explicitly.
+No code change, documentation only.
+
+**3. Test boilerplate duplication refactored.**
+
+Reviewer noted that two unit-level tests duplicated the
+`importlib.util.spec_from_file_location` boilerplate. Extracted to a
+class-level cached loader `_load_scaffold_module()` — the two tests
+now share one import. Saves ~6 lines per test; module loads once per
+class run.
+
+**4. Design choices logged.**
+
+   4a. **No cross-skill helper extraction.** `_looks_already_spec_driven`
+   is a near-clone of `migrate.py`'s trigger logic. Three-caller
+   extraction threshold (per ADR-0002 / 0003) is not yet met —
+   scaffold-init and migrate are the two callers. If a third caller
+   needs the same heuristic (e.g. slice-land's pre-merge sanity check),
+   extract to `skills/_common/spec_driven_check.py` at that time.
+
+   4b. **Trigger ordering is deterministic.** The list returned by
+   `_looks_already_spec_driven` always orders triggers as
+   `[spec-or-slice, decisions-or-adrs, workflow, architecture]`. Tests
+   assert the order indirectly by asserting which triggers appear in
+   the stderr message. This matches `migrate.py`'s ordering for
+   consistency.
+
+   4c. **`docs/specs/` as an empty directory is enough to trigger.**
+   This is the design choice documented in §2 — the safer side to err
+   on at the scaffold-init layer (refuse + suggest migrate) than at
+   the migrate layer (proceed with the report). Recoverable via
+   `--force` if the user really meant greenfield.
+
+**5. Doc updates from this slice.**
+
+- `skills/scaffold-init/scaffold.py` — net new: `_looks_already_spec_driven`
+  (~25 lines including docstring), `LooksAlreadySpecDrivenError` (~10
+  lines), the new pre-flight check in `scaffold()` (~20 lines), the
+  new `except` arm in `main()` (~3 lines). Total: ~58 lines added.
+- `skills/scaffold-init/test_scaffold.py` — 7 new tests in
+  `LooksAlreadySpecDrivenTests` + the `_make_spec_driven_tree` helper.
+- `skills/scaffold-init/SKILL.md` — one new Gotcha bullet.
+- No new ADR (the rule is settled by 008-01's heuristic; this slice
+  just wires the same rule into a different surface).
+- No new `learnings.md` entry — the reviewer-flagged polish items were
+  preventable but minor; recorded here in §1–§3.
+
+**6. Reconciliation discipline note (lesson from spec 009).**
+
+The "Reconciliation review pass" DoD checkbox stays unticked until
+the reconciliation reviewer returns `pass`. The status-board regen +
+CLAUDE.md update boxes live in the "Close-out (post-DONE)" subsection
+so they don't false-positive-block `slice-land`'s DoD check.

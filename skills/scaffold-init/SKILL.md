@@ -102,3 +102,10 @@ After scaffolding succeeds, tell the user:
   `$CLAUDE_PROJECT_DIR` (which is the target project's root after install).
 - Signal detection (existing CI, LLM/agent files, team size) is deferred to slice 001-03.
   Until then, the wizard installs default tiers regardless of project context.
+- **scaffold-init refuses if the target looks spec-driven but lacks `scaffold.json`.**
+  Slice 008-05 introduced a second pre-flight check: if ≥3 of the four migrate
+  triggers (`docs/specs/`/`docs/slices/`, `docs/decisions/`/`docs/adrs/`,
+  `docs/workflow.md`, `docs/architecture.md`) are present without a
+  `scaffold.json`, the helper raises `LooksAlreadySpecDrivenError` (exit 2)
+  and points at `/jig:migrate`. Pass `--force` to scaffold over the existing
+  tree anyway (NOT recommended — overwrites docs).
