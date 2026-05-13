@@ -2,7 +2,7 @@
 
 ## Ordered tasks (TDD)
 
-- [ ] **T1** — Add `templates/docs/adrs/0000-template.md` (skeleton with `{{NUMBER}}` / `{{TITLE}}` / `{{DATE}}` placeholders).
+- [ ] **T1** — Add `templates/docs/decisions/adr-0000-template.md` (skeleton with `{{NUMBER}}` / `{{TITLE}}` / `{{DATE}}` placeholders).
 - [ ] **T2** — Write `skills/adr-workflow/test_adr.py` with failing tests for all four subcommands + skill surface.
 - [ ] **T3** — Implement `skills/adr-workflow/adr.py` (new / accept / index / resolve-todo).
 - [ ] **T4** — Write `skills/adr-workflow/SKILL.md` (active, no `disable-model-invocation`).
@@ -32,7 +32,7 @@
 ## Deliverable paths
 
 ```
-templates/docs/adrs/0000-template.md
+templates/docs/decisions/adr-0000-template.md
 skills/adr-workflow/SKILL.md
 skills/adr-workflow/adr.py
 skills/adr-workflow/test_adr.py
@@ -51,8 +51,8 @@ python3 -m pytest skills/adr-workflow/
 python3 -m pytest skills/
 
 # Sandbox dogfood
-mkdir -p /tmp/adr-sandbox/docs/adrs
-cp docs/adrs/README.md /tmp/adr-sandbox/docs/adrs/
+mkdir -p /tmp/adr-sandbox/docs/decisions
+cp docs/decisions/README.md /tmp/adr-sandbox/docs/decisions/
 python3 skills/adr-workflow/adr.py new test-decision \
   --title "Test Decision" \
   # ... cd into sandbox first; verify file shape, then accept + index.

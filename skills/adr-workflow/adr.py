@@ -1,10 +1,11 @@
 """
-jig adr-workflow helper — slice 005-01 (adr-helper)
+jig adr-workflow helper — slice 005-01 (adr-helper) + 008-03 (ADR-0004 shape)
 
 Deterministic ADR lifecycle helper:
   - `new`          : scaffold a new ADR from the template, auto-numbered.
   - `accept`       : flip Status from Proposed to Accepted (atomic write).
-  - `index`        : regenerate the `## Index` section of docs/adrs/README.md.
+  - `index`        : regenerate the `## Index` section of
+                     docs/decisions/README.md.
   - `resolve-todo` : strike through a refinement-todo entry and link the
                      resolving ADR.
 
@@ -13,11 +14,12 @@ Mirrors the shape of workflow.py / review.py / memory.py / scaffold.py.
 Usage:
     python3 adr.py new <slug> [--title "<Title>"]
     python3 adr.py accept <NNNN>
-    python3 adr.py index <adrs-dir>
+    python3 adr.py index <decisions-dir>
     python3 adr.py resolve-todo <NNNN> "<heading fragment>"
 
-Run from the project root that contains `docs/adrs/` (for `new`, `accept`,
-`resolve-todo`); `index` takes an explicit `<adrs-dir>` argument.
+Run from the project root that contains `docs/decisions/` (for `new`,
+`accept`, `resolve-todo`); `index` takes an explicit `<decisions-dir>`
+argument. Files are named `adr-NNNN-<slug>.md` per ADR-0004.
 """
 
 import argparse
@@ -37,7 +39,9 @@ PLACEHOLDER_NUMBER = "{{NUMBER}}"
 PLACEHOLDER_TITLE = "{{TITLE}}"
 PLACEHOLDER_DATE = "{{DATE}}"
 
-TEMPLATE_RELATIVE = Path("templates") / "docs" / "adrs" / "0000-template.md"
+TEMPLATE_RELATIVE = (
+    Path("templates") / "docs" / "decisions" / "adr-0000-template.md"
+)
 
 
 # ---------- shared helpers ----------
@@ -67,24 +71,27 @@ def _template_path() -> Path:
 
 
 def _adr_files(adrs_dir: Path) -> list:
-    """Return sorted list of NNNN-*.md files under `adrs_dir`, excluding README.md.
-    Files whose basename does not start with a 4-digit prefix are also excluded."""
+    """Return sorted list of `adr-NNNN-*.md` files under `adrs_dir`,
+    excluding README.md. Files whose basename does not start with
+    `adr-NNNN-` are also excluded (per ADR-0004's canonical shape)."""
     if not adrs_dir.is_dir():
         return []
     out = []
     for p in sorted(adrs_dir.glob("*.md")):
         if p.name.lower() == "readme.md":
             continue
-        if not re.match(r"^\d{4}-", p.name):
+        if not re.match(r"^adr-\d{4}-", p.name):
             continue
         out.append(p)
     return out
 
 
 def _parse_adr_number(filename: str) -> int:
-    m = re.match(r"^(\d{4})-", filename)
+    m = re.match(r"^adr-(\d{4})-", filename)
     if not m:
-        raise AdrError(f"file does not start with NNNN- prefix: {filename}")
+        raise AdrError(
+            f"file does not start with `adr-NNNN-` prefix: {filename}"
+        )
     return int(m.group(1))
 
 
@@ -98,23 +105,24 @@ def _slug_to_title(slug: str) -> str:
 
 
 def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
-    """Scaffold `docs/adrs/NNNN-<slug>.md` from the template."""
+    """Scaffold `docs/decisions/adr-NNNN-<slug>.md` from the template."""
     if not slug or not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
         raise AdrError(
             f"invalid slug: '{slug}' (use lowercase letters, digits, hyphens)"
         )
     if not adrs_dir.is_dir():
-        raise AdrError(f"adrs directory not found: {adrs_dir}")
+        raise AdrError(f"decisions directory not found: {adrs_dir}")
 
     template = _template_path()
     if not template.is_file():
         raise AdrError(f"template not found: {template}")
 
-    # Slug collision check — ANY existing NNNN-<slug>.md is a conflict.
+    # Slug collision check — ANY existing `adr-NNNN-<slug>.md` with the
+    # same slug body is a conflict, even at a different number.
     existing = _adr_files(adrs_dir)
     for p in existing:
-        # Strip leading "NNNN-" prefix and trailing ".md".
-        body = p.stem[5:] if len(p.stem) > 5 else ""
+        # Strip leading "adr-NNNN-" prefix (9 chars) and trailing ".md".
+        body = p.stem[9:] if len(p.stem) > 9 else ""
         if body == slug:
             raise AdrError(f"slug collision: {p.name} already exists")
 
@@ -133,8 +141,8 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
     content = content.replace(PLACEHOLDER_TITLE, title)
     content = content.replace(PLACEHOLDER_DATE, _today())
 
-    target = adrs_dir / f"{number}-{slug}.md"
-    if target.exists():  # Defensive — autotonum should have prevented this.
+    target = adrs_dir / f"adr-{number}-{slug}.md"
+    if target.exists():  # Defensive — auto-num should have prevented this.
         raise AdrError(f"target already exists: {target}")
     _atomic_write(target, content)
     return target
@@ -144,11 +152,11 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
 
 
 def _find_adr_by_number(adrs_dir: Path, number: str) -> Path:
-    """Locate the single NNNN-*.md file matching `number` (zero-padded).
-    Raises on miss or ambiguity."""
+    """Locate the single `adr-NNNN-*.md` file matching `number`
+    (zero-padded). Raises on miss or ambiguity."""
     if not re.match(r"^\d{4}$", number):
         raise AdrError(f"NNNN must be 4-digit zero-padded: '{number}'")
-    matches = list(adrs_dir.glob(f"{number}-*.md"))
+    matches = list(adrs_dir.glob(f"adr-{number}-*.md"))
     if not matches:
         raise AdrError(f"ADR not found: NNNN={number}")
     if len(matches) > 1:
@@ -284,18 +292,20 @@ def _render_index_entries(adr_paths: list) -> list:
         title = _extract_title(text)
         status, date_str = _extract_status_and_date(text)
         description = _extract_description(text) or "(no description)"
-        slug = p.stem[5:] if len(p.stem) > 5 else p.stem
+        # Filename stem is `adr-NNNN-<slug>` (9-char prefix to strip).
+        slug = p.stem[9:] if len(p.stem) > 9 else p.stem
         meta = f"({date_str}, {status})" if date_str else f"({status})"
         rows.append(
-            f"- [ADR-{number}: {title}]({number}-{slug}.md) — {description} {meta}"
+            f"- [ADR-{number}: {title}](adr-{number}-{slug}.md) — "
+            f"{description} {meta}"
         )
     return rows
 
 
 def cmd_index(adrs_dir: Path) -> Path:
-    """Regenerate the `## Index` section of `<adrs-dir>/README.md`."""
+    """Regenerate the `## Index` section of `<decisions-dir>/README.md`."""
     if not adrs_dir.is_dir():
-        raise AdrError(f"adrs directory not found: {adrs_dir}")
+        raise AdrError(f"decisions directory not found: {adrs_dir}")
     readme = adrs_dir / "README.md"
     if not readme.is_file():
         raise AdrError(f"README.md not found in: {adrs_dir}")
@@ -368,14 +378,17 @@ def _find_todo_section(todo_text: str, fragment: str) -> tuple:
 def cmd_resolve_todo(project_dir: Path, number: str, fragment: str) -> Path:
     """Strikethrough a refinement-todo section + append Resolved-by link.
 
-    `project_dir` must contain both `docs/adrs/` and `docs/refinement-todo.md`."""
-    adrs_dir = project_dir / "docs" / "adrs"
+    `project_dir` must contain both `docs/decisions/` and
+    `docs/refinement-todo.md`."""
+    adrs_dir = project_dir / "docs" / "decisions"
     todo_path = project_dir / "docs" / "refinement-todo.md"
 
     if not todo_path.is_file():
         raise AdrError(f"refinement-todo.md not found: {todo_path}")
     if not adrs_dir.is_dir():
-        raise AdrError(f"docs/adrs/ not found in project: {project_dir}")
+        raise AdrError(
+            f"docs/decisions/ not found in project: {project_dir}"
+        )
 
     # Resolve ADR + verify Accepted state.
     adr_path = _find_adr_by_number(adrs_dir, number)
@@ -407,11 +420,12 @@ def cmd_resolve_todo(project_dir: Path, number: str, fragment: str) -> Path:
     # 3) Append Resolved-by line at the section's end. Preserve trailing
     # whitespace pattern: insert before any trailing newlines so the next
     # heading still has its leading blank line.
-    slug = adr_path.stem[5:] if len(adr_path.stem) > 5 else adr_path.stem
+    # Filename stem is `adr-NNNN-<slug>` (9-char prefix to strip).
+    slug = adr_path.stem[9:] if len(adr_path.stem) > 9 else adr_path.stem
     number_str = f"{_parse_adr_number(adr_path.name):04d}"
     resolved_line = (
         f"**Resolved by:** [ADR-{number_str}: {title}]"
-        f"(adrs/{number_str}-{slug}.md).\n"
+        f"(decisions/adr-{number_str}-{slug}.md).\n"
     )
     new_body = _append_to_section(new_body, resolved_line)
 
@@ -475,7 +489,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("number", help="4-digit ADR number (e.g. 0003)")
 
     pi = sub.add_parser("index", help="regenerate the Index section of ADR README.md")
-    pi.add_argument("adrs_dir", help="path to docs/adrs/")
+    pi.add_argument("adrs_dir", help="path to docs/decisions/")
 
     pr = sub.add_parser("resolve-todo",
                         help="mark a refinement-todo section resolved by an ADR")
@@ -494,12 +508,12 @@ def main(argv: list) -> int:
 
     try:
         if ns.cmd == "new":
-            adrs_dir = Path.cwd() / "docs" / "adrs"
+            adrs_dir = Path.cwd() / "docs" / "decisions"
             target = cmd_new(adrs_dir, ns.slug, ns.title)
             print(str(target.relative_to(Path.cwd())) if target.is_relative_to(Path.cwd())
                   else str(target))
         elif ns.cmd == "accept":
-            adrs_dir = Path.cwd() / "docs" / "adrs"
+            adrs_dir = Path.cwd() / "docs" / "decisions"
             target = cmd_accept(adrs_dir, ns.number)
             print(str(target.relative_to(Path.cwd())) if target.is_relative_to(Path.cwd())
                   else str(target))

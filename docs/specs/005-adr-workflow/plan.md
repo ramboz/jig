@@ -9,8 +9,8 @@ SKILL.md for when/why to invoke and what to do with the result.
 
 Four subcommands, one helper:
 
-- `new <slug> [--title T]` — creates `docs/adrs/NNNN-<slug>.md` from the
-  template under `templates/docs/adrs/0000-template.md`. NNNN
+- `new <slug> [--title T]` — creates `docs/decisions/NNNN-<slug>.md` from the
+  template under `templates/docs/decisions/adr-0000-template.md`. NNNN
   auto-incremented.
 - `accept <NNNN>` — flips the Status line atomically.
 - `index <adrs-dir>` — regenerates the `## Index` section. Same
@@ -38,7 +38,7 @@ All subcommands:
 ## Template file
 
 ```
-templates/docs/adrs/0000-template.md
+templates/docs/decisions/adr-0000-template.md
 ```
 
 Holds placeholders: `{{NUMBER}}`, `{{TITLE}}`, `{{DATE}}`. The helper
@@ -47,7 +47,7 @@ exactly (same six sections, in the same order).
 
 ## Auto-numbering
 
-`new` scans `docs/adrs/*.md` (excluding `README.md`), extracts the
+`new` scans `docs/decisions/*.md` (excluding `README.md`), extracts the
 leading 4-digit prefix, takes max + 1. Zero ADRs → starts at `0001`.
 Two existing (`0001`, `0002`) → `0003`. A gap (e.g. only `0001` and
 `0003` present) → still max + 1 = `0004`; gaps are not filled.
@@ -102,7 +102,7 @@ the format.
 | `skills/adr-workflow/SKILL.md` | Active skill, no `disable-model-invocation`. |
 | `skills/adr-workflow/adr.py` | Helper. |
 | `skills/adr-workflow/test_adr.py` | Unit tests. |
-| `templates/docs/adrs/0000-template.md` | ADR skeleton. |
+| `templates/docs/decisions/adr-0000-template.md` | ADR skeleton. |
 
 ## Files to modify
 
@@ -130,7 +130,7 @@ on it here triggers the resolution-trigger for ADR-0002.
 ## Test strategy
 
 `NewTests`:
-- Empty `docs/adrs/` → first ADR numbered `0001`.
+- Empty `docs/decisions/` → first ADR numbered `0001`.
 - Existing `0001`, `0002` → next is `0003`.
 - Gap (`0001`, `0003`) → next is `0004` (max + 1, no gap fill).
 - Boundary: existing `0099` → next is `0100`.
@@ -147,7 +147,7 @@ on it here triggers the resolution-trigger for ADR-0002.
 - Atomic: writes via `.tmp` + replace.
 
 `IndexTests`:
-- Regen on empty `docs/adrs/` (only README) → no index entries.
+- Regen on empty `docs/decisions/` (only README) → no index entries.
 - Regen with two ADRs → two entries, sorted.
 - Re-running on current README → byte-identical (idempotent).
 - Preserves Header, Format, "When to write" sections.
@@ -167,14 +167,14 @@ on it here triggers the resolution-trigger for ADR-0002.
 - SKILL.md body references each of the four subcommands by name.
 - Description string contains trigger phrases ("ADR", "decision",
   "resolve", "supersede").
-- Template file exists at `templates/docs/adrs/0000-template.md`.
+- Template file exists at `templates/docs/decisions/adr-0000-template.md`.
 
 ## Dogfood plan
 
 After tests pass:
 1. Use `adr.py new tdd-loop-prerequisite --title "..."` against a
    throwaway sandbox dir to verify the actual end-to-end flow (don't
-   pollute real `docs/adrs/`).
+   pollute real `docs/decisions/`).
 2. Build the implementation-review prompt via `review.py implementation`
    feeding into the reviewer subagent.
 3. Reconcile.

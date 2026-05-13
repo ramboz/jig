@@ -6,11 +6,12 @@ Accepted (2026-05-12)
 
 ## Context
 
-jig's default ADR layout is `docs/adrs/NNNN-<slug>.md`, which is internally
-consistent and matches Nygard's original blog post but has two usability gaps
-that surfaced while dogfooding jig against the aso-shallow-validator project —
-a mature spec-driven repo that organically grew the same workflow jig codifies
-but landed on a different naming convention (`docs/decisions/adr-NNN-<slug>.md`).
+jig's default ADR layout (at the time of this ADR) was `docs/adrs/NNNN-<slug>.md`,
+which is internally consistent and matches Nygard's original blog post but has
+two usability gaps that surfaced while dogfooding jig against the
+aso-shallow-validator project — a mature spec-driven repo that organically grew
+the same workflow jig codifies but landed on a different naming convention
+(`docs/decisions/adr-NNN-<slug>.md`).
 
 **Gap 1 — "ADR" is jargon at the directory level.**
 A new contributor opening a repo sees a top-level `docs/adrs/` folder and has
@@ -122,7 +123,7 @@ shapes; nothing in this ADR forbids either layout downstream.
   skill docs, templates).
 - `adr.py` needs updating: default `--dir` argument, glob pattern for
   auto-numbering, filename construction in `new`, index regeneration.
-- Templates in `templates/docs/adrs/` need renaming and content updates.
+- Templates in `templates/docs/decisions/` need renaming and content updates.
 - Any documentation snippet that says "ADRs live in `docs/adrs/`" needs to
   flip to "`docs/decisions/`".
 
@@ -141,13 +142,13 @@ folded into spec 008 if scope and ordering allow). The migration touches:
    content updates.
 6. `skills/scaffold-init/scaffold.py`: target directory creation.
 7. Cross-references in `CLAUDE.md`, `docs/architecture.md`, every spec
-   that cites an ADR, every skill doc that mentions `docs/adrs/`.
+   that cites an ADR, every skill doc that mentions `docs/decisions/`.
 8. `docs/specs/README.md` and any spec-status notes referencing ADRs.
 
 **Resolution trigger for revisiting:**
 
 - If real users on jig report friction with `docs/decisions/` (e.g.
-  conflicts with another tool that expects `docs/adrs/`), the folder name
+  conflicts with another tool that expects `docs/decisions/`), the folder name
   can be revisited via supersession.
 - If a sibling record type lands in `docs/decisions/`, the `adr-` prefix
   is validated; if no sibling has emerged after, say, 12 months of real

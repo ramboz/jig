@@ -35,7 +35,7 @@ Five things to detect:
 1. **Spec/slice dirs.** Glob: `docs/specs/*/spec.md`, `docs/slices/slice-*.md`.
    The two are mutually informative — both present is unusual; flag in
    Ambiguities.
-2. **Decision dirs.** Glob: `docs/decisions/*.md`, `docs/adrs/*.md`.
+2. **Decision dirs.** Glob: `docs/adrs/*.md`, `docs/decisions/*.md`.
    Both present → Conflict.
 3. **Spike dirs.** Glob: `docs/spikes/*.md`. Optional; inventoried,
    not migrated by 008-01.
@@ -54,7 +54,7 @@ For each detected item, produce a mapping row. Cases:
 
 - `docs/adrs/` present → row maps to `docs/decisions/`.
 - `docs/adrs/0001-foo.md` → row maps to `docs/decisions/adr-0001-foo.md`.
-- `docs/adrs/adr-001-foo.md` (validator style — already has prefix) →
+- `docs/decisions/adr-001-foo.md` (validator style — already has prefix) →
   row maps to `docs/decisions/adr-0001-foo.md` (pad 3-digit to 4).
 - `docs/decisions/` present without `docs/adrs/` → row notes "kept".
 - `docs/slices/slice-NN-name.md` → row notes "topology question — see
@@ -63,7 +63,7 @@ For each detected item, produce a mapping row. Cases:
 
 ## Conflict detection
 
-The single sharpest conflict for 008-01: both `docs/adrs/` AND
+The single sharpest conflict for 008-01: both `docs/decisions/` AND
 `docs/decisions/` present with overlapping filenames (or near-misses
 like `0001-foo.md` in one and `adr-0001-foo.md` in the other).
 Report names each colliding pair under Conflicts.

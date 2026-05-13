@@ -51,7 +51,7 @@
 
 ### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12
 ~~**Deferred:** The mechanism to flip docs from `Draft` to `Stable` (after 3-5 reconciled specs) is described but not implemented.~~
-**Resolved by:** [ADR-0001: scaffold-stable trigger](adrs/0001-scaffold-stable.md). Threshold is **3 reconciled slices**; flip mechanism remains manual for now (one-liner sed; a `stabilize.py` helper is a candidate for a future slice if needed).
+**Resolved by:** [ADR-0001: scaffold-stable trigger](adrs/adr-0001-scaffold-stable.md). Threshold is **3 reconciled slices**; flip mechanism remains manual for now (one-liner sed; a `stabilize.py` helper is a candidate for a future slice if needed).
 
 ### Decision: Scaffold.json manifest format
 **Deferred:** The `scaffold.json` install-state manifest is referenced in the design but its schema is undefined.

@@ -24,7 +24,7 @@ and (in later slices) apply the rename / restructure operations needed
 to bring the project under jig's defaults without losing existing work.
 
 This spec is also the **first real test of jig's `docs/decisions/` rename**
-(decided in [ADR-0004](../../adrs/0004-decisions-folder-naming.md)). One of
+(decided in [ADR-0004](../../decisions/adr-0004-decisions-folder-naming.md)). One of
 its slices will perform that rename — both inside jig itself (the smallest
 possible fixture) and as a reusable operation `migrate.py` exposes for
 external projects.
@@ -397,7 +397,7 @@ What it refuses to do (each is a hard exit, no partial writes):
    exists, walks the migration plan, and applies it. On success,
    exits 0 and prints a summary to stdout with one line per
    operation actually performed (e.g. `renamed docs/adrs/ →
-   docs/decisions/`, `renamed docs/decisions/0001-foo.md →
+   docs/decisions/`, `renamed docs/adrs/0001-foo.md →
    docs/decisions/adr-0001-foo.md`, `rewrote 4 cross-references in
    docs/architecture.md`). When there is nothing to do (the project
    is already on the canonical shape), the helper exits 0 with a
@@ -761,33 +761,451 @@ A second reconciliation-review pass would confirm these are addressed.
 
 ## Slice 008-03 — jig-self-migration
 
-**STATUS: DRAFT** _(deferred — production use of 008-02 on jig itself)_
+**STATUS: RECONCILED**
 
 **Goal:** Apply slice 008-02's `migrate.py rename-decisions` to the
-jig repo. This is the first production use, doubling as ADR-0004's
-implementation. Affects:
-- Physical rename of `docs/adrs/` → `docs/decisions/` (4 files).
-- File renames `0001-…` → `adr-0001-…`, etc.
-- Cross-reference updates in `CLAUDE.md`, `docs/architecture.md`,
-  every spec file referencing an ADR, every SKILL.md mentioning
-  `docs/adrs/`.
-- `skills/adr-workflow/adr.py` defaults updated to write to the new
-  path with the new filename pattern (note: this is a code change,
-  not a `rename-decisions` mutation — flagged as scope expansion for
-  008-03 or split into a separate small slice).
-- `templates/docs/adrs/` → `templates/docs/decisions/` with template
-  content updates.
-- `skills/scaffold-init/scaffold.py` target-dir creation updated.
+jig repo itself, then update the `adr.py` / templates / tests so
+jig's ADR conventions land wholly on ADR-0004's shape. This is the
+**first production use** of `rename-decisions` and closes the
+implementation gap left open by ADR-0004.
 
-Deferred because: needs 008-02 to land first.
+**Scope decision (was the open question):** one slice, not split.
+The mechanical rename and the helper-defaults update form a single
+atomic transition — partial states (e.g. helper still writing to
+`docs/adrs/` while files have moved to `docs/decisions/`) are worse
+than either fully-old or fully-new. Lean is for one slice.
 
-**Resolution trigger:** 008-02 DONE.
+What changes in this slice (six concrete blocks):
 
-**Open question:** Does the `adr.py` and `scaffold.py` code update
-belong in 008-03 or in a separate slice 008-3b? The mechanical
-rename is one operation; updating the helper's defaults is another.
-Lean toward one slice for atomicity (jig's ADR conventions are wholly
-new after this slice — partial states would confuse).
+1. **The rename** — `migrate.py rename-decisions .` applied to jig,
+   producing:
+   - `docs/adrs/` → `docs/decisions/`
+   - `0001-scaffold-stable.md` → `adr-0001-scaffold-stable.md`
+   - `0002-contracts-stays-deferred.md` → `adr-0002-contracts-stays-deferred.md`
+   - `0003-extract-find-slice-section.md` → `adr-0003-extract-find-slice-section.md`
+   - `0004-decisions-folder-naming.md` → `adr-0004-decisions-folder-naming.md`
+   - Cross-reference rewrites in `CLAUDE.md`, `docs/architecture.md`,
+     every spec referencing an ADR, every SKILL.md mentioning
+     `docs/adrs/`, every inbox/refinement-todo entry that links
+     ADRs (~12 files per the 008-02 dogfood plan).
+2. **`templates/docs/adrs/` → `templates/docs/decisions/`** plus
+   - `templates/docs/adrs/README.md.template` →
+     `templates/docs/decisions/README.md.template` (content updated
+     to reference `docs/decisions/adr-NNNN-<slug>.md`).
+   - `templates/docs/adrs/0000-template.md` →
+     `templates/docs/decisions/adr-0000-template.md`.
+3. **`skills/adr-workflow/adr.py` defaults updated** to write to the
+   new path with the new filename pattern:
+   - `TEMPLATE_RELATIVE` constant.
+   - `_adr_files` filter regex (`^\d{4}-` → `^adr-\d{4}-`).
+   - `_parse_adr_number` regex.
+   - `_find_adr_by_number` glob pattern.
+   - `cmd_new` filename construction.
+   - `_render_index_entries` link format.
+   - `cmd_resolve_todo` link to ADR (path + filename).
+   - Default `adrs_dir = Path.cwd() / "docs" / "adrs"` in CLI plumbing
+     → `Path.cwd() / "docs" / "decisions"`.
+   - Module docstring and helper text mentions.
+4. **`skills/adr-workflow/test_adr.py` updated** so all fixture paths
+   and expected outputs reflect the new shape. Fixture helper
+   functions (e.g. `_write_canonical_readme`) now write to
+   `docs/decisions/` with `adr-NNNN-` filename pattern.
+5. **`skills/scaffold-init/test_scaffold.py`** — the test that
+   asserts a scaffolded project contains `docs/adrs/README.md`
+   updated to assert `docs/decisions/README.md` instead. (The
+   production code in `scaffold.py` walks `templates/docs/`
+   recursively and replicates the structure — no code change
+   needed, just template+test.)
+6. **In-repo doc surfaces refreshed:**
+   - `skills/scaffold-init/SKILL.md` — bulleted list of created
+     directories swaps `adrs/` for `decisions/`.
+   - `skills/adr-workflow/SKILL.md` — every mention of `docs/adrs/`
+     becomes `docs/decisions/`; filename examples become
+     `adr-NNNN-<slug>.md`.
+   - `CLAUDE.md` references that the rename-decisions helper didn't
+     catch (because the helper rewrites `docs/adrs/` → `docs/decisions/`
+     and ADR-filename-to-canonical-form, but doesn't rewrite the
+     `adrs/` substring inside other contexts like CLI examples).
+     Manually audit and fix.
+
+**DoR:**
+- ✅ Slice 008-02 (`migrate.py rename-decisions`) is DONE — the
+  helper is tested, dogfooded, and produces a clean 17-line plan
+  against jig (1 dir + 4 file + 12 cross-ref ops).
+- ✅ ADR-0004 is Accepted and names the target shape.
+- ✅ The four current ADRs (0001–0004) all exist; no slug
+  collisions after pad+prefix.
+- ✅ Slice 008-02's `--dry-run` against jig was previewed; the
+  plan is clean (no conflicts, no collisions).
+- ✅ Worktree-skip is in `_SKIP_PATH_NAMES` — sibling jig worktrees
+  on the user's machine won't be touched.
+
+**Acceptance Criteria:**
+
+1. **`migrate.py rename-decisions .` applied** to the jig repo
+   from the worktree root. After application:
+   - `docs/adrs/` no longer exists; `docs/decisions/` exists with
+     four files named `adr-NNNN-<slug>.md` for N ∈ {0001, 0002,
+     0003, 0004}.
+   - `docs/decisions/README.md` is present (moved from the prior
+     `docs/adrs/README.md`).
+   - The cross-reference rewrites listed in the 008-02 jig-self
+     `--dry-run` preview are all applied (12 files including
+     `CLAUDE.md`, `docs/inbox.md`, `docs/refinement-todo.md`,
+     `docs/specs/005-adr-workflow/{plan,spec,tasks}.md`,
+     `docs/specs/008-migrate-existing-project/{plan,spec}.md`).
+
+2. **Templates relocated** under `templates/docs/decisions/`:
+   - `templates/docs/decisions/README.md.template` exists; content
+     now reads "Each ADR lives at `docs/decisions/adr-NNNN-<slug>.md`"
+     (was `docs/adrs/NNNN-<slug>.md`).
+   - `templates/docs/decisions/adr-0000-template.md` exists (was
+     `templates/docs/adrs/0000-template.md`).
+   - `templates/docs/adrs/` no longer exists.
+
+3. **`adr.py` writes ADRs to `docs/decisions/` with `adr-NNNN-`
+   filenames by default.** Running `python3 adr.py new my-decision`
+   from a freshly-scaffolded project root creates
+   `docs/decisions/adr-0001-my-decision.md` (NOT
+   `docs/adrs/0001-my-decision.md`). All four subcommands (`new`,
+   `accept`, `index`, `resolve-todo`) operate against
+   `docs/decisions/` and the `adr-NNNN-` pattern. The
+   `TEMPLATE_RELATIVE` constant points at
+   `templates/docs/decisions/adr-0000-template.md`.
+
+4. **`test_adr.py` exercises the new shape** end-to-end. All 46
+   existing tests pass against `docs/decisions/` + `adr-NNNN-`
+   filename. No fixture path mentions `docs/adrs/` (regex sweep).
+   The fixture helper that writes a canonical README writes to
+   `docs/decisions/README.md` with the new format string.
+
+5. **`test_scaffold.py` asserts the new shape** for the
+   scaffold-output expectation. The test row that previously
+   checked `docs/adrs/README.md` now checks
+   `docs/decisions/README.md`. All 62 existing scaffold tests pass.
+
+6. **SKILL.md surfaces refreshed**:
+   - `skills/adr-workflow/SKILL.md` references `docs/decisions/`
+     and `adr-NNNN-<slug>.md` only; no occurrence of `docs/adrs/`
+     or bare-number ADR filenames remains.
+   - `skills/scaffold-init/SKILL.md` bulleted dir list reads
+     `decisions/`, not `adrs/`.
+
+7. **Full skill test suite green** — all 9 skill directories pass
+   with zero regressions. After the rename, the `migrate.py` self-
+   dogfood test (`SafetyTests`-style regex sweep on the source)
+   continues to confirm the read-only-region invariant is intact.
+
+8. **ADR-0004 resolved** — `adr.py resolve-todo` (or a manual edit)
+   adds a "Resolved by" reference at the bottom of the
+   refinement-todo entry, if one exists. (The current
+   refinement-todo doesn't have an entry for ADR-0004 — ADR-0004's
+   open question was about the rename slice itself, which is being
+   answered by this slice. Document the answer in this slice's
+   deviation log.)
+
+9. **No new tests for the rename application itself.** The helper
+   was tested in slice 008-02; this slice is the *production use*.
+   Test additions in 4–5 are about updating existing fixtures, not
+   adding new test classes for the rename mechanism.
+
+10. **`adr.py` continues to support both layouts read-only for one
+    transitional window?** **No.** Per the scope decision above,
+    this slice flips defaults wholly. Projects already on
+    `docs/adrs/` get the migrate path. Tests assert the new shape
+    only; `adr.py` does not silently fall back to `docs/adrs/`.
+    (Closes the ADR-0004 backwards-compat open question.)
+
+**DoD:**
+- [x] All 10 ACs pass; full test suite green across all 9 skills; no regressions. **354 tests total across 9 skills (62 scaffold + 46 adr-workflow + 65 migrate + 25 independent-review + 42 memory-sync + 33 slice-land + 16 spec-workflow + 25 tdd-loop + 10 _common); 3 pytest-skipped (no runner locally); zero failures.**
+- [x] `migrate.py rename-decisions .` actually applied (not just dry-run); the rename effects are visible in `git status`. **17-line summary captured in §1 below; `docs/adrs/` no longer exists; four ADRs sit at `docs/decisions/adr-000N-*.md`.**
+- [x] Reviewed by `reviewer` subagent (fresh-context, read-only). Reviewer prompt built by `review.py` (dogfood). **Verdict: `needs-changes` with two real classes of issue — bidirectional-arrow narrative collapses (`docs/decisions/ → docs/decisions/`) the rename helper produced that the spec foresaw but my first audit pass missed, plus the absent deviation log itself. Both addressed inline; see §3 below.**
+- [x] Deviation log produced under this slice heading. **See below.**
+- [x] Reconciliation review pass. **Four passes total: pass-1 returned `needs-changes` with bidirectional-arrow collapses + absent deviation log; pass-2 returned `needs-changes` with more collapses missed; pass-3 returned `needs-changes` with one final collapse at AC #5 (lines 883-885) the prior passes missed because it was split across lines; pass-4: `pass`. The repeated failure mode is the lesson recorded in §7 — a multi-line collapse hides from single-line greps.**
+- [x] `docs/refinement-todo.md` — the backwards-compat-window open question is closed by AC #10; record that closure in the deviation log. **Closure recorded in §5.**
+
+### Close-out (post-DONE)
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+- [ ] `CLAUDE.md` Active-specs entry for spec 008 updated to reflect 008-03 DONE.
+
+**Anti-horizontal-phasing check:** ✅ End-to-end value in one slice.
+After this slice lands, jig's own ADR layout fully matches ADR-0004 —
+new ADRs write to the right place, the index regenerates correctly,
+the templates produce the right shape on scaffold-init, and the
+docs no longer have stale path references. No layer-only phase: the
+six change blocks are the same atomic transition described from six
+different angles.
+
+**Resolution trigger:** Slice 008-02 is DONE (✅ as of 2026-05-12).
+The mutator helper exists; jig's self-migration is the obvious next
+slice and closes ADR-0004.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. Implementation notes:
+
+**1. The rename application — full transcript.**
+
+Invocation: `python3 skills/migrate/migrate.py rename-decisions .`
+
+Exit code: `0`. Summary (17 lines):
+
+```
+renamed docs/adrs/ → docs/decisions/
+renamed docs/decisions/0001-scaffold-stable.md → docs/decisions/adr-0001-scaffold-stable.md
+renamed docs/decisions/0002-contracts-stays-deferred.md → docs/decisions/adr-0002-contracts-stays-deferred.md
+renamed docs/decisions/0003-extract-find-slice-section.md → docs/decisions/adr-0003-extract-find-slice-section.md
+renamed docs/decisions/0004-decisions-folder-naming.md → docs/decisions/adr-0004-decisions-folder-naming.md
+rewrote 1 cross-reference in .claude/review-queue.json
+rewrote 3 cross-references in CLAUDE.md
+rewrote 1 cross-reference in docs/adrs/0003-extract-find-slice-section.md
+rewrote 16 cross-references in docs/adrs/0004-decisions-folder-naming.md
+rewrote 8 cross-references in docs/adrs/README.md
+rewrote 1 cross-reference in docs/inbox.md
+rewrote 1 cross-reference in docs/refinement-todo.md
+rewrote 9 cross-references in docs/specs/005-adr-workflow/plan.md
+rewrote 12 cross-references in docs/specs/005-adr-workflow/spec.md
+rewrote 4 cross-references in docs/specs/005-adr-workflow/tasks.md
+rewrote 7 cross-references in docs/specs/008-migrate-existing-project/plan.md
+rewrote 52 cross-references in docs/specs/008-migrate-existing-project/spec.md
+```
+
+Surprises:
+
+- **The DoR enumerated four ADRs (0001–0004); the actual count is four — but with ADR-0003 added between spec authoring and 008-03 execution.** ADR-0003 (Extract `find_slice_section`) was authored in a prior slice; the spec text "(jig has three ADRs and one scaffolded project)" in ADR-0004 was a snapshot from when ADR-0004 was written. The rename handled four files cleanly.
+- The file-rename summary lines (lines 2–5 of the transcript) print the source path as `docs/decisions/<name>.md`, not `docs/adrs/<name>.md`. This is faithful: the helper stores file-rename source paths as the *post-dir-rename* location (per slice 008-02's `plan_rename` design — `post_src = decisions_dir / entry.name`), so by the time the helper formats the summary line, the path already lives under `docs/decisions/`. The cross-reference rewrites on lines 8–10 of the transcript, however, are reported at their *pre-rename* path (e.g. `docs/adrs/0003-...md`) — those rewrites happen BEFORE the directory rename per 008-02 design choice §4c.
+- 52 cross-references in this spec file itself — the spec is the longest description of the ADR-0004 rename anywhere, so naturally has the most references to rewrite. This is also what created the bidirectional-arrow collapse problem fixed in §3 below.
+
+**2. Manual operations beyond the rename helper's scope.**
+
+The helper handles `docs/`, `CLAUDE.md`, and `.claude/`. Out-of-scope work
+the implementer performed by hand:
+
+   2a. **`templates/docs/adrs/` directory move and template-file rename.**
+   `git mv templates/docs/adrs templates/docs/decisions` followed by
+   `git mv templates/docs/decisions/0000-template.md templates/docs/decisions/adr-0000-template.md`.
+   The `README.md.template` content was updated to reference
+   `docs/decisions/adr-NNNN-<slug>.md` (was `docs/adrs/NNNN-<slug>.md`)
+   and the H1 changed from `# ADRs` to `# Decisions`.
+
+   2b. **`skills/adr-workflow/adr.py` defaults updated end-to-end.** Affected
+   symbols (line-refs intentionally omitted — the slice 008-01 reviewer
+   surfaced line-ref drift as a recurring failure mode; symbol-only
+   references are stable across future edits):
+
+   - `TEMPLATE_RELATIVE` constant — now points at
+     `templates/docs/decisions/adr-0000-template.md`.
+   - `_adr_files` filter regex (`^\d{4}-` → `^adr-\d{4}-`).
+   - `_parse_adr_number` regex.
+   - `cmd_new` filename construction (`{number}-{slug}.md` →
+     `adr-{number}-{slug}.md`) and slug-collision body offset (5 → 9 chars).
+   - `_find_adr_by_number` glob (`{number}-*.md` → `adr-{number}-*.md`).
+   - `_render_index_entries` slug offset (5 → 9) and link format
+     (`{number}-{slug}.md` → `adr-{number}-{slug}.md`).
+   - `cmd_resolve_todo` slug offset (5 → 9) + link path
+     (`adrs/{number}-{slug}.md` → `decisions/adr-{number}-{slug}.md`).
+   - CLI default in `main()` (`Path.cwd() / "docs" / "adrs"` →
+     `Path.cwd() / "docs" / "decisions"`) — three occurrences replaced via
+     `replace_all`.
+   - Module docstring updated to mention `docs/decisions/` and the
+     `adr-NNNN-<slug>.md` shape.
+
+   2c. **`skills/adr-workflow/test_adr.py` fixtures and assertions** —
+   bulk-substituted ~30 ADR filename literals from `NNNN-<slug>.md` to
+   `adr-NNNN-<slug>.md` via a one-shot Python regex pass; manually
+   updated the `write_sample_readme` content (H1 `# Decisions`, format
+   string `docs/decisions/adr-NNNN-<slug>.md`), the `write_refinement_todo`
+   resolved-by link, the `test_index_emits_canonical_bullet_format`
+   assertion, the `test_resolve_strikes_heading_and_appends_resolved_by`
+   assertion, and the `test_index_handles_real_adrs_in_repo` realism check.
+   46 tests green.
+
+   2d. **`skills/scaffold-init/test_scaffold.py`** — one-line update from
+   `docs/adrs/README.md` to `docs/decisions/README.md` in the expected-
+   contents list. 62 tests green.
+
+   2e. **`skills/adr-workflow/SKILL.md`** — bulk-substituted `docs/adrs/`
+   → `docs/decisions/`, `NNNN-<slug>.md` → `adr-NNNN-<slug>.md`,
+   `NNNN-*.md` → `adr-NNNN-*.md`, `0001-foo.md` → `adr-0001-foo.md`,
+   resolved-by link path. Also updated the end-to-end example file path
+   from `docs/adrs/0003-scaffold-stable.md` to
+   `docs/decisions/adr-0003-scaffold-stable.md`.
+
+   2f. **`skills/scaffold-init/SKILL.md`** — single-word fix
+   (`docs/` bulleted list: `adrs/` → `decisions/`).
+
+   2g. **`skills/contracts/SKILL.md`** — stale link
+   `(../../docs/adrs/0002-contracts-stays-deferred.md)` →
+   `(../../docs/decisions/adr-0002-contracts-stays-deferred.md)`.
+   The migrate helper missed this because the link sat in a
+   `skills/contracts/` location, outside the `docs/ | CLAUDE.md | .claude/`
+   scan scope. Captured separately in this deviation log to flag the
+   class of miss.
+
+   2h. **`docs/decisions/README.md`** — H1 changed from `# ADRs` to
+   `# Decisions` and the Format string updated to `docs/decisions/adr-NNNN-<slug>.md`.
+   Then `adr.py index docs/decisions` regenerated the Index section, which
+   now contains four correctly-named bullets.
+
+**3. Reviewer-flagged fixes applied during reconciliation.**
+
+The implementation review verdict was `needs-changes`. Two real classes of
+issue:
+
+   3a. **Bidirectional-arrow narrative collapses.** Spec §2-line 825 of
+   008-02's plan **explicitly warned** that the helper rewrites `docs/adrs/`
+   → `docs/decisions/` and doesn't notice that "rename `docs/adrs/` →
+   `docs/decisions/`" descriptions need a manual fix. The reviewer found my
+   first audit pass missed ~10 such bidirectional-collapse spots:
+   - `` `docs/decisions/` → `docs/decisions/` `` (both sides identical)
+   - `` `adr-0001-scaffold-stable.md` → `adr-0001-scaffold-stable.md` ``
+     (four similar lines for ADRs 0001-0004 in the §1 rename plan)
+   - `` `docs/decisions/` or `docs/decisions/` `` (R-rule trigger)
+   - `` `docs/decisions/` AND `docs/decisions/` both present `` (conflict)
+   - `` (no `docs/decisions/`) `` (in the validator-no-adrs explanation)
+   - Plus four similar in `plan.md` and one in ADR-0004's "Becomes harder"
+     section.
+
+   All fixed via a targeted Python script that replaces each collapse with
+   its semantically-correct legacy-side reference (`docs/adrs/` or
+   bare-number filename). Total fixes: 10 in spec.md, 4 in plan.md, 1 in
+   ADR-0004, 2 already-fixed in CLAUDE.md from the earlier audit. The
+   surviving non-broken occurrences (e.g. ADR-0004 line 136 still says
+   "rename of `docs/adrs/` → `docs/decisions/`") are correct as-is.
+
+   3b. **Title rewrite damage in ADR-0004.** The ADR's H1 was originally
+   "Rename docs/adrs/ to docs/decisions/ and prefix files with adr-". The
+   rename helper rewrote it to "Rename docs/decisions/ to docs/decisions/
+   ..." — semantically null. Manually restored the title to the original.
+   Same fix applied to the first sentence of the Context block (was
+   "`docs/decisions/NNNN-<slug>.md`", now "`docs/adrs/NNNN-<slug>.md`"),
+   Option C's title ("Keep `docs/adrs/`"), the Recommended Decision's
+   "old (`docs/adrs/NNNN-<slug>.md`)" parenthetical, the open-question
+   "reading `docs/adrs/`" mention, and the documentation-snippet phrase.
+
+   3c. **Stale relative link `../../adrs/adr-0004-...md`.** The link in
+   spec.md line 27 referenced `../../adrs/adr-0004-...md` (the helper
+   rewrote the filename but not the `adrs/` directory portion of a
+   relative link). Manually fixed to `../../decisions/adr-0004-...md`.
+
+   3d. **End-to-end smoke test.** Ran in `/tmp`:
+   ```
+   python3 skills/scaffold-init/scaffold.py /tmp/jig-008-03-smoke --solo --no-ci --no-tests --no-ai
+   cd /tmp/jig-008-03-smoke
+   python3 .../adr.py new my-first-decision --title "My First Decision"
+   python3 .../adr.py accept 0001
+   python3 .../adr.py index docs/decisions
+   ```
+   Result: clean. The scaffolded project has `docs/decisions/README.md`
+   (header "# Decisions"). `adr.py new` produced
+   `docs/decisions/adr-0001-my-first-decision.md`. `accept` flipped Status.
+   `index` regenerated the Index with the canonical link
+   `(adr-0001-my-first-decision.md)`.
+
+**4. Design choices logged.**
+
+   4a. **Template filename: `adr-0000-template.md` (not `0000-template.md`).**
+   The template file is never user-facing (it's an internal fixture used
+   only by `adr.py new`). Renaming it to `adr-0000-template.md` keeps the
+   filename pattern fully consistent with the rest of jig's ADR convention.
+   The template's content placeholders (`{{NUMBER}}`, `{{TITLE}}`,
+   `{{DATE}}`) are unchanged.
+
+   4b. **README.md.template H1 changed from `# ADRs` to `# Decisions`.**
+   Symmetric with the folder name. The body still uses "ADRs" as a
+   shorthand (Nygard convention, well-known acronym); only the H1 reads
+   as plain English for someone opening the folder cold.
+
+   4c. **`scaffold.py` required NO code change.** scaffold-init walks
+   `templates/docs/**/*.md.template` and replicates the directory
+   structure into the target. After the `templates/docs/adrs/` →
+   `templates/docs/decisions/` move, the scaffolded output landed at
+   `target/docs/decisions/` automatically. The DoR enumerated a scaffold.py
+   update; turned out to be unnecessary — confirmed by the test_scaffold
+   suite (62 tests green) and the /tmp smoke test in §3d.
+
+   4d. **`adr.py` does NOT support legacy `docs/adrs/` as a fallback.**
+   Per AC #10, the slice flips defaults wholly — no transitional dual-read
+   window. Projects on the legacy layout migrate via `migrate.py
+   rename-decisions`. This closes ADR-0004's second open question
+   ("Backwards compatibility window for `adr.py`").
+
+   4e. **Slug-body offset increased from 5 to 9 chars.** Old:
+   `NNNN-<slug>` → strip 5 chars (4 digits + 1 dash) to get the slug. New:
+   `adr-NNNN-<slug>` → strip 9 chars (4 + dash + `adr-` + dash). Three
+   call sites: `cmd_new`'s slug-collision check, `_render_index_entries`,
+   `cmd_resolve_todo`. All three updated symmetrically.
+
+**5. Closure of ADR-0004's open questions.**
+
+   ADR-0004 had two open questions:
+
+   - **Scope of the implementation slice** — "Should the rename land as
+     its own small spec, or as a slice inside spec 008?" Answered: as a
+     slice inside spec 008, specifically 008-03 (this slice), using the
+     general `rename-decisions` helper introduced by slice 008-02.
+   - **Backwards compatibility window for `adr.py`** — "Should `adr.py`
+     continue reading `docs/adrs/` when present?" Answered (per AC #10):
+     no. Default flips wholly; legacy projects migrate via `migrate.py
+     rename-decisions`. The helper is bounded, idempotent, has a
+     `--dry-run` mode, and refuses on conflict — so migration is a single
+     reviewable command, which is friendlier than a deprecation window
+     spread across releases.
+
+   `docs/refinement-todo.md` does NOT have a dedicated entry for these
+   questions (they live inside ADR-0004 itself). No refinement-todo edit
+   needed. The closure is recorded here.
+
+**6. Doc updates from this slice.**
+
+- `docs/decisions/` — 4 ADR files renamed to `adr-NNNN-<slug>.md`;
+  `README.md` updated; ADR-0004 narrative repairs (§3b).
+- `templates/docs/decisions/` — moved from `templates/docs/adrs/`;
+  `0000-template.md` → `adr-0000-template.md`; `README.md.template`
+  body updated.
+- `skills/adr-workflow/adr.py` — 8 distinct change sites (§2b).
+- `skills/adr-workflow/test_adr.py` — ~30 filename literals + 5
+  narrative/assertion updates (§2c).
+- `skills/scaffold-init/test_scaffold.py` — one line (§2d).
+- `skills/adr-workflow/SKILL.md` — bulk path/filename updates (§2e).
+- `skills/scaffold-init/SKILL.md` — one bullet (§2f).
+- `skills/contracts/SKILL.md` — stale link (§2g).
+- `docs/specs/005-adr-workflow/{plan,tasks,spec}.md` — template path
+  references normalized to canonical post-008-03 form (8 fixes total).
+- `docs/specs/008-migrate-existing-project/{plan,spec}.md` — bidirectional-
+  arrow collapses repaired (§3a).
+- `CLAUDE.md` — narrative collapses repaired (§3a).
+- No new ADR required (ADR-0004 is the originating decision; this slice
+  is its implementation).
+- No new `learnings.md` entry — the bidirectional-collapse issue is
+  noted as a class in §7 below and was already foreseen in the 008-03
+  spec body (lines 825-829).
+
+**7. Lesson learned (worth recording as a pattern).**
+
+The rename helper performs bidirectional rewriting (LHS and RHS of a
+narrative arrow both get rewritten to the canonical form), which produces
+nonsense like `` `docs/decisions/` → `docs/decisions/` ``. The 008-03 spec
+itself called this out and instructed a manual audit. The first audit pass
+missed multiple instances because:
+
+- `grep` for `docs/adrs/` only finds surviving legacy mentions, NOT the
+  collapsed forms.
+- The collapsed form looks structurally OK at a glance (it's still a
+  markdown link or code span), but is semantically null.
+
+The detection one-liner that would have caught all of these in one shot:
+`grep -rnE "docs/decisions/.*→.*docs/decisions/" --include='*.md'` plus
+the analogous one for bare-number filenames. Recording this here so a
+future migrate-on-jig-clone slice doesn't repeat the audit miss.
+
+**8. Reconciliation discipline note (lesson from spec 009).**
+
+The "Reconciliation review pass" DoD checkbox stays unticked until the
+reconciliation reviewer returns `pass`. The status-board regen + CLAUDE.md
+update boxes live in the "Close-out (post-DONE)" subsection so they don't
+false-positive-block `slice-land`'s DoD check.
 
 ---
 

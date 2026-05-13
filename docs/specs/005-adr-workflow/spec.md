@@ -11,7 +11,7 @@ tier: 1
 Introduce `adr-workflow` — the first Tier 1 skill — to codify how ADRs are
 written, accepted, indexed, and linked back to the deferred decisions they
 resolve. Today the steps are entirely manual: pick a number, copy the section
-shape from a prior ADR, edit `docs/adrs/README.md`'s Index by hand, and
+shape from a prior ADR, edit `docs/decisions/README.md`'s Index by hand, and
 (when applicable) strike through the matching entry in `docs/refinement-todo.md`
 with a "Resolved by:" link. Two ADRs in, the pattern is clear enough to
 codify without locking in premature design.
@@ -24,7 +24,7 @@ new. We are creating `skills/adr-workflow/` from scratch.
 - **The pattern is dogfooded.** ADR-0001 (scaffold-stable trigger) and ADR-0002
   (contracts stays deferred) were both written by hand, with identical shape
   (Status / Context / Decision Options Considered / Recommended Decision /
-  Consequences / Open questions). The format spec in `docs/adrs/README.md`
+  Consequences / Open questions). The format spec in `docs/decisions/README.md`
   matches what was actually written. There is nothing left to discover about
   what an ADR looks like in jig.
 - **The refinement-todo integration is a real value lever.** ADR-0001's
@@ -49,7 +49,7 @@ new. We are creating `skills/adr-workflow/` from scratch.
 |---|---|---|
 | P — Path | New-ADR vs. supersede-existing-ADR vs. amend (forbidden — ADRs immutable). | New-ADR is the only path this slice covers. Supersede is a separate slice (005-02, deferred). |
 | I — Interface | One helper script (`adr.py`) + SKILL.md, or split into multiple helpers? | One helper, four subcommands. Matches the `scaffold.py` / `memory.py` / `workflow.py` / `review.py` pattern. |
-| D — Data | Inline ADR skeleton in `adr.py`, or external template file under `templates/docs/adrs/`? | External template file. Matches how other docs are templated; lets users tweak the skeleton in their own projects without touching the helper. |
+| D — Data | Inline ADR skeleton in `adr.py`, or external template file under `templates/docs/decisions/`? | External template file. Matches how other docs are templated; lets users tweak the skeleton in their own projects without touching the helper. |
 | R — Rules | Status state machine (Proposed → Accepted; Accepted → Superseded). Immutability after Accepted. Auto-numbering. | This slice enforces the Proposed → Accepted transition and the numbering. Supersede is deferred to 005-02. |
 | S — Spike | None required — two existing ADRs document the full target shape. | — |
 
@@ -69,23 +69,23 @@ new. We are creating `skills/adr-workflow/` from scratch.
 **STATUS: DONE**
 
 **Goal:** `adr.py` helper that scaffolds a new ADR file from a template,
-accepts (status-transitions) it, regenerates `docs/adrs/README.md`'s Index,
+accepts (status-transitions) it, regenerates `docs/decisions/README.md`'s Index,
 and resolves a matching entry in `docs/refinement-todo.md`. New
 `skills/adr-workflow/SKILL.md` with active frontmatter (no
 `disable-model-invocation`) wires it into the auto-trigger surface.
 
 **DoR:**
 - No prior slice dependency — this is the first slice of a new skill.
-- ✅ `docs/adrs/` exists with README.md + two reference ADRs (0001, 0002).
+- ✅ `docs/decisions/` exists with README.md + two reference ADRs (0001, 0002).
 - ✅ `docs/refinement-todo.md` exists with one already-resolved entry
   (the scaffold-stable trigger) demonstrating the target strikethrough
   format.
-- ✅ Format spec in `docs/adrs/README.md` names the required sections.
+- ✅ Format spec in `docs/decisions/README.md` names the required sections.
 
 **Acceptance Criteria:**
 
 1. **`adr.py new <slug> [--title "<Title>"]`** creates
-   `docs/adrs/NNNN-<slug>.md` where:
+   `docs/decisions/NNNN-<slug>.md` where:
    - `NNNN` is auto-numbered: max existing `NNNN-*.md` index + 1, zero-padded
      to 4 digits. (`0001`, `0002` exist → next is `0003`.)
    - File contains the standard sections in order: `# ADR-NNNN: <Title>`,
@@ -102,7 +102,7 @@ and resolves a matching entry in `docs/refinement-todo.md`. New
 
 2. **`adr.py accept <NNNN>`** flips the Status from `Proposed (YYYY-MM-DD)`
    to `Accepted (YYYY-MM-DD)` (today's date), in
-   `docs/adrs/NNNN-<slug>.md`.
+   `docs/decisions/NNNN-<slug>.md`.
    - Locates the ADR by `NNNN-` prefix (zero-padded match) — refuses with
      exit 2 if no match or multiple matches.
    - Refuses with exit 2 if Status is not currently `Proposed` (covers
@@ -147,7 +147,7 @@ and resolves a matching entry in `docs/refinement-todo.md`. New
      index / resolve-todo, each with the bash invocation) / Immutability
      rule (no editing accepted ADRs — supersede instead) / Gotchas.
 
-6. **`templates/docs/adrs/0000-template.md`** is added, holding the
+6. **`templates/docs/decisions/adr-0000-template.md`** is added, holding the
    skeleton `adr.py new` clones. The helper substitutes `{{NUMBER}}`,
    `{{TITLE}}`, `{{DATE}}` placeholders. This keeps the skeleton tweakable
    without re-shipping `adr.py`.
@@ -200,7 +200,7 @@ The original spec is preserved above.
 
 3. **Slug validation added beyond the spec.** `cmd_new` rejects slugs that don't match `^[a-z0-9][a-z0-9-]*$` with exit 2. The spec didn't require slug validation, but invalid slugs would create broken filenames (paths with spaces, leading hyphens, uppercase). Defensive guard. Tested in `NewTests`.
 
-4. **Extra realism test for `index`.** `IndexTests.test_index_handles_real_adrs_in_repo` copies the real `0001-scaffold-stable.md` and `0002-contracts-stays-deferred.md` into a temp dir and asserts the index regen produces well-formed bullets with truncated descriptions. Not strictly required by AC #3, but plan.md's "Risks" section flagged that real-world Context paragraphs would produce ugly descriptions if not truncated; this test pins the truncation behavior against actual jig fixtures.
+4. **Extra realism test for `index`.** `IndexTests.test_index_handles_real_adrs_in_repo` copies the real `adr-0001-scaffold-stable.md` and `adr-0002-contracts-stays-deferred.md` into a temp dir and asserts the index regen produces well-formed bullets with truncated descriptions. Not strictly required by AC #3, but plan.md's "Risks" section flagged that real-world Context paragraphs would produce ugly descriptions if not truncated; this test pins the truncation behavior against actual jig fixtures.
 
 **Reviewer-flagged minor notes (accepted as-is):**
 
@@ -217,7 +217,7 @@ The original spec is preserved above.
 
 **Doc updates from this slice:**
 
-- `templates/docs/adrs/0000-template.md`: new file, holds the ADR skeleton with `{{NUMBER}}`/`{{TITLE}}`/`{{DATE}}` placeholders.
+- `templates/docs/decisions/adr-0000-template.md`: new file, holds the ADR skeleton with `{{NUMBER}}`/`{{TITLE}}`/`{{DATE}}` placeholders.
 - `skills/adr-workflow/SKILL.md`: net-new file (not a stub promotion). Frontmatter active; description triggers on "ADR", "decision", "resolve", "supersede".
 - `skills/adr-workflow/adr.py` + `test_adr.py`: net-new helper + 46 tests.
 - `docs/specs/README.md`: regenerated by `workflow.py status-board`.

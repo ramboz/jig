@@ -17,7 +17,7 @@
     "skills/migrate/fixtures/greenfield/README.md",
     "skills/migrate/fixtures/partial/docs/workflow.md",
     "skills/migrate/fixtures/partial/docs/architecture.md",
-    "skills/migrate/fixtures/conflict/docs/adrs/0001-foo.md",
+    "skills/migrate/fixtures/conflict/docs/decisions/0001-foo.md",
     "skills/migrate/fixtures/conflict/docs/decisions/adr-0001-foo.md",
     "skills/migrate/fixtures/conflict/docs/workflow.md",
     "skills/migrate/fixtures/conflict/docs/architecture.md"

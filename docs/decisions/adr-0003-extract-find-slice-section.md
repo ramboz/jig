@@ -6,7 +6,7 @@ Accepted (2026-05-12)
 
 ## Context
 
-[ADR-0002](0002-contracts-stays-deferred.md) named "first time jig has three callers
+[ADR-0002](adr-0002-contracts-stays-deferred.md) named "first time jig has three callers
 that need the same helper" as the trigger to extract `skills/_common/<module>.py`.
 
 That trigger has fired. Three helpers ([workflow.py](../../skills/spec-workflow/workflow.py),

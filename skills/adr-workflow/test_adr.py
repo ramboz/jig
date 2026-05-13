@@ -18,7 +18,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ADR_PY = REPO_ROOT / "skills" / "adr-workflow" / "adr.py"
 SKILL_MD = REPO_ROOT / "skills" / "adr-workflow" / "SKILL.md"
-TEMPLATE = REPO_ROOT / "templates" / "docs" / "adrs" / "0000-template.md"
+TEMPLATE = (
+    REPO_ROOT / "templates" / "docs" / "decisions" / "adr-0000-template.md"
+)
 
 TODAY = date.today().strftime("%Y-%m-%d")
 
@@ -49,15 +51,16 @@ def write_sample_adr(path: Path, number: str, slug: str, title: str,
 
 
 def write_sample_readme(path: Path) -> None:
-    """Write a docs/adrs/README.md with the canonical jig sections."""
+    """Write a docs/decisions/README.md with the canonical jig sections."""
     path.write_text(
-        "# ADRs\n\n"
+        "# Decisions\n\n"
         "> Architectural Decision Records. Nygard convention: immutable after acceptance.\n"
         "> New decisions supersede old ones — never edit an accepted ADR.\n\n"
         "## Index\n\n"
         "_No ADRs yet._\n\n"
         "## Format\n\n"
-        "Each ADR lives at `docs/adrs/NNNN-<slug>.md`. Title: `# ADR-NNNN: <Title>`.\n\n"
+        "Each ADR lives at `docs/decisions/adr-NNNN-<slug>.md`. "
+        "Title: `# ADR-NNNN: <Title>`.\n\n"
         "Required sections: Status, Context, Decision Options Considered, Recommended Decision, Consequences.\n\n"
         "## When to write an ADR\n\n"
         "- Hard-to-reverse decisions\n"
@@ -81,7 +84,8 @@ def write_refinement_todo(path: Path) -> None:
         "## Operations\n\n"
         "### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12\n"
         "~~**Deferred:** The mechanism to flip docs from `Draft` to `Stable` is described but not implemented.~~\n"
-        "**Resolved by:** [ADR-0001: scaffold-stable trigger](adrs/0001-scaffold-stable.md).\n\n"
+        "**Resolved by:** [ADR-0001: scaffold-stable trigger]"
+        "(decisions/adr-0001-scaffold-stable.md).\n\n"
         "### Decision: Scaffold.json manifest format\n"
         "**Deferred:** The schema is undefined.\n"
         "**Resolution trigger:** Slice 001-01 implementer defines schema.\n"
@@ -94,7 +98,7 @@ class NewTests(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-new-")
-        self.adrs_dir = Path(self.tmpdir) / "docs" / "adrs"
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
 
@@ -102,39 +106,39 @@ class NewTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_auto_number_starts_at_0001(self):
-        """Empty docs/adrs/ → first ADR numbered 0001."""
+        """Empty docs/decisions/ → first ADR numbered 0001."""
         result = run_adr("new", "first-decision", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        adr_path = self.adrs_dir / "0001-first-decision.md"
+        adr_path = self.adrs_dir / "adr-0001-first-decision.md"
         self.assertTrue(adr_path.is_file(), f"expected file not created: {adr_path}")
 
     def test_auto_number_increments(self):
         """Existing 0001, 0002 → next is 0003."""
-        write_sample_adr(self.adrs_dir / "0001-foo.md", "0001", "foo", "Foo")
-        write_sample_adr(self.adrs_dir / "0002-bar.md", "0002", "bar", "Bar")
+        write_sample_adr(self.adrs_dir / "adr-0001-foo.md", "0001", "foo", "Foo")
+        write_sample_adr(self.adrs_dir / "adr-0002-bar.md", "0002", "bar", "Bar")
         result = run_adr("new", "baz", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        self.assertTrue((self.adrs_dir / "0003-baz.md").is_file())
+        self.assertTrue((self.adrs_dir / "adr-0003-baz.md").is_file())
 
     def test_auto_number_skips_gap_uses_max_plus_one(self):
         """Gap (0001, 0003) → next is 0004 (max + 1, no gap filling)."""
-        write_sample_adr(self.adrs_dir / "0001-foo.md", "0001", "foo", "Foo")
-        write_sample_adr(self.adrs_dir / "0003-baz.md", "0003", "baz", "Baz")
+        write_sample_adr(self.adrs_dir / "adr-0001-foo.md", "0001", "foo", "Foo")
+        write_sample_adr(self.adrs_dir / "adr-0003-baz.md", "0003", "baz", "Baz")
         result = run_adr("new", "qux", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        self.assertTrue((self.adrs_dir / "0004-qux.md").is_file())
-        self.assertFalse((self.adrs_dir / "0002-qux.md").is_file())
+        self.assertTrue((self.adrs_dir / "adr-0004-qux.md").is_file())
+        self.assertFalse((self.adrs_dir / "adr-0002-qux.md").is_file())
 
     def test_boundary_auto_number(self):
         """Last existing ADR 0099 → next is 0100 (per DoD)."""
-        write_sample_adr(self.adrs_dir / "0099-old.md", "0099", "old", "Old")
+        write_sample_adr(self.adrs_dir / "adr-0099-old.md", "0099", "old", "Old")
         result = run_adr("new", "centenary", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        self.assertTrue((self.adrs_dir / "0100-centenary.md").is_file())
+        self.assertTrue((self.adrs_dir / "adr-0100-centenary.md").is_file())
 
     def test_slug_collision_refused(self):
         """Existing NNNN-<slug>.md with any number → refuse new <slug> with exit 2."""
-        write_sample_adr(self.adrs_dir / "0001-taken.md", "0001", "taken", "Taken")
+        write_sample_adr(self.adrs_dir / "adr-0001-taken.md", "0001", "taken", "Taken")
         result = run_adr("new", "taken", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 2, f"stdout: {result.stdout} stderr: {result.stderr}")
         self.assertIn("slug", result.stderr.lower())
@@ -145,13 +149,13 @@ class NewTests(unittest.TestCase):
         result = run_adr("new", "first", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         # Must be 0001, not numbered by counting README.
-        self.assertTrue((self.adrs_dir / "0001-first.md").is_file())
+        self.assertTrue((self.adrs_dir / "adr-0001-first.md").is_file())
 
     def test_default_title_title_cased_from_slug(self):
         """Slug `my-decision` → default title `My Decision`."""
         result = run_adr("new", "my-decision", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        content = (self.adrs_dir / "0001-my-decision.md").read_text()
+        content = (self.adrs_dir / "adr-0001-my-decision.md").read_text()
         self.assertIn("# ADR-0001: My Decision", content)
 
     def test_explicit_title_used(self):
@@ -159,14 +163,14 @@ class NewTests(unittest.TestCase):
         result = run_adr("new", "thing", "--title", "Custom Title Here",
                          cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        content = (self.adrs_dir / "0001-thing.md").read_text()
+        content = (self.adrs_dir / "adr-0001-thing.md").read_text()
         self.assertIn("# ADR-0001: Custom Title Here", content)
 
     def test_file_has_all_six_sections_in_order(self):
         """All six sections present, in the canonical order."""
         result = run_adr("new", "ordered", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
-        content = (self.adrs_dir / "0001-ordered.md").read_text()
+        content = (self.adrs_dir / "adr-0001-ordered.md").read_text()
         positions = [
             content.index("# ADR-0001:"),
             content.index("## Status"),
@@ -183,14 +187,14 @@ class NewTests(unittest.TestCase):
         """Status body is 'Proposed (YYYY-MM-DD)' with today's date."""
         result = run_adr("new", "dated", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
-        content = (self.adrs_dir / "0001-dated.md").read_text()
+        content = (self.adrs_dir / "adr-0001-dated.md").read_text()
         self.assertIn(f"Proposed ({TODAY})", content)
 
     def test_prints_created_path_to_stdout(self):
         """The created path is printed to stdout. Exit 0."""
         result = run_adr("new", "printable", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
-        self.assertIn("0001-printable.md", result.stdout)
+        self.assertIn("adr-0001-printable.md", result.stdout)
 
 
 # ---------- AcceptTests (AC #2) ----------
@@ -199,11 +203,11 @@ class AcceptTests(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-accept-")
-        self.adrs_dir = Path(self.tmpdir) / "docs" / "adrs"
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
         # Proposed ADR seed.
-        write_sample_adr(self.adrs_dir / "0001-proposed-thing.md",
+        write_sample_adr(self.adrs_dir / "adr-0001-proposed-thing.md",
                          "0001", "proposed-thing", "Proposed Thing",
                          status="Proposed")
 
@@ -214,7 +218,7 @@ class AcceptTests(unittest.TestCase):
         """Happy path: Proposed → Accepted with today's date."""
         result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        content = (self.adrs_dir / "0001-proposed-thing.md").read_text()
+        content = (self.adrs_dir / "adr-0001-proposed-thing.md").read_text()
         self.assertIn(f"Accepted ({TODAY})", content)
         self.assertNotIn(f"Proposed ({TODAY})", content)
 
@@ -230,7 +234,7 @@ class AcceptTests(unittest.TestCase):
         sharing the prefix bytes (extra-suffix copy) must produce exit 2."""
         # Create a second file with the same 0001 prefix; the prefix-match
         # scan should see both and refuse.
-        write_sample_adr(self.adrs_dir / "0001-duplicate-clone.md",
+        write_sample_adr(self.adrs_dir / "adr-0001-duplicate-clone.md",
                          "0001", "duplicate-clone", "Dup Clone",
                          status="Proposed")
         result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
@@ -257,7 +261,7 @@ class AcceptTests(unittest.TestCase):
         Regression guard: a previous `\\s*$` regex ate the trailing newline
         and glued `Accepted (date)` directly to `## Decision Options...`."""
         run_adr("accept", "0001", cwd=Path(self.tmpdir))
-        content = (self.adrs_dir / "0001-proposed-thing.md").read_text()
+        content = (self.adrs_dir / "adr-0001-proposed-thing.md").read_text()
         # Status body line must be on its own line; next section must follow a
         # blank line, not be glued.
         self.assertRegex(
@@ -268,7 +272,7 @@ class AcceptTests(unittest.TestCase):
     def test_accept_prints_path_to_stdout(self):
         result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
-        self.assertIn("0001-proposed-thing.md", result.stdout)
+        self.assertIn("adr-0001-proposed-thing.md", result.stdout)
 
 
 # ---------- IndexTests (AC #3) ----------
@@ -277,7 +281,7 @@ class IndexTests(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-index-")
-        self.adrs_dir = Path(self.tmpdir) / "docs" / "adrs"
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
 
@@ -295,9 +299,9 @@ class IndexTests(unittest.TestCase):
 
     def test_index_regen_two_adrs_sorted(self):
         """Two ADRs → two entries, sorted ascending by NNNN."""
-        write_sample_adr(self.adrs_dir / "0002-beta.md", "0002", "beta", "Beta",
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta", "Beta",
                          context="Beta does a thing.")
-        write_sample_adr(self.adrs_dir / "0001-alpha.md", "0001", "alpha", "Alpha",
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha", "Alpha",
                          context="Alpha does another thing.")
         result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
@@ -310,19 +314,19 @@ class IndexTests(unittest.TestCase):
 
     def test_index_emits_canonical_bullet_format(self):
         """Bullet line: `- [ADR-NNNN: <Title>](NNNN-<slug>.md) — <desc> (<date>, <Status>)`."""
-        write_sample_adr(self.adrs_dir / "0001-alpha.md", "0001", "alpha", "Alpha",
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha", "Alpha",
                          status="Accepted", context="Alpha context one-liner.")
         result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
         content = (self.adrs_dir / "README.md").read_text()
         self.assertIn(
-            f"- [ADR-0001: Alpha](0001-alpha.md) — Alpha context one-liner. ({TODAY}, Accepted)",
+            f"- [ADR-0001: Alpha](adr-0001-alpha.md) — Alpha context one-liner. ({TODAY}, Accepted)",
             content,
         )
 
     def test_index_idempotent(self):
         """Re-running on a current README produces byte-identical output."""
-        write_sample_adr(self.adrs_dir / "0001-alpha.md", "0001", "alpha", "Alpha",
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha", "Alpha",
                          context="Alpha context.")
         run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
         first = (self.adrs_dir / "README.md").read_text()
@@ -332,11 +336,11 @@ class IndexTests(unittest.TestCase):
 
     def test_index_preserves_outside_content(self):
         """Header, Format, When-to-write sections must survive regen."""
-        write_sample_adr(self.adrs_dir / "0001-alpha.md", "0001", "alpha", "Alpha")
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha", "Alpha")
         result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
         content = (self.adrs_dir / "README.md").read_text()
-        self.assertIn("# ADRs", content)
+        self.assertIn("# Decisions", content)
         self.assertIn("## Format", content)
         self.assertIn("## When to write an ADR", content)
         self.assertIn("Hard-to-reverse decisions", content)
@@ -348,7 +352,7 @@ class IndexTests(unittest.TestCase):
             "ADR-0001's first sentence ends here. Then another sentence "
             "that should not appear in the index line because we truncate at the first period."
         )
-        write_sample_adr(self.adrs_dir / "0001-longctx.md", "0001", "longctx", "LongCtx",
+        write_sample_adr(self.adrs_dir / "adr-0001-longctx.md", "0001", "longctx", "LongCtx",
                          context=long_ctx)
         result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
@@ -367,12 +371,13 @@ class IndexTests(unittest.TestCase):
     def test_index_handles_real_adrs_in_repo(self):
         """Realism check: real jig ADRs (0001, 0002) produce a clean line each.
         Read them from the repo and synthesize a sandbox to regen against."""
-        real_dir = REPO_ROOT / "docs" / "adrs"
-        if not (real_dir / "0001-scaffold-stable.md").is_file():
+        real_dir = REPO_ROOT / "docs" / "decisions"
+        if not (real_dir / "adr-0001-scaffold-stable.md").is_file():
             self.skipTest("real ADR-0001 not present; skipping realism check")
         # Copy real ADRs + a synthesized README into sandbox.
-        shutil.copy(real_dir / "0001-scaffold-stable.md", self.adrs_dir)
-        shutil.copy(real_dir / "0002-contracts-stays-deferred.md", self.adrs_dir)
+        shutil.copy(real_dir / "adr-0001-scaffold-stable.md", self.adrs_dir)
+        shutil.copy(real_dir / "adr-0002-contracts-stays-deferred.md",
+                    self.adrs_dir)
         result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         content = (self.adrs_dir / "README.md").read_text()
@@ -393,14 +398,14 @@ class ResolveTodoTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-resolve-")
         self.docs = Path(self.tmpdir) / "docs"
-        self.adrs_dir = self.docs / "adrs"
+        self.adrs_dir = self.docs / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
         # Accepted ADR for happy path.
-        write_sample_adr(self.adrs_dir / "0001-hooks.md", "0001", "hooks", "Hooks Decision",
+        write_sample_adr(self.adrs_dir / "adr-0001-hooks.md", "0001", "hooks", "Hooks Decision",
                          status="Accepted")
         # Proposed ADR for not-accepted refusal.
-        write_sample_adr(self.adrs_dir / "0002-proposed.md", "0002", "proposed", "Proposed",
+        write_sample_adr(self.adrs_dir / "adr-0002-proposed.md", "0002", "proposed", "Proposed",
                          status="Proposed")
         self.todo = self.docs / "refinement-todo.md"
         write_refinement_todo(self.todo)
@@ -419,7 +424,7 @@ class ResolveTodoTests(unittest.TestCase):
             content,
         )
         self.assertIn(
-            "**Resolved by:** [ADR-0001: Hooks Decision](adrs/0001-hooks.md).",
+            "**Resolved by:** [ADR-0001: Hooks Decision](decisions/adr-0001-hooks.md).",
             content,
         )
 

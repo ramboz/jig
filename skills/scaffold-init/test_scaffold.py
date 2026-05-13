@@ -64,7 +64,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "docs/memory/learnings.md",
             "docs/memory/tooling.md",
             "docs/specs/README.md",
-            "docs/adrs/README.md",
+            "docs/decisions/README.md",
         ]
         for rel in expected:
             path = self.target / rel

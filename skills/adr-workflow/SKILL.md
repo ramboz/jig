@@ -4,7 +4,7 @@ description: >
   Scaffold, accept, index, and link Architectural Decision Records (ADRs).
   Use when the user says "write an ADR", "record this decision", "resolve
   [deferred item] with an ADR", "supersede ADR-NNNN", or otherwise wants to
-  capture a hard-to-reverse decision in `docs/adrs/`. Also use when a
+  capture a hard-to-reverse decision in `docs/decisions/`. Also use when a
   refinement-todo entry needs to be marked RESOLVED with a link back to the
   ADR. Do NOT use for ad-hoc design discussion that hasn't crystallized into
   a decision yet — wait until the choice is firm.
@@ -19,11 +19,11 @@ user-invocable: true
 Codifies the ADR lifecycle that ADR-0001 and ADR-0002 were written by hand to
 exercise. Four deterministic operations:
 
-- **`new`** — scaffold `docs/adrs/NNNN-<slug>.md` from the template, with
+- **`new`** — scaffold `docs/decisions/adr-NNNN-<slug>.md` from the template, with
   auto-numbering and a slug-collision check.
 - **`accept`** — flip Status from `Proposed (YYYY-MM-DD)` to
   `Accepted (YYYY-MM-DD)`. Atomic write.
-- **`index`** — regenerate the `## Index` section of `docs/adrs/README.md`
+- **`index`** — regenerate the `## Index` section of `docs/decisions/README.md`
   from the actual ADR files present. Idempotent.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
   `docs/refinement-todo.md` and append `**Resolved by:** [ADR-NNNN: ...](...)`.
@@ -41,7 +41,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" new <slug> \
   --title "<Title>"
 ```
 
-Run from the project root (the script looks for `./docs/adrs/`). The slug is
+Run from the project root (the script looks for `./docs/decisions/`). The slug is
 kebab-case (`my-decision`). `--title` is optional — defaults to the
 title-cased slug.
 
@@ -62,11 +62,11 @@ already Accepted (ADRs are immutable; supersede instead — see below).
 ### 3. Regenerate the index
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" index docs/adrs
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" index docs/decisions
 ```
 
-Reads every `NNNN-*.md` (skipping `README.md`) and rewrites only the
-`## Index` section of `docs/adrs/README.md`. Everything else in the README
+Reads every `adr-NNNN-*.md` (skipping `README.md`) and rewrites only the
+`## Index` section of `docs/decisions/README.md`. Everything else in the README
 (header, format spec, "When to write" section) is preserved. Re-running on a
 current README is a no-op.
 
@@ -86,7 +86,7 @@ The fragment is a case-insensitive substring (same lenient style as
 - wraps the heading line in `~~strikethrough~~`,
 - appends ` — RESOLVED YYYY-MM-DD`,
 - wraps the first `**Deferred:**` line in strikethrough,
-- appends a `**Resolved by:** [ADR-NNNN: ...](adrs/...)` line at the end of
+- appends a `**Resolved by:** [ADR-NNNN: ...](decisions/adr-...)` line at the end of
   the section.
 
 Refuses (exit 2) if the fragment is ambiguous, the section is already struck
@@ -116,7 +116,7 @@ manual recipe above.
 
 # 2. Scaffold the ADR.
 python3 .../adr.py new scaffold-stable --title "scaffold-stable trigger"
-# → docs/adrs/0003-scaffold-stable.md
+# → docs/decisions/adr-0003-scaffold-stable.md
 
 # 3. Claude edits the file: fills Context, Options, Recommended, Consequences.
 
@@ -125,7 +125,7 @@ python3 .../adr.py accept 0003
 # → flips Proposed → Accepted (today).
 
 # 5. Regen the index.
-python3 .../adr.py index docs/adrs
+python3 .../adr.py index docs/decisions
 
 # 6. Mark the refinement-todo entry resolved.
 python3 .../adr.py resolve-todo 0003 "scaffold-stable"
@@ -136,7 +136,7 @@ python3 .../adr.py resolve-todo 0003 "scaffold-stable"
 - **Auto-numbering does not fill gaps.** If `0001` and `0003` exist (no
   `0002`), the next new ADR is `0004`. The gap is preserved as historical
   record.
-- **Slug collisions refuse regardless of number.** `0001-foo.md` exists →
+- **Slug collisions refuse regardless of number.** `adr-0001-foo.md` exists →
   `adr.py new foo` exits 2. Either pick a different slug or write a
   superseding ADR.
 - **resolve-todo touches only three lines.** Heading, first `**Deferred:**`

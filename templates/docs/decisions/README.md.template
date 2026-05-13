@@ -1,4 +1,4 @@
-# ADRs
+# Decisions
 
 > Status: Draft (wizard-generated)
 >
@@ -11,7 +11,7 @@ _No ADRs yet. First ADR will be written when the first architectural decision is
 
 ## Format
 
-Each ADR lives at `docs/adrs/NNNN-<slug>.md`. Title: `# ADR-NNNN: <Title>`.
+Each ADR lives at `docs/decisions/adr-NNNN-<slug>.md`. Title: `# ADR-NNNN: <Title>`.
 
 Required sections: Status, Context, Decision Options Considered, Recommended Decision, Consequences.
 

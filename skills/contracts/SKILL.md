@@ -9,7 +9,7 @@ disable-model-invocation: true
 user-invocable: true
 ---
 
-> **Status: Deliberate stub — see [ADR-0002](../../docs/adrs/0002-contracts-stays-deferred.md).**
+> **Status: Deliberate stub — see [ADR-0002](../../docs/decisions/adr-0002-contracts-stays-deferred.md).**
 >
 > This skill is **not** half-built or in progress. It is deliberately not
 > implemented yet because jig itself has no real module-boundary coupling to

@@ -68,7 +68,7 @@ answers when the user is unsure.
 
 After running, the target directory contains:
 - `CLAUDE.md` (with Hot Cache section, project name substituted)
-- `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, adrs/)
+- `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
 - `.claude/hooks/` (empty — project-specific gates can go here)
 - `scaffold.json` (install-state manifest)
 
