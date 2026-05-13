@@ -1,32 +1,30 @@
 """
-jig migrate helper — slice 008-01 (migrate-report)
+jig migrate helper — slices 008-01 (report) and 008-02 (rename-decisions)
 
-Read-only inventory + mapping report for an existing project considering
-jig adoption. Mirrors the workflow.py / review.py / adr.py / tdd.py /
-land.py shape: SKILL.md drives judgment; this script does filesystem
-walk + report generation. NO filesystem mutations whatsoever.
+`report` is read-only. `rename-decisions` is the first mutating subcommand;
+its code path is partitioned below `SAFETY_SENTINEL` so the safety regex
+sweep in `test_migrate.py` can verify the report path stays pure-read.
 
-One subcommand:
+Subcommands:
     python3 migrate.py report <project-dir>
+    python3 migrate.py rename-decisions <project-dir> [--dry-run]
 
-The report has five sections in fixed order:
-    Inventory   — what's present (paths + counts + shape notes)
-    Mapping     — current path/name → jig path/name translations
-    Conflicts   — situations that block migration
-    Ambiguities — judgment calls the user must make
-    Operations  — suggested next migrate.py subcommand invocations
-
-Exit codes:
+Report exit codes:
     0 — adoptable verdict OR not-yet-spec-driven (report is the deliverable)
     1 — partial verdict (informational; report still emits)
     2 — user error (missing dir, dir not readable, dir is not a directory)
 
-Future subcommands (slice 008-02 and later):
-    rename-decisions   — apply ADR-0004 rename
+Rename-decisions exit codes:
+    0 — applied OR nothing-to-do (already aligned)
+    2 — user error (missing dir, conflict, collision)
+
+Future subcommands (008-04 and later):
     slice-to-spec      — synthesize parent specs from milestones
 """
 
 import argparse
+import dataclasses
+import os
 import re
 import sys
 from pathlib import Path
@@ -536,13 +534,419 @@ def report(project_dir: Path) -> tuple:
     return text, 0
 
 
+# ---------- BEGIN MUTATING CODE PATH (rename-decisions) ----------
+#
+# Everything below this sentinel is allowed to mutate the filesystem.
+# test_migrate.py's SafetyTests scan only the region above this line for
+# write/rename/replace/unlink/mkdir/open-for-write calls. The report
+# subcommand stays read-only; rename-decisions necessarily writes.
+
+
+# Text-file extensions in scope for cross-reference rewriting. Files
+# without an extension are heuristically scanned via UTF-8 decode of the
+# first 4KB; binary files are skipped.
+_TEXT_EXTENSIONS = frozenset({
+    ".md", ".py", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg",
+    ".ini", ".sh", ".html", ".css", ".js", ".ts",
+})
+
+# Path components and substrings that are skipped during cross-reference
+# scanning. Skipping `.git` is critical — git's loose-object store
+# routinely contains bytes that decode as text and would otherwise be
+# corrupted by a substitution. `worktrees` is here because both jig and
+# the validator use `.claude/worktrees/<name>/` for parallel git
+# checkouts; treating a worktree as in-scope would rewrite a sibling
+# branch's working tree, which is never what the user wants.
+_SKIP_PATH_NAMES = frozenset({
+    ".git", "node_modules", ".venv", "venv", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".tox", "dist", "build",
+    ".next", ".cache", "worktrees",
+})
+
+# Max bytes to read when sniffing an extension-less file for textness.
+_TEXT_SNIFF_BYTES = 4096
+
+# Recognize ADR filenames. `(adr-)?` captures whether the file already has
+# the canonical prefix; `(\d{3,4})` captures the number (3 or 4 digit
+# only — sub-3-digit / 5+ digit are left untouched per AC #5).
+_ADR_NAME_RE = re.compile(r"^(adr-)?(\d{3,4})(-[^/]+)\.md$")
+
+
+@dataclasses.dataclass(frozen=True)
+class DirRename:
+    """Rename of `<project>/docs/adrs/` → `<project>/docs/decisions/`."""
+    src: Path
+    dst: Path
+
+
+@dataclasses.dataclass(frozen=True)
+class FileRename:
+    """Rename of one ADR file. Source path is given relative to the
+    POST-dir-rename location (i.e. `<project>/docs/decisions/...`)
+    so a stale `docs/adrs/...` Path never escapes the planner."""
+    src: Path
+    dst: Path
+
+
+@dataclasses.dataclass(frozen=True)
+class CrossRefRewrite:
+    """One file whose content will be rewritten. `count` is the number of
+    substitutions found at plan time (cosmetic — used for the summary
+    line). The actual write re-reads at apply time."""
+    path: Path
+    count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class RenamePlan:
+    dir_rename: 'DirRename | None'
+    file_renames: tuple  # tuple[FileRename, ...]
+    cross_ref_rewrites: tuple  # tuple[CrossRefRewrite, ...]
+
+    def is_empty(self) -> bool:
+        return (self.dir_rename is None
+                and not self.file_renames
+                and not self.cross_ref_rewrites)
+
+
+def _normalize_adr_filename(name: str) -> 'str | None':
+    """Return the canonical `adr-NNNN-<slug>.md` form for `name`, or
+    None if `name` cannot be normalized (sub-3-digit prefix, 5+ digit
+    prefix, or a non-ADR filename like a quarterly review log).
+
+    Returns the input unchanged if it is already canonical."""
+    m = _ADR_NAME_RE.match(name)
+    if not m:
+        return None
+    _, digits, rest = m.groups()
+    padded = digits.zfill(4)
+    return f"adr-{padded}{rest}.md"
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """POSIX-atomic write via `<path>.tmp` + `os.replace`. Same shape as
+    `adr.py`'s helper."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content)
+    os.replace(tmp, path)
+
+
+def _is_text_path(path: Path) -> bool:
+    """Decide whether `path` should be scanned for cross-references."""
+    if path.suffix.lower() in _TEXT_EXTENSIONS:
+        return True
+    # Extension-less / unknown — sniff first chunk for textness.
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(_TEXT_SNIFF_BYTES)
+    except (OSError, PermissionError):
+        return False
+    if not head:
+        return True  # Empty file — treat as text (no harm).
+    if b"\x00" in head:
+        return False
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def _should_skip_dir(path: Path) -> bool:
+    """True iff `path` (a directory) is on the skip list."""
+    return path.name in _SKIP_PATH_NAMES
+
+
+def _walk_text_files(project_dir: Path) -> list:
+    """Yield text files under `project_dir/docs/`, `project_dir/CLAUDE.md`,
+    and `project_dir/.claude/`. Honors `_SKIP_PATH_NAMES`."""
+    out = []
+
+    def _walk(root: Path):
+        if not root.is_dir():
+            return
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir():
+                if _should_skip_dir(entry):
+                    continue
+                _walk(entry)
+                continue
+            if not entry.is_file():
+                continue
+            if not _is_text_path(entry):
+                continue
+            out.append(entry)
+
+    _walk(project_dir / "docs")
+    claude_md = project_dir / "CLAUDE.md"
+    if claude_md.is_file() and _is_text_path(claude_md):
+        out.append(claude_md)
+    _walk(project_dir / ".claude")
+    return out
+
+
+def _is_helper_or_fixture(path: Path) -> bool:
+    """True iff `path` is migrate.py / test_migrate.py / a fixture file.
+    These must never be rewritten by the helper itself — they contain the
+    canonical patterns and sample paths.
+
+    The check is by absolute path comparison against this module's own
+    location. If the helper is being run on its own repo, the check
+    excludes the helper's own files."""
+    helper_root = Path(__file__).resolve().parent
+    try:
+        path.resolve().relative_to(helper_root)
+        return True
+    except ValueError:
+        return False
+
+
+def _apply_substitutions(text: str, old_dir: str, new_dir: str,
+                         name_map: dict) -> 'tuple[str, int]':
+    """Two-step substitution per AC #6.
+
+    (a) `old_dir` → `new_dir` (literal). Skipped when they're identical
+        (i.e. the source dir is already `docs/decisions/`).
+    (b) For each renamed file, its old name → new name, but only when
+        the match is NOT already preceded by `adr-`. The negative
+        lookbehind is the fix for the greedy-substring bug surfaced in
+        review: a file containing both legacy (`docs/adrs/0001-foo.md`)
+        and already-canonical (`docs/decisions/adr-0001-foo.md`)
+        references would otherwise produce `adr-adr-0001-foo.md` on
+        the canonical occurrence — silent content corruption.
+
+    Returns `(new_text, count)` where `count` is the number of actual
+    substitutions performed. The count is cosmetic — used only for the
+    summary line — and is NOT load-bearing for correctness."""
+    count = 0
+    out = text
+    if old_dir != new_dir:
+        count += out.count(old_dir)
+        out = out.replace(old_dir, new_dir)
+    for old_name, new_name in name_map.items():
+        if old_name == new_name:
+            continue
+        pattern = re.compile(r"(?<!adr-)" + re.escape(old_name))
+        out, n = pattern.subn(new_name, out)
+        count += n
+    return out, count
+
+
+def plan_rename(project_dir: Path) -> RenamePlan:
+    """Build (but do not apply) the rename plan. Raises MigrateError on
+    conflict or collision (preserving the no-partial-writes invariant)."""
+    if not project_dir.exists():
+        raise MigrateError(f"project directory not found: {project_dir}")
+    if not project_dir.is_dir():
+        raise MigrateError(f"not a directory: {project_dir}")
+
+    adrs_dir = project_dir / "docs" / "adrs"
+    decisions_dir = project_dir / "docs" / "decisions"
+
+    has_adrs = adrs_dir.is_dir()
+    has_decisions = decisions_dir.is_dir()
+
+    if has_adrs and has_decisions:
+        raise MigrateError(
+            f"conflict: both `docs/adrs/` and `docs/decisions/` are present "
+            f"in {project_dir}. Resolve manually (merge files into one "
+            f"directory, then re-run rename-decisions)."
+        )
+
+    if not has_adrs and not has_decisions:
+        # Nothing to do.
+        return RenamePlan(dir_rename=None, file_renames=(), cross_ref_rewrites=())
+
+    # Determine source dir and whether we rename it.
+    if has_adrs:
+        dir_rename = DirRename(src=adrs_dir, dst=decisions_dir)
+        source_dir = adrs_dir
+        old_dir_str = "docs/adrs/"
+    else:
+        dir_rename = None
+        source_dir = decisions_dir
+        old_dir_str = "docs/decisions/"
+    new_dir_str = "docs/decisions/"
+
+    # Build file renames + name map. All file_rename paths refer to the
+    # POST-dir-rename location so apply_rename never has to rewrite paths
+    # mid-flight.
+    name_map = {}
+    file_renames = []
+    canonical_present = set()
+    for entry in sorted(source_dir.iterdir()):
+        if not _is_content_md(entry):
+            continue
+        normalized = _normalize_adr_filename(entry.name)
+        if normalized is None:
+            # Unnormalizable (e.g. quarterly review log, sub-3-digit prefix).
+            # Leave alone.
+            continue
+        if normalized == entry.name:
+            # Already canonical.
+            canonical_present.add(entry.name)
+            continue
+        name_map[entry.name] = normalized
+        post_src = decisions_dir / entry.name
+        post_dst = decisions_dir / normalized
+        file_renames.append(FileRename(src=post_src, dst=post_dst))
+
+    # Collision detection — before any write.
+    target_names = [fr.dst.name for fr in file_renames]
+    seen = set()
+    duplicates = []
+    for tname in target_names:
+        if tname in seen:
+            duplicates.append(tname)
+        seen.add(tname)
+    if duplicates:
+        raise MigrateError(
+            f"collision: multiple files in {source_dir} normalize to the "
+            f"same target name(s): {sorted(set(duplicates))}. Resolve "
+            f"manually before re-running."
+        )
+    overlap = sorted(seen & canonical_present)
+    if overlap:
+        raise MigrateError(
+            f"collision: target name(s) already exist in {source_dir}: "
+            f"{overlap}. Resolve manually before re-running."
+        )
+
+    # Cross-reference rewrites — scan all in-scope text files and count
+    # substitutions. The actual rewrite is deferred to apply_rename.
+    cross_ref_rewrites = _plan_cross_refs(
+        project_dir, old_dir_str, new_dir_str, name_map,
+    )
+
+    return RenamePlan(
+        dir_rename=dir_rename,
+        file_renames=tuple(file_renames),
+        cross_ref_rewrites=tuple(cross_ref_rewrites),
+    )
+
+
+def _plan_cross_refs(project_dir: Path, old_dir: str, new_dir: str,
+                     name_map: dict) -> list:
+    """Scan text files under in-scope roots and identify which need
+    rewriting. Returns a sorted list of CrossRefRewrite entries."""
+    rewrites = []
+    for path in _walk_text_files(project_dir):
+        if _is_helper_or_fixture(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        _, count = _apply_substitutions(text, old_dir, new_dir, name_map)
+        if count > 0:
+            rewrites.append(CrossRefRewrite(path=path, count=count))
+    rewrites.sort(key=lambda r: str(r.path))
+    return rewrites
+
+
+def _format_op_lines(plan: RenamePlan, project_dir: Path,
+                     dry_run: bool) -> list:
+    """Render the operation summary lines for `plan`. Always returns the
+    same lines for the same plan (order-stable per AC #7)."""
+    prefix = "[dry-run] " if dry_run else ""
+    lines = []
+    if plan.dir_rename:
+        lines.append(
+            f"{prefix}renamed docs/adrs/ → docs/decisions/"
+        )
+    for fr in plan.file_renames:
+        try:
+            src_rel = fr.src.relative_to(project_dir)
+            dst_rel = fr.dst.relative_to(project_dir)
+        except ValueError:
+            src_rel = fr.src
+            dst_rel = fr.dst
+        lines.append(f"{prefix}renamed {src_rel} → {dst_rel}")
+    for ref in plan.cross_ref_rewrites:
+        try:
+            rel = ref.path.relative_to(project_dir)
+        except ValueError:
+            rel = ref.path
+        plural = "s" if ref.count != 1 else ""
+        lines.append(
+            f"{prefix}rewrote {ref.count} cross-reference{plural} in {rel}"
+        )
+    return lines
+
+
+def apply_rename(plan: RenamePlan, project_dir: Path,
+                 dry_run: bool = False) -> list:
+    """Apply `plan` to `project_dir`. Returns the operation summary lines.
+
+    Execution order (independent of display order):
+      1. Cross-reference rewrites on the ORIGINAL paths (before any
+         rename moves files out from under us).
+      2. Directory rename (if applicable).
+      3. File renames (in the post-dir-rename location).
+
+    Display order (per AC #7) is fixed: dir → files → cross-refs."""
+    op_lines = _format_op_lines(plan, project_dir, dry_run)
+
+    if dry_run or plan.is_empty():
+        return op_lines
+
+    # Step 1 — cross-reference rewrites. The rewrites operate on text
+    # content; the file's location may differ after step 2, but the
+    # content rewrite is identical either way. Doing this BEFORE the
+    # rename keeps the recorded paths valid at apply time.
+    old_dir_str, new_dir_str, name_map = _replay_substitution_params(plan)
+    for ref in plan.cross_ref_rewrites:
+        try:
+            text = ref.path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        new_text, _ = _apply_substitutions(
+            text, old_dir_str, new_dir_str, name_map,
+        )
+        if new_text != text:
+            _atomic_write(ref.path, new_text)
+
+    # Step 2 — directory rename.
+    if plan.dir_rename:
+        os.replace(plan.dir_rename.src, plan.dir_rename.dst)
+
+    # Step 3 — file renames (now in the post-dir-rename location).
+    for fr in plan.file_renames:
+        os.replace(fr.src, fr.dst)
+
+    return op_lines
+
+
+def _replay_substitution_params(plan: RenamePlan) -> tuple:
+    """Recover the (old_dir, new_dir, name_map) tuple used by the planner
+    so apply_rename can re-run substitutions identically."""
+    if plan.dir_rename:
+        old_dir = "docs/adrs/"
+    else:
+        old_dir = "docs/decisions/"
+    new_dir = "docs/decisions/"
+    name_map = {fr.src.name: fr.dst.name for fr in plan.file_renames}
+    return old_dir, new_dir, name_map
+
+
+def rename_decisions(project_dir: Path, dry_run: bool = False) -> tuple:
+    """Top-level entry for the rename-decisions subcommand.
+
+    Returns `(summary_text, exit_code)`."""
+    plan = plan_rename(project_dir)
+    if plan.is_empty():
+        return ("already aligned: nothing to do\n", 0)
+    lines = apply_rename(plan, project_dir, dry_run=dry_run)
+    return ("\n".join(lines) + "\n", 0)
+
+
 # ---------- CLI plumbing ----------
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="migrate.py",
-        description="jig migrate helper (report)",
+        description="jig migrate helper (report + rename-decisions)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -551,6 +955,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit a read-only migration report for an existing project",
     )
     rp.add_argument("project_dir", help="path to the project to inventory")
+
+    rd = sub.add_parser(
+        "rename-decisions",
+        help="apply ADR-0004 rename (docs/adrs/ → docs/decisions/, "
+             "adr-NNNN-<slug>.md filename shape)",
+    )
+    rd.add_argument("project_dir", help="path to the project to migrate")
+    rd.add_argument(
+        "--dry-run", action="store_true",
+        help="emit the operations plan to stdout without writing anything",
+    )
     return p
 
 
@@ -562,9 +977,19 @@ def main(argv: list) -> int:
         return int(exc.code) if exc.code is not None else 2
 
     try:
-        text, code = report(Path(ns.project_dir))
-        sys.stdout.write(text)
-        return code
+        if ns.cmd == "report":
+            text, code = report(Path(ns.project_dir))
+            sys.stdout.write(text)
+            return code
+        if ns.cmd == "rename-decisions":
+            text, code = rename_decisions(
+                Path(ns.project_dir), dry_run=ns.dry_run,
+            )
+            sys.stdout.write(text)
+            return code
+        # argparse `required=True` should make this unreachable.
+        sys.stderr.write(f"unknown subcommand: {ns.cmd}\n")
+        return 2
     except MigrateError as exc:
         sys.stderr.write(f"{exc}\n")
         return 2

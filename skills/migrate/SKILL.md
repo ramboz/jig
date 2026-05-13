@@ -1,14 +1,15 @@
 ---
 name: migrate
 description: >
-  Inventory an existing spec-driven project and produce a read-only migration
-  report (Inventory / Mapping / Conflicts / Ambiguities / Operations) that
-  the user reviews before running mutating migration steps. Use when the
-  user says "migrate this project to jig", "adopt jig here", "this repo
-  already has specs — set up jig", "scaffold-init refused — what now", or
-  "introduce jig to an existing codebase". The helper is read-only; the
-  user runs subsequent `migrate.py` subcommands (rename-decisions,
-  slice-to-spec, …) themselves once they've reviewed the plan.
+  Inventory an existing spec-driven project (read-only report) and apply
+  bounded migration operations to bring it under jig's defaults. Slice
+  008-01 added `report`; slice 008-02 added `rename-decisions` (apply
+  ADR-0004's `docs/adrs/` → `docs/decisions/` rename + filename shape).
+  Use when the user says "migrate this project to jig", "adopt jig here",
+  "this repo already has specs — set up jig", "scaffold-init refused —
+  what now", "introduce jig to an existing codebase", or "apply ADR-0004
+  to my project". The report is read-only; mutating subcommands have a
+  `--dry-run` mode and refuse on conflict before any write.
 user-invocable: true
 ---
 
@@ -31,9 +32,11 @@ tree.
 a migration plan, then (in later slices) apply the rename / restructure
 operations.
 
-For slice 008-01, only the `report` subcommand is implemented. The
-helper is **read-only** — it walks the filesystem, reports what it
-finds, and suggests what would happen. No mutations.
+As of slice 008-02, `migrate.py` exposes two subcommands:
+
+- `report` — strictly read-only inventory + plan.
+- `rename-decisions` — first mutating subcommand; applies ADR-0004's
+  rename. Idempotent; refuses on conflict; has a `--dry-run` mode.
 
 ## How to use
 
@@ -46,6 +49,41 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" report \
 
 - `<project-dir>` — path to the project root (e.g. `/path/to/repo`,
   `.` for cwd).
+
+### Run the rename-decisions migration
+
+Once `report` has been reviewed and the verdict is `adoptable`, the
+recommended sequence is:
+
+```bash
+# 1. Preview the plan (no writes).
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  rename-decisions <project-dir> --dry-run
+
+# 2. After reviewing the planned operations, apply them.
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  rename-decisions <project-dir>
+```
+
+What it does, in display order:
+
+1. `docs/adrs/` → `docs/decisions/` (directory rename, atomic).
+2. Per-file renames: `NNN-<slug>.md` → `adr-NNNN-<slug>.md`
+   (pad 3-digit to 4-digit; add `adr-` prefix where missing).
+3. Cross-reference rewrites in text files under `docs/`, `CLAUDE.md`,
+   and `.claude/`. The helper itself (`migrate.py` and its fixtures)
+   is never rewritten.
+
+Refusal cases (exit 2, no mutations):
+
+- Both `docs/adrs/` and `docs/decisions/` present (manual merge first).
+- Two source files normalize to the same target name (collision).
+- `<project-dir>` missing, not a directory, or unreadable.
+
+No-op cases (exit 0):
+
+- Neither dir present, OR all files already on the canonical shape —
+  emits "already aligned: nothing to do" and returns.
 
 ### Exit codes
 
@@ -175,13 +213,37 @@ python3 .../migrate.py report /path/to/existing-project
 
 ## Gotchas
 
-- **`migrate.py` is strictly read-only.** No file creation, no
-  renames, no writes, not even directory creation. The `SafetyTests`
-  in `test_migrate.py` enforce this via a regex sweep on the source —
-  any call to `Path.write_text`, `.rename`, `os.replace`,
-  `shutil.move`, `.unlink`, `.mkdir`, or `open(..., "w"/"a"/"x")`
-  fails the safety tests. Mutating subcommands graduate into their
-  own slices (008-02, 008-04) with their own safety surfaces.
+- **`migrate.py` is read-only EXCEPT for `rename-decisions`.** The
+  source is partitioned by a sentinel comment (`# ---------- BEGIN
+  MUTATING CODE PATH (rename-decisions) ----------`); the `SafetyTests`
+  regex sweep applies only to the region above the sentinel. The
+  `report` subcommand stays pure-read; future mutating subcommands
+  land below the sentinel with their own bounded safety surface.
+- **`rename-decisions` is bounded by `<project-dir>`.** It never
+  reads or writes outside the directory passed on the CLI. Within
+  scope it only touches `docs/`, `CLAUDE.md`, and `.claude/`; well-
+  known skip paths (`.git`, `node_modules`, `.venv`, `__pycache__`,
+  `dist`, `build`, etc.) are excluded from cross-reference scanning.
+- **Always `--dry-run` first.** Even with idempotency and refusal
+  on conflict, the plan output is the canonical preview surface.
+  Two consecutive `--dry-run` invocations produce byte-identical
+  output (AC #7), which is also how the test suite verifies stability.
+- **Remote links (GitHub URLs) are NOT rewritten.** `docs/adrs/`
+  paths inside `https://github.com/.../docs/adrs/...` URLs stay
+  untouched — external surface area the user may have published.
+  Only local paths are rewritten.
+- **No git awareness.** `rename-decisions` performs filesystem
+  renames; if the project is a git repo, the user must `git add -A`
+  to record the renames as tracked changes. Future slice if it bites.
+- **`migrate.py`'s self-protection is path-anchored.** The helper
+  refuses to rewrite files under its own `skills/migrate/` directory
+  (so the canonical regexes + fixtures never get mangled by the
+  helper running on its own repo). If a user copies `migrate.py`
+  into their own project at e.g. `<project>/tools/migrate.py`, the
+  copy is NOT covered by the self-protection — it would be rewritten
+  like any other text file in scope. Invoke `migrate.py` from the
+  installed plugin path (`${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py`),
+  never a copied-in-tree version, to keep the guarantee.
 - **The verdict counts trigger directories, not files.** A project
   with 100 ADR files but no workflow.md or architecture.md still
   scores only 1 trigger. The four triggers are about *kinds* of

@@ -347,28 +347,415 @@ The description-regex fix in §7c is a generic anti-pattern worth flagging beyon
 
 ## Slice 008-02 — rename-decisions
 
-**STATUS: DRAFT** _(deferred — first mutator; needs slice 008-01's report
-output to validate safety surface)_
+**STATUS: RECONCILED**
 
 **Goal:** `migrate.py rename-decisions <project-dir> [--dry-run]`
-applies ADR-0004's rename to a target project:
-- `docs/adrs/` → `docs/decisions/`
-- `NNNN-<slug>.md` → `adr-NNNN-<slug>.md` (pad to 4 digits if
-  currently 3-digit, per ADR-0004)
-- Update cross-references in any file under `docs/`, `CLAUDE.md`, and
-  `.claude/` that contains a path matching `docs/adrs/...` (regex
-  sweep + replace, idempotent).
-- Refuse if both `docs/adrs/` and `docs/decisions/` exist (conflict
-  case from 008-01's report).
-- `--dry-run` emits the planned operations + diffs without writing.
+applies ADR-0004's rename to a target project. The helper is the first
+**mutating** migrate subcommand. It is bounded, idempotent, refuses on
+conflict, and produces a structured operations plan that the user can
+preview via `--dry-run` before applying.
 
-Deferred from 008-01 because: first mutator slice deserves its own
-review pass, and 008-01's report needs to exist first to validate
-that the conflict-detection logic catches every case before a
-mutator runs.
+What it does (concrete operations, in order):
 
-**Resolution trigger:** Slice 008-01 lands and produces a clean
-report against the validator. The mutator is the obvious next slice.
+1. **Rename the decisions directory** `docs/adrs/` → `docs/decisions/`,
+   if `docs/adrs/` exists and `docs/decisions/` does not.
+2. **Rename ADR files** to `adr-NNNN-<slug>.md` shape: pad 3-digit
+   prefixes to 4-digit; prepend `adr-` where missing (per ADR-0004).
+3. **Rewrite cross-references** in text files under `docs/`,
+   `CLAUDE.md`, and `.claude/`: substitute every literal path mention
+   that matches an old name (`docs/adrs/`, old filename) with its new
+   equivalent. Idempotent: running twice on an already-migrated tree
+   makes zero changes.
+
+What it refuses to do (each is a hard exit, no partial writes):
+
+- Both `docs/adrs/` and `docs/decisions/` present (conflict case from
+  008-01's report — the user must merge manually).
+- Filename collision after pad/prefix normalization (two files in the
+  same source dir map to the same target name).
+- `<project-dir>` does not exist, is not a directory, or contains no
+  `docs/adrs/` or `docs/decisions/` (nothing to do — exit non-error
+  with an "already aligned" message).
+
+**DoR:**
+- ✅ Slice 008-01 (`migrate.py report`) is DONE — its conflict-
+  detection logic (`docs/adrs/` AND `docs/decisions/` both present)
+  is the safety check 008-02 inherits.
+- ✅ ADR-0004 is Accepted — the rename target shape is fixed.
+- ✅ Atomic-write precedent exists: `adr.py` uses `tmp + os.replace`
+  for content writes. `migrate.py rename-decisions` reuses the
+  pattern.
+- ✅ Cross-reference scope is bounded: validator-dogfood inventory
+  (see 008-01 deviation log §2) confirms references live in
+  `docs/**`, `CLAUDE.md`, and `.claude/**` — no surprise locations.
+- ✅ Fixture tree exists: `skills/migrate/fixtures/tiny-validator`
+  has the right shape for adapting into rename-test fixtures.
+
+**Acceptance Criteria:**
+
+1. **`migrate.py rename-decisions <project-dir>`** verifies the dir
+   exists, walks the migration plan, and applies it. On success,
+   exits 0 and prints a summary to stdout with one line per
+   operation actually performed (e.g. `renamed docs/adrs/ →
+   docs/decisions/`, `renamed docs/decisions/0001-foo.md →
+   docs/decisions/adr-0001-foo.md`, `rewrote 4 cross-references in
+   docs/architecture.md`). When there is nothing to do (the project
+   is already on the canonical shape), the helper exits 0 with a
+   single-line "already aligned" summary and no further output.
+
+2. **`migrate.py rename-decisions <project-dir> --dry-run`** emits
+   the planned operations to stdout in the same shape as #1, but
+   prefixes every line with `[dry-run]` and performs zero filesystem
+   mutations. Tests assert the project tree is byte-identical before
+   and after a `--dry-run` invocation.
+
+3. **Refusal cases** (each is exit code 2, with a structured error
+   message to stderr; no filesystem mutations occur):
+   - Both `docs/adrs/` and `docs/decisions/` present.
+   - Filename collision after pad/prefix normalization within the
+     decisions dir (e.g. `0001-foo.md` and `adr-0001-foo.md` both
+     present → would both map to `adr-0001-foo.md`).
+   - `<project-dir>` missing, not a directory, or not readable.
+
+4. **No-op cases** (each is exit code 0, no mutations, no error):
+   - Neither `docs/adrs/` nor `docs/decisions/` present (no ADRs to
+     migrate — emit "already aligned" and return).
+   - `docs/decisions/` present and every file is already on the
+     `adr-NNNN-<slug>.md` shape (canonical — same message).
+
+5. **Atomicity & idempotency:**
+   - Every individual file write uses the `tmp + os.replace`
+     pattern (same `_atomic_write` shape as `adr.py`).
+   - The directory rename uses `os.replace(src, dst)` — POSIX-atomic
+     on same-FS. The helper does NOT fall back to copy-then-delete.
+   - Running the command twice on the same tree leaves the tree
+     unchanged after the first successful run. Tests assert this
+     by hashing the tree before and after the second run.
+
+6. **Cross-reference rewriting scope:**
+   - Scanned roots: `docs/` (recursive), `CLAUDE.md` (single file),
+     `.claude/` (recursive).
+   - File-type filter: text files only (`.md`, `.py`, `.txt`,
+     `.json`, `.yaml`, `.yml`, `.toml`, plus files with no
+     extension that decode as UTF-8 in the first 4KB). Binary
+     files are skipped.
+   - Skipped paths: any path component named `.git`, `node_modules`,
+     `.venv`, `__pycache__`, or any path containing `/dist/` /
+     `/build/`. The helper never reads or writes outside
+     `<project-dir>`.
+   - Two substitutions per file, applied in order: (a) literal
+     `docs/adrs/` → `docs/decisions/`; (b) for each renamed file,
+     its old name → new name. The two-step ordering matters
+     because (b) operates on filenames only; (a) handles the
+     directory-path portion.
+   - The helper itself (`migrate.py`) and its tests
+     (`test_migrate.py` / `fixtures/**`) are NEVER rewritten — they
+     contain the canonical regexes and sample paths. Tests assert
+     this.
+
+7. **`--dry-run` plan is deterministic and order-stable.** The plan
+   prints operations in a fixed order: directory rename first, then
+   file renames (sorted by source filename), then cross-reference
+   rewrites (sorted by file path). Re-running `--dry-run` against
+   the same tree produces byte-identical output.
+
+8. **SKILL.md updated:** `skills/migrate/SKILL.md` adds a new
+   `### Run the rename-decisions migration` subsection under "How to
+   use", removes the slice-008-02-deferred caveat from the existing
+   text, and updates the Gotchas to reflect the new mutating
+   subcommand (e.g. "**`migrate.py` is read-only EXCEPT for
+   `rename-decisions`** — see Gotchas for the safety surface").
+   The frontmatter description gains one trigger phrase:
+   "apply ADR-0004 to my project".
+
+9. **Tests** in `skills/migrate/test_migrate.py` (extending the
+   existing 34) cover:
+   - `RenamePlanTests` — `plan(project_dir)` returns the expected
+     ordered list of operations for each fixture (adrs-only,
+     decisions-misnumbered, already-aligned, conflict).
+   - `RenameDryRunTests` — `--dry-run` prints the plan, every line
+     prefixed `[dry-run]`, and the tree is byte-identical
+     (hash-equal) before and after.
+   - `RenameApplyTests` — actual rename on each fixture leaves the
+     expected tree; the directory rename, file renames, and
+     cross-reference rewrites all happen.
+   - `RenamePadTests` — `0001-foo.md` → `adr-0001-foo.md`; existing
+     `adr-0001-foo.md` is left alone; `1-bar.md` (1-digit, edge
+     case) is left alone and reported as ambiguous (no normalization
+     for sub-3-digit prefixes — same rule as 008-01).
+   - `RenamePrefixTests` — `0001-foo.md` (no `adr-` prefix) →
+     `adr-0001-foo.md`; `adr-001-baz.md` (3-digit, has prefix) →
+     `adr-0001-baz.md`.
+   - `RenameIdempotencyTests` — apply twice; second invocation prints
+     "already aligned" and makes no further changes.
+   - `RenameConflictTests` — both dirs present → exit 2, stderr has
+     "conflict", tree is unchanged.
+   - `RenameCollisionTests` — `0001-foo.md` and `adr-0001-foo.md`
+     both in `docs/decisions/` → exit 2 with collision message,
+     tree unchanged.
+   - `RenameCrossRefTests` — fixture with `docs/architecture.md`
+     containing `docs/adrs/0003-thing.md` reference → after run,
+     reference reads `docs/decisions/adr-0003-thing.md`. Helper
+     file (`migrate.py`) and tests file are NEVER rewritten.
+   - `RenameContainmentTests` — `migrate.py rename-decisions` does
+     not read or write outside `<project-dir>`. Test sets up a
+     fixture with a sibling dir containing matching paths; asserts
+     the sibling is untouched.
+   - `RenameAtomicityTests` — regex sweep on `migrate.py`: every
+     write site goes through `_atomic_write` (i.e. `tmp + os.replace`)
+     OR `os.replace` directly for directory renames; no bare
+     `Path.write_text` in the rename code path. (The 008-01 read-only
+     `SafetyTests` is renamed/relaxed — see §10c below — to allow
+     mutating calls inside `rename-decisions` while still forbidding
+     them inside the `report` code path.)
+   - `RenameErrorTests` — missing dir / non-dir / unreadable → exit
+     2. Invalid argument combinations → exit 2 via argparse.
+   - `RenameSkillSurfaceTests` — SKILL.md mentions
+     `rename-decisions` as available (no longer "deferred"); the
+     new trigger phrase appears; the Gotchas section names the
+     read-only-except-for-rename caveat.
+
+10. **Out of scope for this slice (each is documented in the
+    Operations or Gotchas of SKILL.md and re-flagged here for
+    review):**
+    - **No `.gitignore` or git tracking awareness.** If a renamed
+      file is tracked by git, the user must `git add -A` after the
+      rename. The helper does NOT shell out to git. Future slice if
+      it bites.
+    - **No remote-link rewrites.** Cross-references in markdown
+      pointing to GitHub URLs (e.g. `github.com/owner/repo/blob/main/docs/adrs/`)
+      are NOT rewritten — those are external surface area and the
+      user may have published links that need to keep working.
+      Local paths only.
+    - **No new test for `report` subcommand's safety regression.**
+      The 008-01 `SafetyTests` is relaxed to be code-path-scoped
+      (forbid mutations in the `report` path; allow them in the
+      `rename-decisions` path). The existing 008-01 ACs continue to
+      pass — `report` remains read-only — but the test shape
+      changes.
+
+**DoD:**
+- [x] All 10 ACs pass; full test suite green (existing + new). **31 new migrate tests on top of 34 existing (65 total in skills/migrate/); 354 total tests across 9 skills; 3 pytest-skipped where runner is unavailable; zero regressions in the other 8 skills.**
+- [x] Implementer test coverage exercises real filesystem operations against tempdir fixtures (no mocks). Atomic-write and idempotency are tested by hashing the tree before/after. **Confirmed — `_hash_tree` is used in `RenameDryRunTests.test_dry_run_does_not_mutate_tree`, `RenamePadTests.test_already_canonical_file_left_alone`, `RenameIdempotencyTests.test_second_run_is_noop`, `RenameConflictTests`, `RenameCollisionTests`, and `RenameContainmentTests`.**
+- [x] Reviewed by `reviewer` subagent (fresh-context, read-only). Reviewer prompt built by `review.py` (dogfood). **Verdict: `needs-changes` — one real correctness bug (greedy substring corruption of canonical refs in mixed-state trees) + dead code in `_apply_substitutions` + missing regression test. All addressed inline before reconciliation; see §1–§3 below.**
+- [x] Deviation log produced under this slice heading. **See below.**
+- [x] Reconciliation review pass. **Two passes: first returned `needs-changes` with three precision issues (line-count overstatement in §7, claimed-but-not-captured Gotcha in §4d, line-ref drift in §1) — all addressed inline (see §9a–§9c). Second pass: `pass`.**
+- [x] `docs/refinement-todo.md` left untouched (or updated only if a new deferred decision surfaces during implementation — flag it explicitly). **Untouched. The reviewer-flagged edge case "migrate.py copied to a user's project at e.g. `tools/migrate.py` would not self-protect" is logged under §4d as a deliberate non-fix (low likelihood, low severity, no real signal yet) rather than a new deferred decision.**
+
+### Close-out (post-DONE)
+
+These items can only be ticked AFTER the final `RECONCILED → DONE`
+transition (convention from spec 009 / slice 009-01).
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+- [ ] `CLAUDE.md` Active-specs entry for spec 008 updated to reflect 008-02 DONE.
+
+**Anti-horizontal-phasing check:** ✅ End-to-end value in one slice.
+A user with a project that uses the pre-ADR-0004 layout
+(`docs/adrs/0001-foo.md`) runs `migrate.py rename-decisions . --dry-run`,
+reviews the plan, runs it for real → their project is now on the
+ADR-0004 canonical shape. No layer-only or plumbing-only phase: the
+rename operation is the entire user-facing deliverable.
+
+**Resolution trigger:** Slice 008-01 is DONE (✅ as of 2026-05-12).
+The mutator is the obvious next slice and unblocks slice 008-03
+(jig-self-migration), where this helper is applied to jig itself.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. Implementation notes:
+
+**1. Reviewer-flagged correctness bug fixed before reconciliation: greedy-substring corruption of canonical refs.**
+
+The first review pass returned `needs-changes` with a real bug: the
+filename substitution loop in `_apply_substitutions` was a literal
+`out.replace(old_name, new_name)`. In a mixed-state tree (legacy + canonical
+references present in the same file — the natural case for a partially
+hand-migrated project, or a self-reference inside a moved ADR), the second
+occurrence of the legacy filename matches greedily inside the already-canonical
+`adr-NNNN-<slug>.md` string and produces `adr-adr-NNNN-<slug>.md`. Silent
+content corruption; not caught by the original test suite because every
+fixture used inputs that only contained legacy references.
+
+Fix at [skills/migrate/migrate.py:729](skills/migrate/migrate.py:729) (inside
+`_apply_substitutions` defined at [line 704](skills/migrate/migrate.py:704)):
+replaced literal `.replace` with `re.compile(r"(?<!adr-)" + re.escape(old_name)).subn(...)`.
+The negative lookbehind skips matches preceded by `adr-`, preserving the
+canonical reference in place. The substitution-count math (previously
+fragile and dead-code-tangled per the reviewer) also collapses to a single
+`out.count(old_dir)` plus the subn count; the comment block now explicitly
+flags the count as "cosmetic — not load-bearing for correctness."
+
+Regression test added at
+[test_migrate.py:test_mixed_canonical_and_legacy_refs_no_corruption](skills/migrate/test_migrate.py:447):
+builds a synthetic tree with `docs/architecture.md` containing four
+references in a mix of forms (legacy path-prefixed, canonical path-prefixed,
+bare legacy filename, bare canonical filename), runs the rename, asserts
+`adr-adr-` never appears, asserts the right count of canonical references
+ends up in the file. Total test count grew from 64 → 65.
+
+**2. Dead code in `_apply_substitutions` cleaned up.**
+
+Reviewer flagged that lines 712-713 set `count` via length-math that was
+then immediately overwritten by 716-719 with both branches doing
+`out.count(old_dir)`. Collapsed to `count += out.count(old_dir)` + single
+substitution. The comment block now explicitly documents that `count` is
+a cosmetic summary, not a correctness gate.
+
+**3. Worktrees-skip path surfaced during validator dogfood.**
+
+The first dry-run against `aso-shallow-validator` returned 323 lines —
+because `.claude/worktrees/<branch>/` contains a full parallel checkout
+of the validator that the helper happily scanned. Treating a worktree as
+in-scope would rewrite a sibling branch's working tree, which is never
+what the user wants. Fix at
+[skills/migrate/migrate.py:_SKIP_PATH_NAMES](skills/migrate/migrate.py:567):
+added `worktrees` to the skip set. Regression test:
+`RenameCrossRefTests.test_claude_worktrees_skipped`. After the fix, the
+validator dry-run shrinks from 323 → 62 lines (22 file renames + ~38
+cross-reference rewrites), which matches the actual in-scope content.
+
+**4. Design choices logged:**
+
+   4a. **`_TEXT_EXTENSIONS` is broader than AC #6 enumerates.** AC #6 lists
+   `.md`, `.py`, `.txt`, `.json`, `.yaml`, `.yml`, `.toml`. The implementation
+   adds `.cfg`, `.ini`, `.sh`, `.html`, `.css`, `.js`, `.ts`. The reviewer
+   flagged this as undocumented expansion. Defensive choice — any of those
+   could contain a path mention; nothing in the AC forbade them, and the
+   extension list is a hot-path guardrail before the binary-sniff fallback.
+   Documented here.
+
+   4b. **`_SKIP_PATH_NAMES` is broader than AC #6 enumerates.** AC #6 lists
+   `.git`, `node_modules`, `.venv`, `__pycache__`, `/dist/`, `/build/`. The
+   implementation adds `venv`, `.pytest_cache`, `.mypy_cache`, `.tox`,
+   `.next`, `.cache`, and the regression-driven `worktrees` (§3). Same
+   defensive shape as the extension list. Skipping `.pytest_cache` /
+   `.mypy_cache` / `.tox` / `.next` is mechanical (tool-managed dirs that
+   contain bytes which decode as text and would otherwise be corrupted).
+
+   4c. **Execution order in `apply_rename` is cross-refs → dir rename → file renames.**
+   This is opposite of the display order (dir → files → cross-refs). The
+   choice is deliberate: rewriting text content BEFORE moving files keeps
+   the recorded `CrossRefRewrite.path` valid at write time — no stale
+   `docs/adrs/...` paths escape the planner. The display order is a UX
+   choice (most "impactful" change first), not an execution constraint.
+
+   4d. **`_is_helper_or_fixture` is path-anchored to `Path(__file__).resolve().parent`.**
+   Reviewer flagged that this only protects files under the live
+   `skills/migrate/` path: if a user copies `migrate.py` into their own
+   project at e.g. `<project>/tools/migrate.py`, the copy would NOT be
+   self-protected. Accepted as a known limitation; low likelihood (the
+   intended invocation is `python3 ${CLAUDE_PLUGIN_ROOT}/.../migrate.py
+   rename-decisions <project>`, never a copy), low severity (the copy
+   only gets touched if it sits inside the `docs/`, `CLAUDE.md`, or
+   `.claude/` scope, which is unusual). Captured in `SKILL.md`'s Gotchas
+   instead of opening a new refinement-todo entry. Resolution trigger: a
+   real report of a self-rewritten copy.
+
+   4e. **Summary-line paths are pre-rename for cross-ref rewrites.**
+   Because rewrites execute before the dir/file renames (§4c), the path
+   in the summary line is the pre-rename location — e.g. a freshly-
+   apply'd run will print `rewrote N cross-references in docs/adrs/0003-foo.md`
+   even though the file ends up at `docs/decisions/adr-0003-foo.md`. The
+   text content rewrite happened at the displayed path; the rename happened
+   afterward. Deterministic and truthful, but worth noting because a user
+   greppping the summary for the post-rename path won't find it. Not worth
+   path-translating in 008-02; revisit if a real user reports the confusion.
+
+   4f. **The dry-run output's line count for an empty plan is zero — no
+   "already aligned" banner.** Only the `is_empty()` branch in
+   `rename_decisions()` emits "already aligned: nothing to do\n"; the
+   `apply_rename` summary line list is empty when nothing applies. The
+   `--dry-run` path on an empty plan reaches the same `is_empty()` branch
+   so users see the same "already aligned" message in dry-run too. Tests
+   `RenameIdempotencyTests.test_second_run_is_noop` and
+   `RenameErrorTests.test_no_adrs_or_decisions_dir_is_exit_zero` cover this.
+
+**5. Validator dogfood transcript (post-fix).**
+
+Invocation:
+```
+python3 skills/migrate/migrate.py rename-decisions /Users/ramboz/Projects/misc/aso-shallow-validator --dry-run
+```
+
+Exit code: `0`. Output: 62 lines. 22 ADR file renames (all 22 numbered ADRs
+under `docs/decisions/adr-NNN-*.md` get padded to `adr-NNNN-*.md`); cross-
+reference rewrites in 38 files (CLAUDE.md, architecture.md, corpus notes,
+spec files, slice files, ADR self-references). The validator already has
+`docs/decisions/` (per ADR-0004 alignment), so no directory rename — only
+filename padding + cross-ref updates.
+
+No conflicts; no collisions. This output is the input shape slice 008-03
+(jig-self-migration) will use against jig itself, modulo the directory
+rename (jig has `docs/adrs/`, not `docs/decisions/`).
+
+**6. Self-dogfood (jig-internal --dry-run only).**
+
+```
+python3 skills/migrate/migrate.py rename-decisions . --dry-run
+```
+
+Produces 17 lines: 1 dir rename + 4 file renames + 12 cross-reference
+rewrites. NOT applied in this slice — the actual application against jig
+is slice 008-03's mandate, with its own review surface. This is just the
+dogfood preview validating that the canonical plan reads sensibly.
+
+**7. Doc updates from this slice:**
+
+- `skills/migrate/migrate.py` — added the mutating code path below the
+  `SAFETY_SENTINEL` comment. Final size: **1002 lines** (was 577 at
+  slice 008-01 close; net new: ~425 lines).
+- `skills/migrate/test_migrate.py` — `SafetyTests` rewritten to be
+  region-scoped (read-only-region only); 31 new tests for rename-decisions
+  added. Final size: **984 lines** (was 442 at slice 008-01 close; net new:
+  ~542 lines).
+- `skills/migrate/SKILL.md` — frontmatter description gains one trigger
+  phrase; new "Run the rename-decisions migration" subsection; Gotchas
+  rewritten to flag the safety-region split, scope bounding, no-git-
+  awareness, no-remote-links, AND the helper-self-protection limit
+  surfaced in review (the limitation per §4d is captured in the bullet
+  starting "**`migrate.py`'s self-protection is path-anchored.**").
+- No `architecture.md` changes (helper colocated with its skill — same
+  precedent as `scaffold.py` / `memory.py` / `workflow.py` / `review.py` /
+  `adr.py` / `tdd.py` / `land.py`).
+- No new ADR (ADR-0004 already settled the structural questions; this
+  slice operationalizes them).
+- No new `_common/` helper. `_atomic_write` is inlined in `migrate.py`
+  (second inline copy after `adr.py`'s); the three-caller extraction
+  threshold isn't met yet.
+
+**8. Reconciliation discipline note (lesson from spec 009).**
+
+Per spec 009's anti-pattern, the "Reconciliation review pass" DoD
+checkbox stays unticked until the reconciliation reviewer returns
+`pass`. The status-board regen + CLAUDE.md update boxes live in the
+"Close-out (post-DONE)" subsection so they don't false-positive-block
+`slice-land`'s DoD check.
+
+**9. Reconciliation-review-flagged precision fixes applied.**
+
+The first reconciliation review verdict was `needs-changes` — three
+small but real precision issues in the deviation log itself:
+
+   9a. **Line-count overstatement.** §7 originally claimed `migrate.py`
+   grew to ~660 lines; actual is 1002 (52% understated). Test file
+   claimed ~875; actual is 984 (~12% understated). Both replaced with
+   accurate values; the size growth claim now reads "1002 lines (was
+   577 at slice 008-01 close; net new: ~425 lines)" for the helper and
+   the analogous correction for the test file.
+
+   9b. **SKILL.md self-protection limit was claimed-but-not-captured.**
+   §4d originally said the limit was "Captured in SKILL.md's Gotchas",
+   but no bullet named the limitation. Fix: added an explicit Gotcha
+   to `skills/migrate/SKILL.md` titled "**`migrate.py`'s self-protection
+   is path-anchored.**" §4d's claim is now true.
+
+   9c. **Line-ref drift in §1.** The original `migrate.py:711-718`
+   reference pointed at the docstring; the actual lookbehind regex is
+   at line 729 inside `_apply_substitutions` (defined at line 704).
+   §1 now cites both the function definition and the regex line.
+
+A second reconciliation-review pass would confirm these are addressed.
 
 ---
 

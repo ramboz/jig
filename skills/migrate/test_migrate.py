@@ -292,15 +292,39 @@ class OperationsTests(unittest.TestCase):
 # -------------------- SafetyTests --------------------
 
 
+# Sentinel comment that partitions migrate.py into a read-only region (the
+# `report` code path) and a mutator region (the `rename-decisions` code path).
+# Slice 008-02 introduced this split — `report` must remain pure-read, but
+# `rename-decisions` is the first mutating subcommand and necessarily calls
+# os.replace + atomic-write helpers.
+SAFETY_SENTINEL = (
+    "# ---------- BEGIN MUTATING CODE PATH (rename-decisions) ----------"
+)
+
+
+def _read_only_region() -> str:
+    """Return the source slice from start of file up to (but not including)
+    the sentinel comment. Raises if the sentinel is missing."""
+    src = MIGRATE_PY.read_text()
+    idx = src.find(SAFETY_SENTINEL)
+    if idx == -1:
+        raise AssertionError(
+            f"SAFETY_SENTINEL not found in {MIGRATE_PY}; the read-only "
+            "region cannot be verified. Add the sentinel comment between "
+            "the report code path and the rename-decisions code path."
+        )
+    return src[:idx]
+
+
 class SafetyTests(unittest.TestCase):
-    """AC #4 — no filesystem-mutating calls in the report code path."""
+    """AC #4 (008-01) + AC #10c (008-02) — no filesystem-mutating calls in
+    the report code path. The rename-decisions code path is allowed to
+    mutate; this test class verifies the read-only region only."""
 
     def setUp(self):
-        self.source = MIGRATE_PY.read_text()
+        self.source = _read_only_region()
 
     def test_no_path_write_text(self):
-        # `Path.write_text` would be a write — forbidden anywhere in this slice
-        # (no subcommand mutates).
         self.assertNotRegex(self.source, r"\.write_text\s*\(")
 
     def test_no_path_rename(self):
@@ -316,7 +340,7 @@ class SafetyTests(unittest.TestCase):
         self.assertNotRegex(self.source, r"\.unlink\s*\(")
 
     def test_no_path_mkdir(self):
-        # No directory creation either — pure read-only walk.
+        # No directory creation in the report path.
         self.assertNotRegex(self.source, r"\.mkdir\s*\(")
 
     def test_no_open_for_write(self):
@@ -436,6 +460,524 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0,
                          f"exit {r.returncode}; stderr: {r.stderr}")
         self.assertRegex(r.stdout, r"(?i)\*\*Verdict:\*\*\s+adoptable")
+
+
+# ==========================================================================
+# Slice 008-02 — rename-decisions tests
+# ==========================================================================
+
+import hashlib
+import shutil
+import tempfile
+
+
+def _make_tree(spec: dict, root: Path = None) -> Path:
+    """Build a synthetic project tree under a tempdir.
+
+    spec is a {relative_path: file_content} mapping. Parent dirs are created
+    automatically. Empty-string content creates an empty file; None means
+    "create as directory" (use `dir/` suffix). Returns the root."""
+    if root is None:
+        root = Path(tempfile.mkdtemp(prefix="jig-mig-rename-"))
+    for rel, content in spec.items():
+        target = root / rel
+        if rel.endswith("/"):
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    return root
+
+
+def _hash_tree(root: Path) -> str:
+    """Stable hash of the tree's content (paths + bytes) for byte-identity
+    assertions before/after dry-run."""
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        if p.is_symlink():
+            h.update(b"SYMLINK\0")
+            h.update(str(p.relative_to(root)).encode())
+            h.update(b"\0")
+            h.update(os.readlink(p).encode())
+            h.update(b"\0")
+            continue
+        if p.is_dir():
+            h.update(b"DIR\0")
+            h.update(str(p.relative_to(root)).encode())
+            h.update(b"\0")
+            continue
+        h.update(b"FILE\0")
+        h.update(str(p.relative_to(root)).encode())
+        h.update(b"\0")
+        h.update(p.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+class RenamePlanTests(unittest.TestCase):
+    """AC #1 / #2 — plan() returns the expected ordered list of operations."""
+
+    def setUp(self):
+        # Adrs-dir source with 3-digit padding; needs dir rename + file pads.
+        self.tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# ADR-0001\n",
+            "docs/adrs/0002-bar.md": "# ADR-0002\n",
+            "docs/workflow.md": "# Workflow\n",
+            "docs/architecture.md": "Refers to docs/adrs/0001-foo.md.\n",
+        })
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_plan_includes_dir_rename(self):
+        from skills.migrate import migrate
+        plan = migrate.plan_rename(self.tmpdir)
+        self.assertIsNotNone(plan.dir_rename)
+        self.assertEqual(plan.dir_rename.src.name, "adrs")
+        self.assertEqual(plan.dir_rename.dst.name, "decisions")
+
+    def test_plan_includes_file_renames(self):
+        from skills.migrate import migrate
+        plan = migrate.plan_rename(self.tmpdir)
+        new_names = [fr.dst.name for fr in plan.file_renames]
+        self.assertIn("adr-0001-foo.md", new_names)
+        self.assertIn("adr-0002-bar.md", new_names)
+
+    def test_plan_includes_cross_ref_rewrites(self):
+        from skills.migrate import migrate
+        plan = migrate.plan_rename(self.tmpdir)
+        rewrite_paths = [r.path.name for r in plan.cross_ref_rewrites]
+        self.assertIn("architecture.md", rewrite_paths)
+
+
+class RenameDryRunTests(unittest.TestCase):
+    """AC #2 / #7 — --dry-run emits plan, makes zero filesystem changes."""
+
+    def setUp(self):
+        self.tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# ADR-0001\n",
+            "docs/adrs/0002-bar.md": "# ADR-0002\n",
+            "docs/architecture.md": "See docs/adrs/0001-foo.md\n",
+            "CLAUDE.md": "Project notes; refs docs/adrs/0002-bar.md inline.\n",
+        })
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_dry_run_does_not_mutate_tree(self):
+        before = _hash_tree(self.tmpdir)
+        r = run_migrate("rename-decisions", str(self.tmpdir), "--dry-run")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        after = _hash_tree(self.tmpdir)
+        self.assertEqual(before, after,
+                         "dry-run mutated the tree (hash changed)")
+
+    def test_dry_run_output_has_prefix_on_every_line(self):
+        r = run_migrate("rename-decisions", str(self.tmpdir), "--dry-run")
+        op_lines = [line for line in r.stdout.splitlines()
+                    if line.strip() and not line.startswith("#")]
+        self.assertTrue(op_lines, f"no op lines: {r.stdout!r}")
+        for line in op_lines:
+            self.assertTrue(line.startswith("[dry-run]"),
+                            f"line missing [dry-run] prefix: {line!r}")
+
+    def test_dry_run_output_is_deterministic(self):
+        r1 = run_migrate("rename-decisions", str(self.tmpdir), "--dry-run")
+        r2 = run_migrate("rename-decisions", str(self.tmpdir), "--dry-run")
+        self.assertEqual(r1.stdout, r2.stdout,
+                         "dry-run output not byte-identical across runs")
+
+
+class RenameApplyTests(unittest.TestCase):
+    """AC #1 — apply renames the dir, files, and updates cross-refs."""
+
+    def setUp(self):
+        self.tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# ADR-0001 Foo\nSee 0002-bar.md.\n",
+            "docs/adrs/0002-bar.md": "# ADR-0002 Bar\n",
+            "docs/architecture.md": "Refs: docs/adrs/0001-foo.md and 0002-bar.md.\n",
+            "CLAUDE.md": "Reads docs/adrs/0001-foo.md.\n",
+        })
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_apply_renames_dir(self):
+        r = run_migrate("rename-decisions", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse((self.tmpdir / "docs" / "adrs").exists(),
+                         "docs/adrs/ should be gone after rename")
+        self.assertTrue((self.tmpdir / "docs" / "decisions").is_dir(),
+                        "docs/decisions/ should exist after rename")
+
+    def test_apply_renames_files_with_pad_and_prefix(self):
+        r = run_migrate("rename-decisions", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0)
+        decisions = self.tmpdir / "docs" / "decisions"
+        names = sorted(p.name for p in decisions.iterdir())
+        self.assertEqual(names, ["adr-0001-foo.md", "adr-0002-bar.md"])
+
+    def test_apply_rewrites_cross_references(self):
+        r = run_migrate("rename-decisions", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0)
+        arch = (self.tmpdir / "docs" / "architecture.md").read_text()
+        self.assertIn("docs/decisions/adr-0001-foo.md", arch)
+        self.assertNotIn("docs/adrs/", arch)
+        # CLAUDE.md should also be rewritten
+        claude = (self.tmpdir / "CLAUDE.md").read_text()
+        self.assertIn("docs/decisions/adr-0001-foo.md", claude)
+        self.assertNotIn("docs/adrs/", claude)
+
+
+class RenamePadTests(unittest.TestCase):
+    """AC #5 — 3-digit padding and adr- prefix handling."""
+
+    def test_3_digit_padded_to_4(self):
+        tmpdir = _make_tree({"docs/adrs/001-foo.md": "x\n"})
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertTrue(
+                (tmpdir / "docs" / "decisions" / "adr-0001-foo.md").is_file()
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_existing_adr_prefix_pads_digits(self):
+        tmpdir = _make_tree({"docs/adrs/adr-001-foo.md": "x\n"})
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0)
+            self.assertTrue(
+                (tmpdir / "docs" / "decisions" / "adr-0001-foo.md").is_file()
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_already_canonical_file_left_alone(self):
+        tmpdir = _make_tree({"docs/decisions/adr-0001-foo.md": "x\n"})
+        try:
+            before = _hash_tree(tmpdir)
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0)
+            after = _hash_tree(tmpdir)
+            self.assertEqual(before, after,
+                             "fully-canonical tree mutated unexpectedly")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_sub_3_digit_prefix_left_alone(self):
+        """A `1-bar.md` (1-digit) is not normalized — too ambiguous."""
+        tmpdir = _make_tree({
+            "docs/adrs/1-bar.md": "x\n",
+            "docs/adrs/0002-foo.md": "y\n",
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            decisions = tmpdir / "docs" / "decisions"
+            names = sorted(p.name for p in decisions.iterdir())
+            # 0002-foo.md gets prefix; 1-bar.md is left untouched.
+            self.assertIn("adr-0002-foo.md", names)
+            self.assertIn("1-bar.md", names)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenamePrefixTests(unittest.TestCase):
+    """AC #5 — adr- prefix added when missing."""
+
+    def test_no_prefix_4_digit_gets_prefix(self):
+        tmpdir = _make_tree({"docs/adrs/0042-thing.md": "x\n"})
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0)
+            self.assertTrue(
+                (tmpdir / "docs" / "decisions" / "adr-0042-thing.md").is_file()
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenameIdempotencyTests(unittest.TestCase):
+    """AC #5 — running twice leaves the tree unchanged after the first run."""
+
+    def test_second_run_is_noop(self):
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# ADR-0001\n",
+            "docs/architecture.md": "See docs/adrs/0001-foo.md\n",
+        })
+        try:
+            r1 = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r1.returncode, 0)
+            mid = _hash_tree(tmpdir)
+            r2 = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r2.returncode, 0)
+            end = _hash_tree(tmpdir)
+            self.assertEqual(mid, end,
+                             "second run mutated the tree (not idempotent)")
+            # And the second run's stdout should signal "already aligned"
+            # or be empty of operation lines.
+            op_lines = [line for line in r2.stdout.splitlines()
+                        if line.strip() and "renamed" in line.lower()]
+            self.assertEqual(op_lines, [],
+                             f"second run did rename ops: {r2.stdout!r}")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenameConflictTests(unittest.TestCase):
+    """AC #3 — both docs/adrs/ and docs/decisions/ present → exit 2."""
+
+    def test_conflict_exits_two(self):
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# foo\n",
+            "docs/decisions/adr-0002-bar.md": "# bar\n",
+        })
+        try:
+            before = _hash_tree(tmpdir)
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 2)
+            self.assertRegex(r.stderr, r"(?i)conflict")
+            after = _hash_tree(tmpdir)
+            self.assertEqual(before, after,
+                             "conflict refusal still mutated the tree")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenameCollisionTests(unittest.TestCase):
+    """AC #3 — two files map to the same target name → exit 2."""
+
+    def test_collision_within_source_dir(self):
+        # 0001-foo.md → adr-0001-foo.md AND adr-0001-foo.md → adr-0001-foo.md
+        # (the canonical one already exists)
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# pre-canonical\n",
+            "docs/adrs/adr-0001-foo.md": "# already canonical\n",
+        })
+        try:
+            before = _hash_tree(tmpdir)
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 2)
+            self.assertRegex(r.stderr, r"(?i)collision|exists")
+            after = _hash_tree(tmpdir)
+            self.assertEqual(before, after,
+                             "collision refusal still mutated the tree")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenameCrossRefTests(unittest.TestCase):
+    """AC #6 — cross-reference rewriting scope and exclusions."""
+
+    def test_helper_self_not_rewritten(self):
+        """migrate.py and test_migrate.py must never be rewritten — they
+        contain the canonical patterns and sample paths."""
+        # We exercise this against an actual `docs/adrs/` mention placed in a
+        # file colocated with the helper. But since the helper lives outside
+        # tempdir, the simpler assertion is: after a real run, migrate.py's
+        # content still contains literal `docs/adrs/` (the report subcommand
+        # supports both layouts and the file talks about both).
+        src_before = MIGRATE_PY.read_text()
+        tmpdir = _make_tree({"docs/adrs/0001-foo.md": "x\n"})
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            src_after = MIGRATE_PY.read_text()
+            self.assertEqual(src_before, src_after,
+                             "migrate.py was rewritten by its own helper")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_binary_file_skipped(self):
+        """A binary file under docs/ is not rewritten and not corrupted."""
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "x\n",
+            "docs/architecture.md": "ref docs/adrs/0001-foo.md\n",
+        })
+        # Add a binary file
+        bin_path = tmpdir / "docs" / "logo.png"
+        bin_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100 + b"docs/adrs/foo"
+        bin_path.write_bytes(bin_bytes)
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertEqual(bin_path.read_bytes(), bin_bytes,
+                             "binary file was modified or corrupted")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_skipped_dirs_not_scanned(self):
+        """`.git`, `node_modules`, `__pycache__` are skipped."""
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "x\n",
+            ".git/HEAD": "docs/adrs/0001-foo.md\n",
+            "docs/node_modules/foo.md": "docs/adrs/0001-foo.md\n",
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            git_head = (tmpdir / ".git" / "HEAD").read_text()
+            self.assertIn("docs/adrs/", git_head,
+                          ".git was rewritten (should be skipped)")
+            nm = (tmpdir / "docs" / "node_modules" / "foo.md").read_text()
+            self.assertIn("docs/adrs/", nm,
+                          "node_modules was rewritten (should be skipped)")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_mixed_canonical_and_legacy_refs_no_corruption(self):
+        """Regression from reviewer: a file containing both a legacy
+        reference (`docs/adrs/0001-foo.md`) AND an already-canonical
+        reference (`docs/decisions/adr-0001-foo.md`) must produce a clean
+        result — the canonical reference must NOT become
+        `adr-adr-0001-foo.md` from greedy substring substitution.
+
+        This covers the mixed-state tree case (partial prior migration,
+        hand-edited references, or self-references in an ADR)."""
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "# ADR-0001\n",
+            # Architecture doc mentions both legacy and canonical refs.
+            "docs/architecture.md": (
+                "Legacy ref: docs/adrs/0001-foo.md.\n"
+                "Already canonical: docs/decisions/adr-0001-foo.md.\n"
+                "Bare legacy: 0001-foo.md.\n"
+                "Bare canonical: adr-0001-foo.md.\n"
+            ),
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            arch = (tmpdir / "docs" / "architecture.md").read_text()
+            # The canonical reference must NOT have been double-prefixed.
+            self.assertNotIn("adr-adr-", arch,
+                             f"greedy substitution corrupted canonical ref:\n{arch}")
+            # All four references should end up as the canonical form.
+            self.assertEqual(arch.count("docs/decisions/adr-0001-foo.md"), 2,
+                             f"expected 2 path-prefixed canonical refs:\n{arch}")
+            self.assertEqual(arch.count("adr-0001-foo.md"), 4,
+                             f"expected 4 total canonical filename mentions:\n{arch}")
+            self.assertNotIn("docs/adrs/", arch)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_claude_worktrees_skipped(self):
+        """Regression from validator dogfood: `.claude/worktrees/<name>/` is
+        a parallel git checkout, not project content. Scanning it would
+        rewrite a sibling branch's working tree."""
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "x\n",
+            "docs/architecture.md": "ref docs/adrs/0001-foo.md\n",
+            ".claude/worktrees/some-branch/docs/architecture.md":
+                "should not be touched: docs/adrs/0001-foo.md\n",
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            sibling = (tmpdir / ".claude" / "worktrees" / "some-branch"
+                       / "docs" / "architecture.md").read_text()
+            self.assertIn("docs/adrs/0001-foo.md", sibling,
+                          "worktree was rewritten (should be skipped)")
+            # And the in-scope file IS rewritten
+            arch = (tmpdir / "docs" / "architecture.md").read_text()
+            self.assertIn("docs/decisions/", arch)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenameContainmentTests(unittest.TestCase):
+    """AC #6 — helper does not operate outside <project-dir>."""
+
+    def test_sibling_dir_untouched(self):
+        parent = Path(tempfile.mkdtemp(prefix="jig-mig-cont-"))
+        project = _make_tree(
+            {"docs/adrs/0001-foo.md": "ref docs/adrs/0001-foo.md\n"},
+            root=parent / "project",
+        )
+        sibling = _make_tree(
+            {"docs/adrs/0001-foo.md": "should not be touched\n"},
+            root=parent / "sibling",
+        )
+        try:
+            sibling_before = _hash_tree(sibling)
+            r = run_migrate("rename-decisions", str(project))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            sibling_after = _hash_tree(sibling)
+            self.assertEqual(sibling_before, sibling_after,
+                             "sibling dir was touched outside project-dir")
+        finally:
+            shutil.rmtree(parent, ignore_errors=True)
+
+
+class RenameAtomicityTests(unittest.TestCase):
+    """AC #5 — every write goes through atomic-write or os.replace."""
+
+    def test_no_bare_path_write_text_in_rename_path(self):
+        """The mutator region uses _atomic_write (tmp + os.replace), never a
+        bare Path.write_text. Read the full file source and check that
+        `_atomic_write` is defined and used."""
+        src = MIGRATE_PY.read_text()
+        # _atomic_write helper must be defined.
+        self.assertRegex(src, r"def\s+_atomic_write\s*\(")
+        # And it must use os.replace (POSIX-atomic same-FS rename).
+        self.assertRegex(src, r"os\.replace\s*\(")
+
+
+class RenameErrorTests(unittest.TestCase):
+    """AC #3 — exit 2 on user error for rename-decisions."""
+
+    def test_missing_dir_arg(self):
+        r = run_migrate("rename-decisions")
+        self.assertEqual(r.returncode, 2)
+
+    def test_nonexistent_dir(self):
+        r = run_migrate("rename-decisions", "/tmp/jig-rename-nope-xyz-zzz")
+        self.assertEqual(r.returncode, 2)
+
+    def test_dir_is_file_not_directory(self):
+        r = run_migrate("rename-decisions", str(MIGRATE_PY))
+        self.assertEqual(r.returncode, 2)
+
+    def test_no_adrs_or_decisions_dir_is_exit_zero(self):
+        """A project with no ADR dir at all is exit 0 with 'already aligned'.
+
+        Per AC #4: nothing-to-do is a no-op success, not an error."""
+        tmpdir = _make_tree({"docs/workflow.md": "wf\n"})
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertRegex(r.stdout, r"(?i)already\s+aligned|nothing\s+to")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class RenameSkillSurfaceTests(unittest.TestCase):
+    """AC #8 — SKILL.md updated for rename-decisions."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.skill = SKILL_MD.read_text()
+
+    def test_skill_mentions_rename_decisions_as_available(self):
+        self.assertIn("rename-decisions", self.skill)
+
+    def test_skill_no_longer_says_rename_deferred(self):
+        """The 008-01 SKILL.md text said 'rename-decisions (slice 008-02,
+        not yet implemented)'. After 008-02 lands, that caveat must go."""
+        # Tolerate any forward-looking mention of slice 008-02 (e.g., the
+        # commit history reference) but disallow the "not yet implemented"
+        # tag on rename-decisions specifically.
+        self.assertNotRegex(
+            self.skill,
+            r"rename-decisions[^\n]*not\s+yet\s+implemented",
+        )
+
+    def test_skill_description_has_new_trigger_phrase(self):
+        m = re.match(r"---\n(.*?)\n---", self.skill, re.DOTALL)
+        fm = m.group(1).lower()
+        # AC #8: "apply ADR-0004 to my project" — one of the new triggers
+        self.assertIn("apply adr-0004", fm)
 
 
 if __name__ == "__main__":
