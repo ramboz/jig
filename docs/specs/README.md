@@ -31,7 +31,7 @@
 | [007-slice-land](007-slice-land/spec.md) | 007-04 — scaffold-json-integration-flag | DRAFT | Deferred; --mode flag is sufficient for now |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-01 — migrate-report | **DONE** |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-02 — rename-decisions | **DONE** |  |
-| [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-03 — jig-self-migration | DRAFT |  |
+| [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-03 — jig-self-migration | **DONE** |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-04 — slice-to-spec-mapping | DRAFT |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-05 — scaffold-init --migrate suggestion | DRAFT |  |
 | [009-dod-close-out-separation](009-dod-close-out-separation/spec.md) | 009-01 — close-out-section-recognition | **DONE** |  |
