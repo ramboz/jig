@@ -206,6 +206,74 @@ class PrepareReportTests(unittest.TestCase):
         # Warning marker — `[?]` (not [x], not [ ])
         self.assertRegex(out, r"(?m)^- \[\?\] Tests")
 
+    def test_close_out_boxes_excluded_from_dod_count(self):
+        """Spec 009 / slice 009-01 — `### Close-out` subsection's
+        checkboxes do NOT count toward the DoD. Without this, slices that
+        include post-DONE items (status-board regen, CLAUDE.md updates)
+        can never satisfy DoD before slice-land blesses them.
+
+        Synthetic spec: 4 ticked DoD boxes, then a `### Close-out
+        (post-DONE)` subsection with 2 unticked boxes. Without the fix,
+        check_dod returns (False, 4, 6) and slice-land flags a blocker.
+        With the fix, check_dod returns (True, 4, 4)."""
+        spec_text = (
+            "---\nstatus: DRAFT\nskill: foo\ntier: 1\n---\n\n"
+            "# Spec X: foo\n\n## Overview\n\nSynthetic.\n\n"
+            "## Slice 009-01 — close-out-test\n\n"
+            "**STATUS: DONE**\n\n"
+            "**Goal:** Synthetic goal.\n\n"
+            "**Acceptance Criteria:**\n\n1. AC one.\n\n"
+            "**DoD:**\n"
+            "- [x] Item one.\n"
+            "- [x] Item two.\n"
+            "- [x] Item three.\n"
+            "- [x] Item four.\n\n"
+            "### Close-out (post-DONE)\n\n"
+            "- [ ] Status-board regenerated AFTER DONE.\n"
+            "- [ ] CLAUDE.md updates AFTER DONE.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "Synthetic log.\n"
+        )
+        self.spec.write_text(spec_text)
+        result = run_land("prepare", str(self.spec), "009-01",
+                          cwd=Path(self.tmpdir))
+        # DoD should be 4/4 (the 2 close-out boxes are excluded), no
+        # blocker for DoD. Tests row will still warn (`[?]`) because
+        # tmpdir has no runner — that's not a blocker.
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+        out = result.stdout
+        # DoD row shows `[x] DoD: 4/4 boxes ticked` (NOT 4/6)
+        self.assertRegex(out, r"(?m)^- \[x\] DoD: 4/4")
+        self.assertNotIn("4/6", out,
+                         "close-out boxes leaked into DoD count")
+
+    def test_close_out_heading_is_case_insensitive(self):
+        """Spec 009 / slice 009-01 — case variants of the close-out
+        heading all delimit the boundary."""
+        for heading in ("### Close-out", "### close-out",
+                        "### Closeout", "### CLOSE-OUT (post-DONE)"):
+            with self.subTest(heading=heading):
+                spec_text = (
+                    "---\nstatus: DRAFT\nskill: foo\ntier: 1\n---\n\n"
+                    "# Spec X\n\n"
+                    "## Slice 009-01 — close-out-case-test\n\n"
+                    "**STATUS: DONE**\n\n"
+                    "**Goal:** g\n\n"
+                    "**Acceptance Criteria:**\n\n1. AC.\n\n"
+                    "**DoD:**\n- [x] One.\n- [x] Two.\n\n"
+                    f"{heading}\n\n- [ ] Post-DONE thing.\n"
+                )
+                spec = Path(self.tmpdir) / f"spec-{heading[4:8]}.md"
+                spec.write_text(spec_text)
+                result = run_land("prepare", str(spec), "009-01",
+                                  cwd=Path(self.tmpdir))
+                out = result.stdout
+                self.assertRegex(
+                    out, r"(?m)^- \[x\] DoD: 2/2",
+                    f"heading {heading!r} not recognized: {out}",
+                )
+
 
 # -------------------- ModeTests --------------------
 

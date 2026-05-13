@@ -109,10 +109,22 @@ def check_deviation_log(section: str) -> bool:
     ))
 
 
+CLOSE_OUT_RE = re.compile(r"(?im)^###\s+close[- ]?out\b")
+
+
 def check_dod(section: str) -> tuple:
-    """Returns (ok, ticked, total) where ok iff total >= 1 AND ticked == total."""
-    # Find all `- [ ]` and `- [x]` lines in the section.
-    boxes = re.findall(r"(?m)^\s*-\s+\[([ xX])\]", section)
+    """Returns (ok, ticked, total) where ok iff total >= 1 AND ticked == total.
+
+    Spec 009 / slice 009-01: a `### Close-out` subsection inside the slice
+    terminates the DoD count — checkboxes inside it are treated as
+    post-DONE follow-up (status-board regen, CLAUDE.md updates) and
+    excluded from the count. Heading is case-insensitive and tolerates
+    `Close-out` / `Closeout` / `close out` variants; H3 (`###`) is
+    required to avoid accidentally matching H2/H4 headings."""
+    m = CLOSE_OUT_RE.search(section)
+    dod_section = section[:m.start()] if m else section
+    # Find all `- [ ]` and `- [x]` lines in the DoD region.
+    boxes = re.findall(r"(?m)^\s*-\s+\[([ xX])\]", dod_section)
     total = len(boxes)
     ticked = sum(1 for b in boxes if b.lower() == "x")
     ok = total >= 1 and ticked == total
