@@ -25,6 +25,19 @@
 **Deferred:** `jig-telemetry.sh` logs Task tool spawns as a proxy for skill invocations. This is imprecise — skills can trigger without spawning a Task.
 **Resolution trigger:** After two weeks of telemetry data. If the log is too sparse to be useful, explore the `SubagentStart` / `InstructionsLoaded` events as alternatives.
 
+### Decision: `adr.py index` sentence-end detector mishandles abbreviations
+**Deferred:** The index-description extractor in `adr.py` truncates the first Context paragraph at the first sentence-ending punctuation. It treats the period in `e.g.` / `i.e.` / `cf.` / etc. as a sentence boundary, producing index lines like `... files as NNNN-<slug>.md (e.g.` — cut mid-abbreviation. First hit while writing ADR-0004 (2026-05-12).
+**Resolution trigger:** Next time the bug bites (i.e. an ADR's Context paragraph contains an abbreviation in the first sentence). Workaround documented in the SKILL.md gotchas: rewrite the first sentence to be index-friendly and re-run `adr.py index`.
+**Mitigation idea:** extend the sentence-end detector to skip common abbreviations (`e.g.`, `i.e.`, `etc.`, `cf.`, `vs.`, `Mr.`, `Dr.`) — small allowlist, no NLP needed. Or detect "lowercase letter immediately before the period" as a not-end-of-sentence signal.
+
+### Decision: `adr.py` accept-then-index vs. index-then-accept ordering
+**Deferred:** The `adr-workflow` SKILL.md's end-to-end example runs `accept` → `index`, but the gotchas section says the fix for a truncated index entry is to edit the ADR's first Context sentence and re-run `adr.py index` — which implicitly requires the ADR to still be editable, i.e. NOT yet accepted. The two pieces of guidance conflict. Hit when accepting ADR-0004 (2026-05-12); the truncated description was only visible *after* `index`, which ran *after* `accept`, putting the ADR in an immutable state with an ugly index entry. Worked around by treating Context cosmetic edits as not-decision-content (and thus not under the immutability rule).
+**Resolution trigger:** Spec deciding the canonical lifecycle, OR next time someone hits the same conflict.
+**Open questions:**
+- Is the canonical order `new` → edit → `index` (preview) → `accept` → `index` (final)?
+- Or do we make `accept` automatically run `index` so the two are atomic?
+- Does the immutability rule apply to every character, or only the Recommended Decision / Consequences sections?
+
 ## Operations
 
 ### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12
