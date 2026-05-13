@@ -38,6 +38,15 @@
 - Or do we make `accept` automatically run `index` so the two are atomic?
 - Does the immutability rule apply to every character, or only the Recommended Decision / Consequences sections?
 
+### Decision: Sub-slice topology and naming
+**Deferred:** Real-world projects routinely discover mid-flight that a Ready slice is too big and needs splitting — usually triggered by an ADR. The aso-shallow-validator hit this on slice-18, which decomposed into 18.1–18.5 (skeleton → corpus-AEMCS → corpus-EDS → synthetic-battery → promotion). jig's current helpers (`workflow.py`, `land.py`, `review.py`) assume flat slice IDs and have no concept of a parent-slice / sub-slice relationship.
+**Resolution trigger:** Spec 008 (`--migrate`) needs to handle the validator's sub-slice files, OR the first time a jig user reports needing to split a slice after marking it Ready. Tentatively tracked as [Slice 008-04](specs/008-migrate-existing-project/spec.md#slice-008-04--slice-to-spec-mapping) (sub-slice topology must be decided before slice-to-spec mapping can work mechanically). If sub-slicing is needed before 008-04 is picked up, spin a dedicated slice.
+**Open questions:**
+- Naming: `slice-18.1-...` (validator style) or `slice-018-01-...` (matching the spec/slice number scheme used elsewhere in jig)?
+- Should sub-slices live in the same dir as the parent, or under a `slice-18/` subdir?
+- Does the parent slice stay open as an index, or close when all children are Done?
+- How does `land.py prepare` aggregate sub-slice readiness — all children Done, or each child landed independently?
+
 ## Operations
 
 ### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12
