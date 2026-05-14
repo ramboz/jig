@@ -1,5 +1,6 @@
 """
-jig slice-land helper — slices 007-01 (land-prepare) + 007-02 (direct-mode-execute)
+jig slice-land helper — slices 007-01 (land-prepare) + 007-02
+(direct-mode-execute) + 007-03 (pr-mode-execute).
 
 Deterministic readiness check + landing-plan emitter for a finished slice.
 Mirrors the workflow.py / review.py / adr.py / tdd.py shape: SKILL.md drives
@@ -8,7 +9,7 @@ PR body file emission.
 
 Subcommands:
     python3 land.py prepare <spec.md> <slice-fragment> [--mode {direct,pr}]
-    python3 land.py execute --mode direct <spec.md> <slice-fragment> [--dry-run]
+    python3 land.py execute --mode {direct,pr} <spec.md> <slice-fragment> [--dry-run]
 
 Readiness checks:
   1. STATUS line under the slice header equals "DONE".
@@ -32,11 +33,19 @@ execute --mode direct: DOES mutate git state. Runs `git checkout main`,
   current branch is main/master; refuses if main has diverged (FF not possible).
   `git worktree remove` is never executed — always printed as a suggestion.
   Use `--dry-run` to print the commands without running them.
+
+execute --mode pr: DOES mutate remote state. Runs `git push -u origin
+  <branch>` then `gh pr create --title <title> --body-file <path>`. Guards:
+  refuses if current branch is main/master; refuses if `gh` is not on PATH;
+  refuses if `origin` does not point at github.com.  `git worktree remove`
+  and `gh pr merge` are never executed — both are post-landing suggestions.
+  Use `--dry-run` to print the commands without running them.
 """
 
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -533,18 +542,69 @@ def _run_git_cmd(args: list, cwd: Path, dry_run: bool) -> tuple:
     return result.returncode == 0, output
 
 
+def _run_gh_cmd(args: list, cwd: Path, dry_run: bool) -> tuple:
+    """Run a single gh command.  Mirrors `_run_git_cmd` shape.
+    Returns (success: bool, output: str).  In dry_run mode, returns
+    (True, "[dry-run] gh <args>") without running.
+    """
+    cmd = ["gh"] + args
+    if dry_run:
+        return True, f"[dry-run] {' '.join(cmd)}"
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, cwd=str(cwd),
+        )
+    except FileNotFoundError:
+        return False, "gh not found on PATH"
+    output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+    return result.returncode == 0, output
+
+
+def _check_gh_available() -> tuple:
+    """Slice 007-03 — verify the `gh` CLI is on PATH.  Returns (ok, msg)."""
+    if shutil.which("gh") is None:
+        return False, ("'gh' CLI not found on PATH — install GitHub CLI "
+                       "(https://cli.github.com/) before --mode pr")
+    return True, ""
+
+
+def _check_github_remote(cwd: Path = None) -> tuple:
+    """Slice 007-03 — verify that origin points at github.com.
+    Substring-matches `github.com` against the origin URL so both HTTPS
+    (`https://github.com/...`) and SSH (`git@github.com:...`) forms pass.
+    Returns (ok, msg).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True,
+            cwd=str(cwd) if cwd else None,
+        )
+    except FileNotFoundError:
+        return False, "git not found on PATH"
+    if result.returncode != 0:
+        return False, "no 'origin' remote configured for this repo"
+    url = result.stdout.strip()
+    if not url:
+        return False, "no 'origin' remote configured for this repo"
+    if "github.com" not in url:
+        return False, (f"remote 'origin' does not point at github.com "
+                       f"(url: {url}) — --mode pr requires a GitHub remote")
+    return True, ""
+
+
 def execute(spec_path: Path, slice_fragment: str,
+            mode: str = "direct",
             dry_run: bool = False, target: Path = None) -> tuple:
-    """Run the direct-mode landing sequence for a ready slice.
+    """Run the landing sequence for a ready slice.
 
-    Sequence:
+    Common pipeline:
       1. Run all four readiness checks (identical to `prepare`).
-      2. Check safety guards (not on main, FF viable).
-      3. git checkout main
-      4. git merge <branch> --ff-only
-      5. git push origin main
-      6. Print (but never run) git worktree remove suggestion.
+      2. Branch guard (refuse on main/master) — applies to both modes.
+      3. Mode-specific guards + git/gh sequence (see `_execute_direct`
+         and `_execute_pr`).
 
+    `mode` is "direct" (default) or "pr".
     `target` is passed to the tdd.py invocation inside prepare(); defaults to
     Path.cwd(). Tests pass a tmpdir to avoid running the full suite.
 
@@ -556,21 +616,31 @@ def execute(spec_path: Path, slice_fragment: str,
     parts = [prepare_report.rstrip()]
 
     if prepare_code != 0:
-        # Hard blocker — do not touch git
+        # Hard blocker — do not touch git or gh
         return "\n".join(parts) + "\n", 1
 
     branch = _detect_branch()
-    worktree = _detect_worktree_path()
-    root = _detect_main_worktree_root()
 
-    # Step 2 — safety guards
+    # Step 2 — common branch guard
     if branch in _PROTECTED_BRANCHES:
         parts.append("")
         parts.append(
             f"## Error\n\nRefusing: current branch is '{branch}' — "
-            "execute must run from a feature or worktree branch.\n"
+            f"execute --mode {mode} must run from a feature or worktree branch.\n"
         )
         return "\n".join(parts) + "\n", 1
+
+    # Step 3 — mode dispatch
+    if mode == "pr":
+        return _execute_pr(parts, spec_path, slice_fragment, branch,
+                           dry_run=dry_run)
+    return _execute_direct(parts, branch, dry_run=dry_run)
+
+
+def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
+    """Direct-mode merge sequence: checkout main, merge --ff-only, push."""
+    worktree = _detect_worktree_path()
+    root = _detect_main_worktree_root()
 
     ff_ok, ff_msg = _check_ff_viable(branch)
     if not ff_ok:
@@ -578,7 +648,6 @@ def execute(spec_path: Path, slice_fragment: str,
         parts.append(f"## Error\n\nRefusing: {ff_msg}.\n")
         return "\n".join(parts) + "\n", 1
 
-    # Step 3–5 — git sequence
     git_steps = [
         (["checkout", "main"], f"git checkout main"),
         (["merge", branch, "--ff-only"], f"git merge {branch} --ff-only"),
@@ -628,6 +697,110 @@ def execute(spec_path: Path, slice_fragment: str,
     return "\n".join(parts) + "\n", (1 if failed else 0)
 
 
+def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
+                branch: str, dry_run: bool) -> tuple:
+    """PR-mode push + gh pr create sequence.  Runs from the current
+    worktree (not the main worktree root) because the feature branch is
+    checked out there."""
+    cwd = Path.cwd()
+
+    # PR-specific safety guards
+    gh_ok, gh_msg = _check_gh_available()
+    if not gh_ok:
+        parts.append("")
+        parts.append(f"## Error\n\nRefusing: {gh_msg}.\n")
+        return "\n".join(parts) + "\n", 1
+
+    remote_ok, remote_msg = _check_github_remote(cwd)
+    if not remote_ok:
+        parts.append("")
+        parts.append(f"## Error\n\nRefusing: {remote_msg}.\n")
+        return "\n".join(parts) + "\n", 1
+
+    # Re-parse spec to build PR body + title (same code path as prepare --mode pr)
+    text = spec_path.read_text()
+    start, end, label = find_slice_section(text, slice_fragment)
+    section = text[start:end]
+    spec_num, slice_num = parse_spec_slice_numbers(spec_path, label)
+    pr_body_path = Path(tempfile.gettempdir()) / \
+        f"jig-slice-{spec_num}-{slice_num}-pr-body.md"
+    ac_items = extract_ac_items(section)
+    deviation_excerpt = extract_deviation_excerpt(section)
+    goal = extract_goal_paragraph(section)
+    body = render_pr_body(label, spec_path, goal, ac_items, deviation_excerpt)
+    pr_body_path.write_text(body)
+
+    skill = _parse_skill_from_frontmatter(text)
+    scope = f"({skill})" if skill else ""
+    title = f"feat{scope}: {label}"
+
+    git_steps = [
+        (["push", "-u", "origin", branch], f"git push -u origin {branch}"),
+    ]
+    gh_steps = [
+        (["pr", "create", "--title", title, "--body-file", str(pr_body_path)],
+         f"gh pr create --title \"{title}\" --body-file {pr_body_path}"),
+    ]
+
+    if dry_run:
+        lines = ["", "## Dry-run — commands that would run", ""]
+        lines.append("```")
+        for args, _ in git_steps:
+            lines.append("git " + " ".join(args))
+        for args, label_str in gh_steps:
+            lines.append(label_str)
+        lines.append("```")
+        parts.extend(lines)
+        parts.append("")
+        parts.append(f"PR body staged at: `{pr_body_path}`\n")
+        parts.append(
+            f"## Post-landing\n\n"
+            f"After review approval, merge via the GitHub UI or "
+            f"`gh pr merge {branch}`.\n"
+        )
+        return "\n".join(parts) + "\n", 0
+
+    # Live execution
+    log_lines = ["", "## Execute log", ""]
+    failed_label = None
+
+    # 1. git push
+    for args, label_str in git_steps:
+        log_lines.append(f"**{label_str}**")
+        ok, output = _run_git_cmd(args, cwd, dry_run=False)
+        if output:
+            log_lines.append(f"```\n{output}\n```")
+        if not ok:
+            failed_label = label_str
+            break
+        log_lines.append("")
+
+    # 2. gh pr create (only if push succeeded)
+    if failed_label is None:
+        for args, label_str in gh_steps:
+            log_lines.append(f"**{label_str}**")
+            ok, output = _run_gh_cmd(args, cwd, dry_run=False)
+            if output:
+                log_lines.append(f"```\n{output}\n```")
+            if not ok:
+                failed_label = label_str
+                break
+            log_lines.append("")
+
+    parts.extend(log_lines)
+    if failed_label is not None:
+        parts.append("")
+        parts.append(f"## Error\n\n`{failed_label}` failed. See output above.\n")
+        return "\n".join(parts) + "\n", 1
+
+    parts.append(
+        f"## Post-landing\n\n"
+        f"PR opened.  After review approval, merge via the GitHub UI or "
+        f"`gh pr merge {branch}`.\n"
+    )
+    return "\n".join(parts) + "\n", 0
+
+
 # ---------- CLI plumbing ----------
 
 
@@ -657,8 +830,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ep.add_argument("spec", help="path to spec.md")
     ep.add_argument("slice",
                     help="slice name or fragment (case-insensitive substring)")
-    ep.add_argument("--mode", choices=["direct"], required=True,
-                    help="integration mode (currently only 'direct' is supported)")
+    ep.add_argument("--mode", choices=["direct", "pr"], required=True,
+                    help="integration mode: 'direct' merges to main locally; "
+                         "'pr' pushes the branch and opens a GitHub PR")
     ep.add_argument("--dry-run", action="store_true",
                     help="print commands without executing them")
     ep.add_argument("--target", default=None,
@@ -682,6 +856,7 @@ def main(argv: list) -> int:
         else:  # execute
             report, code = execute(
                 Path(ns.spec), ns.slice,
+                mode=ns.mode,
                 dry_run=ns.dry_run,
                 target=Path(ns.target) if ns.target else None,
             )

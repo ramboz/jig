@@ -7,7 +7,8 @@ description: >
   when the user says "land this slice", "merge back to main", "ready to
   ship", "create a PR for this slice", "close out the slice", or "slice is
   done — what now". Use `prepare` to emit a readiness report; use
-  `execute --mode direct` to also run the merge sequence.
+  `execute --mode direct` to also run the merge sequence; use
+  `execute --mode pr` to push the branch and open the PR.
 user-invocable: true
 ---
 
@@ -29,12 +30,12 @@ skill provides a deterministic landing path:
   (in `--mode direct` or `--mode pr`) a Next-steps section of suggested
   git commands.
 
-The helper is **read-only on git state** (only `git rev-parse
+`prepare` is **read-only on git state** (only `git rev-parse
 --abbrev-ref HEAD` runs, to populate the branch name in the suggested
-commands). Destructive ops (`git checkout`, `git merge`, `git push`,
-`git worktree remove`, `gh pr create`) stay user-driven. Slices 007-02
-and 007-03 will graduate to executable modes once the safety surface
-is tested.
+commands).  `execute --mode direct` runs the destructive merge sequence
+(slice 007-02); `execute --mode pr` runs the destructive push + PR-open
+sequence (slice 007-03).  `git worktree remove` and `gh pr merge` are
+never executed — both stay user-driven post-landing suggestions.
 
 ## How to use
 
@@ -58,7 +59,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" prepare \
 
 ### Run the merge sequence (execute --mode direct)
 
-After `prepare` confirms the slice is ready, `execute` runs the merge:
+After `prepare` confirms the slice is ready, `execute --mode direct`
+runs the merge:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
@@ -75,6 +77,32 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
 **Safety guards** (checked before any git mutation):
 - Refuses if current branch is `main` or `master`.
 - Refuses if `main` has diverged (fast-forward not possible).
+
+### Open the PR (execute --mode pr)
+
+For PR-shaped flows, `execute --mode pr` pushes the branch and opens
+the PR via the GitHub CLI:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
+  --mode pr <path-to-spec.md> <slice-fragment> [--dry-run]
+```
+
+- `--dry-run` — print the commands that would run, write the PR body
+  file for inspection, but do NOT push or open the PR.
+- Without `--dry-run` — runs `git push -u origin <branch>` followed by
+  `gh pr create --title "<title>" --body-file <body-path>`.  Stops if
+  push fails (gh is NOT called after push failure).  Title shape is
+  `feat(<skill>): <slice-label>`, with the `skill:` value pulled from
+  the spec's YAML frontmatter (plain `feat:` fallback otherwise).
+- Push runs from the **current worktree** (not the main worktree root,
+  since the feature branch is checked out here).
+- Never runs `gh pr merge` (printed as a post-landing suggestion only).
+
+**Safety guards** (checked before any subprocess mutation):
+- Refuses if current branch is `main` or `master`.
+- Refuses if `gh` CLI is not on PATH (install instructions printed).
+- Refuses if `origin` does not point at github.com (HTTPS or SSH form).
 
 ### Exit codes
 
@@ -184,11 +212,12 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
 
 ## Gotchas
 
-- **`land.py` does NOT mutate git state.** The Next-steps section is
-  copy-paste-ready, but the helper never runs `git checkout`, `git
-  merge`, `git push`, `git worktree remove`, or `gh pr create`. Slice
-  007-02/03 will add executable modes with explicit confirm-before-
-  destroy prompts.
+- **`prepare` is non-destructive; `execute` IS destructive.**
+  `prepare` only writes the PR body file (mode=pr); it never runs
+  `git checkout`, `git merge`, `git push`, `git worktree remove`, or
+  `gh pr create`.  `execute --mode direct` runs the merge sequence
+  (007-02); `execute --mode pr` runs push + gh pr create (007-03).
+  Use `--dry-run` for a non-destructive preview of either execute mode.
 - **Test-check target = `land.py`'s cwd.** The helper invokes
   `tdd.py run` against the current working directory by default. If
   the slice changes a deep subdir (e.g. `skills/foo/`), run `land.py`
@@ -231,12 +260,18 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
 - **`adr-workflow`** is orthogonal — ADRs may or may not be written
   during reconciliation. `slice-land` doesn't gate on ADR presence.
 
-## Out of scope for slice 007-01
+## Out of scope for slice 007-03
 
-- Actually executing the git / gh commands (slice 007-02 for direct
-  mode; slice 007-03 for PR mode).
-- `scaffold.json` `integration: "direct" | "pr"` field (slice 007-04).
+- `scaffold.json` `integration: "direct" | "pr"` field (slice 007-04
+  remains deferred — the `--mode` flag is sufficient for manual
+  invocations).
 - Multi-slice batch landing (single slice at a time is the right
   audit-trail granularity).
+- Interactive confirm-before-push prompt — `--dry-run` is the
+  preview mechanism instead.  Use `--dry-run`, inspect the PR body,
+  then re-run without `--dry-run`.
 - JIRA / Linear ticketing integration, Slack notifications,
   auto-drafting ADRs from the deviation log.
+- GitHub Enterprise (self-hosted) — the `_check_github_remote`
+  substring match requires `github.com` literally.  Self-hosted GHE
+  users will need a future extension or local override.

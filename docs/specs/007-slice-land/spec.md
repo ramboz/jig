@@ -414,16 +414,269 @@ The original spec is preserved above.
 
 ## Slice 007-03 — pr-mode-execute
 
-**STATUS: DRAFT** _(deferred)_
+**STATUS: DONE**
 
-**Goal:** `land.py execute --mode pr` actually runs `git push` +
-`gh pr create` with the pre-generated body. Includes detection
-of a `gh` binary, refusal if no GitHub remote, and a confirm-
-before-push prompt.
+**Goal:** `land.py execute --mode pr <spec.md> <slice-fragment> [--dry-run]`
+runs the two-step PR-shaped landing sequence — `git push -u origin
+<branch>` followed by `gh pr create --title "<title>" --body-file
+<path>` — after first re-running the four readiness checks and
+two new safety guards (`gh` binary present + GitHub remote
+configured). Mirrors slice 007-02 (direct-mode-execute) in
+structure; uses the PR body file path emitted by `prepare --mode pr`.
 
-Deferred because: requires `gh` binary on PATH (not a jig dev
-dependency) and depends on `pr-review` being designed (so the
-PR body knows what reviewer surface to invite).
+**DoR:**
+- ✅ Slice 007-02 (`land.py execute --mode direct`) DONE — the
+  `execute()` function exists with safety-guard plumbing,
+  `_run_git_cmd`, dry-run pathway, and the report-format
+  conventions slice 007-03 will reuse.
+- ✅ `prepare(... --mode pr)` already writes the PR body file to
+  a predictable path and renders the two-line PR command — slice
+  007-03 just executes that recipe instead of suggesting it.
+- ✅ Slice 012-01 (pr-review) DONE — the gating dependency listed
+  in the original deferred-slice text ("PR body knows what
+  reviewer surface to invite") is satisfied: jig now ships a
+  pr-review skill, so the PR-mode landing path has a logical
+  partner skill for downstream review.
+
+**Acceptance Criteria:**
+
+1. **`land.py execute --mode pr <spec.md> <slice-fragment>`** first runs
+   all four readiness checks (identical to `execute --mode direct`). If
+   any hard check fails, the blocker report emits to stdout and the
+   command exits 1 **without touching git or gh**. Test warnings (`[?]`)
+   do not block.
+
+2. **Git/gh sequence (on all-pass readiness + guards):** executes in
+   order, capturing stdout/stderr for each step:
+   - `git push -u origin <branch>` — run from the worktree (current cwd,
+     since the feature branch is checked out there, not in the main
+     worktree).
+   - `gh pr create --title "<title>" --body-file <pr-body-path>` —
+     title uses the same `feat(<skill>): <slice-label>` shape as
+     `render_next_steps_pr` (frontmatter `skill:` field interpolated;
+     plain `feat:` fallback if frontmatter absent). The body file path
+     is the same `<tempdir>/jig-slice-NNN-NN-pr-body.md` path that
+     `prepare --mode pr` writes.
+   If `git push` fails (non-zero exit), the sequence halts and `gh pr
+   create` is NOT called. If `gh pr create` fails, the error is surfaced
+   in the report.
+
+3. **PR body file is written before `gh pr create` runs.** The same
+   render path as `prepare --mode pr` produces the file (slice label,
+   spec link, AC list, deviation excerpt, generic test plan). Tests
+   assert the file exists at the predictable path before the gh call.
+
+4. **`--dry-run` flag:** `land.py execute --mode pr ... --dry-run` runs
+   the four readiness checks, applies the safety guards, **writes the PR
+   body file** (so the user can inspect it), and prints the two commands
+   that would run — but does NOT execute `git push` or `gh pr create`.
+   Exit 0 if readiness + guards pass; exit 1 on any blocker.
+
+5. **Safety guards** (checked after readiness checks and before the
+   first mutating subprocess; each failure exits 1 with a refuse
+   message that names the guard):
+   - **Branch guard:** if current branch is `main` or `master`, exit 1
+     with `"refusing: current branch is '{branch}' — execute --mode pr
+     must run from a feature or worktree branch"`. Same shape as direct
+     mode (PR-from-main is nonsensical too).
+   - **`gh` binary guard:** if `shutil.which("gh")` returns None, exit 1
+     with `"refusing: 'gh' CLI not found on PATH — install GitHub CLI
+     (https://cli.github.com/) before --mode pr"`.
+   - **GitHub remote guard:** read `git config --get remote.origin.url`
+     (or `git remote get-url origin`); if the result is empty OR does
+     not contain `github.com` (HTTPS) or `github.com:` / `git@github.com`
+     (SSH), exit 1 with `"refusing: remote 'origin' does not point at
+     github.com — --mode pr requires a GitHub remote"`.
+   - **No FF-viability guard** for PR mode — FF/merge resolution happens
+     server-side via the GitHub merge UI or `gh pr merge`. PR mode only
+     pushes the feature branch; main is not touched locally.
+
+6. **PR-mode cwd is the current worktree, not the main worktree root.**
+   Unlike direct mode (which `cd`s to the main worktree for `git
+   checkout main && git merge && git push origin main`), PR mode pushes
+   the feature branch from its own worktree. Both `git push` and
+   `gh pr create` run with `cwd = Path.cwd()`.
+
+7. **Execute-PR report format:** stdout contains, in order:
+   - The readiness check section (same as `prepare`; re-used from
+     `prepare()`'s output).
+   - A separator.
+   - In dry-run mode: a `## Dry-run — commands that would run` section
+     listing the two commands + the PR body file path.
+   - In live mode (success): a `## Execute log` section with each
+     command and its output.
+   - In live mode (failure): a `## Execute log` section up to the
+     failed step, then a `## Error` section.
+   - A trailing `## Post-landing` section with: "After review approval,
+     merge via the GitHub UI or `gh pr merge <branch>`."
+
+8. **Exit codes:** 0 iff readiness + guards pass **and** both subprocess
+   commands succeed (or `--dry-run` with readiness + guards passing); 1
+   on any readiness blocker, safety guard fire, or subprocess failure;
+   2 on user error (missing spec, ambiguous fragment, `--mode` missing).
+
+9. **CLI surface:** the `execute` subparser's `--mode` choices expand to
+   include `"pr"` alongside `"direct"`. The same `--dry-run` and
+   `--target` flags apply to both modes.
+
+10. **Safety regex sweep:** `gh` must only appear in `subprocess.run`
+    calls as a value passed through the `_run_gh_cmd` helper (mirrors
+    the direct-mode treatment of `checkout`/`merge`/`push`). A
+    `test_no_gh_calls_in_direct_subprocess` line-by-line scan replaces
+    the slice 007-01-era `test_no_gh_pr_create` blanket refusal —
+    `gh` IS now legitimately invoked, but only via the helper, never
+    inline.
+
+11. **Tests** in `skills/slice-land/test_land.py` cover:
+    - `ExecutePrBlocksOnReadinessTests` — STATUS ≠ DONE / missing
+      deviation log / DoD unticked → exit 1, no git/gh mutating
+      subprocess runs.
+    - `ExecutePrDryRunTests` — `--dry-run` with clean spec → exit 0,
+      prints both commands, NO `git push` / `gh pr create` subprocess;
+      PR body file IS written.
+    - `ExecutePrSafetyBranchTests` — patched `_detect_branch` returns
+      `"main"` → exit 1, refuse message.
+    - `ExecutePrSafetyGhMissingTests` — patched `_check_gh_available`
+      returns False → exit 1, refuse message names `gh`.
+    - `ExecutePrSafetyNoGithubRemoteTests` — patched
+      `_check_github_remote` returns False → exit 1, refuse message
+      names `github`.
+    - `ExecutePrSuccessTests` — mocked `_run_git_cmd` + `_run_gh_cmd`
+      both succeed → exit 0, report shows both commands' output, PR
+      body file referenced, Post-landing section present.
+    - `ExecutePrPushFailureTests` — push fails → exit 1, gh NOT called
+      (call log absent of `["pr", "create", ...]`).
+    - `ExecutePrGhFailureTests` — gh fails after successful push →
+      exit 1, error surfaced.
+    - `ExecutePrBodyFileWrittenTests` — body file exists at predictable
+      path after both dry-run and live invocations.
+    - `ExecutePrSafetyRegexTests` (folds into the SafetyTests class) —
+      no direct `subprocess.run([...], "gh", ...)` literal calls.
+
+12. **SKILL.md** `## How to use` section gains an `execute --mode pr`
+    subsection (parallel to the existing `execute --mode direct`
+    section). The frontmatter description gets a final sentence:
+    "Use `execute --mode pr` to push the branch and open the PR."
+    The "Out of scope for slice 007-01" section is updated to record
+    that slice 007-03 is now DONE (so the "slice 007-03 for PR mode"
+    forward-reference is no longer accurate).
+
+**DoD:**
+- [x] All 11 ACs pass; full test suite green (existing + new).
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+
+### Close-out (post-DONE)
+
+- [x] `docs/specs/README.md` regenerated by `workflow.py status-board`
+      AFTER the DONE transition.
+- [x] `CLAUDE.md` hot-cache "Active specs" + Skills table updated for 007-03.
+
+**Anti-horizontal-phasing check:** ✅ End-to-end value in one slice.
+A user with a freshly-DONE slice runs `land.py execute --mode pr ...`
+→ branch is pushed → PR is opened on GitHub. No layer-only phase;
+the slice composes existing readiness logic + adds the gh sequence
++ safety guards, all delivered through one CLI invocation.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above.
+
+**Design choices logged:**
+
+1. **`_run_gh_cmd` mirrors `_run_git_cmd`.** Same signature
+   (`args, cwd, dry_run`), same return shape (`(success: bool,
+   output: str)`), same dry-run handling. Keeps the test-mocking
+   ergonomics identical to direct mode — every PR test patches
+   `_run_gh_cmd` the same way direct-mode tests patch `_run_git_cmd`.
+
+2. **GitHub remote check is substring-based on `github.com`.** The
+   spec allows both HTTPS (`https://github.com/...`) and SSH
+   (`git@github.com:...`) forms — both contain the literal substring
+   `github.com`. Self-hosted GitHub Enterprise (`github.example.com`)
+   would fail this check; that's a deliberately narrow surface for
+   slice 007-03 since jig's only real PR target is github.com. If a
+   future user hits GHE, they can extend the check or pass a flag.
+
+3. **`gh pr create` does NOT pass `--head` explicitly.** `gh` infers
+   the head branch from the current checkout, which matches the
+   `cwd = Path.cwd()` convention. Adding `--head <branch>` would be
+   redundant and risks mismatches if the user is in detached-HEAD
+   state. The branch detection inside the helper is used for the push
+   step only.
+
+4. **Title format reuses the prepare-mode-pr scope detection.** The
+   helper interpolates `feat({skill}):` from the spec's YAML
+   frontmatter — same shape as slice 007-01's reconciliation fix
+   (the hardcoded-prefix bug). Plain `feat:` fallback applies if no
+   frontmatter skill is set.
+
+5. **PR-mode push happens from the worktree, NOT the main worktree
+   root.** Unlike direct mode (which needs the main worktree because
+   `git checkout main` only works there), PR mode pushes the feature
+   branch from wherever it's checked out — which is the worktree
+   where the user runs `land.py`. The helper does not call
+   `_detect_main_worktree_root` in the PR path.
+
+6. **`_check_github_remote` shells out to `git config --get
+   remote.origin.url`.** This was a readability choice over
+   `subprocess.run(["git", "remote", "get-url", "origin"])` which
+   does the same thing — `git config` is more universally available
+   on older git versions and the output is identical for the
+   substring check.
+
+7. **Post-landing message names `gh pr merge` as the follow-up.**
+   The Post-landing section in PR mode mirrors direct mode's
+   worktree-remove suggestion: it points the user at the next manual
+   step. `gh pr merge <branch>` (or merging via the GitHub UI) closes
+   the loop. The skill doesn't gate on that step running — auto-merge
+   policies vary too much between teams.
+
+8. **SafetyTest update: `test_no_gh_pr_create` removed; replaced
+   with line-by-line scan.** Same precedent as slice 007-02's
+   `test_read_only_git_calls_are_bounded` replacement of
+   `test_rev_parse_is_allowed`. The replacement asserts: no
+   `subprocess.run([...])` call has `"gh"` as a literal arg on the
+   same line; all gh invocations route through `_run_gh_cmd`.
+
+**Implementation reviewer findings (verdict: pass; 3 minor non-blocking
+points):**
+
+9. **Title-format test gap addressed inline.** The implementation
+   reviewer noted that no surface test pinned the literal `feat(<skill>):
+   <slice-label>` shape on the `gh pr create --title` arg list (the
+   AC #2 prescribed shape). Resolution: added
+   `test_pr_title_uses_frontmatter_skill_scope` in `ExecutePrSuccessTests`
+   that captures the `--title` arg via the `_run_gh_cmd` mock and asserts
+   `^feat\(foo\):\s+007-03` against the synthetic spec's `skill: foo`
+   frontmatter. 80 tests total (1 skipped); no regressions.
+
+10. **`_check_github_remote` non-git-repo error message — flagged,
+    not changed.** Reviewer noted that when `git config --get
+    remote.origin.url` exits non-zero (e.g. running from a non-git
+    directory), `_check_github_remote` returns `"no 'origin' remote
+    configured"` — the same message it returns for an empty origin in
+    a real repo. Both messages are actionable for the user (the next
+    step is the same: configure an origin or run from inside a repo),
+    so the conflation is acceptable. Filed here for traceability.
+
+11. **GitHub-remote refuse message embeds the URL.** Reviewer noted
+    that the refuse message `remote 'origin' does not point at
+    github.com (url: <url>)` deviates from the spec's prescribed
+    wording (which did not include the URL). Deliberate — surfacing
+    the actual misconfigured URL gives the user a faster fix path
+    than "go figure out what your origin is set to". Flagged for the
+    record.
+
+12. **PR body file written before subprocess — intentional ordering.**
+    Reviewer asked whether AC #5's "before the first mutating
+    subprocess" ordering still holds given the PR body file is
+    written between the guards and the push. Answer: yes —
+    `pr_body_path.write_text(...)` is a local filesystem write, not
+    a "mutating subprocess". The same ordering applies in dry-run
+    mode, which is the point: the user can inspect the PR body before
+    deciding whether to re-run live.
 
 ---
 

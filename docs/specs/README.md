@@ -30,7 +30,7 @@
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-05 — custom-test-command | **DONE** | 14 new tests (44 tdd-loop total); `.jig/test-command` override + `scripts/run_tests.py`; `tdd.py run .` now runs jig's full 461-test suite |
 | [007-slice-land](007-slice-land/spec.md) | 007-01 — land-prepare | **DONE** | 31 tests (30 pass + 1 pytest-skipped); landing-readiness report + direct/pr next-steps |
 | [007-slice-land](007-slice-land/spec.md) | 007-02 — direct-mode-execute | **DONE** | Deferred; destructive git ops need safety review |
-| [007-slice-land](007-slice-land/spec.md) | 007-03 — pr-mode-execute | DRAFT | Deferred; gated on pr-review design |
+| [007-slice-land](007-slice-land/spec.md) | 007-03 — pr-mode-execute | **DONE** | 24 new tests (485 total, 3 skipped); `execute --mode pr` runs `git push -u origin <branch>` + `gh pr create`; gh-binary + github-remote + branch guards; `--dry-run` preview |
 | [007-slice-land](007-slice-land/spec.md) | 007-04 — scaffold-json-integration-flag | DRAFT | Deferred; --mode flag is sufficient for now |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-01 — migrate-report | **DONE** |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-02 — rename-decisions | **DONE** |  |

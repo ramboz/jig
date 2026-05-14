@@ -525,11 +525,22 @@ class SafetyTests(unittest.TestCase):
             r'subprocess\.\w+\([^)]*[\'"]worktree[\'"][^)]*[\'"]remove[\'"]',
         )
 
-    def test_no_gh_pr_create(self):
-        self.assertNotRegex(
-            self.source,
-            r'subprocess\.\w+\([^)]*[\'"]gh[\'"]',
-        )
+    def test_no_gh_calls_in_direct_subprocess(self):
+        """Slice 007-03 — `gh` IS legitimately invoked (PR-mode execute),
+        but only via the `_run_gh_cmd` helper.  Same precedent as
+        slice 007-02's `test_read_only_git_calls_are_bounded`: the
+        "gh" literal must NOT appear as an arg inside a
+        `subprocess.run([...])` call on the same line.  The literal
+        belongs in a local `cmd = ["gh"] + args` assignment that is
+        then passed as a variable to subprocess.run."""
+        for line in self.source.splitlines():
+            stripped = line.strip()
+            if re.search(r'subprocess\.\w+\s*\(\s*\[', stripped):
+                self.assertNotRegex(
+                    stripped,
+                    r'"gh"',
+                    f"direct gh subprocess call: {stripped!r}",
+                )
 
     def test_read_only_git_calls_are_bounded(self):
         """Slice 007-01 AC #4 (updated for 007-02) — destructive git args
@@ -1021,6 +1032,476 @@ class ExecuteCliSurfaceTests(unittest.TestCase):
         # After 007-02 this must be gone.
         self.assertNotIn("No destructive git operations", m.group(1),
                          "SKILL.md description must be updated for execute")
+
+
+# ==================== PR-mode execute tests (slice 007-03) ====================
+
+
+# -------------------- ExecutePrBlocksOnReadinessTests --------------------
+
+
+class ExecutePrBlocksOnReadinessTests(unittest.TestCase):
+    """Slice 007-03 AC #1 — readiness blockers prevent any git/gh
+    subprocess from running in PR mode."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_status_not_done_blocks_pr_execute(self):
+        self.spec.write_text(
+            _spec_with_slice("007-03 — test", "IN_PROGRESS",
+                             include_deviation_log=True)
+        )
+        result = run_land("execute", "--mode", "pr",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-03")
+        self.assertEqual(result.returncode, 1)
+        # No git or gh execute-log section should appear
+        self.assertNotIn("Execute log", result.stdout)
+        self.assertNotIn("Dry-run", result.stdout)
+
+    def test_missing_dod_blocks_pr_execute(self):
+        self.spec.write_text(
+            _spec_with_slice("007-03 — test", "DONE",
+                             dod_ticked=False, dod_unticked=2,
+                             include_deviation_log=True)
+        )
+        result = run_land("execute", "--mode", "pr",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-03")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Execute log", result.stdout)
+
+    def test_missing_deviation_log_blocks_pr_execute(self):
+        self.spec.write_text(
+            _spec_with_slice("007-03 — test", "DONE",
+                             include_deviation_log=False)
+        )
+        result = run_land("execute", "--mode", "pr",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-03")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Execute log", result.stdout)
+
+
+# -------------------- ExecutePrDryRunTests --------------------
+
+
+class ExecutePrDryRunTests(unittest.TestCase):
+    """Slice 007-03 AC #4 — dry-run prints commands but never invokes
+    git push or gh pr create.  PR body file IS written so the user
+    can inspect it before live invocation."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        for p in Path(tempfile.gettempdir()).glob("jig-slice-*-pr-body.md"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+    def _execute_pr_dry_run(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")):
+            return _land.execute(self.spec, "007-03", mode="pr",
+                                 dry_run=True, target=Path(self.tmpdir))
+
+    def test_dry_run_clean_spec_exits_zero(self):
+        _, code = self._execute_pr_dry_run()
+        self.assertEqual(code, 0)
+
+    def test_dry_run_output_contains_dry_run_section(self):
+        report, _ = self._execute_pr_dry_run()
+        self.assertIn("Dry-run", report)
+        self.assertIn("git push", report)
+        self.assertIn("gh pr create", report)
+
+    def test_dry_run_writes_pr_body_file(self):
+        report, _ = self._execute_pr_dry_run()
+        # PR body file referenced in the report and on disk
+        m = re.search(r"(\S*jig-slice-\d{3}-\d{2}-pr-body\.md)", report)
+        self.assertIsNotNone(m, f"no PR body path in report:\n{report}")
+        self.assertTrue(Path(m.group(1)).is_file(),
+                        f"PR body file not written at {m.group(1)}")
+
+    def test_dry_run_no_live_subprocess(self):
+        """Dry-run must not call _run_git_cmd or _run_gh_cmd with
+        dry_run=False (no live execution)."""
+        from unittest.mock import patch, MagicMock
+        # Wrap the helpers so we can inspect dry_run kwarg per-call
+        git_calls = []
+        gh_calls = []
+
+        def fake_git(args, cwd, dry_run=False):
+            git_calls.append((list(args), dry_run))
+            return True, "[dry-run] git " + " ".join(args)
+
+        def fake_gh(args, cwd, dry_run=False):
+            gh_calls.append((list(args), dry_run))
+            return True, "[dry-run] gh " + " ".join(args)
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git), \
+             patch.object(_land, "_run_gh_cmd", side_effect=fake_gh):
+            _land.execute(self.spec, "007-03", mode="pr",
+                          dry_run=True, target=Path(self.tmpdir))
+
+        # In dry-run mode, every call to git/gh must have dry_run=True
+        for args, dr in git_calls:
+            self.assertTrue(dr, f"git called live in dry-run: {args}")
+        for args, dr in gh_calls:
+            self.assertTrue(dr, f"gh called live in dry-run: {args}")
+
+    def test_dry_run_blocked_spec_exits_one(self):
+        self.spec.write_text(
+            _spec_with_slice("007-03 — test", "IN_PROGRESS",
+                             include_deviation_log=True)
+        )
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")):
+            report, code = _land.execute(self.spec, "007-03", mode="pr",
+                                         dry_run=True,
+                                         target=Path(self.tmpdir))
+        self.assertEqual(code, 1)
+        self.assertNotIn("Dry-run", report)
+
+
+# -------------------- ExecutePrSafetyBranchTests --------------------
+
+
+class ExecutePrSafetyBranchTests(unittest.TestCase):
+    """Slice 007-03 AC #5 — refuses when current branch is main/master."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _execute_with_branch(self, branch_name: str):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value=branch_name), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")):
+            return _land.execute(self.spec, "007-03", mode="pr",
+                                 target=Path(self.tmpdir))
+
+    def test_main_branch_refused(self):
+        report, code = self._execute_with_branch("main")
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+        self.assertIn("main", report)
+
+    def test_master_branch_refused(self):
+        report, code = self._execute_with_branch("master")
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+
+
+# -------------------- ExecutePrSafetyGhMissingTests --------------------
+
+
+class ExecutePrSafetyGhMissingTests(unittest.TestCase):
+    """Slice 007-03 AC #5 — refuses when `gh` binary is not on PATH."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_gh_missing_refused(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available",
+                          return_value=(False, "'gh' CLI not found on PATH")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")):
+            report, code = _land.execute(self.spec, "007-03", mode="pr",
+                                         target=Path(self.tmpdir))
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+        self.assertIn("gh", report)
+
+
+# -------------------- ExecutePrSafetyNoGithubRemoteTests --------------------
+
+
+class ExecutePrSafetyNoGithubRemoteTests(unittest.TestCase):
+    """Slice 007-03 AC #5 — refuses when origin doesn't point at github.com."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_github_remote_refused(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote",
+                          return_value=(False, "remote 'origin' does not point at github.com")):
+            report, code = _land.execute(self.spec, "007-03", mode="pr",
+                                         target=Path(self.tmpdir))
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+        self.assertIn("github", report.lower())
+
+
+# -------------------- ExecutePrSuccessTests --------------------
+
+
+class ExecutePrSuccessTests(unittest.TestCase):
+    """Slice 007-03 AC #2 — happy path: push + gh pr create both succeed."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        for p in Path(tempfile.gettempdir()).glob("jig-slice-*-pr-body.md"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+    def _run_execute_pr_success(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/my-slice"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")), \
+             patch.object(_land, "_run_gh_cmd",
+                          return_value=(True, "https://github.com/org/repo/pull/42")):
+            return _land.execute(self.spec, "007-03", mode="pr",
+                                 target=Path(self.tmpdir))
+
+    def test_success_exit_zero(self):
+        _, code = self._run_execute_pr_success()
+        self.assertEqual(code, 0)
+
+    def test_success_report_contains_execute_log(self):
+        report, _ = self._run_execute_pr_success()
+        self.assertIn("Execute log", report)
+
+    def test_success_report_contains_push_step(self):
+        report, _ = self._run_execute_pr_success()
+        self.assertIn("git push", report)
+
+    def test_success_report_contains_gh_pr_create_step(self):
+        report, _ = self._run_execute_pr_success()
+        self.assertIn("gh pr create", report)
+
+    def test_success_report_contains_post_landing(self):
+        report, _ = self._run_execute_pr_success()
+        self.assertIn("Post-landing", report)
+        # PR mode mentions gh pr merge / GitHub UI as the close-out step
+        self.assertRegex(report, r"(?i)gh pr merge|github\s*ui")
+
+    def test_success_pr_body_file_written(self):
+        self._run_execute_pr_success()
+        candidates = list(Path(tempfile.gettempdir()).glob(
+            "jig-slice-*-pr-body.md"))
+        self.assertEqual(len(candidates), 1,
+                         f"expected exactly one PR body file, got {candidates}")
+
+    def test_pr_title_uses_frontmatter_skill_scope(self):
+        """Slice 007-03 AC #2 — `gh pr create --title` arg must follow the
+        `feat(<skill>): <slice-label>` shape, with `<skill>` pulled from
+        the spec frontmatter (`foo` for the synthetic spec used here).
+        Reviewer feedback (implementation review §1) pinned this as an
+        explicit-surface gap on the success path."""
+        from unittest.mock import patch
+        title_seen = []
+
+        def fake_gh(args, cwd, dry_run=False):
+            for i, a in enumerate(args):
+                if a == "--title" and i + 1 < len(args):
+                    title_seen.append(args[i + 1])
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")), \
+             patch.object(_land, "_run_gh_cmd", side_effect=fake_gh):
+            _land.execute(self.spec, "007-03", mode="pr",
+                          target=Path(self.tmpdir))
+
+        self.assertEqual(len(title_seen), 1,
+                         f"expected exactly one --title arg, got {title_seen}")
+        title = title_seen[0]
+        # Synthetic spec frontmatter is `skill: foo`
+        self.assertRegex(title, r"^feat\(foo\):\s+007-03",
+                         f"title shape mismatch: {title!r}")
+
+
+# -------------------- ExecutePrPushFailureTests --------------------
+
+
+class ExecutePrPushFailureTests(unittest.TestCase):
+    """Slice 007-03 AC #2 — push failure halts the sequence; gh NOT called."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_push_failure_exits_one_and_skips_gh(self):
+        from unittest.mock import patch
+        gh_call_log = []
+
+        def fake_gh(args, cwd, dry_run=False):
+            gh_call_log.append(list(args))
+            return True, "should not be called"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd",
+                          return_value=(False, "error: failed to push some refs")), \
+             patch.object(_land, "_run_gh_cmd", side_effect=fake_gh):
+            report, code = _land.execute(self.spec, "007-03", mode="pr",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 1)
+        self.assertIn("Error", report)
+        # gh pr create must NOT have been called after push failure
+        self.assertEqual(gh_call_log, [],
+                         f"gh was invoked despite push failure: {gh_call_log}")
+
+
+# -------------------- ExecutePrGhFailureTests --------------------
+
+
+class ExecutePrGhFailureTests(unittest.TestCase):
+    """Slice 007-03 AC #2 — gh pr create failure surfaces in the report."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_gh_failure_exits_one_after_successful_push(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "pushed")), \
+             patch.object(_land, "_run_gh_cmd",
+                          return_value=(False, "a pull request for branch already exists")):
+            report, code = _land.execute(self.spec, "007-03", mode="pr",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 1)
+        self.assertIn("Error", report)
+        self.assertIn("already exists", report)
+
+
+# -------------------- ExecutePrBodyFileWrittenTests --------------------
+
+
+class ExecutePrBodyFileWrittenTests(unittest.TestCase):
+    """Slice 007-03 AC #3 — PR body file is written before gh pr create."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-pr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-03 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        for p in Path(tempfile.gettempdir()).glob("jig-slice-*-pr-body.md"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+    def test_body_file_exists_before_gh_call_in_live_mode(self):
+        """When gh is invoked, the body file path passed to gh must exist."""
+        from unittest.mock import patch
+
+        body_paths_seen = []
+
+        def fake_gh(args, cwd, dry_run=False):
+            # Extract the --body-file path from the args
+            for i, a in enumerate(args):
+                if a == "--body-file" and i + 1 < len(args):
+                    body_paths_seen.append(args[i + 1])
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")), \
+             patch.object(_land, "_run_gh_cmd", side_effect=fake_gh):
+            _land.execute(self.spec, "007-03", mode="pr",
+                          target=Path(self.tmpdir))
+
+        self.assertEqual(len(body_paths_seen), 1,
+                         f"expected exactly one --body-file path, got {body_paths_seen}")
+        body_path = Path(body_paths_seen[0])
+        self.assertTrue(body_path.is_file(),
+                        f"PR body file does not exist at {body_path}")
+
+
+# -------------------- ExecutePrCliSurfaceTests --------------------
+
+
+class ExecutePrCliSurfaceTests(unittest.TestCase):
+    """Slice 007-03 AC #12 — SKILL.md documents --mode pr."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.skill = SKILL_MD.read_text()
+
+    def test_skill_md_references_pr_mode_execute(self):
+        """SKILL.md's How-to-use section must document `execute --mode pr`."""
+        # Single search — either `--mode pr` appears in the body, or the
+        # explicit `execute --mode pr` phrase does
+        body = self.skill.lower()
+        self.assertTrue(
+            "--mode pr" in body or "execute --mode pr" in body,
+            "SKILL.md must document `execute --mode pr`",
+        )
 
 
 if __name__ == "__main__":
