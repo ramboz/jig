@@ -42,13 +42,17 @@ Tick each `- [ ]` box in the slice's Definition of Done **only after the
 item it describes is genuinely complete**, not pre-emptively to advertise
 intent. Specifically:
 
-- The "Reviewed by reviewer subagent" box is ticked **after** the reviewer
-  returns a non-blocking verdict, not when you spawn the reviewer.
+- **Do NOT manually tick "Implementation review passed" or
+  "Reconciliation review passed."** As of [slice 003-04](../docs/specs/003-spec-workflow-promotion/spec.md),
+  `workflow.py transition` auto-ticks those two boxes on the gating
+  state transition (IN_PROGRESS → REVIEWED ticks the implementation
+  box; REVIEWED → RECONCILED ticks the reconciliation box). Manual
+  ticks are now superseded — run the transition instead. The auto-tick
+  exists because three slices in a row (007-01, 008-03, 011-02) hit
+  the pre-tick anti-pattern; making the helper the sole ticker stops
+  the recurrence structurally.
 - The "Deviation log produced" box is ticked **after** the log is written,
   not when you plan to write it.
-- The "Reconciliation review pass" box is ticked **after** the
-  reconciliation reviewer returns a non-blocking verdict, not when you
-  plan to run it.
 - The "status board regenerated" / "CLAUDE.md updated" boxes are ticked
   **after** the regen / edits land, not when you intend to do them. The
   005-01 and 006-01 reconciliation reviewers caught false-positive ticks
@@ -56,7 +60,8 @@ intent. Specifically:
 
 Optimistic pre-ticking creates a deviation-log-vs-reality mismatch the
 reconciliation reviewer must catch, which is friction we can avoid by
-just-in-time ticking.
+just-in-time ticking — or, for the two review-passed boxes, by leaving
+them entirely to `workflow.py transition`.
 
 ## Constraints
 
