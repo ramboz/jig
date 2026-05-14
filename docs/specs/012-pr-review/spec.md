@@ -550,6 +550,78 @@ correction itself is recorded as deviation §1 below).
    architecture lens. That depth belongs in a richer user-installed
    `pr-review` — exactly the deferral pattern this slice ships.
 
+9. **Routing-dogfood PASS (post-merge, fresh session, 2026-05-14).**
+   After the slice merged to main and the user refreshed the jig install,
+   the routing-dogfood was run in a fresh Claude Code session. Three test
+   prompts were attempted; the conclusive evidence came from a direct
+   skill-inventory question rather than from the original two trigger
+   prompts.
+
+   **Conclusive test — direct skill inventory question.** The user asked
+   the fresh session: *"what review skills do you have access to?"* The
+   model's response correctly:
+   - Listed both `pr-review` (user-installed, richer) and `jig:pr-review`
+     (lightweight baseline) as separate, distinct skills.
+   - Reported each skill's actual description content — `Multi-perspective…`
+     for the user's, `Lightweight baseline…` for jig's. Not identical.
+   - **Explicitly identified the deferral relationship**, summarizing
+     jig:pr-review as "defers to the richer `pr-review` skill when
+     present."
+
+   That last point is the load-bearing hypothesis confirmed: Claude Code's
+   skill router does surface jig's SKILL.md `description` field (including
+   the deferral hint) to the model, and the model uses it to understand
+   the routing relationship between the two skills.
+
+   **Earlier test-session reports of "identical descriptions" between
+   the two skills were model confabulation, not a Claude Code router
+   bug.** Three independent test sessions all produced the same wrong
+   answer — consistent enough to look like signal but actually just
+   three samples of the same hallucination pattern from similar
+   inference paths. The terminal `cat` of both `~/.claude/skills/pr-review/SKILL.md`
+   and `~/.claude/plugins/marketplaces/local-desktop-app-uploads/jig/skills/pr-review/SKILL.md`
+   was the ground truth that pinned this — files different on disk,
+   exactly as shipped. The implementer (initially) read the consistent
+   confabulation across sessions as evidence of a real bug and
+   prematurely recommended applying the AC #9 fallback; that
+   recommendation was retracted before any code change after the direct
+   inventory test produced conclusive evidence.
+
+   **Earlier inconclusive prompts** (recorded for completeness, not as
+   pass/fail):
+   - *"review this PR"* → reported as routing to `pr-review` (the
+     user's). Test-session reasoning was unreliable (cited a confabulated
+     description), but the *choice* matches the deferral.
+   - *"can you look at the changes I just made?"* → no skill fired.
+     Defensible — neither skill's trigger language was a tight match for
+     that phrasing. Not a jig-shadowing failure.
+   - *"review the most recent commit on the currently-checked-out branch"*
+     → produced a four-section review (`**Scope:**` / `**Blockers:**` /
+     `**Nits:**` / `**Strengths:**`) with no UI-visible "Using skill: X"
+     signal. Ambiguous: could have been jig:pr-review firing without UI
+     surfacing, or Claude producing a sensible four-section format on its
+     own without invoking either skill. Not used as a pass/fail signal.
+
+   **AC #9 fallback NOT applied.** Frontmatter stays at the auto-
+   triggering default (no `disable-model-invocation: true`). The
+   deferral hint remains the routing mechanism.
+
+   **Methodology lessons captured to inbox (filed during this close-out):**
+   - When a test depends on a fresh model's self-report about its own
+     skill list, prefer **direct inventory questions** ("list the skills
+     you have access to with X in the name and paste their descriptions
+     verbatim") over **behavioral observation prompts** ("review this PR
+     and tell me which skill you used"). The former is harder for the
+     model to confabulate against because it asks for ground-truth
+     enumeration; the latter conflates routing decision with output
+     production with self-report — three layers of potential
+     unreliability.
+   - When multiple test sessions produce the same confused answer,
+     that's not automatically a bug signal — it can be three samples
+     of the same hallucination from similar inference paths.
+     Disambiguate with non-LLM evidence (terminal `cat`, file
+     inspection, direct API calls) before concluding a system bug.
+
 **Open follow-ons (filed to inbox.md during reconciliation):**
 
 - The internal AC #1/#3 contradiction surfaced a meta-issue:
@@ -586,10 +658,15 @@ correction itself is recorded as deviation §1 below).
 
 ### Close-out (post-DONE)
 
-- [ ] Routing-dogfood run by the user from a freshly-restarted session
-      with both skills loaded, at least twice across two prompt phrasings.
-      Outcome recorded here (which skill routed, which prompts used). If
-      the dogfood fails, apply AC #9 fallback and re-run to confirm.
+- [x] Routing-dogfood run by the user from a freshly-restarted session
+      with both skills loaded. _(Completed 2026-05-14 — see deviation §9.
+      Conclusive evidence from a direct skill-inventory question: the
+      fresh-session model correctly listed both skills, reported each
+      one's distinct description, and explicitly identified the deferral
+      relationship. AC #9 fallback NOT applied; auto-triggering stays the
+      default. Methodology lessons (prefer direct-inventory questions
+      over behavioral-routing-introspection prompts; consistent
+      confabulation can mimic real bugs) captured to inbox.)_
 - [x] SKILL.md dogfood against this slice's own diff (DoD box 2).
       _(Completed 2026-05-14. The skill is judgment-only — no helper, no
       slash-command invocation needed — so the implementer ran it by
