@@ -103,6 +103,45 @@ keep running jig from source — running `scripts/verify_install.py`
 without the install will exit `2` with the actionable
 `jig plugin not installed` message.
 
+## Refreshing the install after edits (install-snapshot lag)
+
+**Read this if you're editing jig and want a reviewer subagent to see
+your changes.**
+
+The Desktop app's graphical plugin manager installs jig by **copying**
+the source tree to `~/.claude/plugins/marketplaces/<source>/jig/` — it
+is NOT a symlink or path-link to your working checkout. Concretely:
+
+- A `reviewer` subagent spawned via Task in a Claude Code session reads
+  jig's code from the installed snapshot path, not from your working
+  copy.
+- Edits you make to `skills/`, `agents/`, `review.py`, etc. are
+  **invisible** to that reviewer until you refresh the install.
+- This bit slice 011-02's dogfood (deviation log §1-2): the first real-
+  `jig:reviewer` pass returned `fail` because it reviewed a snapshot
+  that pre-dated the slice's implementation by ~minutes.
+
+The refresh recipe (from a Claude Code session, with your jig checkout
+as the current dir):
+
+```text
+/plugin uninstall jig@jig-dev
+/plugin install jig@jig-dev
+```
+
+If you originally installed via the graphical plugin manager rather
+than `/plugin marketplace add .`, use **Settings → Plugins → jig →
+Uninstall**, then re-add via the manager. The `local-desktop-app-uploads`
+install path is regenerated each time.
+
+After the refresh, **start a fresh Claude Code session** to get the
+new agents reachable as `subagent_type` values (the available-agents
+list is fixed at session start — see [docs/inbox.md](docs/inbox.md)
+2026-05-13 install-snapshot-lag entry for context).
+
+A `scripts/refresh-install.md` runbook ships with the repo as a
+single-page summary of these steps.
+
 ## Running the test suite
 
 jig uses per-skill `python3 -m unittest discover` with no top-level
