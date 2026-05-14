@@ -33,6 +33,11 @@ claude plugins install github:ramboz/jig
 ```
 
 > Not yet on the plugin marketplace. Install from source for now.
+>
+> **Contributors:** see [CONTRIBUTING.md](CONTRIBUTING.md) for the local
+> dev install via the bundled `jig-dev` marketplace — it's the path that
+> makes the three subagents (`implementer` / `reviewer` / `architect`)
+> reachable while developing jig itself.
 
 ## Getting started
 
@@ -44,20 +49,24 @@ The `scaffold-init` skill will run and produce the docs/ scaffolding.
 ## Repository structure (for contributors)
 
 ```
-.claude-plugin/plugin.json    # Plugin manifest
-skills/                       # Skill definitions (SKILL.md per skill)
-agents/                       # Subagent definitions
-hooks/                        # Hook configuration + Python scripts
-templates/                    # Source templates scaffold-init generates from
-docs/                         # Dev docs for jig itself (dogfooded workflow)
-  specs/                      # Specs for jig's own features
-  memory/                     # jig's own memory layer
-  adrs/                       # Architectural decisions
+.claude-plugin/plugin.json       # Plugin manifest
+.claude-plugin/marketplace.json  # Local dev marketplace descriptor
+skills/                          # Skill definitions (SKILL.md per skill)
+agents/                          # Subagent definitions
+hooks/                           # Hook configuration + Python scripts
+scripts/                         # Top-level dev scripts (verify-install, …)
+templates/                       # Source templates scaffold-init generates from
+docs/                            # Dev docs for jig itself (dogfooded workflow)
+  specs/                         # Specs for jig's own features
+  memory/                        # jig's own memory layer
+  decisions/                     # Architectural decisions (ADRs)
 ```
 
 ## Contributing
 
-Read [docs/workflow.md](docs/workflow.md) before starting. Every change starts with a spec.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the local install + verify
+flow, then [docs/workflow.md](docs/workflow.md) for the spec lifecycle.
+Every change to jig starts with a spec.
 
 ## Status
 

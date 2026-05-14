@@ -1,0 +1,13 @@
+{
+  "name": "jig-dev",
+  "owner": {
+    "name": "ramboz"
+  },
+  "plugins": [
+    {
+      "name": "jig",
+      "source": "..",
+      "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for Claude Code (local dev install)"
+    }
+  ]
+}

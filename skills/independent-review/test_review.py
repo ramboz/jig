@@ -227,5 +227,144 @@ class SkillPromotionTests(unittest.TestCase):
         self.assertRegex(self.skill, r"(?i)reconciliation\s+review")
 
 
+class SubagentTypeTests(unittest.TestCase):
+    """`review.py subagent-type <mode>` — slice 011-02.
+
+    Detection: presence of `${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md`.
+    - env var set + reviewer.md present → "reviewer"
+    - env var unset → "general-purpose"
+    - env var set, reviewer.md absent → "general-purpose" (graceful)
+    - env var set to nonexistent path → "general-purpose" (graceful)
+    """
+
+    def _run(self, *args: str, env_overrides=None, drop_plugin_root: bool = False):
+        env = os.environ.copy()
+        if drop_plugin_root:
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+        if env_overrides:
+            env.update(env_overrides)
+        return subprocess.run(
+            [sys.executable, str(REVIEW), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_returns_reviewer_when_plugin_root_set_and_agent_present(self):
+        # Repo root satisfies the "installed" shape: agents/reviewer.md exists
+        result = self._run(
+            "subagent-type", "implementation",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "reviewer")
+
+    def test_returns_general_purpose_when_plugin_root_unset(self):
+        result = self._run("subagent-type", "implementation",
+                           drop_plugin_root=True)
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "general-purpose")
+
+    def test_returns_general_purpose_when_reviewer_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            result = self._run(
+                "subagent-type", "implementation",
+                env_overrides={"CLAUDE_PLUGIN_ROOT": td},
+            )
+            self.assertEqual(result.returncode, 0,
+                             msg=f"stderr: {result.stderr}")
+            self.assertEqual(result.stdout.strip(), "general-purpose")
+
+    def test_returns_general_purpose_when_plugin_root_path_missing(self):
+        result = self._run(
+            "subagent-type", "implementation",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": "/no/such/jig/install"},
+        )
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "general-purpose")
+
+    def test_reconciliation_mode_returns_same_as_implementation(self):
+        # AC #1: mode arg is informational only; both return same name today
+        result = self._run(
+            "subagent-type", "reconciliation",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "reviewer")
+
+    def test_missing_mode_argument_errors(self):
+        result = self._run("subagent-type", drop_plugin_root=True)
+        self.assertNotEqual(result.returncode, 0,
+                            msg="argparse should reject missing required arg")
+
+    def test_unknown_mode_argument_errors(self):
+        result = self._run("subagent-type", "bogus", drop_plugin_root=True)
+        self.assertNotEqual(result.returncode, 0,
+                            msg="argparse should reject unknown choice")
+
+    def test_stdout_only_emits_the_name_no_trailing_noise(self):
+        # SKILL.md's bash recipe relies on this: `--subagent-type "$(... subagent-type ...)"`
+        result = self._run(
+            "subagent-type", "implementation",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(result.returncode, 0)
+        # No leading whitespace, no trailing extras beyond a single newline
+        self.assertIn(result.stdout, ("reviewer\n", "reviewer"),
+                      f"stdout must be clean for shell substitution; got {result.stdout!r}")
+
+
+class SkillRecipeIntegrationTests(unittest.TestCase):
+    """SKILL.md's bash recipe must call the new helper subcommand (AC #4)."""
+
+    def setUp(self):
+        self.skill = SKILL_MD.read_text()
+
+    def test_skill_recipe_calls_subagent_type_subcommand(self):
+        # SKILL.md must invoke `review.py … subagent-type <mode>` from its
+        # bash recipe. Allow line continuations / closing quotes between
+        # `review.py` and `subagent-type`.
+        self.assertIn(
+            "subagent-type implementation",
+            self.skill,
+            "SKILL.md must call `subagent-type implementation` to pick the "
+            "Task argument deterministically",
+        )
+        self.assertIn(
+            "subagent-type reconciliation",
+            self.skill,
+            "SKILL.md must call `subagent-type reconciliation` for the "
+            "reconciliation-pass recipe",
+        )
+
+    def test_skill_no_longer_uses_hand_written_fallback_hedge(self):
+        # The pre-011-02 text was: "subagent_type: \"general-purpose\" (or
+        # \"reviewer\" if that filesystem-based agent is loaded)". Replace
+        # that hedge with deterministic selection via the helper.
+        self.assertNotRegex(
+            self.skill,
+            r"or\s+`?\"reviewer\"`?\s+if\s+that\s+filesystem-based\s+agent",
+            "SKILL.md must drop the hand-written fallback hedge — "
+            "the helper now picks deterministically",
+        )
+
+
+class ArchitectureNoteTests(unittest.TestCase):
+    """AC #8: a sentence under 'Three subagents, no more' notes spec 011 reachability."""
+
+    def test_architecture_md_records_spec_011_reachability(self):
+        arch = (REPO_ROOT / "docs" / "architecture.md").read_text()
+        # Look for any sentence under "Three subagents" that mentions
+        # spec 011 and reachable / installed / live
+        self.assertRegex(
+            arch,
+            r"(?is)Three\s+subagents.*?(spec\s*011|011-0[12]|plugin-self-install)",
+            "docs/architecture.md must record that subagents are reachable "
+            "in jig's dev env as of spec 011",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

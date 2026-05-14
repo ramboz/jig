@@ -41,12 +41,16 @@ PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \
   "<deliverable-path-1>" "<deliverable-path-2>" ...)
+SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type implementation)
 ```
 
-Then feed `$PROMPT` to the `Task` tool with `subagent_type: "general-purpose"`
-(or `"reviewer"` if that filesystem-based agent is loaded). Wait for the
-verdict. Address any `fail`/`needs-changes` findings; rerun the helper +
-Task as needed until `pass`.
+Then feed `$PROMPT` to the `Task` tool with `subagent_type: "$SUBAGENT"`.
+The helper resolves `$SUBAGENT` deterministically — `reviewer` when jig is
+installed as a plugin (the real filesystem-based agent is reachable),
+`general-purpose` when running from source. Wait for the verdict. Address
+any `fail`/`needs-changes` findings; rerun the helper + Task as needed
+until `pass`.
 
 ### Reconciliation review
 
@@ -58,10 +62,13 @@ PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   reconciliation \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>")
+SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type reconciliation)
 ```
 
-Feed to `Task`. The prompt explicitly tells the reviewer NOT to re-evaluate
-against ACs — it only verifies the deviation log matches reality.
+Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
+explicitly tells the reviewer NOT to re-evaluate against ACs — it only
+verifies the deviation log matches reality.
 
 ### What gets put in the prompt automatically
 
