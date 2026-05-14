@@ -40,3 +40,7 @@
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-02 — subagent-type-fallback-upgrade | **DONE** | 11 new tests (362 total); real `jig:reviewer` dogfood clean; install-snapshot lag flagged for follow-up |
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-03 — scaffold-json-self-install-marker | DRAFT | Deferred; no caller needs the signal yet |
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-04 — subagentstart-reachability | DRAFT | Deferred; gated on a real subagent-event use case |
+| [012-pr-review](012-pr-review/spec.md) | 012-01 — pr-review-skill | **DONE** | 23 new tests (394 total); lightweight baseline; defers to richer user skill via description hint; first non-stub active jig skill without a `.py` helper; routing-dogfood + own-slice dogfood deferred to user-driven Close-out |
+| [012-pr-review](012-pr-review/spec.md) | 012-02 — pr-review-gather-helper | DRAFT |  |
+| [012-pr-review](012-pr-review/spec.md) | 012-03 — security-lens-integration | DRAFT |  |
+| [012-pr-review](012-pr-review/spec.md) | 012-04 — language-specific-references | DRAFT |  |

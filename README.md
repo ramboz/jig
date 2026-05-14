@@ -25,6 +25,25 @@ jig installs a focused, opinionated workflow layer into your project:
 
 See [docs/architecture.md](docs/architecture.md) for the full reasoning.
 
+## Extension points
+
+> **Bring your own depth; jig provides the floor.**
+
+Some jig skills ship as **lightweight baselines** designed to defer to
+richer user-level skills when both are present. The auto-triggering
+description for each such skill includes an explicit deferral hint, so
+the Claude Code skill router picks a more specific user skill over
+jig's baseline.
+
+Example: `/jig:pr-review` ships a slim four-section PR review (scope /
+blockers / nits / strengths). If you already have a richer `pr-review`
+skill at `~/.claude/skills/pr-review` (or any other scope), that wins —
+jig stays out of the way.
+
+This keeps jig opinionated about *workflow* (spec-driven, reviewer-gated,
+deterministic helpers) while staying out of the way of *judgment skills*
+you've already invested in.
+
 ## Installation
 
 ```bash
