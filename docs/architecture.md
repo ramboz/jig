@@ -44,6 +44,15 @@ Above ~40% context fill, model recall degrades. Practical ceiling: 8 MCP servers
 - `architect`: rare, ADR-style output
 Subagents are defined by what context they need isolated from, not by job title.
 
+As of [spec 011-01 (plugin-self-install)](specs/011-plugin-self-install/spec.md),
+all three are reachable as real `subagent_type` values when jig is installed
+as a Claude Code plugin (the `jig-dev` local marketplace or any future
+public install). Pre-spec-011, every caller fell back to
+`subagent_type: "general-purpose"`. Slice 011-02 added
+`review.py subagent-type` so SKILL.md's bash recipe picks the real
+`reviewer` deterministically when installed and degrades to
+`general-purpose` when running from source.
+
 ## Module boundaries
 
 > **Deferred — no signal yet on what modules jig itself will have.**

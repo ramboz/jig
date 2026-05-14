@@ -1,17 +1,26 @@
 """
-jig independent-review helper — slice 004-01 (review-helper)
+jig independent-review helper — slices 004-01 (review-helper) + 011-02
+(subagent-type-fallback-upgrade)
 
 Builds the standardized reviewer-subagent prompt for either an implementation
 review or a reconciliation review. The helper does NOT spawn the subagent
 itself — Claude owns the Task invocation. This script just makes the prompt
 consistent across 100+ invocations.
 
+Slice 011-02 added the `subagent-type` subcommand: it inspects
+`${CLAUDE_PLUGIN_ROOT}` and prints either `reviewer` (jig installed as a
+plugin — real subagent reachable) or `general-purpose` (fallback). SKILL.md's
+bash recipe uses it to pick the Task tool's `subagent_type` argument
+deterministically.
+
 Usage:
     python3 review.py implementation <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py reconciliation <spec.md> <slice-fragment>
+    python3 review.py subagent-type {implementation|reconciliation}
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -144,6 +153,35 @@ For each deviation-log claim:
 """
 
 
+# -------- Subagent-type selection (slice 011-02) --------
+
+
+def detect_subagent_type() -> str:
+    """Return `reviewer` when jig is installed as a plugin (the real
+    filesystem-based agent is reachable), `general-purpose` otherwise.
+
+    Primary signal: `${CLAUDE_PLUGIN_ROOT}` env var, populated by Claude
+    Code when running plugin scripts. If set, we verify it contains
+    `agents/reviewer.md` to distinguish "this is jig's plugin root" from
+    "this is some other plugin's root that happens to set the var."
+
+    Graceful fallback: any failure to read the env var, resolve the path,
+    or stat the agent file returns `general-purpose` with no traceback.
+    Users running jig from source without installing it MUST NOT be
+    blocked. (See spec 011-02 AC #3.)
+    """
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if not plugin_root:
+        return "general-purpose"
+    try:
+        if (Path(plugin_root) / "agents" / "reviewer.md").is_file():
+            return "reviewer"
+    except (OSError, ValueError):
+        # Path-construction or stat failure — defensively fall back.
+        pass
+    return "general-purpose"
+
+
 # -------- CLI plumbing --------
 
 
@@ -163,6 +201,19 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("spec", help="path to spec.md")
     pr.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
 
+    pt = sub.add_parser(
+        "subagent-type",
+        help="print the subagent_type name SKILL.md should pass to Task",
+    )
+    pt.add_argument(
+        "mode",
+        choices=["implementation", "reconciliation"],
+        help=(
+            "review mode (currently informational — both modes return the "
+            "same name; the choice exists for forward compatibility)"
+        ),
+    )
+
     return p
 
 
@@ -172,6 +223,12 @@ def main(argv: list) -> int:
         ns = parser.parse_args(argv[1:])
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
+
+    # The `subagent-type` subcommand doesn't need a spec — handle it before
+    # the spec-reading block below.
+    if ns.command == "subagent-type":
+        sys.stdout.write(detect_subagent_type() + "\n")
+        return 0
 
     spec = Path(ns.spec)
     if not spec.is_file():

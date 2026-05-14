@@ -249,5 +249,190 @@ class SkillPromotionTests(unittest.TestCase):
                       "SKILL.md must reference the workflow.py helper")
 
 
+class AutoTickReviewPassedTests(unittest.TestCase):
+    """Slice 003-04: workflow.py transition auto-ticks the two review-passed
+    DoD boxes on the gating transitions."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-autotick-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write(self, slice_name: str, status: str, dod_lines: list) -> None:
+        body = [
+            "---", "status: DRAFT", "---", "",
+            "# Spec X", "",
+            f"## Slice {slice_name}", "",
+            f"**STATUS: {status}**", "",
+            "**Goal:** placeholder.", "",
+            "**Definition of Done:**", "",
+        ]
+        body.extend(dod_lines)
+        self.spec.write_text("\n".join(body) + "\n")
+
+    def _read(self) -> str:
+        return self.spec.read_text()
+
+    # AC #1
+    def test_transition_to_REVIEWED_auto_ticks_implementation_review(self):
+        self._write("009-99 alpha", "IN_PROGRESS", [
+            "- [ ] Implementation review passed.",
+            "- [ ] Reconciliation review passed.",
+        ])
+        result = run_workflow("transition", str(self.spec), "009-99", "REVIEWED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        self.assertIn("- [x] Implementation review passed.", text)
+        # Recon row stays unticked
+        self.assertIn("- [ ] Reconciliation review passed.", text)
+
+    # AC #2
+    def test_transition_to_RECONCILED_auto_ticks_reconciliation_review(self):
+        self._write("009-99 alpha", "REVIEWED", [
+            "- [x] Implementation review passed.",
+            "- [ ] Reconciliation review passed.",
+        ])
+        result = run_workflow("transition", str(self.spec), "009-99", "RECONCILED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        self.assertIn("- [x] Reconciliation review passed.", text)
+
+    # AC #3
+    def test_other_transitions_leave_checkboxes_alone(self):
+        self._write("009-99 alpha", "DRAFT", [
+            "- [ ] Implementation review passed.",
+            "- [ ] Reconciliation review passed.",
+        ])
+        # DRAFT → READY_FOR_REVIEW shouldn't touch the boxes
+        result = run_workflow("transition", str(self.spec), "009-99", "READY_FOR_REVIEW")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        self.assertIn("- [ ] Implementation review passed.", text)
+        self.assertIn("- [ ] Reconciliation review passed.", text)
+
+    def test_RECONCILED_to_DONE_does_not_re_tick(self):
+        self._write("009-99 alpha", "RECONCILED", [
+            "- [x] Implementation review passed.",
+            "- [x] Reconciliation review passed.",
+        ])
+        result = run_workflow("transition", str(self.spec), "009-99", "DONE")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        # Both stay ticked, neither is added/removed
+        self.assertEqual(text.count("- [x] Implementation review passed."), 1)
+        self.assertEqual(text.count("- [x] Reconciliation review passed."), 1)
+
+    # AC #4 (idempotent)
+    def test_auto_tick_is_idempotent_when_box_already_ticked(self):
+        self._write("009-99 alpha", "IN_PROGRESS", [
+            "- [x] Implementation review passed.",
+        ])
+        result = run_workflow("transition", str(self.spec), "009-99", "REVIEWED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        # Still exactly one ticked instance, no `- [x] - [x]` corruption
+        self.assertEqual(text.count("- [x] Implementation review passed."), 1)
+
+    # AC #4 (scoping: Close-out subsection excluded)
+    def test_auto_tick_skips_close_out_subsection(self):
+        body = [
+            "---", "status: DRAFT", "---", "",
+            "# Spec X", "",
+            "## Slice 009-99 alpha", "",
+            "**STATUS: IN_PROGRESS**", "",
+            "**Definition of Done:**", "",
+            "- [ ] Implementation review passed.",
+            "",
+            "### Close-out (post-DONE)",
+            "",
+            "- [ ] Implementation review passed.  # would be a duplicate label if reached",
+            "",
+        ]
+        self.spec.write_text("\n".join(body) + "\n")
+        result = run_workflow("transition", str(self.spec), "009-99", "REVIEWED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        # The DoD line (above Close-out) is ticked
+        self.assertIn("- [x] Implementation review passed.", text)
+        # The Close-out duplicate stays unticked
+        # (count: 1 ticked + 1 unticked-in-Close-out = 1 each)
+        self.assertEqual(text.count("- [x] Implementation review passed."), 1)
+        self.assertEqual(
+            text.count("- [ ] Implementation review passed."), 1,
+            f"Close-out duplicate should remain unticked; spec was:\n{text}",
+        )
+
+    # AC #4 (scoping: other slices in same spec untouched)
+    def test_auto_tick_does_not_touch_other_slices(self):
+        body = [
+            "---", "status: DRAFT", "---", "",
+            "# Spec X", "",
+            "## Slice 009-99 alpha", "",
+            "**STATUS: IN_PROGRESS**", "",
+            "**Definition of Done:**", "",
+            "- [ ] Implementation review passed.",
+            "",
+            "## Slice 009-98 beta", "",
+            "**STATUS: DRAFT**", "",
+            "**Definition of Done:**", "",
+            "- [ ] Implementation review passed.",  # should stay unticked
+            "",
+        ]
+        self.spec.write_text("\n".join(body) + "\n")
+        result = run_workflow("transition", str(self.spec), "009-99", "REVIEWED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        # alpha is ticked; beta is not
+        self.assertEqual(text.count("- [x] Implementation review passed."), 1)
+        self.assertEqual(text.count("- [ ] Implementation review passed."), 1)
+
+    # AC #5 (multiple matches in same DoD: warn + skip + name spec/slice)
+    def test_auto_tick_warns_on_multiple_matches_and_skips_all(self):
+        self._write("009-99 alpha", "IN_PROGRESS", [
+            "- [ ] Implementation review passed (first take).",
+            "- [ ] Implementation review passed (second take).",
+        ])
+        result = run_workflow("transition", str(self.spec), "009-99", "REVIEWED")
+        self.assertEqual(result.returncode, 0,
+                         msg=f"transition should still succeed; stderr: {result.stderr}")
+        text = self._read()
+        # Neither got ticked
+        self.assertEqual(text.count("- [x] Implementation review passed"), 0)
+        # Stderr describes the ambiguity AND names the spec + slice so a
+        # CI/log grep can disambiguate which slice triggered the warning.
+        self.assertRegex(
+            result.stderr,
+            r"(?i)multiple.*implementation review passed",
+            "stderr should describe the ambiguous match",
+        )
+        self.assertIn(
+            "spec.md", result.stderr,
+            f"stderr should name the spec file; got: {result.stderr!r}",
+        )
+        self.assertIn(
+            "009-99", result.stderr,
+            f"stderr should name the slice; got: {result.stderr!r}",
+        )
+
+    # AC #5 (no matching label → no-op, no warn)
+    def test_auto_tick_noop_when_label_absent(self):
+        self._write("009-99 alpha", "IN_PROGRESS", [
+            "- [ ] Some unrelated item.",
+        ])
+        result = run_workflow("transition", str(self.spec), "009-99", "REVIEWED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self._read()
+        # The unrelated item stays unticked
+        self.assertIn("- [ ] Some unrelated item.", text)
+        # No stderr noise about absent labels
+        self.assertNotIn("Implementation review passed", result.stderr or "")
+
+    # AC #7: existing tests still pass — covered implicitly by running the
+    # whole test_workflow.py module.
+
+
 if __name__ == "__main__":
     unittest.main()

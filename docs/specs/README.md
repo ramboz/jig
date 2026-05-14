@@ -18,6 +18,7 @@
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-01 — lifecycle-helper | **DONE** | 16 workflow tests green; spec-workflow promoted |
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-02 — anti-horizontal-phasing-check | DRAFT | Deferred this session |
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-03 — new-spec-scaffolding | DRAFT | Deferred this session |
+| [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-04 — auto-tick-review-passed-on-transition | **DONE** | 9 new tests (371 total); transition auto-ticks review-passed boxes — pre-tick anti-pattern fixed structurally |
 | [004-independent-review-promotion](004-independent-review-promotion/spec.md) | 004-01 — review-helper | **DONE** |  |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-01 — adr-helper | **DONE** | 46 tests green; first Tier 1 skill — adr-workflow active |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-02 — supersede | DRAFT | Deferred; no real supersede yet |
@@ -35,3 +36,7 @@
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-04 — slice-to-spec-mapping | DRAFT |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-05 — scaffold-init --migrate suggestion | **DONE** |  |
 | [009-dod-close-out-separation](009-dod-close-out-separation/spec.md) | 009-01 — close-out-section-recognition | **DONE** |  |
+| [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-01 — local-plugin-install | **DONE** | 20 new tests (351 total); first real reviewer dogfood — reviewer + architect refused write, implementer wrote |
+| [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-02 — subagent-type-fallback-upgrade | **DONE** | 11 new tests (362 total); real `jig:reviewer` dogfood clean; install-snapshot lag flagged for follow-up |
+| [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-03 — scaffold-json-self-install-marker | DRAFT | Deferred; no caller needs the signal yet |
+| [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-04 — subagentstart-reachability | DRAFT | Deferred; gated on a real subagent-event use case |
