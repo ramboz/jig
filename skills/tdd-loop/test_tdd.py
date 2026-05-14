@@ -1,18 +1,21 @@
 """
-AC verification tests for slice 006-01 (tdd-helper).
+AC verification tests for slices 006-01, 006-04, 006-05.
 
 Run from the repo root:
-    python3 skills/tdd-loop/test_tdd.py
+    python3 -m unittest discover -s skills/tdd-loop -p 'test_*.py'
 """
 
+import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TDD_PY = REPO_ROOT / "skills" / "tdd-loop" / "tdd.py"
@@ -27,6 +30,14 @@ def run_tdd(*args: str, cwd: Path = None) -> subprocess.CompletedProcess:
         capture_output=True, text=True, env=env,
         cwd=str(cwd) if cwd else None,
     )
+
+
+def _load_tdd():
+    """Load tdd.py as a module for direct-call tests with mocking."""
+    spec = importlib.util.spec_from_file_location("tdd", TDD_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def write(path: Path, content: str = "") -> Path:
@@ -283,6 +294,228 @@ class SkillSurfaceTests(unittest.TestCase):
     def test_body_has_when_not_to_use_section(self):
         # AC #3 — "When NOT to use" section.
         self.assertRegex(self.text, r"(?i)when not to use")
+
+
+# -------------------- MissingModuleTests (006-04) --------------------
+
+
+class MissingModuleTests(unittest.TestCase):
+    """AC #1–5 for slice 006-04 — missing module normalizes to exit 2."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        # Write a pytest.ini so pytest is detected via filesystem signals.
+        (self.target / "pytest.ini").write_text("[pytest]\n")
+        self._tdd = _load_tdd()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run_cmd_run(self, importable: bool):
+        """Helper: call cmd_run with _is_module_importable patched."""
+        buf = []
+        with patch.object(self._tdd, "_is_module_importable",
+                          return_value=importable):
+            with patch("sys.stderr") as mock_stderr:
+                mock_stderr.write = lambda s: buf.append(s)
+                # Also patch subprocess.run so we don't actually run pytest.
+                with patch.object(self._tdd.subprocess, "run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=0)
+                    code = self._tdd.cmd_run(self.target, None)
+        return code, "".join(buf)
+
+    def test_missing_pytest_module_exits_2(self):
+        # AC #1: pytest detected but module not importable → exit 2.
+        code, _ = self._run_cmd_run(importable=False)
+        self.assertEqual(code, 2)
+
+    def test_missing_pytest_module_stderr_contains_not_installed(self):
+        # AC #1: stderr must contain "not installed".
+        _, stderr = self._run_cmd_run(importable=False)
+        self.assertIn("not installed", stderr.lower())
+
+    def test_existing_pytest_module_proceeds(self):
+        # AC #2: when module IS importable, subprocess is called (not short-circuited).
+        code, _ = self._run_cmd_run(importable=True)
+        self.assertEqual(code, 0)
+
+    def test_detect_unaffected_by_missing_module(self):
+        # AC #4: detect still returns "pytest" regardless of module availability.
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "pytest")
+
+    def test_vitest_no_preflight(self):
+        # AC #3: vitest path unchanged — _is_module_importable NOT called for vitest.
+        vitest_target = Path(self.tmp.name) / "js"
+        vitest_target.mkdir()
+        (vitest_target / "vitest.config.ts").write_text("")
+        tdd = _load_tdd()
+        calls = []
+
+        def tracking_check(name):
+            calls.append(name)
+            return True
+
+        with patch.object(tdd, "_is_module_importable", side_effect=tracking_check):
+            with patch.object(tdd.subprocess, "run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                tdd.cmd_run(vitest_target, None)
+
+        self.assertNotIn("vitest", calls, "vitest must not trigger a module pre-flight")
+
+
+# -------------------- CustomCommandTests (006-05) --------------------
+
+
+def _write(path: Path, content: str = "") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return path
+
+
+class CustomCommandDetectTests(unittest.TestCase):
+    """AC #1, #4 for slice 006-05 — detect returns 'custom' when override present."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_detect_custom_when_file_present(self):
+        # AC #1: .jig/test-command present → detect prints "custom".
+        _write(self.target / ".jig" / "test-command",
+               "python3 -m unittest discover\n")
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "custom")
+
+    def test_detect_custom_takes_priority_over_pytest_signal(self):
+        # AC #1: custom beats all other detection signals.
+        _write(self.target / "pytest.ini", "[pytest]\n")
+        _write(self.target / ".jig" / "test-command",
+               "python3 -m unittest discover\n")
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.stdout.strip(), "custom")
+
+    def test_detect_falls_through_without_file(self):
+        # AC #4: no .jig/test-command → normal detection (empty dir → exit 2).
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no test runner detected", r.stderr)
+
+    def test_detect_falls_through_with_empty_file(self):
+        # AC #3: empty file → falls through to normal detection (not treated as custom).
+        _write(self.target / ".jig" / "test-command", "")
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 2)
+
+    def test_detect_falls_through_with_comment_only_file(self):
+        # AC #3: comment-only file → falls through.
+        _write(self.target / ".jig" / "test-command", "# just a comment\n")
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 2)
+
+
+class CustomCommandRunTests(unittest.TestCase):
+    """AC #2, #3, #5 for slice 006-05 — run executes custom command."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._tdd = _load_tdd()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_run_uses_custom_command_argv(self):
+        # AC #2/#5: run calls subprocess with the custom command's argv.
+        _write(self.target / ".jig" / "test-command",
+               "python3 -m unittest discover\n")
+        captured = []
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            self._tdd.cmd_run(self.target, None)
+            captured = mock_run.call_args[0][0]
+        self.assertEqual(captured,
+                         shlex.split("python3 -m unittest discover"))
+
+    def test_run_custom_command_green_exits_0(self):
+        # AC #2: custom command returns 0 → tdd.py exits 0.
+        _write(self.target / ".jig" / "test-command",
+               "python3 -m unittest discover\n")
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            code = self._tdd.cmd_run(self.target, None)
+        self.assertEqual(code, 0)
+
+    def test_run_custom_command_red_exits_1(self):
+        # AC #2: custom command returns non-zero → tdd.py exits 1.
+        _write(self.target / ".jig" / "test-command",
+               "python3 -m unittest discover\n")
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            code = self._tdd.cmd_run(self.target, None)
+        self.assertEqual(code, 1)
+
+    def test_run_custom_command_missing_binary_exits_2(self):
+        # AC #2: FileNotFoundError from subprocess → exit 2.
+        _write(self.target / ".jig" / "test-command",
+               "nonexistent-binary --run\n")
+        with patch.object(self._tdd.subprocess, "run",
+                          side_effect=FileNotFoundError):
+            code = self._tdd.cmd_run(self.target, None)
+        self.assertEqual(code, 2)
+
+    def test_run_custom_command_oserror_exits_2(self):
+        # AC #2: OSError (e.g. permission denied) from subprocess → exit 2.
+        _write(self.target / ".jig" / "test-command",
+               "some-command --run\n")
+        with patch.object(self._tdd.subprocess, "run",
+                          side_effect=OSError("Permission denied")):
+            code = self._tdd.cmd_run(self.target, None)
+        self.assertEqual(code, 2)
+
+    def test_run_empty_command_file_exits_2(self):
+        # AC #3: empty file → exit 2 with message.
+        _write(self.target / ".jig" / "test-command", "")
+        stderr_buf = []
+        with patch("sys.stderr") as mock_err:
+            mock_err.write = lambda s: stderr_buf.append(s)
+            code = self._tdd.cmd_run(self.target, None)
+        self.assertEqual(code, 2)
+        self.assertIn(".jig/test-command", "".join(stderr_buf))
+
+    def test_run_comment_only_file_exits_2(self):
+        # AC #3: comment-only file → exit 2.
+        _write(self.target / ".jig" / "test-command",
+               "# run all tests\n# python3 -m pytest\n")
+        stderr_buf = []
+        with patch("sys.stderr") as mock_err:
+            mock_err.write = lambda s: stderr_buf.append(s)
+            code = self._tdd.cmd_run(self.target, None)
+        self.assertEqual(code, 2)
+
+    def test_run_ignores_comment_lines_in_file(self):
+        # AC #3: comment lines are skipped; first non-comment line is the command.
+        _write(self.target / ".jig" / "test-command",
+               "# this is a comment\npython3 -m unittest discover\n")
+        captured = []
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            self._tdd.cmd_run(self.target, None)
+            captured = mock_run.call_args[0][0]
+        self.assertEqual(captured,
+                         shlex.split("python3 -m unittest discover"))
+
+    def test_run_normal_detection_when_no_file(self):
+        # AC #4: no .jig/test-command → existing runner detection used.
+        r = run_tdd("run", str(self.target))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no test runner detected", r.stderr)
 
 
 if __name__ == "__main__":

@@ -26,8 +26,10 @@
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-01 — tdd-helper | **DONE** | 25 tests (23 pass + 2 pytest-skipped); detect + run with normalized exit codes |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-02 — ac-coverage | DRAFT | Deferred; needs test-tagging convention |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-03 — pre-commit-gate | DRAFT | Deferred; no missing-coverage incident yet |
+| [006-tdd-loop](006-tdd-loop/spec.md) | 006-04 — missing-module-exit-code | **DONE** | 5 new tests (44 tdd-loop total); `No module named pytest` → exit 2 via `_is_module_importable` preflight |
+| [006-tdd-loop](006-tdd-loop/spec.md) | 006-05 — custom-test-command | **DONE** | 14 new tests (44 tdd-loop total); `.jig/test-command` override + `scripts/run_tests.py`; `tdd.py run .` now runs jig's full 461-test suite |
 | [007-slice-land](007-slice-land/spec.md) | 007-01 — land-prepare | **DONE** | 31 tests (30 pass + 1 pytest-skipped); landing-readiness report + direct/pr next-steps |
-| [007-slice-land](007-slice-land/spec.md) | 007-02 — direct-mode-execute | DRAFT | Deferred; destructive git ops need safety review |
+| [007-slice-land](007-slice-land/spec.md) | 007-02 — direct-mode-execute | **DONE** | Deferred; destructive git ops need safety review |
 | [007-slice-land](007-slice-land/spec.md) | 007-03 — pr-mode-execute | DRAFT | Deferred; gated on pr-review design |
 | [007-slice-land](007-slice-land/spec.md) | 007-04 — scaffold-json-integration-flag | DRAFT | Deferred; --mode flag is sufficient for now |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-01 — migrate-report | **DONE** |  |

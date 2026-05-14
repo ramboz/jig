@@ -1,0 +1,321 @@
+"""
+spec_lint.py — AC contradiction detector for jig specs.
+
+Scans a spec file for acceptance criteria (ACs) within each slice and
+reports cases where a phrase required verbatim in one AC is forbidden by
+another AC in the same slice.
+
+Motivating incident (slice 012-01, deviation log §1):
+  AC #1 required the description contain "personal multi-persona reviewer".
+  AC #3 forbade "multi-persona" anywhere in the description.
+  The contradiction was unsatisfiable and discovered only at implementation time.
+
+This helper detects such pairs before implementation begins, as a pre-transition
+check when moving a slice to READY_FOR_IMPLEMENTATION.
+
+Usage:
+    python3 scripts/spec_lint.py <spec.md> [--slice <fragment>] [--strict]
+
+Exit codes:
+    0 — no contradictions (or --strict: no contradictions AND no parse warnings)
+    1 — at least one AC contradiction found
+    2 — user error (file not found, ambiguous fragment)
+
+Options:
+    --slice <fragment>   Lint only the matching slice (case-insensitive substring).
+    --strict             Exit 1 also on parse warnings (default: warnings are informational).
+"""
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Slice parsing (mirrors _common/parsing.py without a dependency on it so
+# this script is runnable standalone from scripts/).
+# ---------------------------------------------------------------------------
+
+_SLICE_HEADER_RE = re.compile(r"(?im)^##\s+Slice\s+([^\n]+)$")
+
+
+def _iter_slices(spec_text: str):
+    """Yield (label, section_text) for each ## Slice ... heading."""
+    headers = list(_SLICE_HEADER_RE.finditer(spec_text))
+    for i, header in enumerate(headers):
+        label = header.group(1).strip()
+        start = header.start()
+        if i + 1 < len(headers):
+            end = headers[i + 1].start()
+        else:
+            end = len(spec_text)
+        yield label, spec_text[start:end]
+
+
+# ---------------------------------------------------------------------------
+# AC parsing — numbered list under **Acceptance Criteria:**
+# ---------------------------------------------------------------------------
+
+_AC_HEADER_RE = re.compile(r"\*\*Acceptance\s+Criteria:\*\*\s*\n", re.IGNORECASE)
+_NUMBERED_ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
+
+
+def _parse_ac_items(slice_text: str) -> list:
+    """Return list of (ac_number: int, ac_text: str) for this slice's ACs.
+
+    Multi-line ACs are joined into a single string. Parsing stops at the
+    next bold H3/H4 header (e.g. **DoD**) or a line that starts a new top-
+    level section (##).
+    """
+    m = _AC_HEADER_RE.search(slice_text)
+    if not m:
+        return []
+    rest = slice_text[m.end():]
+    items = []
+    current_num = None
+    current_lines = []
+
+    for line in rest.splitlines():
+        # End of AC block on next ## heading
+        if re.match(r"^##", line):
+            break
+        # A new numbered item
+        nm = _NUMBERED_ITEM_RE.match(line)
+        if nm:
+            if current_num is not None:
+                items.append((current_num, " ".join(current_lines)))
+            current_num = int(nm.group(1))
+            current_lines = [nm.group(2)]
+            continue
+        # Blank line — might end the list if no current item
+        if not line.strip():
+            if current_num is not None and current_lines:
+                # Allow one blank inside a multi-line AC; stop on bold header
+                # or a second blank (we peek forward implicitly by continuing).
+                current_lines.append("")
+            continue
+        # Non-blank continuation — belongs to current item if indented or if
+        # we're still inside one, unless it's a bold section header.
+        if current_num is not None:
+            if re.match(r"^\*\*[A-Z][^*]+:\*\*", line):
+                # New bold section — end of AC list
+                break
+            current_lines.append(line)
+
+    if current_num is not None:
+        items.append((current_num, " ".join(current_lines)))
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Phrase extraction
+# ---------------------------------------------------------------------------
+
+# Markers that introduce a REQUIRED exact phrase.
+_REQUIRED_MARKERS = re.compile(
+    r"(?:this exact phrasing|exact phrasing|exact phrase|exact wording"
+    r"|exact text|exact order|using this exact|with this exact)",
+    re.IGNORECASE,
+)
+
+# Markers that introduce FORBIDDEN phrases.
+_FORBIDDEN_MARKERS = re.compile(
+    r"(?:NOT\s+contain|does\s+not\s+contain|must\s+not\s+contain"
+    r"|must\s+not\s+include|never\s+contain|must\s+never\s+contain"
+    r"|is\s+forbidden|are\s+forbidden|prohibited)",
+    re.IGNORECASE,
+)
+
+# A quoted string: `...` or "..." (non-greedy, single-line, 1–200 chars).
+_QUOTED_RE = re.compile(r'["`]([^"`\n]{1,200})["`]')
+
+
+def _extract_phrases_near(text: str, marker_re: re.Pattern, window: int = 600) -> list:
+    """Find all matches of marker_re in text; for each, extract quoted strings
+    within `window` characters after the match start.
+
+    Returns a list of quoted strings (deduplicated, order-preserved).
+    """
+    seen = set()
+    results = []
+    for m in marker_re.finditer(text):
+        segment = text[m.start(): m.start() + window]
+        for qm in _QUOTED_RE.finditer(segment):
+            phrase = qm.group(1)
+            if phrase not in seen:
+                seen.add(phrase)
+                results.append(phrase)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Contradiction detection
+# ---------------------------------------------------------------------------
+
+class Contradiction:
+    def __init__(self, required: str, req_ac: int, forbidden: str, forbid_ac: int):
+        self.required = required      # full required phrase
+        self.forbidden = forbidden    # the forbidden substring
+        self.req_ac = req_ac
+        self.forbid_ac = forbid_ac
+
+    def __repr__(self):
+        return (
+            f"Contradiction(required={self.required!r}, req_ac={self.req_ac}, "
+            f"forbidden={self.forbidden!r}, forbid_ac={self.forbid_ac})"
+        )
+
+
+def check_slice(label: str, slice_text: str) -> tuple:
+    """Return (contradictions: list[Contradiction], warnings: list[str]).
+
+    A contradiction is found when:
+      - AC #X says phrase P must appear verbatim
+      - AC #Y (Y ≠ X) says substring S must NOT appear
+      - S appears (case-insensitively) inside P
+    """
+    ac_items = _parse_ac_items(slice_text)
+    contradictions = []
+    warnings = []
+
+    if not ac_items:
+        return contradictions, warnings
+
+    # Collect per-AC required and forbidden phrases.
+    required_by_ac = {}   # {ac_num: [phrase, ...]}
+    forbidden_by_ac = {}  # {ac_num: [phrase, ...]}
+
+    for ac_num, ac_text in ac_items:
+        req = _extract_phrases_near(ac_text, _REQUIRED_MARKERS)
+        forb = _extract_phrases_near(ac_text, _FORBIDDEN_MARKERS)
+        if req:
+            required_by_ac[ac_num] = req
+        if forb:
+            forbidden_by_ac[ac_num] = forb
+
+    # Cross-check: required phrase in AC #X vs forbidden phrase in AC #Y (X≠Y).
+    for req_ac, req_phrases in required_by_ac.items():
+        for forb_ac, forb_phrases in forbidden_by_ac.items():
+            if req_ac == forb_ac:
+                continue
+            for req_phrase in req_phrases:
+                for forb_phrase in forb_phrases:
+                    if forb_phrase.lower() in req_phrase.lower():
+                        contradictions.append(
+                            Contradiction(req_phrase, req_ac, forb_phrase, forb_ac)
+                        )
+
+    return contradictions, warnings
+
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+def render_report(results: list, spec_path: Path) -> tuple:
+    """Return (report_text: str, exit_code: int).
+
+    results is a list of (slice_label, contradictions, warnings).
+    """
+    lines = [f"## Spec lint: {spec_path}", ""]
+    any_contradiction = False
+
+    for label, contradictions, warnings in results:
+        lines.append(f"### Slice {label}")
+        lines.append("")
+        if not contradictions and not warnings:
+            lines.append("✓ No AC contradictions detected.")
+        else:
+            for c in contradictions:
+                any_contradiction = True
+                lines.append(
+                    f"⚠  AC #{c.req_ac} × AC #{c.forbid_ac} contradiction:"
+                )
+                lines.append(f"   Required phrase  (AC #{c.req_ac}): \"{c.required}\"")
+                lines.append(f"   Forbidden term   (AC #{c.forbid_ac}): \"{c.forbidden}\"")
+                lines.append(
+                    f"   \"{c.forbidden}\" appears inside the required phrase."
+                )
+            for w in warnings:
+                lines.append(f"⚐  {w}")
+        lines.append("")
+
+    exit_code = 1 if any_contradiction else 0
+    return "\n".join(lines), exit_code
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="spec_lint.py",
+        description="Detect AC phrase contradictions in a jig spec.",
+    )
+    p.add_argument("spec", help="path to spec.md")
+    p.add_argument(
+        "--slice",
+        default=None,
+        metavar="FRAGMENT",
+        help="lint only the matching slice (case-insensitive substring)",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 also on parse warnings",
+    )
+    return p
+
+
+def lint(spec_path: Path, slice_fragment: str = None, strict: bool = False) -> tuple:
+    """Lint a spec file. Returns (report_text, exit_code)."""
+    if not spec_path.is_file():
+        return f"spec not found: {spec_path}\n", 2
+
+    text = spec_path.read_text()
+    slices = list(_iter_slices(text))
+
+    if not slices:
+        return f"no '## Slice ...' headings found in {spec_path}\n", 2
+
+    if slice_fragment:
+        needle = slice_fragment.lower()
+        slices = [(lbl, sec) for lbl, sec in slices if needle in lbl.lower()]
+        if not slices:
+            return f"slice not found: '{slice_fragment}'\n", 2
+        if len(slices) > 1:
+            names = [lbl for lbl, _ in slices]
+            return f"ambiguous slice fragment '{slice_fragment}' matches: {names}\n", 2
+
+    results = []
+    for label, section in slices:
+        contradictions, warnings = check_slice(label, section)
+        results.append((label, contradictions, warnings))
+
+    report, code = render_report(results, spec_path)
+
+    if strict:
+        has_warnings = any(w for _, _, ws in results for w in ws)
+        if has_warnings:
+            code = 1
+
+    return report, code
+
+
+def main(argv: list) -> int:
+    parser = _build_parser()
+    try:
+        ns = parser.parse_args(argv[1:])
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 2
+
+    report, code = lint(Path(ns.spec), slice_fragment=ns.slice, strict=ns.strict)
+    sys.stdout.write(report)
+    if not report.endswith("\n"):
+        sys.stdout.write("\n")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -531,22 +531,34 @@ class SafetyTests(unittest.TestCase):
             r'subprocess\.\w+\([^)]*[\'"]gh[\'"]',
         )
 
-    def test_rev_parse_is_allowed(self):
-        """Read-only `git rev-parse` for branch detection is permitted —
-        spec clarification on AC #4. This test pins that allowance: at
-        least one subprocess call to `git rev-parse` should exist (or
-        the source should not call git at all)."""
-        # Either no git subprocess invocations at all, OR every git call
-        # is to "rev-parse" (read-only).
-        git_calls = re.findall(
-            r'subprocess\.\w+\([^)]*[\'"]git[\'"][^)]*\)',
+    def test_read_only_git_calls_are_bounded(self):
+        """Slice 007-01 AC #4 (updated for 007-02) — destructive git args
+        (`checkout`, `push`) must not appear as literals inside direct
+        `subprocess.run(["git", ...])` calls; they must only be passed
+        dynamically through `_run_git_cmd`.
+
+        Strategy: scan for direct subprocess calls where the first arg is
+        "git" (as a string literal in the same parenthesized group). None
+        of those should contain "checkout" or "push" as a literal arg.
+        """
+        # Collect each single-function-call block by finding
+        # subprocess.run(["git", ...]) patterns (single-line list start).
+        # We look at each line individually to avoid cross-call matching.
+        for line in self.source.splitlines():
+            stripped = line.strip()
+            if re.search(r'subprocess\.\w+\s*\(\s*\[', stripped):
+                # This line starts a subprocess call with a list arg.
+                self.assertNotRegex(
+                    stripped,
+                    r'"(?:checkout|push)"',
+                    f"destructive git arg in direct subprocess call: {stripped!r}",
+                )
+        # At least one read-only git call must exist.
+        self.assertRegex(
             self.source,
-            re.DOTALL,
+            r'(?:rev-parse|merge-base)',
+            "expected at least one read-only git call (rev-parse or merge-base)",
         )
-        for call in git_calls:
-            # Each git call must be rev-parse — no checkout/merge/push/etc.
-            self.assertIn("rev-parse", call,
-                          f"non-rev-parse git subprocess call: {call}")
 
 
 # -------------------- SkillSurfaceTests --------------------
@@ -597,6 +609,418 @@ class SkillSurfaceTests(unittest.TestCase):
     def test_body_references_mode_flag(self):
         self.assertIn("--mode", self.skill,
                       "SKILL.md must document the --mode flag")
+
+
+# ==================== Execute subcommand tests (slice 007-02) ====================
+
+import importlib.util as _ilu
+
+# Load land.py as a module for direct-call tests (needed for mocking).
+# importlib bypasses the hyphen-in-directory-name limitation.
+def _load_land():
+    spec = _ilu.spec_from_file_location("_land_module", LAND_PY)
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_land = _load_land()
+
+
+def _make_subprocess_mock(returncode: int = 0, stdout: str = "", stderr: str = ""):
+    """Return a mock CompletedProcess-like object."""
+    from unittest.mock import MagicMock
+    m = MagicMock()
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
+
+
+# -------------------- ExecuteBlocksOnReadinessTests --------------------
+
+
+class ExecuteBlocksOnReadinessTests(unittest.TestCase):
+    """AC #1 — blockers prevent any git command from running."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_status_not_done_blocks_execute(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "IN_PROGRESS",
+                             include_deviation_log=True)
+        )
+        result = run_land("execute", "--mode", "direct",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        self.assertEqual(result.returncode, 1)
+        # No git sequence log should appear
+        self.assertNotIn("Execute log", result.stdout)
+        self.assertNotIn("Dry-run", result.stdout)
+
+    def test_missing_dod_blocks_execute(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE",
+                             dod_ticked=False, dod_unticked=2,
+                             include_deviation_log=True)
+        )
+        result = run_land("execute", "--mode", "direct",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Execute log", result.stdout)
+
+    def test_missing_deviation_log_blocks_execute(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE",
+                             include_deviation_log=False)
+        )
+        result = run_land("execute", "--mode", "direct",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Execute log", result.stdout)
+
+
+# -------------------- ExecuteDryRunTests --------------------
+
+
+class ExecuteDryRunTests(unittest.TestCase):
+    """AC #3 — dry-run prints commands, never calls git checkout/merge/push.
+
+    These subprocess tests run from the repo root (no cwd override) so that:
+      - git commands (rev-parse, merge-base) work correctly.
+      - tdd.py runs against the repo root where tests can be detected.
+    The spec path is passed as an absolute path.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_dry_run_clean_spec_exits_zero(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE")
+        )
+        # --target <tmpdir> keeps tdd.py away from the full repo suite.
+        result = run_land("execute", "--mode", "direct", "--dry-run",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+
+    def test_dry_run_output_contains_dry_run_section(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE")
+        )
+        result = run_land("execute", "--mode", "direct", "--dry-run",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        out = result.stdout
+        self.assertIn("Dry-run", out)
+        self.assertIn("git checkout main", out)
+        self.assertIn("git merge", out)
+        self.assertIn("git push origin main", out)
+
+    def test_dry_run_does_not_contain_execute_log(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE")
+        )
+        result = run_land("execute", "--mode", "direct", "--dry-run",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        self.assertNotIn("Execute log", result.stdout)
+
+    def test_dry_run_blocked_spec_exits_one(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "IN_PROGRESS",
+                             include_deviation_log=True)
+        )
+        result = run_land("execute", "--mode", "direct", "--dry-run",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Dry-run", result.stdout)
+
+    def test_dry_run_includes_worktree_suggestion(self):
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE")
+        )
+        result = run_land("execute", "--mode", "direct", "--dry-run",
+                          "--target", self.tmpdir,
+                          str(self.spec), "007-02")
+        # worktree remove must appear as a suggestion, not a live command
+        self.assertIn("worktree remove", result.stdout)
+
+
+# -------------------- ExecuteSafetyTests (direct calls + mocking) --------------------
+
+
+class ExecuteSafetyBranchTests(unittest.TestCase):
+    """AC #4 branch guard — refuses when current branch is main/master."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-02 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _execute_with_branch(self, branch_name: str) -> tuple:
+        from unittest.mock import patch, MagicMock
+        with patch.object(_land, "_detect_branch", return_value=branch_name), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)):
+            return _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+
+    def test_main_branch_refused(self):
+        report, code = self._execute_with_branch("main")
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+        self.assertIn("main", report)
+
+    def test_master_branch_refused(self):
+        report, code = self._execute_with_branch("master")
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+
+    def test_feature_branch_not_refused(self):
+        from unittest.mock import patch, MagicMock
+        with patch.object(_land, "_detect_branch", return_value="feat/my-slice"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")):
+            report, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+        self.assertEqual(code, 0)
+        self.assertNotIn("Refusing", report)
+
+
+class ExecuteSafetyFFTests(unittest.TestCase):
+    """AC #4 FF viability guard — refuses when main has diverged."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-02 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_diverged_main_refused(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable",
+                          return_value=(False, "main has diverged — FF merge not possible; pull or rebase first")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)):
+            report, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing", report)
+        self.assertIn("diverged", report)
+
+
+# -------------------- ExecuteSuccessTests --------------------
+
+
+class ExecuteSuccessTests(unittest.TestCase):
+    """AC #2 — happy path: all git commands succeed → exit 0."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-02 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run_execute_success(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/my-slice"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")):
+            return _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+
+    def test_success_exit_zero(self):
+        _, code = self._run_execute_success()
+        self.assertEqual(code, 0)
+
+    def test_success_report_contains_execute_log(self):
+        report, _ = self._run_execute_success()
+        self.assertIn("Execute log", report)
+
+    def test_success_report_contains_branch_name(self):
+        report, _ = self._run_execute_success()
+        self.assertIn("feat/my-slice", report)
+
+    def test_success_report_contains_post_landing_suggestion(self):
+        report, _ = self._run_execute_success()
+        self.assertIn("Post-landing", report)
+        self.assertIn("worktree remove", report)
+
+
+# -------------------- ExecuteGitFailureTests --------------------
+
+
+class ExecuteGitFailureTests(unittest.TestCase):
+    """AC #2 — if any git command fails, sequence halts and exits 1."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-02 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_merge_failure_exits_one(self):
+        from unittest.mock import patch, call
+
+        call_log = []
+
+        def fake_git_cmd(args, cwd, dry_run=False):
+            call_log.append(args[0])  # record subcommand
+            if args[0] == "merge":
+                return False, "CONFLICT (content): Merge conflict in foo.py"
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
+            report, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+
+        self.assertEqual(code, 1)
+        self.assertIn("Error", report)
+        # push must NOT have been called after merge failure
+        self.assertNotIn("push", call_log)
+
+    def test_checkout_failure_prevents_merge_and_push(self):
+        from unittest.mock import patch
+
+        call_log = []
+
+        def fake_git_cmd(args, cwd, dry_run=False):
+            call_log.append(args[0])
+            if args[0] == "checkout":
+                return False, "error: pathspec 'main' did not match"
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
+            _, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("merge", call_log)
+        self.assertNotIn("push", call_log)
+
+
+# -------------------- ExecuteWorktreeNeverRunTests --------------------
+
+
+class ExecuteWorktreeNeverRunTests(unittest.TestCase):
+    """AC #6 — `git worktree remove` is NEVER executed, only suggested."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("007-02 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _collect_git_calls(self, dry_run: bool = False):
+        """Run execute and return list of git subcommand arg-lists called."""
+        from unittest.mock import patch
+
+        calls = []
+
+        def fake_git_cmd(args, cwd, dry_run=False):
+            calls.append(list(args))
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
+            _land.execute(self.spec, "007-02", dry_run=dry_run,
+                          target=Path(self.tmpdir))
+
+        return calls
+
+    def test_worktree_remove_not_in_live_calls(self):
+        calls = self._collect_git_calls(dry_run=False)
+        for args in calls:
+            self.assertFalse(
+                "worktree" in args and "remove" in args,
+                f"git worktree remove was executed (must only be suggested): {args}"
+            )
+
+    def test_worktree_remove_not_in_dry_run_calls(self):
+        calls = self._collect_git_calls(dry_run=True)
+        # In dry-run mode _run_git_cmd is not called for git commands,
+        # so the call list should be empty.
+        for args in calls:
+            self.assertFalse(
+                "worktree" in args and "remove" in args,
+                f"git worktree remove was unexpectedly invoked: {args}"
+            )
+
+    def test_worktree_suggestion_appears_in_output_success(self):
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")):
+            report, _ = _land.execute(self.spec, "007-02",
+                                      target=Path(self.tmpdir))
+        self.assertIn("worktree remove", report)
+
+
+# -------------------- ExecuteCliSurfaceTests --------------------
+
+
+class ExecuteCliSurfaceTests(unittest.TestCase):
+    """AC #10 — SKILL.md updated to document execute --mode direct."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.skill = SKILL_MD.read_text()
+
+    def test_skill_md_references_execute(self):
+        self.assertIn("execute", self.skill.lower(),
+                      "SKILL.md must document the execute subcommand")
+
+    def test_skill_md_references_dry_run(self):
+        self.assertIn("--dry-run", self.skill,
+                      "SKILL.md must document the --dry-run flag")
+
+    def test_skill_md_no_destructive_ops_claim_removed(self):
+        """AC #10 requires the 'No destructive git operations' clause in the
+        description frontmatter to be replaced once execute ships."""
+        m = re.match(r"---\n(.*?)\n---", self.skill, re.DOTALL)
+        self.assertIsNotNone(m)
+        # The old description said "No destructive git operations." verbatim.
+        # After 007-02 this must be gone.
+        self.assertNotIn("No destructive git operations", m.group(1),
+                         "SKILL.md description must be updated for execute")
 
 
 if __name__ == "__main__":

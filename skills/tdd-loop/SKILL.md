@@ -134,6 +134,15 @@ the main session) use to actually run the loop. The discipline lives in
 - **`tdd.py` does not spawn the implementer subagent.** It's a runner-driver,
   not a workflow orchestrator. Lifecycle transitions live in
   `skills/spec-workflow/workflow.py`.
+- **Custom test command override** (slice 006-05). Create
+  `<target>/.jig/test-command` with the first non-blank, non-comment line
+  being the exact command to run. This takes priority over all runner
+  auto-detection. Useful for projects whose test convention doesn't map to
+  pytest/vitest/jest (e.g. `python3 scripts/run_tests.py` for jig itself).
+- **pytest module not installed** (slice 006-04). If pytest is detected via
+  filesystem signals but the `pytest` module isn't importable, `run` exits
+  2 with "not installed" in stderr — not exit 1 (red tests). Fix:
+  `pip install pytest`.
 - **Out of scope for slice 006-01:** rspec / `go test` / `cargo test`
   detection, AC-to-test coverage mapping (deferred to 006-02), pre-commit
   hooks that block red commits (deferred to 006-03).

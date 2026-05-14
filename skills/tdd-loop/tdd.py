@@ -1,5 +1,5 @@
 """
-jig tdd-loop helper — slice 006-01 (tdd-helper)
+jig tdd-loop helper — slices 006-01, 006-04, 006-05
 
 Deterministic test-runner detection + subprocess-driven invocation, with
 normalized exit codes so Claude can branch deterministically on the result.
@@ -21,7 +21,9 @@ runner detection).
 """
 
 import argparse
+import importlib
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -83,6 +85,30 @@ def _has_test_files_shallow(target: Path) -> bool:
     return False
 
 
+def _is_module_importable(name: str) -> bool:
+    """Return True if the named module can be imported; False otherwise."""
+    try:
+        importlib.import_module(name)
+        return True
+    except ImportError:
+        return False
+
+
+def _custom_command_file(target: Path):
+    """Return the Path to <target>/.jig/test-command if it exists, else None."""
+    p = target / ".jig" / "test-command"
+    return p if p.is_file() else None
+
+
+def _parse_custom_command(cmd_file) -> str:
+    """Return the first non-blank, non-comment line from cmd_file, or None."""
+    for line in _read_text_safe(cmd_file).splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return None
+
+
 def _is_pytest(target: Path) -> bool:
     if (target / "pytest.ini").is_file():
         return True
@@ -114,9 +140,12 @@ def _is_jest(target: Path) -> bool:
 
 
 def detect_runner(target: Path):
-    """Return the detected runner name (`pytest` / `vitest` / `jest`), or None.
+    """Return the detected runner name, or None.
 
-    Priority order: pytest > vitest > jest. First hit wins."""
+    Priority: custom (.jig/test-command) > pytest > vitest > jest."""
+    cmd_file = _custom_command_file(target)
+    if cmd_file is not None and _parse_custom_command(cmd_file) is not None:
+        return "custom"
     if _is_pytest(target):
         return "pytest"
     if _is_vitest(target):
@@ -157,9 +186,31 @@ def cmd_run(target: Path, test_path: Path) -> int:
     terminal so the user sees real test output, not a swallowed summary.
     (Per AC #2: "Streams the runner's stdout/stderr through to the caller".)
     """
+    # Custom command (.jig/test-command) takes priority over auto-detection.
+    cmd_file = _custom_command_file(target)
+    if cmd_file is not None:
+        cmd_str = _parse_custom_command(cmd_file)
+        if cmd_str is None:
+            sys.stderr.write(".jig/test-command is empty (no runnable command found)\n")
+            return 2
+        argv = shlex.split(cmd_str)
+        try:
+            result = subprocess.run(argv, cwd=str(target))
+        except (FileNotFoundError, OSError):
+            sys.stderr.write(f"{argv[0]}: command failed to start\n")
+            return 2
+        return 0 if result.returncode == 0 else 1
+
     runner = detect_runner(target)
     if runner is None:
         sys.stderr.write(f"no test runner detected at {target}\n")
+        return 2
+
+    # Pre-flight: verify module availability for module-based runners.
+    # `python3 -m pytest` exits 1 with stderr "No module named pytest" when
+    # the module is absent — indistinguishable from red tests without this check.
+    if runner == "pytest" and not _is_module_importable("pytest"):
+        sys.stderr.write("pytest module is not installed (try: pip install pytest)\n")
         return 2
 
     cmd = _build_command(runner, test_path or target)

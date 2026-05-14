@@ -260,3 +260,164 @@ Deferred because: jig's own commits go through manual review; we
 have no friction yet from missing-test-coverage incidents. Worth
 codifying once we have one real "broken commit landed because we
 forgot to run tests" event in the wild.
+
+---
+
+## Slice 006-04 — missing-module-exit-code
+
+**STATUS: DONE**
+
+**Goal:** When `python3 -m pytest` would fail with `No module named
+pytest`, normalize to exit 2 (env error) instead of exit 1 (red
+tests). Today exit 1 from a missing module is
+indistinguishable from "tests ran and failed" — the root cause surfaced
+in slice 006-01 deviation log §5 and was re-hit during the slice
+007-02 landing flow.
+
+**DoR:**
+- ✅ Slice 006-01 is DONE — `tdd.py` helper exists.
+- ✅ Root cause is understood: `python3 -m pytest` exits 1 with stderr
+  `No module named pytest` when the module is absent; the launching
+  binary `python3` IS found, so `FileNotFoundError` never fires.
+- ✅ Fix path is clear: pre-flight `importlib.import_module("pytest")`
+  before the subprocess call.
+
+**Acceptance Criteria:**
+
+1. `tdd.py run <target>` returns **exit 2** (not exit 1) when `pytest`
+   is detected via filesystem signals but the `pytest` Python module
+   is not importable. stderr must contain "not installed" (case-
+   insensitive).
+
+2. `tdd.py run <target>` still returns **exit 1** when pytest IS
+   importable and at least one test fails (no regression on the happy
+   path).
+
+3. The pre-flight check applies **only to pytest** (the only runner
+   invoked via `python3 -m <module>`). vitest and jest use `npx`;
+   their missing-binary case is already covered by `FileNotFoundError
+   → exit 2`. No change to vitest/jest paths.
+
+4. `tdd.py detect <target>` is **unchanged** — it still returns
+   `pytest` based on filesystem signals regardless of whether the
+   module is installed. Detection is about project shape, not env
+   readiness.
+
+5. Tests cover the module-missing case via **direct-call mocking**
+   (load `tdd.py` with `importlib.util.spec_from_file_location`;
+   patch `importlib.import_module` to raise `ImportError`). No
+   dependency on pytest being installed or absent in the test env.
+   Existing real-run tests (`test_pytest_real_run_*`) continue to
+   skip cleanly when pytest is absent.
+
+**DoD:**
+- [x] All ACs pass; full suite green.
+- [x] Reviewed by `reviewer` subagent.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review pass.
+- [x] `docs/specs/README.md` regenerated.
+- [x] `CLAUDE.md` updated (test count, 006-04 DONE).
+
+### Deviation log
+
+**AC #5 mocking approach.** The spec prescribes patching
+`importlib.import_module` to raise `ImportError`. The implementation
+patches the higher-level `_is_module_importable` wrapper instead.
+Root cause: `patch.object(importlib, "import_module", side_effect=...)`
+in Python 3.14 causes a recursive side-effect trap — `mock.__enter__`
+calls `pkgutil.resolve_name` which calls `importlib.import_module`
+(already mocked), triggering the side effect before the test body runs.
+The wrapper approach is functionally equivalent and eliminates the
+Python-version-specific trap. The `_is_module_importable` function
+exists solely for testability and the deviation is harmless.
+
+---
+
+## Slice 006-05 — custom-test-command
+
+**STATUS: DONE**
+
+**Goal:** Support a `.jig/test-command` file at `<target>/.jig/test-
+command`. When present, `tdd.py detect` reports `custom` and `tdd.py
+run` executes that command instead of the auto-detected runner. Closes
+the gap where jig's own `unittest discover` convention is
+unrecognized, forcing an `--target <empty-dir>` workaround.
+
+**DoR:**
+- ✅ Slice 006-04 is DONE (or can be implemented in the same session).
+- ✅ Root cause is understood: jig's test files live at depth 3
+  (`skills/<name>/test_*.py`), which passes the depth-2 scan → pytest
+  detected → `python3 -m pytest` called → module missing → exit 1.
+  Even with 006-04's fix, jig returns exit 2 ("pytest not installed")
+  rather than running the real suite.
+- ✅ Design is settled: `.jig/test-command` override at the target
+  root, taking priority over all auto-detection.
+
+**Acceptance Criteria:**
+
+1. `tdd.py detect <target>` prints `custom` (exit 0) when
+   `<target>/.jig/test-command` exists and is a non-empty readable
+   file. The custom signal takes **priority over all other runner
+   detection signals** (even if pytest.ini, vitest config, etc. are
+   also present).
+
+2. `tdd.py run <target>` runs the command from `.jig/test-command`
+   when that file is present. stdout/stderr stream through to the
+   caller unchanged. Exit code is normalized (0 = green, 1 = red,
+   2 = command startup failure via `FileNotFoundError` / `OSError`).
+
+3. **File format:** The first non-blank, non-comment line is the
+   command. Lines beginning with `#` are ignored. The command is
+   split with `shlex.split()` (no shell expansion — no pipes,
+   redirects, glob expansion). A file containing only blanks /
+   comments → exit 2 with stderr "`.jig/test-command` is empty".
+
+4. When `.jig/test-command` is **absent**, behavior is identical to
+   slice 006-01 (and 006-04 where applicable) — no regression.
+
+5. **Tests** cover: detect returns `custom` when file is present;
+   detect falls through to normal detection when file is absent; run
+   executes the custom command (mock subprocess to capture argv); run
+   with an empty/comment-only file exits 2; run when the custom
+   command binary is not found exits 2.
+
+6. **Jig's own `.jig/test-command`** is created at the project root
+   with content:
+   ```
+   python3 -m unittest discover -s skills -p "test_*.py"
+   ```
+   After this slice, `tdd.py run .` (from the project root) prints
+   `custom` and runs the real jig test suite.
+
+**DoD:**
+- [x] All ACs pass; full suite green.
+- [x] Reviewed by `reviewer` subagent.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review pass.
+- [x] `docs/specs/README.md` regenerated.
+- [x] `CLAUDE.md` updated (test count, 006-05 DONE).
+- [x] `SKILL.md` updated to document the `.jig/test-command` override
+      in the Gotchas section.
+
+### Deviation log
+
+**AC #6 — command in `.jig/test-command`.** The spec prescribes
+`python3 -m unittest discover -s skills -p "test_*.py"`. The actual
+file contains `python3 scripts/run_tests.py`. Two reasons:
+(a) `unittest discover -s skills` fails for jig because skill directory
+names contain hyphens (`adr-workflow`, `slice-land`, `tdd-loop`) which
+aren't valid Python identifiers — discover can't import those modules,
+so all tests in hyphenated skill dirs are silently skipped.
+(b) The scripts/ directory has its own tests (`test_spec_lint.py`,
+`test_verify_install.py`) that the single-dir discover command would
+miss. `scripts/run_tests.py` discovers per-skill and covers scripts/,
+running 461 tests vs. 0 for the inline command. The spec AC was written
+optimistically without knowledge of the hyphen constraint.
+
+**AC #2 — `OSError` catch added during reconciliation.** The initial
+implementation caught only `FileNotFoundError` in the custom-command
+subprocess path. The reviewer (needs-changes verdict) flagged that AC
+#2 explicitly requires `OSError` as well. Fixed: changed `except
+FileNotFoundError:` to `except (FileNotFoundError, OSError):` and
+added `test_run_custom_command_oserror_exits_2`. 44 tests total (up
+from 43 after the fix; 2 skipped).

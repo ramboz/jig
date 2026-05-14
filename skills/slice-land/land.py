@@ -1,13 +1,14 @@
 """
-jig slice-land helper — slice 007-01 (land-prepare)
+jig slice-land helper — slices 007-01 (land-prepare) + 007-02 (direct-mode-execute)
 
 Deterministic readiness check + landing-plan emitter for a finished slice.
 Mirrors the workflow.py / review.py / adr.py / tdd.py shape: SKILL.md drives
 judgment; this script does file parsing + report generation + (in pr mode)
 PR body file emission.
 
-One subcommand:
+Subcommands:
     python3 land.py prepare <spec.md> <slice-fragment> [--mode {direct,pr}]
+    python3 land.py execute --mode direct <spec.md> <slice-fragment> [--dry-run]
 
 Readiness checks:
   1. STATUS line under the slice header equals "DONE".
@@ -22,11 +23,15 @@ Exit codes:
   1 — at least one check failed (report still emits; blockers listed).
   2 — user error (missing spec, ambiguous fragment, invalid --mode).
 
-The helper does NOT mutate git state. Mode-specific next-steps appear
-as suggested commands the user copy-pastes. Per slice 007-01 spec AC #4,
-the only destructive operation is writing the PR body file (mode=pr).
-Read-only `git rev-parse --abbrev-ref HEAD` is permitted for branch
-detection (clarification recorded in the slice's deviation log).
+prepare: does NOT mutate git state. Mode-specific next-steps appear as
+  suggested commands the user copy-pastes. The only write is the PR body
+  file (mode=pr). Read-only `git rev-parse --abbrev-ref HEAD` is permitted.
+
+execute --mode direct: DOES mutate git state. Runs `git checkout main`,
+  `git merge <branch> --ff-only`, `git push origin main`. Guards: refuses if
+  current branch is main/master; refuses if main has diverged (FF not possible).
+  `git worktree remove` is never executed — always printed as a suggestion.
+  Use `--dry-run` to print the commands without running them.
 """
 
 import argparse
@@ -457,13 +462,179 @@ def prepare(spec_path: Path, slice_fragment: str,
     return report, (1 if has_blocker else 0)
 
 
+# ---------- execute: main-worktree detection + git sequence ----------
+
+
+_PROTECTED_BRANCHES = {"main", "master"}
+
+
+def _detect_main_worktree_root() -> Path:
+    """Return the root of the primary (main) worktree.
+
+    In a linked worktree, `git rev-parse --git-common-dir` returns the
+    absolute path to the main `.git` directory, whose parent is the main
+    worktree root.  In the main worktree itself, it returns the relative
+    path `.git`.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        return Path.cwd()
+    if result.returncode != 0:
+        return Path.cwd()
+    common = result.stdout.strip()
+    if common == ".git":
+        return Path.cwd()
+    return Path(common).resolve().parent
+
+
+def _check_ff_viable(branch: str) -> tuple:
+    """Returns (ok: bool, message: str).
+    Checks that `main` is an ancestor of `branch` (HEAD), meaning
+    a --ff-only merge of `branch` into `main` will succeed.
+    Uses read-only `git merge-base --is-ancestor`.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", "main", branch],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        return False, "git not found"
+    if result.returncode == 0:
+        return True, ""
+    # Distinguish "main not found" from "not an ancestor"
+    verify = subprocess.run(
+        ["git", "rev-parse", "--verify", "main"],
+        capture_output=True,
+    )
+    if verify.returncode != 0:
+        return False, "branch 'main' not found in this repo"
+    return False, "main has diverged — FF merge not possible; pull or rebase first"
+
+
+def _run_git_cmd(args: list, cwd: Path, dry_run: bool) -> tuple:
+    """Run a single git command.  Returns (success: bool, output: str).
+    In dry_run mode, returns (True, "[dry-run] git <args>") without running.
+    """
+    cmd = ["git"] + args
+    if dry_run:
+        return True, f"[dry-run] {' '.join(cmd)}"
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, cwd=str(cwd),
+        )
+    except FileNotFoundError:
+        return False, "git not found on PATH"
+    output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+    return result.returncode == 0, output
+
+
+def execute(spec_path: Path, slice_fragment: str,
+            dry_run: bool = False, target: Path = None) -> tuple:
+    """Run the direct-mode landing sequence for a ready slice.
+
+    Sequence:
+      1. Run all four readiness checks (identical to `prepare`).
+      2. Check safety guards (not on main, FF viable).
+      3. git checkout main
+      4. git merge <branch> --ff-only
+      5. git push origin main
+      6. Print (but never run) git worktree remove suggestion.
+
+    `target` is passed to the tdd.py invocation inside prepare(); defaults to
+    Path.cwd(). Tests pass a tmpdir to avoid running the full suite.
+
+    Returns (report_text, exit_code).
+    """
+    # Step 1 — readiness checks (reuse prepare logic, no mode output)
+    prepare_report, prepare_code = prepare(spec_path, slice_fragment,
+                                           mode=None, target=target)
+    parts = [prepare_report.rstrip()]
+
+    if prepare_code != 0:
+        # Hard blocker — do not touch git
+        return "\n".join(parts) + "\n", 1
+
+    branch = _detect_branch()
+    worktree = _detect_worktree_path()
+    root = _detect_main_worktree_root()
+
+    # Step 2 — safety guards
+    if branch in _PROTECTED_BRANCHES:
+        parts.append("")
+        parts.append(
+            f"## Error\n\nRefusing: current branch is '{branch}' — "
+            "execute must run from a feature or worktree branch.\n"
+        )
+        return "\n".join(parts) + "\n", 1
+
+    ff_ok, ff_msg = _check_ff_viable(branch)
+    if not ff_ok:
+        parts.append("")
+        parts.append(f"## Error\n\nRefusing: {ff_msg}.\n")
+        return "\n".join(parts) + "\n", 1
+
+    # Step 3–5 — git sequence
+    git_steps = [
+        (["checkout", "main"], f"git checkout main"),
+        (["merge", branch, "--ff-only"], f"git merge {branch} --ff-only"),
+        (["push", "origin", "main"], "git push origin main"),
+    ]
+
+    if dry_run:
+        lines = ["", "## Dry-run — commands that would run", ""]
+        lines.append("```")
+        for args, _ in git_steps:
+            lines.append("git " + " ".join(args))
+        lines.append(f"# suggestion (not run): git worktree remove {worktree}")
+        lines.append("```")
+        parts.extend(lines)
+        parts.append("")
+        parts.append(
+            f"## Post-landing\n\n"
+            f"After the merge, optionally clean up the worktree:\n\n"
+            f"```\ngit worktree remove {worktree}\n```\n"
+        )
+        return "\n".join(parts) + "\n", 0
+
+    # Live execution
+    log_lines = ["", "## Execute log", ""]
+    failed = False
+    for args, label in git_steps:
+        log_lines.append(f"**{label}**")
+        ok, output = _run_git_cmd(args, root, dry_run=False)
+        if output:
+            log_lines.append(f"```\n{output}\n```")
+        if not ok:
+            parts.extend(log_lines)
+            parts.append("")
+            parts.append(f"## Error\n\n`{label}` failed. See output above.\n")
+            failed = True
+            break
+        log_lines.append("")
+
+    if not failed:
+        parts.extend(log_lines)
+        parts.append(
+            f"## Post-landing\n\n"
+            f"Merge complete. Optionally clean up the worktree:\n\n"
+            f"```\ngit worktree remove {worktree}\n```\n"
+        )
+
+    return "\n".join(parts) + "\n", (1 if failed else 0)
+
+
 # ---------- CLI plumbing ----------
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="land.py",
-        description="jig slice-land helper (prepare)",
+        description="jig slice-land helper (prepare + execute)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -476,6 +647,22 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="slice name or fragment (case-insensitive substring)")
     pp.add_argument("--mode", choices=VALID_MODES, default=None,
                     help="append a Next-steps section for the given mode")
+    pp.add_argument("--target", default=None,
+                    help="directory passed to tdd.py run (default: cwd)")
+
+    ep = sub.add_parser(
+        "execute",
+        help="run the merge sequence for a finished slice (destructive)",
+    )
+    ep.add_argument("spec", help="path to spec.md")
+    ep.add_argument("slice",
+                    help="slice name or fragment (case-insensitive substring)")
+    ep.add_argument("--mode", choices=["direct"], required=True,
+                    help="integration mode (currently only 'direct' is supported)")
+    ep.add_argument("--dry-run", action="store_true",
+                    help="print commands without executing them")
+    ep.add_argument("--target", default=None,
+                    help="directory passed to tdd.py run (default: cwd)")
     return p
 
 
@@ -487,9 +674,17 @@ def main(argv: list) -> int:
         return int(exc.code) if exc.code is not None else 2
 
     try:
-        report, code = prepare(
-            Path(ns.spec), ns.slice, mode=ns.mode,
-        )
+        if ns.cmd == "prepare":
+            report, code = prepare(
+                Path(ns.spec), ns.slice, mode=ns.mode,
+                target=Path(ns.target) if ns.target else None,
+            )
+        else:  # execute
+            report, code = execute(
+                Path(ns.spec), ns.slice,
+                dry_run=ns.dry_run,
+                target=Path(ns.target) if ns.target else None,
+            )
         sys.stdout.write(report)
         return code
     except LandError as exc:

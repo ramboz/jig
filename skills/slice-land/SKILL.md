@@ -6,8 +6,8 @@ description: >
   checklist for either direct merge-to-main or PR-shaped integration. Use
   when the user says "land this slice", "merge back to main", "ready to
   ship", "create a PR for this slice", "close out the slice", or "slice is
-  done — what now". The helper produces a structured report; the user runs
-  the suggested git commands themselves. No destructive git operations.
+  done — what now". Use `prepare` to emit a readiness report; use
+  `execute --mode direct` to also run the merge sequence.
 user-invocable: true
 ---
 
@@ -56,11 +56,32 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" prepare \
     written to `/tmp/jig-slice-<NNN-NN>-pr-body.md` containing the
     slice's ACs and a deviation-log excerpt.
 
+### Run the merge sequence (execute --mode direct)
+
+After `prepare` confirms the slice is ready, `execute` runs the merge:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
+  --mode direct <path-to-spec.md> <slice-fragment> [--dry-run]
+```
+
+- `--dry-run` — print the git commands that would run without executing
+  them. Use this for a final sanity check before committing.
+- Without `--dry-run` — runs `git checkout main`, `git merge <branch>
+  --ff-only`, and `git push origin main` in sequence. Stops and reports
+  on the first failure. Never runs `git worktree remove` (printed as a
+  post-landing suggestion only).
+
+**Safety guards** (checked before any git mutation):
+- Refuses if current branch is `main` or `master`.
+- Refuses if `main` has diverged (fast-forward not possible).
+
 ### Exit codes
 
-- `0` — all four readiness checks pass; the slice is ready to land.
-- `1` — at least one check failed (the report still emits; the user
-  sees exactly what's blocking).
+- `0` — all four readiness checks pass; the slice is ready to land
+  (for `prepare`) or was merged successfully (for `execute`).
+- `1` — at least one check failed, a safety guard fired, or a git
+  command failed (the report still emits; the user sees what's wrong).
 - `2` — user error (missing spec, ambiguous fragment, invalid `--mode`).
 
 ### Test-check warnings
