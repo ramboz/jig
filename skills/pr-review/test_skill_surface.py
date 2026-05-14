@@ -76,9 +76,10 @@ class DescriptionTests(unittest.TestCase):
         cls.normalized = _normalize(cls.fm)
 
     def test_one_sentence_summary(self):
-        # AC #1 specifies the exact opener phrasing.
+        # Post-012-01 hot-patch: description opens with the team-baseline
+        # framing (was: "lightweight default pr review for jig projects").
         self.assertIn(
-            "lightweight default pr review for jig projects",
+            "team baseline for pr and code review",
             self.normalized,
         )
 
@@ -96,15 +97,26 @@ class DescriptionTests(unittest.TestCase):
                           f"description missing trigger phrase: {phrase!r}")
 
     def test_deferral_hint_present(self):
-        # AC #1 requires the exact substring.
+        # Post-012-01 hot-patch: deferral is now category-based, not
+        # name-specific (was: "if you have another `pr-review` skill
+        # installed"). The new phrasing tells the router to defer to any
+        # other installed skill whose description claims PR/code/diff
+        # review.
         self.assertIn(
-            "if you have another `pr-review` skill installed",
+            "defers to any other installed skill whose description "
+            "identifies it as handling pr review, code review, or "
+            "diff review",
             self.normalized,
         )
 
-    def test_deferral_hint_names_user_skill_path(self):
-        # AC #1 requires the path-shape hint.
-        self.assertIn("~/.claude/skills/pr-review", self.normalized)
+    def test_excludes_bundled_review_skill_from_deferral(self):
+        # Post-012-01 hot-patch: the description carves out the bundled
+        # `review` skill explicitly so the deferral chain doesn't collapse
+        # downward to the catch-all fallback.
+        self.assertIn(
+            "does not defer to the generic built-in `review` skill",
+            self.normalized,
+        )
 
     def test_do_not_use_clause_names_independent_review(self):
         self.assertRegex(self.normalized, r"do not use")

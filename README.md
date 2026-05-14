@@ -36,9 +36,14 @@ the Claude Code skill router picks a more specific user skill over
 jig's baseline.
 
 Example: `/jig:pr-review` ships a slim four-section PR review (scope /
-blockers / nits / strengths). If you already have a richer `pr-review`
-skill at `~/.claude/skills/pr-review` (or any other scope), that wins —
-jig stays out of the way.
+blockers / nits / strengths). Its deferral is **category-based, not
+name-specific** — any user-installed skill whose description identifies
+it as handling PR review, code review, or diff review wins, regardless
+of what the user named it. The common location is
+`~/.claude/skills/pr-review/`, but a skill named `code-reviewer`,
+`team-pr`, or anything else in that category beats jig's baseline too.
+The one carve-out is the bundled `review` skill — jig does not defer to
+that one (it stays below jig's baseline as the generic fallback).
 
 This keeps jig opinionated about *workflow* (spec-driven, reviewer-gated,
 deterministic helpers) while staying out of the way of *judgment skills*

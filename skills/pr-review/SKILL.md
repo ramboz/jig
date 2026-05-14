@@ -1,26 +1,32 @@
 ---
 name: pr-review
 description: >
-  Lightweight default PR review for jig projects — scope summary, blockers
-  vs. nits, and strengths call-out. Auto-triggers when you say review this
-  PR, check this diff, review these changes, pre-review before I share,
-  what do you think of this PR, or review the diff on this branch. If you
-  have another `pr-review` skill installed (e.g. a richer personal
-  reviewer at `~/.claude/skills/pr-review`), prefer that — jig's version
-  is a slim baseline. Do not use for: spec-compliance review of a finished
-  slice (use `/jig:independent-review` instead); standalone architecture-doc
-  review (jig does not ship an arch-review skill today); single-line typo
-  fixes or trivial whitespace changes (just merge and move on).
+  Team baseline for PR and code review — produces scope, blockers, nits,
+  and strengths. Auto-triggers when you say review this PR, check this
+  diff, review these changes, pre-review before I share, what do you
+  think of this PR, or review the diff on this branch. Defers to any
+  other installed skill whose description identifies it as handling PR
+  review, code review, or diff review — if such a skill is present,
+  prefer it over this one (jig's version is a slim baseline). Does not
+  defer to the generic built-in `review` skill. Do not use for:
+  spec-compliance review of a finished slice (use
+  `/jig:independent-review` instead); standalone architecture-doc review
+  (jig does not ship an arch-review skill today); single-line typo fixes
+  or trivial whitespace changes (just merge and move on).
 user-invocable: true
 ---
 
-> Spec 012 introduced this skill as jig's **lightweight baseline** PR
-> review. It is the first non-stub active jig skill that ships without a
-> `.py` helper — pr-review is fundamentally a judgment skill, and the
-> determinism it needs (`git diff`, file-type detection) Claude can run
-> inline. If a richer `pr-review` skill is installed at the user scope,
-> the Claude Code skill router prefers that one because its description
-> outcompetes jig's baseline on match-specificity.
+> Spec 012 introduced this skill as jig's **team baseline** for PR and
+> code review. It is the first non-stub active jig skill that ships
+> without a `.py` helper — pr-review is fundamentally a judgment skill,
+> and the determinism it needs (`git diff`, file-type detection) Claude
+> can run inline. If any other skill is installed whose description
+> identifies it as handling PR review, code review, or diff review, the
+> Claude Code skill router prefers that one over jig's baseline — the
+> deferral is category-based, not name-specific, so a richer user skill
+> named anything (`pr-review`, `code-reviewer`, `team-pr`, etc.) wins.
+> Jig's slim version remains the auto-trigger when no such skill is
+> installed.
 
 ## What this skill does
 
@@ -38,21 +44,26 @@ branch's accumulated changes:
 
 The review is **breadth over depth**: catch the obvious across any
 language/stack, leave the deep language-specific antipatterns to a richer
-user-installed `pr-review` skill (or to a code reviewer with full domain
-context). If you want multi-persona security/SRE/architecture lenses, jig
-doesn't ship those — install a heavier `pr-review` at the user scope.
+user-installed PR/code-review skill (or to a code reviewer with full
+domain context). If you want multi-persona security/SRE/architecture
+lenses, jig doesn't ship those — install a heavier skill at the user
+scope and the router will prefer it.
 
 ## When to use vs. when to defer
 
 There are three things people often confuse with this skill. Pick the right
 one:
 
-- **A richer user-installed `pr-review` skill** (e.g.
-  `~/.claude/skills/pr-review` with multi-persona reviewers, language-
-  specific reference files, or Adobe-security-suite integration). If one
-  is present, **defer to it.** The Claude Code skill router should route
-  to the more specific skill automatically; if you want to be sure,
-  explicitly invoke it (`/pr-review` rather than `/jig:pr-review`).
+- **Any other user-installed PR/code-review skill.** Common location:
+  `~/.claude/skills/pr-review/` — but the deferral is **category-based,
+  not name-based**, so a skill named anything (`pr-review`,
+  `code-reviewer`, `team-pr`, etc.) whose description claims PR review,
+  code review, or diff review will be preferred. If one is present,
+  **defer to it.** The Claude Code skill router should route to the
+  more specific skill automatically; if you want to be sure, explicitly
+  invoke it. The one exception jig's description carves out is the
+  bundled `review` skill — jig:pr-review does **not** defer to that one
+  (it's the generic fallback below jig's baseline, not above it).
 - **`/jig:independent-review`** — a sibling jig skill for **spec-compliance
   review** of a finished slice (does the implementation satisfy the
   acceptance criteria of `spec.md`?). That's a spec-shape review against a
@@ -164,22 +175,30 @@ file; no tests added in this diff.
 
 Notice: no language-specific deep dive (no "use `Decimal` instead of
 `float` for currency", no "this should be a `@dataclass`"). That depth
-belongs in a richer user-installed `pr-review` skill, not the baseline.
+belongs in a richer user-installed PR/code-review skill, not the
+baseline.
 
 ## Gotchas
 
 - **The deferral hint is the routing mechanism, not a code path.** Jig's
-  description tells the Claude Code router "prefer a more specific
-  `pr-review` skill if one is installed." There is no filesystem probe,
-  no plugin-precedence lookup. If the router consistently picks jig's
-  baseline over a richer user skill, the description is too greedy —
-  open an issue.
+  description tells the Claude Code router "prefer any other installed
+  skill whose description identifies it as handling PR/code/diff
+  review." There is no filesystem probe, no plugin-precedence lookup,
+  no name-matching against `pr-review` specifically. The deferral is
+  category-based: a user skill named anything that claims the PR/code
+  review surface area will win. If the router consistently picks jig's
+  baseline over such a skill, jig's description is too greedy — open an
+  issue.
+- **The bundled `review` skill is explicitly excluded from the deferral.**
+  Jig's description says it does **not** defer to `review`. That's the
+  one carve-out; everything else in the PR/code review category wins
+  over jig.
 - **Lightweight is a feature, not a limitation.** The baseline does not
   ship language-specific reference files (Node, Java, Python, etc.). It
-  does not multi-persona-review. It does not check for security issues
+  does not run multiple personas. It does not check for security issues
   beyond the obvious. If you find yourself wishing the baseline did
-  more, you are in the target audience for installing a richer
-  `~/.claude/skills/pr-review`.
+  more, you are in the target audience for installing a richer skill
+  at the user scope (commonly `~/.claude/skills/pr-review/`).
 - **This is a PR-shape review, not a spec-shape review.** If a slice has
   a spec.md to evaluate against, use `/jig:independent-review` (or spawn
   the `agents/reviewer.md` subagent). Mixing the two surfaces leads to
