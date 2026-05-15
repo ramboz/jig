@@ -61,7 +61,10 @@
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-02 — copy-hooks-and-register | **DONE** | Generates `.claude/settings.json` w/ jig hook registration |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-03 — dogfood-and-dual-mode-docs | **DONE** | Flips scaffold-mode to default; rewrites README install paths |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-04 — update-skill (DEFERRED) | DRAFT | Deferred; promotion gated on real friction or security-shaped fix |
-| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-01 — TBD | DRAFT | Stub — closes the wizard gap (audit-stage); slice-level SPIDR pending promotion |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-01 — vision-template-and-architecture-slots | **DONE** |  |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-02 — vision-elicitation-skill-core | READY_FOR_REVIEW |  |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-03 — re-runnable-with-edit-detection | READY_FOR_REVIEW |  |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-04 — seed-ADR-pass | DEFERRED |  |
 
 ## Deferred slices
 
@@ -84,3 +87,4 @@
 | [014-arch-review](014-arch-review/spec.md) | 014-02 — arch-review-gather-helper | Three `arch-review/gather-friction:` inbox entries naming specific sessions where Claude had to re-derive scope inline (parallels 012-02's gather-helper trigger). |
 | [014-arch-review](014-arch-review/spec.md) | 014-03 — domain-specific-references | Multi-domain-architecture user reports a concrete gap that the lightweight baseline doesn't cover, AND no user-installed `~/.claude/skills/arch-review` deferral target exists for them. |
 | [014-arch-review](014-arch-review/spec.md) | 014-04 — security-lens-integration | Resolution of the `security_lens` parent decision (same trigger as 012-03 — both slices plug into whichever shape that decision takes). |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-04 — seed-ADR-pass | First 5 real `/jig:vision-elicit` runs after 017-02 lands. If >25% of those runs name an explicit locked-in decision during Section 6 (Stack) elicitation that the user would have wanted auto-scaffolded as an ADR, promote 017-04 to DRAFT. If <25%, deferral becomes permanent — the elicitation output already names decisions inline and ADR seeding can stay manual. |

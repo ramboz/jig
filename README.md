@@ -37,7 +37,7 @@ jig installs a focused, opinionated workflow layer into your project:
 - Hooks are the spine; skills are the LLM layer
 - 8-12 skills total when complete
 
-See [docs/architecture.md](docs/architecture.md) for the full reasoning.
+See [docs/product-vision.md](docs/product-vision.md) for the full vision (target users, competitive landscape, design principles) and [docs/architecture.md](docs/architecture.md) for the technical mechanics.
 
 ## Extension points
 

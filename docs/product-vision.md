@@ -1,0 +1,214 @@
+> Status: Draft (hand-seeded as the worked-example artifact for [spec 017](specs/017-vision-elicitation/spec.md))
+>
+> This document captures *why* jig exists, *for whom*, and *with what
+> principles*. Architectural mechanics live in [architecture.md](architecture.md).
+> Update via reconciliation, or via `/jig:vision-elicit` once spec 017 lands.
+
+# Vision: jig
+
+## Vision statement
+
+A small, opinionated Claude Code plugin that scaffolds AI-native
+development practices — spec-driven slices, independent review, memory
+continuity, deterministic gates — into a project on day 1, and gets
+out of the way after.
+
+> *jig (noun): a tool that guides other tools to work accurately and
+> consistently.*
+
+## Target users
+
+- **Devs starting a new AI-native project on Claude Code** who want a
+  structured workflow on day 1 instead of inventing one over the first
+  three sprints.
+- **Devs adopting AI-native practices on an existing project** —
+  served by the sibling `/jig:migrate` skill rather than `scaffold-init`.
+- **Teams who want a thin, opinionated baseline** they can extend with
+  their own richer skills (jig's extension-point pattern lets user
+  skills override jig's baselines without configuration).
+- **Solo devs who want sane defaults** without committing to a
+  100-skill mega-pack that fills the context window.
+
+**Not for:** devs who want a maximalist skill marketplace; devs who
+want their tooling to make architectural decisions for them.
+
+## The core problem
+
+Claude Code is powerful but deliberately unopinionated about *project
+workflow*. Teams adopting it tend to land in one of three places:
+
+1. **Build the workflow yourself, slowly.** Each project re-invents
+   spec discipline, review gates, memory conventions, and
+   deterministic enforcement. Two months in, the team still doesn't
+   have it right, and lessons don't carry across projects.
+2. **Install a sprawling skill pack** (e.g. ECC's ~48 subagents, large
+   skill marketplaces). The toolset works, but ~40% context fill is
+   the practical ceiling for model recall (the "dumb zone"), and a
+   mega-pack blows through it before the dev's actual work loads.
+3. **Hand-roll team conventions in CLAUDE.md.** Common; expensive;
+   non-portable; no enforcement.
+
+There's a gap in the middle: **a focused, opinionated, *extensible*
+workflow layer that respects context economy and dogfoods its own
+conventions.** That's what jig is.
+
+### The positioning recovery (2026-05 audit)
+
+A user-led audit in May 2026 surfaced that jig was drifting from its
+original framing — *"scaffolding library: puts the machinery in your
+repo, then gets out of the way"* — toward an install-and-forget plugin
+where the machinery lives under `${CLAUDE_PLUGIN_ROOT}` and stays
+opaque to the dev. **The dev should own and extend the scaffolding,
+not depend on a plugin runtime they can't see.** [Spec 016](specs/016-scaffold-mode/spec.md)
+ships dual-mode install (plugin OR scaffolded-in-repo) to recover
+that framing; this spec (017) closes the second half by adding
+content-guidance at init time so a new project leaves the wizard with
+a real vision + architecture seed, not three "Deferred — no signal"
+stanzas.
+
+## Competitive landscape
+
+| Option | What it does | Where it falls short for this gap |
+|---|---|---|
+| **Built-in Claude Code skills** (`review`, `init`, `security-review`) | Generic single-skill helpers | No workflow stitching; no spec discipline; no memory continuity |
+| **anthropic-skills marketplace** (`skill-creator`, `consolidate-memory`, `pdf`, `xlsx`, …) | Atomic, well-designed skills | Each is excellent at one thing; none impose a project workflow |
+| **Large skill packs (ECC-style)** | Maximalist coverage | Context-window cost; tools you don't use crowd out the ones you do; no clear "shape" for new projects |
+| **Hand-rolled team CLAUDE.md** | Tailored to one team | Expensive to author; non-portable; no enforcement; rots |
+| **claude-code-templates-style boilerplate** | Solves day-1 layout | Static — no living workflow, no reviewer subagent, no spec lifecycle |
+
+**Where jig fits:** between "atomic skills" and "maximalist packs" —
+a fixed-size opinionated workflow layer (5 Tier 0 + ~5 Tier 1
+skills, 3 subagents) that ships with the templates, hooks, and helpers
+to enforce it, and that defers to richer user-installed skills where
+they exist.
+
+## Core features (prioritized)
+
+Jig ships in **tiers** so the install size matches the project's
+signal, not jig's wish list. See [docs/memory/glossary.md](memory/glossary.md)
+for tier definitions.
+
+### Tier 0 — always installs (the floor)
+
+The minimum coherent workflow. Nothing useful without all five.
+
+1. **`scaffold-init`** — generate docs/, hot-cache CLAUDE.md, settings.json
+2. **`memory-sync`** — cross-session continuity; hot cache + deep storage + inbox
+3. **`spec-workflow`** — SPIDR-split slices; DRAFT → DONE state machine; status board
+4. **`independent-review`** — reviewer subagent with fresh context, every implementation
+5. **`migrate`** — sibling entry path for projects that already have specs
+
+### Tier 1 — default-on (the working surface)
+
+Enabled by default; can be disabled per install. These are the daily
+drivers once Tier 0 is in place.
+
+6. **`adr-workflow`** — capture decisions; resolve refinement-todo entries
+7. **`tdd-loop`** — auto-detected test runner; normalized exit codes (0/1/2)
+8. **`slice-land`** — readiness check + landing checklist (direct merge or PR)
+9. **`pr-review`** — slim baseline four-section review; defers to richer user skills
+10. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern
+
+### Tier 2 — opt-in by signal (deferred until pain reported)
+
+Hypothetical. Only one candidate today (`local-dev-parity`) and no
+user signal yet. Tier 2 stays empty until pain is reported.
+
+### MVP scope (already shipped)
+
+Tier 0 + Tier 1 are both **effectively complete** as of 2026-05-15.
+See [docs/specs/README.md](specs/README.md) for the status board.
+
+### Out of scope (deliberately)
+
+- **Project management surface.** No backlog rendering, no estimation,
+  no roadmap visualization. Specs are the only project state.
+- **Auto-coding from the elicited spec.** Elicitation produces *docs*
+  (vision, architecture, draft ADRs). Implementation is still
+  `/jig:spec-workflow` + `implementer` subagent.
+- **Polyglot test runner support beyond pytest/vitest/jest.** Add
+  others when a real project hits the gap.
+- **A web UI, dashboard, or external service.** Jig is a Claude Code
+  plugin and a directory of files. That's the whole product.
+
+## Design principles
+
+These are load-bearing — every spec is judged against them at
+reconciliation.
+
+1. **Hooks are deterministic; skills carry judgment.** *Everything
+   that MUST happen is a hook. Everything that should happen when
+   relevant is a skill.* Determinism is non-negotiable; pattern-matched
+   skill triggering is a probabilistic best-effort.
+2. **Stay below the dumb zone (~40% context fill).** Practical
+   ceiling: 8 MCP servers, ~80 active tools. Skills use progressive
+   disclosure: body loads only on trigger; supporting files load only
+   when referenced. `jig-context-check` warns at session start.
+3. **Three subagents, no more — defined by isolation, not job title.**
+   `implementer` (TDD, writes), `reviewer` (read-only, fresh context),
+   `architect` (rare, ADR-style output). New subagent shapes require
+   a new isolation argument, not a new role description.
+4. **Dogfood the workflow we build.** Every jig feature is built using
+   jig's own spec lifecycle. The repo's `docs/` is the worked example
+   of what `scaffold-init` produces — including this vision document
+   (and the audit gap it closes).
+5. **Bring your own depth; jig provides the floor.** Where jig ships a
+   "lightweight baseline" skill (today: `pr-review`, `arch-review`),
+   the auto-trigger description includes a *category-based deferral
+   hint* so a richer user-installed skill in the same category wins
+   without configuration. Jig stays opinionated about *workflow*; it
+   stays out of the way of *judgment skills* the user has invested in.
+6. **No backwards-compat shims when conventions change.** When a
+   convention is wrong, flip it wholly (e.g. ADR-0004's `docs/adrs/`
+   → `docs/decisions/` rename was a clean cut, not a dual-read
+   transition). Backwards-compat is a tax on every future spec; pay
+   the migration cost once instead.
+7. **Owning the scaffolding beats renting the plugin.** Default install
+   mode after [spec 016](specs/016-scaffold-mode/spec.md) puts the
+   machinery (`skills/`, `agents/`, `hooks/`) in the dev's `.claude/`
+   directory where it can be read, modified, and extended. Plugin mode
+   stays available for users who want it; scaffolded mode is the
+   default because positioning matters.
+
+## How new work enters jig
+
+Jig grows by **signal**, not by speculation. A new spec is justified
+when one of the following lands:
+
+- **User signal**: a real pain hit two or more times across sessions,
+  or once and clearly load-bearing.
+- **Dogfooding revelation**: a gap found while using jig on jig
+  (e.g. [spec 009](specs/009-dod-close-out-separation/spec.md)
+  separated post-DONE close-out items from blocking DoD checks after
+  the chicken-and-egg hit slice 008-01).
+- **Cross-project comparison**: a pattern that recurs in multiple
+  projects (e.g. [spec 015](specs/015-structured-lifecycle-metadata/spec.md)
+  was born from comparing spec frontmatter across projects).
+
+Speculative tier promotion — "what if we also shipped X?" — is
+explicitly disallowed. Tier 2 stays empty until a real user reports
+real pain.
+
+## Future scope
+
+Track in [docs/specs/README.md](specs/README.md) and
+[docs/refinement-todo.md](refinement-todo.md). High-level horizon:
+
+- **Spec 017 (this spec) ships** → scaffold-init produces a real
+  vision + architecture seed at install time.
+- **Tier 2 stays empty** until `local-dev-parity` (or another
+  candidate) gets a real user signal.
+- **`contracts` skill stays a deliberate stub** ([ADR-0002](decisions/adr-0002-contracts-stays-deferred.md))
+  until a third caller needs the duplicated lookup logic.
+
+## References
+
+- [README.md](../README.md) — install + entry points
+- [docs/architecture.md](architecture.md) — technical mechanics; this
+  vision document supplies the *why*, architecture.md supplies the *how*
+- [docs/workflow.md](workflow.md) — spec lifecycle, session workflow
+- [docs/specs/README.md](specs/README.md) — current status board
+- [docs/specs/016-scaffold-mode/spec.md](specs/016-scaffold-mode/spec.md)
+  — positioning recovery (mechanical)
+- [docs/specs/017-vision-elicitation/spec.md](specs/017-vision-elicitation/spec.md)
+  — positioning recovery (content) — this document is its worked-example artifact

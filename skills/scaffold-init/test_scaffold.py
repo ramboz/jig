@@ -1054,5 +1054,297 @@ class LooksAlreadySpecDrivenTests(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class VisionTemplateSlotsTests(unittest.TestCase):
+    """AC verification tests for slice 017-01 (vision-template-and-architecture-slots).
+
+    These tests pin the *template* shape — the named-but-empty slots that
+    `scaffold-init` produces, before the elicitation skill (017-02) exists.
+    The skill that fills the slots is out of scope for 017-01.
+    """
+
+    EXPECTED_VISION_SECTIONS = [
+        "Identity",
+        "Target users",
+        "Core problem",
+        "Competitive landscape",
+        "Scope",
+        "Stack",
+        "Design principles & constraints",
+        "How new work enters",
+        "Open questions",
+    ]
+
+    UNFILLED_MARKER = "<!-- elicited: PENDING / status: unfilled -->"
+
+    # Slice 017-01 reshape: architecture.md.template now has 4 elicitation
+    # slots (was 3 Deferred stanzas). "What this project does" was removed —
+    # product-vision.md owns that question, and the template has a top-of-doc
+    # pointer to it instead. Two new slots — Repository structure and Data
+    # model — were added based on the proven structure of jig's own
+    # docs/architecture.md.
+    EXPECTED_ARCH_STANZAS = [
+        "Repository structure",
+        "Tech stack",
+        "Module boundaries",
+        "Data model",
+    ]
+    # Two sections exist but are NOT elicitation slots — they carry no marker.
+    # "Core architecture decisions" is populated incrementally by ADRs over
+    # time, not a single-shot elicitation. "Open questions" is a footer that
+    # points to refinement-todo.md.
+    EXPECTED_ARCH_NON_MARKER_SECTIONS = [
+        "Core architecture decisions",
+        "Open questions",
+    ]
+
+    def _read(self, rel: str) -> str:
+        return (REPO_ROOT / rel).read_text(encoding="utf-8")
+
+    # AC #1
+    def test_product_vision_template_exists(self):
+        path = REPO_ROOT / "templates" / "docs" / "product-vision.md.template"
+        self.assertTrue(
+            path.exists(),
+            "templates/docs/product-vision.md.template must exist (slice 017-01 AC #1)",
+        )
+
+    # AC #2: 9 H2 sections in exact order
+    def test_product_vision_template_has_9_sections_in_order(self):
+        body = self._read("templates/docs/product-vision.md.template")
+        # match `## <heading>` but not deeper headings
+        headings = re.findall(r"^## (.+)$", body, flags=re.MULTILINE)
+        self.assertEqual(
+            headings,
+            self.EXPECTED_VISION_SECTIONS,
+            f"product-vision.md.template H2 sections must be exactly "
+            f"{self.EXPECTED_VISION_SECTIONS}, got {headings}",
+        )
+
+    # AC #3: each H2 section starts with the unfilled marker
+    def test_product_vision_template_each_section_has_unfilled_marker(self):
+        body = self._read("templates/docs/product-vision.md.template")
+        # split by `## ` heading; first chunk is preamble, rest are sections
+        chunks = re.split(r"^## ", body, flags=re.MULTILINE)[1:]
+        self.assertEqual(
+            len(chunks), 9,
+            f"expected 9 sections, got {len(chunks)}",
+        )
+        for chunk in chunks:
+            heading_line, _, rest = chunk.partition("\n")
+            # first non-blank line after the heading must be the unfilled marker
+            stripped = rest.lstrip("\n")
+            first_line = stripped.split("\n", 1)[0]
+            self.assertEqual(
+                first_line.strip(),
+                self.UNFILLED_MARKER,
+                f"section '## {heading_line}' must start with "
+                f"'{self.UNFILLED_MARKER}', got '{first_line}'",
+            )
+
+    # AC #4: architecture.md.template's four elicitation slots have markers
+    def test_architecture_template_four_slots_have_unfilled_markers(self):
+        body = self._read("templates/docs/architecture.md.template")
+        for stanza in self.EXPECTED_ARCH_STANZAS:
+            # Each elicitation slot heading is followed by the unfilled marker
+            # on the line immediately after (blank lines tolerated).
+            pattern = re.compile(
+                rf"^## {re.escape(stanza)}\s*\n+{re.escape(self.UNFILLED_MARKER)}",
+                flags=re.MULTILINE,
+            )
+            self.assertRegex(
+                body, pattern,
+                f"slot '## {stanza}' must have '{self.UNFILLED_MARKER}' "
+                f"on the line(s) immediately after the heading (slice 017-01 AC #4)",
+            )
+
+    # AC #4 sub: exactly 4 markers total — no duplicates, no fifth slot.
+    # Tightening per implementation-reviewer feedback (deviation §3).
+    def test_architecture_template_has_exactly_four_markers(self):
+        body = self._read("templates/docs/architecture.md.template")
+        count = body.count(self.UNFILLED_MARKER)
+        self.assertEqual(
+            count, 4,
+            f"architecture.md.template must contain exactly 4 unfilled "
+            f"markers (one per elicitation slot); got {count}. A duplicate "
+            f"marker or a marker on the Core architecture decisions / "
+            f"Open questions sections would break this assertion (slice 017-01 AC #4).",
+        )
+
+    # AC #4 sub: non-elicitation sections (decisions, open questions) carry NO marker
+    def test_architecture_template_non_marker_sections_have_no_marker(self):
+        body = self._read("templates/docs/architecture.md.template")
+        for section in self.EXPECTED_ARCH_NON_MARKER_SECTIONS:
+            # Capture the body between this H2 and the next H2 (or EOF).
+            match = re.search(
+                rf"^## {re.escape(section)}\n+(.*?)(?=^## |\Z)",
+                body, flags=re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(
+                match,
+                f"section '## {section}' must exist in architecture.md.template",
+            )
+            section_body = match.group(1)
+            self.assertNotIn(
+                self.UNFILLED_MARKER, section_body,
+                f"section '## {section}' must NOT carry an elicitation marker — "
+                f"it's a hand-curated section, not an elicitation slot",
+            )
+
+    # AC #4 sub: architecture.md.template keeps Deferred fallback prose on
+    # the slots that previously had it (Tech stack and Module boundaries).
+    # Repository structure and Data model are new slots that get a positive
+    # placeholder rather than a Deferred fallback (the answer is rarely
+    # "no signal" for those — every project has a layout).
+    def test_architecture_template_keeps_deferred_fallback(self):
+        body = self._read("templates/docs/architecture.md.template")
+        for stanza in ("Tech stack", "Module boundaries"):
+            pattern = re.compile(
+                rf"^## {re.escape(stanza)}\b.*?\*\*Deferred",
+                flags=re.MULTILINE | re.DOTALL,
+            )
+            self.assertRegex(
+                body, pattern,
+                f"slot '## {stanza}' must keep its Deferred fallback prose "
+                f"(slice 017-01 AC #4)",
+            )
+
+    # AC #4 sub: template no longer carries the old "What this project does"
+    # stub — that's vision.md's job. The pointer to vision.md is in the
+    # top-of-doc preamble instead.
+    def test_architecture_template_no_what_project_does_stub(self):
+        body = self._read("templates/docs/architecture.md.template")
+        self.assertNotIn(
+            "## What this project does", body,
+            "architecture.md.template must not carry its own 'What this project "
+            "does' stub — that question is owned by product-vision.md (slice 017-01 AC #4)",
+        )
+        self.assertIn(
+            "product-vision.md", body,
+            "architecture.md.template must reference product-vision.md "
+            "(top-of-doc pointer; slice 017-01 AC #4)",
+        )
+
+    # AC #5: CLAUDE.md.template's "What this project does" line points to vision doc
+    def test_claude_md_template_references_product_vision(self):
+        body = self._read("templates/CLAUDE.md.template")
+        # The "What this project does" section must reference docs/product-vision.md
+        # and must not contain the old "Deferred — no signal from initial pitch" stub.
+        what_section = re.search(
+            r"^## What this project does\n+(.+?)(?=^##|\Z)",
+            body, flags=re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(
+            what_section,
+            "CLAUDE.md.template must have a '## What this project does' section",
+        )
+        section_body = what_section.group(1)
+        self.assertIn(
+            "docs/product-vision.md", section_body,
+            "the 'What this project does' section must reference "
+            "docs/product-vision.md (slice 017-01 AC #5)",
+        )
+        self.assertNotIn(
+            "Deferred — no signal from initial pitch", section_body,
+            "the 'What this project does' section must no longer carry the "
+            "'Deferred — no signal' stub (slice 017-01 AC #5)",
+        )
+
+    # AC #6: docs/conventions.md documents the marker convention
+    def test_conventions_md_documents_marker_convention(self):
+        body = self._read("docs/conventions.md")
+        # Tightened per implementation-reviewer feedback (deviation §3): the
+        # earlier substring-only check could pass on a convention body where
+        # the words "unfilled" / "filled" / "skipped" appeared in unrelated
+        # rules. Anchor instead on the "Elicitation slots" rule's heading
+        # text + content adjacency.
+        rule_match = re.search(
+            r"\*\*Rule:\*\* Elicitation slots.*?(?=\*\*Rule:\*\*|\Z)",
+            body, flags=re.DOTALL,
+        )
+        self.assertIsNotNone(
+            rule_match,
+            "docs/conventions.md must contain a '**Rule:** Elicitation slots' "
+            "block documenting the marker convention (slice 017-01 AC #6)",
+        )
+        rule_body = rule_match.group(0)
+        # The rule body must mention all three lifecycle states.
+        for state in ("unfilled", "filled", "skipped"):
+            self.assertIn(
+                state, rule_body,
+                f"the 'Elicitation slots' rule must name the '{state}' "
+                f"marker state (slice 017-01 AC #6)",
+            )
+        # The rule body must mention the marker format (so a future edit
+        # that removes the format example is caught).
+        self.assertIn(
+            "elicited:", rule_body,
+            "the 'Elicitation slots' rule must document the marker prefix "
+            "'<!-- elicited: ... -->' (slice 017-01 AC #6)",
+        )
+        # The rule body must name 017-03 as the slice that introduces the
+        # hash field — so the convention notes its own intentional deferral
+        # rather than silently shipping incomplete machinery.
+        self.assertIn(
+            "017-03", rule_body,
+            "the 'Elicitation slots' rule must reference slice 017-03 as the "
+            "introducer of the `hash` field (slice 017-01 AC #6)",
+        )
+
+    # AC #7: scaffold-init dogfood produces docs/product-vision.md AND
+    # docs/architecture.md, both with their slot structure intact.
+    def test_scaffold_produces_product_vision_md(self):
+        with tempfile.TemporaryDirectory(prefix="jig-017-01-dogfood-") as tmp:
+            target = Path(tmp) / "demo-project"
+            result = run_scaffold(target)
+            self.assertEqual(
+                result.returncode, 0,
+                f"scaffold.py exit nonzero: stderr={result.stderr}",
+            )
+
+            # Vision side: 9 H2 sections in order.
+            vision = target / "docs" / "product-vision.md"
+            self.assertTrue(
+                vision.exists(),
+                "scaffold-init must produce docs/product-vision.md "
+                "(slice 017-01 AC #7)",
+            )
+            vision_body = vision.read_text(encoding="utf-8")
+            headings = re.findall(r"^## (.+)$", vision_body, flags=re.MULTILINE)
+            self.assertEqual(
+                headings, self.EXPECTED_VISION_SECTIONS,
+                f"scaffolded docs/product-vision.md must have 9 sections "
+                f"in order; got {headings}",
+            )
+
+            # Architecture side: 4 elicitation markers present
+            # (deviation §3 close-out — reviewer noted AC #7 originally
+            # only verified the vision side).
+            arch = target / "docs" / "architecture.md"
+            self.assertTrue(
+                arch.exists(),
+                "scaffold-init must produce docs/architecture.md "
+                "(slice 017-01 AC #7)",
+            )
+            arch_body = arch.read_text(encoding="utf-8")
+            marker_count = arch_body.count(self.UNFILLED_MARKER)
+            self.assertEqual(
+                marker_count, 4,
+                f"scaffolded docs/architecture.md must contain exactly 4 "
+                f"unfilled-marker comments (Repository structure / Tech "
+                f"stack / Module boundaries / Data model); got "
+                f"{marker_count} (slice 017-01 AC #7)",
+            )
+            # And each of the 4 named slots is present as an H2 in the
+            # scaffolded file (catches reordering / renaming bugs in the
+            # template at scaffold time).
+            arch_headings = re.findall(r"^## (.+)$", arch_body, flags=re.MULTILINE)
+            for slot in self.EXPECTED_ARCH_STANZAS:
+                self.assertIn(
+                    slot, arch_headings,
+                    f"scaffolded docs/architecture.md must contain "
+                    f"'## {slot}' (slice 017-01 AC #7)",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
