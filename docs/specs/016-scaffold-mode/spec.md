@@ -352,7 +352,39 @@ the empirical check.
   "minor." Kept; the existing single-file check meets the spec's
   literal "A regression test reads a copied SKILL.md."
 
-**6. Test counts.** Pre-016-01 baseline (post-merge of `main`'s
+**6. Smoke-test result (2026-05-15, post-DONE close-out).** Ran
+`CLAUDE_PLUGIN_ROOT=$(pwd) python3 skills/scaffold-init/scaffold.py
+--with-machinery <tmpdir>` from the jig worktree. Output:
+- `<tmpdir>/.claude/skills/` contained 11 `jig-`prefixed directories
+  (one per source skill, including `jig-arch-review` carried in from
+  main's merge): `jig-adr-workflow`, `jig-arch-review`, `jig-contracts`,
+  `jig-independent-review`, `jig-memory-sync`, `jig-migrate`,
+  `jig-pr-review`, `jig-scaffold-init`, `jig-slice-land`,
+  `jig-spec-workflow`, `jig-tdd-loop`.
+- `<tmpdir>/.claude/agents/` contained 3 `jig-`prefixed files:
+  `jig-architect.md`, `jig-implementer.md`, `jig-reviewer.md`.
+- `${CLAUDE_PLUGIN_ROOT}/skills/` count in `jig-tdd-loop/SKILL.md` and
+  `jig-scaffold-init/SKILL.md` = **0** (AC #3 substitution complete).
+- `${CLAUDE_PROJECT_DIR}` count in same two SKILL.md files = **2**
+  each (the rewritten bash commands). Sample from `jig-tdd-loop`:
+  `python3 "${CLAUDE_PROJECT_DIR}/.claude/skills/jig-tdd-loop/tdd.py"
+  detect [target]` — exactly the expected shape.
+- Bare-prose `${CLAUDE_PLUGIN_ROOT}` mentions DID survive in
+  `jig-scaffold-init/SKILL.md` (lines 19, 101 — the `templates/` path
+  reference + the "right env var inside the plugin" Gotcha) per
+  deviation log §2. Confirms the narrower AC #8(c) interpretation
+  matches the implementation's behavior.
+
+Structural verification passes. Runtime reachability of
+`${CLAUDE_PROJECT_DIR}` from skill-bash context (DoR §4 open
+question) was NOT exercised — that requires a `claude` session
+loading the scaffolded skills, which is a manual user-driven check
+out of band of this smoke-test. The structural rewrite is correct;
+if the env-var doesn't resolve at runtime, the one-line fallback
+inside `_rewrite_skill_md_paths()` (per deviation log §4) is the
+recovery path.
+
+**7. Test counts.** Pre-016-01 baseline (post-merge of `main`'s
 arch-review work): **555 tests, 3 skipped** (541 jig baseline + 14
 slice 016-01 + 27 arch-review merged in concurrently → 582 grand
 total). Post-label-fix: **582 tests, 3 skipped — green.** No
@@ -362,12 +394,12 @@ regressions.
 
 - [x] `docs/specs/README.md` regenerated.
 - [x] CLAUDE.md Hot Cache updated to mark 016-01 DONE.
-- [ ] Manual smoke-test: run `scaffold.py --with-machinery <tmpdir>`,
+- [x] Manual smoke-test: run `scaffold.py --with-machinery <tmpdir>`,
   verify `ls <tmpdir>/.claude/skills/` lists all jig skills, and
   verify one SKILL.md no longer contains
   `${CLAUDE_PLUGIN_ROOT}/skills/` (note: bare `${CLAUDE_PLUGIN_ROOT}`
-  prose mentions DO survive — see deviation log §2). Record
-  observation in the deviation log.
+  prose mentions DO survive — see deviation log §2). Recorded in
+  deviation log §6 (2026-05-15).
 
 ---
 
