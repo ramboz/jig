@@ -622,7 +622,7 @@ observes at first use. Same bridge-of-trust pattern as slice 016-01
 
 ## Slice 016-03 — dogfood-and-dual-mode-docs
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** Flip `--with-machinery` to default-on (i.e. scaffold-mode
 becomes jig's default install shape), rewrite README's Installation
@@ -850,14 +850,22 @@ triggers, none of which were present). Cleaned post-verification.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache updated to mark spec 016 effectively complete
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache updated to mark spec 016 effectively complete
   (016-01..03 DONE; 016-04 deferred).
-- [ ] User-driven verification: in a fresh Claude Code session,
-  scaffold jig into a new project, confirm `/jig:scaffold-init` and
-  `/jig:tdd-loop` are discoverable AS PROJECT-SCOPED skills (i.e.
-  not via the installed plugin). Record session ID + observation
-  here.
+- [x] Default-on smoke-test ran (2026-05-15, structural verification):
+  `python3 skills/scaffold-init/scaffold.py <tmpdir>` (no flags;
+  default-on path) produced a `.claude/` tree with 11 jig-prefixed
+  skills, 3 agents, 5 hook scripts (0o755), and 5 jig-managed
+  settings.json entries. `verify_install.py --mode scaffold
+  --project-root <tmpdir>` returned 4/4 PASS. Confirms the default
+  flip behaves identically to `--with-machinery` under 016-01/02's
+  smoke-tests.
+- [ ] **User-driven runtime verification** (out of band — requires
+  a fresh `claude` session): scaffold jig into a new project,
+  confirm `/jig:scaffold-init` and `/jig:tdd-loop` are discoverable
+  AS PROJECT-SCOPED skills (i.e. not via the installed plugin).
+  Record session ID + observation here.
 
 ---
 
