@@ -5,11 +5,18 @@ description: >
   bounded migration operations to bring it under jig's defaults. Slice
   008-01 added `report`; slice 008-02 added `rename-decisions` (apply
   ADR-0004's `docs/adrs/` → `docs/decisions/` rename + filename shape).
-  Use when the user says "migrate this project to jig", "adopt jig here",
-  "this repo already has specs — set up jig", "scaffold-init refused —
-  what now", "introduce jig to an existing codebase", or "apply ADR-0004
-  to my project". The report is read-only; mutating subcommands have a
-  `--dry-run` mode and refuse on conflict before any write.
+  Slice 018-04 added `split-slices` (extract `## Slice` sections out of
+  spec.md into sibling slice files). Slice 020-01 added an agentic
+  slice-to-spec migration workflow — judgment-driven, no helper — for
+  projects with flat `docs/slices/*.md` files that need to be grouped
+  into nested `docs/specs/MNN-slug/slice-NN-*.md` form. Use when the
+  user says "migrate this project to jig", "adopt jig here", "this repo
+  already has specs — set up jig", "scaffold-init refused — what now",
+  "introduce jig to an existing codebase", "apply ADR-0004 to my
+  project", or "migrate flat slices into nested specs". The report is
+  read-only; mutating subcommands have a `--dry-run` mode and refuse on
+  conflict before any write; the agentic slice-to-spec workflow never
+  deletes originals (caller decides when to clean up).
 user-invocable: true
 ---
 
@@ -210,6 +217,142 @@ python3 .../migrate.py report /path/to/existing-project
 #   2. **`migrate.py slice-to-spec <dir>`** (slice 008-04, not yet
 #      implemented) — interactively map flat slices...
 ```
+
+## Agentic slice-to-spec migration
+
+For projects where `migrate.py report` returns **Verdict: adoptable**
+AND the inventory shows flat slice files under `docs/slices/` rather
+than nested `docs/specs/NNN-slug/spec.md` form, there is no
+deterministic helper to do the grouping (slice 008-04 was deferred
+deliberately — see Non-goals on spec 020). Instead, the LLM driving
+the migration follows the algorithm below. Output is a new
+`docs/specs/` tree; originals stay where they are until the caller
+verifies and chooses to clean up.
+
+### When to invoke
+
+After `migrate.py rename-decisions` (so ADR filenames are jig-shaped),
+when the report's Ambiguities section names
+**"Flat slices reference N milestone(s)"** or similar. The follow-up
+is this agentic workflow. Do NOT run it if specs already live under
+`docs/specs/NNN-slug/spec.md` — that's already the jig shape.
+
+### Algorithm
+
+For each migration, in order:
+
+1. **Read milestone summaries.** Walk
+   `docs/milestones/*.md` (or whatever the source's milestone-doc
+   convention is). For each milestone, capture the title, scope,
+   and slice list. These become the basis for spec naming.
+2. **Decide milestone → spec mapping.** Each milestone becomes one
+   spec folder. Naming convention:
+   `docs/specs/NNN-mM-<title-slug>/` where:
+   - `NNN` is a 3-digit spec number (start at 001, ascend per
+     milestone order — match the project's chronology when
+     possible);
+   - `mM` is the milestone tag lowercased (e.g. `m1`, `m4.5`);
+   - `<title-slug>` is a slug of the milestone's headline
+     ("EDS thin E2E" → `eds-thin-e2e`).
+   Skip milestones that have no slices.
+3. **For each source slice file:**
+   1. Read its body. Locate the milestone tag (prose
+      `- **Milestone:** M1`, frontmatter `milestone: M1`, or
+      filename prefix — adapt to what the source uses).
+   2. Locate its status. The source's vocabulary is usually
+      4-state — translate per the table below.
+   3. Locate the heading. Source shape is usually
+      `# Slice NN — Title` (H1, single number, no spec prefix).
+      Transform to `## Slice NNN-NN — <slug-of-title>` (H2, jig
+      spec-slice fragment, slug-form title). Use the target spec's
+      `NNN` from step 2 and the original slice number for the
+      second `NN`.
+   4. Prepend a frontmatter block (frontmatter shape per spec 015
+      + 018):
+      ```
+      ---
+      status: <translated-status>
+      dependencies: []
+      last_verified:
+      ---
+      ```
+      Leave `dependencies: []` for now — backfilling structured
+      deps from prose "Depends on" lines is per-slice judgment
+      work, not bulk-migration scope.
+   5. Preserve the original slice body verbatim AFTER the new
+      heading (Status / Milestone / Depends on / Estimated size
+      prose lines included — they're harmless trailing context).
+4. **Write new files** under
+   `docs/specs/NNN-mM-<title-slug>/`:
+   - `spec.md` synthesized from the milestone summary (header +
+     overview + `## Decomposition` + `## Slices` link list).
+   - One `slice-NN-<original-shortname>.md` per source slice. Keep
+     the original filename's shortname (no re-slugging) so existing
+     cross-references resolve.
+5. **Do NOT delete originals.** The source `docs/slices/` and
+   milestone summaries stay in place. Caller decides when to
+   clean up after verifying.
+6. **Verify with jig helpers.** Run the following against the new
+   spec dir and confirm clean output:
+   ```bash
+   # All slices resolvable
+   python3 -c "import sys; sys.path.insert(0, 'skills/_common'); \
+     from parsing import iter_slices; \
+     [print(l.label) for l in iter_slices('docs/specs/NNN-mM-slug/spec.md')]"
+
+   # Lint walks all slices, no AC contradictions
+   python3 scripts/spec_lint.py docs/specs/NNN-mM-slug/spec.md
+
+   # Status board generates the table
+   python3 skills/spec-workflow/workflow.py status-board <project-dir>
+   ```
+   `land.py prepare --no-deviation-log` (slice 019-01) lands
+   without complaining about absent deviation logs on pre-jig
+   DONE slices.
+
+### State translation
+
+| Source (4-state)   | Jig (7-state)               | Notes                                                                 |
+|--------------------|-----------------------------|-----------------------------------------------------------------------|
+| `Draft`            | `DRAFT`                     | Direct.                                                               |
+| `Ready`            | `READY_FOR_IMPLEMENTATION`  | "Ready" in 4-state means "ready to start work" — NOT "ready for spec review." Map past READY_FOR_REVIEW. |
+| `In Progress`      | `IN_PROGRESS`               | Direct.                                                               |
+| `Done`             | `DONE`                      | Direct.                                                               |
+| `Deferred` (rare)  | `DEFERRED` (spec 014)       | If the source uses a Deferred state with a resolution trigger.        |
+
+`REVIEWED` and `RECONCILED` are intermediate gates the source never
+had. Pre-jig slices that landed under the old lifecycle skip those
+gates by definition — the auto-tick on jig's REVIEWED→RECONCILED
+transitions doesn't fire for them and shouldn't. Use spec 019's
+`--no-deviation-log` flag when landing these retroactively.
+
+### Worked example
+
+The shallow-validator M1 dogfood (2026-05-15) is the canonical
+reference. See
+[`worked-example-slice-to-spec.md`](worked-example-slice-to-spec.md)
+for the source → target before/after, status-board output, and
+verification report.
+
+### Limitations
+
+- **No backfill of `dependencies:`.** Prose "Depends on" lines stay
+  in the slice body; the frontmatter `dependencies: []` is empty.
+  Future slices can populate them per-slice.
+- **No backfill of `### Deviation log`.** Pre-jig slices never had
+  one. Use `land.py prepare --no-deviation-log` to land them
+  retroactively (spec 019-01).
+- **Originals NOT deleted.** Caller decides post-verification.
+- **No status-vocabulary auto-detection.** The 4-state vocabulary
+  above is the most common, but adapt to what the source actually
+  uses (e.g., "In Review" might map to `IN_PROGRESS` or `REVIEWED`
+  depending on context).
+- **CLAUDE.md references to old slice paths are NOT rewritten.**
+  Cross-references like `[slice-01](docs/slices/slice-01.md)` in
+  CLAUDE.md / milestone summaries / etc. keep pointing at the
+  original files. After the caller deletes originals, those refs
+  must be updated by hand or via a follow-up
+  `migrate.py rename-decisions`-style sweep (out of scope here).
 
 ## Gotchas
 

@@ -1313,5 +1313,96 @@ class SplitSlicesTests(unittest.TestCase):
         self.assertIn("Body paragraph two.", text)
 
 
+WORKED_EXAMPLE = REPO_ROOT / "skills" / "migrate" / "worked-example-slice-to-spec.md"
+
+
+class SliceToSpecSkillTests(unittest.TestCase):
+    """Slice 020-01: surface-pinning tests for the agentic slice-to-spec
+    workflow documented in SKILL.md + worked-example sibling. No
+    `migrate.py` code is exercised — this slice ships markdown only."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.skill_text = SKILL_MD.read_text()
+        cls.worked_text = (WORKED_EXAMPLE.read_text()
+                           if WORKED_EXAMPLE.is_file() else "")
+
+    # AC #1: dedicated section heading.
+    def test_skill_md_has_slice_to_spec_section(self):
+        self.assertIn("## Agentic slice-to-spec migration",
+                      self.skill_text,
+                      "SKILL.md missing the agentic slice-to-spec section")
+
+    # AC #2: state translation table.
+    def test_skill_md_has_state_translation_table(self):
+        # The table must mention the canonical 4-state vocabulary AND
+        # the jig 7-state vocabulary together.
+        for state_4 in ("Draft", "Ready", "In Progress", "Done"):
+            self.assertIn(state_4, self.skill_text,
+                          f"4-state token {state_4!r} missing from SKILL.md")
+        for state_7 in ("DRAFT", "READY_FOR_IMPLEMENTATION",
+                        "IN_PROGRESS", "DONE"):
+            self.assertIn(state_7, self.skill_text,
+                          f"jig-state token {state_7!r} missing from SKILL.md")
+        # The "Ready → READY_FOR_IMPLEMENTATION" mapping is the
+        # most lossy translation — its rationale must be explicit.
+        # Check for the key phrase in any case.
+        lower = self.skill_text.lower()
+        self.assertTrue(
+            "ready to start work" in lower or "not \"ready for spec review\"" in lower,
+            "SKILL.md should explain why Ready maps past READY_FOR_REVIEW",
+        )
+
+    # AC #3: algorithm-as-steps with the canonical step list.
+    def test_skill_md_has_algorithm_steps(self):
+        # Spot-check each of the 6 canonical steps. Phrasing is flexible
+        # but the concept must appear.
+        for token in ("milestone summaries", "milestone → spec mapping",
+                      "frontmatter", "originals", "iter_slices",
+                      "spec_lint", "status-board"):
+            self.assertIn(token, self.skill_text,
+                          f"algorithm step token {token!r} missing")
+
+    # AC #4: worked example file exists with key sections.
+    def test_worked_example_file_present(self):
+        self.assertTrue(WORKED_EXAMPLE.is_file(),
+                        f"worked example missing at {WORKED_EXAMPLE}")
+        self.assertGreater(len(self.worked_text), 1000,
+                           "worked example suspiciously short")
+
+    def test_worked_example_documents_m1_dogfood(self):
+        # The dogfood was on shallow-validator M1 — that name should appear.
+        self.assertIn("shallow-validator", self.worked_text)
+        self.assertIn("M1", self.worked_text)
+        # Before/after slice snippets must be present
+        self.assertIn("# Slice 01", self.worked_text,
+                      "worked example missing source-shape snippet")
+        self.assertIn("## Slice 001-01", self.worked_text,
+                      "worked example missing target-shape snippet")
+        # The result must show iter_slices / spec_lint / status-board outputs
+        self.assertIn("iter_slices", self.worked_text)
+        self.assertIn("spec_lint", self.worked_text)
+        self.assertIn("status-board", self.worked_text)
+
+    # AC #5: skill description updated to mention the new workflow.
+    def test_skill_description_mentions_slice_to_spec(self):
+        # Frontmatter description block (between `---` lines at file top).
+        m = re.match(r"---\n(.*?)\n---\n", self.skill_text, re.DOTALL)
+        self.assertIsNotNone(m, "SKILL.md missing frontmatter block")
+        fm = m.group(1).lower()
+        self.assertTrue(
+            "slice-to-spec" in fm or "flat slices into nested specs" in fm,
+            "frontmatter description must mention the new agentic workflow",
+        )
+
+    # AC #6 sanity check: no `migrate.py slice-to-spec` subcommand exists.
+    def test_no_slice_to_spec_subcommand_in_migrate_py(self):
+        migrate_py = (REPO_ROOT / "skills" / "migrate" / "migrate.py").read_text()
+        # The string `slice-to-spec` MAY appear in comments / docstrings
+        # discussing the deferral, but NOT as an argparse subparser.
+        self.assertNotIn('add_parser(\n        "slice-to-spec"', migrate_py)
+        self.assertNotIn('add_parser("slice-to-spec"', migrate_py)
+
+
 if __name__ == "__main__":
     unittest.main()
