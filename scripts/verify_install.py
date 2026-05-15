@@ -123,6 +123,148 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
     )
 
 
+# ----------------------------------------------------------------------------
+# Scaffold-mode checks (slice 016-03 AC #4)
+# ----------------------------------------------------------------------------
+#
+# The plugin-mode checks above validate that jig's plugin install footprint
+# is on disk (`.claude-plugin/...` etc.). When jig is installed via
+# `scaffold-init` (default-on as of slice 016-03), the artifacts live under
+# `<project>/.claude/` instead, with a `jig-` prefix to namespace them away
+# from user-added project skills. The four scaffold-mode checks mirror the
+# four plugin-mode checks (skills / agents / hook scripts / settings.json
+# registration), but against the project tree.
+
+
+_EXPECTED_HOOK_SCRIPTS = (
+    "jig-context-check.sh",
+    "jig-memory-scan.sh",
+    "jig-spec-gate.sh",
+    "jig-task-capture.sh",
+    "jig-telemetry.sh",
+)
+
+
+def check_scaffold_skills_present(project_root: Path) -> CheckResult:
+    """At least one `.claude/skills/jig-*/SKILL.md` exists under the
+    project root."""
+    skills_dir = project_root / ".claude" / "skills"
+    if not skills_dir.is_dir():
+        return False, f".claude/skills/ dir missing at {skills_dir}"
+    skill_mds = list(skills_dir.glob("jig-*/SKILL.md"))
+    if not skill_mds:
+        return False, (
+            f"no jig-prefixed skill SKILL.md files found under {skills_dir}"
+        )
+    return True, f"{len(skill_mds)} scaffolded skill SKILL.md file(s) present"
+
+
+def check_scaffold_agents_present(project_root: Path) -> CheckResult:
+    """All three jig-prefixed agent files are at the expected path."""
+    agents_dir = project_root / ".claude" / "agents"
+    if not agents_dir.is_dir():
+        return False, f".claude/agents/ dir missing at {agents_dir}"
+    missing = [
+        name for name in _REQUIRED_AGENTS
+        if not (agents_dir / f"jig-{name}.md").is_file()
+    ]
+    if missing:
+        return False, (
+            f"missing scaffolded agent file(s): "
+            f"{', '.join('jig-' + n + '.md' for n in missing)}"
+        )
+    return True, "all three scaffolded subagent definitions present"
+
+
+def check_scaffold_hook_scripts_present(project_root: Path) -> CheckResult:
+    """All five jig hook scripts exist under `.claude/hooks/scripts/`."""
+    scripts_dir = project_root / ".claude" / "hooks" / "scripts"
+    if not scripts_dir.is_dir():
+        return False, f".claude/hooks/scripts/ dir missing at {scripts_dir}"
+    missing = [
+        name for name in _EXPECTED_HOOK_SCRIPTS
+        if not (scripts_dir / name).is_file()
+    ]
+    if missing:
+        return False, f"missing hook script(s): {', '.join(missing)}"
+    return True, "all five scaffolded hook scripts present"
+
+
+def check_scaffold_settings_registration(project_root: Path) -> CheckResult:
+    """`.claude/settings.json` parses as JSON and has at least one
+    jig-managed hook entry (`metadata.managed_by_jig: true`)."""
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.is_file():
+        return False, f"settings.json missing at {settings_path}"
+    try:
+        data = json.loads(settings_path.read_text())
+    except json.JSONDecodeError as exc:
+        return False, f"settings.json is not valid JSON: {exc}"
+    hooks = data.get("hooks") or {}
+    jig_entries = [
+        entry
+        for entries in hooks.values()
+        for entry in (entries or [])
+        if bool((entry.get("metadata") or {}).get("managed_by_jig"))
+    ]
+    if not jig_entries:
+        return False, (
+            "settings.json has no jig-managed hook entries "
+            "(metadata.managed_by_jig marker missing on every entry)"
+        )
+    return True, (
+        f"settings.json registers {len(jig_entries)} jig-managed hook "
+        "entry/entries"
+    )
+
+
+_SCAFFOLD_CHECKS: list[tuple[str, Check]] = [
+    ("skills", check_scaffold_skills_present),
+    ("agents", check_scaffold_agents_present),
+    ("hooks", check_scaffold_hook_scripts_present),
+    ("settings", check_scaffold_settings_registration),
+]
+
+
+def run_all_scaffold_checks(project_root: Path) -> list[CheckResult]:
+    """Run every scaffold-mode check; return list of (passed, message)."""
+    return [check(project_root) for _, check in _SCAFFOLD_CHECKS]
+
+
+def _looks_unscaffolded(project_root: Path) -> bool:
+    """`.claude/` directory entirely absent → the project was never
+    scaffolded with `--with-machinery` (default-on as of slice 016-03).
+    Mirrors `_looks_uninstalled` semantics for plugin mode."""
+    return not (project_root / ".claude").exists()
+
+
+def run_headless_scaffold(project_root: Path, out=None) -> int:
+    """Run all scaffold-mode static checks; write one line per check +
+    summary. Mirrors `run_headless`'s exit-code convention: 0 (all
+    passed), 1 (at least one failed), 2 (project not scaffolded at all
+    — actionable error)."""
+    if out is None:
+        out = sys.stdout
+    if _looks_unscaffolded(project_root):
+        out.write(
+            f"FAIL — project not scaffolded at {project_root} "
+            "(run `scaffold-init` to install jig into the project)\n"
+        )
+        return 2
+
+    results = run_all_scaffold_checks(project_root)
+    failed = 0
+    for (name, _), (passed, msg) in zip(_SCAFFOLD_CHECKS, results):
+        marker = "PASS" if passed else "FAIL"
+        out.write(f"{marker} {name}: {msg}\n")
+        if not passed:
+            failed += 1
+
+    total = len(results)
+    out.write(f"summary: {total - failed}/{total} passed\n")
+    return 0 if failed == 0 else 1
+
+
 def run_headless(plugin_root: Path, out=None) -> int:
     """Run all static checks; write one line per check + summary."""
     if out is None:
@@ -193,12 +335,26 @@ def probe_prompt(agent_type: str, temp_path: str) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="verify_install.py",
-        description="verify that jig is installed as a local Claude Code plugin",
+        description="verify that jig is installed (plugin or scaffold mode)",
     )
     p.add_argument(
         "--plugin-root",
         default=str(Path(__file__).resolve().parent.parent),
         help="path to jig's plugin root (defaults to the script's repo root)",
+    )
+    p.add_argument(
+        "--project-root",
+        default=None,
+        help="path to a scaffolded project root (used with --mode scaffold; "
+             "defaults to the current working directory in scaffold mode)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=("plugin", "scaffold"),
+        default="plugin",
+        help="install shape to verify: `plugin` checks the installed plugin "
+             "footprint (today's default); `scaffold` checks the project's "
+             "`.claude/` tree produced by scaffold-init (slice 016-03)",
     )
 
     sub = p.add_subparsers(dest="command")
@@ -233,6 +389,15 @@ def main(argv: list) -> int:
     if ns.command == "probe":
         sys.stdout.write(probe_prompt(ns.agent_type, ns.temp_path))
         return 0
+
+    if ns.mode == "scaffold":
+        # In scaffold mode, default the project root to the current working
+        # directory when the user didn't pass --project-root. The plugin-root
+        # default doesn't apply here — it's a separate concept.
+        project_root = Path(
+            ns.project_root if ns.project_root else Path.cwd()
+        )
+        return run_headless_scaffold(project_root)
 
     return run_headless(Path(ns.plugin_root))
 

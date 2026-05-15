@@ -622,7 +622,7 @@ observes at first use. Same bridge-of-trust pattern as slice 016-01
 
 ## Slice 016-03 — dogfood-and-dual-mode-docs
 
-**STATUS: DRAFT**
+**STATUS: RECONCILED**
 
 **Goal:** Flip `--with-machinery` to default-on (i.e. scaffold-mode
 becomes jig's default install shape), rewrite README's Installation
@@ -707,19 +707,146 @@ docs), scaffold.py (default flag change), and verify_install.py
 
 **Definition of Done:**
 
-- [ ] 016-02 DONE.
-- [ ] `scaffold.py` default flipped; `--plugin-only` opt-out wired.
-- [ ] README Installation section rewritten per AC #2.
-- [ ] CONTRIBUTING.md "Two install shapes" subsection added.
-- [ ] `verify_install.py` gains `--mode` flag with both branches
+- [x] 016-02 DONE.
+- [x] `scaffold.py` default flipped; `--plugin-only` opt-out wired.
+- [x] README Installation section rewritten per AC #2.
+- [x] CONTRIBUTING.md "Two install shapes" subsection added.
+- [x] `verify_install.py` gains `--mode` flag with both branches
   tested.
-- [ ] `test_scaffold_mode.py` regression test for AC #6.
-- [ ] CLAUDE.md skill table updated per AC #7.
-- [ ] End-to-end dogfood recorded in deviation log per AC #5.
-- [ ] Full test suite green.
-- [ ] Implementation review passed.
-- [ ] Deviation log written.
-- [ ] Reconciliation review passed.
+- [x] `test_scaffold_mode.py` regression test for AC #6.
+- [x] CLAUDE.md skill table updated per AC #7.
+- [x] End-to-end dogfood recorded in deviation log per AC #5.
+- [x] Full test suite green.
+- [x] Implementation review passed.
+- [x] Deviation log written.
+- [x] Reconciliation review passed.
+
+### Deviation log (016-03)
+
+**1. `--plugin-only` and `--with-machinery` are argparse mutually-
+exclusive, not standalone flags.** Spec AC #1 says "Add a
+`--plugin-only` flag." The implementer chose to group them under
+`add_mutually_exclusive_group()` because the two flags are
+semantically opposing booleans on the same dimension. `--with-machinery`
+is kept (default-on, redundant by default) for documentation symmetry
+and back-compat with explicit slice 016-01/02 invocations in tests
+and runbooks. Passing both flags exits 2 with the standard argparse
+mutually-exclusive error (covered by
+`test_plugin_only_and_with_machinery_are_exclusive`).
+
+**2. `test_scaffold.py` historical assertions left untouched.** The
+spec briefing said "Decide: update existing `test_scaffold.py` cases
+that broke OR have them pass `--plugin-only`. Record the decision."
+Decision: **neither was needed**. A grep of `test_scaffold.py` showed
+zero references to `.claude/skills/`, `.claude/agents/`,
+`.claude/hooks/scripts/`, `.claude/settings.json`, or `scaffold_mode` —
+the existing tests assert only canonical-docs invariants (CLAUDE.md,
+scaffold.json shape, docs/architecture.md content, etc.) that are
+unaffected by the default flip. Default scaffolds still produce the
+same docs tree; what changed is the addition of `.claude/skills/`
+and friends, which no test_scaffold.py case asserts on. The
+`DefaultOffMachineryTests` and `MergeExistingSettingsTests` in
+`test_scaffold_mode.py` were the only consumers, and those were
+updated to pass `--plugin-only` explicitly (still asserting the
+opt-out preserves the old shape).
+
+**3. `verify_install.py` gained `--project-root` separate from
+`--plugin-root`.** Spec AC #4 said "`verify_install.py` gains a
+`--mode {plugin,scaffold}` flag." The two modes target structurally
+different trees (plugin: `<plugin_root>/.claude-plugin/`,
+`<plugin_root>/skills/`; scaffold: `<project_root>/.claude/skills/`,
+`<project_root>/.claude/agents/`, etc.). Reusing `--plugin-root` for
+both would conflate the two concepts in the CLI surface. Decision:
+add `--project-root` (defaults to `.` in scaffold mode) and keep
+`--plugin-root` defaulting to the script's repo root. Plugin-mode
+invocations are byte-identical to today; scaffold-mode adds a clean
+new path.
+
+**4. Scaffold-mode "not installed" check uses `.claude/` absence,
+not `.claude/skills/` absence.** A scaffolded project may have an
+empty or in-progress `.claude/` while the dev is working through
+slices; flagging that as "not scaffolded" would be overzealous. The
+`_looks_unscaffolded` heuristic only fires when `.claude/` doesn't
+exist at all — mirroring `_looks_uninstalled`'s "neither plugin.json
+nor marketplace.json nor agents/" approach. Covered by
+`test_run_headless_scaffold_returns_two_when_not_scaffolded`.
+
+**5. AC #5 dogfood run (2026-05-15T17:12:14Z).** Ran both paths
+from the same source tree in `/tmp/jig-dogfood-016-03/`:
+
+```
+--- 1. Plugin-build path: scripts/build_release_zip.py ---
+OK: built jig-dogfood.zip (66 entries, version 1.0.0)
+
+--- 2. Plugin-build smoke-test (validates the zip) ---
+PASS marketplace: marketplace.json present and lists 'jig'
+PASS manifest: plugin.json present and well-formed
+PASS agents: all three subagent definitions present
+PASS skills: 11 skill SKILL.md file(s) reachable
+summary: 4/4 passed
+
+--- 3. Scaffold path: scaffold.py (default-on with-machinery) ---
+scaffolded scaffold-target → /private/tmp/jig-dogfood-016-03/scaffold-target
+
+--- 4. Scaffold-mode verify_install: 4 checks ---
+PASS skills: 11 scaffolded skill SKILL.md file(s) present
+PASS agents: all three scaffolded subagent definitions present
+PASS hooks: all five scaffolded hook scripts present
+PASS settings: settings.json registers 5 jig-managed hook entry/entries
+summary: 4/4 passed
+```
+
+Both paths exit 0. The scaffold path produced 11 `jig-` prefixed
+skills (matching slice 016-01's smoke-test count), 3 agents, 5 hook
+scripts, and a settings.json with 5 jig-managed hook entries (one
+matcher per source `hooks/hooks.json` entry). AC #5 confirmed end-
+to-end.
+
+**6. Test counts.** Pre-016-03 baseline: 617 tests, 3 skipped (per
+the merged main). Post-016-03: **631 tests, 3 skipped — green**.
+New tests: 14 — 10 in `scripts/test_verify_install.py` (2 CLI
+`--mode` cases + 8 `ScaffoldModeChecksTests`) and 4 in
+`skills/scaffold-init/test_scaffold_mode.py`
+(`DefaultOnMachineryTests`,
+`PluginOnlyOptOutTests` x2,
+`DogfoodVerifyInstallScaffoldTests`). No regressions.
+
+**7. Reviewer SPECIFIC ISSUES — recorded; non-blocking.**
+- **Partial-state-on-refuse** (`scaffold.py:619`). `UnmanagedHooksError`
+  is raised AFTER the hook-script copy already happened (loop at
+  `scaffold.py:588-595`, `dst_scripts.mkdir` at line 587). A scaffold
+  that refuses on `.claude/settings.json` under default-on leaves
+  `.claude/hooks/scripts/jig-*.sh` behind. **This rough edge predates
+  016-03** — it was the behavior of slice 016-02 too — but the
+  default-on flip in this slice makes it more reachable for new users
+  who happen to have a pre-existing `.claude/settings.json` with
+  non-jig hooks. `--force` is the documented escape. Future tidy-on-
+  refuse or moving the safety check before the copy would close it
+  cleanly; recorded for a follow-up rather than a 016-03 in-scope fix
+  (deviation log §1 of 016-02 explains why the safety check sits where
+  it does).
+- **PASS-line-counting in `DogfoodVerifyInstallScaffoldTests`
+  (test_scaffold_mode.py:762-785).** The test counts PASS lines via
+  prefix match. If a future scaffold-mode check emits a non-prefixed
+  line containing "PASS", the count could drift. Today the output
+  format is `{marker} {name}: {msg}` with `marker == "✓"` for PASS,
+  so the line-start anchor is safe. Minor robustness note; left as-is.
+
+**8. Dual-flag rejection note.** The mutually-exclusive grouping at
+`scaffold.py:769` means passing both `--with-machinery` AND
+`--plugin-only` exits 2 with argparse's standard "not allowed with
+argument" message. Tested at
+`test_scaffold_mode.py:726-735` (`test_plugin_only_and_with_machinery_are_exclusive`)
+— recorded only in test, not in SKILL.md or the wizard prompt. Worth
+a SKILL.md mention if a future doc-surfacing pass exposes
+`--plugin-only` to end users.
+
+**9. AC #5 dogfood — root cleanliness note.** The 2026-05-15T17:12:14Z
+dogfood scaffolded into `/tmp/jig-dogfood-016-03/scaffold-target/`,
+a freshly-created tempdir with no pre-existing `.claude/`,
+`docs/specs/`, or other jig-managed artifacts. `_looks_already_spec_driven`
+did NOT refuse (would only trigger on ≥3 of the four migrate
+triggers, none of which were present). Cleaned post-verification.
 
 ### Close-out (post-DONE)
 

@@ -37,7 +37,7 @@ Plugin `bin/` PATH injection is Bash-tool only, not hook commands. All hook `com
 
 ### Dual-distribution: plugin install AND scaffolded install
 As of [spec 016-scaffold-mode](specs/016-scaffold-mode/spec.md) (slices
-016-01 + 016-02 DONE, 016-03 pending), `scaffold-init` can copy the
+016-01 + 016-02 + 016-03 all DONE; 016-04 deferred), `scaffold-init` copies the
 runtime machinery (`skills/`, `agents/`, `hooks/scripts/`) into the
 user's `.claude/` directory under `jig-` prefixed names
 (`.claude/skills/jig-<name>/`, `.claude/agents/jig-<name>.md`,

@@ -9,6 +9,59 @@ Before you start, read [docs/workflow.md](docs/workflow.md) (the spec
 lifecycle) and skim [docs/architecture.md](docs/architecture.md). Every
 change to jig starts with a spec.
 
+## Two install shapes
+
+jig serves two distinct install shapes from a single source of truth.
+Knowing the difference is load-bearing when you're hacking on jig
+itself, because what you edit propagates differently to each mode.
+
+- **Plugin install** (`/plugin install jig@jig`): the marketplace
+  resolution path. Skills, agents, hooks, and helper `.py` files live
+  under `${CLAUDE_PLUGIN_ROOT}` on disk; the project tree gets only
+  docs and `scaffold.json`. Right for "install-and-forget" users who
+  want central upgrades and an opaque runtime.
+- **Scaffold install** (`/jig:scaffold-init`, default-on as of slice
+  016-03): `scaffold.py` copies `skills/`, `agents/`, and
+  `hooks/scripts/` into the target's `.claude/` (`.claude/skills/jig-*/`,
+  `.claude/agents/jig-*.md`, `.claude/hooks/scripts/jig-*.sh`,
+  `.claude/settings.json`), rewriting `${CLAUDE_PLUGIN_ROOT}/skills/<name>/`
+  → `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/` in SKILL.md
+  bodies at copy time. Right for "scaffold-and-extend" users who want
+  to own and customize the machinery under version control.
+
+**jig's own working tree is the canonical scaffolded install.** The
+repo root has `skills/`, `agents/`, and `hooks/scripts/` directly —
+one level up from where they'd be in `.claude/` on a scaffolded
+downstream project. This is by design; jig dogfoods by being its own
+scaffolded install. The plugin distribution
+(`scripts/build_release_zip.py`) packages the same tree as a zip.
+
+### How changes propagate
+
+- **Source SKILL.md edits** propagate to both modes. Plugin install
+  reads source directly via `${CLAUDE_PLUGIN_ROOT}`; scaffold-mode
+  applies the path rewrite at copy time. No separate build step is
+  needed for either mode.
+- **Hook scripts** (`hooks/scripts/jig-*.sh`) are mode-agnostic:
+  they use `$CLAUDE_PROJECT_DIR` exclusively (audit-confirmed), so the
+  same script body works under both `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/`
+  and `${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/`. Edits land in
+  both without any rewrite.
+- **Helper `.py` files** are mode-agnostic too. The `plugin_root()`
+  helper at the top of each `.py` falls back to
+  `Path(__file__).resolve().parents[N]`, so running a copied
+  scaffolded `tdd.py` self-locates the right tree even with
+  `${CLAUDE_PLUGIN_ROOT}` unset.
+
+### Precedence when both modes coexist
+
+If a user scaffolds jig into a project AND has the plugin installed
+session-wide, **the scaffolded (project-scoped) skills win** by Claude
+Code's existing project-scoped precedence. jig does not introduce a
+new arbiter — this is the documented Claude Code skill-discovery rule.
+The same applies to agents and hooks: the project's `.claude/`
+versions take precedence over the plugin's.
+
 ## Local dev install
 
 The repo ships a marketplace descriptor at

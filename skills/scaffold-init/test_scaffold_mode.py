@@ -35,13 +35,17 @@ def run_scaffold_with_args(target: Path, *args: str) -> subprocess.CompletedProc
 
 
 # --------------------------------------------------------------------------
-# Default-off behavior (AC #1 + AC #8 (g)): scaffolding WITHOUT
-# --with-machinery must leave .claude/skills and .claude/agents alone.
+# Plugin-only opt-out behavior (slice 016-01 AC #8 (g) PRE-016-03; slice
+# 016-03 AC #1 flipped the default ON, so these tests now drive the
+# behavior via --plugin-only explicitly. Same invariants — slice 016-01
+# `--with-machinery` flag is still default-on; the dormant path is now
+# the explicit opt-out.)
 # --------------------------------------------------------------------------
 
 
 class DefaultOffMachineryTests(unittest.TestCase):
-    """AC #1 + AC #8 (g) — without the flag, the new copy logic is dormant."""
+    """Slice 016-01 AC #8 (g) — the dormant copy path now reached via
+    `--plugin-only` (slice 016-03 flipped the default)."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-016-default-")
@@ -53,23 +57,24 @@ class DefaultOffMachineryTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_g_no_skills_or_agents_dir_without_flag(self):
-        """AC #8 (g) — without --with-machinery, .claude/skills and
-        .claude/agents are NOT created. Pure existing-behavior preservation."""
-        r = run_scaffold_with_args(self.target)
+        """AC #8 (g) — with `--plugin-only`, .claude/skills and
+        .claude/agents are NOT created. Pure existing-behavior preservation
+        for users who explicitly opted out of scaffold-mode."""
+        r = run_scaffold_with_args(self.target, "--plugin-only")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertFalse(
             (self.target / ".claude" / "skills").exists(),
-            ".claude/skills must not exist without --with-machinery",
+            ".claude/skills must not exist with --plugin-only",
         )
         self.assertFalse(
             (self.target / ".claude" / "agents").exists(),
-            ".claude/agents must not exist without --with-machinery",
+            ".claude/agents must not exist with --plugin-only",
         )
 
     def test_scaffold_mode_defaults_to_plugin_only(self):
-        """AC #7 — without --with-machinery, scaffold.json.scaffold_mode
+        """AC #7 — with --plugin-only, scaffold.json.scaffold_mode
         is 'plugin-only'."""
-        r = run_scaffold_with_args(self.target)
+        r = run_scaffold_with_args(self.target, "--plugin-only")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         manifest = json.loads((self.target / "scaffold.json").read_text())
         self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
@@ -623,17 +628,160 @@ class MergeExistingSettingsTests(unittest.TestCase):
         )
 
     def test_default_off_does_not_write_settings_or_hooks(self):
-        """AC #1 — without --with-machinery, no hook scripts, no
-        settings.json. Pure existing-behavior preservation."""
-        r = run_scaffold_with_args(self.target)
+        """AC #1 — with --plugin-only, no hook scripts, no settings.json.
+        Pure existing-behavior preservation for users who opt out.
+        (Slice 016-03 flipped the default, so this case is now reached
+        via the explicit opt-out flag rather than absent-by-default.)"""
+        r = run_scaffold_with_args(self.target, "--plugin-only")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertFalse(
             (self.target / ".claude" / "hooks" / "scripts").exists(),
-            ".claude/hooks/scripts must not exist without --with-machinery",
+            ".claude/hooks/scripts must not exist with --plugin-only",
         )
         self.assertFalse(
             (self.target / ".claude" / "settings.json").exists(),
-            ".claude/settings.json must not exist without --with-machinery",
+            ".claude/settings.json must not exist with --plugin-only",
+        )
+
+
+# --------------------------------------------------------------------------
+# Slice 016-03 — default flip + --plugin-only opt-out + dogfood regression
+# --------------------------------------------------------------------------
+
+
+class DefaultOnMachineryTests(unittest.TestCase):
+    """Slice 016-03 AC #1 — `--with-machinery` is now default-on. Running
+    scaffold without flags produces a fully-scaffolded `.claude/` tree."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-default-on-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_default_includes_machinery(self):
+        """AC #1 — no flag → machinery copied. scaffold_mode is 'in-repo'."""
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertTrue(
+            (self.target / ".claude" / "skills" / "jig-scaffold-init"
+             / "SKILL.md").is_file(),
+            "default scaffold should include skills/",
+        )
+        self.assertTrue(
+            (self.target / ".claude" / "agents" / "jig-reviewer.md").is_file(),
+            "default scaffold should include agents/",
+        )
+        self.assertTrue(
+            (self.target / ".claude" / "hooks" / "scripts").is_dir(),
+            "default scaffold should include hooks/scripts/",
+        )
+        self.assertTrue(
+            (self.target / ".claude" / "settings.json").is_file(),
+            "default scaffold should write settings.json",
+        )
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertEqual(manifest.get("scaffold_mode"), "in-repo")
+
+
+class PluginOnlyOptOutTests(unittest.TestCase):
+    """Slice 016-03 AC #1 — `--plugin-only` opts out, preserving the old
+    docs-only behavior (scaffold_mode: plugin-only, no .claude/skills/
+    or .claude/agents/)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-plugin-only-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_plugin_only_skips_machinery(self):
+        r = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse(
+            (self.target / ".claude" / "skills").exists(),
+            "--plugin-only must not create .claude/skills/",
+        )
+        self.assertFalse(
+            (self.target / ".claude" / "agents").exists(),
+            "--plugin-only must not create .claude/agents/",
+        )
+        self.assertFalse(
+            (self.target / ".claude" / "hooks" / "scripts").exists(),
+            "--plugin-only must not create .claude/hooks/scripts/",
+        )
+        self.assertFalse(
+            (self.target / ".claude" / "settings.json").exists(),
+            "--plugin-only must not write .claude/settings.json",
+        )
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
+
+    def test_plugin_only_and_with_machinery_are_exclusive(self):
+        """Passing both --plugin-only and --with-machinery is a usage
+        error (argparse mutually-exclusive group, exit 2)."""
+        r = run_scaffold_with_args(
+            self.target, "--plugin-only", "--with-machinery",
+        )
+        self.assertNotEqual(
+            r.returncode, 0,
+            "passing both flags must be rejected by argparse",
+        )
+
+
+class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
+    """Slice 016-03 AC #6 — regression-pin the dogfood shape by scaffolding
+    into a tmpdir and asserting all four `verify_install.py --mode scaffold`
+    checks pass on the resulting tree.
+
+    The automation backstop for AC #5. If this test fails, the end-to-end
+    dogfood is broken too — the structural rewrite has regressed."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-dogfood-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        # Default-on scaffold (no flags); 016-03 made this fully wire up
+        # the .claude/ tree.
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(
+            r.returncode, 0,
+            f"scaffold failed: stderr={r.stderr}\nstdout={r.stdout}",
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_verify_install_scaffold_mode_all_checks_pass(self):
+        """AC #6 — `verify_install.py --mode scaffold --project-root <target>`
+        runs four PASS checks against the freshly-scaffolded tree."""
+        verify = REPO_ROOT / "scripts" / "verify_install.py"
+        r = subprocess.run(
+            [
+                sys.executable, str(verify),
+                "--mode", "scaffold",
+                "--project-root", str(self.target),
+            ],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"verify_install --mode scaffold failed: rc={r.returncode}\n"
+            f"stdout={r.stdout}\nstderr={r.stderr}",
+        )
+        # Four PASS lines + 1 summary line.
+        lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+        pass_lines = [ln for ln in lines if ln.startswith("PASS")]
+        self.assertEqual(
+            len(pass_lines), 4,
+            f"expected 4 PASS lines; got {len(pass_lines)}: {r.stdout!r}",
         )
 
 
