@@ -173,7 +173,7 @@ so they self-locate. The only real refactor is `SKILL.md` path strings
 
 ## Slice 016-01 — copy-skills-and-agents
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** `scaffold-init` learns to copy `skills/*` and `agents/*` from
 the plugin source tree into `.claude/skills/` and `.claude/agents/` in
@@ -360,8 +360,8 @@ regressions.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache updated to mark 016-01 DONE.
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache updated to mark 016-01 DONE.
 - [ ] Manual smoke-test: run `scaffold.py --with-machinery <tmpdir>`,
   verify `ls <tmpdir>/.claude/skills/` lists all jig skills, and
   verify one SKILL.md no longer contains
