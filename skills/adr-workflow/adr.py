@@ -29,6 +29,9 @@ import sys
 from datetime import date
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.parsing import set_frontmatter_field as _set_frontmatter_field
+
 
 class AdrError(RuntimeError):
     """User-facing error; CLI exits with status 2."""
@@ -204,6 +207,10 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
         lambda _m: f"Accepted ({_today()})", section_body, count=1
     )
     new_text = text[:status_match.end()] + new_body + text[section_end:]
+    # Slice 014-01: stamp `last_verified: <today>` in the ADR frontmatter
+    # at the single point where an ADR becomes decision-of-record. Adds
+    # the frontmatter block if absent; updates the field if present.
+    new_text = _set_frontmatter_field(new_text, "last_verified", _today())
     _atomic_write(adr_path, new_text)
     return adr_path
 

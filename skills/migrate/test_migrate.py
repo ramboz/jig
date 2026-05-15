@@ -980,5 +980,61 @@ class RenameSkillSurfaceTests(unittest.TestCase):
         self.assertIn("apply adr-0004", fm)
 
 
+class BareIdPaddingTests(unittest.TestCase):
+    """Slice 014-01: rename-decisions also pads bare `adr-NNN` ID tokens
+    in frontmatter dependencies lists when the corresponding ADR file
+    is renamed."""
+
+    def test_flow_list_bare_id_padded(self):
+        tmpdir = _make_tree({
+            "docs/adrs/001-foo.md": "# ADR-0001 Foo\n",
+            "docs/specs/100-spec/spec.md":
+                "## Slice 100-01\n\n"
+                "---\nstatus: DRAFT\ndependencies: [adr-001]\n---\n\nBody.\n",
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            spec = (tmpdir / "docs/specs/100-spec/spec.md").read_text()
+            self.assertIn("dependencies: [adr-0001]", spec)
+            self.assertNotIn("adr-001]", spec)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_block_list_bare_id_padded(self):
+        tmpdir = _make_tree({
+            "docs/adrs/002-bar.md": "# ADR-0002 Bar\n",
+            "docs/specs/200-spec/spec.md":
+                "## Slice 200-01\n\n"
+                "---\nstatus: DRAFT\ndependencies:\n  - adr-002\n---\n\nBody.\n",
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            spec = (tmpdir / "docs/specs/200-spec/spec.md").read_text()
+            self.assertIn("- adr-0002", spec)
+            self.assertNotIn("- adr-002\n", spec)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_already_canonical_id_unchanged(self):
+        """`adr-0001` (already canonical) must not be touched when its
+        file is not being renamed."""
+        tmpdir = _make_tree({
+            "docs/decisions/adr-0001-foo.md": "# ADR-0001 Foo\n",
+            "docs/specs/300-spec/spec.md":
+                "## Slice 300-01\n\n"
+                "---\nstatus: DRAFT\ndependencies: [adr-0001]\n---\n\nBody.\n",
+        })
+        try:
+            # Already canonical: should report "nothing to do"
+            r = run_migrate("rename-decisions", str(tmpdir))
+            self.assertEqual(r.returncode, 0)
+            spec = (tmpdir / "docs/specs/300-spec/spec.md").read_text()
+            self.assertIn("dependencies: [adr-0001]", spec)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

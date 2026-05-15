@@ -274,6 +274,32 @@ class AcceptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("adr-0001-proposed-thing.md", result.stdout)
 
+    def test_accept_writes_last_verified_frontmatter(self):
+        """Slice 014-01: accept stamps `last_verified: <today>` in frontmatter."""
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = (self.adrs_dir / "adr-0001-proposed-thing.md").read_text()
+        self.assertTrue(content.startswith("---\n"),
+                        "frontmatter block must lead the file after accept")
+        self.assertIn(f"last_verified: {TODAY}", content)
+        # Title still intact below the block
+        self.assertIn("# ADR-0001:", content)
+
+    def test_accept_updates_existing_last_verified(self):
+        """Re-accepting an ADR that already has stale last_verified updates it."""
+        # Seed an existing frontmatter with old last_verified
+        adr_path = self.adrs_dir / "adr-0001-proposed-thing.md"
+        original = adr_path.read_text()
+        adr_path.write_text(
+            "---\nlast_verified: 2020-01-01\n---\n" + original
+        )
+        # Accept normally
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = adr_path.read_text()
+        self.assertIn(f"last_verified: {TODAY}", content)
+        self.assertNotIn("last_verified: 2020-01-01", content)
+
 
 # ---------- IndexTests (AC #3) ----------
 

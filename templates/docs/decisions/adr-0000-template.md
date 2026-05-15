@@ -1,3 +1,8 @@
+---
+dependencies: []
+last_verified:
+---
+
 # ADR-{{NUMBER}}: {{TITLE}}
 
 ## Status

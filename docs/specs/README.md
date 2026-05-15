@@ -54,3 +54,6 @@
 | [014-arch-review](014-arch-review/spec.md) | 014-02 — arch-review-gather-helper | DRAFT |  |
 | [014-arch-review](014-arch-review/spec.md) | 014-03 — domain-specific-references | DRAFT |  |
 | [014-arch-review](014-arch-review/spec.md) | 014-04 — security-lens-integration | DRAFT |  |
+| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-01 — frontmatter-parsing-and-templates | **DONE** | +25 tests (parser + workflow + adr + migrate); slice template at `templates/docs/specs/slice-template.md`; lazy migration; mysticat-architecture comparison adoption #1 |
+| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-02 — deferred-as-lifecycle-state | **DONE** | +6 tests; `DEFERRED` added to `VALID_STATUSES`; status-board renders separate Deferred section with Resolution trigger; first FROM-state-restricted transition in jig |
+| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-03 — last-verified-staleness-check | **DONE** | +6 tests; `workflow.py stale [--days N]`; conjunctive criterion (age AND dep-changed); git-log preferred, mtime fallback |

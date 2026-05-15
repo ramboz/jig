@@ -715,6 +715,13 @@ def _apply_substitutions(text: str, old_dir: str, new_dir: str,
         references would otherwise produce `adr-adr-0001-foo.md` on
         the canonical occurrence — silent content corruption.
 
+    Additionally (slice 014-01): bare ADR ID tokens in frontmatter
+    `dependencies:` lists — e.g. `adr-001` or `adr-1` — are padded to
+    `adr-NNNN` shape when the corresponding ADR file was renamed.
+    A bare-ID token is only padded when not already followed by
+    another digit or a dash-letter (so `adr-001-foo.md` is left to
+    the filename branch).
+
     Returns `(new_text, count)` where `count` is the number of actual
     substitutions performed. The count is cosmetic — used only for the
     summary line — and is NOT load-bearing for correctness."""
@@ -729,6 +736,31 @@ def _apply_substitutions(text: str, old_dir: str, new_dir: str,
         pattern = re.compile(r"(?<!adr-)" + re.escape(old_name))
         out, n = pattern.subn(new_name, out)
         count += n
+
+    # Slice 014-01: bare ADR ID padding (e.g. `adr-001` → `adr-0001`)
+    # for frontmatter `dependencies:` list entries. Derive an ID-level
+    # map by extracting the numeric portion from both old and new
+    # filenames. Tolerates `001-foo.md` (unprefixed) and `adr-001-foo.md`
+    # (prefixed) on the old side; the new side is always `adr-NNNN-`
+    # post-rename. References in deps are written with the `adr-` prefix
+    # by convention, so the canonical mapping is `adr-<old>` → `adr-<new>`.
+    id_map = {}
+    _num_re = re.compile(r"^(?:adr-)?(\d{1,4})-")
+    for old_name, new_name in name_map.items():
+        om = _num_re.match(old_name)
+        nm = _num_re.match(new_name)
+        if not (om and nm) or om.group(1) == nm.group(1):
+            continue
+        id_map[f"adr-{om.group(1)}"] = f"adr-{nm.group(1)}"
+    for old_id, new_id in id_map.items():
+        # Match the bare ID only when NOT followed by another digit
+        # (avoids partial matches inside longer IDs) and NOT followed by
+        # `-` (avoids `adr-001-foo.md` which is handled by the filename
+        # branch above).
+        pattern = re.compile(re.escape(old_id) + r"(?![\d\-])")
+        out, n = pattern.subn(new_id, out)
+        count += n
+
     return out, count
 
 

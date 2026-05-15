@@ -434,5 +434,370 @@ class AutoTickReviewPassedTests(unittest.TestCase):
     # whole test_workflow.py module.
 
 
+class DeferredLifecycleTests(unittest.TestCase):
+    """Slice 014-02: `DEFERRED` is a recognized state with bounded
+    outbound transitions and a separate status-board section."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-defer-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_spec(self, rel_dir: str, label: str, status: str,
+                    trigger: str = "") -> Path:
+        """Append a slice to the spec under rel_dir, creating the spec
+        file with a preamble on first call."""
+        spec_dir = self.target / "docs/specs" / rel_dir
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        slice_block = (
+            f"\n## Slice {label}\n\n**STATUS: {status}**\n\n**Goal:** x.\n"
+        )
+        if trigger:
+            slice_block += f"\n**Resolution trigger:** {trigger}\n"
+        if spec_md.is_file():
+            spec_md.write_text(spec_md.read_text() + slice_block)
+        else:
+            spec_md.write_text("# Spec\n" + slice_block)
+        return spec_md
+
+    def test_transition_any_to_deferred(self):
+        """From any active state, → DEFERRED succeeds."""
+        spec_md = self._write_spec("500-alpha", "500-01 alpha", "DRAFT")
+        result = run_workflow("transition", str(spec_md), "500-01", "DEFERRED")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("**STATUS: DEFERRED**", spec_md.read_text())
+
+    def test_transition_deferred_to_draft(self):
+        """DEFERRED → DRAFT (re-open) is allowed."""
+        spec_md = self._write_spec("501-alpha", "501-01 alpha", "DEFERRED")
+        result = run_workflow("transition", str(spec_md), "501-01", "DRAFT")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("**STATUS: DRAFT**", spec_md.read_text())
+
+    def test_transition_deferred_to_done_refused(self):
+        """DEFERRED → DONE (or any non-DRAFT) must be refused."""
+        spec_md = self._write_spec("502-alpha", "502-01 alpha", "DEFERRED")
+        result = run_workflow("transition", str(spec_md), "502-01", "DONE")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DEFERRED", result.stderr)
+
+    def test_status_board_renders_deferred_section(self):
+        """Slices in DEFERRED appear under `## Deferred slices` with
+        their `**Resolution trigger:**` line as the per-row context."""
+        self._write_spec("600-alpha", "600-01 active", "IN_PROGRESS")
+        self._write_spec("600-alpha", "600-02 parked", "DEFERRED",
+                         trigger="When the third caller appears.")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        # Active table has 600-01 only (600-02 is in the Deferred section)
+        active = board.split("## Deferred slices")[0]
+        self.assertIn("600-01 active", active)
+        # Deferred section is present with the trigger
+        self.assertIn("## Deferred slices", board)
+        self.assertIn("600-02 parked", board)
+        self.assertIn("When the third caller appears.", board)
+
+    def test_status_board_omits_deferred_section_when_empty(self):
+        """No `## Deferred slices` heading when nothing is deferred."""
+        self._write_spec("700-alpha", "700-01 active", "IN_PROGRESS")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0)
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertNotIn("## Deferred slices", board)
+
+    def test_status_board_idempotent_with_deferred(self):
+        """Re-running on a board that already has a Deferred section
+        produces no diff."""
+        self._write_spec("800-alpha", "800-01 a", "DEFERRED",
+                         trigger="When X happens.")
+        run_workflow("status-board", str(self.target))
+        first = (self.target / "docs/specs/README.md").read_text()
+        run_workflow("status-board", str(self.target))
+        second = (self.target / "docs/specs/README.md").read_text()
+        self.assertEqual(first, second)
+
+
+class StaleCheckTests(unittest.TestCase):
+    """Slice 014-03: `workflow.py stale` lists items whose last_verified
+    is more than N days old AND whose dep file was modified since."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-stale-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _touch(self, path: Path, iso_date: str) -> None:
+        """Set both mtime and atime to the given YYYY-MM-DD (00:00 UTC)."""
+        import time
+        dt = __import__("datetime").datetime.fromisoformat(iso_date)
+        ts = time.mktime(dt.timetuple())
+        os.utime(path, (ts, ts))
+
+    def _write_dep_slice(self, dep_spec: str, dep_label: str,
+                         touch_date: str) -> Path:
+        """Create a 'dependency' spec file and touch it to the given date."""
+        dep_dir = self.target / "docs/specs" / dep_spec
+        dep_dir.mkdir(parents=True, exist_ok=True)
+        dep_md = dep_dir / "spec.md"
+        dep_md.write_text(
+            f"# Dep\n\n## Slice {dep_label}\n\n**STATUS: DONE**\n\nBody.\n"
+        )
+        self._touch(dep_md, touch_date)
+        return dep_md
+
+    def _write_consumer_slice(self, spec_dir: str, label: str,
+                              last_verified: str, deps: list) -> Path:
+        """Write the consumer slice with frontmatter."""
+        cons_dir = self.target / "docs/specs" / spec_dir
+        cons_dir.mkdir(parents=True, exist_ok=True)
+        cons_md = cons_dir / "spec.md"
+        cons_md.write_text(
+            f"# Spec\n\n## Slice {label}\n\n"
+            f"---\nstatus: RECONCILED\n"
+            f"dependencies: [{', '.join(deps)}]\n"
+            f"last_verified: {last_verified}\n---\n\nBody.\n"
+        )
+        return cons_md
+
+    def test_no_stale_items_when_recent(self):
+        """Recently verified slice with old deps → not stale."""
+        self._write_dep_slice("900-dep", "900-01 old-dep", "2020-01-01")
+        today = __import__("datetime").date.today().isoformat()
+        self._write_consumer_slice("901-cons", "901-01 c", today, ["900-01"])
+        result = run_workflow("stale", "--project-dir", str(self.target),
+                              "--days", "30")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("no stale items", result.stdout)
+
+    def test_stale_item_listed_when_dep_changed_since(self):
+        """Old verify date + dep changed since → stale."""
+        # Dep touched yesterday (recent change)
+        import datetime as _dt
+        yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+        self._write_dep_slice("910-dep", "910-01 fresh-dep", yesterday)
+        # Consumer verified 200 days ago
+        old = (_dt.date.today() - _dt.timedelta(days=200)).isoformat()
+        self._write_consumer_slice("911-cons", "911-01 c", old, ["910-01"])
+        result = run_workflow("stale", "--project-dir", str(self.target),
+                              "--days", "90")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("stale items", result.stdout)
+        self.assertIn("911-01", result.stdout)
+        self.assertIn(old, result.stdout)
+
+    def test_old_verify_without_dep_change_not_stale(self):
+        """Conjunctive criterion: old verify alone is not enough."""
+        import datetime as _dt
+        ancient = "2018-01-01"
+        # Dep also old — no change since verify
+        self._write_dep_slice("920-dep", "920-01 ancient", ancient)
+        old = (_dt.date.today() - _dt.timedelta(days=300)).isoformat()
+        self._write_consumer_slice("921-cons", "921-01 c", old, ["920-01"])
+        result = run_workflow("stale", "--project-dir", str(self.target),
+                              "--days", "90")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("no stale items", result.stdout)
+
+    def test_legacy_slice_without_frontmatter_skipped(self):
+        """Slices with no frontmatter (no last_verified) are skipped."""
+        # Write a legacy slice in the same project
+        legacy_dir = self.target / "docs/specs/930-legacy"
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "spec.md").write_text(
+            "# Spec\n\n## Slice 930-01 legacy\n\n**STATUS: DONE**\n\nBody.\n"
+        )
+        result = run_workflow("stale", "--project-dir", str(self.target),
+                              "--days", "90")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("no stale items", result.stdout)
+
+    def test_missing_dependencies_skipped(self):
+        """Slice with last_verified but empty dependencies → skipped."""
+        old = "2020-01-01"
+        cons_dir = self.target / "docs/specs/940-empty"
+        cons_dir.mkdir(parents=True)
+        (cons_dir / "spec.md").write_text(
+            f"# Spec\n\n## Slice 940-01 c\n\n"
+            f"---\nstatus: DONE\ndependencies: []\nlast_verified: {old}\n---\n\n"
+            f"Body.\n"
+        )
+        result = run_workflow("stale", "--project-dir", str(self.target),
+                              "--days", "90")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("no stale items", result.stdout)
+
+    def test_days_flag_overrides_default(self):
+        """`--days 1` makes a 5-day-old verify stale; default 90 wouldn't."""
+        import datetime as _dt
+        yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+        self._write_dep_slice("950-dep", "950-01 fresh", yesterday)
+        five_days_ago = (_dt.date.today() - _dt.timedelta(days=5)).isoformat()
+        self._write_consumer_slice("951-cons", "951-01 c", five_days_ago,
+                                   ["950-01"])
+        # Default 90 → not stale yet
+        r1 = run_workflow("stale", "--project-dir", str(self.target))
+        self.assertEqual(r1.returncode, 0)
+        self.assertIn("no stale items", r1.stdout)
+        # --days 1 → stale
+        r2 = run_workflow("stale", "--project-dir", str(self.target),
+                          "--days", "1")
+        self.assertEqual(r2.returncode, 0)
+        self.assertIn("951-01", r2.stdout)
+
+
+class SliceTemplateTests(unittest.TestCase):
+    """Slice 014-01: a new slice template exists with the right frontmatter."""
+
+    def test_slice_template_present(self):
+        template = REPO_ROOT / "templates" / "docs" / "specs" / "slice-template.md"
+        self.assertTrue(template.is_file(),
+                        "templates/docs/specs/slice-template.md must exist")
+        text = template.read_text()
+        self.assertIn("status: DRAFT", text)
+        self.assertIn("dependencies: []", text)
+        self.assertIn("last_verified:", text)
+        # Close-out section per slice 009 convention
+        self.assertIn("### Close-out (post-DONE)", text)
+
+
+class FrontmatterTransitionTests(unittest.TestCase):
+    """Slice 014-01: transitions handle slice-level frontmatter."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-fm-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_fm_slice(self, name: str, status: str, deps: list = None,
+                        body: str = "") -> None:
+        deps_line = (f"\ndependencies: [{', '.join(deps)}]"
+                     if deps else "\ndependencies: []")
+        self.spec.write_text(
+            f"# Spec X\n\n## Slice {name}\n\n"
+            f"---\nstatus: {status}{deps_line}\nlast_verified:\n---\n\n"
+            f"{body}"
+        )
+
+    # AC #1: slice frontmatter is parsed and used as the source of truth.
+    def test_status_board_reads_frontmatter_status(self):
+        # Set up a full scaffold so the status-board has somewhere to write.
+        target = Path(self.tmpdir) / "demo-project"
+        target.mkdir()
+        scaffold(target)
+        spec_dir = target / "docs/specs/200-frontmatter-spec"
+        spec_dir.mkdir(parents=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "# Spec\n\n## Slice 200-01 — alpha\n\n"
+            "---\nstatus: IN_PROGRESS\ndependencies: []\n---\n\n"
+            "Body.\n"
+        )
+        result = run_workflow("status-board", str(target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (target / "docs/specs/README.md").read_text()
+        # The board should show IN_PROGRESS for slice 200-01, sourced
+        # from frontmatter (no prose `**STATUS:**` marker present).
+        self.assertRegex(board, r"200-01[^|]*\|[^|]*IN_PROGRESS")
+
+    # AC #2: legacy prose marker fallback still works (existing tests
+    # cover that exhaustively).
+
+    # AC #3: transition writes to frontmatter when present.
+    def test_transition_updates_frontmatter_status(self):
+        self._write_fm_slice("300-01 alpha", "DRAFT")
+        result = run_workflow("transition", str(self.spec), "300-01",
+                              "IN_PROGRESS")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = self.spec.read_text()
+        self.assertIn("status: IN_PROGRESS", text)
+        # No spurious prose marker leak — none was present originally.
+        self.assertNotIn("**STATUS:", text)
+
+    # AC #3: `last_verified` is stamped on RECONCILED transitions.
+    def test_reconciled_transition_stamps_last_verified(self):
+        self._write_fm_slice("301-01 alpha", "REVIEWED")
+        result = run_workflow("transition", str(self.spec), "301-01",
+                              "RECONCILED")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = self.spec.read_text()
+        self.assertIn("status: RECONCILED", text)
+        # Today's date should appear in last_verified
+        today = __import__("datetime").date.today().isoformat()
+        self.assertIn(f"last_verified: {today}", text)
+
+    # AC #3: non-RECONCILED transitions don't stamp.
+    def test_non_reconciled_transition_does_not_stamp(self):
+        self._write_fm_slice("302-01 alpha", "DRAFT")
+        result = run_workflow("transition", str(self.spec), "302-01",
+                              "IN_PROGRESS")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = self.spec.read_text()
+        # last_verified field stays empty
+        self.assertIn("last_verified:\n", text)
+
+    # AC #4: DONE transition refuses on unsatisfied slice dependency.
+    def test_done_refuses_when_dependency_not_done(self):
+        target = Path(self.tmpdir) / "demo-project"
+        target.mkdir()
+        scaffold(target)
+        # Spec A with a DRAFT slice; spec B with a slice depending on A.
+        spec_a = target / "docs/specs/400-alpha"
+        spec_a.mkdir(parents=True)
+        (spec_a / "spec.md").write_text(
+            "# Spec A\n\n## Slice 400-01 — first\n\n"
+            "---\nstatus: DRAFT\ndependencies: []\n---\n\nBody.\n"
+        )
+        spec_b = target / "docs/specs/401-beta"
+        spec_b.mkdir(parents=True)
+        spec_b_path = spec_b / "spec.md"
+        spec_b_path.write_text(
+            "# Spec B\n\n## Slice 401-01 — second\n\n"
+            "---\nstatus: REVIEWED\ndependencies: [400-01]\n---\n\nBody.\n"
+        )
+        result = run_workflow("transition", str(spec_b_path), "401-01",
+                              "DONE")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("400-01", result.stderr)
+        self.assertIn("DRAFT", result.stderr)
+
+    # AC #4: DONE succeeds when dependency is DONE.
+    def test_done_succeeds_when_dependency_done(self):
+        target = Path(self.tmpdir) / "demo-project"
+        target.mkdir()
+        scaffold(target)
+        spec_a = target / "docs/specs/410-alpha"
+        spec_a.mkdir(parents=True)
+        (spec_a / "spec.md").write_text(
+            "# Spec A\n\n## Slice 410-01 — first\n\n"
+            "---\nstatus: DONE\ndependencies: []\n---\n\nBody.\n"
+        )
+        spec_b = target / "docs/specs/411-beta"
+        spec_b.mkdir(parents=True)
+        spec_b_path = spec_b / "spec.md"
+        spec_b_path.write_text(
+            "# Spec B\n\n## Slice 411-01 — second\n\n"
+            "---\nstatus: RECONCILED\ndependencies: [410-01]\n---\n\nBody.\n"
+        )
+        result = run_workflow("transition", str(spec_b_path), "411-01",
+                              "DONE")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("status: DONE", spec_b_path.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()
