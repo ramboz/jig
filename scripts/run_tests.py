@@ -21,8 +21,14 @@ loader = unittest.TestLoader()
 suite = unittest.TestSuite()
 
 for skill_dir in sorted((ROOT / "skills").iterdir()):
-    if skill_dir.is_dir() and not skill_dir.name.startswith("_"):
-        suite.addTests(loader.discover(start_dir=str(skill_dir), pattern="test_*.py"))
+    if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
+        continue
+    # Python 3.11's unittest.discover raises ImportError on a dir with no
+    # Python files (Python 3.12 silently returns an empty suite). Skip skill
+    # dirs that have no test_*.py to keep both versions happy.
+    if not any(skill_dir.glob("test_*.py")):
+        continue
+    suite.addTests(loader.discover(start_dir=str(skill_dir), pattern="test_*.py"))
 
 suite.addTests(loader.discover(start_dir=str(ROOT / "scripts"), pattern="test_*.py"))
 
