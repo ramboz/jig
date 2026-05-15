@@ -62,7 +62,7 @@
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-03 — dogfood-and-dual-mode-docs | **DONE** | Flips scaffold-mode to default; rewrites README install paths |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-04 — update-skill (DEFERRED) | DRAFT | Deferred; promotion gated on real friction or security-shaped fix |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-01 — vision-template-and-architecture-slots | **DONE** |  |
-| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-02 — vision-elicitation-skill-core | READY_FOR_REVIEW |  |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-02 — vision-elicitation-skill-core | **DONE** |  |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-03 — re-runnable-with-edit-detection | READY_FOR_REVIEW |  |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-04 — seed-ADR-pass | DEFERRED |  |
 
