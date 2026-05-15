@@ -14,6 +14,19 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure 'main' is a local branch
+        # slice-land's land.py runs `git rev-parse --verify main` even in
+        # dry-run mode (see ExecuteDryRunTests). On PRs, actions/checkout
+        # leaves HEAD on the PR's branch and `main` is only available as
+        # `origin/main` — the verify fails. Create a local `main` ref
+        # pointing at origin/main so the test's preflight passes.
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/main; then
+            git branch main origin/main
+          fi
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
