@@ -88,3 +88,23 @@
 - Does `AGENTS.md` repeat the CLAUDE.md hot cache, or does CLAUDE.md `@import` AGENTS.md (mysticat's pattern)? The latter is cleaner but assumes `@import` semantics that non-Claude tools may not respect.
 - Should `scaffold-init` emit both unconditionally, or behind a `--multi-agent` flag?
 **Comparison source:** See conversation 2026-05-15 (mysticat-architecture vs jig comparison) for the pattern's full context. This was item #4 in the "what to adopt from mysticat" set; items #1–#3 became spec 014.
+
+### Decision: `workflow.py new --from-branch` to migrate already-drafted feature branches into a reservation
+**Deferred:** Today `workflow.py new <slug>` only works as a clean-room reservation from `main`. If a user already drafted slice content on a feature branch (the common case before adopting `new`), there's no path to retroactively reserve the number on origin/main while keeping the drafted body. Surfaced as a "likely candidate" in slice 003-03's DoD.
+**Resolution trigger:** First user request to retroactively reserve a number for an already-drafted branch, OR a second slice in jig itself starts life as a draft-first branch and hits the renumber friction.
+**Mitigation idea:** `--from-branch <branch>` reads the slug + draft from the named branch, opens main, runs the standard reservation flow with the next-free number, then rebases/cherry-picks the branch's content onto the reservation commit.
+
+### Decision: `workflow.py unreserve <NNN>` for abandoned reservations
+**Deferred:** A reservation that's never drafted leaves a permanent stub `docs/specs/NNN-<slug>/spec.md` on main. No tooling exists to cleanly retract a reservation. Surfaced as a "likely candidate" in slice 003-03's DoD.
+**Resolution trigger:** First abandoned reservation in the wild (≥30 days at DRAFT with zero slices and no activity), OR a user explicitly asks how to un-reserve.
+**Mitigation idea:** `unreserve <NNN-slug>` removes the spec directory + commits `docs(specs): unreserve NNN-<slug>` on main with the same push/PR-fallback flow `new` uses. Refuse if the spec has any slices defined or any commits referencing it.
+
+### Decision: post-stub-create / pre-local-commit race window in `workflow.py new`
+**Deferred:** `workflow.py new` fetches origin/main, computes `next_number`, creates the stub directory + spec.md, THEN commits. Between mkdir and commit, another reservation could land on origin (caught by `git push`'s non-fast-forward later). The race detection fires correctly at push time, but a small window of stranded-on-disk state exists between `mkdir` and `git commit`. Surfaced as a "likely candidate" in slice 003-03's DoD.
+**Resolution trigger:** First user-observable race-on-disk incident (e.g., two operators report seeing a "dirty worktree" error from a `new` that didn't run cleanly). Probably never bites in practice (window is sub-second).
+**Mitigation idea:** stash-or-revert the stub-create on push failure (already done in the `non-fast-forward` path). Generalize the cleanup to fire on any push-failure shape, not just race.
+
+### Decision: race-recovery `git reset --hard HEAD~1` leaves empty spec directory on disk
+**Deferred:** On `non-fast-forward` push rejection, the helper resets the commit but leaves the empty `docs/specs/NNN-<slug>/` directory. Functionally harmless (`_next_spec_number` still works) but untidy. Surfaced by the reviewer of slice 003-03 (workflow.py:1028-1035 region).
+**Resolution trigger:** First user complaint about leftover empty dirs, OR a `--clean-on-race` flag becomes wanted, OR the same issue appears in `unreserve`.
+**Mitigation idea:** `shutil.rmtree(spec_dir, ignore_errors=True)` immediately after the `git reset --hard HEAD~1` call.

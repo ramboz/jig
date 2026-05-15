@@ -32,10 +32,30 @@ user-invocable: true
 ### Creating a new spec
 
 1. Confirm the work needs a spec. Trivial fixes don't.
-2. Pick a number (next free `NNN-` slug under `docs/specs/`). **Fetch
-   `origin/main` first** — if you're in a long session and another spec
-   landed on main concurrently, you'll need to renumber yours pre-merge.
-   This is cheaper to discover at spec-creation time than at merge time.
+2. **Reserve the next free number on origin/main:**
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" new <slug>
+   ```
+
+   The helper computes `max(NNN) + 1` across `docs/specs/`, writes a
+   minimum stub `docs/specs/NNN-<slug>/spec.md` (frontmatter + Overview
+   + SPIDR-analysis headers), commits it as
+   `docs(specs): reserve NNN-<slug>`, and pushes to `origin/main`. If
+   the push is refused by branch protection / permissions, the helper
+   automatically falls back to a `reserve/NNN-<slug>` branch + `gh pr
+   create`. This locks the number **team-wide** before any drafting
+   begins, killing the parallel-worktree spec-number-collision failure
+   mode logged across specs 014/015/016/017. Run it from a clean main.
+
+   Flags: `--no-push` for solo machines without a remote (commit
+   locally only, never touch fetch/push); `--pr` to skip the
+   direct-push attempt on protection-locked main.
+
+   For projects without remote access — or when you'd rather pick the
+   number by hand — you can still `mkdir docs/specs/NNN-<slug>/` and
+   write `spec.md` directly; `workflow.py new` is the convenience path,
+   not a gate.
 3. Create `docs/specs/NNN-<slug>/{spec.md,plan.md,tasks.md}` with the conventional
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers

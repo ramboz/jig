@@ -877,5 +877,503 @@ class FrontmatterTransitionTests(unittest.TestCase):
         self.assertIn("status: DONE", spec_b_path.read_text())
 
 
+# Load workflow.py as a module for direct-call tests (needed for mocking
+# subprocess.run inside the helper). importlib bypasses the hyphen-in-
+# directory-name limitation. Mirrors the pattern in skills/slice-land/
+# test_land.py.
+import importlib.util as _ilu
+
+
+def _load_workflow():
+    spec = _ilu.spec_from_file_location("_workflow_module", WORKFLOW)
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_workflow = _load_workflow()
+
+
+class _SubprocessRecorder:
+    """Captures subprocess.run calls and returns canned results based on
+    a sequence of (matcher, returncode, stdout, stderr) tuples.
+
+    Each call to the recorder consumes the first matching tuple in the
+    sequence (FIFO). Matcher is a callable that takes the argv list and
+    returns True if this tuple should fire. Unmatched calls return
+    (returncode=0, stdout="", stderr="") by default — useful for
+    benign reads like `git status --porcelain`.
+    """
+
+    def __init__(self):
+        self.calls = []            # list of argv-lists
+        self._responses = []       # list of (matcher, rc, stdout, stderr)
+
+    def stub(self, matcher, returncode=0, stdout="", stderr=""):
+        self._responses.append((matcher, returncode, stdout, stderr))
+        return self
+
+    def __call__(self, *args, **kwargs):
+        # First positional arg is the argv list (or string).
+        argv = args[0] if args else kwargs.get("args")
+        if isinstance(argv, str):
+            argv_list = argv.split()
+        else:
+            argv_list = list(argv)
+        self.calls.append(argv_list)
+        for i, (matcher, rc, out, err) in enumerate(self._responses):
+            if matcher(argv_list):
+                # One-shot: pop after match.
+                self._responses.pop(i)
+                return _make_proc(rc, out, err)
+        return _make_proc(0, "", "")
+
+    def argv_log(self):
+        """Returns a list of space-joined command strings for assertion."""
+        return [" ".join(a) for a in self.calls]
+
+
+def _make_proc(returncode: int, stdout: str = "", stderr: str = ""):
+    from unittest.mock import MagicMock
+    m = MagicMock()
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
+
+
+def _matches(*prefix_tokens):
+    """Build a matcher that returns True when argv starts with the given
+    tokens (in order, contiguous from index 0). E.g. _matches("git",
+    "push") fires for ["git", "push", "origin", "main"]."""
+    def _m(argv):
+        return tuple(argv[: len(prefix_tokens)]) == tuple(prefix_tokens)
+    return _m
+
+
+def _matches_full(*tokens):
+    """Exact full-argv matcher."""
+    def _m(argv):
+        return tuple(argv) == tuple(tokens)
+    return _m
+
+
+class ReserveSpecTests(unittest.TestCase):
+    """Slice 003-03: `workflow.py new <slug>` reserves the next free
+    spec number by committing — and by default pushing — a stub
+    spec.md to origin/main."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-reserve-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        # Build minimal scaffolding: docs/specs/ exists; a couple of
+        # existing spec dirs so the next-number computation has signal.
+        (self.target / "docs" / "specs").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mkspec(self, name: str) -> None:
+        d = self.target / "docs" / "specs" / name
+        d.mkdir(parents=True)
+        (d / "spec.md").write_text("# Spec\n")
+
+    def _stub_preflight_ok(self, rec: _SubprocessRecorder,
+                            dirty: bool = False) -> None:
+        """Stub the preflight git calls: branch == main, clean worktree,
+        origin URL on github.com. `dirty=True` simulates uncommitted
+        changes."""
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0,
+                 stdout=("M somefile\n" if dirty else ""))
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
+
+    # AC #1 + AC #2 + AC #7 (--no-push) — happy path; verify stub contents
+    # and commit semantics without any remote calls.
+    def test_new_reserves_next_number_and_writes_stub(self):
+        self._mkspec("001-existing")
+        self._mkspec("015-other")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        # Local commit step.
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "parallel-worktree-collision",
+                project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        spec_dir = self.target / "docs" / "specs" / "016-parallel-worktree-collision"
+        self.assertTrue(spec_dir.is_dir(), f"missing: {spec_dir}")
+        spec_md = spec_dir / "spec.md"
+        self.assertTrue(spec_md.is_file())
+        text = spec_md.read_text()
+        # AC #2: frontmatter
+        self.assertIn("---\nstatus: DRAFT\nskill:\n---", text)
+        # AC #2: title-cased header
+        self.assertIn("# Spec 016: Parallel-worktree collision", text)
+        # AC #2: today's date in the reservation line
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        self.assertIn(f"Reserved on {today}", text)
+        # AC #2: required headers
+        self.assertIn("## Overview", text)
+        self.assertIn("## SPIDR analysis", text)
+        # AC #1: commit message
+        commit_calls = [c for c in rec.calls
+                        if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]
+        self.assertEqual(len(commit_calls), 1)
+        self.assertIn("docs(specs): reserve 016-parallel-worktree-collision",
+                      " ".join(commit_calls[0]))
+        # AC #7 (--no-push): no fetch / push calls.
+        flat_log = " | ".join(rec.argv_log())
+        self.assertNotIn("git push", flat_log)
+        self.assertNotIn("git fetch", flat_log)
+
+    # AC #1 — gap-tolerance: max + 1 across gaps, non-spec entries ignored.
+    def test_new_uses_max_plus_one_across_gaps(self):
+        self._mkspec("001-x")
+        self._mkspec("015-y")
+        self._mkspec("003-z")
+        # Non-spec sibling entries don't perturb the max
+        (self.target / "docs" / "specs" / "README.md").write_text("# stub\n")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "newslot", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # 015 was the max → reserve 016
+        spec_dir = self.target / "docs" / "specs" / "016-newslot"
+        self.assertTrue(spec_dir.is_dir(),
+                        f"expected 016-newslot, got: "
+                        f"{sorted((self.target / 'docs/specs').iterdir())}")
+
+    # AC #5 — refuse on non-main branch.
+    def test_new_refuses_on_non_main_branch(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/something\n")
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "myslug", project_dir=self.target,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("main", msg.lower())
+        # Refused BEFORE any mutation: spec dir not created
+        self.assertFalse(any((self.target / "docs/specs").glob("*-myslug")))
+
+    # AC #5 — refuse on dirty worktree.
+    def test_new_refuses_on_dirty_worktree(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec, dirty=True)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "myslug", project_dir=self.target,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertTrue("dirty" in msg or "uncommitted" in msg or "clean" in msg,
+                        f"unexpected message: {ctx.exception!r}")
+        # No spec dir created
+        self.assertFalse(any((self.target / "docs/specs").glob("*-myslug")))
+
+    # AC #5 — bad slug variants: uppercase, leading digit, empty, double-dash.
+    def test_new_refuses_on_bad_slug(self):
+        self._mkspec("001-existing")
+        bad = ["BadSlug", "1leadingdigit", "", "double--dash",
+                "-leading", "with space"]
+        for slug in bad:
+            with self.subTest(slug=slug):
+                rec = _SubprocessRecorder()
+                # No preflight stubs needed — slug check happens first
+                # for clearly-invalid shapes that argparse / regex
+                # rejects before any git command runs.
+                from unittest.mock import patch
+                with patch.object(_workflow, "subprocess") as sp_mod:
+                    sp_mod.run = rec
+                    with self.assertRaises(_workflow.WorkflowError) as ctx:
+                        _workflow.reserve_spec(
+                            slug, project_dir=self.target,
+                            no_push=True, pr_mode=False,
+                        )
+                msg = str(ctx.exception).lower()
+                self.assertIn("slug", msg,
+                              f"slug={slug!r}: error didn't name 'slug': "
+                              f"{ctx.exception!r}")
+
+    # AC #5 — refuse when docs/specs/ absent.
+    def test_new_refuses_when_specs_dir_absent(self):
+        # Build a fresh target without docs/specs
+        bare = Path(self.tmpdir) / "bare"
+        bare.mkdir()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "validslug", project_dir=bare,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("docs/specs", msg)
+
+    # AC #3 — direct push succeeds; no fallback branch created.
+    def test_new_direct_push_succeeds(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        # fetch + add + commit + push all succeed
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "newslot", project_dir=self.target,
+                no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # No fallback branch operations: no `git branch reserve/`, no
+        # `git checkout reserve/`, no `git push -u origin reserve/`.
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git branch reserve", flat)
+        self.assertNotIn("git checkout reserve", flat)
+        self.assertNotIn("git push -u origin reserve", flat)
+        self.assertNotIn("gh pr create", flat)
+
+    # AC #3 + AC #4 — protected-branch stderr triggers PR fallback.
+    def test_new_falls_back_on_protected_branch(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        # push origin main FAILS with protection signal
+        rec.stub(_matches("git", "push", "origin", "main"),
+                 returncode=1, stderr="remote: error: GH006: Protected branch update failed.\n")
+        # Fallback sequence
+        rec.stub(_matches("git", "branch"), returncode=0)
+        rec.stub(_matches("git", "reset", "--hard", "origin/main"),
+                 returncode=0)
+        rec.stub(_matches("git", "checkout"), returncode=0)
+        rec.stub(_matches("git", "push", "-u", "origin"), returncode=0)
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/user/repo/pull/42\n")
+        # shutil.which('gh') needs to be true; we patch shutil.which.
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/local/bin/gh"):
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "newslot", project_dir=self.target,
+                no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git branch", flat)
+        self.assertIn("git reset --hard origin/main", flat)
+        self.assertIn("git checkout", flat)
+        self.assertIn("git push -u origin", flat)
+        self.assertIn("gh pr create", flat)
+
+    # AC #6 — non-fast-forward triggers race-detection (NOT fallback).
+    def test_new_does_not_fall_back_on_non_fast_forward(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"),
+                 returncode=1,
+                 stderr="! [rejected]  main -> main (non-fast-forward)\n")
+        # The race-recovery does `git reset --hard HEAD~1`
+        rec.stub(_matches("git", "reset", "--hard", "HEAD~1"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "newslot", project_dir=self.target,
+                    no_push=False, pr_mode=False,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("race", msg)
+        # Local commit dropped: reset HEAD~1 fired.
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git reset --hard HEAD~1", flat)
+        # No fallback branch / gh pr create
+        self.assertNotIn("git branch reserve", flat)
+        self.assertNotIn("gh pr create", flat)
+
+    # AC #7 (--pr) — skip direct-push, go straight to branch + PR.
+    def test_new_pr_mode_skips_direct_push(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        # Fallback sequence — direct push NOT attempted.
+        rec.stub(_matches("git", "branch"), returncode=0)
+        rec.stub(_matches("git", "reset", "--hard", "origin/main"),
+                 returncode=0)
+        rec.stub(_matches("git", "checkout"), returncode=0)
+        rec.stub(_matches("git", "push", "-u", "origin"), returncode=0)
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/u/r/pull/7\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/bin/gh"):
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "myslot", project_dir=self.target,
+                no_push=False, pr_mode=True,
+            )
+        self.assertEqual(code, 0)
+        # No `git push origin main`
+        push_main = [c for c in rec.calls
+                     if tuple(c[:4]) == ("git", "push", "origin", "main")]
+        self.assertEqual(push_main, [],
+                         f"--pr should skip direct push; calls: "
+                         f"{rec.argv_log()}")
+        # But the branch + PR creation happened
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git push -u origin", flat)
+        self.assertIn("gh pr create", flat)
+
+    # AC #4 — PR fallback refuses without `gh` on PATH.
+    def test_new_pr_mode_refuses_without_gh(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value=None):
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "myslot", project_dir=self.target,
+                    no_push=False, pr_mode=True,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("gh", msg, f"prereq message must name 'gh': "
+                                 f"{ctx.exception!r}")
+
+    # AC #4 — PR fallback refuses when origin isn't on github.com.
+    def test_new_pr_mode_refuses_without_github_remote(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        # Override preflight: origin URL points elsewhere
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0,
+                 stdout="git@gitlab.example.com:foo/bar.git\n")
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/bin/gh"):
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "myslot", project_dir=self.target,
+                    no_push=False, pr_mode=True,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("github.com", msg,
+                      f"prereq message must name 'github.com': "
+                      f"{ctx.exception!r}")
+
+    # AC #7 (--no-push) — never calls fetch or push.
+    def test_new_no_push_skips_remote_calls(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "soloslot", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git fetch", flat)
+        self.assertNotIn("git push", flat)
+
+    # AC #7 — mutex: --no-push and --pr together is a usage error.
+    def test_new_no_push_and_pr_are_mutually_exclusive(self):
+        self._mkspec("001-existing")
+        # argparse usage error → exit 2 from main()
+        result = run_workflow("new", "myslot", "--no-push", "--pr")
+        self.assertNotEqual(result.returncode, 0)
+
+    # AC #2 — title casing example from the spec.
+    def test_new_title_cases_slug_per_spec_example(self):
+        # Seed enough specs to push the reservation to 016 (matches the
+        # spec example for clarity).
+        self._mkspec("001-existing")
+        self._mkspec("015-other")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "parallel-worktree-collision",
+                project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        text = (self.target / "docs/specs/016-parallel-worktree-collision/"
+                              "spec.md").read_text()
+        self.assertIn("Parallel-worktree collision", text)
+
+
 if __name__ == "__main__":
     unittest.main()

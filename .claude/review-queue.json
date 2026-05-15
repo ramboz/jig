@@ -1,13 +1,10 @@
 {
-  "spec": "docs/specs/016-scaffold-mode/spec.md",
-  "slice": "016-03",
+  "spec": "docs/specs/003-spec-workflow-promotion/spec.md",
+  "slice": "003-03",
   "files": [
-    "skills/scaffold-init/scaffold.py",
-    "skills/scaffold-init/test_scaffold_mode.py",
-    "scripts/verify_install.py",
-    "scripts/test_verify_install.py",
-    "README.md",
-    "CONTRIBUTING.md",
+    "skills/spec-workflow/workflow.py",
+    "skills/spec-workflow/test_workflow.py",
+    "skills/spec-workflow/SKILL.md",
     "CLAUDE.md"
   ]
 }

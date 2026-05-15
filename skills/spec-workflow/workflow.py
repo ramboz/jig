@@ -14,6 +14,8 @@ import argparse
 import datetime
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -631,6 +633,445 @@ def stale(project_dir: Path, days: int = 90) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------- Slice 003-03: reserve-spec-on-main ----------
+
+# Valid slug shape: starts with lowercase letter; lowercase letters,
+# digits, hyphens; no `--` (which would create empty path segments after
+# any future split-on-hyphen). Mirrors the convention used across all
+# existing `docs/specs/NNN-<slug>/` directories.
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+# Stderr substrings (case-insensitive) that classify a `git push` failure
+# as a protection / permission refusal — these trigger the PR-fallback
+# path (AC #3). Anything else is treated as a hard error (race-on-push
+# gets its own classifier via _PUSH_RACE_SIGNALS).
+_PUSH_PROTECTION_SIGNALS = (
+    "protected branch",
+    "permission denied",
+    "pre-receive hook declined",
+    "not authorized",
+    "cannot lock ref",
+)
+
+# Stderr substrings that classify a `git push origin main` failure as a
+# race (someone else advanced main in the gap between fetch and push).
+# Structurally distinct from protection refusal: PR-fallback would still
+# fail; the right recovery is to re-run after picking the next free
+# number (AC #6).
+_PUSH_RACE_SIGNALS = (
+    "non-fast-forward",
+    "fetch first",
+    "[rejected]",
+    "rejected",
+)
+
+
+def _title_case_slug(slug: str) -> str:
+    """Spec AC #2: `parallel-worktree-collision` → `Parallel-worktree collision`.
+
+    Replace the LAST hyphen with a space (so the slug reads as
+    `<adjective-chain> <noun>`), then capitalize only the first letter.
+    Single-token slugs (no hyphens) just get a capital first letter.
+    """
+    if "-" in slug:
+        head, tail = slug.rsplit("-", 1)
+        joined = f"{head} {tail}"
+    else:
+        joined = slug
+    if not joined:
+        return joined
+    return joined[0].upper() + joined[1:]
+
+
+def _next_spec_number(specs_dir: Path) -> int:
+    """Scan `specs_dir` for `NNN-*/` entries; return max(NNN) + 1.
+    Ignores non-spec entries (README.md, files, dirs that don't start
+    with three digits + hyphen). Returns 1 when the directory is empty."""
+    max_n = 0
+    if not specs_dir.is_dir():
+        return 1
+    for entry in specs_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        m = re.match(r"^(\d{3})-", entry.name)
+        if m:
+            n = int(m.group(1))
+            if n > max_n:
+                max_n = n
+    return max_n + 1
+
+
+def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
+    """Build the spec.md stub body. Exact shape per AC #2."""
+    title = _title_case_slug(slug)
+    return (
+        "---\n"
+        "status: DRAFT\n"
+        "skill:\n"
+        "---\n"
+        "\n"
+        f"# Spec {num_str}: {title}\n"
+        "\n"
+        f"> Reserved on {today_iso} via `workflow.py new`. "
+        "Body to be drafted in a feature branch.\n"
+        "\n"
+        "## Overview\n"
+        "\n"
+        "_TBD_\n"
+        "\n"
+        "## SPIDR analysis\n"
+        "\n"
+        "_TBD_\n"
+    )
+
+
+def _run(argv: list, cwd: Path) -> tuple:
+    """Run a subprocess and return (returncode, stdout, stderr).
+
+    Uses module-level `subprocess.run` so tests can patch it via
+    `patch.object(_workflow, "subprocess")`. Mirrors the
+    `_run_git_cmd` / `_run_gh_cmd` shape from skills/slice-land/land.py
+    (ADR-0003 — inline-mirror until a third caller emerges)."""
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, cwd=str(cwd),
+        )
+    except FileNotFoundError:
+        return 127, "", f"{argv[0]}: not found on PATH"
+    return result.returncode, result.stdout or "", result.stderr or ""
+
+
+def _classify_push_failure(stderr: str) -> str:
+    """Classify a `git push origin main` stderr into one of:
+      - "protection" — protected branch / permission denied / ...
+      - "race" — non-fast-forward / fetch first / rejected
+      - "other" — connection refused, DNS errors, anything else
+
+    Case-insensitive substring match. Race wins over protection if both
+    appear (race recovery requires the stranded commit drop)."""
+    low = stderr.lower()
+    for sig in _PUSH_RACE_SIGNALS:
+        if sig in low:
+            return "race"
+    for sig in _PUSH_PROTECTION_SIGNALS:
+        if sig in low:
+            return "protection"
+    return "other"
+
+
+def _validate_slug(slug: str) -> None:
+    """Raise WorkflowError naming both the slug and the violated rule.
+    AC #5: bad slug refusal happens before any mutation."""
+    if not slug:
+        raise WorkflowError("invalid slug: empty (rule: must start "
+                            "with [a-z], no '--')")
+    if "--" in slug:
+        raise WorkflowError(
+            f"invalid slug {slug!r}: contains '--' "
+            f"(rule: no consecutive hyphens)"
+        )
+    if not _SLUG_RE.match(slug):
+        raise WorkflowError(
+            f"invalid slug {slug!r}: must match {_SLUG_RE.pattern} "
+            f"(lowercase letters, digits, hyphens; starts with letter)"
+        )
+
+
+def _preflight_branch_and_worktree(project_dir: Path) -> None:
+    """AC #5: refuse if current branch != main, or worktree is dirty.
+    Both checks happen before any file mutation."""
+    rc, stdout, stderr = _run(
+        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"could not determine current branch (git: {stderr.strip()})"
+        )
+    branch = stdout.strip()
+    if branch != "main":
+        raise WorkflowError(
+            f"refusing: current branch is {branch!r}, must be 'main' "
+            f"(reservation lands on main; switch with `git checkout main`)"
+        )
+
+    rc, stdout, _stderr = _run(
+        ["git", "status", "--porcelain"], cwd=project_dir,
+    )
+    if rc != 0:
+        # Non-fatal if status itself fails — but if it's truly broken,
+        # downstream git commands will fail anyway. Treat as clean.
+        return
+    if stdout.strip():
+        raise WorkflowError(
+            "refusing: working tree has uncommitted changes (rule: "
+            "clean worktree required). Run `git status` to see them, "
+            "then stash or commit before reserving."
+        )
+
+
+def _check_gh_and_remote(project_dir: Path) -> None:
+    """AC #4 prereqs: `gh` on PATH AND `origin` URL contains `github.com`.
+    Mirrors the slice-land 007-03 guard precedent."""
+    if shutil.which("gh") is None:
+        raise WorkflowError(
+            "refusing PR-fallback: 'gh' CLI not found on PATH. "
+            "Install GitHub CLI (https://cli.github.com/) or re-run "
+            "with `--no-push` to commit locally only."
+        )
+    rc, stdout, stderr = _run(
+        ["git", "config", "--get", "remote.origin.url"], cwd=project_dir,
+    )
+    if rc != 0 or not stdout.strip():
+        raise WorkflowError(
+            "refusing PR-fallback: no 'origin' remote configured "
+            f"(git: {stderr.strip() or 'empty url'})"
+        )
+    url = stdout.strip()
+    if "github.com" not in url:
+        raise WorkflowError(
+            f"refusing PR-fallback: remote 'origin' does not point at "
+            f"github.com (url: {url}). PR-fallback requires a GitHub "
+            f"remote; re-run with `--no-push` for local-only commit."
+        )
+
+
+def _do_pr_fallback(project_dir: Path, branch_name: str,
+                    num_str: str, slug: str,
+                    pr_body: str) -> None:
+    """AC #4 — branch-and-PR sequence. Any step's failure aborts and
+    surfaces what state the user's repo is left in.
+
+    Sequence:
+      1. git branch <branch> HEAD
+      2. git reset --hard origin/main (un-strand local main)
+      3. git checkout <branch>
+      4. git push -u origin <branch>
+      5. gh pr create --title ... --body ...
+    """
+    _check_gh_and_remote(project_dir)
+
+    # 1. Create the branch at the reservation commit.
+    rc, _out, err = _run(
+        ["git", "branch", branch_name, "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git branch {branch_name} HEAD`: "
+            f"{err.strip()}. The reservation commit is still on local main; "
+            f"re-run after fixing, or `git reset --hard origin/main` to drop it."
+        )
+
+    # 2. Reset local main so it no longer carries the stranded commit.
+    rc, _out, err = _run(
+        ["git", "reset", "--hard", "origin/main"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git reset --hard origin/main`: "
+            f"{err.strip()}. The reservation commit lives on local "
+            f"{branch_name!r}; check `git log {branch_name}` to confirm "
+            f"before pushing manually."
+        )
+
+    # 3. Switch to the reservation branch.
+    rc, _out, err = _run(
+        ["git", "checkout", branch_name], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git checkout {branch_name}`: "
+            f"{err.strip()}. The branch exists locally; switch to it "
+            f"manually with `git checkout {branch_name}`."
+        )
+
+    # 4. Push the branch to origin.
+    rc, _out, err = _run(
+        ["git", "push", "-u", "origin", branch_name], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git push -u origin {branch_name}`: "
+            f"{err.strip()}. The reservation commit lives on local "
+            f"{branch_name!r}; push manually once the remote allows it."
+        )
+
+    # 5. Open the PR.
+    title = f"docs(specs): reserve {num_str}-{slug}"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `gh pr create`: {err.strip()}. "
+            f"The branch is already pushed to origin/{branch_name}; "
+            f"open the PR manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def reserve_spec(slug: str, project_dir: Path,
+                 no_push: bool = False, pr_mode: bool = False) -> int:
+    """Slice 003-03 entry point. Reserve the next free spec number by
+    committing a stub spec.md and (by default) pushing it to origin/main.
+
+    Returns the intended process exit code (0 on success). Raises
+    WorkflowError for refusals — main() converts these to exit 2.
+    """
+    # AC #5 (bad-slug) — refuse BEFORE any other check. Bad slug is the
+    # cheapest failure to surface and shouldn't waste git invocations.
+    _validate_slug(slug)
+
+    # AC #5 (specs-dir-absent) — the helper only makes sense inside a
+    # scaffolded jig project.
+    specs_dir = project_dir / "docs" / "specs"
+    if not specs_dir.is_dir():
+        raise WorkflowError(
+            f"refusing: docs/specs/ not found under {project_dir} "
+            f"(not inside a scaffolded jig project)"
+        )
+
+    # AC #5 (not-on-main, dirty-worktree) — applies even to `--no-push`
+    # so the reservation commit always lands on a clean main.
+    _preflight_branch_and_worktree(project_dir)
+
+    # Fetch origin/main first (AC #1) so the next-number scan reflects
+    # the freshest state. Skipped for --no-push (no remote contract).
+    if not no_push:
+        rc, _out, err = _run(
+            ["git", "fetch", "origin", "main"], cwd=project_dir,
+        )
+        # A failed fetch isn't fatal — we still proceed with the local
+        # view. The push step will catch any out-of-date condition via
+        # the race-on-push classifier (AC #6).
+        if rc != 0:
+            sys.stderr.write(
+                f"warning: `git fetch origin main` failed: "
+                f"{err.strip()}; proceeding with local view\n"
+            )
+
+    # Compute the next number AFTER the fetch so we pick up any specs
+    # that landed in the gap.
+    next_n = _next_spec_number(specs_dir)
+    num_str = f"{next_n:03d}"
+    spec_dirname = f"{num_str}-{slug}"
+    spec_dir = specs_dir / spec_dirname
+
+    # Defensive: if the target dir already exists, refuse rather than
+    # overwrite. This shouldn't happen in practice (we just computed
+    # max + 1) but guards against unexpected race-with-self.
+    if spec_dir.exists():
+        raise WorkflowError(
+            f"refusing: {spec_dir} already exists. Re-run after "
+            f"resolving the conflict."
+        )
+
+    # Write the stub.
+    spec_dir.mkdir(parents=True)
+    spec_md = spec_dir / "spec.md"
+    today_iso = _today()
+    spec_md.write_text(_render_stub_spec(num_str, slug, today_iso))
+
+    # Stage + commit locally.
+    rel = f"docs/specs/{spec_dirname}/spec.md"
+    rc, _out, err = _run(["git", "add", rel], cwd=project_dir)
+    if rc != 0:
+        raise WorkflowError(
+            f"`git add {rel}` failed: {err.strip()}. "
+            f"The stub spec.md is on disk; stage and commit manually."
+        )
+    commit_msg = f"docs(specs): reserve {spec_dirname}"
+    rc, _out, err = _run(
+        ["git", "commit", "-m", commit_msg], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"`git commit` failed: {err.strip()}. "
+            f"The stub spec.md is staged; commit manually."
+        )
+
+    # Print the success line BEFORE any push so users see the
+    # reservation even on subsequent push failure.
+    print(f"reserved {spec_dirname}")
+    print(str(spec_md.resolve()))
+
+    # AC #7 — `--no-push` stops here.
+    if no_push:
+        return 0
+
+    pr_body = _build_pr_body(num_str, slug, project_dir)
+    branch_name = f"reserve/{spec_dirname}"
+
+    # AC #7 — `--pr` skips the direct-push attempt entirely.
+    if pr_mode:
+        _do_pr_fallback(project_dir, branch_name, num_str, slug, pr_body)
+        return 0
+
+    # AC #3 — default: try direct push first.
+    rc, _out, err = _run(
+        ["git", "push", "origin", "main"], cwd=project_dir,
+    )
+    if rc == 0:
+        print(f"reserved {spec_dirname} on origin/main")
+        return 0
+
+    kind = _classify_push_failure(err)
+    if kind == "race":
+        # AC #6 — drop the stranded commit so re-run starts clean.
+        sys.stderr.write(
+            f"race detected: origin/main advanced during reservation. "
+            f"Re-run 'workflow.py new {slug}' to pick the next free "
+            f"number.\n"
+        )
+        _reset_rc, _reset_out, _reset_err = _run(
+            ["git", "reset", "--hard", "HEAD~1"], cwd=project_dir,
+        )
+        # Even if reset fails, the race signal already fired — surface
+        # the original push failure to the user.
+        raise WorkflowError(
+            f"race-on-push: {err.strip()}"
+        )
+
+    if kind == "protection":
+        # AC #4 — fall back to branch + PR.
+        sys.stderr.write(
+            f"direct push refused ({err.strip()}); falling back to "
+            f"PR mode...\n"
+        )
+        _do_pr_fallback(project_dir, branch_name, num_str, slug, pr_body)
+        return 0
+
+    # AC #3 — anything else: hard error; leave commit in place.
+    raise WorkflowError(
+        f"`git push origin main` failed: {err.strip()} "
+        f"(local commit left in place; inspect with `git log -1` "
+        f"and decide how to recover)."
+    )
+
+
+def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
+    """Compose a PR body explaining the reservation purpose, naming the
+    slot, and pointing reviewers at this slice for context."""
+    return (
+        f"Reserves spec number `{num_str}` for slug `{slug}` on the "
+        f"shared trunk, so parallel worktrees cannot both claim the "
+        f"same `NNN`.\n"
+        f"\n"
+        f"This PR adds only a stub `docs/specs/{num_str}-{slug}/spec.md` "
+        f"with frontmatter + `## Overview` / `## SPIDR analysis` "
+        f"placeholders. The actual spec body will be drafted in a "
+        f"separate feature branch.\n"
+        f"\n"
+        f"Generated by `workflow.py new {slug}` "
+        f"(see spec 003-03 reserve-spec-on-main for rationale).\n"
+    )
+
+
+# ---------- end slice 003-03 ----------
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="workflow.py",
                                 description="jig spec-workflow helper")
@@ -654,6 +1095,21 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="project root directory (default: cwd)")
     ps.add_argument("--days", type=int, default=90,
                     help="staleness threshold in days (default: 90)")
+
+    pn = sub.add_parser(
+        "new",
+        help="reserve the next free spec number on origin/main (slice 003-03)",
+    )
+    pn.add_argument("slug",
+                    help="slug for the new spec (matches ^[a-z][a-z0-9-]*$, "
+                         "no '--')")
+    pn.add_argument("--project-dir", default=".",
+                    help="project root directory (default: cwd)")
+    mx = pn.add_mutually_exclusive_group()
+    mx.add_argument("--no-push", action="store_true",
+                    help="commit locally only; skip fetch / push entirely")
+    mx.add_argument("--pr", action="store_true", dest="pr_mode",
+                    help="skip direct-push; go straight to branch + PR")
     return p
 
 
@@ -674,6 +1130,13 @@ def main(argv: list) -> int:
         elif ns.command == "stale":
             report = stale(Path(ns.project_dir), days=ns.days)
             sys.stdout.write(report)
+        elif ns.command == "new":
+            return reserve_spec(
+                ns.slug,
+                project_dir=Path(ns.project_dir).resolve(),
+                no_push=ns.no_push,
+                pr_mode=ns.pr_mode,
+            )
     except WorkflowError as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
