@@ -157,6 +157,61 @@ python3 -m unittest discover -s scripts -p "test_*.py"
 When you add a new skill or top-level `scripts/`-style dir, make sure
 its tests are discoverable by the same pattern.
 
+## Releasing
+
+Releases are driven by
+[release-please](https://github.com/googleapis/release-please-action). On every
+push to `main`, the release workflow at
+[`.github/workflows/release.yml`](.github/workflows/release.yml) inspects new
+conventional-commit subjects and, if any of them warrant a version bump,
+opens or updates a **release PR** that:
+
+- bumps `.claude-plugin/plugin.json`'s `version` field,
+- updates `CHANGELOG.md` with the user-facing entries (sections: Features /
+  Bug Fixes / Performance / Documentation; `chore`, `refactor`, `test`, `ci`,
+  `build` are hidden),
+- updates [`.github/.release-please-manifest.json`](.github/.release-please-manifest.json).
+
+Merging that release PR cuts a `vX.Y.Z` git tag and creates the GitHub
+Release.
+
+### Conventional-commit shapes that bump the version
+
+| Subject prefix | Effect |
+|---|---|
+| `feat(scope): ...` | minor bump (e.g. 1.0.0 → 1.1.0) |
+| `fix(scope): ...` | patch bump (e.g. 1.0.0 → 1.0.1) |
+| `perf(scope): ...` | patch bump |
+| Any of the above with `!:` or a `BREAKING CHANGE:` footer | major bump |
+| `chore`, `docs`, `refactor`, `test`, `ci`, `build` | no version bump |
+
+The PR-title workflow (`pr-title.yml`) enforces conventional shape on PR
+titles. With squash-merge enabled, the PR title becomes the commit subject
+on `main` — so release-please sees clean inputs.
+
+### Inspecting / iterating on the release config
+
+Dry-run the config locally before pushing changes to it:
+
+```bash
+npx release-please release-pr \
+  --token=$GITHUB_TOKEN \
+  --repo-url=ramboz/jig \
+  --dry-run
+```
+
+The static checks in `scripts/test_release_config.py` also catch most
+config-shape regressions before CI does.
+
+### After v1.0.0 lands
+
+The current config pins `release-as: "1.0.0"` to force the very first release
+to be `v1.0.0` regardless of commit history. Once the v1.0.0 PR is merged
+and the tag is cut, raise a small follow-up `chore(release): unpin
+release-as after v1.0.0` PR that removes the `release-as` field from
+`.github/release-please-config.json`. From that point on, version bumps
+follow conventional-commit semantics organically.
+
 ## Spec workflow (short version)
 
 1. Pick up the next `READY_FOR_IMPLEMENTATION` slice from

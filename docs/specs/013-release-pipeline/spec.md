@@ -333,7 +333,7 @@ RealRepoIntegrationTests, GeneratorIterableTests, CliTests).
 
 ## Slice 013-02 — release-please-scaffold
 
-**STATUS: READY_FOR_IMPLEMENTATION**
+**STATUS: RECONCILED**
 
 **Goal:** Adding `release-please` to the repo so that merging a PR with
 a `feat`, `fix`, or `perf` commit opens a "release PR" that bumps the
@@ -429,21 +429,83 @@ the PR list after the next merged `feat:` PR, and merging it tags
 
 **Definition of Done:**
 
-- [ ] 013-01 DONE.
-- [ ] `.github/workflows/release.yml` committed.
-- [ ] `.github/release-please-config.json` committed with
+- [x] 013-01 DONE.
+- [x] `.github/workflows/release.yml` committed.
+- [x] `.github/release-please-config.json` committed with
   `release-as: "1.0.0"`.
-- [ ] `.github/.release-please-manifest.json` committed.
-- [ ] `.claude-plugin/plugin.json` bumped to `1.0.0`.
-- [ ] `CHANGELOG.md` seeded.
-- [ ] CONTRIBUTING.md (or `docs/releasing.md`) "Releasing" section
+- [x] `.github/.release-please-manifest.json` committed.
+- [x] `.claude-plugin/plugin.json` bumped to `1.0.0`.
+- [x] `CHANGELOG.md` seeded.
+- [x] CONTRIBUTING.md (or `docs/releasing.md`) "Releasing" section
   added per AC #7.
-- [ ] `scripts/test_release_config.py` committed with the five test
+- [x] `scripts/test_release_config.py` committed with the five test
   cases from AC #9.
-- [ ] Full test suite green.
-- [ ] Implementation review passed.
-- [ ] Deviation log written.
-- [ ] Reconciliation review passed.
+- [x] Full test suite green.
+- [x] Implementation review passed.
+- [x] Deviation log written.
+- [x] Reconciliation review passed.
+
+### Deviation log (013-02)
+
+**1. Implementer was the main agent, not the real `jig:implementer` subagent.**
+Same shape as 013-01 §1 — TDD-first work in the main session.
+
+**2. Implementation review came back `needs-changes` on first pass; the real
+`jig:reviewer` subagent caught a material AC #4 violation.** Initial
+implementation seeded `.github/.release-please-manifest.json` at `"1.0.0"`
+(reasoning: keep manifest and `plugin.json` in lockstep at HEAD). The
+spec's "Known constraints" section + AC #4 explicitly said to seed at
+`"0.1.0"` so `release-as: "1.0.0"` could override it on the first
+release. With manifest == release-as == "1.0.0", release-please's
+`simple` release type treats v1.0.0 as already-released and declines
+to open the first release PR — defeating the slice's primary goal.
+Fix: manifest re-seeded at `"0.1.0"` per AC #4; added
+`test_manifest_seed_below_release_as_target` regression test in
+`ReleasePleaseManifestTests` (scripts/test_release_config.py:110-128)
+that pins the invariant during the bootstrap window AND self-disables
+once `release-as` is removed (per the "After v1.0.0 lands" CONTRIBUTING
+section). A confirmation review pass against the corrected files
+returned `pass`.
+
+**3. CHANGELOG seed initially carried a Keep-a-Changelog preamble; tightened
+to match AC #6 literally.** Original seed had a paragraph block between
+`# Changelog` and `## [Unreleased]` explaining the release-please
+convention. AC #6 specified "an empty `# Changelog` heading and a
+`## [Unreleased]` placeholder" — the preamble was a (minor) deviation
+from "empty." Tightened to a literal heading + placeholder. The
+release-please-managed CHANGELOG will pick up its own preamble shape
+on first release; the CONTRIBUTING.md "Releasing" section now carries
+the contributor-facing explanation that used to live in the CHANGELOG.
+
+**4. `release.yml` permissions block omits `issues: write` intentionally.**
+The reviewer noted release-please-action@v4 docs mention `issues:
+write` "if release-please ever labels release PRs or comments on
+issues." Current config uses neither — `contents: write` (tags +
+release creation) + `pull-requests: write` (release PR) are
+sufficient. Will add `issues: write` if a future change wires
+release-please to label issues or comment.
+
+**5. `release.yml` does not pass an explicit `token:` parameter.**
+Standard release-please-action@v4 setup — the action defaults to
+`${{ github.token }}` and uses the workflow's `permissions:` block.
+Flagged here only because release-please setups commonly break on
+token configuration, so a future maintainer searching for
+"GITHUB_TOKEN" in the workflow won't find it explicitly.
+
+**6. Test scope expanded beyond AC #9's five required cases.**
+Required (a)–(e) all covered (5 tests in `ReleasePleaseConfigTests`
+and `ReleasePleaseManifestTests`). Additionally: `VersionLockstepTests`
+(1 test — plugin.json version matches `release-as` or manifest, catches
+desync during the bootstrap window), `ChangelogSeedTests` (2 tests —
+CHANGELOG exists; CHANGELOG has `# Changelog` heading),
+`test_manifest_seed_below_release_as_target` in
+`ReleasePleaseManifestTests` (1 test — the regression test from
+item 2; self-disables once `release-as` is removed). Positive
+direction; total 10 tests in this file across 4 test classes
+(5 required + 4 additional test methods on top).
+
+**7. Test counts.** Pre-013-02 baseline: 500 (3 skipped). Post-013-02:
+510 (3 skipped). New tests: 10 in `scripts/test_release_config.py`.
 
 ### Close-out (post-DONE)
 
