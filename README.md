@@ -128,7 +128,7 @@ become reachable as `subagent_type` values.
 
 1. Download `jig-vX.Y.Z.zip` from the
    [Releases page](https://github.com/ramboz/jig/releases).
-2. Drag the zip into the Desktop app's `/plugin` UI.
+2. In the Desktop app: **Customize → Personal Plugins (+) → Create Plugin → Upload plugin**, then drop the zip.
 
 For a one-shot session install via the CLI without a marketplace:
 
