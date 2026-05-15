@@ -4,6 +4,20 @@
 
 **jig** (noun): a tool that guides other tools to work accurately and consistently.
 
+## Why jig exists
+
+Two years of vibe coding surfaced the same scars on every non-trivial project:
+
+- **Horizontal drift.** LLMs prefer to refactor whole layers before delivering anything end-to-end. By the time the flow lands, it's broken — and the tokens are gone. [SPIDR](https://www.mountaingoatsoftware.com/blog/the-spidr-approach-to-splitting-user-stories) (Mike Cohn) splits work into thin vertical slices the model can actually hit.
+- **Invisible scope creep.** Without explicit acceptance criteria in the repo, "done" is whatever the model decided it meant. [Spec-driven development](https://github.com/github/spec-kit) makes the contract verifiable.
+- **Manual workflow repetition.** Spec → plan review → SPIDR alignment → implement → verify → reconcile docs. Every session. Encoding the loop as skills + hooks removes the manual babysitting.
+- **Implementers grade their own homework.** Sessions routinely end with "done" claims over partial work. A fresh subagent with only the spec and the diff — no chat history — catches the gaps ([LLM-as-judge](https://arxiv.org/abs/2306.05685)).
+- **Review depth shouldn't be locked in a private repo.** Internal PR/arch review skills can't ship publicly, but the workflow still needs a floor. jig's extension points defer to richer user-installed skills when present.
+- **Contracts parallelise work.** Strong interface contracts let frontend and backend (human or LLM) progress independently, and give the model a precise target instead of one it has to infer.
+- **Sessions are short; projects aren't.** A memory layer (hot cache + deep storage + inbox) means a new session picks up where the last left off without a re-briefing.
+
+jig encodes all of this so you don't rediscover it session by session.
+
 ## What it does
 
 jig installs a focused, opinionated workflow layer into your project:
