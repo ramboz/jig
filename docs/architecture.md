@@ -35,6 +35,20 @@ jig/
 ### Hook command paths: `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/...`
 Plugin `bin/` PATH injection is Bash-tool only, not hook commands. All hook `command` fields use the full `${CLAUDE_PLUGIN_ROOT}` path.
 
+### Dual-distribution: plugin install AND scaffolded install
+As of [spec 016-scaffold-mode](specs/016-scaffold-mode/spec.md) (slice
+016-01 DONE, 016-02/03 pending), `scaffold-init` can copy the runtime
+machinery (`skills/`, `agents/`, eventually `hooks/`) into the user's
+`.claude/` directory under `jig-` prefixed names
+(`.claude/skills/jig-<name>/`, `.claude/agents/jig-<name>.md`), with
+SKILL.md path strings rewritten from `${CLAUDE_PLUGIN_ROOT}/skills/<name>/`
+to `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/` at copy time. The
+plugin distribution (zip + marketplace) is unchanged; the source SKILL.md
+files keep their `${CLAUDE_PLUGIN_ROOT}` paths. Only the scaffold path
+rewrites. Coexistence between scaffolded and plugin installs falls under
+Claude Code's normal project-scoped-wins precedence; jig introduces no
+new arbiter.
+
 ### Context economy (the "dumb zone")
 Above ~40% context fill, model recall degrades. Practical ceiling: 8 MCP servers, ~80 active tools. The `jig-context-check` hook warns at session start. Skills use progressive disclosure — body loads only on trigger; supporting files load only when needed.
 

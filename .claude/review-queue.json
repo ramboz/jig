@@ -1,11 +1,8 @@
 {
-  "spec": "docs/specs/014-arch-review/spec.md",
-  "slice": "014-01",
+  "spec": "docs/specs/016-scaffold-mode/spec.md",
+  "slice": "016-01",
   "files": [
-    "skills/arch-review/SKILL.md",
-    "skills/arch-review/test_arch_review_skill_surface.py",
-    "CLAUDE.md",
-    "README.md",
-    "docs/specs/014-arch-review/spec.md"
+    "skills/scaffold-init/scaffold.py",
+    "skills/scaffold-init/test_scaffold_mode.py"
   ]
 }

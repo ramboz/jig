@@ -40,3 +40,16 @@ reviewer pass on the doc changes themselves.
 A spec slice that crosses all layers (DB + service + UI) and delivers end-to-end value.
 Contrast with horizontal phasing (DB phase, then API phase, then frontend phase), which
 is the AI's default failure mode.
+
+## Scaffolded install / scaffold mode
+
+The second of jig's two install shapes (the other being plugin install). Introduced by
+[spec 016-scaffold-mode](../specs/016-scaffold-mode/spec.md). `scaffold-init --with-machinery`
+(default-on once 016-03 lands) copies `skills/`, `agents/`, and `hooks/scripts/` into the
+target's `.claude/` directory under `jig-` prefixed names (e.g.
+`.claude/skills/jig-scaffold-init/SKILL.md`). SKILL.md path strings are rewritten from
+`${CLAUDE_PLUGIN_ROOT}/skills/<name>/` to `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`
+at copy time. The dev owns the in-repo files — they can edit any SKILL.md or helper,
+version-control their customizations, and pick up the original "scaffolding library"
+positioning. Plugin install via `/plugin install jig@jig` still works unchanged; project-
+scoped wins when both are present.

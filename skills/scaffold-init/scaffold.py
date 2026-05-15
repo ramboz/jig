@@ -372,12 +372,136 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
     })
 
 
+def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
+    """Copy `plugin/skills/<name>/` → `target/.claude/skills/jig-<name>/` and
+    `plugin/agents/*.md` → `target/.claude/agents/jig-<name>.md`.
+
+    Slice 016-01 (scaffold-mode). Skips:
+      - `skills/_common` and any other `_`-prefixed private skill dir
+        (mirrors the convention in `scripts/run_tests.py`);
+      - skill dirs that don't have a `SKILL.md` (not user-facing);
+      - `test_*.py` files anywhere under a skill dir (helper-only files
+        bloat the user's tree and aren't load-bearing at runtime);
+      - `__pycache__` directories.
+
+    For each copied SKILL.md, rewrites every
+    `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` literal in the body to
+    `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`. The frontmatter is
+    left untouched (AC #5). Helper .py files (non-test) are copied
+    verbatim — their `plugin_root()` fallback handles self-location at
+    runtime (AC #6).
+
+    Agent .md files are copied byte-identically with a `jig-` filename
+    prefix (audit confirmed agents have zero plugin-root references)."""
+    skills_src = plugin / "skills"
+    agents_src = plugin / "agents"
+    skills_dst = target / ".claude" / "skills"
+    agents_dst = target / ".claude" / "agents"
+
+    if skills_src.is_dir():
+        skills_dst.mkdir(parents=True, exist_ok=True)
+        for skill_dir in sorted(skills_src.iterdir()):
+            if not skill_dir.is_dir():
+                continue
+            if skill_dir.name.startswith("_"):
+                continue
+            if not (skill_dir / "SKILL.md").is_file():
+                continue
+            dst_dir = skills_dst / f"jig-{skill_dir.name}"
+            _copy_skill_dir(skill_dir, dst_dir)
+
+    if agents_src.is_dir():
+        agents_dst.mkdir(parents=True, exist_ok=True)
+        for agent in sorted(agents_src.glob("*.md")):
+            dst = agents_dst / f"jig-{agent.name}"
+            dst.write_bytes(agent.read_bytes())
+
+
+# Pattern: ${CLAUDE_PLUGIN_ROOT}/skills/<name>/ — captures <name>.
+# Bash `${...}` syntax in SKILL.md bash recipes is the only place this
+# token appears (verified by the spec 016 audit; 24 occurrences across 7
+# SKILL.md files at the time of writing). The substitution rewrites every
+# such occurrence to the project-scoped equivalent.
+_PLUGIN_SKILL_PATH_RE = re.compile(
+    r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/([A-Za-z0-9_-]+)/"
+)
+
+
+def _rewrite_skill_md_paths(body: str) -> str:
+    """Replace every `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` with
+    `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`.
+
+    Operates on the SKILL.md body only — the frontmatter must be carved off
+    by the caller before calling here (AC #5).
+
+    String substitution, not AST: SKILL.md is markdown + bash, no parsing
+    needed. The Known-constraint #1 fallback (substitute absolute paths if
+    `${CLAUDE_PROJECT_DIR}` is unreachable from skill bash) is a one-line
+    change inside this function — left for a future slice to flip if the
+    env-var path turns out to be unreachable in practice."""
+    return _PLUGIN_SKILL_PATH_RE.sub(
+        r"${CLAUDE_PROJECT_DIR}/.claude/skills/jig-\1/",
+        body,
+    )
+
+
+def _split_frontmatter(text: str) -> tuple[str, str]:
+    """Split a SKILL.md into (frontmatter_with_fences, body). If the file
+    has no YAML frontmatter, returns ('', text)."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].rstrip("\n") != "---":
+        return ("", text)
+    for i in range(1, len(lines)):
+        if lines[i].rstrip("\n") == "---":
+            fm = "".join(lines[: i + 1])
+            body = "".join(lines[i + 1:])
+            return (fm, body)
+    # No closing fence found — treat as no frontmatter to stay defensive
+    # (the source SKILL.md files all have well-formed fences; this branch
+    # is a guard against authoring mistakes, not normal operation).
+    return ("", text)
+
+
+def _copy_skill_dir(src: Path, dst: Path) -> None:
+    """Copy a single skill directory. SKILL.md gets path-substitution on
+    its body; other .py files (excluding test_*.py) are copied verbatim;
+    everything else under the skill dir is mirrored verbatim too. Skips
+    `__pycache__` and `test_*.py`."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for entry in src.rglob("*"):
+        rel = entry.relative_to(src)
+        # Skip __pycache__ trees wholesale
+        if any(part == "__pycache__" for part in rel.parts):
+            continue
+        if entry.is_dir():
+            (dst / rel).mkdir(parents=True, exist_ok=True)
+            continue
+        # Exclude test files anywhere in the tree
+        if entry.name.startswith("test_") and entry.name.endswith(".py"):
+            continue
+        target_path = dst / rel
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if entry.name == "SKILL.md":
+            text = entry.read_text()
+            fm, body = _split_frontmatter(text)
+            rewritten = fm + _rewrite_skill_md_paths(body)
+            target_path.write_text(rewritten)
+        else:
+            target_path.write_bytes(entry.read_bytes())
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
-             overrides: Overrides = None) -> None:
+             overrides: Overrides = None,
+             with_machinery: bool = False) -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
     already-scaffolded directory unless `force=True`. `overrides` carries the
     Q&A wizard answers from slice 001-05; None fields fall back to filesystem
-    inference. Plugin templates live at `plugin/templates/`."""
+    inference. Plugin templates live at `plugin/templates/`.
+
+    When `with_machinery=True` (slice 016-01), also copies `plugin/skills/*`
+    and `plugin/agents/*` into `target/.claude/skills/jig-*/` and
+    `target/.claude/agents/jig-*.md` respectively, rewriting SKILL.md path
+    placeholders. Default-off; flips to default-on in slice 016-03."""
     target = target.resolve()
     template_root = plugin / "templates"
 
@@ -459,12 +583,23 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # the wizard chose to record, not the same as "skipped".
     if overrides is not None and overrides.runtime is not None:
         manifest["project_runtime"] = overrides.runtime
+    # Slice 016-01: record which install shape was used. Default is
+    # "plugin-only" (today's behavior — machinery lives under
+    # ${CLAUDE_PLUGIN_ROOT}); "in-repo" is set when --with-machinery was
+    # passed (machinery copied into target/.claude/).
+    manifest["scaffold_mode"] = "in-repo" if with_machinery else "plugin-only"
     (target / "scaffold.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     # 5. brief.md — human-readable summary of detection results
     brief_template = (template_root / "brief.md.template").read_text()
     brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers, subs)
     (target / "brief.md").write_text(brief)
+
+    # 6. Slice 016-01: copy skills/ and agents/ into .claude/ when
+    # --with-machinery was passed. Default-off; flips to default-on in
+    # slice 016-03. Hooks are 016-02's job.
+    if with_machinery:
+        _copy_skills_and_agents(plugin, target)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -476,6 +611,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("target", help="target directory")
     p.add_argument("--force", action="store_true",
                    help="overwrite an already-scaffolded directory")
+    p.add_argument("--with-machinery", action="store_true",
+                   help="also copy skills/ and agents/ into target/.claude/ "
+                        "so the dev owns and can edit the runtime artifacts "
+                        "(slice 016-01; default-off until 016-03)")
     p.add_argument("--runtime", default=None,
                    help="runtime/language answer from the Q&A wizard "
                         "(stored in scaffold.json.project_runtime)")
@@ -525,7 +664,8 @@ def main(argv: list[str]) -> int:
     )
 
     try:
-        scaffold(target, plugin_root(), force=ns.force, overrides=overrides)
+        scaffold(target, plugin_root(), force=ns.force, overrides=overrides,
+                 with_machinery=ns.with_machinery)
     except AlreadyScaffoldedError as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
