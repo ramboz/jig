@@ -58,6 +58,19 @@ files — they can edit any SKILL.md or helper, version-control their customizat
 pick up the original "scaffolding library" positioning. Plugin install via
 `/plugin install jig@jig` still works unchanged; project-scoped wins when both are present.
 
+**Naming distinction (worth knowing).** The `jig-` prefix lives on the
+**directory** name only (`.claude/skills/jig-scaffold-init/`,
+`.claude/agents/jig-reviewer.md`); the SKILL.md frontmatter `name:` field
+is left untouched at copy time, so Claude Code surfaces the scaffolded
+copies as **unprefixed** skills (`scaffold-init`, `tdd-loop`, etc.). The
+plugin-installed versions are namespaced as `jig:scaffold-init`,
+`jig:tdd-loop`, etc. So a dev with BOTH installs sees two non-colliding
+sets — `/scaffold-init` (their owned, editable copy) and
+`/jig:scaffold-init` (the upstream plugin version) address different
+files. Confirmed empirically in slice 016-03 deviation log §close-out
+runtime verification (session
+`54d38632-dec1-42e4-bd6a-f8f12274ee1a`).
+
 ## DEFERRED
 
 A spec-lifecycle state added in slice 015-02. A slice marked `DEFERRED` was scoped
