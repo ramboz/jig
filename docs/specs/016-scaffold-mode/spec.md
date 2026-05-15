@@ -405,7 +405,7 @@ regressions.
 
 ## Slice 016-02 — copy-hooks-and-register
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** With `--with-machinery`, `scaffold-init` also copies
 `hooks/scripts/jig-*.sh` into `target/.claude/hooks/scripts/`, and
