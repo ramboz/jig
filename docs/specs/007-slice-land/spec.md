@@ -682,7 +682,9 @@ points):**
 
 ## Slice 007-04 — scaffold-json-integration-flag
 
-**STATUS: DRAFT** _(deferred)_
+**STATUS: DEFERRED** _(deferred)_
+
+**Resolution trigger:** User reports the `--mode` flag is genuinely annoying in repeated invocations (≥3 instances), OR the first project using jig that has BOTH a direct-merge skill and a PR-merge skill in the same repo.
 
 **Goal:** Add an `integration: "direct" | "pr"` field to
 `scaffold.json` so `land.py` can default to the right mode

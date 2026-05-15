@@ -635,7 +635,9 @@ parenthetical; tracked in §2 below).
 
 ## Slice 014-02 — arch-review-gather-helper
 
-**STATUS: DRAFT** _(deferred — add only if gather-friction is observed)_
+**STATUS: DEFERRED** _(deferred — add only if gather-friction is observed)_
+
+**Resolution trigger:** Three `arch-review/gather-friction:` inbox entries naming specific sessions where Claude had to re-derive scope inline (parallels 012-02's gather-helper trigger).
 
 **Goal:** `arch_review.py gather <input>` produces a structured markdown
 bundle (doc fetch / scope classification / extracted goals + constraints
@@ -653,7 +655,9 @@ misclassified an ADR as a system design, missed a stated constraint).
 
 ## Slice 014-03 — domain-specific-references
 
-**STATUS: DRAFT** _(deferred — explicit non-goal of "lightweight")_
+**STATUS: DEFERRED** _(deferred — explicit non-goal of "lightweight")_
+
+**Resolution trigger:** Multi-domain-architecture user reports a concrete gap that the lightweight baseline doesn't cover, AND no user-installed `~/.claude/skills/arch-review` deferral target exists for them.
 
 **Goal:** Port the domain-specific reference files from the personal
 `arch-review` skill (`distributed-systems.md`, `api-design.md`,
@@ -682,7 +686,9 @@ own skill."
 
 ## Slice 014-04 — security-lens-integration
 
-**STATUS: DRAFT** _(deferred — gated on `security_lens` decision)_
+**STATUS: DEFERRED** _(deferred — gated on `security_lens` decision)_
+
+**Resolution trigger:** Resolution of the `security_lens` parent decision (same trigger as 012-03 — both slices plug into whichever shape that decision takes).
 
 **Goal:** `arch-review` consults the `security_lens` field in
 `scaffold.json` (when present) and either appends an

@@ -63,3 +63,15 @@
 **Rule:** ADRs are immutable after acceptance.
 **Why:** Editing history destroys the audit trail that makes ADRs valuable.
 **How to apply:** New decision → new ADR with `Supersedes: ADR-NNNN`. Never edit an accepted ADR.
+
+**Rule:** New slices use the slice template at `templates/docs/specs/slice-template.md`. New ADRs use `templates/docs/decisions/adr-0000-template.md`. Both carry a YAML frontmatter block with `status`, `dependencies`, and `last_verified` fields (slice 015-01).
+**Why:** Typed frontmatter lets `workflow.py` validate dependency satisfaction on `→ DONE`, stamp `last_verified` on `→ RECONCILED`, and surface stale items via `workflow.py stale`. Free-text prose markers can't do this.
+**How to apply:** Copy the template, replace placeholders, and treat the frontmatter as the source of truth for the slice's state. Legacy slices using prose `**STATUS:** DRAFT` markers continue to work via lazy migration — no retroactive mass rewrite. Do not invent new frontmatter fields without updating `_common/parsing.py` and the related templates together.
+
+**Rule:** Deferred slices use the `DEFERRED` lifecycle state, not `DRAFT` + prose annotations (slice 015-02).
+**Why:** `DEFERRED` is rendered as a dedicated section in the status board with `**Resolution trigger:**` as the per-row context — discoverable in one place. Prose annotations on `DRAFT` slices look like in-progress work and don't index.
+**How to apply:** Transition with `workflow.py transition <spec.md> <slice> DEFERRED`. Add a `**Resolution trigger:** <condition>` line in the slice body that names the concrete signal that would re-open the slice. Re-open via `transition <slice> DRAFT` — `DEFERRED` may only transition to `DRAFT` (or stay `DEFERRED` idempotently); all other targets are refused.
+
+**Rule:** `templates/` files that should be hand-edited at slice-creation time (rather than substituted at scaffold-init time) use the `.md` suffix, not `.md.template`.
+**Why:** `scaffold-init` globs `templates/docs/**/*.md.template` and refuses on any unrendered `{{KEY}}` placeholder. A slice or ADR template carrying `{{NUMBER}}` / `{{NAME}}` placeholders meant for future slice authors would block scaffold-init.
+**How to apply:** Hand-edited templates → `.md`. Scaffold-time-substituted templates → `.md.template`. Existing precedent: `templates/docs/decisions/adr-0000-template.md` and `templates/docs/specs/slice-template.md` both use `.md`.
