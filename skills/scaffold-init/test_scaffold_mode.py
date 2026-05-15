@@ -594,6 +594,36 @@ class MergeExistingSettingsTests(unittest.TestCase):
         self.assertIn("--force", r.stderr,
                       f"refuse-message should mention --force: {r.stderr}")
 
+    def test_refused_scaffold_leaves_no_partial_hook_scripts(self):
+        """Regression for slice 016-03 deviation log §7 — when
+        UnmanagedHooksError fires, the scaffold MUST NOT have written any
+        `.claude/hooks/scripts/jig-*.sh` files. Before the §7 follow-up,
+        the safety check ran AFTER the copy loop, leaving partial state
+        behind on refuse. The fix moves the check to the top of
+        `_copy_hooks_and_register`; this test pins that ordering."""
+        self._seed_settings({
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Edit",
+                     "hooks": [{"type": "command",
+                                "command": "bash ./user-edit.sh",
+                                "timeout": 5}]}
+                ]
+            }
+        })
+        r = run_scaffold_with_args(self.target, "--with-machinery")
+        self.assertNotEqual(r.returncode, 0,
+                            "scaffold should refuse on unmanaged hooks")
+        scripts_dir = self.target / ".claude" / "hooks" / "scripts"
+        if scripts_dir.exists():
+            jig_scripts = list(scripts_dir.glob("jig-*.sh"))
+            self.assertEqual(
+                jig_scripts, [],
+                f"refused scaffold left partial state: {jig_scripts}. "
+                "The safety check must run BEFORE the hook-script copy "
+                "loop so a refused scaffold leaves no trace.",
+            )
+
     def test_force_overrides_unmanaged_hooks_refusal(self):
         """AC #4 — --force is the documented escape hatch. With it, the
         merge proceeds even when no jig marker is present."""

@@ -581,20 +581,20 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
       hooks registered against project-relative paths.
 
     Refuses (`UnmanagedHooksError`) when a pre-existing settings.json has
-    hook entries but none carry the jig marker, unless `force=True`."""
+    hook entries but none carry the jig marker, unless `force=True`. The
+    safety check fires BEFORE any filesystem mutation so a refused scaffold
+    leaves no partial state behind (no copied scripts, no created dirs).
+    Originally introduced in slice 016-02; reordering landed as a 016-03
+    follow-up after the reviewer flagged the partial-state rough edge."""
     src_scripts = plugin / "hooks" / "scripts"
-    dst_scripts = target / ".claude" / "hooks" / "scripts"
-    dst_scripts.mkdir(parents=True, exist_ok=True)
-    if src_scripts.is_dir():
-        for script in sorted(src_scripts.glob("jig-*.sh")):
-            dst = dst_scripts / script.name
-            dst.write_bytes(script.read_bytes())
-            # AC #5 — executable bit set. We don't trust the umask; pin to
-            # 0o755 explicitly so the scaffolded tree behaves identically
-            # across umasks (e.g. 0o022 vs. 0o077).
-            os.chmod(dst, 0o755)
-
     settings_path = target / ".claude" / "settings.json"
+
+    # AC #4 (016-02) safety check — runs FIRST, before any mkdir/copy, so
+    # a refused scaffold doesn't leak partial state into the target. Read
+    # the existing settings.json (if present) to determine whether to
+    # refuse. The check is per-file ("are any of these hooks jig's?"),
+    # not per-event: if the user has any non-jig hook anywhere AND no
+    # jig marker anywhere, that's a fully-third-party-managed file.
     existing: dict = {}
     if settings_path.is_file():
         try:
@@ -603,10 +603,6 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
             raise RuntimeError(
                 f"{settings_path} exists but is not valid JSON: {exc}"
             ) from exc
-        # AC #4 — refuse when existing settings.json has hooks but no jig
-        # marker. The check is per-file ("are any of these hooks jig's?"),
-        # not per-event: if the user has any non-jig hook anywhere AND no
-        # jig marker anywhere, that's a fully-third-party-managed file.
         existing_hooks = existing.get("hooks") or {}
         has_any_hook = any(
             (entries or []) for entries in existing_hooks.values()
@@ -624,6 +620,18 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
                 "jig hooks alongside the existing entries, or remove the "
                 "file and re-run."
             )
+
+    # Safety check passed (or settings.json doesn't exist). Now mutate.
+    dst_scripts = target / ".claude" / "hooks" / "scripts"
+    dst_scripts.mkdir(parents=True, exist_ok=True)
+    if src_scripts.is_dir():
+        for script in sorted(src_scripts.glob("jig-*.sh")):
+            dst = dst_scripts / script.name
+            dst.write_bytes(script.read_bytes())
+            # AC #5 — executable bit set. We don't trust the umask; pin to
+            # 0o755 explicitly so the scaffolded tree behaves identically
+            # across umasks (e.g. 0o022 vs. 0o077).
+            os.chmod(dst, 0o755)
 
     jig_hooks = _build_jig_hook_entries(plugin)
     merged = _merge_settings(existing, jig_hooks)
