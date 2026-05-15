@@ -521,7 +521,7 @@ direction; total 10 tests in this file across 4 test classes
 
 ## Slice 013-03 — release-zip-artifact
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** When release-please publishes a new GitHub Release (via
 slice 013-02), an additional CI job builds a `jig-vX.Y.Z.zip` from the
@@ -726,8 +726,8 @@ MissingLicenseWarningTests).
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache updated.
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache updated.
 - [ ] The v1.0.0 release (created by 013-02's PR merge) gets the
   zip retroactively attached IF the slice landed after the release.
   If 013-03 lands before v1.0.0, the zip is automatically attached
