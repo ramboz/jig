@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.1.0](https://github.com/ramboz/jig/compare/v1.0.0...v1.1.0) (2026-05-15)
+
+
+### Features
+
+* **arch-review:** spec 014-01 — lightweight architecture-review baseline with category-based deferral ([1d76d96](https://github.com/ramboz/jig/commit/1d76d96a595da2adb315e402e842030ec24602b0))
+* **scaffold-init:** spec 016 slices 01+02 — scaffold-mode (skills/agents + hooks) ([#6](https://github.com/ramboz/jig/issues/6)) ([ba94a2f](https://github.com/ramboz/jig/commit/ba94a2fc89ab65c5725d52aba7e3eef092f80f99))
+* **scaffold-init:** spec 016-03 — scaffold-mode default-on + dual-mode docs ([#9](https://github.com/ramboz/jig/issues/9)) ([528b2f6](https://github.com/ramboz/jig/commit/528b2f6acafaa122bf0718928ba61624c6b19e3b))
+* **spec-workflow:** revive slice 003-03 as reserve-spec-on-main (READY_FOR_REVIEW) ([b5f528d](https://github.com/ramboz/jig/commit/b5f528df30f1b5b18d5e5ec4f346ff94ff47dc29))
+* **spec-workflow:** spec 015 — structured-lifecycle-metadata ([#7](https://github.com/ramboz/jig/issues/7)) ([b518927](https://github.com/ramboz/jig/commit/b5189271b09e5cb16748ab96c3fc8299be7cc2af))
+* **spec-workflow:** workflow.py new &lt;slug&gt; reserves spec numbers on origin/main (slice 003-03) ([e9dd318](https://github.com/ramboz/jig/commit/e9dd31833e082d26165050d1bf5c976fbc7faa45))
+
+
+### Bug Fixes
+
+* **scaffold-init:** refuse-on-unmanaged-hooks safety check before filesystem mutation ([#10](https://github.com/ramboz/jig/issues/10)) ([86a2bd6](https://github.com/ramboz/jig/commit/86a2bd6914a722d03da6b8f4eb307f3a7cfc5656))
+* **slice-land:** make ExecuteDryRunTests branch-independent ([#5](https://github.com/ramboz/jig/issues/5)) ([3c25549](https://github.com/ramboz/jig/commit/3c25549e7ac6880029b564e446ff9574bb99211e))
+* **spec-workflow:** prevent parse_existing_notes from gluing adjacent table rows ([cdf036d](https://github.com/ramboz/jig/commit/cdf036dde1f819f156cae0890243e3d995553480))
+
+
+### Documentation
+
+* **memory:** refresh Tier 1 glossary entry for built skills ([36ac94d](https://github.com/ramboz/jig/commit/36ac94d31aefda0c1b47f3a5627f5f515e661de2))
+* **readme:** add "Why jig exists" motivation section ([#11](https://github.com/ramboz/jig/issues/11)) ([c767932](https://github.com/ramboz/jig/commit/c7679327b99bfe666c2d82b5b32e6a2047b218bb))
+* **readme:** fix Claude Desktop plugin install steps ([8562299](https://github.com/ramboz/jig/commit/85622997be1c42d349c3848045b6efb6c108fe66))
+* **spec-workflow:** post-spec-015 close-out — SKILL.md, memory, deferred slices, conventions ([#8](https://github.com/ramboz/jig/issues/8)) ([5f00801](https://github.com/ramboz/jig/commit/5f00801ba1b12577bb0ec8110943b9829cb1d5d9))
+
 ## [1.0.0](https://github.com/ramboz/jig/compare/v0.1.0...v1.0.0) (2026-05-15)
 
 
