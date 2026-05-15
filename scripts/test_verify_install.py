@@ -32,7 +32,7 @@ def _make_fake_plugin_root(tmpdir: Path) -> Path:
     (tmpdir / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps(
             {
-                "name": "jig-dev",
+                "name": "jig",
                 "owner": {"name": "ramboz"},
                 "plugins": [{"name": "jig", "source": "./"}],
             }

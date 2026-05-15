@@ -46,8 +46,8 @@ Subagents are defined by what context they need isolated from, not by job title.
 
 As of [spec 011-01 (plugin-self-install)](specs/011-plugin-self-install/spec.md),
 all three are reachable as real `subagent_type` values when jig is installed
-as a Claude Code plugin (the `jig-dev` local marketplace or any future
-public install). Pre-spec-011, every caller fell back to
+as a Claude Code plugin (the bundled `jig` marketplace — renamed from
+`jig-dev` in slice 013-04 — or any future public install). Pre-spec-011, every caller fell back to
 `subagent_type: "general-purpose"`. Slice 011-02 added
 `review.py subagent-type` so SKILL.md's bash recipe picks the real
 `reviewer` deterministically when installed and degrades to

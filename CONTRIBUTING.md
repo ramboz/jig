@@ -14,7 +14,7 @@ change to jig starts with a spec.
 The repo ships a marketplace descriptor at
 [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)
 that registers this checkout as a single-plugin marketplace named
-`jig-dev`. Installing from it is equivalent to installing jig from
+`jig`. Installing from it is equivalent to installing jig from
 source, but it exercises the same plugin-resolution path an external
 user would hit, so the three subagent definitions under
 [`agents/`](agents/) become reachable as `subagent_type` values.
@@ -25,7 +25,7 @@ From a Claude Code session at the repo root:
 
 ```text
 /plugin marketplace add .
-/plugin install jig@jig-dev
+/plugin install jig@jig
 ```
 
 **Restart Claude Code (or open a fresh session) after install.**
@@ -93,8 +93,8 @@ restriction, which is the whole point of the dogfood.
 To remove the local dev install:
 
 ```text
-/plugin uninstall jig@jig-dev
-/plugin marketplace remove jig-dev
+/plugin uninstall jig@jig
+/plugin marketplace remove jig
 ```
 
 After this, `subagent_type: "reviewer"` and friends will fall back to
@@ -125,8 +125,8 @@ The refresh recipe (from a Claude Code session, with your jig checkout
 as the current dir):
 
 ```text
-/plugin uninstall jig@jig-dev
-/plugin install jig@jig-dev
+/plugin uninstall jig@jig
+/plugin install jig@jig
 ```
 
 If you originally installed via the graphical plugin manager rather
@@ -156,6 +156,22 @@ python3 -m unittest discover -s scripts -p "test_*.py"
 
 When you add a new skill or top-level `scripts/`-style dir, make sure
 its tests are discoverable by the same pattern.
+
+## Versioning
+
+The plugin's published version lives in
+[`.claude-plugin/plugin.json`](.claude-plugin/plugin.json)'s `version`
+field. **Do not edit it by hand.** It is managed by
+[release-please](https://github.com/googleapis/release-please-action):
+every merged release PR bumps the field via the
+`extra-files` directive in
+[`.github/release-please-config.json`](.github/release-please-config.json),
+in lockstep with the matching tag and CHANGELOG entry.
+
+The `release-please-manifest.json` tracks the last *released* version
+(seeded at `0.1.0` so the first release-please PR can force `v1.0.0`
+via `release-as`). After v1.0.0 lands, the manifest and `plugin.json`
+both advance together on every subsequent release.
 
 ## Releasing
 

@@ -737,7 +737,7 @@ MissingLicenseWarningTests).
 
 ## Slice 013-04 — marketplace-rename-and-docs
 
-**STATUS: READY_FOR_IMPLEMENTATION**
+**STATUS: RECONCILED**
 
 **Goal:** Rename the marketplace from `jig-dev` to `jig` (public-facing
 canonical name), rewrite README's Installation section to document the
@@ -819,19 +819,89 @@ README (public docs), CONTRIBUTING.md (contributor docs), LICENSE
 
 **Definition of Done:**
 
-- [ ] 013-03 DONE.
-- [ ] `.claude-plugin/marketplace.json` renamed.
-- [ ] README.md install section rewritten per AC #2.
-- [ ] CONTRIBUTING.md updated per AC #4.
-- [ ] LICENSE committed.
-- [ ] `scripts/build_release_zip.py` (or its include list)
+- [x] 013-03 DONE.
+- [x] `.claude-plugin/marketplace.json` renamed.
+- [x] README.md install section rewritten per AC #2.
+- [x] CONTRIBUTING.md updated per AC #4.
+- [x] LICENSE committed.
+- [x] `scripts/build_release_zip.py` (or its include list)
   references `LICENSE`.
-- [ ] `scripts/test_validate_manifests.py` updated per AC #7.
-- [ ] Full test suite green.
+- [x] `scripts/test_validate_manifests.py` updated per AC #7.
+- [x] Full test suite green.
 - [ ] Dogfood per AC #8 completed and recorded in deviation log.
-- [ ] Implementation review passed.
-- [ ] Deviation log written.
-- [ ] Reconciliation review passed.
+- [x] Implementation review passed.
+- [x] Deviation log written.
+- [x] Reconciliation review passed.
+
+### Deviation log (013-04)
+
+**1. Implementer was the main agent, not the real `jig:implementer`
+subagent.** Same shape as 013-01/02/03 §1 — TDD-light work (this slice
+was mostly documentation + rename, with one new test pin).
+
+**2. Implementation review came back `needs-changes` on first pass; the
+real `jig:reviewer` subagent caught three stale `jig-dev` references
+that the main-pass rename missed.**
+- `scripts/refresh-install.md:34-35` — the user-facing install/uninstall
+  recipe still said `jig@jig-dev`. **Blocking** — would break any
+  contributor following the runbook after the rename.
+- `docs/architecture.md:49` — prose said "the `jig-dev` local
+  marketplace." **Material but not blocking** — stale narrative.
+- `scripts/test_verify_install.py:35` — fake test-fixture marketplace
+  name still hardcoded `"jig-dev"`. **Cosmetic** — harmless but
+  noisy for grep-driven future renames.
+All three fixed in one pass. Refresh-install.md and architecture.md now
+say `jig`; architecture.md retains the historical context "renamed from
+`jig-dev` in slice 013-04" so the audit trail stays readable. Test
+fixture pinned to `"jig"`. Confirmation review returned `pass` on all
+three.
+
+**3. AC #6 — `_INCLUDE_FILES` already references LICENSE from 013-03.**
+Slice 013-03's `_warn_missing_optional_files` step (013-03 deviation
+§4) added LICENSE to the include list; 013-04 only committed the
+LICENSE file itself. Verified post-013-04 build: zip now has 64
+entries (was 63 pre-LICENSE), `LICENSE` is the first entry by sort
+order. No `WARN: optional file 'LICENSE'` line fires anymore.
+
+**4. AC #8 dogfood deferred to user post-merge.** The dogfood scenario
+requires installing jig in a fresh Claude Code session from the
+GitHub repo URL (`/plugin marketplace add ramboz/jig` +
+`/plugin install jig@jig`) and confirming at least one jig skill is
+discoverable. The implementer can't easily spawn a fresh session from
+inside the current one; per precedent in slice 011-01 §9 and slice
+012-01 §9, the user performs this verification post-merge and the
+result is recorded as a Close-out item. AC #8 is therefore
+**implementer-prepared, awaiting user confirmation**. The DoD
+"Dogfood per AC #8" checkbox stays unticked until the user records
+the result.
+
+**5. CONTRIBUTING.md "Versioning" section added.** Per AC #4, a new
+subsection landed above the existing "Releasing" section (added in
+013-02). Covers: the version lives in `plugin.json`, release-please
+manages it via `extra-files`, the manifest tracks last released
+version, `release-as: "1.0.0"` is single-use for the bootstrap.
+
+**6. README.md "Contributing" section gained a squash-merge call-out.**
+Per AC #3, the existing "Contributing" section now explicitly states
+that PRs are merged via squash-merge so release-please reads clean
+conventional-commit subjects, and points at the PR-title workflow
+introduced by slice 013-01.
+
+**7. Test count.** Pre-013-04 baseline: 540 (3 skipped). Post-013-04:
+541 (3 skipped). New test: 1 — `test_marketplace_name_is_jig` in
+`RealRepoIntegrationTests` (`scripts/test_validate_manifests.py`).
+The existing four `RealRepoIntegrationTests` cases would have passed
+with `jig-dev` too — this slice tightens the check.
+
+**8. Rollback name collision is a deliberate trade-off.** Renaming
+the marketplace from `jig-dev` to `jig` means the rollback command
+`/plugin marketplace remove jig` now refers to the same name a public
+user would have added via `/plugin marketplace add ramboz/jig`.
+Contributors who installed under the old `jig-dev` name should
+update their local install (or use `scripts/refresh-install.md` —
+already pointed at `jig@jig`) before relying on the rollback. Worth
+calling out for any maintainer who develops jig on multiple machines
+and needs to interop with pre-013-04 installs.
 
 ### Close-out (post-DONE)
 
@@ -840,6 +910,12 @@ README (public docs), CONTRIBUTING.md (contributor docs), LICENSE
   effectively complete.
 - [ ] Inbox entry "Public installability of jig" (if present) marked
   RESOLVED with a reference back to this spec.
+- [ ] **User-driven dogfood per AC #8** — fresh Claude Code session,
+  `/plugin marketplace add ramboz/jig` + `/plugin install jig@jig`,
+  confirm `/jig:scaffold-init` (or any other jig skill) is
+  discoverable. Result recorded here with timestamp. Only fires
+  after this PR merges to `main` (the marketplace.json rename
+  is on `main`).
 
 ---
 

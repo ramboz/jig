@@ -31,8 +31,8 @@ you want the installed plugin's runtime to use it, refresh.
 ### From a Claude Code session (recommended)
 
 ```text
-/plugin uninstall jig@jig-dev
-/plugin install jig@jig-dev
+/plugin uninstall jig@jig
+/plugin install jig@jig
 ```
 
 Then **exit the session and start a new one.** The available-agents

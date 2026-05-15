@@ -51,17 +51,37 @@ you've already invested in.
 
 ## Installation
 
-```bash
-# Via Claude Code plugin manager
-claude plugins install github:ramboz/jig
+### From this repository (Claude Code CLI)
+
+In a Claude Code session:
+
+```text
+/plugin marketplace add ramboz/jig
+/plugin install jig@jig
 ```
 
-> Not yet on the plugin marketplace. Install from source for now.
->
-> **Contributors:** see [CONTRIBUTING.md](CONTRIBUTING.md) for the local
-> dev install via the bundled `jig-dev` marketplace — it's the path that
-> makes the three subagents (`implementer` / `reviewer` / `architect`)
-> reachable while developing jig itself.
+This is the recommended path. The repo is itself a single-plugin
+marketplace — no separate registry is needed. Restart Claude Code (or
+open a fresh session) after install so the three subagents
+(`implementer` / `reviewer` / `architect`) become reachable as
+`subagent_type` values.
+
+### From a release zip (Claude Code Desktop)
+
+1. Download `jig-vX.Y.Z.zip` from the
+   [Releases page](https://github.com/ramboz/jig/releases).
+2. Drag the zip into the Desktop app's `/plugin` UI.
+
+For a one-shot session install via the CLI without a marketplace:
+
+```bash
+claude --plugin-dir path/to/jig-vX.Y.Z.zip
+```
+
+### From source (contributors)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
+workflow used during development.
 
 ## Getting started
 
@@ -91,6 +111,12 @@ docs/                            # Dev docs for jig itself (dogfooded workflow)
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for the local install + verify
 flow, then [docs/workflow.md](docs/workflow.md) for the spec lifecycle.
 Every change to jig starts with a spec.
+
+PRs are merged via **squash merge** so that release-please reads clean
+conventional-commit subjects on `main`. The `pr-title.yml` workflow
+enforces conventional-commit shape on PR titles
+(`feat(scope): …` / `fix(scope): …` / etc.). See CONTRIBUTING.md
+"Releasing" for the version-bump effect of each prefix.
 
 ## Status
 

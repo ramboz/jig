@@ -229,6 +229,21 @@ class RealRepoIntegrationTests(unittest.TestCase):
             msg=f"the real repo's manifests should validate; got:\n{out.getvalue()}",
         )
 
+    def test_marketplace_name_is_jig(self):
+        """Pins the slice 013-04 rename: marketplace must be `jig`, not `jig-dev`.
+
+        The public install command is `/plugin install jig@jig`. Reverting to
+        `jig-dev` would invalidate the README install path documented in
+        slice 013-04 AC #2.
+        """
+        data = json.loads(
+            (self.repo_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        self.assertEqual(
+            data.get("name"), "jig",
+            f"marketplace.json `name` must be 'jig' (post-013-04); got {data.get('name')!r}",
+        )
+
 
 # ---------------------------------------------------------------------------
 # CLI entry point
