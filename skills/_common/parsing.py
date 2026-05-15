@@ -8,6 +8,15 @@ against a user-supplied fragment. adr.py uses a divergent
 
 Helpers in this module:
   - find_slice_section(text, fragment) -> (start, end, label)
+  - parse_frontmatter(text) -> (fields, body_offset) — extracts a leading
+    `---\\n...\\n---` YAML-lite block from the head of a body (e.g. a
+    slice section's content, after the `## Slice ...` heading line).
+    Supports scalar values, flow-style lists `[a, b, c]`, and
+    block-style lists. Returns ({}, 0) when no block is present.
+  - set_frontmatter_field(text, key, value) -> new_text — idempotent
+    in-place field update. Adds the field at the end of an existing
+    block when missing. Creates a fresh block at the head of `text`
+    when absent. Lists serialized as flow style `[a, b]`.
 
 Callers wrap `SliceLookupError` to re-raise as their own user-facing
 error type (WorkflowError / ReviewError / LandError) so CLI messages
@@ -53,3 +62,160 @@ def find_slice_section(spec_text: str, slice_fragment: str):
     end = header.end() + (nxt.start() if nxt else len(rest))
     label = header.group(1).strip()
     return header.start(), end, label
+
+
+# ---------- frontmatter (slice 014-01) ----------
+
+# Matches a leading frontmatter block: `---\n<lines>\n---\n` at the very
+# start of `text` (after optional leading blank lines, since slice
+# sections begin with a newline after the `## Slice ...` header line).
+_FM_BLOCK_RE = re.compile(r"\A(\s*\n)?---\n(.*?)\n---\n", re.DOTALL)
+
+
+def _parse_scalar(raw: str) -> str:
+    """Strip surrounding quotes and inline `# comment` tails."""
+    s = raw.strip()
+    # Strip inline comment (best effort — does not handle quoted '#')
+    if "#" in s and not (s.startswith('"') or s.startswith("'")):
+        s = s.split("#", 1)[0].rstrip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        s = s[1:-1]
+    return s
+
+
+def _parse_flow_list(raw: str) -> list:
+    """Parse `[a, b, c]` into a list of stripped scalars. `[]` → []."""
+    inner = raw.strip()[1:-1].strip()
+    if not inner:
+        return []
+    return [_parse_scalar(p) for p in inner.split(",") if p.strip()]
+
+
+def parse_frontmatter(text: str) -> tuple:
+    """Extract a leading frontmatter block from `text`.
+
+    Returns ``(fields, body_offset)``:
+      - ``fields`` — dict mapping keys to values. Scalar fields are
+        strings; lists (flow or block) become Python lists of strings.
+        Empty/missing values are the empty string for scalars or
+        empty list for keys declared as block-list with no items.
+      - ``body_offset`` — number of bytes consumed by the frontmatter
+        block (including the trailing newline after the closing `---`).
+        0 when no block is present, so ``text[body_offset:]`` is the
+        body in both cases.
+
+    YAML-lite: tolerates `key: value`, `key: [a, b, c]`, and block-list
+    form `key:\\n  - a\\n  - b`. Unknown shapes are stored as raw
+    strings — the caller decides how to interpret. No PyYAML dependency.
+    """
+    m = _FM_BLOCK_RE.match(text)
+    if not m:
+        return {}, 0
+    body = m.group(2)
+    fields: dict = {}
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip() or line.lstrip().startswith("#"):
+            i += 1
+            continue
+        # Expect `key: rest` at column 0 (not indented — that's a list item).
+        if line.startswith((" ", "\t")):
+            i += 1
+            continue
+        if ":" not in line:
+            i += 1
+            continue
+        key, _, rest = line.partition(":")
+        key = key.strip()
+        rest = rest.strip()
+        if rest.startswith("["):
+            fields[key] = _parse_flow_list(rest)
+            i += 1
+            continue
+        if rest == "":
+            # Look ahead for block-list items.
+            items = []
+            j = i + 1
+            while j < len(lines):
+                nxt = lines[j]
+                if not nxt.strip():
+                    j += 1
+                    continue
+                stripped = nxt.lstrip()
+                if stripped.startswith("- "):
+                    items.append(_parse_scalar(stripped[2:]))
+                    j += 1
+                    continue
+                break
+            if items:
+                fields[key] = items
+                i = j
+                continue
+            # Truly empty scalar.
+            fields[key] = ""
+            i += 1
+            continue
+        fields[key] = _parse_scalar(rest)
+        i += 1
+    return fields, m.end()
+
+
+def _serialize_list(values: list) -> str:
+    """Flow-style: `[a, b, c]` with no quoting (jig deps are slugs)."""
+    return "[" + ", ".join(values) + "]"
+
+
+def set_frontmatter_field(text: str, key: str, value) -> str:
+    """Idempotent in-place update of a single frontmatter field.
+
+    Behavior:
+      - If a frontmatter block exists AND the key is present: replace
+        the value on the existing `key:` line. Block-list form is
+        rewritten to flow style (jig's canonical shape).
+      - If a frontmatter block exists AND the key is absent: append
+        the field at the end of the block (before the closing `---`).
+      - If no frontmatter block exists: create one at the head of
+        `text` containing just this field.
+
+    `value` may be a string or a list of strings.
+    """
+    if isinstance(value, list):
+        serialized = _serialize_list(value)
+    else:
+        serialized = str(value)
+
+    m = _FM_BLOCK_RE.match(text)
+    if not m:
+        block = f"---\n{key}: {serialized}\n---\n"
+        return block + text
+
+    body = m.group(2)
+    lines = body.splitlines()
+    # Locate existing key line (at column 0, `<key>:` prefix).
+    key_re = re.compile(r"^" + re.escape(key) + r":\s*(.*)$")
+    idx = None
+    for i, line in enumerate(lines):
+        if line.startswith((" ", "\t")):
+            continue
+        if key_re.match(line):
+            idx = i
+            break
+    if idx is None:
+        new_body = body + "\n" + f"{key}: {serialized}"
+    else:
+        # Replace the value on this line AND drop any block-list
+        # continuation lines (indented `- item` rows).
+        new_lines = lines[:idx]
+        new_lines.append(f"{key}: {serialized}")
+        j = idx + 1
+        while j < len(lines) and (lines[j].startswith((" ", "\t"))
+                                  and lines[j].lstrip().startswith("- ")):
+            j += 1
+        new_lines.extend(lines[j:])
+        new_body = "\n".join(new_lines)
+
+    leading = m.group(1) or ""
+    new_block = f"{leading}---\n{new_body}\n---\n"
+    return new_block + text[m.end():]
