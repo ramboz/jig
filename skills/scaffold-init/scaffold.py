@@ -77,6 +77,13 @@ class AlreadyScaffoldedError(RuntimeError):
     """Raised when target already has a scaffold.json — refuses to overwrite."""
 
 
+class UnmanagedHooksError(RuntimeError):
+    """Raised by slice 016-02 when `.claude/settings.json` already exists with
+    hooks present, but no jig-managed marker on any of them. Same safety
+    stance as AlreadyScaffoldedError — refuses to merge silently. `--force`
+    is the documented escape hatch."""
+
+
 class LooksAlreadySpecDrivenError(RuntimeError):
     """Raised when target has no scaffold.json but ≥3 of the four migrate
     triggers (specs-or-slices, decisions-or-adrs, workflow.md,
@@ -490,6 +497,140 @@ def _copy_skill_dir(src: Path, dst: Path) -> None:
             target_path.write_bytes(entry.read_bytes())
 
 
+# Marker stamped on every jig-managed hook entry in `.claude/settings.json`.
+# Used by both the idempotent re-run path (replace-in-place rather than
+# duplicate) and the AC #4 safety check (an existing settings.json with hooks
+# but no jig marker is "managed by someone else" — refuse to merge without
+# --force).
+_JIG_HOOK_MARKER = {"managed_by_jig": True}
+
+# Source-of-truth hook events for the project-scoped registration.
+# Mirrors hooks/hooks.json shape exactly, with only the command-path rewrite.
+_PLUGIN_HOOK_SCRIPT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+_PROJECT_HOOK_SCRIPT_PREFIX = "${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/"
+
+
+def _is_jig_managed(entry: dict) -> bool:
+    """An entry counts as jig-managed iff its `metadata.managed_by_jig` is
+    truthy. Stable across re-runs."""
+    return bool((entry.get("metadata") or {}).get("managed_by_jig"))
+
+
+def _rewrite_hook_command(command: str) -> str:
+    """Rewrite a single hook command's `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/`
+    prefix to `${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/`. Hooks scripts
+    themselves use `$CLAUDE_PROJECT_DIR` internally (audit-confirmed), so
+    only the dispatch path needs rewriting."""
+    return command.replace(_PLUGIN_HOOK_SCRIPT_PREFIX,
+                           _PROJECT_HOOK_SCRIPT_PREFIX)
+
+
+def _build_jig_hook_entries(plugin: Path) -> dict:
+    """Read `plugin/hooks/hooks.json` and produce a dict keyed by event name
+    of hook entries with:
+      - command paths rewritten to `${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/`
+      - a `metadata: {managed_by_jig: true}` marker on every entry
+      - matchers, timeouts, async flags, and inner shape carried over verbatim
+    """
+    source = json.loads((plugin / "hooks" / "hooks.json").read_text())
+    out: dict = {}
+    for event, entries in (source.get("hooks") or {}).items():
+        new_entries = []
+        for entry in entries:
+            new_inner = []
+            for h in entry.get("hooks", []):
+                rewritten = dict(h)
+                if "command" in rewritten:
+                    rewritten["command"] = _rewrite_hook_command(rewritten["command"])
+                new_inner.append(rewritten)
+            new_entry = {}
+            if "matcher" in entry:
+                new_entry["matcher"] = entry["matcher"]
+            new_entry["hooks"] = new_inner
+            new_entry["metadata"] = dict(_JIG_HOOK_MARKER)
+            new_entries.append(new_entry)
+        out[event] = new_entries
+    return out
+
+
+def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
+    """Merge jig's hook registration into a (possibly pre-existing) settings
+    dict. Strategy: append-with-marker.
+
+    - Non-hook top-level fields pass through untouched.
+    - Per event: keep all non-jig-managed entries verbatim; replace any
+      jig-managed entries with the fresh set (idempotent re-run).
+    - Returns a new dict; does not mutate `existing`."""
+    merged: dict = dict(existing) if existing else {}
+    hooks = dict(merged.get("hooks") or {})
+    for event, fresh_entries in jig_hooks.items():
+        current = hooks.get(event) or []
+        survivors = [e for e in current if not _is_jig_managed(e)]
+        hooks[event] = survivors + fresh_entries
+    merged["hooks"] = hooks
+    return merged
+
+
+def _copy_hooks_and_register(plugin: Path, target: Path, *,
+                             force: bool = False) -> None:
+    """Slice 016-02 — copy hook scripts + write/merge `.claude/settings.json`.
+
+    - Copies every `plugin/hooks/scripts/jig-*.sh` to
+      `target/.claude/hooks/scripts/`, preserving the executable bit (0o755).
+    - Generates or merges `target/.claude/settings.json` with the five jig
+      hooks registered against project-relative paths.
+
+    Refuses (`UnmanagedHooksError`) when a pre-existing settings.json has
+    hook entries but none carry the jig marker, unless `force=True`."""
+    src_scripts = plugin / "hooks" / "scripts"
+    dst_scripts = target / ".claude" / "hooks" / "scripts"
+    dst_scripts.mkdir(parents=True, exist_ok=True)
+    if src_scripts.is_dir():
+        for script in sorted(src_scripts.glob("jig-*.sh")):
+            dst = dst_scripts / script.name
+            dst.write_bytes(script.read_bytes())
+            # AC #5 — executable bit set. We don't trust the umask; pin to
+            # 0o755 explicitly so the scaffolded tree behaves identically
+            # across umasks (e.g. 0o022 vs. 0o077).
+            os.chmod(dst, 0o755)
+
+    settings_path = target / ".claude" / "settings.json"
+    existing: dict = {}
+    if settings_path.is_file():
+        try:
+            existing = json.loads(settings_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"{settings_path} exists but is not valid JSON: {exc}"
+            ) from exc
+        # AC #4 — refuse when existing settings.json has hooks but no jig
+        # marker. The check is per-file ("are any of these hooks jig's?"),
+        # not per-event: if the user has any non-jig hook anywhere AND no
+        # jig marker anywhere, that's a fully-third-party-managed file.
+        existing_hooks = existing.get("hooks") or {}
+        has_any_hook = any(
+            (entries or []) for entries in existing_hooks.values()
+        )
+        has_jig_marker = any(
+            _is_jig_managed(entry)
+            for entries in existing_hooks.values()
+            for entry in (entries or [])
+        )
+        if has_any_hook and not has_jig_marker and not force:
+            raise UnmanagedHooksError(
+                f"{settings_path} already has hooks but none carry the "
+                "jig-managed marker — refusing to merge to avoid clobbering "
+                "third-party hook configuration. Pass --force to append "
+                "jig hooks alongside the existing entries, or remove the "
+                "file and re-run."
+            )
+
+    jig_hooks = _build_jig_hook_entries(plugin)
+    merged = _merge_settings(existing, jig_hooks)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(merged, indent=2) + "\n")
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides = None,
              with_machinery: bool = False) -> None:
@@ -600,6 +741,13 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # slice 016-03. Hooks are 016-02's job.
     if with_machinery:
         _copy_skills_and_agents(plugin, target)
+        # 7. Slice 016-02: copy hook scripts + write/merge
+        # .claude/settings.json so the SessionStart / UserPromptSubmit /
+        # PreToolUse / Stop hooks fire on the scaffolded install without
+        # any plugin component. `force` propagates so that --force also
+        # overrides the unmanaged-hooks safety check (same escape hatch
+        # as AlreadyScaffoldedError).
+        _copy_hooks_and_register(plugin, target, force=force)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -670,6 +818,9 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"{exc}\n")
         return 3
     except LooksAlreadySpecDrivenError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    except UnmanagedHooksError as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
     except Exception as exc:

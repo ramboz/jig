@@ -1,6 +1,6 @@
 {
   "spec": "docs/specs/016-scaffold-mode/spec.md",
-  "slice": "016-01",
+  "slice": "016-02",
   "files": [
     "skills/scaffold-init/scaffold.py",
     "skills/scaffold-init/test_scaffold_mode.py"

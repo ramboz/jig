@@ -405,7 +405,7 @@ regressions.
 
 ## Slice 016-02 — copy-hooks-and-register
 
-**STATUS: DRAFT**
+**STATUS: RECONCILED**
 
 **Goal:** With `--with-machinery`, `scaffold-init` also copies
 `hooks/scripts/jig-*.sh` into `target/.claude/hooks/scripts/`, and
@@ -483,15 +483,90 @@ sees jig hooks from project settings, not plugin).
 
 **Definition of Done:**
 
-- [ ] 016-01 DONE.
-- [ ] Hook copy + settings.json generation implemented in `scaffold.py`.
-- [ ] Merge-existing logic implemented (per AC #3) with deviation-log
+- [x] 016-01 DONE.
+- [x] Hook copy + settings.json generation implemented in `scaffold.py`.
+- [x] Merge-existing logic implemented (per AC #3) with deviation-log
   rationale on the chosen strategy.
-- [ ] `test_scaffold_mode.py` extended per AC #6.
-- [ ] Full test suite green.
-- [ ] Implementation review passed.
-- [ ] Deviation log written.
-- [ ] Reconciliation review passed.
+- [x] `test_scaffold_mode.py` extended per AC #6.
+- [x] Full test suite green.
+- [x] Implementation review passed.
+- [x] Deviation log written.
+- [x] Reconciliation review passed.
+
+### Deviation log (016-02)
+
+**1. Merge strategy decision (AC #3): append-with-marker.** Pre-
+existing `.claude/settings.json` is treated as follows. Non-hook
+top-level fields (`permissions`, `env`, etc.) pass through verbatim.
+Per hook event, non-jig entries survive untouched; jig-managed
+entries are replaced in place on re-run (so idempotent and never
+duplicates). Every jig-managed hook entry carries
+`metadata: {managed_by_jig: true}` — the marker that drives both the
+idempotent replace-in-place and the AC #4 refuse-on-unmanaged
+safety check. Rationale: refuse-then-instruct on any pre-existing
+settings.json would have forced devs with `permissions` or `env`
+already configured into `--force`, which is a needlessly hostile
+default. Append-with-marker preserves their config and still
+hard-stops against silent stomping of third-party hooks (AC #4).
+
+**2. AC #4 refuse-on-unmanaged-hooks is independent of merge.**
+Trigger: `.claude/settings.json` has hooks AND none carry
+`metadata.managed_by_jig`. In that case `scaffold.py` raises
+`UnmanagedHooksError`, exits with code 3, and the error text names
+`--force` as the documented escape. `--force` propagates from
+`scaffold()` through to `_copy_hooks_and_register` and bypasses
+the safety while still preserving the existing entries (they survive
+the merge — see test
+`test_existing_user_hooks_under_other_matcher_preserved`).
+
+**3. Idempotent re-run with `--force` chooses replace-in-place
+rather than skip-if-present.** Spec was silent on this detail.
+Replace-in-place ensures that a jig version bump that changes a
+hook script's matcher (or adds a new event handler) propagates on
+the next `--force` re-scaffold. Skip-if-present would have made
+that update silent and confusing. Confirmed by
+`test_idempotent_rerun_does_not_duplicate_jig_entries`.
+
+**4. AC #6 sub-case (i) tests are tighter than the spec wording.**
+Spec said the test asserts entries "referencing
+`${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/jig-*.sh`." Two tests
+together implement the stronger invariant:
+- `test_i_settings_json_registers_all_four_hook_events`
+  (test_scaffold_mode.py:406–411) asserts there are **exactly five**
+  such references — one per source hook script.
+- `test_settings_json_shape_mirrors_source_hooks_json`
+  (test_scaffold_mode.py:413–437) asserts the `matcher` / `timeout` /
+  `async` / `type` keys from `hooks/hooks.json` are preserved
+  per-entry.
+The combined invariant is in spirit with the spec's "shape mirrors
+`hooks/hooks.json`" language. Documented here so a future maintainer
+who adds a sixth hook script knows to update **both** tests in
+lockstep.
+
+**5. Reviewer SPECIFIC ISSUES — kept as-is.**
+- `test_idempotent_rerun_does_not_duplicate_jig_entries` only
+  checks jig-entry counts post-re-run; it doesn't independently
+  verify foreign-non-jig-entries-don't-duplicate-either.
+  Reviewer rated "today's coverage is sufficient for AC #3 but
+  the survivors-no-duplication invariant is untested." Kept as a
+  future tightening candidate.
+- `test_existing_user_hooks_under_other_matcher_preserved`
+  conflates AC #3 (jig hooks merge alongside) and AC #4 (force
+  escape) in one test. Reviewer rated "not a correctness bug."
+  Kept for compactness; both invariants are exercised.
+- `_copy_hooks_and_register` silently skips the copy loop when
+  `src_scripts` doesn't exist (guarded by `if src_scripts.is_dir():`
+  at scaffold.py:588) but still writes settings.json registering
+  paths to scripts that don't exist. This can't happen in the wild —
+  the plugin tree always has `hooks/scripts/` — but a future jig
+  refactor that removed that directory would silently produce a
+  broken scaffold. Reviewer's note recorded; a sanity-guard error
+  is a separate defensive ticket if it ever recurs.
+
+**6. Test counts.** Pre-016-02 baseline: 582 tests, 3 skipped.
+Post-016-02: 593 tests, 3 skipped — green. New tests: 11
+(`CopyHooksAndRegisterTests` + `MergeExistingSettingsTests`).
+No regressions.
 
 ### Close-out (post-DONE)
 
