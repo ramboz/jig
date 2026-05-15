@@ -139,7 +139,7 @@ asset attached to a GitHub Release.
 
 ## Slice 013-01 — ci-baseline
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** Every PR + every push to `main` runs the existing test suite
 (`scripts/run_tests.py`), the existing spec linter (`scripts/spec_lint.py`),
@@ -323,8 +323,8 @@ RealRepoIntegrationTests, GeneratorIterableTests, CliTests).
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache `Active specs` updated to reflect 013-01 DONE.
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache `Active specs` updated to reflect 013-01 DONE.
 - [ ] CI workflow runs green on the PR introducing 013-01 itself
   (dogfood — the first PR with CI is also the first PR that proves
   CI works). Record the CI run URL in the deviation log.
