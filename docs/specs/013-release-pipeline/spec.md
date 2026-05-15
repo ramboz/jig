@@ -521,7 +521,7 @@ direction; total 10 tests in this file across 4 test classes
 
 ## Slice 013-03 — release-zip-artifact
 
-**STATUS: READY_FOR_IMPLEMENTATION**
+**STATUS: RECONCILED**
 
 **Goal:** When release-please publishes a new GitHub Release (via
 slice 013-02), an additional CI job builds a `jig-vX.Y.Z.zip` from the
@@ -626,17 +626,103 @@ it, a smoke test that proves it, and a release asset upload via `gh`.
 
 **Definition of Done:**
 
-- [ ] 013-02 DONE.
-- [ ] `scripts/build_release_zip.py` committed.
-- [ ] `scripts/test_build_release_zip.py` committed.
-- [ ] `.github/workflows/release.yml` extended with the `package` job.
-- [ ] `.gitignore` updated.
-- [ ] Local smoke test passes (`python3 scripts/build_release_zip.py
+- [x] 013-02 DONE.
+- [x] `scripts/build_release_zip.py` committed.
+- [x] `scripts/test_build_release_zip.py` committed.
+- [x] `.github/workflows/release.yml` extended with the `package` job.
+- [x] `.gitignore` updated.
+- [x] Local smoke test passes (`python3 scripts/build_release_zip.py
   --version 1.0.0` + `verify_install.py` on the extracted tree).
-- [ ] Full test suite green.
-- [ ] Implementation review passed.
-- [ ] Deviation log written.
-- [ ] Reconciliation review passed.
+- [x] Full test suite green.
+- [x] Implementation review passed.
+- [x] Deviation log written.
+- [x] Reconciliation review passed.
+
+### Deviation log (013-03)
+
+**1. Implementer was the main agent, not the real `jig:implementer`
+subagent.** Same shape as 013-01 §1 and 013-02 §1 — TDD-first work in the
+main session.
+
+**2. Implementation review came back `needs-changes` on first pass; the
+real `jig:reviewer` subagent caught two material AC violations.**
+- **AC #7 unmet**: no local-runnable smoke-test command, no CONTRIBUTING.md
+  documentation for one.
+- **AC #2 LICENSE-warning missing**: builder silently skipped when LICENSE
+  was absent rather than emitting a warning per the AC.
+Fix described in §3–§4. Confirmation review pass returned `pass`.
+
+**3. Fix for AC #7 — added `--smoke-test ZIP` mode + documentation.**
+`build_release_zip.py` now exposes a `smoke_test(zip_path)` function and a
+`--smoke-test ZIP` CLI flag that extracts the named zip to a tempdir and
+runs `verify_install.run_headless` against the extracted tree, returning
+the underlying verify exit code (0/1/2). CONTRIBUTING.md gains a
+"Building and smoke-testing a release zip locally" section under the
+"Releasing" header (two-step recipe; AC explicitly allowed "or
+equivalent — implementer's call on the exact CLI shape"). The release.yml
+`package` job's smoke-test step now invokes the same
+`build_release_zip.py --smoke-test ...` command instead of an inline
+heredoc, so local and CI smoke-tests share one code path.
+
+**4. Fix for AC #2 — `_warn_missing_optional_files` warning.**
+Added a warning step that iterates `_INCLUDE_FILES` (README + LICENSE)
+and emits `WARN: optional file '<name>' not found at source root; ...`
+for each missing entry. The build still succeeds (exit 0) when LICENSE is
+absent, matching AC #2's "the builder warns but doesn't fail" wording.
+The warning self-silences once 013-04 lands LICENSE. Slightly more
+general than AC #2's LICENSE-specific phrasing — README would also
+trigger it if absent, but README is present so no extra noise.
+`MissingLicenseWarningTests` covers both present-LICENSE and
+absent-LICENSE branches.
+
+**5. Bug found and fixed during implementation — `hooks/scripts/*.sh`
+was silently excluded by an over-broad directory name filter.**
+Initial `_EXCLUDE_DIR_NAMES` included `"scripts"` to match the top-level
+dev-only `scripts/` directory. The walker checks every path component
+against this set, so `hooks/scripts/jig-*.sh` (the actual hook scripts
+invoked at runtime by `hooks/hooks.json`) was filtered out — silently
+breaking every hook event on the installed plugin. First builder run
+produced 32 entries; correct count is 63. Fixed by limiting
+`_EXCLUDE_DIR_NAMES` to defensive cache exclusions only (`__pycache__`,
+`.pytest_cache`, `.mypy_cache`) and relying on `_INCLUDE_ROOTS` to
+implicitly exclude top-level dev-only dirs (which are never walked).
+Comment at `build_release_zip.py:50-56` explains the rationale to deter
+future re-broadening. Added `test_hook_scripts_present` as regression
+test in `InclusionTests`.
+
+**6. Idempotency tightened to cross-platform — `ZipInfo.create_system`
+pinned to `3` (Unix).** Default `create_system` is platform-dependent
+(macOS = 3, Windows = 0). Without pinning, the zip built on a
+contributor's macOS laptop and the zip built on `ubuntu-latest` CI would
+differ in two bytes of metadata per entry. `IdempotencyTests` previously
+only checked same-machine reproducibility (the AC's literal requirement);
+the pin makes the stronger guarantee true. Documented for the next
+maintainer who wonders why the field is set explicitly.
+
+**7. CONTRIBUTING.md presents two separate commands instead of the AC's
+`&&`-chained one-liner.** AC #7's example was
+`python3 scripts/build_release_zip.py --version 1.0.0 && python3
+scripts/build_release_zip.py --smoke-test dist/jig-v1.0.0.zip`. The
+implemented documentation presents these as two separate code blocks
+because the second relies on the artifact produced by the first — easier
+to scan when read by a human, and the AC explicitly allowed "or
+equivalent — implementer's call." Worth flagging for transparency.
+
+**8. `_validate_output` post-write version check is defensive layering.**
+The pre-build check at the top of `build()` already enforces the
+`--version` ↔ `plugin.json` match before any I/O fires, so the
+post-write read of plugin.json from inside the produced zip is
+strictly dead code for the version-mismatch path. Kept anyway because
+it's cheap and protects against a hypothetical future where the
+builder mutates the manifest mid-build (today it doesn't; copy-only
+construction). Flagged by reviewer; intentionally kept.
+
+**9. Test counts.** Pre-013-03 baseline: 510 (3 skipped). Post-013-03:
+540 (3 skipped). New tests: 30 in `scripts/test_build_release_zip.py`
+across 9 test classes (BuildOutputTests, InclusionTests with
+`test_hook_scripts_present` regression, ExclusionTests, VersionMismatchTests,
+IdempotencyTests, ManifestContentTests, CliTests, SmokeTestTests,
+MissingLicenseWarningTests).
 
 ### Close-out (post-DONE)
 

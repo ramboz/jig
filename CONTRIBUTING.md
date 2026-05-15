@@ -212,6 +212,25 @@ release-as after v1.0.0` PR that removes the `release-as` field from
 `.github/release-please-config.json`. From that point on, version bumps
 follow conventional-commit semantics organically.
 
+### Building and smoke-testing a release zip locally
+
+The release workflow attaches a `jig-vX.Y.Z.zip` asset to every GitHub
+Release. You can build and verify the same zip locally before pushing
+any change to the build script:
+
+```bash
+# Build the zip (writes to ./dist/jig-v<version>.zip):
+python3 scripts/build_release_zip.py --version 1.0.0
+
+# Extract + run verify_install against the contents in one step:
+python3 scripts/build_release_zip.py --smoke-test dist/jig-v1.0.0.zip
+```
+
+The smoke-test prints the same four `PASS marketplace / manifest / agents
+/ skills` lines you'd see from `verify_install.py` against the
+checked-out repo. The CI `package` job runs the equivalent steps in
+the release workflow.
+
 ## Spec workflow (short version)
 
 1. Pick up the next `READY_FOR_IMPLEMENTATION` slice from
