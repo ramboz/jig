@@ -719,59 +719,63 @@ class ExecuteDryRunTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def _dry_run_in_process(self) -> tuple:
+        """Invoke execute in-process with the branch guard mocked away.
+
+        Subprocess invocation can't be used here: CI checks out the repo on
+        `main`, where the branch guard fires before the dry-run output is
+        produced. Mocking matches the pattern in ExecuteSafetyBranchTests.
+        """
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feature/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=Path(self.tmpdir)):
+            return _land.execute(self.spec, "007-02", mode="direct",
+                                  dry_run=True, target=Path(self.tmpdir))
+
     def test_dry_run_clean_spec_exits_zero(self):
         self.spec.write_text(
             _spec_with_slice("007-02 — test", "DONE")
         )
-        # --target <tmpdir> keeps tdd.py away from the full repo suite.
-        result = run_land("execute", "--mode", "direct", "--dry-run",
-                          "--target", self.tmpdir,
-                          str(self.spec), "007-02")
-        self.assertEqual(result.returncode, 0,
-                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+        report, code = self._dry_run_in_process()
+        self.assertEqual(code, 0, f"report: {report}")
 
     def test_dry_run_output_contains_dry_run_section(self):
         self.spec.write_text(
             _spec_with_slice("007-02 — test", "DONE")
         )
-        result = run_land("execute", "--mode", "direct", "--dry-run",
-                          "--target", self.tmpdir,
-                          str(self.spec), "007-02")
-        out = result.stdout
-        self.assertIn("Dry-run", out)
-        self.assertIn("git checkout main", out)
-        self.assertIn("git merge", out)
-        self.assertIn("git push origin main", out)
+        report, _ = self._dry_run_in_process()
+        self.assertIn("Dry-run", report)
+        self.assertIn("git checkout main", report)
+        self.assertIn("git merge", report)
+        self.assertIn("git push origin main", report)
 
     def test_dry_run_does_not_contain_execute_log(self):
         self.spec.write_text(
             _spec_with_slice("007-02 — test", "DONE")
         )
-        result = run_land("execute", "--mode", "direct", "--dry-run",
-                          "--target", self.tmpdir,
-                          str(self.spec), "007-02")
-        self.assertNotIn("Execute log", result.stdout)
+        report, _ = self._dry_run_in_process()
+        self.assertNotIn("Execute log", report)
 
     def test_dry_run_blocked_spec_exits_one(self):
         self.spec.write_text(
             _spec_with_slice("007-02 — test", "IN_PROGRESS",
                              include_deviation_log=True)
         )
-        result = run_land("execute", "--mode", "direct", "--dry-run",
-                          "--target", self.tmpdir,
-                          str(self.spec), "007-02")
-        self.assertEqual(result.returncode, 1)
-        self.assertNotIn("Dry-run", result.stdout)
+        report, code = self._dry_run_in_process()
+        self.assertEqual(code, 1)
+        self.assertNotIn("Dry-run", report)
 
     def test_dry_run_includes_worktree_suggestion(self):
         self.spec.write_text(
             _spec_with_slice("007-02 — test", "DONE")
         )
-        result = run_land("execute", "--mode", "direct", "--dry-run",
-                          "--target", self.tmpdir,
-                          str(self.spec), "007-02")
+        report, _ = self._dry_run_in_process()
         # worktree remove must appear as a suggestion, not a live command
-        self.assertIn("worktree remove", result.stdout)
+        self.assertIn("worktree remove", report)
 
 
 # -------------------- ExecuteSafetyTests (direct calls + mocking) --------------------
