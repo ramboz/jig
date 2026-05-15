@@ -488,5 +488,227 @@ class DeferralLanguageTests(unittest.TestCase):
         )
 
 
+# ----------------------------------------------------------------------------
+# Slice 017-03: Re-run protocol + hash field + per-section refresh
+# ----------------------------------------------------------------------------
+
+
+WORKED_RERUN = SKILL_DIR / "worked-example-rerun.md"
+CONVENTIONS_MD = REPO_ROOT / "docs" / "conventions.md"
+
+
+class RerunProtocolBodyTests(unittest.TestCase):
+    """AC #1 (017-03) — SKILL.md body contains a 'Re-run protocol'
+    section documenting the four-step flow + AC #5 (017-03) per-section
+    refresh."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+
+    def test_has_rerun_protocol_section(self):
+        # The body must have a section that names the re-run protocol
+        # (either as an H2 / H3 heading or as a bolded paragraph header).
+        self.assertRegex(
+            self.body, r"(?im)^#+\s+Re-run protocol|^\*\*Re-run protocol\*\*",
+            "SKILL.md body must contain a 'Re-run protocol' section "
+            "(slice 017-03 AC #1)",
+        )
+
+    def test_documents_four_step_flow(self):
+        # Four steps: read marker → compute hash → compare → surface
+        # decision. Pin the four step verbs.
+        body_lower = self.body.lower()
+        for verb in ("read", "compute hash", "compare", "surface"):
+            self.assertIn(
+                verb, body_lower,
+                f"SKILL.md body must mention '{verb}' as part of the "
+                f"re-run four-step flow (017-03 AC #1)",
+            )
+
+    def test_documents_three_choice_surface(self):
+        # AC #4 (017-03): warning offers refresh / skip / diff.
+        body_lower = self.body.lower()
+        for choice in ("refresh", "skip", "diff"):
+            self.assertIn(
+                choice, body_lower,
+                f"SKILL.md body must mention the '{choice}' choice for "
+                f"per-section divergence handling (017-03 AC #4)",
+            )
+
+    def test_documents_per_section_refresh(self):
+        # AC #5 (017-03): per-section refresh is documented.
+        self.assertRegex(
+            self.body, r"--section",
+            "SKILL.md body must document `--section` per-section refresh "
+            "(017-03 AC #5)",
+        )
+
+    def test_references_rerun_worked_example(self):
+        # AC #6 (017-03): worked-example transcript referenced from SKILL.md
+        self.assertIn(
+            "worked-example-rerun.md", self.body,
+            "SKILL.md body must reference worked-example-rerun.md "
+            "(017-03 AC #6)",
+        )
+
+
+class ConventionsHashFieldTests(unittest.TestCase):
+    """AC #2 (017-03) — docs/conventions.md marker convention specifies
+    the hash field format for filled sections."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = CONVENTIONS_MD.read_text() if CONVENTIONS_MD.is_file() else ""
+
+    def test_hash_field_documented(self):
+        # The "Elicitation slots" rule must now document the hash field.
+        rule_match = re.search(
+            r"\*\*Rule:\*\* Elicitation slots.*?(?=\*\*Rule:\*\*|\Z)",
+            self.body, flags=re.DOTALL,
+        )
+        self.assertIsNotNone(
+            rule_match,
+            "docs/conventions.md must contain the 'Elicitation slots' rule",
+        )
+        rule_body = rule_match.group(0)
+        # Hash field name + format.
+        self.assertIn(
+            "hash:", rule_body,
+            "The 'Elicitation slots' rule must document the `hash:` field "
+            "for filled sections (017-03 AC #2)",
+        )
+
+    def test_hash_format_specified(self):
+        # AC #2 (017-03): hash format is sha256:<first-12-hex>.
+        rule_match = re.search(
+            r"\*\*Rule:\*\* Elicitation slots.*?(?=\*\*Rule:\*\*|\Z)",
+            self.body, flags=re.DOTALL,
+        )
+        rule_body = rule_match.group(0) if rule_match else ""
+        self.assertRegex(
+            rule_body, r"sha256",
+            "The 'Elicitation slots' rule must specify 'sha256' as the "
+            "hash algorithm (017-03 AC #2)",
+        )
+        self.assertRegex(
+            rule_body, r"12.{0,10}hex",
+            "The 'Elicitation slots' rule must specify the hash prefix "
+            "length ('12 hex' chars) (017-03 AC #2)",
+        )
+
+    def test_017_03_hash_field_no_longer_says_added_in_017_03(self):
+        # Pre-017-03 convention rule said "hash field added in 017-03".
+        # After 017-03 lands, that future-tense phrasing should be gone.
+        rule_match = re.search(
+            r"\*\*Rule:\*\* Elicitation slots.*?(?=\*\*Rule:\*\*|\Z)",
+            self.body, flags=re.DOTALL,
+        )
+        rule_body = rule_match.group(0) if rule_match else ""
+        self.assertNotIn(
+            "added in 017-03", rule_body,
+            "The 'Elicitation slots' rule must no longer say "
+            "'added in 017-03' — that's the pre-017-03 deferral note. "
+            "After 017-03 lands, the hash field is documented directly.",
+        )
+
+
+class SkillMdStalenessRegressionTests(unittest.TestCase):
+    """Slice 017-03 reviewer-driven regression pin (per learnings.md
+    "Mid-implementation reshape leaves stale future-tense prose"). Each
+    landing of a deferred slice should not leave behind sentences that
+    describe the now-shipped behavior as deferred.
+
+    Scope extended (reconciliation reviewer §7): test sweeps both
+    SKILL.md AND docs/conventions.md, because the first reconciliation
+    pass found a stale "017-03's re-run mechanics will detect" in
+    conventions.md that the SKILL.md-only test missed."""
+
+    STALE_PHRASES = [
+        "once that ships",
+        "Once slice 017-03 ships",
+        "Today (017-02) the skill is first-run only",
+        "Re-runs are 017-03's job",
+        "017-03 will detect",
+        "017-03 will add",
+        "017-03 adds re-run mechanics",
+        "added in 017-03",
+    ]
+
+    SURFACES = {
+        "SKILL.md": SKILL_MD,
+        "docs/conventions.md": CONVENTIONS_MD,
+    }
+
+    def test_no_017_03_future_tense_phrasing(self):
+        for label, path in self.SURFACES.items():
+            text = path.read_text() if path.is_file() else ""
+            for phrase in self.STALE_PHRASES:
+                self.assertNotIn(
+                    phrase, text,
+                    f"{label} must not contain pre-017-03 future-tense "
+                    f"phrasing '{phrase}' — pattern documented in "
+                    f"docs/memory/learnings.md 'Mid-implementation reshape "
+                    f"leaves stale future-tense prose'",
+                )
+
+    def test_describes_rerun_as_shipped(self):
+        # Positive bound: SKILL.md must describe the re-run protocol as
+        # part of the skill's current behavior (not future work).
+        skill_text = SKILL_MD.read_text() if SKILL_MD.is_file() else ""
+        self.assertIn(
+            "re-run protocol", skill_text.lower(),
+            "SKILL.md must describe the Re-run protocol as current behavior",
+        )
+
+
+class WorkedExampleRerunTests(unittest.TestCase):
+    """AC #6 (017-03) — worked-example transcript demonstrates divergence
+    detection end-to-end."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = WORKED_RERUN.read_text() if WORKED_RERUN.is_file() else ""
+
+    def test_file_exists(self):
+        self.assertTrue(
+            WORKED_RERUN.is_file(),
+            f"worked-example-rerun.md must exist at {WORKED_RERUN} "
+            "(017-03 AC #6)",
+        )
+
+    def test_shows_divergence_detection(self):
+        text_lower = self.text.lower()
+        # The transcript must show: a section gets manually edited;
+        # the skill detects divergence; the skill warns; the user
+        # chooses refresh / skip / diff; the section is refreshed
+        # or kept; the hash updates.
+        for cue in ("hash", "diverge", "manual edit", "warn"):
+            self.assertIn(
+                cue, text_lower,
+                f"worked-example-rerun.md must demonstrate '{cue}' "
+                f"as part of the divergence detection flow (017-03 AC #6)",
+            )
+
+    def test_shows_three_choice_resolution(self):
+        text_lower = self.text.lower()
+        for choice in ("refresh", "skip", "diff"):
+            self.assertIn(
+                choice, text_lower,
+                f"worked-example-rerun.md must show the '{choice}' choice "
+                f"(017-03 AC #6)",
+            )
+
+    def test_shows_hash_update_after_refresh(self):
+        # After refresh, the marker's hash should change. The worked
+        # example must show this end-to-end.
+        text_lower = self.text.lower()
+        self.assertRegex(
+            text_lower, r"hash.{0,200}(?:updat|new|chang)",
+            "worked-example-rerun.md must show hash update after refresh "
+            "(017-03 AC #6)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

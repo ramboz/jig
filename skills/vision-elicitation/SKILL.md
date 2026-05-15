@@ -11,8 +11,9 @@ description: >
   present, prefer it over this one (jig's version is a slim baseline). Does
   not defer to the generic built-in `init` skill. Do not use for: ad-hoc
   brainstorming with no `docs/product-vision.md` slot to write into;
-  rewriting vision content the user has already hand-edited (use the 017-03
-  re-run path with edit detection once that ships); spec authoring (use
+  silently overwriting vision content the user has already hand-edited
+  (the re-run protocol's divergence detection handles that — see the
+  Re-run protocol section below); spec authoring (use
   `/jig:spec-workflow`); seeding ADRs for already-named decisions (use
   `/jig:adr-workflow new`).
 user-invocable: true
@@ -105,10 +106,15 @@ rendered answers via the Edit tool. The per-section flow is:
    sections; each lists 1–4 questions plus optional follow-ups.
 2. **Detect existing markers.** Open the project's
    `docs/product-vision.md` and `docs/architecture.md`. Find each
-   section's `<!-- elicited: ... -->` marker. Today (017-02): only
-   sections with `status: unfilled` are candidates for elicitation;
-   `status: filled` or `status: skipped` sections are passed over.
-   (Slice 017-03 adds re-run mechanics with hash-based edit detection.)
+   section's `<!-- elicited: ... -->` marker. Branch on the
+   `status:` value:
+   - `unfilled` → elicit (this is the first-run case).
+   - `filled` → run the Re-run protocol below (hash check; warn on
+     divergence).
+   - `skipped` → offer fresh Q&A. The user explicitly skipped this
+     section previously; a re-run is the natural moment to revisit
+     it. No hash check is performed (skipped sections have no
+     canonical body to compare against).
 3. **For each candidate section, ask the questions in order.** Let the
    user answer, skip, or come back later. A user can answer "skip" to
    transition the section to `status: skipped` without filling it.
@@ -195,6 +201,76 @@ Two annotated transcripts ship with this skill:
   YarnFinder's bespoke concepts (Data sourcing, Recommended slice
   order, prioritized backlog) map to the template's slots. Two
   shapes keep the question set honest.
+- [`worked-example-rerun.md`](worked-example-rerun.md) — runs the
+  elicitation a *second time* against jig's vision doc, with one
+  section manually edited between runs. Demonstrates the re-run
+  protocol's divergence detection + the three-choice resolution
+  (refresh / skip / diff) end-to-end. Required reading for any
+  re-run invocation.
+
+## Re-run protocol
+
+Slice 017-03 added re-run mechanics. When a section's marker is
+`status: filled` and the user invokes the skill again, the skill
+must detect whether the section body has been hand-edited since
+last elicitation. If it has, the skill warns before overwriting.
+
+The protocol is four steps per section:
+
+1. **Read** the section's marker comment. Three states matter:
+   - `status: unfilled` → eligible for elicitation, no hash check needed
+   - `status: skipped` → offer fresh Q&A. A re-run is the natural
+     moment to revisit a previously-skipped section; no hash check
+     applies (skipped sections have no canonical body).
+   - `status: filled / hash: sha256:<12hex>` → run the next three steps
+2. **Compute hash** of the section's current body (bytes between the
+   marker line and the next H2 heading; whitespace-trimmed at both
+   ends; SHA-256, first 12 hex characters of the digest).
+3. **Compare** the computed hash to the marker's `hash:` field. If they
+   match, the section body is unchanged since last elicitation — safe
+   to re-elicit silently. If they diverge, the user has hand-edited
+   the section between runs.
+4. **Surface decision.** On divergence, the skill warns inline:
+   > *"Section `<H2 name>` has been manually edited since the last
+   > elicitation pass (hash mismatch). Refresh, skip, or diff?"*
+   Three choices:
+   - **refresh** — discard the hand-edits and re-run the Q&A for this
+     section. The new answer replaces the body; the marker's date +
+     hash are updated.
+   - **skip** — keep the hand-edits as-is. The marker is updated to
+     `status: filled` with today's date and the *new* hash (so future
+     re-runs see the hand-edited body as the new baseline). No Q&A
+     happens for this section in this run.
+   - **diff** — print a unified diff of the hand-edits against the
+     last-elicited body, then re-prompt with refresh / skip choices.
+
+### Per-section refresh
+
+A user can target a specific section explicitly via:
+
+```
+/jig:vision-elicit --section "Core problem"
+```
+
+This bypasses the divergence check for that section and forces a
+fresh Q&A. Useful when the user knows they want to redo a section
+and doesn't want to see the warning. Section name matching is
+case-insensitive substring match against the template H2 names.
+
+### Silent path: no edits, no surprises
+
+If no sections have hand-edits (all hashes match), the re-run is
+silent — only sections still `unfilled` get elicited. This is the
+common case after a brief gap (re-run today's elicitation tomorrow
+to fill the sections that were skipped).
+
+### Implementation note
+
+The skill computes the hash inline using `hashlib.sha256`. There is no
+`.py` helper for this — same judgment-only shape as the rest of the
+skill. The hash algorithm + prefix length are fixed by
+[`docs/conventions.md`](../../docs/conventions.md) "Elicitation slots"
+rule; do not vary them.
 
 ## Gotchas
 
@@ -216,12 +292,14 @@ Two annotated transcripts ship with this skill:
   `adr-workflow new`), and does not enforce the conventions gate
   (that's `jig-spec-gate`). It only writes content into the slots that
   slice 017-01 introduced.
-- **Re-runs are 017-03's job.** Today (017-02) the skill is first-run
-  only. Sections already marked `status: filled` or `status: skipped`
-  are passed over; the skill does not detect or warn on manual edits
-  between runs. Once slice 017-03 ships, hash-based edit detection
-  lets the skill detect divergence and offer refresh / skip / diff
-  per-section.
+- **Re-runs are protected by hash-based divergence detection.** See
+  the "Re-run protocol" section above. The skill computes a SHA-256
+  hash of each `filled` section's body and stores it in the marker;
+  on re-run, it recomputes and compares before overwriting. If a user
+  has hand-edited a section between runs, the skill warns and offers
+  refresh / skip / diff before touching the body. Skipped sections
+  are offered fresh Q&A on re-run (no hash check — they have no
+  canonical body).
 - **Fallback mode** (if the routing-dogfood in spec 017-02's AC #9
   ever fails): the SKILL.md frontmatter gets `disable-model-invocation:
   true` and this skill becomes explicit-invocation-only

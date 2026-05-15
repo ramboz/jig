@@ -163,3 +163,48 @@ business logic, any spec the user hasn't been hands-on with, any spec where
 case-by-case judgment. If the pattern recurs >2 more times, consider a
 `workflow.py transition --reviewer user-in-session` flag that requires a
 non-empty `--review-summary` and records both in the slice frontmatter.
+
+## Mid-implementation reshape / reword leaves stale future-tense prose in adjacent stanzas
+
+Surfaced across 4 slices in spec 017's run: 017-01 §5(a) (AC #7 said
+"three slots" after the AC #4 reshape made it 4); 017-01 §8 (the very
+convention rule 017-01 introduced still listed the pre-reshape 3 stanzas
+in its How-to-apply line); 017-02 §2 (SKILL.md "byte-for-byte match"
+claim contradicted the reworded AC #4); 017-03's reconciliation cycle
+(three SKILL.md spots still said "017-03 ships" / "Today (017-02)" /
+"once that ships" after 017-03 *did* ship). Each instance was caught
+by an independent reviewer; each was a real defect that the
+implementer's own re-read missed.
+
+**Pattern:** when you reshape or reword an AC mid-slice, every sentence
+that *consumes* the AC needs an audit, not just the AC text. Sentences
+elsewhere in the spec, in adjacent skill files, in the very convention
+rule the slice is introducing, in worked-example transcripts — all are
+load-bearing references to the pre-reshape phrasing.
+
+**Pre-review checklist (informal):** before requesting implementation
+review on a slice with a mid-flight AC reshape or post-shipping
+landing, grep the diff for:
+
+- the pre-reshape AC text verbatim, if short enough to grep
+- "byte-for-byte" / "matches the hand-seeded" (reshape-specific exact wording)
+- "Today (017-NN)" / "Once slice 017-NN ships" / "added in 017-NN"
+- "will be added" / "once that ships" / "in a future slice"
+
+If anything pre-reshape survives in the deliverable, fix it before
+review. The reviewers will flag it otherwise — cheaper to catch inline.
+
+**Test-driven version:** for SKILL.md / convention-rule files where
+the staleness pattern is recurrent, add a regression test that pins
+post-reshape phrasing as both *required* and pre-reshape phrasing as
+*forbidden*. Example:
+`test_worked_examples_section_acknowledges_template_shape` in
+`skills/vision-elicitation/test_vision_elicitation_skill_surface.py`
+locks "template" required + "byte-for-byte" forbidden in the
+worked-examples section body.
+
+**When this matters most:** post-shipping landings (a deferred slice
+finally lands; prose elsewhere still describes it as deferred) and
+mid-flight AC reshapes (the AC text changes; sentences elsewhere in
+the spec / deliverables keep the old wording). Easy mistake to make
+twice; explicitly call it out in the slice's deviation log.
