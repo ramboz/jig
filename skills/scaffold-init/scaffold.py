@@ -633,16 +633,18 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides = None,
-             with_machinery: bool = False) -> None:
+             with_machinery: bool = True) -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
     already-scaffolded directory unless `force=True`. `overrides` carries the
     Q&A wizard answers from slice 001-05; None fields fall back to filesystem
     inference. Plugin templates live at `plugin/templates/`.
 
-    When `with_machinery=True` (slice 016-01), also copies `plugin/skills/*`
-    and `plugin/agents/*` into `target/.claude/skills/jig-*/` and
-    `target/.claude/agents/jig-*.md` respectively, rewriting SKILL.md path
-    placeholders. Default-off; flips to default-on in slice 016-03."""
+    When `with_machinery=True` (slice 016-01; default-on as of slice 016-03),
+    also copies `plugin/skills/*` and `plugin/agents/*` into
+    `target/.claude/skills/jig-*/` and `target/.claude/agents/jig-*.md`
+    respectively, rewriting SKILL.md path placeholders. The CLI's
+    `--plugin-only` flag sets this to `False` to preserve the pre-016-03
+    docs-only behavior."""
     target = target.resolve()
     template_root = plugin / "templates"
 
@@ -759,10 +761,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("target", help="target directory")
     p.add_argument("--force", action="store_true",
                    help="overwrite an already-scaffolded directory")
-    p.add_argument("--with-machinery", action="store_true",
-                   help="also copy skills/ and agents/ into target/.claude/ "
-                        "so the dev owns and can edit the runtime artifacts "
-                        "(slice 016-01; default-off until 016-03)")
+    # Slice 016-03 flipped the default ON. The two flags are mutually
+    # exclusive: --with-machinery is now redundant (default) but kept for
+    # documentation symmetry and back-compat with explicit slice 016-01/02
+    # invocations; --plugin-only is the new opt-out for users who want the
+    # old docs-only behavior.
+    machinery = p.add_mutually_exclusive_group()
+    machinery.add_argument(
+        "--with-machinery", dest="with_machinery",
+        action="store_true", default=True,
+        help="copy skills/, agents/, and hooks/ into target/.claude/ so the "
+             "dev owns and can edit the runtime artifacts (default-on as of "
+             "slice 016-03; flag is now redundant but kept for symmetry)",
+    )
+    machinery.add_argument(
+        "--plugin-only", dest="with_machinery",
+        action="store_false",
+        help="opt out of scaffold-mode: only scaffold docs/ and CLAUDE.md "
+             "into the target; leave skills/ and agents/ under the installed "
+             "${CLAUDE_PLUGIN_ROOT} (pre-016-03 default behavior)",
+    )
     p.add_argument("--runtime", default=None,
                    help="runtime/language answer from the Q&A wizard "
                         "(stored in scaffold.json.project_runtime)")

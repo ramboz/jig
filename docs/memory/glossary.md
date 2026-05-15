@@ -44,8 +44,7 @@ is the AI's default failure mode.
 ## Scaffolded install / scaffold mode
 
 The second of jig's two install shapes (the other being plugin install). Introduced by
-[spec 016-scaffold-mode](../specs/016-scaffold-mode/spec.md). `scaffold-init --with-machinery`
-(default-on once 016-03 lands) copies `skills/`, `agents/`, and `hooks/scripts/` into the
+[spec 016-scaffold-mode](../specs/016-scaffold-mode/spec.md). `scaffold-init` (default-on as of slice 016-03; opt out with `--plugin-only`) copies `skills/`, `agents/`, and `hooks/scripts/` into the
 target's `.claude/` directory under `jig-` prefixed names (e.g.
 `.claude/skills/jig-scaffold-init/SKILL.md`, `.claude/hooks/scripts/jig-context-check.sh`).
 SKILL.md path strings are rewritten from `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` to

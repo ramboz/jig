@@ -59,7 +59,7 @@
 | [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-03 — last-verified-staleness-check | **DONE** | +6 tests; `workflow.py stale [--days N]`; conjunctive criterion (age AND dep-changed); git-log preferred, mtime fallback |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-01 — copy-skills-and-agents | **DONE** | Positioning-recovery (audit-stage): give devs editable in-repo machinery |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-02 — copy-hooks-and-register | **DONE** | Generates `.claude/settings.json` w/ jig hook registration |
-| [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-03 — dogfood-and-dual-mode-docs | DRAFT | Flips scaffold-mode to default; rewrites README install paths |
+| [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-03 — dogfood-and-dual-mode-docs | **DONE** | Flips scaffold-mode to default; rewrites README install paths |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-04 — update-skill (DEFERRED) | DRAFT | Deferred; promotion gated on real friction or security-shaped fix |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-01 — TBD | DRAFT | Stub — closes the wizard gap (audit-stage); slice-level SPIDR pending promotion |
 

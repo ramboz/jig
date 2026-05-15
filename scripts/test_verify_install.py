@@ -47,6 +47,62 @@ def _make_fake_plugin_root(tmpdir: Path) -> Path:
     return tmpdir
 
 
+def _make_fake_scaffold_root(tmpdir: Path) -> Path:
+    """Build a minimum-shape scaffolded project that passes every
+    scaffold-mode check (slice 016-03 AC #4)."""
+    claude = tmpdir / ".claude"
+    # skills/
+    skills = claude / "skills"
+    skills.mkdir(parents=True)
+    (skills / "jig-scaffold-init").mkdir()
+    (skills / "jig-scaffold-init" / "SKILL.md").write_text("# scaffold-init\n")
+    # agents/
+    agents = claude / "agents"
+    agents.mkdir()
+    for name in ("implementer", "reviewer", "architect"):
+        (agents / f"jig-{name}.md").write_text(f"# {name}\n")
+    # hooks/scripts/
+    scripts = claude / "hooks" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "jig-context-check.sh",
+        "jig-memory-scan.sh",
+        "jig-spec-gate.sh",
+        "jig-task-capture.sh",
+        "jig-telemetry.sh",
+    ):
+        s = scripts / name
+        s.write_text("#!/bin/bash\n")
+        s.chmod(0o755)
+    # settings.json with at least one jig-managed hook entry
+    (claude / "settings.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        "bash "
+                                        "${CLAUDE_PROJECT_DIR}/.claude/"
+                                        "hooks/scripts/jig-context-check.sh"
+                                    ),
+                                }
+                            ],
+                            "metadata": {"managed_by_jig": True},
+                        }
+                    ]
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    return tmpdir
+
+
 # --------------------------------------------------------------------------
 # AC #1 — marketplace descriptor checked in (against jig's real repo)
 # --------------------------------------------------------------------------
@@ -206,6 +262,131 @@ class HeadlessRunnerTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
+# Slice 016-03 AC #4 — scaffold-mode checks (--mode scaffold)
+# --------------------------------------------------------------------------
+
+
+class ScaffoldModeChecksTests(unittest.TestCase):
+    """Each of the four scaffold-mode checks fires on a synthetic scaffold
+    tree, and each fails when its target artifact is missing."""
+
+    def test_scaffold_full_fixture_passes_all_checks(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            results = verify_install.run_all_scaffold_checks(project)
+            self.assertTrue(
+                all(passed for passed, _ in results),
+                f"scaffold-mode checks should pass on a full fixture; "
+                f"got {results!r}",
+            )
+
+    def test_scaffold_skills_check_fails_when_missing(self):
+        import tempfile
+        import shutil
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            shutil.rmtree(project / ".claude" / "skills")
+            passed, msg = verify_install.check_scaffold_skills_present(project)
+            self.assertFalse(passed)
+            self.assertIn("skill", msg.lower())
+
+    def test_scaffold_agents_check_fails_when_missing(self):
+        import tempfile
+        import shutil
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            shutil.rmtree(project / ".claude" / "agents")
+            passed, msg = verify_install.check_scaffold_agents_present(project)
+            self.assertFalse(passed)
+            self.assertIn("agent", msg.lower())
+
+    def test_scaffold_hook_scripts_check_fails_when_missing(self):
+        import tempfile
+        import shutil
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            shutil.rmtree(project / ".claude" / "hooks")
+            passed, msg = verify_install.check_scaffold_hook_scripts_present(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("hook", msg.lower())
+
+    def test_scaffold_settings_check_fails_when_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            (project / ".claude" / "settings.json").unlink()
+            passed, msg = verify_install.check_scaffold_settings_registration(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("settings", msg.lower())
+
+    def test_scaffold_settings_check_fails_without_jig_marker(self):
+        """A settings.json missing any managed_by_jig marker is not a
+        valid scaffold-mode registration."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            (project / ".claude" / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "SessionStart": [
+                                {
+                                    "hooks": [
+                                        {
+                                            "type": "command",
+                                            "command": (
+                                                "bash ./user-hook.sh"
+                                            ),
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                )
+            )
+            passed, msg = verify_install.check_scaffold_settings_registration(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("jig", msg.lower())
+
+    def test_run_headless_scaffold_returns_exit_zero(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            buf = io.StringIO()
+            rc = verify_install.run_headless_scaffold(project, out=buf)
+            self.assertEqual(rc, 0, msg=f"output was:\n{buf.getvalue()}")
+
+    def test_run_headless_scaffold_returns_two_when_not_scaffolded(self):
+        """A project with no .claude/ at all is `not scaffolded` — exit 2."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            buf = io.StringIO()
+            rc = verify_install.run_headless_scaffold(project, out=buf)
+            self.assertEqual(rc, 2)
+            self.assertIn(
+                "not scaffolded", buf.getvalue().lower(),
+                f"expected 'not scaffolded' message; got:\n{buf.getvalue()}",
+            )
+
+
+# --------------------------------------------------------------------------
 # Live-mode probe prompts (AC #4 live mode, AC #7 architect coverage)
 # --------------------------------------------------------------------------
 
@@ -246,6 +427,55 @@ class CliTests(unittest.TestCase):
             try:
                 rc = verify_install.main(
                     ["verify_install.py", "--plugin-root", str(root)]
+                )
+            finally:
+                sys.stdout = old_stdout
+            self.assertEqual(rc, 0, msg=f"output was:\n{captured.getvalue()}")
+
+    def test_cli_mode_plugin_runs_plugin_checks(self):
+        """Slice 016-03 AC #4 — `--mode plugin` runs the existing four
+        plugin-mode checks (today's default behavior)."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            captured = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = captured
+            try:
+                rc = verify_install.main(
+                    [
+                        "verify_install.py",
+                        "--plugin-root",
+                        str(root),
+                        "--mode",
+                        "plugin",
+                    ]
+                )
+            finally:
+                sys.stdout = old_stdout
+            self.assertEqual(rc, 0, msg=f"output was:\n{captured.getvalue()}")
+            self.assertIn("marketplace", captured.getvalue())
+
+    def test_cli_mode_scaffold_runs_scaffold_checks(self):
+        """Slice 016-03 AC #4 — `--mode scaffold` runs the new
+        scaffold-mode checks against a scaffolded `.claude/` tree."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            captured = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = captured
+            try:
+                rc = verify_install.main(
+                    [
+                        "verify_install.py",
+                        "--project-root",
+                        str(project),
+                        "--mode",
+                        "scaffold",
+                    ]
                 )
             finally:
                 sys.stdout = old_stdout

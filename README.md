@@ -59,7 +59,44 @@ you've already invested in.
 
 ## Installation
 
-### From this repository (Claude Code CLI)
+jig ships in two install shapes. Both are served from the same repo;
+pick the one that matches how you intend to relate to the machinery.
+
+### Scaffold into your repo (recommended — own the machinery)
+
+> **Scaffold to own and edit the machinery in version control.**
+
+The default `scaffold-init` flow copies jig's skills, agents, hooks,
+and helper scripts into your project's `.claude/` directory, so you
+can edit any `SKILL.md` or helper under version control and
+customize jig per-project. The Claude Code skill router auto-discovers
+the scaffolded skills as project-scoped — no plugin install required.
+
+In a Claude Code session at your project root:
+
+```text
+/jig:scaffold-init
+```
+
+This produces `<your-project>/.claude/skills/jig-*/`,
+`.claude/agents/jig-*.md`, `.claude/hooks/scripts/jig-*.sh`, and
+`.claude/settings.json` registering the five jig hooks against the
+project-local paths. The pre-016-03 docs-only behavior is preserved
+via `python3 scaffold.py --plugin-only <target>` if you want to
+combine scaffolded docs with a plugin-installed runtime.
+
+Verify the scaffold succeeded:
+
+```bash
+python3 scripts/verify_install.py --mode scaffold --project-root .
+```
+
+Expected output is four `PASS` lines and `summary: 4/4 passed`.
+
+### From this repository (Claude Code CLI — install-and-forget)
+
+> **Plugin install to install-and-forget; the machinery stays under
+> `${CLAUDE_PLUGIN_ROOT}` and upgrades centrally.**
 
 In a Claude Code session:
 
@@ -68,11 +105,10 @@ In a Claude Code session:
 /plugin install jig@jig
 ```
 
-This is the recommended path. The repo is itself a single-plugin
-marketplace — no separate registry is needed. Restart Claude Code (or
-open a fresh session) after install so the three subagents
-(`implementer` / `reviewer` / `architect`) become reachable as
-`subagent_type` values.
+The repo is itself a single-plugin marketplace — no separate registry
+is needed. Restart Claude Code (or open a fresh session) after install
+so the three subagents (`implementer` / `reviewer` / `architect`)
+become reachable as `subagent_type` values.
 
 ### From a release zip (Claude Code Desktop)
 
