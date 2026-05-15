@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0](https://github.com/ramboz/jig/compare/v1.1.0...v1.2.0) (2026-05-15)
+
+
+### Features
+
+* **migrate:** spec 018 slice 018-04 — split-slices subcommand + spec 017 dogfood ([62f5471](https://github.com/ramboz/jig/commit/62f54715f602abbaa1ad39a5101e5236738d7ada))
+* **slice-land:** spec 019 slice 019-01 — --no-deviation-log flag ([692c7d1](https://github.com/ramboz/jig/commit/692c7d11c0e105c0d681e6040f57b3a2465a09a1))
+* **spec-workflow:** spec 018 slice 018-01 — parser-foundation-and-dual-read ([86d30e0](https://github.com/ramboz/jig/commit/86d30e0a2b2ef6d28cb68cb2a443387787c23cae))
+* **spec-workflow:** spec 018 slice 018-02 — caller-recognition-and-fixtures ([057afe7](https://github.com/ramboz/jig/commit/057afe768ffeb2a7f6dc1495ac71e88baf9a5241))
+* **spec-workflow:** spec 018 slice 018-03 — scaffold-new-specs-as-file-per-slice ([7300743](https://github.com/ramboz/jig/commit/7300743b3129efa843a4361105635a9d620011c2))
+* **vision-elicitation:** spec 017-01 — vision template + arch reshape + product-vision.md seed ([#12](https://github.com/ramboz/jig/issues/12)) ([54e9251](https://github.com/ramboz/jig/commit/54e9251d02feb82ecbbe3951199535ff987c8ca6))
+* **vision-elicitation:** spec 017-02 — vision-elicitation skill (judgment-only) ([#14](https://github.com/ramboz/jig/issues/14)) ([bad832f](https://github.com/ramboz/jig/commit/bad832fdca848dec27a4e602a43d9356d083c6d4))
+* **vision-elicitation:** spec 017-03 — re-run protocol with hash-based edit detection ([#15](https://github.com/ramboz/jig/issues/15)) ([6db1c8c](https://github.com/ramboz/jig/commit/6db1c8c77e9656920a7c30c27440e526af186879))
+
+
+### Bug Fixes
+
+* **ci:** derive plugin version from plugin.json in build tests ([75a49aa](https://github.com/ramboz/jig/commit/75a49aab16d4b4909af05513d23fd3c60f5ebd4d))
+* **marketplace:** use git-subdir object format for source field ([51a7a12](https://github.com/ramboz/jig/commit/51a7a12943c97bafd0b3efd92a65a5a6b18455b4))
+
 ## [1.1.0](https://github.com/ramboz/jig/compare/v1.0.0...v1.1.0) (2026-05-15)
 
 
