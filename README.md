@@ -45,6 +45,14 @@ of what the user named it. The common location is
 The one carve-out is the bundled `review` skill — jig does not defer to
 that one (it stays below jig's baseline as the generic fallback).
 
+Second example: `/jig:arch-review` ships a slim four-section
+architecture / design-doc / RFC / ADR-draft review (summary / strengths
+/ concerns / open questions). Same category-based deferral: any
+user-installed skill whose description identifies it as handling
+architecture, design, RFC, or technical-design review wins. The pattern
+is reusable, not a one-off — `/jig:pr-review` and `/jig:arch-review`
+are the two current instances.
+
 This keeps jig opinionated about *workflow* (spec-driven, reviewer-gated,
 deterministic helpers) while staying out of the way of *judgment skills*
 you've already invested in.

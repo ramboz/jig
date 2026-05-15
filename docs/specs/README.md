@@ -50,3 +50,7 @@
 | [013-release-pipeline](013-release-pipeline/spec.md) | 013-02 — release-please-scaffold | **DONE** |  |
 | [013-release-pipeline](013-release-pipeline/spec.md) | 013-03 — release-zip-artifact | **DONE** |  |
 | [013-release-pipeline](013-release-pipeline/spec.md) | 013-04 — marketplace-rename-and-docs | **DONE** |  |
+| [014-arch-review](014-arch-review/spec.md) | 014-01 — arch-review-skill | **DONE** |  |
+| [014-arch-review](014-arch-review/spec.md) | 014-02 — arch-review-gather-helper | DRAFT |  |
+| [014-arch-review](014-arch-review/spec.md) | 014-03 — domain-specific-references | DRAFT |  |
+| [014-arch-review](014-arch-review/spec.md) | 014-04 — security-lens-integration | DRAFT |  |

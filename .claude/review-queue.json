@@ -1,25 +1,11 @@
 {
-  "spec": "docs/specs/008-migrate-existing-project/spec.md",
-  "slice": "008-01",
+  "spec": "docs/specs/014-arch-review/spec.md",
+  "slice": "014-01",
   "files": [
-    "skills/migrate/migrate.py",
-    "skills/migrate/test_migrate.py",
-    "skills/migrate/SKILL.md",
-    "skills/migrate/fixtures/tiny-validator/CLAUDE.md",
-    "skills/migrate/fixtures/tiny-validator/docs/workflow.md",
-    "skills/migrate/fixtures/tiny-validator/docs/architecture.md",
-    "skills/migrate/fixtures/tiny-validator/docs/decisions/adr-001-foo.md",
-    "skills/migrate/fixtures/tiny-validator/docs/decisions/adr-002-bar.md",
-    "skills/migrate/fixtures/tiny-validator/docs/slices/slice-01-thing.md",
-    "skills/migrate/fixtures/tiny-validator/docs/slices/slice-02-other.md",
-    "skills/migrate/fixtures/tiny-validator/docs/spikes/spike-01-investigation.md",
-    "skills/migrate/fixtures/tiny-validator/.claude/skills/custom-skill.md",
-    "skills/migrate/fixtures/greenfield/README.md",
-    "skills/migrate/fixtures/partial/docs/workflow.md",
-    "skills/migrate/fixtures/partial/docs/architecture.md",
-    "skills/migrate/fixtures/conflict/docs/decisions/0001-foo.md",
-    "skills/migrate/fixtures/conflict/docs/decisions/adr-0001-foo.md",
-    "skills/migrate/fixtures/conflict/docs/workflow.md",
-    "skills/migrate/fixtures/conflict/docs/architecture.md"
+    "skills/arch-review/SKILL.md",
+    "skills/arch-review/test_arch_review_skill_surface.py",
+    "CLAUDE.md",
+    "README.md",
+    "docs/specs/014-arch-review/spec.md"
   ]
 }
