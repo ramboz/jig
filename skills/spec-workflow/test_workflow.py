@@ -523,6 +523,84 @@ class DeferredLifecycleTests(unittest.TestCase):
         second = (self.target / "docs/specs/README.md").read_text()
         self.assertEqual(first, second)
 
+    def test_status_board_does_not_glue_adjacent_rows_across_tables(self):
+        """Regression: `parse_existing_notes`'s row regex used `\\s*` between
+        the status and notes cells, which could consume `\\n` and continue
+        matching `(.*?)\\|$` on the NEXT line. When the prior board had a
+        `## Deferred slices` table (3-cell rows), this glued the next
+        deferred row's content into the active row's Notes cell. Bug
+        symptom: lines in the regenerated README contained two `|...|`
+        rows mashed onto one physical line. Fix: tightened the inter-cell
+        `\\s*` to `[^\\S\\n]*` so the match cannot cross newlines.
+
+        This test seeds a board with one active + two deferred slices,
+        regenerates twice (so the second regen reads the first's output),
+        then asserts every `^| ... |$` line contains exactly 4 cells
+        (active row) OR 3 cells (deferred row) — never glued.
+        """
+        self._write_spec("900-alpha", "900-01 active", "IN_PROGRESS")
+        # Curate a note on the active row so we exercise preservation
+        # without the glue bug stomping it.
+        self._write_spec("900-alpha", "900-02 parked-a", "DEFERRED",
+                         trigger="When trigger A fires.")
+        self._write_spec("900-alpha", "900-03 parked-b", "DEFERRED",
+                         trigger="When trigger B fires.")
+        board_path = self.target / "docs/specs/README.md"
+
+        first = run_workflow("status-board", str(self.target))
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+
+        # Hand-curate a note on the active row so we can confirm it survives
+        # regen unaltered (and isn't replaced by glued-row content).
+        board_text = board_path.read_text()
+        marker = "| 900-01 active | IN_PROGRESS |  |"
+        replacement = "| 900-01 active | IN_PROGRESS | curated note here |"
+        self.assertIn(marker, board_text, "active row not found before curation")
+        board_path.write_text(board_text.replace(marker, replacement))
+
+        second = run_workflow("status-board", str(self.target))
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        final = board_path.read_text()
+
+        # Every `|`-prefixed line must have <=5 pipes (4 cells max) or
+        # exactly 4 pipes (3 cells, deferred table). Anything more means
+        # two rows got glued.
+        for line in final.splitlines():
+            if not line.startswith("|") or set(line.strip()) == {"|", "-"}:
+                continue  # skip separator rows
+            pipe_count = line.count("|")
+            self.assertIn(
+                pipe_count, (4, 5),
+                f"row has {pipe_count} pipes (expected 4 or 5) — glue bug "
+                f"resurfaced:\n  {line!r}",
+            )
+
+        # Spot-check: curated note survived regen unchanged.
+        self.assertIn(
+            "| 900-01 active | IN_PROGRESS | curated note here |", final,
+            "curated note on active row was not preserved across regen",
+        )
+
+        # Spot-check: deferred-table rows are NOT pulled into the active
+        # row's Notes cell. The active row's Notes must not contain a
+        # markdown link to another spec (which would be cross-row glue).
+        active_section = final.split("## Deferred slices")[0]
+        active_900_lines = [
+            ln for ln in active_section.splitlines()
+            if "900-01 active" in ln
+        ]
+        self.assertEqual(len(active_900_lines), 1)
+        self.assertNotIn(
+            "900-02", active_900_lines[0],
+            "active row's Notes cell contains content from a deferred row "
+            "(cross-row glue bug)",
+        )
+        self.assertNotIn(
+            "900-03", active_900_lines[0],
+            "active row's Notes cell contains content from a deferred row "
+            "(cross-row glue bug)",
+        )
+
 
 class StaleCheckTests(unittest.TestCase):
     """Slice 014-03: `workflow.py stale` lists items whose last_verified

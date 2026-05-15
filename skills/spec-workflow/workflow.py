@@ -395,9 +395,19 @@ def parse_existing_notes(existing: str) -> dict:
     board's table. Used to preserve curated Notes across regen — the workflow's
     most valuable per-row content (test counts, review state, links)."""
     notes_map = {}
-    # Match `| [spec-link]... | slice | status | notes |` rows; preamble + headers skipped
+    # Match `| [spec-link]... | slice | status | notes |` rows; preamble + headers skipped.
+    # Two constraints are load-bearing for not gluing adjacent rows together:
+    #   1. `[^\S\n]*` (horizontal whitespace only) between the status cell and
+    #      the notes cell — prevents `\s*` from consuming `\n` and continuing
+    #      the match onto the NEXT line when the current row has 3 cells (e.g.
+    #      rows from the `## Deferred slices` table, shape `| spec | slice |
+    #      trigger |`).
+    #   2. `[^|\n]*?` for the notes cell — rejects already-corrupted rows whose
+    #      notes cell contains pipes (the sign of a previously-glued row). Clean
+    #      notes never contain a raw `|` by convention (SKILL.md gotcha lists
+    #      `&#124;` as the escape).
     row_pattern = re.compile(
-        r"^\|\s*\[([^\]]+)\][^|]*\|\s*([^|]+?)\s*\|\s*[^|]+\|\s*(.*?)\s*\|\s*$",
+        r"^\|\s*\[([^\]]+)\][^|]*\|\s*([^|]+?)\s*\|\s*[^|]+\|[^\S\n]*([^|\n]*?)\s*\|\s*$",
         re.MULTILINE,
     )
     for m in row_pattern.finditer(existing):
