@@ -1375,5 +1375,144 @@ class ReserveSpecTests(unittest.TestCase):
         self.assertIn("Parallel-worktree collision", text)
 
 
+class MixedLayoutTransitionTests(unittest.TestCase):
+    """Slice 018-02 AC #2: `transition` writes to the slice file when the
+    slice lives in one; writes to spec.md when it's embedded. Same
+    command, layout-aware target."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-mixed-"))
+        # Slice 018-01 in its own file
+        self.slice_file = self.tmpdir / "slice-01-file-based.md"
+        self.slice_file.write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 018-01 — file-slice\n\n"
+            "**Goal:** placeholder.\n"
+        )
+        # Slice 018-02 embedded in spec.md
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec\n\n"
+            "## Slice 018-02 — embedded-slice\n\n"
+            "**STATUS: DRAFT**\n\n"
+            "**Goal:** placeholder.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_transition_writes_to_slice_file_not_spec_md(self):
+        spec_before = self.spec.read_text()
+        result = run_workflow(
+            "transition", str(self.spec), "018-01", "IN_PROGRESS",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Slice file's frontmatter updated
+        slice_after = self.slice_file.read_text()
+        self.assertIn("status: IN_PROGRESS", slice_after)
+        # spec.md UNCHANGED — the write must go to loc.path, not blindly spec_md
+        self.assertEqual(self.spec.read_text(), spec_before)
+
+    def test_transition_writes_to_spec_md_for_embedded_slice(self):
+        slice_before = self.slice_file.read_text()
+        result = run_workflow(
+            "transition", str(self.spec), "018-02", "IN_PROGRESS",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # spec.md changed — embedded slice's STATUS marker rewritten
+        spec_after = self.spec.read_text()
+        m = re.search(r"## Slice 018-02[^\n]*\n+\*\*STATUS:\s+(\w+)\*\*", spec_after)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "IN_PROGRESS")
+        # Slice file untouched
+        self.assertEqual(self.slice_file.read_text(), slice_before)
+
+
+class MixedLayoutDependencyValidationTests(unittest.TestCase):
+    """Slice 018-02 follow-up (reviewer §SPECIFIC ISSUES):
+    `_lookup_slice_status` and `_resolve_dep_path` must see file-per-slice
+    slices when resolving DONE-transition dependencies."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-deps-"))
+        # Dep slice lives in a sibling file, marked DONE.
+        dep_spec_dir = self.tmpdir / "docs/specs/050-deps"
+        dep_spec_dir.mkdir(parents=True)
+        (dep_spec_dir / "slice-01-prereq.md").write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified: 2026-05-15\n---\n\n"
+            "## Slice 050-01 — prereq\n\nBody.\n"
+        )
+        (dep_spec_dir / "spec.md").write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 050\n\n## Overview\n\nNote.\n"
+        )
+        # Consumer slice depends on it. Lives in spec.md, RECONCILED.
+        consumer_dir = self.tmpdir / "docs/specs/051-consumer"
+        consumer_dir.mkdir(parents=True)
+        self.consumer_spec = consumer_dir / "spec.md"
+        self.consumer_spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 051\n\n"
+            "## Slice 051-01 — consumes-prereq\n\n"
+            "---\nstatus: RECONCILED\ndependencies: [050-01]\nlast_verified:\n---\n\n"
+            "**Goal:** depends on 050-01.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_done_transition_finds_dep_in_slice_file(self):
+        """Pre-018-02 bug: dependency validation walked `## Slice` headers
+        inside spec.md only. A consumer slice whose `dependencies: [050-01]`
+        targets a slice that's been split out to `slice-01-prereq.md`
+        would be reported as 'slice not found' even though it IS DONE.
+        After the fix, the DONE transition succeeds."""
+        result = run_workflow(
+            "transition", str(self.consumer_spec), "051-01", "DONE",
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+
+
+class MixedLayoutStatusBoardTests(unittest.TestCase):
+    """Slice 018-02: status-board regen sees both layouts in one spec."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-board-mixed-"))
+        # Status-board requires the README.md target to already exist
+        # (it regenerates an existing board, doesn't create one from
+        # nothing). Stub one in.
+        (self.tmpdir / "docs/specs").mkdir(parents=True)
+        (self.tmpdir / "docs/specs/README.md").write_text(
+            "# Status board\n\n| Spec | Slice | Status | Notes |\n"
+            "|---|---|---|---|\n"
+        )
+        spec_dir = self.tmpdir / "docs/specs/099-demo"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "slice-01-from-file.md").write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 099-01 — alpha\n\nBody.\n"
+        )
+        (spec_dir / "spec.md").write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 099\n\n"
+            "## Slice 099-02 — beta\n\n**STATUS: DRAFT**\n\nBody.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_status_board_lists_both_layouts(self):
+        result = run_workflow("status-board", str(self.tmpdir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = (self.tmpdir / "docs/specs/README.md").read_text()
+        self.assertIn("099-01 — alpha", board)
+        self.assertIn("099-02 — beta", board)
+        # Status from each layout is read correctly
+        # Slice file → DONE; embedded → DRAFT
+        self.assertRegex(board, r"099-01 — alpha\s*\|\s*\*\*DONE\*\*")
+        self.assertRegex(board, r"099-02 — beta\s*\|\s*DRAFT")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -366,5 +366,48 @@ class ArchitectureNoteTests(unittest.TestCase):
         )
 
 
+class MixedLayoutResolutionTests(unittest.TestCase):
+    """Slice 018-02 AC #4: review.py resolves slice fragments correctly
+    against a mixed-layout spec dir (one slice in a sibling file, one
+    embedded in spec.md). Tests both shapes are equally findable from
+    the same `find_slice_label(spec_path, ...)` call."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-mixed-"))
+        # Slice 018-01 lives in a sibling file
+        (self.tmpdir / "slice-01-foo.md").write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 018-01 — alpha-via-file\n\n"
+            "**Goal:** Demonstrates file-per-slice resolution.\n"
+        )
+        # Slice 018-02 lives inside spec.md
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\nskill: spec-workflow\n---\n\n"
+            "# Spec 018\n\n## Overview\n\nStuff.\n\n"
+            "## Slice 018-02 — beta-via-section\n\n"
+            "**STATUS: IN_PROGRESS**\n\n"
+            "**Goal:** Demonstrates embedded resolution.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_label_resolves_from_slice_file(self):
+        result = run_review(
+            "implementation", str(self.spec), "018-01", "x.py",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("018-01 — alpha-via-file", result.stdout)
+
+    def test_label_resolves_from_embedded_section(self):
+        result = run_review(
+            "implementation", str(self.spec), "018-02", "x.py",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("018-02 — beta-via-section", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

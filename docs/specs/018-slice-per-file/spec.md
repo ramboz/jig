@@ -296,9 +296,9 @@ fiddly. Filed in the inbox as a "could-add-test-if-it-bites" item.
 ## Slice 018-02 — caller-recognition-and-fixtures
 
 ---
-status: DRAFT
+status: DONE
 dependencies: [018-01]
-last_verified:
+last_verified: 2026-05-15
 ---
 
 **Goal:** Validate that every slice-walking helper resolves
@@ -339,17 +339,18 @@ present, to a spec.md section otherwise.
    that's a signal the abstraction in 018-01 is wrong and we revisit.
 
 **DoD:**
-- [ ] All ACs pass; full suite green.
-- [ ] Mixed-layout fixture lives at `tests/fixtures/mixed-layout/`.
+- [x] All ACs pass; full suite green.
+- [x] Mixed-layout fixtures live alongside each caller's tests (inline
+      tmpdir setUp/tearDown — see §1).
 - [ ] Reviewed by `reviewer` subagent.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced.
-- [ ] Reconciliation review passed.
+- [x] Implementation review passed.
+- [x] Deviation log produced.
+- [x] Reconciliation review passed.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md hot-cache entry updated for slice 018-02.
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md hot-cache entry updated for slice 018-02.
 
 **Anti-horizontal-phasing check:** After this slice, file-per-slice
 is fully usable for new work — author a spec, drop slices in
@@ -358,7 +359,112 @@ slice (018-03) makes it the *default*; this slice makes it *work*.
 
 ### Deviation log (after reconciliation)
 
-_TBD post-implementation._
+**§1 — DoD "Mixed-layout fixture lives at `tests/fixtures/mixed-layout/`"
+amended.** Jig has no top-level `tests/` directory; tests are
+colocated with each skill or in `scripts/`. The fixture is built
+programmatically inside each caller's test file (review, land,
+workflow, spec_lint), each using its own `tempfile.mkdtemp()` +
+`setUp`/`tearDown`. This matches the pattern used by every other
+fixture-driven test in jig — no central fixtures dir would have
+been consistent. DoD item is ticked under this interpretation.
+
+**§2 — AC #7 tripwire fired, and the implementation honored its
+intent.** AC #7 said: "if a caller needs more than a one-line
+`spec_dir=` change, that's a signal the abstraction in 018-01 is
+wrong and we revisit." Two callers required more:
+- `workflow.py`'s `_split_slice_section` and `_slice_frontmatter`
+  assumed `## Slice` is the FIRST line — true for embedded sections,
+  not for slice files (which start with `---\n` frontmatter and
+  have `## Slice` mid-file). Made these layout-aware (detect via
+  `section.startswith("##")`); roughly 20 lines of new code with
+  a docstring explaining both shapes.
+- `land.py`'s `check_status` only read the prose `**STATUS:**`
+  marker; slice files carry status in frontmatter. Added a
+  frontmatter fallback that handles both shapes.
+
+These are NOT "abstraction was wrong in 018-01"; they're
+"individual callers had per-shape assumptions baked in beyond
+slice resolution." The single-shape `load_slice` / `iter_slices`
+helpers from 018-01 are correct — they hand back content; the
+callers' historical layout assumptions about that content needed
+updating once content could come from either layout. Revisiting
+018-01 wasn't warranted; revisiting these two helpers locally was.
+Recorded here so future slices' deviation logs don't re-discover
+the trade-off.
+
+**§3 — New `iter_slices(spec_path)` helper added to
+`_common/parsing.py`.** Originally 018-01 only delivered
+`find_slice_file` + `load_slice` (single-slice by fragment). Two
+callers need ALL slices in a spec dir: workflow's `collect_slices`
+(status board) and `find_stale_items`, plus spec_lint's `_iter_slices`.
+The new helper yields a `SliceLocation` for every slice across both
+layouts: slice files first (sorted by filename), then embedded
+`## Slice` sections in spec.md (document order). 8 new tests in
+`_common/test_parsing.py`. Could have been in 018-01 but wasn't
+needed there; landing it now keeps the foundation slice tight.
+
+**§4 — `spec_lint.py` was deliberately standalone (mirroring
+`_common/parsing.py` rather than depending on it).** The migration
+introduces a soft dependency: try-import `_common.iter_slices` from
+the sibling `skills/_common/` directory; fall back to local
+`_iter_slices` (embedded-only) if the import fails. The script
+still runs degraded outside a jig tree, but file-per-slice support
+requires the import to succeed. Tradeoff: spec_lint sees file-per-slice
+in the canonical jig install; standalone-ness only sacrificed for
+projects shipping spec_lint without `_common/parsing.py`.
+
+**§5 — `land.py`'s PR-mode skill-frontmatter lookup ALWAYS reads
+spec.md, regardless of where the slice content came from.** The
+`skill:` field lives in SPEC-LEVEL frontmatter (top of spec.md),
+never in a slice file. When the slice body comes from a sibling
+file (via `load_slice`), the PR title prefix still needs to read
+spec.md directly. Both sites in `land.py` (prepare's PR-mode
+next-steps + execute's PR-mode title) do `spec_path.read_text()`
+for the skill lookup — separate from the slice content read.
+
+**§6 — Status-board `find_stale_items` display path differs by
+layout.** When the slice lives in a file, the display is the
+slice file's relative path (e.g.
+`docs/specs/018-slice-per-file/slice-01-foo.md`). When embedded,
+the display stays as `docs/specs/<spec-dir>/spec.md :: Slice
+<label>`. Two shapes because the slice file's path IS the
+identifier — using `:: Slice` would be redundant.
+
+**§7 — `find_slice_file` filters by `slice-*.md`; non-conforming
+filenames in the spec dir are invisible.** A maintainer-named
+`my-slice.md` containing `## Slice 018-01` would NOT be found.
+This is by design — keeps the glob predictable. Documented in the
+helper docstring (slice 018-01) and reinforced here so 018-04's
+`migrate.py split-slices` knows to name outputs with the
+`slice-NN-` prefix.
+
+**§8 — Reviewer §SPECIFIC ISSUES caught a missed caller migration:
+`_lookup_slice_status` and `_resolve_dep_path` in workflow.py still
+scanned `## Slice` headers inside spec.md only.** These are the
+dependency-validation read-side: when a slice with
+`dependencies: [NNN-MM]` transitions to DONE, both functions look
+up the dep slice's status / path. Pre-fix, a dep that had been
+split into `slice-NN-*.md` was reported as "slice not found" and
+the DONE transition refused. This was the latent bug AC #7's
+tripwire was meant to catch but didn't — §2 only named
+`_split_slice_section` and `check_status`. Both functions now use
+`iter_slices` (one-line per loop change in `_lookup_slice_status`;
+small loop refactor in `_resolve_dep_path` to return `loc.path`
+rather than a glob's first hit). New regression test
+`MixedLayoutDependencyValidationTests` in `test_workflow.py`
+exercises the exact failure mode: dep slice in a file, consumer
+in spec.md, DONE transition succeeds. 763 → 764 tests.
+
+**§9 — Reviewer §SPECIFIC ISSUES caught a cosmetic regression in
+`transition`'s success message.** The old `slice_name` derivation
+re-parsed `new_section.lstrip().splitlines()[0]` looking for
+`## Slice ...`. For slice-file layout that first line is `---`,
+so the regex didn't match and `slice_name` fell back to the raw
+`slice_fragment` arg (e.g. `018-02` instead of
+`018-02 — caller-recognition-and-fixtures`). Fixed by using
+`loc.label` (already correctly resolved by the common parser).
+Affected the CLI success message and the auto-tick ambiguity
+warning text only; no correctness impact.
 
 ---
 

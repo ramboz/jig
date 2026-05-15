@@ -52,7 +52,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common.parsing import find_slice_section as _find_slice_section_common
+from _common.parsing import load_slice as _load_slice_common
+from _common.parsing import parse_frontmatter as _parse_frontmatter
 from _common.parsing import SliceLookupError
 
 
@@ -64,15 +65,17 @@ VALID_MODES = ("direct", "pr")
 DEVIATION_EXCERPT_MAX_CHARS = 500
 
 
-def find_slice_section(spec_text: str, slice_fragment: str) -> tuple:
-    """Locate the `## Slice ...` header whose H2 contains `slice_fragment`.
-    Returns (header_start, section_end, full_label). Raises LandError on
-    miss or ambiguity.
+def load_slice(spec_path, slice_fragment: str):
+    """Resolve `slice_fragment` to a SliceLocation, dual-read (slice file
+    or `## Slice` section in `spec_path`). Re-raises SliceLookupError as
+    LandError so the CLI message keeps its `land:` prefix.
 
-    Thin wrapper over `_common.parsing.find_slice_section`.
+    Slice 018-02 migration: replaced `find_slice_section(text, fragment)`
+    + manual `spec_path.read_text()` callers with a single helper that
+    handles both layouts.
     """
     try:
-        return _find_slice_section_common(spec_text, slice_fragment)
+        return _load_slice_common(spec_path, slice_fragment)
     except SliceLookupError as e:
         raise LandError(str(e)) from e
 
@@ -81,11 +84,29 @@ def find_slice_section(spec_text: str, slice_fragment: str) -> tuple:
 
 
 def check_status(section: str) -> tuple:
-    """Returns (ok: bool, actual_status: str). ok iff status == DONE."""
+    """Returns (ok: bool, actual_status: str). ok iff status == DONE.
+
+    Layout-aware (slice 018-02): looks for the prose `**STATUS:**`
+    marker first (legacy + embedded), then falls back to the
+    frontmatter `status:` field — slice files (file-per-slice layout
+    from 018-01) carry status in frontmatter rather than as a marker.
+    """
     m = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
-    if not m:
-        return False, "MISSING"
-    return m.group(1) == "DONE", m.group(1)
+    if m:
+        return m.group(1) == "DONE", m.group(1)
+    # Try frontmatter — slice files (018-01) start with `---\n...---\n`.
+    # `parse_frontmatter` requires the block at column 0, so feed the
+    # section as-is for slice files. For embedded sections that have
+    # frontmatter AFTER the heading, also try skipping the heading line.
+    fm_fields, _ = _parse_frontmatter(section)
+    if not fm_fields:
+        nl = section.find("\n")
+        if nl >= 0 and section.startswith("##"):
+            fm_fields, _ = _parse_frontmatter(section[nl + 1:].lstrip("\n"))
+    status = fm_fields.get("status", "").strip()
+    if status:
+        return status == "DONE", status
+    return False, "MISSING"
 
 
 def check_tests(target: Path) -> tuple:
@@ -408,9 +429,9 @@ def prepare(spec_path: Path, slice_fragment: str,
     if not spec_path.is_file():
         raise LandError(f"spec not found: {spec_path}")
 
-    text = spec_path.read_text()
-    start, end, label = find_slice_section(text, slice_fragment)
-    section = text[start:end]
+    loc = load_slice(spec_path, slice_fragment)
+    section = loc.text[loc.start:loc.end]
+    label = loc.label
 
     # Run the four checks
     status_ok, status_actual = check_status(section)
@@ -464,7 +485,9 @@ def prepare(spec_path: Path, slice_fragment: str,
             body = render_pr_body(label, spec_path, goal, ac_items,
                                   deviation_excerpt)
             pr_body_path.write_text(body)
-            skill = _parse_skill_from_frontmatter(text)
+            # Spec-level `skill:` frontmatter ALWAYS lives in spec.md,
+            # never in a sibling slice file — read from spec_path directly.
+            skill = _parse_skill_from_frontmatter(spec_path.read_text())
             parts.append(render_next_steps_pr(branch, pr_body_path, label, skill))
 
     report = "\n".join(parts) + "\n"
@@ -718,9 +741,9 @@ def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
         return "\n".join(parts) + "\n", 1
 
     # Re-parse spec to build PR body + title (same code path as prepare --mode pr)
-    text = spec_path.read_text()
-    start, end, label = find_slice_section(text, slice_fragment)
-    section = text[start:end]
+    loc = load_slice(spec_path, slice_fragment)
+    section = loc.text[loc.start:loc.end]
+    label = loc.label
     spec_num, slice_num = parse_spec_slice_numbers(spec_path, label)
     pr_body_path = Path(tempfile.gettempdir()) / \
         f"jig-slice-{spec_num}-{slice_num}-pr-body.md"
@@ -730,7 +753,11 @@ def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
     body = render_pr_body(label, spec_path, goal, ac_items, deviation_excerpt)
     pr_body_path.write_text(body)
 
-    skill = _parse_skill_from_frontmatter(text)
+    # Spec-level frontmatter (the `skill:` field for the PR title prefix)
+    # ALWAYS lives in spec.md, never in a slice file — read spec_path
+    # directly even when the slice body came from a sibling file.
+    spec_md_text = spec_path.read_text()
+    skill = _parse_skill_from_frontmatter(spec_md_text)
     scope = f"({skill})" if skill else ""
     title = f"feat{scope}: {label}"
 

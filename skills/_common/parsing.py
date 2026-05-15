@@ -18,6 +18,12 @@ Helpers in this module:
     on hit, returns the slice file's full content. Otherwise reads
     `spec_path` and falls back to `find_slice_section`. Callers get
     `loc.text[loc.start:loc.end]` uniformly without branching on layout.
+  - iter_slices(spec_path) -> Iterable[SliceLocation]  (slice 018-02)
+    All slices in a spec directory. Walks sibling `slice-*.md` files
+    first (sorted), then embedded `## Slice` sections inside spec.md.
+    Each yielded SliceLocation is independently slice-able via
+    `loc.text[loc.start:loc.end]`. Used by status-board and lint
+    callers that need every slice, not just one by fragment.
   - parse_frontmatter(text) -> (fields, body_offset) — extracts a leading
     `---\\n...\\n---` YAML-lite block from the head of a body (e.g. a
     slice section's content, after the `## Slice ...` heading line).
@@ -163,6 +169,56 @@ def load_slice(spec_path, slice_fragment: str) -> SliceLocation:
     spec_text = spec_path.read_text()
     start, end, label = find_slice_section(spec_text, slice_fragment)
     return SliceLocation(spec_path, spec_text, start, end, label)
+
+
+def iter_slices(spec_path):
+    """Yield a `SliceLocation` for every slice in this spec's directory.
+
+    Walk order:
+      1. Sibling `slice-*.md` files, sorted by filename — each
+         yielded as a whole-file SliceLocation (start=0, end=len(text)).
+      2. Embedded `## Slice` sections inside `spec_path`, in document
+         order — yielded with section offsets.
+
+    A spec may have ANY mix: all slices in spec.md (legacy), all in
+    sibling files (new shape), or both (mid-migration). The iter order
+    is deterministic but does NOT sort by numeric label — callers that
+    care about ordering by slice number should sort by `loc.label`.
+
+    Skips files that fail to read or contain no `## Slice` heading.
+    """
+    spec_path = Path(spec_path)
+    spec_dir = spec_path.parent
+
+    # (1) Sibling slice files.
+    if spec_dir.is_dir():
+        for candidate in sorted(spec_dir.glob("slice-*.md")):
+            try:
+                text = candidate.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+            m = _SLICE_HEADER_RE.search(text)
+            if not m:
+                continue
+            label = m.group(1).strip()
+            yield SliceLocation(candidate, text, 0, len(text), label)
+
+    # (2) Embedded ## Slice sections in spec.md.
+    if not spec_path.is_file():
+        return
+    spec_text = spec_path.read_text()
+    headers = list(_SLICE_HEADER_RE.finditer(spec_text))
+    for i, header in enumerate(headers):
+        label = header.group(1).strip()
+        start = header.start()
+        if i + 1 < len(headers):
+            end = headers[i + 1].start()
+        else:
+            # Bound at the next `## ` heading (any H2), or EOF.
+            rest = spec_text[header.end():]
+            nxt = re.search(r"(?m)^##\s", rest)
+            end = header.end() + (nxt.start() if nxt else len(rest))
+        yield SliceLocation(spec_path, spec_text, start, end, label)
 
 
 # ---------- frontmatter (slice 014-01) ----------

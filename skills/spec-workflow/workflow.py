@@ -20,7 +20,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common.parsing import find_slice_section as _find_slice_section_common
+from _common.parsing import iter_slices as _iter_slices_common
+from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import (
     SliceLookupError,
     parse_frontmatter,
@@ -64,20 +65,21 @@ class WorkflowError(RuntimeError):
     """Raised for user-facing workflow errors (CLI exits non-zero)."""
 
 
-def find_slice_section(spec_text: str, slice_fragment: str) -> tuple:
-    """Locate the slice section whose H2 contains `slice_fragment`.
-    Returns (start, end) byte offsets into spec_text bounding the slice
-    section from header start to next H2 / EOF. Raises WorkflowError on
-    miss or ambiguity.
+def load_slice(spec_path, slice_fragment: str):
+    """Resolve a slice fragment to a `SliceLocation` (path / text / start
+    / end / label), dual-read across slice files and `## Slice` sections.
+    Re-raises `SliceLookupError` as `WorkflowError` to keep CLI messages
+    consistent.
 
-    Thin wrapper over `_common.parsing.find_slice_section`; preserves
-    this module's historical 2-tuple return shape and error type.
+    Slice 018-02 migration: replaced `find_slice_section(text, fragment)`
+    + manual `read_text()` with this helper. Write-side callers use
+    `loc.path.write_text(new_text)` to write back to whichever file the
+    slice lives in (slice file or spec.md).
     """
     try:
-        start, end, _label = _find_slice_section_common(spec_text, slice_fragment)
+        return _load_slice_common(spec_path, slice_fragment)
     except SliceLookupError as e:
         raise WorkflowError(str(e)) from e
-    return start, end
 
 
 def _auto_tick_review_box(section: str, label_substring: str) -> tuple:
@@ -122,15 +124,34 @@ def _auto_tick_review_box(section: str, label_substring: str) -> tuple:
     return new_section, None
 
 
+_SLICE_HEADING_LINE_RE = re.compile(r"(?m)^##\s+Slice[^\n]*\n")
+
+
 def _split_slice_section(section: str) -> tuple:
-    """Split a slice section into (header_line, body) where header_line
-    includes the trailing newline (or empty). The body is everything
-    after the `## Slice ...` line. The body is the unit frontmatter
-    sits in front of."""
-    nl = section.find("\n")
-    if nl < 0:
-        return section, ""
-    return section[: nl + 1], section[nl + 1:]
+    """Split a slice section into (head_chunk, body_chunk).
+
+    Two layouts (slice 018-02):
+    - **Embedded** (section comes from a `## Slice ...` block inside
+      spec.md): section starts with the heading line; frontmatter, if
+      present, follows it. `head_chunk` is the heading line (including
+      trailing `\\n`); `body_chunk` is everything after.
+    - **Slice-file** (section is a whole `slice-*.md` file): file
+      starts with a `---\\n...---\\n` frontmatter block; the heading
+      appears later. `head_chunk` is empty so that `body_chunk` is the
+      full file — `parse_frontmatter(body_chunk)` will then locate the
+      frontmatter at column 0 as designed.
+
+    Detection: if the section starts with `## Slice`, it's embedded;
+    otherwise treat it as slice-file (or as a section with no header,
+    in which case the whole thing is body)."""
+    if section.startswith("##"):
+        nl = section.find("\n")
+        if nl < 0:
+            return section, ""
+        return section[: nl + 1], section[nl + 1:]
+    # Slice-file layout (or no header at all) — body is the full section
+    # so frontmatter parsing / writing operates on the canonical location.
+    return "", section
 
 
 def _today() -> str:
@@ -193,25 +214,22 @@ def _validate_dependencies(deps: list, project_dir: Path,
 
 def _lookup_slice_status(specs_dir: Path, fragment: str,
                          current_spec: Path) -> str:
-    """Walk every spec.md under specs_dir, return the status of the
-    slice whose label contains `fragment`. Returns None if not found.
-    Looks at the current spec file too — a slice can depend on an
-    earlier slice in the same spec.
+    """Walk every spec under specs_dir (both layouts via iter_slices),
+    return the status of the slice whose label contains `fragment`.
+    Returns None if not found. A slice can depend on an earlier slice
+    in the same spec.
+
+    Slice 018-02: uses `iter_slices` so dependency-validation sees
+    file-per-slice slices, not just `## Slice` sections inside spec.md.
     """
     if not specs_dir.is_dir():
         return None
+    needle = fragment.lower()
     for spec_md in sorted(specs_dir.glob("*/spec.md")):
-        try:
-            text = spec_md.read_text()
-        except OSError:
-            continue
-        headers = list(re.finditer(r"(?im)^##\s+Slice\s+([^\n]+)$", text))
-        for i, h in enumerate(headers):
-            label = h.group(1).strip()
-            if fragment.lower() not in label.lower():
+        for loc in _iter_slices_common(spec_md):
+            if needle not in loc.label.lower():
                 continue
-            section_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
-            section = text[h.start():section_end]
+            section = loc.text[loc.start:loc.end]
             # Prefer frontmatter status, fall back to prose marker.
             fields, _ = _slice_frontmatter(section)
             if "status" in fields and fields["status"]:
@@ -258,9 +276,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     if not spec_md.is_file():
         raise WorkflowError(f"spec file not found: {spec_md}")
 
-    text = spec_md.read_text()
-    start, end = find_slice_section(text, slice_fragment)
-    section = text[start:end]
+    loc = load_slice(spec_md, slice_fragment)
+    section = loc.text[loc.start:loc.end]
 
     fm_fields, _ = _slice_frontmatter(section)
     has_frontmatter = bool(fm_fields)
@@ -321,9 +338,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
             "found in slice section"
         )
 
-    header_match = re.match(r"##\s+Slice\s+([^\n]+)$",
-                            new_section.lstrip().splitlines()[0])
-    slice_name = header_match.group(1).strip() if header_match else slice_fragment
+    # Slice 018-02: `loc.label` is already the resolved slice label from
+    # the common parser. Earlier code derived it by re-parsing the first
+    # line of `new_section`, which broke for slice-file layout (first
+    # line is `---`, not `## Slice ...`).
+    slice_name = loc.label
 
     # Slice 003-04: auto-tick the corresponding review-passed DoD box on
     # the two gating transitions. Other transitions don't tick anything.
@@ -338,8 +357,12 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
                 f"warning: {spec_md}: slice {slice_name}: {warning}\n"
             )
 
-    new_text = text[:start] + new_section + text[end:]
-    spec_md.write_text(new_text)
+    new_text = loc.text[:loc.start] + new_section + loc.text[loc.end:]
+    # Slice 018-02: write back to whichever file the slice lives in —
+    # `loc.path` is the slice file when dual-read picked it, or spec.md
+    # otherwise. Same behavior for legacy specs, correct behavior for
+    # file-per-slice ones.
+    loc.path.write_text(new_text)
 
     return f"transitioned {slice_name}: {old_status} → {new_status}"
 
@@ -368,17 +391,14 @@ def collect_slices(project_dir: Path) -> list:
     rows = []
     for spec_md in sorted(specs_dir.glob("*/spec.md")):
         spec_dir = spec_md.parent.name
-        text = spec_md.read_text()
-        headers = list(re.finditer(r"(?im)^##\s+Slice\s+([^\n]+)$", text))
-        for i, h in enumerate(headers):
-            label = h.group(1).strip()
-            section_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
-            # `section` here is the body AFTER the header line (existing
-            # legacy shape); frontmatter parser tolerates leading blank.
-            section = text[h.end():section_end]
-            # Prefer frontmatter `status:` when present; fall back to
-            # prose `**STATUS:**` marker for legacy slices.
-            fm_fields, _ = parse_frontmatter(section.lstrip("\n"))
+        # Slice 018-02: walk both layouts via the common iterator. Slice
+        # files come first (sorted by filename), then embedded sections in
+        # spec.md document order — deterministic display.
+        for loc in _iter_slices_common(spec_md):
+            section = loc.text[loc.start:loc.end]
+            # Layout-aware status read: frontmatter at top (slice file)
+            # OR after the heading line (embedded section).
+            fm_fields, _ = _slice_frontmatter(section)
             status = None
             if fm_fields.get("status"):
                 status = fm_fields["status"]
@@ -388,7 +408,7 @@ def collect_slices(project_dir: Path) -> list:
                     status = sm.group(1)
             trigger = (_extract_resolution_trigger(section)
                        if status == "DEFERRED" else "")
-            rows.append((spec_dir, label, status or "UNKNOWN", trigger))
+            rows.append((spec_dir, loc.label, status or "UNKNOWN", trigger))
     return rows
 
 
@@ -502,15 +522,24 @@ def regenerate_status_board(project_dir: Path) -> str:
 
 def _resolve_dep_path(dep: str, project_dir: Path) -> Path:
     """Map a dep token to its underlying doc file. Returns None if the
-    token shape is unrecognized or no file matches."""
+    token shape is unrecognized or no file matches.
+
+    Slice 018-02: for slice deps, walk both layouts via `iter_slices`
+    and return the file the slice actually lives in (slice-NN-*.md
+    when file-per-slice, spec.md when embedded). Staleness checks
+    against this path then reflect the right mtime.
+    """
     slice_m = re.match(r"^(\d{3})-(\d{2})$", dep)
     adr_m = re.match(r"(?i)^adr-(\d{1,4})$", dep)
     if slice_m:
         spec_num = slice_m.group(1)
-        # `docs/specs/<spec_num>-*/spec.md`
-        candidates = sorted((project_dir / "docs" / "specs").glob(
-            f"{spec_num}-*/spec.md"))
-        return candidates[0] if candidates else None
+        specs_dir = project_dir / "docs" / "specs"
+        needle = dep.lower()
+        for spec_md in sorted(specs_dir.glob(f"{spec_num}-*/spec.md")):
+            for loc in _iter_slices_common(spec_md):
+                if needle in loc.label.lower():
+                    return loc.path
+        return None
     if adr_m:
         num = adr_m.group(1).zfill(4)
         candidates = sorted((project_dir / "docs" / "decisions").glob(
@@ -576,24 +605,27 @@ def find_stale_items(project_dir: Path, days: int = 90) -> list:
     today = datetime.date.today()
     out = []
 
-    # Slices: every `## Slice ...` section in docs/specs/*/spec.md
+    # Slices: walk every slice in every spec dir, both layouts (018-02).
     specs_dir = project_dir / "docs" / "specs"
     if specs_dir.is_dir():
         for spec_md in sorted(specs_dir.glob("*/spec.md")):
-            text = spec_md.read_text()
-            headers = list(re.finditer(r"(?im)^##\s+Slice\s+([^\n]+)$", text))
-            for i, h in enumerate(headers):
-                label = h.group(1).strip()
-                section_end = (headers[i + 1].start()
-                               if i + 1 < len(headers) else len(text))
-                section = text[h.end():section_end]
-                fm, _ = parse_frontmatter(section.lstrip("\n"))
+            for loc in _iter_slices_common(spec_md):
+                section = loc.text[loc.start:loc.end]
+                # Layout-aware frontmatter read (handles both shapes).
+                fm, _ = _slice_frontmatter(section)
                 lv = fm.get("last_verified", "").strip()
                 deps = fm.get("dependencies") or []
                 if not lv or not deps:
                     continue
-                rel_spec = spec_md.relative_to(project_dir)
-                display = f"{rel_spec} :: Slice {label}"
+                # Display path: prefer the slice file's relative path
+                # when the slice lives in its own file; fall back to
+                # spec.md :: Slice label for embedded layout.
+                if loc.path != spec_md:
+                    rel = loc.path.relative_to(project_dir)
+                    display = str(rel)
+                else:
+                    rel_spec = spec_md.relative_to(project_dir)
+                    display = f"{rel_spec} :: Slice {loc.label}"
                 is_stale, reason = _stale_check(
                     spec_md, lv, deps, days, project_dir, today,
                 )

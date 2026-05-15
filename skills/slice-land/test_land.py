@@ -1508,5 +1508,52 @@ class ExecutePrCliSurfaceTests(unittest.TestCase):
         )
 
 
+class MixedLayoutPrepareTests(unittest.TestCase):
+    """Slice 018-02 AC #3: land.py prepare resolves a slice fragment
+    against either layout (sibling slice file OR `## Slice` section in
+    spec.md). The fixture has both shapes side-by-side."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-land-mixed-"))
+        # Slice file version
+        (self.tmpdir / "slice-01-file-based.md").write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 018-01 — file-based-slice\n\n"
+            "**Goal:** Demonstrates file resolution by land.\n\n"
+            "**DoR:**\n- prereq.\n\n"
+            "**Acceptance Criteria:**\n\n"
+            "1. AC one.\n2. AC two.\n\n"
+            "**DoD:**\n"
+            "- [x] First done.\n"
+            "- [x] Second done.\n"
+            "- [x] Third done.\n"
+            "- [x] Fourth done.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "Notes here.\n"
+        )
+        # Embedded slice in spec.md
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(_spec_with_slice("018-02 — embedded-slice", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_prepare_resolves_file_based_slice(self):
+        result = run_land("prepare", str(self.spec), "018-01",
+                          cwd=self.tmpdir)
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+        # Readiness section quotes the slice label from the FILE'S heading
+        self.assertIn("018-01 — file-based-slice", result.stdout)
+
+    def test_prepare_resolves_embedded_slice(self):
+        result = run_land("prepare", str(self.spec), "018-02",
+                          cwd=self.tmpdir)
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+        self.assertIn("018-02 — embedded-slice", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

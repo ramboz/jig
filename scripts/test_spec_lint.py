@@ -419,5 +419,43 @@ class CliTests(unittest.TestCase):
                          f"Real 012-01 spec has a contradiction: {result.stdout}")
 
 
+class MixedLayoutLintTests(unittest.TestCase):
+    """Slice 018-02 AC #5: spec_lint sees slices in both layouts."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = Path(tempfile.mkdtemp(prefix="jig-lint-mixed-"))
+        # Slice in a file
+        (self._tmpdir / "slice-01-from-file.md").write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 018-01 — alpha-from-file\n\n"
+            "**Acceptance Criteria:**\n\n"
+            "1. **Must** do thing X.\n"
+            "2. Doesn't do anything unusual.\n\n"
+        )
+        # Slice embedded
+        self.spec = self._tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec X\n\n"
+            "## Slice 018-02 — beta-embedded\n\n"
+            "**STATUS: DRAFT**\n\n"
+            "**Acceptance Criteria:**\n\n"
+            "1. **Must** also do thing Y.\n"
+            "2. No contradictions.\n\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_lint_walks_both_layouts(self):
+        report, code = sl.lint(self.spec)
+        self.assertEqual(code, 0,
+                         f"report:\n{report}")
+        # Report should reference both slices
+        self.assertIn("018-01 — alpha-from-file", report)
+        self.assertIn("018-02 — beta-embedded", report)
+
+
 if __name__ == "__main__":
     unittest.main()

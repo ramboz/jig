@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from parsing import (
     find_slice_file,
     find_slice_section,
+    iter_slices,
     load_slice,
     parse_frontmatter,
     set_frontmatter_field,
@@ -398,6 +399,96 @@ class LoadSliceTests(_SpecDirFixture):
         loc = load_slice(spec_path, "018-01")
         self.assertEqual(loc.path, slice_path)
         self.assertIn("018-01", loc.label)
+
+
+class IterSlicesTests(_SpecDirFixture):
+    """Slice 018-02: iter_slices walks both file-per-slice and
+    embedded-section layouts deterministically."""
+
+    def test_all_in_spec_md_yields_embedded_sections(self):
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text(
+            "# Spec X\n\n## Slice X-01 — alpha\n\nBody alpha.\n\n"
+            "## Slice X-02 — beta\n\nBody beta.\n"
+        )
+        locs = list(iter_slices(spec_path))
+        self.assertEqual([l.label for l in locs], ["X-01 — alpha", "X-02 — beta"])
+        for loc in locs:
+            self.assertEqual(loc.path, spec_path)
+            self.assertIn("Slice " + loc.label[:4], loc.text[loc.start:loc.end])
+
+    def test_all_in_slice_files_yields_files(self):
+        (self.tmpdir / "slice-01-alpha.md").write_text(SLICE_FILE_018_01)
+        (self.tmpdir / "slice-02-beta.md").write_text(SLICE_FILE_018_02)
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text("# Spec X\n\n## Overview\n\nNo slices here.\n")
+
+        locs = list(iter_slices(spec_path))
+        labels = [l.label for l in locs]
+        self.assertEqual(labels, [
+            "018-01 — parser-foundation-and-dual-read",
+            "018-02 — caller-recognition",
+        ])
+        # Each yielded loc maps to a distinct slice file
+        paths = {l.path for l in locs}
+        self.assertEqual(len(paths), 2)
+        self.assertTrue(all(p.suffix == ".md" and p.name != "spec.md"
+                            for p in paths))
+
+    def test_mixed_layout_yields_files_then_sections(self):
+        (self.tmpdir / "slice-01-foo.md").write_text(SLICE_FILE_018_01)
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text(SPEC_MD_WITH_ONLY_018_03)
+
+        locs = list(iter_slices(spec_path))
+        # File-based slice comes first (file walk), then embedded section.
+        self.assertEqual(len(locs), 2)
+        self.assertEqual(locs[0].label, "018-01 — parser-foundation-and-dual-read")
+        self.assertEqual(locs[0].path.name, "slice-01-foo.md")
+        self.assertEqual(locs[1].label, "018-03 — scaffold-defaults")
+        self.assertEqual(locs[1].path, spec_path)
+
+    def test_each_yielded_loc_supports_uniform_slicing(self):
+        (self.tmpdir / "slice-01-foo.md").write_text(SLICE_FILE_018_01)
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text(SPEC_MD_WITH_ONLY_018_03)
+
+        for loc in iter_slices(spec_path):
+            section = loc.text[loc.start:loc.end]
+            self.assertIn("## Slice", section, f"empty section for {loc.label}")
+
+    def test_no_slices_anywhere_yields_empty(self):
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text("# Spec X\n\nNo slices.\n")
+        self.assertEqual(list(iter_slices(spec_path)), [])
+
+    def test_missing_spec_md_only_yields_slice_files(self):
+        (self.tmpdir / "slice-01-foo.md").write_text(SLICE_FILE_018_01)
+        # spec.md does not exist
+        locs = list(iter_slices(self.tmpdir / "spec.md"))
+        self.assertEqual(len(locs), 1)
+        self.assertEqual(locs[0].path.name, "slice-01-foo.md")
+
+    def test_slice_files_sorted_by_filename(self):
+        # Deliberately create out-of-order
+        (self.tmpdir / "slice-02-beta.md").write_text(SLICE_FILE_018_02)
+        (self.tmpdir / "slice-01-alpha.md").write_text(SLICE_FILE_018_01)
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text("# Spec X\n")
+        locs = list(iter_slices(spec_path))
+        self.assertEqual([l.path.name for l in locs],
+                         ["slice-01-alpha.md", "slice-02-beta.md"])
+
+    def test_file_with_no_slice_header_is_skipped(self):
+        # A `slice-*.md` file lacking a `## Slice` heading is silently
+        # skipped — it's not a valid slice file.
+        bad = self.tmpdir / "slice-99-not-a-slice.md"
+        bad.write_text("Just some random content.\n")
+        (self.tmpdir / "slice-01-good.md").write_text(SLICE_FILE_018_01)
+        spec_path = self.tmpdir / "spec.md"
+        spec_path.write_text("# Spec X\n")
+        locs = list(iter_slices(spec_path))
+        self.assertEqual([l.path.name for l in locs], ["slice-01-good.md"])
 
 
 if __name__ == "__main__":

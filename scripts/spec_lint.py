@@ -31,9 +31,22 @@ import re
 import sys
 from pathlib import Path
 
+# Slice 018-02: route slice iteration through the shared common parser
+# so spec_lint sees both file-per-slice and embedded-in-spec.md layouts.
+# Kept inside a try/except so the script still runs (degraded — embedded
+# only) if it's ever invoked outside a tree containing skills/_common/.
+try:
+    _common_dir = Path(__file__).resolve().parent.parent / "skills" / "_common"
+    if str(_common_dir) not in sys.path:
+        sys.path.insert(0, str(_common_dir))
+    from parsing import iter_slices as _iter_slices_common  # type: ignore
+except ImportError:  # pragma: no cover — bare-script fallback
+    _iter_slices_common = None
+
 # ---------------------------------------------------------------------------
-# Slice parsing (mirrors _common/parsing.py without a dependency on it so
-# this script is runnable standalone from scripts/).
+# Slice parsing — historically mirrored _common/parsing.py to keep this
+# script standalone. After 018-02 it routes through `_common.iter_slices`
+# when present, falling back to this local scan over `spec.md` only.
 # ---------------------------------------------------------------------------
 
 _SLICE_HEADER_RE = re.compile(r"(?im)^##\s+Slice\s+([^\n]+)$")
@@ -273,8 +286,14 @@ def lint(spec_path: Path, slice_fragment: str = None, strict: bool = False) -> t
     if not spec_path.is_file():
         return f"spec not found: {spec_path}\n", 2
 
-    text = spec_path.read_text()
-    slices = list(_iter_slices(text))
+    # Slice 018-02: prefer the common iterator (sees slice files too)
+    # when available. Fall back to embedded-only scan otherwise.
+    if _iter_slices_common is not None:
+        slices = [(loc.label, loc.text[loc.start:loc.end])
+                  for loc in _iter_slices_common(spec_path)]
+    else:
+        text = spec_path.read_text()
+        slices = list(_iter_slices(text))
 
     if not slices:
         return f"no '## Slice ...' headings found in {spec_path}\n", 2

@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common.parsing import find_slice_section as _find_slice_section_common
+from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import SliceLookupError
 
 
@@ -34,18 +34,21 @@ class ReviewError(RuntimeError):
     """User-facing error; CLI exits 2."""
 
 
-def find_slice_label(spec_text: str, slice_fragment: str) -> str:
-    """Return the full label of the `## Slice ...` H2 whose text contains
+def find_slice_label(spec_path, slice_fragment: str) -> str:
+    """Return the full label of the slice whose `## Slice` heading contains
     `slice_fragment` (e.g. `001-01 — greenfield-scaffold`). Raises
     ReviewError on miss or ambiguity.
 
-    Thin wrapper over `_common.parsing.find_slice_section`.
+    Dual-read via `_common.parsing.load_slice`: resolves to either a
+    sibling `slice-*.md` file or a `## Slice` section in `spec_path`,
+    transparently. Slice 018-02 migrated this from text-based to
+    path-based; the prompt builder only needs the label, not the body.
     """
     try:
-        _, _, label = _find_slice_section_common(spec_text, slice_fragment)
+        loc = _load_slice_common(spec_path, slice_fragment)
     except SliceLookupError as e:
         raise ReviewError(str(e)) from e
-    return label
+    return loc.label
 
 
 # -------- Prompt templates --------
@@ -236,8 +239,7 @@ def main(argv: list) -> int:
         return 2
 
     try:
-        spec_text = spec.read_text()
-        slice_label = find_slice_label(spec_text, ns.slice)
+        slice_label = find_slice_label(spec, ns.slice)
         if ns.command == "implementation":
             prompt = build_implementation_prompt(spec, slice_label, ns.deliverables)
         else:
