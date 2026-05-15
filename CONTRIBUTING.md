@@ -14,7 +14,7 @@ change to jig starts with a spec.
 The repo ships a marketplace descriptor at
 [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)
 that registers this checkout as a single-plugin marketplace named
-`jig-dev`. Installing from it is equivalent to installing jig from
+`jig`. Installing from it is equivalent to installing jig from
 source, but it exercises the same plugin-resolution path an external
 user would hit, so the three subagent definitions under
 [`agents/`](agents/) become reachable as `subagent_type` values.
@@ -25,7 +25,7 @@ From a Claude Code session at the repo root:
 
 ```text
 /plugin marketplace add .
-/plugin install jig@jig-dev
+/plugin install jig@jig
 ```
 
 **Restart Claude Code (or open a fresh session) after install.**
@@ -93,8 +93,8 @@ restriction, which is the whole point of the dogfood.
 To remove the local dev install:
 
 ```text
-/plugin uninstall jig@jig-dev
-/plugin marketplace remove jig-dev
+/plugin uninstall jig@jig
+/plugin marketplace remove jig
 ```
 
 After this, `subagent_type: "reviewer"` and friends will fall back to
@@ -125,8 +125,8 @@ The refresh recipe (from a Claude Code session, with your jig checkout
 as the current dir):
 
 ```text
-/plugin uninstall jig@jig-dev
-/plugin install jig@jig-dev
+/plugin uninstall jig@jig
+/plugin install jig@jig
 ```
 
 If you originally installed via the graphical plugin manager rather
@@ -156,6 +156,96 @@ python3 -m unittest discover -s scripts -p "test_*.py"
 
 When you add a new skill or top-level `scripts/`-style dir, make sure
 its tests are discoverable by the same pattern.
+
+## Versioning
+
+The plugin's published version lives in
+[`.claude-plugin/plugin.json`](.claude-plugin/plugin.json)'s `version`
+field. **Do not edit it by hand.** It is managed by
+[release-please](https://github.com/googleapis/release-please-action):
+every merged release PR bumps the field via the
+`extra-files` directive in
+[`.github/release-please-config.json`](.github/release-please-config.json),
+in lockstep with the matching tag and CHANGELOG entry.
+
+The `release-please-manifest.json` tracks the last *released* version
+(seeded at `0.1.0` so the first release-please PR can force `v1.0.0`
+via `release-as`). After v1.0.0 lands, the manifest and `plugin.json`
+both advance together on every subsequent release.
+
+## Releasing
+
+Releases are driven by
+[release-please](https://github.com/googleapis/release-please-action). On every
+push to `main`, the release workflow at
+[`.github/workflows/release.yml`](.github/workflows/release.yml) inspects new
+conventional-commit subjects and, if any of them warrant a version bump,
+opens or updates a **release PR** that:
+
+- bumps `.claude-plugin/plugin.json`'s `version` field,
+- updates `CHANGELOG.md` with the user-facing entries (sections: Features /
+  Bug Fixes / Performance / Documentation; `chore`, `refactor`, `test`, `ci`,
+  `build` are hidden),
+- updates [`.github/.release-please-manifest.json`](.github/.release-please-manifest.json).
+
+Merging that release PR cuts a `vX.Y.Z` git tag and creates the GitHub
+Release.
+
+### Conventional-commit shapes that bump the version
+
+| Subject prefix | Effect |
+|---|---|
+| `feat(scope): ...` | minor bump (e.g. 1.0.0 → 1.1.0) |
+| `fix(scope): ...` | patch bump (e.g. 1.0.0 → 1.0.1) |
+| `perf(scope): ...` | patch bump |
+| Any of the above with `!:` or a `BREAKING CHANGE:` footer | major bump |
+| `chore`, `docs`, `refactor`, `test`, `ci`, `build` | no version bump |
+
+The PR-title workflow (`pr-title.yml`) enforces conventional shape on PR
+titles. With squash-merge enabled, the PR title becomes the commit subject
+on `main` — so release-please sees clean inputs.
+
+### Inspecting / iterating on the release config
+
+Dry-run the config locally before pushing changes to it:
+
+```bash
+npx release-please release-pr \
+  --token=$GITHUB_TOKEN \
+  --repo-url=ramboz/jig \
+  --dry-run
+```
+
+The static checks in `scripts/test_release_config.py` also catch most
+config-shape regressions before CI does.
+
+### After v1.0.0 lands
+
+The current config pins `release-as: "1.0.0"` to force the very first release
+to be `v1.0.0` regardless of commit history. Once the v1.0.0 PR is merged
+and the tag is cut, raise a small follow-up `chore(release): unpin
+release-as after v1.0.0` PR that removes the `release-as` field from
+`.github/release-please-config.json`. From that point on, version bumps
+follow conventional-commit semantics organically.
+
+### Building and smoke-testing a release zip locally
+
+The release workflow attaches a `jig-vX.Y.Z.zip` asset to every GitHub
+Release. You can build and verify the same zip locally before pushing
+any change to the build script:
+
+```bash
+# Build the zip (writes to ./dist/jig-v<version>.zip):
+python3 scripts/build_release_zip.py --version 1.0.0
+
+# Extract + run verify_install against the contents in one step:
+python3 scripts/build_release_zip.py --smoke-test dist/jig-v1.0.0.zip
+```
+
+The smoke-test prints the same four `PASS marketplace / manifest / agents
+/ skills` lines you'd see from `verify_install.py` against the
+checked-out repo. The CI `package` job runs the equivalent steps in
+the release workflow.
 
 ## Spec workflow (short version)
 

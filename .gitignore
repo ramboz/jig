@@ -4,3 +4,7 @@
 node_modules/
 *.pyc
 __pycache__/
+
+# Release artifacts (built locally by scripts/build_release_zip.py).
+dist/
+*.zip

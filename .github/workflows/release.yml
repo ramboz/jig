@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+
+  package:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build release zip
+        run: |
+          python3 scripts/build_release_zip.py \
+            --version "${{ needs.release-please.outputs.version }}" \
+            --output "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
+
+      - name: Smoke-test zip contents
+        run: |
+          python3 scripts/build_release_zip.py \
+            --smoke-test "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
+
+      - name: Upload zip to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload \
+            "${{ needs.release-please.outputs.tag_name }}" \
+            "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
