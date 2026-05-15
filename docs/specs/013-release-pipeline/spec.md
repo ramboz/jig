@@ -333,7 +333,7 @@ RealRepoIntegrationTests, GeneratorIterableTests, CliTests).
 
 ## Slice 013-02 — release-please-scaffold
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** Adding `release-please` to the repo so that merging a PR with
 a `feat`, `fix`, or `perf` commit opens a "release PR" that bumps the
@@ -509,8 +509,8 @@ direction; total 10 tests in this file across 4 test classes
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache updated.
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache updated.
 - [ ] Post-v1.0.0 merge: `release-as: "1.0.0"` removed from
   `.github/release-please-config.json` and a `chore(release): unpin
   release-as after v1.0.0` follow-up PR raised. Tracked here, not
