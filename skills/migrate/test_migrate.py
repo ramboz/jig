@@ -1036,5 +1036,282 @@ class BareIdPaddingTests(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+SPEC_MD_TWO_SLICES = """\
+---
+status: DRAFT
+skill: spec-workflow
+tier: 1
+---
+
+# Spec 999: demo
+
+## Overview
+
+Demo spec for split-slices tests.
+
+## Decomposition
+
+S — Spike: none.
+
+### Slices
+
+- 999-01 — alpha
+- 999-02 — beta
+
+---
+
+## Slice 999-01 — alpha
+
+---
+status: DONE
+dependencies: []
+last_verified:
+---
+
+**Goal:** First slice body.
+
+**DoD:**
+- [x] Done.
+
+---
+
+## Slice 999-02 — beta
+
+---
+status: DRAFT
+dependencies: [999-01]
+last_verified:
+---
+
+**Goal:** Second slice body.
+"""
+
+
+SPEC_MD_NO_SLICES = """\
+---
+status: DRAFT
+---
+
+# Spec 998: no-slices
+
+## Overview
+
+This spec has no slices yet.
+
+## Decomposition
+
+_TBD_
+"""
+
+
+class SplitSlicesTests(unittest.TestCase):
+    """Slice 018-04 ACs: `migrate.py split-slices <spec-dir>`."""
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-mig-split-"))
+        self.spec_dir = self.tmpdir / "999-demo"
+        self.spec_dir.mkdir()
+        self.spec_md = self.spec_dir / "spec.md"
+        self.spec_md.write_text(SPEC_MD_TWO_SLICES)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # AC #1, #2: subcommand exists; one file per slice.
+    def test_split_writes_one_file_per_slice(self):
+        r = run_migrate("split-slices", str(self.spec_dir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        files = sorted(p.name for p in self.spec_dir.glob("slice-*.md"))
+        self.assertEqual(files, ["slice-01-alpha.md", "slice-02-beta.md"])
+
+    # AC #2: slice file frontmatter at top, heading after.
+    def test_slice_file_has_frontmatter_at_top(self):
+        run_migrate("split-slices", str(self.spec_dir))
+        text = (self.spec_dir / "slice-01-alpha.md").read_text()
+        self.assertTrue(text.startswith("---\n"),
+                        f"expected `---` at top, got: {text[:50]!r}")
+        # Heading must follow the closing frontmatter
+        fm_end = text.index("\n---\n", 4)
+        self.assertIn("## Slice 999-01 — alpha", text[fm_end:])
+        # Frontmatter preserved verbatim
+        self.assertIn("status: DONE", text)
+        self.assertIn("dependencies: []", text)
+
+    # AC #3: spec.md drops `## Slice` sections, gets a `## Slices` link list.
+    def test_spec_md_rewritten_drops_slices_adds_link_section(self):
+        run_migrate("split-slices", str(self.spec_dir))
+        text = self.spec_md.read_text()
+        self.assertNotIn("## Slice 999-01", text)
+        self.assertNotIn("## Slice 999-02", text)
+        # `## Slices` link list at the bottom
+        self.assertIn("## Slices", text)
+        self.assertIn("[999-01 — alpha](slice-01-alpha.md)", text)
+        self.assertIn("[999-02 — beta](slice-02-beta.md)", text)
+        # Prefix preserved (header + overview + decomposition)
+        self.assertIn("# Spec 999: demo", text)
+        self.assertIn("## Overview", text)
+        self.assertIn("## Decomposition", text)
+
+    # AC #4: --dry-run writes nothing.
+    def test_dry_run_writes_nothing(self):
+        before = self.spec_md.read_text()
+        r = run_migrate("split-slices", str(self.spec_dir), "--dry-run")
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("[dry-run]", r.stdout)
+        self.assertIn("slice-01-alpha.md", r.stdout)
+        self.assertIn("slice-02-beta.md", r.stdout)
+        # No slice files written
+        self.assertEqual(sorted(p.name for p in self.spec_dir.glob("slice-*.md")), [])
+        # spec.md unchanged
+        self.assertEqual(self.spec_md.read_text(), before)
+
+    # AC #5: refuses on conflict, no partial writes.
+    def test_refuses_on_existing_target_file(self):
+        # Pre-create a conflicting slice file
+        (self.spec_dir / "slice-01-alpha.md").write_text("blocking content")
+        r = run_migrate("split-slices", str(self.spec_dir))
+        self.assertEqual(r.returncode, 2,
+                         f"expected exit 2, got: stderr={r.stderr} stdout={r.stdout}")
+        self.assertIn("refusing", r.stdout.lower())
+        self.assertIn("slice-01-alpha.md", r.stdout)
+        # No partial writes: slice-02-beta.md must NOT exist
+        self.assertFalse((self.spec_dir / "slice-02-beta.md").exists())
+        # spec.md UNTOUCHED — content is the original two-slice spec.
+        self.assertEqual(self.spec_md.read_text(), SPEC_MD_TWO_SLICES)
+
+    # AC #6: idempotent — no slices to split → exit 0 with no-op message.
+    def test_idempotent_when_no_slices_in_spec_md(self):
+        self.spec_md.write_text(SPEC_MD_NO_SLICES)
+        r = run_migrate("split-slices", str(self.spec_dir))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("nothing to split", r.stdout)
+        # No slice files emitted
+        self.assertEqual(sorted(p.name for p in self.spec_dir.glob("slice-*.md")), [])
+
+    # AC #8: label-to-filename derivation — special chars / hyphens.
+    def test_slug_derivation_handles_punctuation_and_spaces(self):
+        spec_dir = self.tmpdir / "777-tricky"
+        spec_dir.mkdir()
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "# Spec 777\n\n## Decomposition\n\n_TBD_\n\n"
+            "---\n\n## Slice 777-01 — Foo Bar/Baz!\n\n"
+            "**Goal:** Tricky shortname.\n"
+        )
+        r = run_migrate("split-slices", str(spec_dir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        # `/` and `!` dropped, space → `-`, lowercased
+        files = sorted(p.name for p in spec_dir.glob("slice-*.md"))
+        self.assertEqual(files, ["slice-01-foo-barbaz.md"])
+
+    # AC #8: heading-after-split is still resolvable via iter_slices.
+    def test_iter_slices_after_split_yields_both_slice_files(self):
+        run_migrate("split-slices", str(self.spec_dir))
+        sys.path.insert(0, str(REPO_ROOT / "skills" / "_common"))
+        from parsing import iter_slices
+        locs = list(iter_slices(self.spec_md))
+        labels = sorted(l.label for l in locs)
+        self.assertEqual(labels, ["999-01 — alpha", "999-02 — beta"])
+        # All come from slice files now, not spec.md
+        self.assertTrue(all(l.path.name.startswith("slice-")
+                            for l in locs),
+                        f"expected all slice files, got: {[l.path.name for l in locs]}")
+
+    # AC #7-ish: --dry-run writes nothing, exit 0
+    def test_dry_run_exits_zero(self):
+        r = run_migrate("split-slices", str(self.spec_dir), "--dry-run")
+        self.assertEqual(r.returncode, 0)
+
+    def test_missing_spec_md_returns_exit_two(self):
+        empty = self.tmpdir / "empty"
+        empty.mkdir()
+        r = run_migrate("split-slices", str(empty))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("spec.md not found", r.stdout)
+
+    # Reviewer §SPECIFIC ISSUES — legacy-shape (no frontmatter) split.
+    def test_legacy_shape_slice_without_frontmatter(self):
+        """Spec 017's slices predate per-slice frontmatter: heading is
+        followed directly by prose `**STATUS: ...**` instead of a
+        `---\\n...---\\n` block. The split must produce a slice file
+        that starts with the heading on line 1 (no synthesized
+        frontmatter), and `iter_slices` must still resolve it."""
+        spec_dir = self.tmpdir / "888-legacy"
+        spec_dir.mkdir()
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "# Spec 888\n\n## Overview\n\nOld-style.\n\n"
+            "## Slice 888-01 — legacy-shape\n\n"
+            "**STATUS: DONE**\n\n"
+            "**Goal:** A slice authored before frontmatter conventions.\n"
+        )
+        r = run_migrate("split-slices", str(spec_dir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        target = spec_dir / "slice-01-legacy-shape.md"
+        self.assertTrue(target.is_file())
+        text = target.read_text()
+        # File starts with the heading, NOT `---`.
+        self.assertTrue(text.startswith("## Slice 888-01"),
+                        f"legacy-shape slice should start with heading; "
+                        f"got: {text[:50]!r}")
+        # Body preserved verbatim
+        self.assertIn("**STATUS: DONE**", text)
+        self.assertIn("A slice authored before frontmatter conventions.", text)
+
+    # Reviewer §SPECIFIC ISSUES — split twice is a no-op.
+    def test_split_is_idempotent_on_rerun(self):
+        """AC #6 idempotency: running split-slices on a spec.md that's
+        already been split (no `## Slice` sections remain) is a no-op
+        that exits 0 with the canonical message."""
+        r1 = run_migrate("split-slices", str(self.spec_dir))
+        self.assertEqual(r1.returncode, 0)
+        r2 = run_migrate("split-slices", str(self.spec_dir))
+        self.assertEqual(r2.returncode, 0)
+        self.assertIn("nothing to split", r2.stdout)
+        # Re-run did NOT modify the slice files
+        slice1_first = (self.spec_dir / "slice-01-alpha.md").read_text()
+        r3 = run_migrate("split-slices", str(self.spec_dir))
+        self.assertEqual(r3.returncode, 0)
+        self.assertEqual(
+            (self.spec_dir / "slice-01-alpha.md").read_text(),
+            slice1_first,
+            "split-slices on already-split dir must not touch slice files",
+        )
+
+    # Reviewer §SPECIFIC ISSUES — horizontal rules in body don't break FM detection.
+    def test_horizontal_rule_in_body_not_treated_as_frontmatter(self):
+        """A slice body that opens with `\\n---\\n` (a horizontal rule
+        separator) followed by prose then another `---` must NOT be
+        misidentified as a YAML frontmatter block. The guard requires
+        a `key:` line inside the captured `---...---` window."""
+        spec_dir = self.tmpdir / "777-hr"
+        spec_dir.mkdir()
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "# Spec 777\n\n## Overview\n\nx.\n\n"
+            "## Slice 777-01 — hr-body\n\n"
+            "---\n\n"  # horizontal rule, no `key:` lines
+            "Body paragraph one.\n\n"
+            "---\n\n"  # another horizontal rule
+            "Body paragraph two.\n"
+        )
+        r = run_migrate("split-slices", str(spec_dir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        text = (spec_dir / "slice-01-hr-body.md").read_text()
+        # Must start with the heading — the `---\n...\n---\n` window
+        # was correctly identified as hr-pair, not frontmatter.
+        self.assertTrue(text.startswith("## Slice 777-01"))
+        # Both horizontal rules + paragraphs preserved in body
+        self.assertIn("Body paragraph one.", text)
+        self.assertIn("Body paragraph two.", text)
+
+
 if __name__ == "__main__":
     unittest.main()

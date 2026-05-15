@@ -975,10 +975,179 @@ def rename_decisions(project_dir: Path, dry_run: bool = False) -> tuple:
 # ---------- CLI plumbing ----------
 
 
+# ---------- split-slices (slice 018-04) ----------
+
+
+_SLICE_H2_RE = re.compile(
+    r"(?m)^##\s+Slice\s+(\d{3})-(\d{2})\s+—\s+([^\n]+?)\s*$"
+)
+_FM_AFTER_HEADING_RE = re.compile(
+    r"\A(\s*\n)?(---\n.*?\n---\n)", re.DOTALL,
+)
+# Reviewer §SPECIFIC ISSUES (slice 018-04): a body that opens with
+# `\n---\n` (horizontal rule) and later contains another `---` would be
+# misread by `_FM_AFTER_HEADING_RE` as a YAML frontmatter block. Guard
+# by requiring the captured block to contain at least one `key:` line
+# (column 0, before the first whitespace). Real frontmatter always has
+# at least one such line; a hr-pair never does.
+_FM_KV_LINE_RE = re.compile(r"(?m)^[A-Za-z_][A-Za-z0-9_\-]*\s*:")
+
+
+def _looks_like_frontmatter_block(block: str) -> bool:
+    """True iff the captured `---\\n...---\\n` block contains at least
+    one `key:` line — distinguishes a real YAML-lite frontmatter
+    from a horizontal-rule pair around prose."""
+    return bool(_FM_KV_LINE_RE.search(block))
+
+
+def _shortname_to_slug(shortname: str) -> str:
+    """Map a slice's heading shortname (free text after `— `) to a
+    filename-safe slug. Lowercase, runs of whitespace collapse to `-`,
+    non `[a-z0-9-]` chars dropped, leading/trailing `-` stripped."""
+    slug = shortname.lower().strip()
+    slug = re.sub(r"\s+", "-", slug)
+    slug = re.sub(r"[^a-z0-9\-]", "", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug or "slice"
+
+
+def _plan_split_slices(spec_md: Path):
+    """Build the split-slices plan for `spec_md`. Returns a list of
+    `(target_path, slice_file_content, source_start, source_end,
+    spec_num, slice_num, shortname)` tuples in document order, or
+    an empty list if no slice sections are present."""
+    text = spec_md.read_text()
+    spec_dir = spec_md.parent
+    headings = list(_SLICE_H2_RE.finditer(text))
+    plan = []
+    for i, m in enumerate(headings):
+        spec_num = m.group(1)
+        slice_num = m.group(2)
+        shortname = m.group(3).strip()
+        slug = _shortname_to_slug(shortname)
+        target = spec_dir / f"slice-{slice_num}-{slug}.md"
+
+        start = m.start()
+        # End: next `## ` heading of any kind (slice OR non-slice section),
+        # or EOF. Reviewer §SPECIFIC ISSUES (018-04): the original
+        # implementation stopped intermediate slices at the next `## Slice`
+        # only — meaning a non-slice `## Foo` H2 between two slice headings
+        # would get absorbed by the preceding slice. Uniform "next `## `"
+        # bound matches AC #1's spirit ("up to the next slice heading"
+        # read as "up to the next major section") and avoids the latent
+        # surprise.
+        rest = text[m.end():]
+        nxt = re.search(r"(?m)^##\s", rest)
+        end = m.end() + (nxt.start() if nxt else len(rest))
+
+        body_after_heading = text[m.end():end]
+        fm_m = _FM_AFTER_HEADING_RE.match(body_after_heading)
+        # Reviewer guard: require the captured block to actually look
+        # like frontmatter (at least one `key:` line). A horizontal-rule
+        # pair around prose has none.
+        if fm_m and _looks_like_frontmatter_block(fm_m.group(2)):
+            fm_block = fm_m.group(2)
+            rest_body = body_after_heading[fm_m.end():]
+            slice_content = (
+                f"{fm_block}\n## Slice {spec_num}-{slice_num} — "
+                f"{shortname}\n{rest_body}"
+            )
+        else:
+            slice_content = (
+                f"## Slice {spec_num}-{slice_num} — "
+                f"{shortname}\n{body_after_heading}"
+            )
+        plan.append((target, slice_content, start, end, spec_num,
+                     slice_num, shortname))
+    return plan
+
+
+def split_slices(spec_dir: Path, dry_run: bool = False) -> tuple:
+    """Split each `## Slice` section out of `<spec_dir>/spec.md` into
+    its own `slice-NN-<slug>.md` file. Returns `(report_text, exit_code)`.
+
+    - Atomic: writes go via `_atomic_write`; spec.md is rewritten last.
+    - Idempotent: if no `## Slice` sections remain in spec.md, exits 0
+      with "nothing to split".
+    - Refuses on conflict (exit 2): any target `slice-*.md` already
+      exists in `spec_dir`. No partial writes — the conflict check runs
+      before any I/O.
+    - Cross-references unchanged: slice fragments (`NNN-MM`) still
+      resolve via 018-01's dual-read parser.
+
+    spec.md after the split:
+    - Prefix preserved through the first `## Slice` heading (frontmatter,
+      `# Spec ...` title, `## Overview`, `## Decomposition`, etc.).
+    - All `## Slice` sections removed.
+    - A `## Slices` link list appended pointing at each extracted file.
+    - Any trailing content after the last `## Slice` (rare) is kept.
+    """
+    spec_dir = Path(spec_dir)
+    spec_md = spec_dir / "spec.md"
+    if not spec_md.is_file():
+        return f"spec.md not found in {spec_dir}\n", 2
+
+    plan = _plan_split_slices(spec_md)
+    if not plan:
+        return f"nothing to split: no `## Slice` sections in {spec_md}\n", 0
+
+    # Conflict check: refuse if any target file already exists.
+    conflicts = [str(t.relative_to(spec_dir)) for t, *_ in plan if t.exists()]
+    if conflicts:
+        return (
+            "refusing: target slice file(s) already exist:\n  "
+            + "\n  ".join(conflicts) + "\n",
+            2,
+        )
+
+    if dry_run:
+        lines = ["[dry-run] split-slices plan:"]
+        for target, *_ in plan:
+            lines.append(f"  → write {target.relative_to(spec_dir)}")
+        lines.append(f"  → rewrite {spec_md.name}")
+        return "\n".join(lines) + "\n", 0
+
+    # Apply: write slice files first (recoverable on partial failure),
+    # then rewrite spec.md last.
+    for target, content, *_ in plan:
+        _atomic_write(target, content)
+
+    # Build the new spec.md content:
+    #   prefix (everything before the first slice heading)
+    # + `## Slices` link section
+    # + any trailing content (after the last slice section)
+    text = spec_md.read_text()
+    first_start = plan[0][2]
+    last_end = plan[-1][3]
+    prefix = text[:first_start].rstrip() + "\n\n"
+    trailing = text[last_end:].lstrip("\n")
+
+    link_lines = ["## Slices", ""]
+    for target, _content, _s, _e, spec_num, slice_num, shortname in plan:
+        link_lines.append(
+            f"- [{spec_num}-{slice_num} — {shortname}]({target.name})"
+        )
+    link_lines.append("")  # trailing newline before any further content
+
+    new_spec = prefix + "\n".join(link_lines) + "\n"
+    if trailing:
+        new_spec += "\n" + trailing
+    _atomic_write(spec_md, new_spec)
+
+    summary = []
+    for target, *_ in plan:
+        summary.append(f"wrote {target.relative_to(spec_dir)}")
+    summary.append(f"rewrote {spec_md.name}")
+    return "\n".join(summary) + "\n", 0
+
+
+# ---------- end split-slices ----------
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="migrate.py",
-        description="jig migrate helper (report + rename-decisions)",
+        description="jig migrate helper (report + rename-decisions + split-slices)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -995,6 +1164,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rd.add_argument("project_dir", help="path to the project to migrate")
     rd.add_argument(
+        "--dry-run", action="store_true",
+        help="emit the operations plan to stdout without writing anything",
+    )
+
+    ss = sub.add_parser(
+        "split-slices",
+        help="split each `## Slice` section out of <spec-dir>/spec.md "
+             "into its own slice-NN-<slug>.md file (slice 018-04)",
+    )
+    ss.add_argument("spec_dir",
+                    help="path to a spec directory (containing spec.md)")
+    ss.add_argument(
         "--dry-run", action="store_true",
         help="emit the operations plan to stdout without writing anything",
     )
@@ -1016,6 +1197,12 @@ def main(argv: list) -> int:
         if ns.cmd == "rename-decisions":
             text, code = rename_decisions(
                 Path(ns.project_dir), dry_run=ns.dry_run,
+            )
+            sys.stdout.write(text)
+            return code
+        if ns.cmd == "split-slices":
+            text, code = split_slices(
+                Path(ns.spec_dir), dry_run=ns.dry_run,
             )
             sys.stdout.write(text)
             return code

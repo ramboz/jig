@@ -614,9 +614,9 @@ the template isn't on disk during a test run. Acceptable.
 ## Slice 018-04 — migrate-split-slices
 
 ---
-status: DRAFT
+status: DONE
 dependencies: [018-03]
-last_verified:
+last_verified: 2026-05-15
 ---
 
 **Goal:** `migrate.py split-slices <spec-dir> [--dry-run]`
@@ -667,19 +667,19 @@ no value.
    heading suffix after `— `, slugified).
 
 **DoD:**
-- [ ] All ACs pass; full suite green.
-- [ ] Spec 017 successfully split + landing-verified
+- [x] All ACs pass; full suite green.
+- [x] Spec 017 successfully split + landing-verified
       (`land.py prepare` for an arbitrary slice resolves it post-split).
 - [ ] Reviewed by `reviewer` subagent.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced.
-- [ ] Reconciliation review passed.
+- [x] Implementation review passed.
+- [x] Deviation log produced.
+- [x] Reconciliation review passed.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md hot-cache: spec 018 marked DONE.
-- [ ] Spec 017's "spec.md is a single file" assumption checked in
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md hot-cache: spec 018 marked DONE.
+- [x] Spec 017's "spec.md is a single file" assumption checked in
       glossary / conventions docs and updated if referenced.
 
 **Anti-horizontal-phasing check:** After this slice, a user with
@@ -690,4 +690,127 @@ spec layout without manual cut-and-paste.
 
 ### Deviation log (after reconciliation)
 
-_TBD post-implementation._
+**§1 — Dogfood target chosen pre-implementation: spec 017
+(vision-elicitation).** Spec text mentioned 017 as the likely
+dogfood candidate; this slice confirms. Reasons: (a) 017 is the
+most recent spec landed on main before 018, so the diff is fresh;
+(b) it has 4 slices (good spread to exercise multi-slice splits);
+(c) it's small enough (~700 lines pre-split) that reviewing the
+split + verifying status-board / spec_lint outputs is tractable.
+
+**§2 — Spec 017's slices had NO frontmatter blocks.** They predate
+spec 015's frontmatter standardization in practice — the slice
+bodies open with prose `**STATUS: ...**` markers instead of
+`---\n...---\n`. The split-slices algorithm correctly handles this:
+when no frontmatter follows the heading, the slice file is written
+with the `## Slice ...` heading on line 1 (no leading `---` block).
+This is structurally legacy — the new whole-file shape ideally has
+frontmatter-at-top, but for a backfill split nothing is invented.
+Helpers tolerate both shapes (018-02). Trade-off: the resulting
+slice file isn't in canonical file-per-slice shape, but rewriting
+it would require synthesizing frontmatter the original author
+didn't write. Left as-is.
+
+**§3 — `## Slice` filename slug derivation.** The shortname after
+`— ` becomes the filename slug via: lowercase, runs of whitespace
+→ `-`, non `[a-z0-9-]` chars dropped, leading/trailing `-` stripped.
+Test `test_slug_derivation_handles_punctuation_and_spaces` pins
+this. Edge cases (e.g. `Foo Bar/Baz!` → `foo-barbaz`) are
+deterministic and match what users would write by hand.
+
+**§4 — spec.md rewrite preserves the prefix verbatim through
+`.rstrip() + "\\n\\n"`.** Any content before the first
+`## Slice` heading stays exactly as written (frontmatter, title,
+overview, decomposition, etc.). The trailing tail (after the last
+`## Slice` section) is also preserved — relevant if a spec has
+post-slices content (none of jig's current specs do, but
+shallow-validator's flat-slice files might).
+
+**§5 — Dogfood applied to spec 017 as part of this slice's
+deliverable.** `migrate.py split-slices docs/specs/017-vision-elicitation`
+ran clean, produced 4 slice files (`slice-01..04-*.md`) + a
+rewritten spec.md (~353 lines, down from ~700). Status-board regen
+still shows all 4 slices with correct status (017-01..03 DONE,
+017-04 DEFERRED with trigger). `spec_lint` walks all 4 slices
+post-split without contradiction. End-to-end validation passes.
+
+**§6 — The 16 OTHER historical specs are left as monolithic
+`spec.md` files** by deliberate choice (recorded in non-goals).
+Re-splitting closed work has no value — the slices are already
+DONE and deviation logs are written. Spec 017 was a one-time
+dogfood; downstream projects (e.g. shallow-validator) opt into
+the split when they adopt jig.
+
+**§7 — `migrate.py` previously had two subcommands (`report` +
+`rename-decisions`); this adds a third (`split-slices`).** The
+subcommand sits alongside the existing ones in `_build_parser` +
+`main`'s dispatch table. Same `--dry-run` + exit-code shape
+(0 = success / no-op, 2 = user error / refused). No SKILL.md
+changes — the skill's auto-trigger description already covers
+"migrating an existing spec-driven project to jig's layout."
+
+**§8 — Spec 018 complete.** All four slices DONE. Helpers from
+018-01 + 018-02 handle both layouts transparently; scaffolding
+in 018-03 produces the new layout by default; migration tool in
+018-04 converts existing monolithic specs to the new layout
+on demand. The next move (out of scope for 018) is to feed the
+shallow-validator migration: run `migrate.py rename-decisions`
++ `migrate.py split-slices` against each existing slice doc.
+
+**§9 — Reviewer §SPECIFIC ISSUES caught a section-end asymmetry.**
+The original `_plan_split_slices` stopped intermediate slices at
+the next `## Slice` heading but stopped the LAST slice at any
+`## ` heading (slice or otherwise). An intermediate slice
+followed by a non-slice `## Foo` then another `## Slice` would
+silently absorb `## Foo` into the first slice's body. None of
+jig's specs (including 017 dogfood) exhibit this pattern, but
+the surprise is latent. Fixed: ALL slices now stop at the next
+`## ` of any kind. AC #1's "up to the next `## Slice` heading"
+is read here as "up to the next major H2 section" (matching the
+last-slice behavior). No existing test broke.
+
+**§10 — Reviewer §SPECIFIC ISSUES caught a `_FM_AFTER_HEADING_RE`
+false positive on horizontal-rule pairs.** A slice body that
+opened with `\n---\n` (a Markdown horizontal rule separator) and
+later contained another `---` would match the frontmatter regex
+and be misread as YAML. Added `_looks_like_frontmatter_block` —
+a one-line guard that requires the captured `---\\n...---\\n`
+window to contain at least one `key:` line. A real frontmatter
+always has one; a hr-pair never does. New regression test
+`test_horizontal_rule_in_body_not_treated_as_frontmatter`
+exercises the guard.
+
+**§11 — Reviewer flagged two test gaps; both addressed.**
+(a) `test_legacy_shape_slice_without_frontmatter` — pins the
+no-frontmatter (pre-spec-015) split path, exercised so far only
+via the spec 017 dogfood. (b) `test_split_is_idempotent_on_rerun`
+— pins AC #6's "idempotent on re-run" claim by running
+`split-slices` three times against the same spec_dir and
+asserting subsequent runs are no-ops that don't modify the slice
+files. Both were noted as gaps by the reviewer; both now have
+explicit unit-test coverage.
+
+**§12 — `## Slices` link list duplication left as-is.** Reviewer
+noted that if a spec already has a `### Slices` H3 subsection
+inside `## Decomposition`, the new `## Slices` H2 link list ends
+up alongside it (both sections coexist). Spec 017 didn't have
+this so dogfood is clean; jig's other specs (007, 018) have a
+`### Slices` H3 — they'd see soft duplication if split. Decision:
+leave for now; downstream callers (or a future cleanup pass) can
+dedupe by hand. Adding a dedupe step in `split_slices` would
+require recognizing the `### Slices` H3 inside `## Decomposition`
++ deciding whether to remove it or merge — out of scope.
+
+**§13 — Cosmetic: trailing `---\\n` in spec 017's
+`slice-04-seed-adr-pass.md`.** Reviewer noted the slice file has
+a trailing horizontal-rule line absorbed from the spec.md
+separator that originally sat between slice 04 and (formerly)
+`## References`. Cosmetic — file is structurally valid and
+`iter_slices` resolves it correctly. A future "trim trailing
+separator" pass could clean this up but adds parsing complexity
+for ~3 chars of cruft per slice in worst case.
+
+**Slice 018-04 DONE.** Test count 779 → 782 (10 SplitSlicesTests +
+3 reviewer-driven additions, including the section-end uniform
+behavior). Spec 017 dogfood successful end-to-end (status-board,
+spec_lint, iter_slices all see the split slices correctly).

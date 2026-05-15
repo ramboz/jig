@@ -68,7 +68,7 @@
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-01 — parser-foundation-and-dual-read | **DONE** |  |
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-02 — caller-recognition-and-fixtures | **DONE** |  |
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-03 — scaffold-new-specs-as-file-per-slice | **DONE** |  |
-| [018-slice-per-file](018-slice-per-file/spec.md) | 018-04 — migrate-split-slices | DRAFT |  |
+| [018-slice-per-file](018-slice-per-file/spec.md) | 018-04 — migrate-split-slices | **DONE** |  |
 
 ## Deferred slices
 
