@@ -139,14 +139,18 @@ class MarketplaceDescriptorIntegrationTests(unittest.TestCase):
         jig_entry = next(p for p in data["plugins"] if p.get("name") == "jig")
         source = jig_entry.get("source")
         self.assertIsNotNone(source, "jig plugin entry missing source")
-        # Source resolves relative to the marketplace.json's parent (the
-        # .claude-plugin/ dir); the plugin root is one level up.
-        resolved = (self.repo_root / ".claude-plugin" / source).resolve()
-        # The source should point at a directory that contains plugin.json.
+        # Source must be a git-subdir object (the CLI rejects bare string paths).
+        self.assertIsInstance(source, dict, "source must be an object, not a bare path string")
+        self.assertEqual(source.get("source"), "git-subdir")
+        self.assertIn("url", source, "git-subdir source must include 'url'")
+        self.assertIn("path", source, "git-subdir source must include 'path'")
+        # The path within the repo should resolve to a directory with plugin.json.
+        path = source.get("path", ".")
+        resolved = (self.repo_root / path).resolve()
         self.assertTrue(
             (resolved / ".claude-plugin" / "plugin.json").is_file()
             or (resolved / "plugin.json").is_file(),
-            f"source {source!r} doesn't resolve to a plugin root with plugin.json",
+            f"source path {path!r} doesn't resolve to a plugin root with plugin.json",
         )
 
 

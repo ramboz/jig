@@ -6,7 +6,11 @@
   "plugins": [
     {
       "name": "jig",
-      "source": "..",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/ramboz/jig.git",
+        "path": "."
+      },
       "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for Claude Code"
     }
   ]
