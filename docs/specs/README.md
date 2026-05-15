@@ -17,7 +17,7 @@
 | [002-memory-layer](002-memory-layer/spec.md) | 002-04 — reconciliation-integration | **DONE** | spec 002 complete |
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-01 — lifecycle-helper | **DONE** | 16 workflow tests green; spec-workflow promoted |
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-02 — anti-horizontal-phasing-check | DEFERRED |  |
-| [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-03 — reserve-spec-on-main | IN_PROGRESS | Revived from "new-spec-scaffolding"; reserve next free spec number on origin/main with PR fallback |
+| [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-03 — reserve-spec-on-main | **DONE** | Revived from "new-spec-scaffolding"; reserve next free spec number on origin/main with PR fallback |
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-04 — auto-tick-review-passed-on-transition | **DONE** | 9 new tests (371 total); transition auto-ticks review-passed boxes — pre-tick anti-pattern fixed structurally |
 | [004-independent-review-promotion](004-independent-review-promotion/spec.md) | 004-01 — review-helper | **DONE** |  |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-01 — adr-helper | **DONE** | 46 tests green; first Tier 1 skill — adr-workflow active |
