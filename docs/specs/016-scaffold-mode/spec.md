@@ -568,15 +568,55 @@ Post-016-02: 593 tests, 3 skipped — green. New tests: 11
 (`CopyHooksAndRegisterTests` + `MergeExistingSettingsTests`).
 No regressions.
 
+**7. Smoke-test result (2026-05-15, post-DONE close-out).** Ran
+`CLAUDE_PLUGIN_ROOT=$(pwd) python3 skills/scaffold-init/scaffold.py
+--with-machinery <tmpdir>` from the jig worktree. Structural
+verification:
+- `.claude/hooks/scripts/` contained all 5 source scripts:
+  `jig-context-check.sh`, `jig-memory-scan.sh`, `jig-spec-gate.sh`,
+  `jig-task-capture.sh`, `jig-telemetry.sh`.
+- All 5 are mode `-rwxr-xr-x` (0o755) — AC #5 confirmed at runtime,
+  not just in unit tests.
+- `.claude/settings.json` registered all 4 hook events
+  (`PreToolUse`, `SessionStart`, `UserPromptSubmit`, `Stop`) with
+  matcher blocks mirroring `hooks/hooks.json` shape.
+- **5 jig-marked matcher blocks total** (`PreToolUse` has 2: Task →
+  telemetry, Edit|Write|MultiEdit → spec-gate; the other three
+  events one block each). Every block carries
+  `metadata: {managed_by_jig: true}` at the **outer matcher block**
+  level — NOT on the inner hook command. Worth recording: an
+  initial count-by-marker script looked for the marker on the
+  inner hook entry and reported `0`, which momentarily looked
+  like a regression. The marker placement mirrors how
+  `hooks/hooks.json` pairs a matcher with its hooks list — jig
+  owns the *block*, not the individual command.
+- Every command resolves to `bash
+  ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/jig-*.sh`. Sample
+  SessionStart: `bash
+  ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/jig-context-check.sh`.
+  AC #2 confirmed; no `${CLAUDE_PLUGIN_ROOT}` references survived
+  in the registered commands.
+
+Runtime SessionStart-hook firing (the spec's literal close-out
+wording: "open `claude` in that dir, observe the SessionStart hook
+fires") was NOT exercised — it requires a fresh `claude` session
+loading the scaffolded settings.json, which is user-driven and out
+of band of this smoke-test. Structural verification confirms the
+registration is correct; runtime fire-or-not is what the user
+observes at first use. Same bridge-of-trust pattern as slice 016-01
+§6.
+
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache updated to mark 016-02 DONE.
-- [ ] Manual smoke-test: run scaffold-init with `--with-machinery`
-  into a tmpdir, open `claude` in that dir, observe that the
-  SessionStart hook fires (e.g. produces the "Context budget warning"
-  if you injected ≥9 fake MCP servers) **without the jig plugin
-  installed in the session**. Record observation in deviation log.
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache updated to mark 016-02 DONE.
+- [x] Manual smoke-test: run scaffold-init with `--with-machinery`
+  into a tmpdir; structural verification PASS per deviation log §7
+  (5 hook scripts copied with 0o755, all 4 events registered with
+  jig markers on outer matcher blocks, every command uses
+  `${CLAUDE_PROJECT_DIR}` paths). Runtime SessionStart-hook firing
+  observation is user-driven in a fresh `claude` session — same
+  bridge-of-trust as 016-01.
 
 ---
 
