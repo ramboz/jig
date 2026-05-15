@@ -1,12 +1,13 @@
-> Status: Draft (wizard-generated equivalent — manually seeded for jig itself)
+> Status: Draft (technical mechanics; vision and design principles live in [product-vision.md](product-vision.md))
 >
 > This document evolves as we make decisions. Open questions are explicit, not papered over.
 
 # Architecture: jig
 
-## What jig is
-
-An installable Claude Code plugin that scaffolds AI-native development practices into new projects. Tier 0 skills always install; Tier 1 installs by default; Tier 2 opts in by signal.
+> For *what jig is*, *who it's for*, and *why it works the way it does*, see
+> [product-vision.md](product-vision.md). This document covers the technical
+> mechanics: plugin structure, hook spine, subagent roster, module boundaries,
+> open architectural questions.
 
 ## Plugin structure
 
@@ -25,9 +26,8 @@ jig/
 ## Core architecture decisions
 
 ### Hooks are the deterministic spine; skills are the LLM layer
-- Skills carry workflows and reasoning. Auto-trigger via description matching.
-- Hooks enforce gates that don't require judgment. Always run.
-- Everything that MUST happen is a hook. Everything that should happen when relevant is a skill.
+*Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#1).
+*Mechanics:* hook entries live in `hooks/hooks.json` and run unconditionally on their declared event; skill entries live in `skills/<name>/SKILL.md` and auto-trigger via description matching against user messages.
 
 ### Hook scripts: Python 3, never jq
 `jq` is not installed by default on macOS. All hook scripts use inline `python3 -c` for JSON parsing. Python 3 is reliably available.
@@ -36,6 +36,8 @@ jig/
 Plugin `bin/` PATH injection is Bash-tool only, not hook commands. All hook `command` fields use the full `${CLAUDE_PLUGIN_ROOT}` path.
 
 ### Dual-distribution: plugin install AND scaffolded install
+*Principle:* [product-vision.md § Design principles](product-vision.md#design-principles) (#7) — dev owns the scaffolding, not the plugin runtime.
+
 As of [spec 016-scaffold-mode](specs/016-scaffold-mode/spec.md) (slices
 016-01 + 016-02 + 016-03 all DONE; 016-04 deferred), `scaffold-init` copies the
 runtime machinery (`skills/`, `agents/`, `hooks/scripts/`) into the
@@ -65,13 +67,16 @@ and plugin installs falls under Claude Code's normal
 project-scoped-wins precedence; jig introduces no new arbiter.
 
 ### Context economy (the "dumb zone")
-Above ~40% context fill, model recall degrades. Practical ceiling: 8 MCP servers, ~80 active tools. The `jig-context-check` hook warns at session start. Skills use progressive disclosure — body loads only on trigger; supporting files load only when needed.
+*Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#2).
+*Mechanics:* the `jig-context-check` hook warns at session start when fill approaches the ~40% threshold. Skills use progressive disclosure — body loads only on trigger; supporting files load only when referenced.
 
 ### Three subagents, no more
+*Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#3) — subagents are defined by what context they need isolated from, not by job title.
+
+*Roster:*
 - `implementer`: TDD discipline, writes deliverables
 - `reviewer`: read-only, fresh context per review
 - `architect`: rare, ADR-style output
-Subagents are defined by what context they need isolated from, not by job title.
 
 As of [spec 011-01 (plugin-self-install)](specs/011-plugin-self-install/spec.md),
 all three are reachable as real `subagent_type` values when jig is installed
@@ -84,13 +89,24 @@ as a Claude Code plugin (the bundled `jig` marketplace — renamed from
 
 ## Module boundaries
 
-> **Deferred — no signal yet on what modules jig itself will have.**
-> Will be decided in the first implementation spec (001-scaffold-init, slice 001-01).
+Six top-level concerns, named in [product-vision.md § Core features](product-vision.md#core-features-prioritized) at the vision layer:
+
+- `skills/` — auto-triggering LLM behaviors (one `SKILL.md` + supporting files per skill)
+- `agents/` — three subagent definitions (`implementer` / `reviewer` / `architect`)
+- `hooks/` — deterministic spine (`hooks.json` + Python 3 scripts under `hooks/scripts/`)
+- `templates/` — source templates that `scaffold-init` copies into new projects (CLAUDE.md, docs/, brief)
+- `scripts/` — Python helpers invoked by skills, one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py`, `land.py`, `migrate.py`, `scaffold.py`
+- `.claude-plugin/` — plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
+
+Interface contracts between these modules are deliberately deferred — today's coupling is read-only and one-directional (skills read templates; helpers read specs; hooks read events; nothing writes across the module boundary). Will tighten when the first bidirectional case appears.
 
 ## Data model
 
-> **Deferred — jig is a skill pack, not a data application.**
-> Relevant state: `scaffold.json` manifest (install state), `skill-usage.jsonl` (telemetry), spec files.
+Jig is a workflow layer, not a data application (per [product-vision.md](product-vision.md) non-goals). Relevant on-disk state is small:
+
+- `.jig/scaffold.json` — install manifest: which tiers chosen, when, by which jig version (per [ADR-0001](decisions/adr-0001-scaffold-stable.md))
+- `.jig/skill-usage.jsonl` — telemetry append-only log (deferred until a real consumer exists)
+- `docs/specs/**/spec.md` — the only project-level state jig owns; everything else lives in the dev's repo, owned by the dev
 
 ## Open questions
 
