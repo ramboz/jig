@@ -99,15 +99,125 @@ Deferred because the detection heuristic (what counts as "user-facing layer touc
 
 ---
 
-## Slice 003-03 — new-spec-scaffolding
+## Slice 003-03 — reserve-spec-on-main
 
-**STATUS: DEFERRED** _(deferred)_
+---
+status: READY_FOR_REVIEW
+dependencies: []
+last_verified:
+---
 
-**Resolution trigger:** Friction during new-spec authoring becomes a repeatable annoyance — at least three sessions where the boilerplate copy-paste from a prior spec is the visible bottleneck.
+> Revived from the original "new-spec-scaffolding" deferred stub with sharpened scope. The convenience-boilerplate motivation is folded in (the reservation stub IS the boilerplate); the new primary driver is **team-visible numbering locks** to eliminate parallel-worktree spec-number collisions on merge.
 
-**Goal:** `workflow.py new-spec <number> <name>` creates `docs/specs/NNN-name/` with `spec.md`, `plan.md`, `tasks.md` skeleton files pre-filled with the conventional structure.
+**Goal:** `workflow.py new <slug>` claims the next free spec number by committing — and by default pushing — a minimum-viable `docs/specs/NNN-<slug>/spec.md` stub directly to `origin/main`. If direct push is refused (branch protection, permission denied, pre-receive hook), the helper falls back automatically to a `reserve/NNN-<slug>` branch + `gh pr create`. The reservation lands on the shared trunk **before** any feature-branch drafting begins, so two parallel worktrees cannot both claim the same `NNN`.
 
-Deferred — the current manual `mkdir` + `Write` flow works; this is convenience, not necessity.
+This closes the failure mode logged in CLAUDE.md's spec 016/017 hot-cache note (2026-05-15): parallel sessions landed 014/015 to main while the user's drafts targeted those same numbers, forcing a renumber + reconciliation pass downstream.
+
+**DoR:**
+- ✅ `workflow.py` exists with argparse subcommand scaffolding and `WorkflowError` exit-2 conventions (slice 003-01).
+- ✅ Slice frontmatter parsing + write-back already in place (slice 015-01) — the stub `spec.md` ships with the modern frontmatter shape from day one.
+- ✅ Git / `gh` subprocess + safety-guard precedent exists in `skills/slice-land/land.py` (`_run_git_cmd`, `_run_gh_cmd`, `_check_gh_available`, `_check_github_remote`) — slice 003-03 reuses the shape inline. ADR-0003's three-callers-then-extract trigger fires only on a third caller.
+- ✅ Convention `docs/specs/NNN-<slug>/spec.md` is uniform across all 17 existing specs.
+
+### Anti-horizontal-phasing check
+
+End-to-end, the user runs `python3 workflow.py new <slug>` from `main` and observes three user-visible outcomes in a single CLI invocation: (a) a new `docs/specs/NNN-<slug>/spec.md` on disk with valid stub content, (b) a fresh `docs(specs): reserve NNN-<slug>` commit on local main, and (c) **either** `origin/main` updated **or** a `reserve/NNN-<slug>` PR open on GitHub. No intermediate state, no manual git plumbing between "decide to start work" and "the number is mine team-wide."
+
+### Acceptance Criteria
+
+1. **`workflow.py new <slug>` claims the next number atomically.** With current branch = `main` and a clean worktree, the helper: fetches `origin/main` (when an `origin` remote exists), scans `docs/specs/` for the max `NNN-` directory prefix, computes `NNN = max + 1` (zero-padded to 3 digits), validates the slug (`^[a-z][a-z0-9-]*$` AND no `--`), creates `docs/specs/<NNN>-<slug>/spec.md` with the stub content from AC #2, stages it, and commits with message `docs(specs): reserve <NNN>-<slug>`. Stdout prints two lines: the reserved number+slug and the absolute spec path.
+
+2. **The stub `spec.md` carries valid frontmatter + headers ready for drafting.** Exact contents:
+
+   ```
+   ---
+   status: DRAFT
+   skill:
+   ---
+
+   # Spec <NNN>: <Title-Cased Slug>
+
+   > Reserved on <YYYY-MM-DD> via `workflow.py new`. Body to be drafted in a feature branch.
+
+   ## Overview
+
+   _TBD_
+
+   ## SPIDR analysis
+
+   _TBD_
+   ```
+
+   `skill:` is intentionally blank — the reserver may not know the final skill home yet; it's filled in during drafting. Title-cased slug: `parallel-worktree-collision` → `Parallel-worktree collision` (replace `-` with space, capitalize first letter only).
+
+3. **Direct-push is the default; PR-fallback fires only on protection / permission refusal.** After the local commit, the helper runs `git push origin main`. On success: print `reserved <NNN>-<slug> on origin/main`, exit 0. On failure, classify the stderr:
+   - Recognized protection/permission signals (case-insensitive substring match): `protected branch`, `permission denied`, `pre-receive hook declined`, `not authorized`, `cannot lock ref` → **fall back to PR mode** (AC #4).
+   - Anything else (notably `non-fast-forward`, `connection refused`, DNS errors) → **do NOT fall back**; print the git stderr verbatim, leave the local commit in place, exit 2.
+
+4. **PR-fallback creates `reserve/<NNN>-<slug>`, restores main, pushes the branch, and opens a PR.** Sequence executed atomically (any step's failure aborts and prints what's left to clean up):
+   1. `git branch reserve/<NNN>-<slug> HEAD`
+   2. `git reset --hard origin/main` (un-strand local main; the reservation commit lives on the new branch)
+   3. `git checkout reserve/<NNN>-<slug>`
+   4. `git push -u origin reserve/<NNN>-<slug>`
+   5. `gh pr create --title "docs(specs): reserve <NNN>-<slug>" --body <body>` — the body explains the reservation purpose, names the slot, and links back to this slice for reviewer context.
+   6. Print the PR URL.
+
+   Fallback requires `gh` on PATH **and** `origin` URL containing `github.com` — mirrors the slice-land 007-03 guard precedent. If either check fails, the helper prints a clear message naming the missing prereq and exits 2 with the branch already pushed (no PR opened, but the reservation work is on origin — the user can open the PR manually).
+
+5. **Preflight refusals: not-on-main, dirty-worktree, bad-slug, no-specs-dir.** The helper refuses (exit 2) with a clear message **before any mutation** when:
+   - Current branch ≠ `main` (`git symbolic-ref --short HEAD`).
+   - Working tree has uncommitted changes (`git status --porcelain` non-empty).
+   - Slug fails the regex (`^[a-z][a-z0-9-]*$`) OR contains `--`. The error names the offending slug AND the rule it violated.
+   - `docs/specs/` directory is absent in CWD (we're not inside a scaffolded jig project).
+
+6. **Race-on-push detected and reported.** If `git push origin main` fails with `non-fast-forward` (or `fetch first`, `rejected`), the helper detects this distinct signal and prints `race detected: origin/main advanced during reservation. Re-run 'workflow.py new <slug>' to pick the next free number.` Then `git reset --hard HEAD~1` to drop the local stranded commit (so re-run starts clean), and exits 2. **Note:** this is structurally different from the protection/permission fallback in AC #3; race-on-push means *someone else got there first*, not *I'm not allowed to push at all*.
+
+7. **`--no-push` and `--pr` flags override the default flow.**
+   - `--no-push`: commit locally only; never attempt fetch or push. For solo-machine work without a remote.
+   - `--pr`: skip the direct-push attempt entirely; go straight to AC #4's branch-and-PR fallback. For users on protection-locked main who'd rather not waste a roundtrip on a known-rejected push.
+   - Mutually exclusive (argparse mutex group); both together is a usage error.
+
+8. **Tests cover happy paths, refusal paths, and fallback paths with subprocess mocking.** At least **12 new tests** in `test_workflow.py` under a `ReserveSpecTests` class:
+   - `test_new_reserves_next_number_and_writes_stub` — clean main, `--no-push`; verify dir + spec.md content + frontmatter + commit message.
+   - `test_new_uses_max_plus_one_across_gaps` — fixture with `docs/specs/{001-x, 015-y, 003-z}/` → reserves `016-...` (max + 1, gaps ignored).
+   - `test_new_refuses_on_non_main_branch`
+   - `test_new_refuses_on_dirty_worktree`
+   - `test_new_refuses_on_bad_slug` — covers uppercase, leading digit, `--`, empty string.
+   - `test_new_refuses_when_specs_dir_absent`
+   - `test_new_direct_push_succeeds` — mock `git push` rc=0; verify success message + no fallback branch created.
+   - `test_new_falls_back_on_protected_branch` — mock push rc=1 + stderr `protected branch`; verify branch created, main reset, `gh pr create` invoked.
+   - `test_new_does_not_fall_back_on_non_fast_forward` — mock push rc=1 + stderr `non-fast-forward`; verify race message + local commit dropped + exit 2.
+   - `test_new_pr_mode_skips_direct_push` — `--pr`; assert subprocess log has no `git push origin main` call, branch + PR creation happen.
+   - `test_new_pr_mode_refuses_without_gh` — mock `shutil.which('gh') == None`; verify exit 2 with named prereq.
+   - `test_new_pr_mode_refuses_without_github_remote` — mock `origin` URL = `git@gitlab.example.com:foo/bar.git`; verify exit 2 with named prereq.
+   - `test_new_no_push_skips_remote_calls` — `--no-push`; assert subprocess log has no `git fetch` or `git push`.
+
+9. **`SKILL.md` "Creating a new spec" recipe updated.** Step 2 of the existing "Creating a new spec" section is replaced with:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" new <slug>
+   ```
+
+   The manual `mkdir` + `Write` fallback is preserved as a one-paragraph note for projects without remote access (or for `--no-push` workflows).
+
+10. **`CLAUDE.md` `Skills in this repo` table entry for `/jig:spec-workflow` updated** to mention the `new` subcommand alongside `transition`, `status-board`, and `stale`.
+
+### Definition of Done
+
+- [ ] All ACs pass; full test suite green (no regressions from current 593 baseline).
+- [ ] ≥12 new tests in `test_workflow.py` under `ReserveSpecTests`, all green.
+- [ ] Subprocess mocking pattern is consistent with `test_workflow.py`'s existing precedent (or cleanly extends it; reviewer signs off on the extension if so).
+- [ ] Reviewed by `reviewer` subagent (prompt built by `review.py`).
+- [ ] Implementation review passed.
+- [ ] Deviation log produced under "### Deviation log (003-03)".
+- [ ] Reconciliation review passed.
+- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during implementation (likely candidates: `--from-branch` to retroactively migrate already-drafted feature branches into a reservation; an `unreserve` subcommand for abandoned reservations; behavior when `origin/main` advances *after* the stub-create but *before* the local commit).
+
+### Close-out (post-DONE)
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+- [ ] CLAUDE.md Hot Cache `Active specs` entry for 003 updated to mark 003-03 DONE and note the `new` subcommand shipped.
+- [ ] First real `workflow.py new <slug>` invocation in this repo lands on `origin/main` as a green dogfood — captured in the deviation log (per the dogfood-first pattern established by slices 003-01 and 003-04).
 
 ---
 
