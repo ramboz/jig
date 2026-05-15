@@ -21,7 +21,12 @@ loader = unittest.TestLoader()
 suite = unittest.TestSuite()
 
 for skill_dir in sorted((ROOT / "skills").iterdir()):
-    if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
+    if not skill_dir.is_dir():
+        continue
+    # Pycache and other dot-dirs only — `_common` IS a real test home
+    # (shared parser tests). Slice 018-01 surfaced that the original
+    # `_`-prefix skip silently dropped `skills/_common/test_parsing.py`.
+    if skill_dir.name.startswith(".") or skill_dir.name == "__pycache__":
         continue
     # Python 3.11's unittest.discover raises ImportError on a dir with no
     # Python files (Python 3.12 silently returns an empty suite). Skip skill

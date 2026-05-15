@@ -65,6 +65,10 @@
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-02 — vision-elicitation-skill-core | **DONE** |  |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-03 — re-runnable-with-edit-detection | **DONE** |  |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-04 — seed-ADR-pass | DEFERRED |  |
+| [018-slice-per-file](018-slice-per-file/spec.md) | 018-01 — parser-foundation-and-dual-read | **DONE** |  |
+| [018-slice-per-file](018-slice-per-file/spec.md) | 018-02 — caller-recognition-and-fixtures | DRAFT |  |
+| [018-slice-per-file](018-slice-per-file/spec.md) | 018-03 — scaffold-new-specs-as-file-per-slice | DRAFT |  |
+| [018-slice-per-file](018-slice-per-file/spec.md) | 018-04 — migrate-split-slices | DRAFT |  |
 
 ## Deferred slices
 

@@ -8,6 +8,16 @@ against a user-supplied fragment. adr.py uses a divergent
 
 Helpers in this module:
   - find_slice_section(text, fragment) -> (start, end, label)
+  - find_slice_file(spec_dir, fragment) -> Path | None  (slice 018-01)
+    Resolves a fragment to a sibling slice file in `spec_dir`. Match is
+    on the `## Slice` heading inside each `slice-*.md` file, not the
+    filename. Returns None on miss; raises SliceLookupError on ambiguity.
+    `spec.md` itself is excluded — only `slice-*.md` files are walked.
+  - load_slice(spec_path, fragment) -> SliceLocation  (slice 018-01)
+    Dual-read: tries find_slice_file(spec_path.parent, fragment) first;
+    on hit, returns the slice file's full content. Otherwise reads
+    `spec_path` and falls back to `find_slice_section`. Callers get
+    `loc.text[loc.start:loc.end]` uniformly without branching on layout.
   - parse_frontmatter(text) -> (fields, body_offset) — extracts a leading
     `---\\n...\\n---` YAML-lite block from the head of a body (e.g. a
     slice section's content, after the `## Slice ...` heading line).
@@ -24,10 +34,17 @@ keep their original prefix.
 """
 
 import re
+from collections import namedtuple
+from pathlib import Path
 
 
 class SliceLookupError(RuntimeError):
     """Raised when a slice fragment can't be uniquely resolved in a spec."""
+
+
+SliceLocation = namedtuple("SliceLocation", "path text start end label")
+"""Result of `load_slice`. `text[start:end]` is the slice body; `path` is
+the file the body came from (slice-NN-*.md or spec.md)."""
 
 
 _SLICE_HEADER_RE = re.compile(r"(?im)^##\s+Slice\s+([^\n]+)$")
@@ -62,6 +79,90 @@ def find_slice_section(spec_text: str, slice_fragment: str):
     end = header.end() + (nxt.start() if nxt else len(rest))
     label = header.group(1).strip()
     return header.start(), end, label
+
+
+# ---------- file-based slice resolution (slice 018-01) ----------
+
+
+def find_slice_file(spec_dir, slice_fragment: str):
+    """Locate a sibling `slice-*.md` file in `spec_dir` whose `## Slice`
+    heading contains `slice_fragment` (case-insensitive substring).
+
+    Returns the matching `pathlib.Path`, or `None` when no match is found
+    (including: dir missing, no slice files, none match). Raises
+    `SliceLookupError` when two or more slice files match.
+
+    Only files matching `slice-*.md` are considered — `spec.md`, `.bak`,
+    `.txt`, etc. are ignored. Match is on the H2 heading content inside
+    each file, not the filename, so a misnamed file still resolves
+    correctly (and a filename-only match without the corresponding
+    heading does not).
+
+    Only the first `## Slice` heading per file is considered. The
+    file-per-slice convention this spec establishes means there should
+    be exactly one. If a future slice needs multiple, revisit.
+    """
+    p = Path(spec_dir)
+    if not p.is_dir():
+        return None
+    needle = slice_fragment.lower()
+    matches = []
+    for candidate in sorted(p.glob("slice-*.md")):
+        # Read just enough to find the first `## Slice ...` heading.
+        try:
+            text = candidate.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        m = _SLICE_HEADER_RE.search(text)
+        if m and needle in m.group(0).lower():
+            matches.append(candidate)
+    if not matches:
+        return None
+    if len(matches) > 1:
+        names = [m.name for m in matches]
+        raise SliceLookupError(
+            f"ambiguous slice fragment '{slice_fragment}' matches "
+            f"multiple files: {names}"
+        )
+    return matches[0]
+
+
+def load_slice(spec_path, slice_fragment: str) -> SliceLocation:
+    """Resolve `slice_fragment` against either a sibling slice file or
+    a section inside `spec_path`, returning a uniform `SliceLocation`.
+
+    Dual-read order:
+      1. `find_slice_file(spec_path.parent, slice_fragment)` — if a
+         slice file matches, returns
+         `SliceLocation(slice_file_path, slice_file_text, 0,
+         len(slice_file_text), label)` where `label` is parsed from the
+         `## Slice` heading inside the file.
+      2. Otherwise reads `spec_path` and delegates to
+         `find_slice_section`, returning
+         `SliceLocation(spec_path, spec_text, start, end, label)`.
+
+    Either way, the caller does `loc.text[loc.start:loc.end]` to get
+    the slice body — the layout is invisible at the call site.
+
+    Raises `SliceLookupError` if no slice file matches AND the
+    fragment is not present in `spec_path`. Re-raises ambiguity
+    errors from either resolver unchanged.
+    """
+    spec_path = Path(spec_path)
+    spec_dir = spec_path.parent
+
+    slice_file = find_slice_file(spec_dir, slice_fragment)
+    if slice_file is not None:
+        text = slice_file.read_text()
+        m = _SLICE_HEADER_RE.search(text)
+        # find_slice_file already verified a matching heading exists.
+        label = m.group(1).strip() if m else slice_fragment
+        return SliceLocation(slice_file, text, 0, len(text), label)
+
+    # Fallback: scan spec.md for the section.
+    spec_text = spec_path.read_text()
+    start, end, label = find_slice_section(spec_text, slice_fragment)
+    return SliceLocation(spec_path, spec_text, start, end, label)
 
 
 # ---------- frontmatter (slice 014-01) ----------
