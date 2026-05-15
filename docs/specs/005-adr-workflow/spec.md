@@ -231,7 +231,7 @@ The original spec is preserved above.
 
 ## Slice 005-02 — supersede
 
-**STATUS: DRAFT** _(deferred; not part of this session)_
+**STATUS: DEFERRED** _(deferred; not part of this session)_
 
 **Goal:** `adr.py supersede <old-NNNN> <new-NNNN>` flips the old ADR's
 Status to `Superseded by ADR-NNNN (YYYY-MM-DD)` and inserts a
@@ -248,7 +248,7 @@ in jig OR in a target project.
 
 ## Slice 005-03 — boundary-change-detection
 
-**STATUS: DRAFT** _(deferred)_
+**STATUS: DEFERRED** _(deferred)_
 
 **Goal:** Hook or helper that surfaces "you changed a module boundary
 without writing an ADR." Pairs with the `contracts` skill once it

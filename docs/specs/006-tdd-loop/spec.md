@@ -233,7 +233,9 @@ The original spec is preserved above.
 
 ## Slice 006-02 — ac-coverage
 
-**STATUS: DRAFT** _(deferred; not part of this session)_
+**STATUS: DEFERRED** _(deferred; not part of this session)_
+
+**Resolution trigger:** A real spec ships with an AC that doesn't map to any test, AND the gap survives review. Until that happens, the AC↔test mapping discipline is being upheld manually.
 
 **Goal:** `tdd.py ac-coverage <spec.md> <test-path>` parses AC numbers
 out of a spec slice and maps them to tests in `test-path`. Reports
@@ -250,7 +252,9 @@ helper that consumes hints from the spec. Worth scoping after
 
 ## Slice 006-03 — pre-commit-gate
 
-**STATUS: DRAFT** _(deferred)_
+**STATUS: DEFERRED** _(deferred)_
+
+**Resolution trigger:** First production-grade red-tests-committed incident, OR a sustained run of more than 2 commits-with-red-tests within a single spec.
 
 **Goal:** PreToolUse hook that blocks `git commit` calls when
 `tdd.py run` returns non-zero exit. Optionally bypassable via

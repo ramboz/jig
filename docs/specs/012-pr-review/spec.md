@@ -680,7 +680,9 @@ correction itself is recorded as deviation §1 below).
 
 ## Slice 012-02 — pr-review-gather-helper
 
-**STATUS: DRAFT** _(deferred — add only if gather-friction is observed)_
+**STATUS: DEFERRED** _(deferred — add only if gather-friction is observed)_
+
+**Resolution trigger:** Three `pr-review/gather-friction:` inbox entries naming specific sessions where Claude had to re-derive determinism inline. Count today: 0 (per inbox 2026-05-13 entry).
 
 **Goal:** `pr_review.py gather <target-branch>` produces a structured
 markdown bundle (diff, file list, scope classification, language detection)
@@ -697,7 +699,9 @@ file, miscounted lines changed, etc.).
 
 ## Slice 012-03 — security-lens-integration
 
-**STATUS: DRAFT** _(deferred — gated on `security_lens` decision)_
+**STATUS: DEFERRED** _(deferred — gated on `security_lens` decision)_
+
+**Resolution trigger:** Resolution of the `security_lens` parent decision (see [inbox 2026-05-12 entry](../../inbox.md) on graceful-degradation with `adobe-security-suite`). 012-03 plugs into whichever shape that decision takes.
 
 **Goal:** `pr-review` consults the `security_lens` field in `scaffold.json`
 (when present) and either appends an `adobe-security-suite` hand-off block
@@ -711,7 +715,9 @@ the slim baseline applies.
 
 ## Slice 012-04 — language-specific-references
 
-**STATUS: DRAFT** _(deferred — explicit non-goal of "lightweight")_
+**STATUS: DEFERRED** _(deferred — explicit non-goal of "lightweight")_
+
+**Resolution trigger:** Multi-language-codebase user reports a concrete gap that the lightweight baseline doesn't cover, AND no user-installed `~/.claude/skills/pr-review` deferral target exists for them.
 
 **Goal:** Port the language-specific reference files from the personal
 `pr-review` skill (`nodejs-typescript.md`, `java-aem.md`, `python.md`).

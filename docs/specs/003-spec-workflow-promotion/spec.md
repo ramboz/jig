@@ -89,7 +89,9 @@ The original spec is preserved above.
 
 ## Slice 003-02 — anti-horizontal-phasing-check
 
-**STATUS: DRAFT** _(deferred; not part of this session)_
+**STATUS: DEFERRED** _(deferred; not part of this session)_
+
+**Resolution trigger:** First slice that ships pure backend changes and slips past review with no UI-layer flag — i.e. when horizontal-phasing risk becomes observed, not theoretical.
 
 **Goal:** `workflow.py check <spec.md>` parses each slice and warns if it appears to be horizontal phasing (no user-facing layer touched).
 
@@ -99,7 +101,9 @@ Deferred because the detection heuristic (what counts as "user-facing layer touc
 
 ## Slice 003-03 — new-spec-scaffolding
 
-**STATUS: DRAFT** _(deferred)_
+**STATUS: DEFERRED** _(deferred)_
+
+**Resolution trigger:** Friction during new-spec authoring becomes a repeatable annoyance — at least three sessions where the boilerplate copy-paste from a prior spec is the visible bottleneck.
 
 **Goal:** `workflow.py new-spec <number> <name>` creates `docs/specs/NNN-name/` with `spec.md`, `plan.md`, `tasks.md` skeleton files pre-filled with the conventional structure.
 

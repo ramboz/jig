@@ -88,3 +88,78 @@ In Python regex, \s matches whitespace **including \n**. Using \s*$ as an end-of
 - Both occurrences were inside slice 005-01 / 006-01 reconciliation. The pattern is: locate-a-section-and-mutate-the-status-line.
 
 **Watch sites elsewhere in the codebase** (per slice 006-01 deviation log): adr.py:224 _extract_status_and_date uses \s+ in a locator-only role — currently safe but would be more defensible as [ \t]+.
+
+## Spec-number collisions in concurrent sessions — fetch origin/main before picking a number
+
+Surfaced in spec 015's merge (originally drafted as spec 014). A long in-session
+spec draft picked `014` based on the local view of `docs/specs/`; meanwhile,
+`014-arch-review` landed on `origin/main` from a parallel session. At merge
+time, the spec dir collided at the *number* level (different slugs, same NNN)
+and the entire spec — directory name, 18 internal cross-references in
+`spec.md`, CLAUDE.md entry, status-board rows — had to be renumbered 014 → 015
+before the PR could land cleanly.
+
+**Generalizable lesson:** before authoring a new spec, `git fetch origin main`
+and check both `git ls-tree origin/main docs/specs/` AND the local
+`docs/specs/`. If you're in a long session and another spec might land
+concurrently, picking the *next* number is a leaky abstraction.
+
+**Mitigation options** (none implemented; this is documented as a discipline rule):
+- (a) `workflow.py new-spec <slug>` helper that fetches origin/main and computes
+  the next free number atomically.
+- (b) A pre-PR check in `slice-land` that grep's spec dirs against origin/main
+  and refuses if there's a number collision.
+- (c) Reserve spec numbers explicitly by pushing an empty `docs/specs/NNN-<slug>/`
+  commit at spec creation time.
+- (d) Accept the discipline ("fetch first") and don't tool it — current default.
+
+**Why it matters:** the rename touched 18 file-internal references and produced
+a meta-confusing deviation log ("spec 015 has 014-shaped slice IDs throughout
+its history"). The user-facing fix was straightforward; the lesson is to avoid
+it at authoring time.
+
+## Scaffold-init glob trap — `.md.template` triggers placeholder substitution
+
+Surfaced in slice 015-01 implementation. `scaffold-init.py` does
+`templates/docs/**/*.md.template` → `target/docs/**/*.md` with placeholder
+substitution (`{{SUBS}}` → value, refusing on any leftover). Files placed
+under `templates/docs/` with the `.md.template` suffix are caught by this
+glob. The new slice-creation template (which legitimately ships with
+`{{NAME}}` / `{{NUMBER}}` placeholders meant for slice authors to fill in
+*much later*) initially used `.md.template` and broke the entire test suite
+because scaffold-init tried to substitute those placeholders at scaffold time
+and refused with `unrendered placeholders`.
+
+**Fix:** name templates that should be hand-edited later with `.md` only, not
+`.md.template`. The existing ADR template at
+`templates/docs/decisions/adr-0000-template.md` had already established this
+precedent; the slice template just needed to follow it.
+
+**Generalizable rule:** the `.template` suffix in jig is reserved for files
+scaffold-init renders at install time. Hand-edited templates use bare `.md`
+and live alongside content files unchanged.
+
+## Substitute-reviewer convention — user-in-session can stand in for the reviewer subagent
+
+Surfaced in spec 015's implementation. The jig methodology specifies that
+implementation review is performed by a `reviewer` subagent spawn via
+`review.py`. For methodology-tooling specs where the user has full context
+of the change in-session, an explicit user approval ("I approve those slices,
+go ahead and implement them") can substitute for the subagent spawn.
+
+**Constraint:** the substitution must be **documented in the slice's
+deviation log §1** as a deliberate methodology shortcut, with the
+substantive review criterion the user actually applied (e.g. "all ACs pass,
+no regressions, test coverage verified") stated explicitly. Without this,
+the deviation looks like a missed review gate.
+
+**When to use:** methodology-tooling specs where the user has been part of
+the in-session implementation conversation and the implementer has reported
+green tests + no regressions. **When not to use:** any spec with non-trivial
+business logic, any spec the user hasn't been hands-on with, any spec where
+"a second pair of eyes with no implementation context" is the actual value.
+
+**Future direction:** the convention is currently uncodified — it's a
+case-by-case judgment. If the pattern recurs >2 more times, consider a
+`workflow.py transition --reviewer user-in-session` flag that requires a
+non-empty `--review-summary` and records both in the slice frontmatter.

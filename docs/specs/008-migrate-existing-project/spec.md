@@ -1211,7 +1211,7 @@ false-positive-block `slice-land`'s DoD check.
 
 ## Slice 008-04 — slice-to-spec-mapping
 
-**STATUS: DRAFT** _(deferred — needs design work; depends on
+**STATUS: DEFERRED** _(deferred — needs design work; depends on
 sub-slice-topology decision)_
 
 **Goal:** `migrate.py slice-to-spec <project-dir>` interactively (or
@@ -1226,9 +1226,7 @@ needs a real session with the validator's full slice set to design.
 Also depends on the sub-slice topology decision (see
 [refinement-todo](../../refinement-todo.md#decision-sub-slice-topology-and-naming)).
 
-**Resolution trigger:** Either (a) 008-01 + 008-02 + 008-03 all
-DONE and the validator migration is actively in progress, OR (b) a
-second project with similar flat-slice topology surfaces.
+**Resolution trigger:** Either (a) 008-01 + 008-02 + 008-03 all DONE and the validator migration is actively in progress, OR (b) a second project with similar flat-slice topology surfaces.
 
 ---
 

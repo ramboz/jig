@@ -694,7 +694,7 @@ exists. Filed as inbox follow-up.
 
 ## Slice 011-03 — scaffold-json-self-install-marker
 
-**STATUS: DRAFT** (deferred — gated on a real caller needing the signal)
+**STATUS: DEFERRED** (deferred — gated on a real caller needing the signal)
 
 **Goal placeholder:** Decide whether `scaffold.json` should carry a
 field representing "jig is installed locally for dev." Likely answer:
@@ -703,14 +703,13 @@ not via scaffold-init), so the field has no natural home. The
 question only arises if an external contributor wants to mirror jig's
 dev setup *and* needs the install state surfaced to some other tool.
 
-**Resolution trigger:** First caller that needs to branch on "jig is
-installed locally" AND can't get the signal from the runtime directly.
+**Resolution trigger:** First caller that needs to branch on "jig is installed locally" AND can't get the signal from the runtime directly.
 
 ---
 
 ## Slice 011-04 — subagentstart-reachability
 
-**STATUS: DRAFT** (deferred — gated on a real use case)
+**STATUS: DEFERRED** (deferred — gated on a real use case)
 
 **Goal placeholder:** With real subagents in jig's dev env post-011-01,
 revisit the deferred [SubagentStart hook event question](../../refinement-todo.md#decision-subagentstart-hook-event).
@@ -718,9 +717,7 @@ Test whether the event fires as documented in the changelog. If it
 does, define the contract jig depends on. If it doesn't, escalate to
 Anthropic or work around.
 
-**Resolution trigger:** First skill that needs to react to subagent
-start (e.g. reviewer-pass logging, effort-scaling enforcement, real
-telemetry to replace the Task-spawn proxy).
+**Resolution trigger:** First skill that needs to react to subagent start (e.g. reviewer-pass logging, effort-scaling enforcement, real telemetry to replace the Task-spawn proxy).
 
 ---
 

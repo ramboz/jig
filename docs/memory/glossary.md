@@ -58,3 +58,34 @@ hooks exist but none carry the jig marker; `--force` is the escape. The dev owns
 files — they can edit any SKILL.md or helper, version-control their customizations, and
 pick up the original "scaffolding library" positioning. Plugin install via
 `/plugin install jig@jig` still works unchanged; project-scoped wins when both are present.
+
+## DEFERRED
+
+A spec-lifecycle state added in slice 015-02. A slice marked `DEFERRED` was scoped
+but parked — the work is identified but not the current priority. Different from
+`DRAFT`, which means "not yet fleshed out." Outbound transitions are restricted:
+`DEFERRED → DRAFT` (re-open) only; all other targets are refused so review gates
+aren't silently skipped when a parked slice is picked back up. This is the **first
+FROM-state-restricted transition** in jig's lifecycle.
+
+## Resolution trigger
+
+A line (`**Resolution trigger:** <condition>`) under a deferred slice or a deferred
+decision describing the concrete signal that would justify re-opening it. The
+status board's `## Deferred slices` section renders this as the per-row context
+(slice 015-02). The same convention is reused from `docs/refinement-todo.md`.
+
+## Lazy migration
+
+Convention introduced by slice 015-01: when a layout change is introduced (here,
+frontmatter on slices), parsers tolerate both old and new shapes indefinitely;
+only newly authored items use the new shape. No mass rewrite of existing items.
+Tradeoff: long-lived support for two shapes; benefit: zero high-churn migration
+diff and zero risk of garbling rare existing variants.
+
+## Conjunctive staleness
+
+The criterion used by `workflow.py stale` (slice 015-03): an item is stale iff
+BOTH `(today - last_verified) > --days` AND at least one file in `dependencies`
+has been modified since `last_verified`. Pure age alone or pure dep-recency alone
+is not enough.

@@ -3,10 +3,13 @@ name: spec-workflow
 description: >
   Drive the spec-driven lifecycle for any non-trivial work item: SPIDR-split a
   new spec into vertical slices, transition state markers (DRAFT → READY_FOR_REVIEW
-  → READY_FOR_IMPLEMENTATION → IN_PROGRESS → REVIEWED → RECONCILED → DONE), and
-  enforce the reconciliation checklist before commit. Use when starting non-trivial
-  new work, creating a spec, transitioning a slice's state, or reconciling a slice
-  that's been reviewed. Do not use for quick one-off fixes that don't need a spec,
+  → READY_FOR_IMPLEMENTATION → IN_PROGRESS → REVIEWED → RECONCILED → DONE; also
+  DEFERRED for parked slices with a stated resolution trigger), enforce the
+  reconciliation checklist before commit, and surface stale specs/ADRs whose
+  `last_verified` date has aged past dependency changes. Use when starting
+  non-trivial new work, creating a spec, transitioning a slice's state,
+  parking a slice as DEFERRED, reconciling a reviewed slice, or auditing
+  doc freshness. Do not use for quick one-off fixes that don't need a spec,
   or for bug-shaped work where `debug-workflow` is the better fit.
 user-invocable: true
 ---
@@ -29,12 +32,20 @@ user-invocable: true
 ### Creating a new spec
 
 1. Confirm the work needs a spec. Trivial fixes don't.
-2. Pick a number (next free `NNN-` slug under `docs/specs/`).
+2. Pick a number (next free `NNN-` slug under `docs/specs/`). **Fetch
+   `origin/main` first** — if you're in a long session and another spec
+   landed on main concurrently, you'll need to renumber yours pre-merge.
+   This is cheaper to discover at spec-creation time than at merge time.
 3. Create `docs/specs/NNN-<slug>/{spec.md,plan.md,tasks.md}` with the conventional
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers
    end-to-end value. Spike is the last resort, not the first reach.
-5. Set each slice's `**STATUS: DRAFT**` initially.
+5. For each new slice, use the template at
+   `templates/docs/specs/slice-template.md` — it ships the canonical
+   frontmatter shape (`status`, `dependencies`, `last_verified`) plus
+   DoR / AC / DoD / Close-out sections. Set `status: DRAFT` in the
+   frontmatter. Legacy slices that use prose `**STATUS: DRAFT**` markers
+   still work (lazy migration); no need to rewrite them.
 6. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
 
 ### Picking up a slice
@@ -75,11 +86,57 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
 ```
 DRAFT → READY_FOR_REVIEW → READY_FOR_IMPLEMENTATION → IN_PROGRESS
   → REVIEWED → RECONCILED → DONE
+
+         DEFERRED ⇄ DRAFT  (parked slices with a stated resolution trigger)
 ```
 
-Status transitions are mutations on `spec.md`'s `**STATUS: ...**` line and the
-matching row in `docs/specs/README.md`. Use `workflow.py transition` for the
-former and `workflow.py status-board` to re-sync the latter.
+Status transitions are mutations on either `spec.md`'s frontmatter `status:`
+field (new convention, slice 015-01) or the prose `**STATUS: ...**` line
+(legacy — still supported via lazy migration), AND the matching row in
+`docs/specs/README.md`. Use `workflow.py transition` for the spec mutation
+and `workflow.py status-board` to re-sync the board.
+
+### DEFERRED state
+
+A slice is `DEFERRED` when scoped but parked — the work is identified but
+not the current priority. Different from `DRAFT` which means "not yet
+fleshed out." Transitions:
+
+- Any state → `DEFERRED` is allowed.
+- `DEFERRED` → `DRAFT` (re-open) is allowed.
+- `DEFERRED` → any other state is **refused** — re-open via DRAFT first
+  so review gates aren't silently skipped. This is the first
+  FROM-state-restricted transition in jig's lifecycle.
+
+When transitioning a slice to `DEFERRED`, add a `**Resolution trigger:**`
+line in the slice body (same convention `docs/refinement-todo.md` uses).
+The status-board renders deferred slices in a separate `## Deferred slices`
+section with that trigger as the per-row context.
+
+### Slice frontmatter (slice 015-01 convention)
+
+New slices written from `templates/docs/specs/slice-template.md` use a
+typed frontmatter block right after the `## Slice ...` heading:
+
+```yaml
+---
+status: DRAFT
+dependencies: [007-02, adr-0004]
+last_verified:
+---
+```
+
+- `status` — current lifecycle state. `workflow.py transition` updates
+  this when present.
+- `dependencies` — flow-style list of slice fragments (e.g. `007-02`)
+  and ADR IDs (e.g. `adr-0004`). `transition <slice> DONE` refuses if
+  any listed dependency is not DONE / accepted.
+- `last_verified` — date the slice was last reconciled. `transition`
+  stamps this automatically on `→ RECONCILED`. Used by `stale`.
+
+Legacy slices using prose `**STATUS:**` markers still work — the
+transition helper writes to whichever shape is present. No retroactive
+mass migration; new slices use the template, old slices stay as-is.
 
 ## Reconciliation checklist
 
@@ -107,6 +164,33 @@ status flip is allowed. Each item is a gate.
       deviation log honest? Is scope appropriate (no scope creep in docs)?
 - [ ] **Commit** — only after all gates pass.
 
+### Auditing staleness (`workflow.py stale`)
+
+Slice 015-03 added a read-only freshness audit:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" stale \
+  [--project-dir DIR] [--days N]
+```
+
+Walks `docs/specs/*/spec.md` and `docs/decisions/adr-*.md`, extracts
+`last_verified` + `dependencies` from frontmatter, and lists items
+meeting the **conjunctive criterion**:
+
+> An item is stale iff (a) `today - last_verified > --days` (default 90)
+> AND (b) at least one file referenced by `dependencies` was modified
+> since `last_verified`.
+
+Pure age isn't enough — a verified-2-years-ago ADR for an unchanged
+decision shouldn't fire. Pure recency-of-dep isn't either — a doc
+verified yesterday with old deps is fine. Both conditions must hold.
+
+The check uses `git log -1 --format=%cs <path>` for committed-state
+authority and falls back to filesystem mtime when git is unavailable
+or the file isn't tracked. Read-only: it lists, doesn't transition.
+Bumping `last_verified` is a deliberate human/agent action — edit the
+file, or re-run `transition <slice> RECONCILED` after re-verifying.
+
 ## Gotchas
 
 - **Spike is the LAST SPIDR technique** to reach for, not the first. AI agents
@@ -125,7 +209,8 @@ status flip is allowed. Each item is a gate.
 - **`workflow.py status-board` preserves the preamble** before the `| Spec` table
   header. Custom intro text survives regen. Idempotent: no churn if the board is
   already current. **Notes column** also survives regen (the helper parses existing
-  Notes and re-emits them).
+  Notes and re-emits them). **Deferred slices** appear in a separate `## Deferred
+  slices` table below the active table; only the active table preserves Notes.
 - **`workflow.py` ignores `## Spike` headers.** Spikes are research artifacts, not
   lifecycle-managed work items. They don't have a STATUS marker the helper can
   transition. If you need a spike to be tracked in the status board, model it as a
@@ -134,3 +219,11 @@ status flip is allowed. Each item is a gate.
   Markdown tables use pipes as cell separators; raw pipes in a Note value would
   truncate the cell during regen's preservation step. Use HTML-entity `&#124;`
   or rephrase if you really need a pipe.
+- **`DEFERRED → DONE` (or any non-DRAFT state) is refused.** Re-open the
+  slice with `DEFERRED → DRAFT` first, then advance through the normal
+  lifecycle. This prevents silently skipping review gates when a parked
+  slice is picked back up.
+- **`transition <slice> DONE` validates `dependencies:`.** If any
+  listed dep slice isn't DONE or any listed ADR isn't Accepted, the
+  helper refuses with a structured error naming each unsatisfied dep.
+  Empty / missing `dependencies:` skips the check.
