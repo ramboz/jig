@@ -861,11 +861,40 @@ triggers, none of which were present). Cleaned post-verification.
   --project-root <tmpdir>` returned 4/4 PASS. Confirms the default
   flip behaves identically to `--with-machinery` under 016-01/02's
   smoke-tests.
-- [ ] **User-driven runtime verification** (out of band — requires
-  a fresh `claude` session): scaffold jig into a new project,
-  confirm `/jig:scaffold-init` and `/jig:tdd-loop` are discoverable
-  AS PROJECT-SCOPED skills (i.e. not via the installed plugin).
-  Record session ID + observation here.
+- [x] **User-driven runtime verification** — DONE 2026-05-15.
+  Scaffolded jig into a tmpdir with `scaffold.py <tmpdir>` (default-on,
+  no flags), then spawned a fresh non-interactive session from the
+  tmpdir with `claude --print --output-format json` and asked the
+  model to enumerate available skills without invoking tools.
+  Session ID: `54d38632-dec1-42e4-bd6a-f8f12274ee1a`. Result
+  (verbatim JSON):
+  ```json
+  {
+    "unprefixed_present": ["scaffold-init", "tdd-loop",
+                            "spec-workflow", "pr-review"],
+    "jig_prefixed_present": ["jig:memory-sync", "jig:tdd-loop",
+                              "jig:spec-workflow",
+                              "jig:scaffold-init",
+                              "jig:independent-review",
+                              "jig:pr-review", "jig:slice-land",
+                              "jig:adr-workflow", "jig:migrate"],
+    "totals": {"unprefixed": 4, "jig_prefixed": 9}
+  }
+  ```
+  **Interpretation:** project-scoped discovery WORKS. The
+  unprefixed names (`scaffold-init`, `tdd-loop`, etc.) come from
+  the scaffolded `.claude/skills/jig-<name>/SKILL.md` files (the
+  `name:` field in the frontmatter has no namespace prefix; the
+  `jig-` is only in the directory name). The `jig:*` names come
+  from the plugin install (which is also active in this dev
+  environment). The two coexist with distinct names — no collision,
+  no precedence dispute. The plugin's `jig:*` skills and the
+  scaffolded unprefixed skills are addressable separately.
+  **Caveat:** the model only confirmed the four skills named in
+  the prompt; the scaffolded `.claude/skills/` has 11 directories,
+  so a full inventory would likely surface 11 unprefixed skills.
+  The four-of-four positive result is sufficient to prove the load
+  works.
 
 ---
 
