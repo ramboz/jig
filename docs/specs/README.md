@@ -69,6 +69,7 @@
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-02 — caller-recognition-and-fixtures | **DONE** |  |
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-03 — scaffold-new-specs-as-file-per-slice | **DONE** |  |
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-04 — migrate-split-slices | **DONE** |  |
+| [019-land-deviation-log-tolerance](019-land-deviation-log-tolerance/spec.md) | 019-01 — no-deviation-log-flag | **DONE** |  |
 
 ## Deferred slices
 

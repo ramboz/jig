@@ -1555,5 +1555,91 @@ class MixedLayoutPrepareTests(unittest.TestCase):
         self.assertIn("018-02 — embedded-slice", result.stdout)
 
 
+class NoDeviationLogFlagTests(unittest.TestCase):
+    """Slice 019-01: `--no-deviation-log` demotes missing deviation log
+    to a warning. Covers all four combinations of (flag × log present/absent).
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-land-nodev-"))
+        self.spec = self.tmpdir / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # 1. AC #3: default behavior unchanged — absent dev log → blocker.
+    def test_default_without_flag_missing_log_blocks(self):
+        self.spec.write_text(_spec_with_slice(
+            "019-01 — test", "DONE", include_deviation_log=False,
+        ))
+        result = run_land("prepare", str(self.spec), "019-01",
+                          cwd=self.tmpdir)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Deviation log: missing", result.stdout)
+        self.assertIn("Deviation log subsection", result.stdout)
+
+    # 2. AC #2: with the flag, absent dev log → warning, exit 0.
+    def test_flag_demotes_missing_log_to_warning(self):
+        self.spec.write_text(_spec_with_slice(
+            "019-01 — test", "DONE", include_deviation_log=False,
+        ))
+        result = run_land("prepare", str(self.spec), "019-01",
+                          "--no-deviation-log",
+                          cwd=self.tmpdir)
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+        self.assertIn("[?] Deviation log: skipped", result.stdout)
+        # Must NOT include the original blocker text
+        self.assertNotIn("Deviation log subsection (`### Deviation log`)",
+                         result.stdout)
+
+    # 3. AC #4: with the flag AND present log, still renders as green.
+    def test_flag_does_not_blind_present_log(self):
+        self.spec.write_text(_spec_with_slice(
+            "019-01 — test", "DONE", include_deviation_log=True,
+        ))
+        result = run_land("prepare", str(self.spec), "019-01",
+                          "--no-deviation-log",
+                          cwd=self.tmpdir)
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+        self.assertIn("[x] Deviation log: present", result.stdout)
+        self.assertNotIn("[?] Deviation log", result.stdout)
+
+    # 4. Default behavior with present log — unchanged.
+    def test_default_with_present_log_green(self):
+        self.spec.write_text(_spec_with_slice(
+            "019-01 — test", "DONE", include_deviation_log=True,
+        ))
+        result = run_land("prepare", str(self.spec), "019-01",
+                          cwd=self.tmpdir)
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout}\nstderr: {result.stderr}")
+        self.assertIn("[x] Deviation log: present", result.stdout)
+
+    # 5. AC #1: flag accepted by execute too.
+    def test_execute_subcommand_also_accepts_flag(self):
+        """Slice 019-01 AC #1: `--no-deviation-log` parses cleanly on
+        the execute subcommand. Use --dry-run to skip git effects."""
+        self.spec.write_text(_spec_with_slice(
+            "019-01 — test", "DONE", include_deviation_log=False,
+        ))
+        from unittest.mock import patch
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=Path(self.tmpdir)):
+            report, code = _land.execute(
+                self.spec, "019-01", mode="direct",
+                dry_run=True, target=Path(self.tmpdir),
+                skip_deviation_log=True,
+            )
+        self.assertEqual(code, 0,
+                         f"expected 0 (--no-deviation-log + dry-run "
+                         f"unblocks missing dev log); got {code}\n{report}")
+        self.assertIn("[?] Deviation log: skipped", report)
+
+
 if __name__ == "__main__":
     unittest.main()

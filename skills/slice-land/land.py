@@ -312,6 +312,11 @@ def render_readiness_section(checks: dict) -> str:
     # Deviation log
     if checks["deviation_log_ok"]:
         lines.append("- [x] Deviation log: present")
+    elif checks.get("skip_deviation_log"):
+        # Slice 019-01: caller passed --no-deviation-log to land
+        # retroactively (e.g. a pre-jig DONE slice imported under
+        # jig's lifecycle). Render as a warning, not a blocker.
+        lines.append("- [?] Deviation log: skipped (--no-deviation-log)")
     else:
         lines.append("- [ ] Deviation log: missing "
                      "(`### Deviation log` subsection required)")
@@ -338,7 +343,10 @@ def render_blockers(checks: dict) -> str:
         blockers.append(
             f"- Tests are red (`tdd.py run` exit {checks['test_exit']}). Fix failures first."
         )
-    if not checks["deviation_log_ok"]:
+    # Slice 019-01: skip the deviation-log blocker when the caller
+    # opted in via --no-deviation-log. The check still runs and shows
+    # in the readiness section as `[?]`; it just doesn't fail the gate.
+    if not checks["deviation_log_ok"] and not checks.get("skip_deviation_log"):
         blockers.append(
             "- Deviation log subsection (`### Deviation log`) is missing from the slice. "
             "Add it under the slice heading before landing."
@@ -421,7 +429,8 @@ def render_pr_body(slice_label: str, spec_path: Path, goal: str,
 
 
 def prepare(spec_path: Path, slice_fragment: str,
-            mode: str = None, target: Path = None) -> tuple:
+            mode: str = None, target: Path = None,
+            skip_deviation_log: bool = False) -> tuple:
     """Run all four readiness checks and emit the markdown report.
 
     Returns (report_text, exit_code). exit_code is 0 if all checks pass
@@ -448,6 +457,7 @@ def prepare(spec_path: Path, slice_fragment: str,
         "dod_ok": dod_ok,
         "dod_ticked": dod_ticked,
         "dod_total": dod_total,
+        "skip_deviation_log": skip_deviation_log,
     }
 
     # Render the readiness section + optional blockers
@@ -460,10 +470,12 @@ def prepare(spec_path: Path, slice_fragment: str,
         parts.append(blockers)
 
     # Determine pass/fail. Warnings (`warn`) don't block.
+    # Slice 019-01: --no-deviation-log demotes the deviation-log
+    # blocker to a warning. STATUS, tests, and DoD all still gate.
     has_blocker = (
         not status_ok
         or test_status == "red"
-        or not deviation_log_ok
+        or (not deviation_log_ok and not skip_deviation_log)
         or not dod_ok
     )
 
@@ -618,7 +630,8 @@ def _check_github_remote(cwd: Path = None) -> tuple:
 
 def execute(spec_path: Path, slice_fragment: str,
             mode: str = "direct",
-            dry_run: bool = False, target: Path = None) -> tuple:
+            dry_run: bool = False, target: Path = None,
+            skip_deviation_log: bool = False) -> tuple:
     """Run the landing sequence for a ready slice.
 
     Common pipeline:
@@ -635,7 +648,8 @@ def execute(spec_path: Path, slice_fragment: str,
     """
     # Step 1 — readiness checks (reuse prepare logic, no mode output)
     prepare_report, prepare_code = prepare(spec_path, slice_fragment,
-                                           mode=None, target=target)
+                                           mode=None, target=target,
+                                           skip_deviation_log=skip_deviation_log)
     parts = [prepare_report.rstrip()]
 
     if prepare_code != 0:
@@ -849,6 +863,10 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="append a Next-steps section for the given mode")
     pp.add_argument("--target", default=None,
                     help="directory passed to tdd.py run (default: cwd)")
+    pp.add_argument("--no-deviation-log", action="store_true",
+                    dest="skip_deviation_log",
+                    help="demote missing `### Deviation log` to a warning "
+                         "(for retroactive landings of pre-jig DONE slices)")
 
     ep = sub.add_parser(
         "execute",
@@ -864,6 +882,10 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="print commands without executing them")
     ep.add_argument("--target", default=None,
                     help="directory passed to tdd.py run (default: cwd)")
+    ep.add_argument("--no-deviation-log", action="store_true",
+                    dest="skip_deviation_log",
+                    help="demote missing `### Deviation log` to a warning "
+                         "(for retroactive landings of pre-jig DONE slices)")
     return p
 
 
@@ -879,6 +901,7 @@ def main(argv: list) -> int:
             report, code = prepare(
                 Path(ns.spec), ns.slice, mode=ns.mode,
                 target=Path(ns.target) if ns.target else None,
+                skip_deviation_log=ns.skip_deviation_log,
             )
         else:  # execute
             report, code = execute(
@@ -886,6 +909,7 @@ def main(argv: list) -> int:
                 mode=ns.mode,
                 dry_run=ns.dry_run,
                 target=Path(ns.target) if ns.target else None,
+                skip_deviation_log=ns.skip_deviation_log,
             )
         sys.stdout.write(report)
         return code
