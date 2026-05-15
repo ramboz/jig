@@ -28,9 +28,23 @@ for skill_dir in sorted((ROOT / "skills").iterdir()):
     # dirs that have no test_*.py to keep both versions happy.
     if not any(skill_dir.glob("test_*.py")):
         continue
-    suite.addTests(loader.discover(start_dir=str(skill_dir), pattern="test_*.py"))
+    # Skill directories use hyphens in their names (e.g. `independent-review`)
+    # which are not valid Python module identifiers. Python 3.11's
+    # unittest.discover rejects such directories as "not importable" unless
+    # `top_level_dir == start_dir`, in which case the importability check is
+    # skipped. Python 3.12 is more lenient. Pin `top_level_dir` to make both
+    # versions behave identically.
+    suite.addTests(loader.discover(
+        start_dir=str(skill_dir),
+        pattern="test_*.py",
+        top_level_dir=str(skill_dir),
+    ))
 
-suite.addTests(loader.discover(start_dir=str(ROOT / "scripts"), pattern="test_*.py"))
+suite.addTests(loader.discover(
+    start_dir=str(ROOT / "scripts"),
+    pattern="test_*.py",
+    top_level_dir=str(ROOT / "scripts"),
+))
 
 result = unittest.TextTestRunner(verbosity=1).run(suite)
 sys.exit(0 if result.wasSuccessful() else 1)
