@@ -46,3 +46,7 @@
 | [012-pr-review](012-pr-review/spec.md) | 012-02 — pr-review-gather-helper | DRAFT |  |
 | [012-pr-review](012-pr-review/spec.md) | 012-03 — security-lens-integration | DRAFT |  |
 | [012-pr-review](012-pr-review/spec.md) | 012-04 — language-specific-references | DRAFT |  |
+| [013-release-pipeline](013-release-pipeline/spec.md) | 013-01 — ci-baseline | READY_FOR_IMPLEMENTATION |  |
+| [013-release-pipeline](013-release-pipeline/spec.md) | 013-02 — release-please-scaffold | READY_FOR_IMPLEMENTATION |  |
+| [013-release-pipeline](013-release-pipeline/spec.md) | 013-03 — release-zip-artifact | READY_FOR_IMPLEMENTATION |  |
+| [013-release-pipeline](013-release-pipeline/spec.md) | 013-04 — marketplace-rename-and-docs | READY_FOR_IMPLEMENTATION |  |
