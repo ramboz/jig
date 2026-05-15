@@ -737,7 +737,7 @@ MissingLicenseWarningTests).
 
 ## Slice 013-04 — marketplace-rename-and-docs
 
-**STATUS: RECONCILED**
+**STATUS: DONE**
 
 **Goal:** Rename the marketplace from `jig-dev` to `jig` (public-facing
 canonical name), rewrite README's Installation section to document the
@@ -905,11 +905,13 @@ and needs to interop with pre-013-04 installs.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md Hot Cache `Active specs` updated to mark spec 013
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md Hot Cache `Active specs` updated to mark spec 013
   effectively complete.
-- [ ] Inbox entry "Public installability of jig" (if present) marked
-  RESOLVED with a reference back to this spec.
+- [x] Inbox entry "Public installability of jig" (if present) marked
+  RESOLVED with a reference back to this spec. — N/A; no such inbox
+  entry existed at the time of close-out (verified via `grep -n
+  "Public installability" docs/inbox.md` returning no matches).
 - [ ] **User-driven dogfood per AC #8** — fresh Claude Code session,
   `/plugin marketplace add ramboz/jig` + `/plugin install jig@jig`,
   confirm `/jig:scaffold-init` (or any other jig skill) is

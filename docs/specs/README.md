@@ -49,4 +49,4 @@
 | [013-release-pipeline](013-release-pipeline/spec.md) | 013-01 — ci-baseline | **DONE** |  |
 | [013-release-pipeline](013-release-pipeline/spec.md) | 013-02 — release-please-scaffold | **DONE** |  |
 | [013-release-pipeline](013-release-pipeline/spec.md) | 013-03 — release-zip-artifact | **DONE** |  |
-| [013-release-pipeline](013-release-pipeline/spec.md) | 013-04 — marketplace-rename-and-docs | READY_FOR_IMPLEMENTATION |  |
+| [013-release-pipeline](013-release-pipeline/spec.md) | 013-04 — marketplace-rename-and-docs | **DONE** |  |
