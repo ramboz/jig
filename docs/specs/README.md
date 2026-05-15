@@ -54,6 +54,11 @@
 | [014-arch-review](014-arch-review/spec.md) | 014-02 — arch-review-gather-helper | DRAFT |  |
 | [014-arch-review](014-arch-review/spec.md) | 014-03 — domain-specific-references | DRAFT |  |
 | [014-arch-review](014-arch-review/spec.md) | 014-04 — security-lens-integration | DRAFT |  |
-| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-01 — frontmatter-parsing-and-templates | **DONE** | +25 tests (parser + workflow + adr + migrate); slice template at `templates/docs/specs/slice-template.md`; lazy migration; mysticat-architecture comparison adoption #1 |
-| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-02 — deferred-as-lifecycle-state | **DONE** | +6 tests; `DEFERRED` added to `VALID_STATUSES`; status-board renders separate Deferred section with Resolution trigger; first FROM-state-restricted transition in jig |
-| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-03 — last-verified-staleness-check | **DONE** | +6 tests; `workflow.py stale [--days N]`; conjunctive criterion (age AND dep-changed); git-log preferred, mtime fallback |
+| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-01 — frontmatter-parsing-and-templates | **DONE** |  |
+| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-02 — deferred-as-lifecycle-state | **DONE** |  |
+| [015-structured-lifecycle-metadata](015-structured-lifecycle-metadata/spec.md) | 015-03 — last-verified-staleness-check | **DONE** |  |
+| [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-01 — copy-skills-and-agents | **DONE** | Positioning-recovery (audit-stage): give devs editable in-repo machinery |
+| [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-02 — copy-hooks-and-register | **DONE** | Generates `.claude/settings.json` w/ jig hook registration |
+| [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-03 — dogfood-and-dual-mode-docs | DRAFT | Flips scaffold-mode to default; rewrites README install paths |
+| [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-04 — update-skill (DEFERRED) | DRAFT | Deferred; promotion gated on real friction or security-shaped fix |
+| [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-01 — TBD | DRAFT | Stub — closes the wizard gap (audit-stage); slice-level SPIDR pending promotion |
