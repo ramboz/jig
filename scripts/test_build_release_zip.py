@@ -20,9 +20,12 @@ import build_release_zip  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+_PLUGIN_VERSION = json.loads(
+    (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text()
+)["version"]
 
 
-def _build_once(version: str = "1.0.0") -> Path:
+def _build_once(version: str = _PLUGIN_VERSION) -> Path:
     """Build a zip using the real repo as source, into a tempdir.
 
     Builder log output is captured to a sink so the test runner's
@@ -190,7 +193,7 @@ class VersionMismatchTests(unittest.TestCase):
     def test_mismatched_version_exits_nonzero(self):
         tmp = Path(tempfile.mkdtemp(prefix="jig-mismatch-"))
         out = tmp / "jig-v9.9.9.zip"
-        # The real repo's plugin.json says 1.0.0; passing 9.9.9 must fail.
+        # Passing a deliberately wrong version must fail regardless of current plugin.json.
         captured = io.StringIO()
         code = build_release_zip.build(
             source_root=REPO_ROOT,
@@ -231,12 +234,12 @@ class IdempotencyTests(unittest.TestCase):
 
 class ManifestContentTests(unittest.TestCase):
     def test_plugin_json_version_matches_requested(self):
-        zip_path = _build_once(version="1.0.0")
+        zip_path = _build_once()
         self.addCleanup(zip_path.unlink, missing_ok=True)
         with zipfile.ZipFile(zip_path) as zf:
             with zf.open(".claude-plugin/plugin.json") as f:
                 data = json.loads(f.read())
-        self.assertEqual(data["version"], "1.0.0")
+        self.assertEqual(data["version"], _PLUGIN_VERSION)
         self.assertEqual(data["name"], "jig")
 
 
@@ -248,13 +251,13 @@ class ManifestContentTests(unittest.TestCase):
 class CliTests(unittest.TestCase):
     def test_main_with_version_creates_zip(self):
         tmp = Path(tempfile.mkdtemp(prefix="jig-cli-"))
-        out = tmp / "jig-v1.0.0.zip"
+        out = tmp / f"jig-v{_PLUGIN_VERSION}.zip"
         captured = io.StringIO()
         original = sys.stdout
         sys.stdout = captured
         try:
             code = build_release_zip.main(
-                ["build_release_zip.py", "--version", "1.0.0", "--output", str(out)]
+                ["build_release_zip.py", "--version", _PLUGIN_VERSION, "--output", str(out)]
             )
         finally:
             sys.stdout = original
@@ -314,11 +317,11 @@ class MissingLicenseWarningTests(unittest.TestCase):
         # (013-04 adds it). The builder should still succeed AND emit
         # a warning line so the missing file is visible to the operator.
         tmp = Path(tempfile.mkdtemp(prefix="jig-license-"))
-        out = tmp / "jig-v1.0.0.zip"
+        out = tmp / f"jig-v{_PLUGIN_VERSION}.zip"
         sink = io.StringIO()
         code = build_release_zip.build(
             source_root=Path(__file__).resolve().parent.parent,
-            version="1.0.0",
+            version=_PLUGIN_VERSION,
             output_path=out,
             out=sink,
         )
