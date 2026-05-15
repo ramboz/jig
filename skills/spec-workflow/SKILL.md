@@ -133,10 +133,15 @@ line in the slice body (same convention `docs/refinement-todo.md` uses).
 The status-board renders deferred slices in a separate `## Deferred slices`
 section with that trigger as the per-row context.
 
-### Slice frontmatter (slice 015-01 convention)
+### Slice frontmatter (slice 015-01 convention, file shape per 018-03)
 
-New slices written from `templates/docs/specs/slice-template.md` use a
-typed frontmatter block right after the `## Slice ...` heading:
+New slices written from `templates/docs/specs/slice-template.md` are
+whole-file templates — frontmatter at the top, `## Slice ...` heading
+immediately following the closing frontmatter delimiter. `workflow.py
+new` emits a starter `slice-01-tbd.md` alongside `spec.md` in this
+shape. Legacy specs that embed `## Slice` sections inside `spec.md`
+(heading-first, frontmatter-after) remain supported by every helper —
+no forced migration.
 
 ```yaml
 ---

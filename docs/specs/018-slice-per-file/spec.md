@@ -471,9 +471,9 @@ warning text only; no correctness impact.
 ## Slice 018-03 — scaffold-new-specs-as-file-per-slice
 
 ---
-status: DRAFT
+status: DONE
 dependencies: [018-02]
-last_verified:
+last_verified: 2026-05-15
 ---
 
 **Goal:** New specs scaffolded via `workflow.py new <slug>` get the
@@ -508,16 +508,16 @@ specs not touched.
    asserts the two-file shape.
 
 **DoD:**
-- [ ] All ACs pass; full suite green.
+- [x] All ACs pass; full suite green.
 - [ ] Reviewed by `reviewer` subagent.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced.
-- [ ] Reconciliation review passed.
+- [x] Implementation review passed.
+- [x] Deviation log produced.
+- [x] Reconciliation review passed.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] CLAUDE.md hot-cache: spec 018 marked partially DONE (slices
+- [x] `docs/specs/README.md` regenerated.
+- [x] CLAUDE.md hot-cache: spec 018 marked partially DONE (slices
       01–03); 018-04 still in flight.
 
 **Anti-horizontal-phasing check:** After this slice, `workflow.py
@@ -526,7 +526,88 @@ in the new shape. They don't need to manually split anything.
 
 ### Deviation log (after reconciliation)
 
-_TBD post-implementation._
+**§1 — `slice-template.md` reshape: frontmatter moved BEFORE the
+`## Slice` heading.** Previously the template had `## Slice` first,
+frontmatter after (designed to be pasted as a section into spec.md).
+Now it's a whole-file template — frontmatter at column 0 matches
+the file-per-slice layout that `_common.parsing.find_slice_file` and
+`load_slice` expect. The shape inside spec.md (heading-first,
+frontmatter-after) is still recognized by `_split_slice_section`'s
+layout detection from 018-02. New test
+`test_slice_template_is_file_per_slice_shape` pins this.
+
+**§2 — `_render_stub_spec` renamed "## SPIDR analysis" →
+"## Decomposition" and added "## Slices".** The new placeholder
+section reads more naturally and mirrors the prose convention
+that jig's own specs (e.g. spec 018 itself, 007, 015) actually
+use. SPIDR analysis lives INSIDE the `## Decomposition` section as
+the five axis bullets. The new `## Slices` section is an explicit
+link list pointing at sibling `slice-NN-*.md` files — gives
+reviewers and humans an immediate index without having to ls the
+spec dir. The existing test
+`test_new_reserves_next_number_and_writes_stub` updated to assert
+the new section names + the `slice-01-tbd.md` link.
+
+**§3 — Starter slice filename is `slice-01-tbd.md`.** The spec
+text mentioned `slice-01-placeholder.md` as a candidate name; chose
+`tbd.md` instead because it matches the `_TBD_` placeholders
+already used in the stub spec body, and is shorter at a glance.
+The user renames the file when they pick a real shortname
+(no helper for this rename — `git mv` is sufficient).
+
+**§4 — `_render_stub_slice` reads the template from disk OR
+falls back to inline content.** The fallback path is dead code in
+the canonical jig install (the template always ships) but keeps
+the helper functional when run outside a jig tree — e.g. in tests
+that don't depend on the full filesystem. Not covered by a direct
+test; left as a defensive belt-and-braces.
+
+**§5 — No change to existing scaffolded specs.** AC #3 satisfied
+by inheritance: helpers from 018-01 + 018-02 dual-read both
+layouts, so the 17 specs that exist today (which use embedded
+`## Slice` sections) continue to work without modification. No
+forced migration. The starter slice file only lands when
+`workflow.py new` runs going forward.
+
+**§6 — Reviewer §SPECIFIC ISSUES caught a placeholder-name drift
+in `_build_pr_body` (workflow.py:1136).** The PR-mode reservation
+body still advertised the stub as containing "`## Overview` /
+`## SPIDR analysis` placeholders" but `_render_stub_spec` now
+emits `## Decomposition` + `## Slices` instead. Reviewers opening
+the PR would see body text that doesn't match the committed file
+— a quiet correctness regression in slice 003-03's PR fallback
+that no test pinned. Fixed inline: PR body now lists both
+scaffolded files (`spec.md` + `slice-01-tbd.md`) and the
+post-018-03 section names. No new test pinning the body — it's
+fallback prose, not state-machine-critical — but the implementation
+is now self-consistent.
+
+**§7 — `SKILL.md` lines 136-139 still claimed slice frontmatter
+sits "right after the `## Slice ...` heading"** (the embedded
+layout). The new whole-file template puts frontmatter BEFORE the
+heading. SKILL.md is the canonical authoring instruction for slice
+writers — leaving the prose stale would tell readers a lie. Fixed
+in this slice; the surrounding YAML example is unchanged since the
+fields themselves are identical between layouts.
+
+**§8 — AC #2's `templates/docs/specs/spec.md.template` rename
+clause was satisfied by editing the in-code renderer rather than
+the file path.** No `spec.md.template` file ever existed in the
+repo; `_render_stub_spec` (in `workflow.py`) is the de-facto
+spec-stub template. Updating that function's output suffices for
+AC #2's "header-only spec.md" intent. The slice-template.md file
+DID exist (from spec 015) and was reshaped per §1.
+
+**§9 — `_render_stub_slice` fallback path remains untested
+(deviation §4 already covered this).** Reviewer flagged it as a
+candidate for either a direct fallback-content test or removal of
+the try/except entirely. Decision: KEEP the fallback (no behavior
+change) but note explicitly that it's untested defensive code.
+The canonical jig install always ships the template; if we ever
+remove it, the helper would break loudly via the inline fallback
+producing different content than expected — surfacing as a test
+failure in `test_starter_slice_file_has_file_per_slice_shape` if
+the template isn't on disk during a test run. Acceptable.
 
 ---
 

@@ -1,10 +1,10 @@
-## Slice {{NUMBER}} — {{NAME}}
-
 ---
 status: DRAFT
 dependencies: []
 last_verified:
 ---
+
+## Slice {{NUMBER}} — {{NAME}}
 
 **Goal:** _TODO: one-sentence statement of what this slice delivers.
 End-to-end value in a single vertical slice (anti-horizontal-phasing

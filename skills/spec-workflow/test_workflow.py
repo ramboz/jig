@@ -749,6 +749,24 @@ class SliceTemplateTests(unittest.TestCase):
         # Close-out section per slice 009 convention
         self.assertIn("### Close-out (post-DONE)", text)
 
+    def test_slice_template_is_file_per_slice_shape(self):
+        """Slice 018-03: template's frontmatter must come BEFORE the
+        `## Slice` heading (file-per-slice layout). Embedded layout
+        had heading first, frontmatter after — but the template is now
+        meant as a whole-file template, not a `## Slice` block to
+        append to spec.md."""
+        template = REPO_ROOT / "templates" / "docs" / "specs" / "slice-template.md"
+        text = template.read_text().lstrip()
+        # First non-blank line is the frontmatter delimiter, not a heading.
+        first_line = text.splitlines()[0]
+        self.assertEqual(first_line, "---",
+                         f"expected '---' (frontmatter open) at top, "
+                         f"got: {first_line!r}")
+        # Heading appears AFTER the closing frontmatter delimiter.
+        fm_end = text.index("\n---\n", 4)  # second `---` line
+        self.assertIn("## Slice {{NUMBER}}", text[fm_end:],
+                      "## Slice heading must follow the frontmatter block")
+
 
 class FrontmatterTransitionTests(unittest.TestCase):
     """Slice 014-01: transitions handle slice-level frontmatter."""
@@ -1025,9 +1043,13 @@ class ReserveSpecTests(unittest.TestCase):
         import datetime as _dt
         today = _dt.date.today().isoformat()
         self.assertIn(f"Reserved on {today}", text)
-        # AC #2: required headers
+        # AC #2: required headers (slice 018-03 renamed "SPIDR analysis"
+        # → "Decomposition" + added "Slices" section pointing at the
+        # starter slice file emitted alongside spec.md).
         self.assertIn("## Overview", text)
-        self.assertIn("## SPIDR analysis", text)
+        self.assertIn("## Decomposition", text)
+        self.assertIn("## Slices", text)
+        self.assertIn("slice-01-tbd.md", text)
         # AC #1: commit message
         commit_calls = [c for c in rec.calls
                         if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]
@@ -1427,6 +1449,110 @@ class MixedLayoutTransitionTests(unittest.TestCase):
         self.assertEqual(m.group(1), "IN_PROGRESS")
         # Slice file untouched
         self.assertEqual(self.slice_file.read_text(), slice_before)
+
+
+class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
+    """Slice 018-03 AC #1+#2+#4: `workflow.py new` scaffolds spec.md
+    (header-only) + a starter `slice-01-*.md` file. spec.md must NOT
+    contain an embedded `## Slice` section."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-new-fps-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        # Minimal git init so reserve_spec's stage+commit path doesn't
+        # break — we mock subprocess anyway, but the dir must look git-like.
+        (self.target / "docs/specs").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _stub_subprocess(self, rec):
+        rec.stub(_matches("git", "symbolic-ref"), returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status"), returncode=0)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "merge-base"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+
+    def test_emits_spec_md_plus_starter_slice_file(self):
+        from unittest.mock import patch
+        import skills  # noqa: F401 — namespace anchor
+        import importlib
+        _workflow = importlib.import_module("skills.spec-workflow.workflow")
+        rec = _SubprocessRecorder()
+        self._stub_subprocess(rec)
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "demo-slug", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        spec_dir = self.target / "docs/specs/001-demo-slug"
+        self.assertTrue((spec_dir / "spec.md").is_file())
+        self.assertTrue((spec_dir / "slice-01-tbd.md").is_file(),
+                        "starter slice file slice-01-tbd.md must be emitted")
+
+    def test_spec_md_has_no_embedded_slice_section(self):
+        from unittest.mock import patch
+        import importlib
+        _workflow = importlib.import_module("skills.spec-workflow.workflow")
+        rec = _SubprocessRecorder()
+        self._stub_subprocess(rec)
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            _workflow.reserve_spec("demo-slug",
+                                    project_dir=self.target,
+                                    no_push=True, pr_mode=False)
+        spec_text = (self.target / "docs/specs/001-demo-slug/spec.md").read_text()
+        self.assertNotIn("## Slice ", spec_text,
+                         "spec.md must not contain a `## Slice` heading "
+                         "(slices live in sibling files now)")
+
+    def test_starter_slice_file_has_file_per_slice_shape(self):
+        from unittest.mock import patch
+        import importlib
+        _workflow = importlib.import_module("skills.spec-workflow.workflow")
+        rec = _SubprocessRecorder()
+        self._stub_subprocess(rec)
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            _workflow.reserve_spec("demo-slug",
+                                    project_dir=self.target,
+                                    no_push=True, pr_mode=False)
+        slice_text = (self.target / "docs/specs/001-demo-slug"
+                      / "slice-01-tbd.md").read_text()
+        # Frontmatter at top (file-per-slice shape)
+        self.assertTrue(slice_text.startswith("---\n"))
+        # Heading after frontmatter, with the right slice fragment
+        self.assertIn("## Slice 001-01 — tbd", slice_text)
+        # Placeholders substituted
+        self.assertNotIn("{{NUMBER}}", slice_text)
+        self.assertNotIn("{{NAME}}", slice_text)
+
+    def test_iter_slices_picks_up_starter_slice(self):
+        """End-to-end: after `new`, `iter_slices(spec.md)` yields the
+        starter slice — proves the helpers from 018-01/02 see the
+        scaffolded shape end-to-end."""
+        from unittest.mock import patch
+        import importlib
+        _workflow = importlib.import_module("skills.spec-workflow.workflow")
+        rec = _SubprocessRecorder()
+        self._stub_subprocess(rec)
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            _workflow.reserve_spec("demo-slug",
+                                    project_dir=self.target,
+                                    no_push=True, pr_mode=False)
+        # Import iter_slices from the common parser
+        sys.path.insert(0, str(REPO_ROOT / "skills" / "_common"))
+        from parsing import iter_slices
+        spec_md = self.target / "docs/specs/001-demo-slug/spec.md"
+        locs = list(iter_slices(spec_md))
+        labels = [l.label for l in locs]
+        self.assertIn("001-01 — tbd", labels)
 
 
 class MixedLayoutDependencyValidationTests(unittest.TestCase):
