@@ -3,6 +3,7 @@
 ## Status
 
 Accepted (2026-05-12)
+Superseded by [ADR-0005](./adr-0005-contracts-as-judgment-skill.md) (2026-05-15)
 
 ## Context
 
