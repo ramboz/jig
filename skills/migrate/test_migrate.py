@@ -1404,5 +1404,315 @@ class SliceToSpecSkillTests(unittest.TestCase):
         self.assertNotIn('add_parser("slice-to-spec"', migrate_py)
 
 
+# ==========================================================================
+# Slice 021-01 — copy-machinery subcommand
+# ==========================================================================
+
+import json as _json
+
+
+def _seed_spec_driven_project(root: Path) -> None:
+    """Build a tiny spec-driven project layout the way slice 008-05 expects
+    it (so `report` returns `adoptable`). Used by CopyMachineryTests and
+    CopyMachineryOperationsTests."""
+    (root / "docs" / "specs" / "001-demo").mkdir(parents=True)
+    (root / "docs" / "specs" / "001-demo" / "spec.md").write_text(
+        "# Spec 001\n\n## Overview\n\nDemo.\n"
+    )
+    (root / "docs" / "decisions").mkdir(parents=True)
+    (root / "docs" / "decisions" / "adr-0001-demo.md").write_text(
+        "# ADR-0001 demo\n"
+    )
+    (root / "docs" / "workflow.md").write_text("# Workflow\n")
+    (root / "docs" / "architecture.md").write_text("# Architecture\n")
+
+
+class CopyMachineryTests(unittest.TestCase):
+    """Slice 021-01 — `migrate.py copy-machinery <project-dir>` reuses
+    scaffold-mode's machinery copy via the public `copy_machinery()`
+    façade.
+
+    Maps to AC #2 (subcommand registered), AC #3 (subcommand calls the
+    façade), AC #4 (UnmanagedHooksError refuses cleanly), AC #5
+    (idempotent re-run), AC #8 (a-e: skills + hooks + settings + refuse
+    + idempotency)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-021-copy-mach-"))
+        _seed_spec_driven_project(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ----- AC #1 — public façade exists and is callable --------------------
+    def test_public_facade_is_importable_from_scaffold(self):
+        """AC #1 — `copy_machinery(plugin, target, *, force=False)` is
+        importable from `skills.scaffold-init.scaffold`."""
+        import importlib
+        mod = importlib.import_module("skills.scaffold-init.scaffold")
+        self.assertTrue(callable(getattr(mod, "copy_machinery", None)),
+                        "copy_machinery is not callable on scaffold module")
+
+    # ----- AC #2 — subcommand registered -----------------------------------
+    def test_copy_machinery_subcommand_is_registered(self):
+        """AC #2 — invoking `migrate.py copy-machinery --help` returns
+        exit 0 with usage referencing project_dir + --force."""
+        r = run_migrate("copy-machinery", "--help")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("project", r.stdout.lower())
+        self.assertIn("--force", r.stdout)
+
+    # ----- AC #3 — subcommand exits 0 on success ---------------------------
+    def test_subcommand_returns_zero_on_clean_target(self):
+        """AC #3 — `copy-machinery <dir>` against a clean spec-driven
+        project (no pre-existing `.claude/settings.json`) returns exit 0."""
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+
+    # ----- AC #8 (a) — skills copied with rewritten SKILL.md ---------------
+    def test_8a_skills_copied_with_rewritten_skill_md(self):
+        """AC #8 (a) — `.claude/skills/jig-migrate/` exists with a
+        SKILL.md whose `${CLAUDE_PLUGIN_ROOT}/skills/` path strings have
+        been rewritten."""
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        copied = (self.tmpdir / ".claude" / "skills" / "jig-migrate"
+                  / "SKILL.md")
+        self.assertTrue(copied.is_file(), f"missing: {copied}")
+        body = copied.read_text()
+        # No raw plugin-root paths survive in the body
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}/skills/", body,
+                         "SKILL.md still has plugin-root path strings")
+        # Agents copied too
+        agents_dir = self.tmpdir / ".claude" / "agents"
+        agents = sorted(p.name for p in agents_dir.glob("jig-*.md"))
+        self.assertTrue(agents,
+                        f"no jig-prefixed agents copied: {list(agents_dir.iterdir())}")
+
+    # ----- AC #8 (b) — hook scripts present with 0o755 perms ---------------
+    def test_8b_hook_scripts_present_and_executable(self):
+        """AC #8 (b) — `.claude/hooks/scripts/` has at least one
+        `jig-*.sh` and every script has mode 0o755."""
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        scripts_dir = self.tmpdir / ".claude" / "hooks" / "scripts"
+        self.assertTrue(scripts_dir.is_dir(),
+                        f"missing scripts dir: {scripts_dir}")
+        scripts = sorted(scripts_dir.glob("jig-*.sh"))
+        self.assertTrue(scripts, f"no jig-*.sh scripts in {scripts_dir}")
+        for s in scripts:
+            mode = s.stat().st_mode & 0o777
+            self.assertEqual(
+                mode, 0o755,
+                f"{s} has mode {oct(mode)}, expected 0o755",
+            )
+
+    # ----- AC #8 (c) — settings.json marker on every hook entry ------------
+    def test_8c_settings_json_marks_every_hook_entry(self):
+        """AC #8 (c) — `.claude/settings.json` exists and every hook
+        entry under `hooks.<event>` has `metadata.managed_by_jig: true`."""
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        settings_path = self.tmpdir / ".claude" / "settings.json"
+        self.assertTrue(settings_path.is_file(),
+                        f"missing: {settings_path}")
+        settings = _json.loads(settings_path.read_text())
+        hooks = settings.get("hooks") or {}
+        self.assertTrue(hooks, "settings.json has no hooks")
+        for event, entries in hooks.items():
+            self.assertTrue(entries, f"event {event} has no entries")
+            for entry in entries:
+                meta = entry.get("metadata") or {}
+                self.assertTrue(
+                    meta.get("managed_by_jig"),
+                    f"entry under {event} missing managed_by_jig marker: "
+                    f"{entry}",
+                )
+
+    # ----- AC #8 (d) — UnmanagedHooksError refusal exits 3 ----------------
+    def test_8d_unmanaged_hooks_refusal_exits_three(self):
+        """AC #8 (d) — pre-seed `.claude/settings.json` with a non-jig
+        hook entry. Subcommand must exit 3, emit `--force` in the
+        refuse-message on stderr, leave stdout empty."""
+        settings_path = self.tmpdir / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(_json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Edit",
+                     "hooks": [{"type": "command",
+                                "command": "bash ./user-edit.sh",
+                                "timeout": 5}]}
+                ]
+            }
+        }, indent=2) + "\n")
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(
+            r.returncode, 3,
+            f"expected exit 3 on unmanaged hooks; got {r.returncode} "
+            f"(stdout={r.stdout!r} stderr={r.stderr!r})",
+        )
+        self.assertIn("--force", r.stderr,
+                      f"refuse-message must mention --force: {r.stderr!r}")
+        self.assertEqual(
+            r.stdout, "",
+            f"stdout must stay empty on refusal; got: {r.stdout!r}",
+        )
+
+    # ----- AC #8 (e) — idempotent re-run -----------------------------------
+    def test_8e_idempotent_rerun(self):
+        """AC #8 (e) — running `copy-machinery` against a `.claude/`
+        already populated by a prior run is a byte-stable no-op (modulo
+        the in-place file overwrites which produce identical content).
+        Hash the relevant subtree before/after the second run."""
+        r1 = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r1.returncode, 0,
+                         f"first run failed: {r1.stderr}")
+        claude_dir = self.tmpdir / ".claude"
+        before = _hash_tree(claude_dir)
+        r2 = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r2.returncode, 0,
+                         f"second run failed: {r2.stderr}")
+        after = _hash_tree(claude_dir)
+        self.assertEqual(
+            before, after,
+            "idempotent re-run mutated .claude/ tree (hash drift)",
+        )
+
+    # ----- AC #4 + AC #5 — force overrides unmanaged-hooks refusal ---------
+    def test_force_flag_overrides_unmanaged_hooks(self):
+        """AC #4 — `--force` is the documented escape. With the flag,
+        the merge proceeds and the user's pre-existing entry survives."""
+        settings_path = self.tmpdir / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(_json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Edit",
+                     "hooks": [{"type": "command",
+                                "command": "bash ./user-edit.sh",
+                                "timeout": 5}]}
+                ]
+            }
+        }, indent=2) + "\n")
+        r = run_migrate("copy-machinery", str(self.tmpdir), "--force")
+        self.assertEqual(r.returncode, 0,
+                         f"--force should succeed; stderr: {r.stderr}")
+        merged = _json.loads(settings_path.read_text())
+        pre_tool_use = merged["hooks"]["PreToolUse"]
+        user_present = any(
+            entry.get("matcher") == "Edit"
+            and entry.get("hooks", [{}])[0].get("command", "").endswith(
+                "user-edit.sh"
+            )
+            for entry in pre_tool_use
+        )
+        self.assertTrue(
+            user_present,
+            "user's Edit-matcher hook was clobbered under --force",
+        )
+
+
+class CopyMachineryOperationsTests(unittest.TestCase):
+    """Slice 021-01 AC #6 + AC #9 — `migrate.py report` surfaces the new
+    subcommand in its Operations section when the verdict is `adoptable`
+    or `partial` AND the target's `.claude/skills/` has no pre-existing
+    `jig-*` skill dir. Suppressed once the skills are in place."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-021-ops-"))
+        _seed_spec_driven_project(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ----- AC #6 — operations section names copy-machinery -----------------
+    def test_operations_section_suggests_copy_machinery_when_absent(self):
+        """AC #6 / AC #9 — adoptable verdict + no `.claude/skills/jig-*`
+        on disk → Operations section names `copy-machinery`."""
+        r = run_migrate("report", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}")
+        self.assertIn("## Operations", r.stdout)
+        self.assertIn("copy-machinery", r.stdout)
+
+    # ----- AC #9 — suppressed when jig-* skill dir already present --------
+    def test_operations_section_suppresses_when_jig_skills_present(self):
+        """AC #9 — same project, but with at least one
+        `.claude/skills/jig-*/` dir present, must NOT mention
+        `copy-machinery` in Operations."""
+        jig_dir = self.tmpdir / ".claude" / "skills" / "jig-migrate"
+        jig_dir.mkdir(parents=True)
+        (jig_dir / "SKILL.md").write_text("seed\n")
+        r = run_migrate("report", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}")
+        self.assertIn("## Operations", r.stdout)
+        self.assertNotIn(
+            "copy-machinery", r.stdout,
+            f"operations should suppress copy-machinery when "
+            f"jig-* skills exist: {r.stdout!r}",
+        )
+
+    # ----- AC #6 — partial verdict branch also surfaces copy-machinery ----
+    def test_operations_section_suggests_copy_machinery_on_partial_verdict(self):
+        """AC #6 — verdict `partial` (exactly two triggers detected) ALSO
+        surfaces `copy-machinery` in Operations. Reviewer noted the
+        `adoptable` path was the only covered branch; this test closes
+        the gap by seeding a project with specs + decisions only (no
+        workflow.md / architecture.md), which produces exactly two
+        triggers per `compute_verdict`."""
+        partial_root = Path(tempfile.mkdtemp(prefix="jig-021-ops-partial-"))
+        try:
+            (partial_root / "docs" / "specs" / "001-demo").mkdir(parents=True)
+            (partial_root / "docs" / "specs" / "001-demo" / "spec.md").write_text(
+                "# Spec 001\n\n## Overview\n\nDemo.\n"
+            )
+            (partial_root / "docs" / "decisions").mkdir(parents=True)
+            (partial_root / "docs" / "decisions" / "adr-0001-demo.md").write_text(
+                "# ADR-0001 demo\n"
+            )
+            r = run_migrate("report", str(partial_root))
+            self.assertEqual(r.returncode, 1,  # partial verdict → exit 1
+                             f"stderr: {r.stderr}")
+            self.assertIn("**Verdict:** partial", r.stdout)
+            self.assertIn("## Operations", r.stdout)
+            self.assertIn("copy-machinery", r.stdout)
+        finally:
+            shutil.rmtree(partial_root, ignore_errors=True)
+
+
+class CopyMachinerySkillSurfaceTests(unittest.TestCase):
+    """AC #7 — SKILL.md documents the new `copy-machinery` subcommand."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.skill_text = SKILL_MD.read_text()
+
+    def test_skill_md_has_copy_machinery_section(self):
+        """AC #7 — `## Copying machinery into your project` (or
+        equivalent prose) is documented."""
+        # Accept any heading whose text contains "copy" + "machinery"
+        # (case-insensitive). The slice spec names "Copying machinery into
+        # your project" but we don't pin the exact wording.
+        m = re.search(r"(?im)^##\s+.*copy.*machinery", self.skill_text)
+        self.assertIsNotNone(
+            m,
+            "SKILL.md missing a `## ...copy...machinery...` heading",
+        )
+
+    def test_skill_md_documents_force_escape(self):
+        """AC #7 — section names `--force` as the documented escape
+        for the unmanaged-hooks refusal."""
+        # The new section should reference --force somewhere near a
+        # mention of unmanaged hooks. Loose constraint: both tokens
+        # appear in the document.
+        self.assertIn("--force", self.skill_text)
+
+
 if __name__ == "__main__":
     unittest.main()

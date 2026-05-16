@@ -1,10 +1,10 @@
 {
-  "spec": "docs/specs/003-spec-workflow-promotion/spec.md",
-  "slice": "003-03",
+  "spec": "docs/specs/021-migrate-copy-machinery/spec.md",
+  "slice": "021-01",
   "files": [
-    "skills/spec-workflow/workflow.py",
-    "skills/spec-workflow/test_workflow.py",
-    "skills/spec-workflow/SKILL.md",
-    "CLAUDE.md"
+    "skills/scaffold-init/scaffold.py",
+    "skills/migrate/migrate.py",
+    "skills/migrate/test_migrate.py",
+    "skills/migrate/SKILL.md"
   ]
 }

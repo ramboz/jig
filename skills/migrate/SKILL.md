@@ -9,14 +9,18 @@ description: >
   spec.md into sibling slice files). Slice 020-01 added an agentic
   slice-to-spec migration workflow — judgment-driven, no helper — for
   projects with flat `docs/slices/*.md` files that need to be grouped
-  into nested `docs/specs/MNN-slug/slice-NN-*.md` form. Use when the
-  user says "migrate this project to jig", "adopt jig here", "this repo
-  already has specs — set up jig", "scaffold-init refused — what now",
-  "introduce jig to an existing codebase", "apply ADR-0004 to my
-  project", or "migrate flat slices into nested specs". The report is
-  read-only; mutating subcommands have a `--dry-run` mode and refuse on
-  conflict before any write; the agentic slice-to-spec workflow never
-  deletes originals (caller decides when to clean up).
+  into nested `docs/specs/MNN-slug/slice-NN-*.md` form. Slice 021-01
+  added `copy-machinery` (copy jig's skills + agents + hooks +
+  settings.json into the target's `.claude/`, reusing scaffold-mode's
+  helpers). Use when the user says "migrate this project to jig",
+  "adopt jig here", "this repo already has specs — set up jig",
+  "scaffold-init refused — what now", "introduce jig to an existing
+  codebase", "apply ADR-0004 to my project", "migrate flat slices into
+  nested specs", or "copy jig's machinery into my project". The report
+  is read-only; mutating subcommands have a `--dry-run` mode (where
+  available) and refuse on conflict before any write; the agentic
+  slice-to-spec workflow never deletes originals (caller decides when
+  to clean up).
 user-invocable: true
 ---
 
@@ -91,6 +95,21 @@ No-op cases (exit 0):
 
 - Neither dir present, OR all files already on the canonical shape —
   emits "already aligned: nothing to do" and returns.
+
+### Run the copy-machinery operation
+
+`copy-machinery` brings a migrated project to scaffold-mode parity —
+the same `.claude/` shape `/jig:scaffold-init` produces by default for
+greenfield projects (per spec 016-03). See the dedicated section
+[`## Copying machinery into your project`](#copying-machinery-into-your-project)
+below for the full description.
+
+Quick reference:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  copy-machinery <project-dir>
+```
 
 ### Exit codes
 
@@ -217,6 +236,87 @@ python3 .../migrate.py report /path/to/existing-project
 #   2. **`migrate.py slice-to-spec <dir>`** (slice 008-04, not yet
 #      implemented) — interactively map flat slices...
 ```
+
+## Copying machinery into your project
+
+`copy-machinery` brings a migrated project to scaffold-mode parity —
+the same `.claude/` shape `/jig:scaffold-init` produces by default for
+greenfield projects (per spec 016-03). After running it, the project
+owns its own copy of jig's skills, agents, hook scripts, and
+`settings.json` registration. The dev can edit those files in their
+own repo, and they ride along under version control.
+
+When to use it:
+
+- **After `rename-decisions`** has applied ADR-0004 to existing ADRs.
+- **After `split-slices`** has split any monolithic `spec.md` files
+  with embedded slices into the file-per-slice layout.
+- **Standalone**, when a project already has spec-driven layout but
+  the dev wants the machinery in their tree (rather than only in the
+  installed plugin under `${CLAUDE_PLUGIN_ROOT}`).
+
+`migrate.py report` will surface this subcommand in the Operations
+section when the verdict is `adoptable` or `partial` AND the target's
+`.claude/skills/` has no pre-existing `jig-*` skill dir.
+
+How to run it:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  copy-machinery <project-dir>
+```
+
+What it does:
+
+1. Copies `<plugin-root>/skills/<name>/` → `<project>/.claude/skills/
+   jig-<name>/`, rewriting every plugin-root path string in SKILL.md
+   bodies to the `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`
+   equivalent.
+2. Copies `<plugin-root>/agents/*.md` →
+   `<project>/.claude/agents/jig-*.md` byte-identically.
+3. Copies `<plugin-root>/hooks/scripts/jig-*.sh` →
+   `<project>/.claude/hooks/scripts/`, pinning each script's mode to
+   `0o755`.
+4. Generates or merges `<project>/.claude/settings.json` with hook
+   entries registered against `${CLAUDE_PROJECT_DIR}/.claude/hooks/
+   scripts/jig-*.sh` paths. Every jig-managed entry carries a
+   `metadata.managed_by_jig: true` marker.
+
+Subsequent runs are idempotent: re-running `copy-machinery` overwrites
+the copied files in place and updates the jig-managed entries in
+settings.json by replace-in-place (per the `managed_by_jig` marker).
+Non-jig hooks in an existing settings.json survive untouched.
+
+### Refusal: unmanaged hooks
+
+If `.claude/settings.json` already exists and has hooks under
+`hooks.<event>` but NONE of them carry the `managed_by_jig` marker,
+`copy-machinery` exits non-zero (exit code 3) and emits the
+`UnmanagedHooksError` refuse-message to stderr — no filesystem writes
+occur. This matches the same safety stance `scaffold-init` enforces.
+
+The documented escape is `--force`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  copy-machinery <project-dir> --force
+```
+
+With `--force`, jig's hooks are appended alongside the existing
+entries (which survive unchanged). Use this only when you are sure the
+existing hooks should coexist with jig's, not be replaced.
+
+### Relationship to scaffold-mode
+
+`migrate.py copy-machinery` is the migration-path equivalent of
+`scaffold-init --with-machinery` (default since slice 016-03). Both
+end up calling the same `copy_machinery(plugin, target, *, force)`
+façade in `scaffold.py`, so the resulting `.claude/` shape is
+byte-identical regardless of which adoption path produced it. Closing
+this gap was spec 021's reason for being — until 021-01 landed,
+migrated projects defaulted to plugin-mode (machinery under
+`${CLAUDE_PLUGIN_ROOT}`) while greenfield projects defaulted to
+scaffold-mode (machinery under `${CLAUDE_PROJECT_DIR}/.claude/`).
 
 ## Agentic slice-to-spec migration
 

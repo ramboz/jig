@@ -34,6 +34,13 @@ class MigrateError(RuntimeError):
     """User-facing CLI error — caller exits 2."""
 
 
+class MigrateMachineryRefusalError(RuntimeError):
+    """Raised by `copy_machinery` when the scaffold-mode helper refuses
+    (currently: unmanaged hooks in the target's settings.json without
+    --force). Caller exits 3, mirroring `LooksAlreadySpecDrivenError`
+    precedent from 008-05."""
+
+
 # ---------- Inventory model ----------
 
 
@@ -51,6 +58,11 @@ class Inventory:
         self.product_vision = None  # Path | None
         self.custom_skills = []   # list of Path under .claude/skills/
         self.custom_agents = []   # list of Path under .claude/agents/
+        self.jig_skill_dirs = []  # list of Path under .claude/skills/jig-*/
+                                  # (slice 021-01 — used by report's
+                                  # operations section to suppress the
+                                  # `copy-machinery` suggestion when
+                                  # the machinery is already in place).
         self.claude_md_size = None  # int | None — bytes
         self.milestones_referenced = set()  # set of strings like "M1"
 
@@ -156,6 +168,11 @@ def scan(project_dir: Path) -> Inventory:
     for entry in _safe_iterdir(claude_skills_dir):
         if _is_content_md(entry):
             inv.custom_skills.append(entry)
+        # Slice 021-01 — detect `jig-*` skill directories (the shape
+        # scaffold-mode produces) so `report`'s Operations section can
+        # decide whether to suggest `copy-machinery`.
+        elif entry.is_dir() and entry.name.startswith("jig-"):
+            inv.jig_skill_dirs.append(entry)
     claude_agents_dir = project_dir / ".claude" / "agents"
     for entry in _safe_iterdir(claude_agents_dir):
         if _is_content_md(entry):
@@ -463,6 +480,19 @@ def render_operations(inv: Inventory, verdict: str) -> str:
             "(slice 008-04, **not yet implemented**) — interactively map "
             "flat slices into nested parent specs. Likely needs a "
             "milestone-to-spec manifest from the user."
+        )
+
+    # Slice 021-01 — copy-machinery (scaffold-mode parity for migrated
+    # projects). Surfaces when the verdict is adoptable OR partial AND
+    # the target's `.claude/skills/` has no pre-existing `jig-*` skill
+    # dir (the marker scaffold-mode leaves behind). Suppressed once the
+    # machinery is in place, otherwise the suggestion is redundant.
+    if verdict in {"adoptable", "partial"} and not inv.jig_skill_dirs:
+        items.append(
+            "**`migrate.py copy-machinery <project-dir>`** — copy "
+            "jig's hooks / agents / skill helpers into the target's "
+            "`.claude/` (scaffold-mode parity). Mirrors what "
+            "`scaffold-init` does by default for greenfield projects."
         )
 
     if not items:
@@ -1144,6 +1174,112 @@ def split_slices(spec_dir: Path, dry_run: bool = False) -> tuple:
 # ---------- end split-slices ----------
 
 
+# ---------- copy-machinery (slice 021-01) ----------
+#
+# Reuses scaffold-mode's `copy_machinery()` façade from
+# skills/scaffold-init/scaffold.py. Imports are local to the function so
+# the migrate.py module stays cheap to import for the read-only `report`
+# path (which is the hot path for `/jig:migrate` skill autoload).
+
+
+def _load_scaffold_module(plugin: Path):
+    """Load `skills/scaffold-init/scaffold.py` from the plugin root and
+    return the module object.
+
+    Why not `from skills.scaffold-init.scaffold import copy_machinery`?
+    Two reasons:
+      1. The directory name `scaffold-init` contains a hyphen, which is
+         not a valid Python identifier — the namespace-package import
+         path only works when the caller is itself loaded as part of the
+         `skills` package (e.g. via `python3 -m unittest`).
+      2. When `migrate.py` is run as a top-level script
+         (`python3 migrate.py ...`), `skills` is not on `sys.path` and
+         the namespace package is unavailable.
+
+    File-path loading via `importlib.util` works uniformly across both
+    invocation shapes."""
+    import importlib.util
+    scaffold_py = plugin / "skills" / "scaffold-init" / "scaffold.py"
+    if not scaffold_py.is_file():
+        raise MigrateError(
+            f"cannot locate scaffold.py at {scaffold_py}. "
+            "Check that CLAUDE_PLUGIN_ROOT points at a valid jig install."
+        )
+    spec = importlib.util.spec_from_file_location(
+        "jig_scaffold_for_migrate", scaffold_py,
+    )
+    if spec is None or spec.loader is None:
+        raise MigrateError(
+            f"importlib failed to build a module spec for {scaffold_py}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_plugin_root() -> Path:
+    """Locate the jig plugin root. Mirrors scaffold.py's `plugin_root()`
+    fallback shape:
+      1. `CLAUDE_PLUGIN_ROOT` env var if set;
+      2. otherwise this module's parents[2] (the repo root in a
+         scaffolded / plugin install).
+
+    Kept local to migrate.py (rather than importing scaffold.py's helper)
+    so that the migrate module's import surface stays minimal. The fallback
+    matches the same parents[N] depth because both helpers live at
+    `<plugin-root>/skills/<name>/<file>.py`."""
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if env_root:
+        return Path(env_root).resolve()
+    return Path(__file__).resolve().parents[2]
+
+
+def copy_machinery(project_dir: Path, *, force: bool = False) -> tuple:
+    """Top-level entry for the `copy-machinery` subcommand.
+
+    Returns `(summary_text, exit_code)`. Raises `MigrateError` on user
+    error (missing dir, not a directory). `UnmanagedHooksError` bubbles
+    out to `main()` where it is converted to exit code 3 (matching
+    `LooksAlreadySpecDrivenError` precedent from 008-05).
+
+    Delegates the work to `scaffold.copy_machinery()` — slice 021-01's
+    public façade over `_copy_skills_and_agents` +
+    `_copy_hooks_and_register`. The two helpers each carry their own
+    safety guarantees (executable-bit pinning, marker-based merge, refuse
+    before mutation)."""
+    if not project_dir.exists():
+        raise MigrateError(f"project directory not found: {project_dir}")
+    if not project_dir.is_dir():
+        raise MigrateError(f"not a directory: {project_dir}")
+
+    # Local import: keep the scaffold dependency out of the report-path
+    # module load (matches the comment in `_resolve_plugin_root`). The
+    # `skills/scaffold-init/` directory contains a hyphen, so the
+    # namespace-package import path `skills.scaffold-init.scaffold` only
+    # works when migrate.py was loaded via the same parent package. When
+    # migrate.py is run as a script (`python3 migrate.py ...`), `skills`
+    # is not importable. Load by file path via `importlib.util` so both
+    # modes work uniformly.
+    plugin = _resolve_plugin_root()
+    scaffold_mod = _load_scaffold_module(plugin)
+    try:
+        scaffold_mod.copy_machinery(plugin, project_dir, force=force)
+    except scaffold_mod.UnmanagedHooksError as exc:
+        # Re-raise as a migrate-side typed exception so main()'s
+        # exception chain can route to exit 3 via isinstance, not a
+        # class-name string match (reviewer-flagged at slice 021-01
+        # implementation review).
+        raise MigrateMachineryRefusalError(str(exc)) from exc
+
+    return (
+        f"copied machinery into {project_dir / '.claude'}\n",
+        0,
+    )
+
+
+# ---------- end copy-machinery ----------
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="migrate.py",
@@ -1179,6 +1315,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="emit the operations plan to stdout without writing anything",
     )
+
+    cm = sub.add_parser(
+        "copy-machinery",
+        help="copy jig's skills + agents + hooks + settings.json into "
+             "the target's .claude/ (scaffold-mode parity, slice 021-01)",
+    )
+    cm.add_argument("project_dir",
+                    help="path to the project to receive jig's machinery")
+    cm.add_argument(
+        "--force", action="store_true",
+        help="override the unmanaged-hooks safety check when "
+             ".claude/settings.json already has hook entries without a "
+             "jig-managed marker (same escape hatch as scaffold-init's "
+             "--force)",
+    )
     return p
 
 
@@ -1206,9 +1357,18 @@ def main(argv: list) -> int:
             )
             sys.stdout.write(text)
             return code
+        if ns.cmd == "copy-machinery":
+            text, code = copy_machinery(
+                Path(ns.project_dir), force=ns.force,
+            )
+            sys.stdout.write(text)
+            return code
         # argparse `required=True` should make this unreachable.
         sys.stderr.write(f"unknown subcommand: {ns.cmd}\n")
         return 2
+    except MigrateMachineryRefusalError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
     except MigrateError as exc:
         sys.stderr.write(f"{exc}\n")
         return 2

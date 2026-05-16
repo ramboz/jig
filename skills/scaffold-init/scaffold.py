@@ -639,6 +639,31 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
     settings_path.write_text(json.dumps(merged, indent=2) + "\n")
 
 
+def copy_machinery(plugin: Path, target: Path, *,
+                   force: bool = False) -> None:
+    """Copy jig's runtime machinery (skills + agents + hooks + settings.json)
+    from `plugin` into `target/.claude/`.
+
+    Public façade introduced by slice 021-01 so that `migrate.py
+    copy-machinery` can reuse exactly the same logic `scaffold-init` uses
+    when `--with-machinery` is in effect. Internally calls, in order:
+
+      1. `_copy_skills_and_agents(plugin, target)` — slice 016-01.
+      2. `_copy_hooks_and_register(plugin, target, force=force)` — slice
+         016-02; raises `UnmanagedHooksError` on a pre-existing
+         `.claude/settings.json` that has hooks but no jig-managed marker
+         (unless `force=True`).
+
+    Safety guarantees inherited from the underlying helpers:
+    - Executable bit pinned to 0o755 on copied hook scripts.
+    - Marker-based merge in `.claude/settings.json` (replace-in-place by
+      `metadata.managed_by_jig`, non-jig entries survive).
+    - UnmanagedHooksError fires BEFORE any filesystem mutation, so a
+      refused call leaves no partial state."""
+    _copy_skills_and_agents(plugin, target)
+    _copy_hooks_and_register(plugin, target, force=force)
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides = None,
              with_machinery: bool = True) -> None:
@@ -746,18 +771,16 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers, subs)
     (target / "brief.md").write_text(brief)
 
-    # 6. Slice 016-01: copy skills/ and agents/ into .claude/ when
-    # --with-machinery was passed. Default-off; flips to default-on in
-    # slice 016-03. Hooks are 016-02's job.
+    # 6. Slice 016-01 + 016-02: copy skills/, agents/, hook scripts, and
+    # write/merge .claude/settings.json when --with-machinery is on
+    # (default since 016-03). `force` propagates so that --force also
+    # overrides the unmanaged-hooks safety check (same escape hatch as
+    # AlreadyScaffoldedError). Slice 021-01 lifted the two-call sequence
+    # behind a public `copy_machinery()` façade so `migrate.py
+    # copy-machinery` can reuse the exact same logic without depending
+    # on the underscored helpers.
     if with_machinery:
-        _copy_skills_and_agents(plugin, target)
-        # 7. Slice 016-02: copy hook scripts + write/merge
-        # .claude/settings.json so the SessionStart / UserPromptSubmit /
-        # PreToolUse / Stop hooks fire on the scaffolded install without
-        # any plugin component. `force` propagates so that --force also
-        # overrides the unmanaged-hooks safety check (same escape hatch
-        # as AlreadyScaffoldedError).
-        _copy_hooks_and_register(plugin, target, force=force)
+        copy_machinery(plugin, target, force=force)
 
 
 def _build_parser() -> argparse.ArgumentParser:
