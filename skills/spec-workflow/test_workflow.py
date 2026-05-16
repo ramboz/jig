@@ -1258,6 +1258,39 @@ class ReserveSpecTests(unittest.TestCase):
         self.assertNotIn("git branch reserve", flat)
         self.assertNotIn("gh pr create", flat)
 
+    # Refinement-todo (slice 003-03 review): the race-recovery's
+    # `git reset --hard HEAD~1` un-strands the commit but leaves the
+    # now-empty spec dir on disk. The fix `shutil.rmtree`s the dir
+    # after the reset so the user's worktree stays clean.
+    def test_new_race_recovery_removes_empty_spec_dir(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"),
+                 returncode=1,
+                 stderr="! [rejected]  main -> main (non-fast-forward)\n")
+        # In tests `git reset --hard HEAD~1` is mocked so the worktree
+        # files aren't actually rolled back; the helper must still clean
+        # up the dir it just created.
+        rec.stub(_matches("git", "reset", "--hard", "HEAD~1"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError):
+                _workflow.reserve_spec(
+                    "newslot", project_dir=self.target,
+                    no_push=False, pr_mode=False,
+                )
+        # The dir would have been created as 002-newslot
+        spec_dir = self.target / "docs" / "specs" / "002-newslot"
+        self.assertFalse(
+            spec_dir.exists(),
+            f"race recovery left empty spec dir on disk: {spec_dir}",
+        )
+
     # AC #7 (--pr) — skip direct-push, go straight to branch + PR.
     def test_new_pr_mode_skips_direct_push(self):
         self._mkspec("001-existing")

@@ -15,14 +15,19 @@ check when moving a slice to READY_FOR_IMPLEMENTATION.
 
 Usage:
     python3 scripts/spec_lint.py <spec.md> [--slice <fragment>] [--strict]
+    python3 scripts/spec_lint.py --all [--strict]
+    python3 scripts/spec_lint.py            # no-arg form is equivalent to --all
 
 Exit codes:
     0 — no contradictions (or --strict: no contradictions AND no parse warnings)
-    1 — at least one AC contradiction found
-    2 — user error (file not found, ambiguous fragment)
+    1 — at least one AC contradiction found across the scanned specs
+    2 — user error (file not found, ambiguous fragment, conflicting flags)
 
 Options:
     --slice <fragment>   Lint only the matching slice (case-insensitive substring).
+                         Requires a positional <spec.md>.
+    --all                Lint every `docs/specs/*/spec.md` under the cwd.
+                         Reports each spec, then aggregates exit codes.
     --strict             Exit 1 also on parse warnings (default: warnings are informational).
 """
 
@@ -266,7 +271,12 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="spec_lint.py",
         description="Detect AC phrase contradictions in a jig spec.",
     )
-    p.add_argument("spec", help="path to spec.md")
+    p.add_argument(
+        "spec",
+        nargs="?",
+        default=None,
+        help="path to spec.md (omit with --all to lint every spec)",
+    )
     p.add_argument(
         "--slice",
         default=None,
@@ -274,11 +284,58 @@ def _build_parser() -> argparse.ArgumentParser:
         help="lint only the matching slice (case-insensitive substring)",
     )
     p.add_argument(
+        "--all",
+        dest="all_specs",
+        action="store_true",
+        help="lint every docs/specs/*/spec.md (the no-arg default)",
+    )
+    p.add_argument(
         "--strict",
         action="store_true",
         help="exit 1 also on parse warnings",
     )
     return p
+
+
+def _discover_specs(cwd: Path) -> list:
+    """Return a sorted list of `docs/specs/*/spec.md` paths relative to cwd.
+
+    A spec is `docs/specs/<NNN-slug>/spec.md`. Order is lexicographic on the
+    spec-dir name so 001-... comes before 002-..., which is the natural
+    reading order for the status board.
+    """
+    specs_root = cwd / "docs" / "specs"
+    if not specs_root.is_dir():
+        return []
+    found = []
+    for child in sorted(specs_root.iterdir()):
+        candidate = child / "spec.md"
+        if candidate.is_file():
+            found.append(candidate)
+    return found
+
+
+def lint_all(specs: list, strict: bool = False) -> tuple:
+    """Lint every spec in `specs`. Returns (report_text, exit_code).
+
+    The exit code is the max of the per-spec codes: 0 if all green, 1 if any
+    contradictions (or warnings under --strict), 2 if any spec failed to
+    parse (file missing or no '## Slice' headings).
+    """
+    parts = []
+    worst = 0
+    for spec in specs:
+        report, code = lint(spec, slice_fragment=None, strict=strict)
+        parts.append(report.rstrip())
+        if code > worst:
+            worst = code
+    summary = (
+        f"\n## Summary\n\n"
+        f"Linted {len(specs)} spec(s); "
+        f"{'no contradictions found' if worst == 0 else 'contradictions found (exit ' + str(worst) + ')'}.\n"
+    )
+    parts.append(summary)
+    return "\n\n".join(parts), worst
 
 
 def lint(spec_path: Path, slice_fragment: str = None, strict: bool = False) -> tuple:
@@ -329,7 +386,32 @@ def main(argv: list) -> int:
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    report, code = lint(Path(ns.spec), slice_fragment=ns.slice, strict=ns.strict)
+    # Validate flag combinations.
+    if ns.all_specs and ns.spec:
+        sys.stderr.write(
+            "spec_lint: --all is mutually exclusive with a positional spec path.\n"
+        )
+        return 2
+    if ns.all_specs and ns.slice:
+        sys.stderr.write(
+            "spec_lint: --slice requires a positional spec path; cannot combine with --all.\n"
+        )
+        return 2
+
+    # No-arg form is equivalent to --all.
+    walk_all = ns.all_specs or ns.spec is None
+
+    if walk_all:
+        specs = _discover_specs(Path.cwd())
+        if not specs:
+            sys.stderr.write(
+                "spec_lint: no docs/specs/*/spec.md found under cwd.\n"
+            )
+            return 2
+        report, code = lint_all(specs, strict=ns.strict)
+    else:
+        report, code = lint(Path(ns.spec), slice_fragment=ns.slice, strict=ns.strict)
+
     sys.stdout.write(report)
     if not report.endswith("\n"):
         sys.stdout.write("\n")

@@ -84,6 +84,54 @@ class GreenfieldScaffoldTests(unittest.TestCase):
                          "bare empty dir has no test signals; tier-1 should not auto-install")
         self.assertRegex(manifest["timestamp"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
+    # ADR-0007: per-skill install list lives alongside installed_tiers
+    def test_scaffold_json_has_installed_skills(self):
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertIn("installed_skills", manifest,
+                      "ADR-0007: scaffold.json must include installed_skills")
+        self.assertIsInstance(manifest["installed_skills"], list)
+        # Every entry follows the `<tier>/<skill>` shape.
+        for entry in manifest["installed_skills"]:
+            self.assertRegex(
+                entry, r"^tier-[012]/[a-z][a-z0-9-]*$",
+                f"installed_skills entry has wrong shape: {entry!r}",
+            )
+
+    def test_installed_skills_invariant_with_tiers(self):
+        """ADR-0007 invariant — the set of tiers derived from
+        installed_skills equals the installed_tiers set."""
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        derived = {s.split("/")[0] for s in manifest["installed_skills"]}
+        self.assertEqual(
+            derived, set(manifest["installed_tiers"]),
+            f"derived tiers {derived} != installed_tiers "
+            f"{set(manifest['installed_tiers'])}",
+        )
+
+    def test_installed_skills_includes_expected_tier0_skills(self):
+        """Bare empty dir → only tier-0 skills. The per-skill list must
+        name the canonical Tier 0 set."""
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        expected = {
+            "tier-0/scaffold-init",
+            "tier-0/memory-sync",
+            "tier-0/spec-workflow",
+            "tier-0/independent-review",
+            "tier-0/migrate",
+        }
+        actual = set(manifest["installed_skills"])
+        missing = expected - actual
+        self.assertFalse(
+            missing,
+            f"installed_skills missing canonical Tier 0 entries: {missing}",
+        )
+        # No tier-1 entries (no test signals).
+        tier1_entries = [s for s in actual if s.startswith("tier-1/")]
+        self.assertEqual(
+            tier1_entries, [],
+            f"bare empty dir produced tier-1 entries: {tier1_entries}",
+        )
+
     # AC #3: Draft markers — applies to ALL scaffolded .md files
     def test_draft_markers(self):
         marker = "Status: Draft (wizard-generated)"
@@ -519,6 +567,15 @@ class SignalDetectionTests(unittest.TestCase):
         manifest = self._manifest()
         self.assertTrue(manifest["scaffold_signals"]["has_tests"])
         self.assertIn("tier-1", manifest["installed_tiers"])
+        # ADR-0007 — per-skill list should ALSO carry tier-1 entries
+        tier1_skills = [s for s in manifest["installed_skills"]
+                        if s.startswith("tier-1/")]
+        self.assertTrue(
+            tier1_skills,
+            f"tier-1 in installed_tiers but no tier-1/* in installed_skills",
+        )
+        # And one named tier-1 skill should be present
+        self.assertIn("tier-1/tdd-loop", manifest["installed_skills"])
 
     def test_test_signal_via_vitest_in_package_json(self):
         (self.target / "package.json").write_text(json.dumps({

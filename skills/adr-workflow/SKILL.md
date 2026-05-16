@@ -110,6 +110,13 @@ manual recipe above.
 
 ## End-to-end example (full lifecycle)
 
+The canonical lifecycle is `new → edit → index (preview) → accept → index (final)`.
+The preview-`index` pass surfaces a truncated or ugly first-bullet line
+while the ADR is still mutable (per [ADR-0006](../../docs/decisions/adr-0006-adr-accept-then-index-ordering.md)).
+Skip the preview only if the Context first sentence is known to be
+index-friendly (no abbreviations outside the helper's allowlist,
+fits in one short clause).
+
 ```bash
 # 1. Identify the deferred decision in docs/refinement-todo.md.
 #    Fragment: "scaffold-stable" (matches "### Decision: scaffold-stable …").
@@ -120,14 +127,20 @@ python3 .../adr.py new scaffold-stable --title "scaffold-stable trigger"
 
 # 3. Claude edits the file: fills Context, Options, Recommended, Consequences.
 
-# 4. Accept.
+# 4. Preview the index BEFORE accept, while the ADR is still mutable.
+python3 .../adr.py index docs/decisions
+# Inspect the new bullet line. If it looks wrong (truncated mid-
+# abbreviation, missing the key noun, etc.), edit the ADR's first
+# Context sentence and re-run this command. Iterate freely.
+
+# 5. Accept.
 python3 .../adr.py accept 0003
 # → flips Proposed → Accepted (today).
 
-# 5. Regen the index.
+# 6. Final index regen (idempotent re-run; updates only the Accepted line).
 python3 .../adr.py index docs/decisions
 
-# 6. Mark the refinement-todo entry resolved.
+# 7. Mark the refinement-todo entry resolved.
 python3 .../adr.py resolve-todo 0003 "scaffold-stable"
 ```
 
@@ -147,9 +160,16 @@ python3 .../adr.py resolve-todo 0003 "scaffold-stable"
 - **Index description extraction may produce ugly first lines.** The helper
   takes the first non-empty paragraph from `## Context`, truncating at the
   first sentence-ending punctuation when the paragraph is multi-line or
-  >120 chars. If the first sentence references a markdown link or starts
-  with a long preamble, the resulting bullet line will read oddly — edit
-  the ADR's first Context sentence to be index-friendly.
+  >120 chars. Common abbreviations (`e.g.`, `i.e.`, `etc.`, `Mr.`, `Dr.`,
+  …) are skipped by an explicit allowlist; abbreviations outside that
+  list may still cause a mid-word cut. If the resulting bullet reads
+  oddly, edit the ADR's first Context sentence to be index-friendly.
+  Per [ADR-0006](../../docs/decisions/adr-0006-adr-accept-then-index-ordering.md),
+  edits to Context-section *prose* to fix index-rendering are NOT
+  decision-content and do not violate the immutability rule. Edits to
+  Status, Recommended Decision, or Consequences DO violate immutability
+  and require a superseding ADR. Run `index` BEFORE `accept` as a preview
+  pass to catch this while the ADR is still freely mutable.
 - **The helper does NOT spawn a Task or commit anything.** It only mutates
   files. Claude is responsible for orchestration (e.g. running
   `workflow.py status-board` afterward, writing commit messages,

@@ -679,11 +679,12 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
     worktree = _detect_worktree_path()
     root = _detect_main_worktree_root()
 
-    ff_ok, ff_msg = _check_ff_viable(branch)
-    if not ff_ok:
-        parts.append("")
-        parts.append(f"## Error\n\nRefusing: {ff_msg}.\n")
-        return "\n".join(parts) + "\n", 1
+    if not dry_run:
+        ff_ok, ff_msg = _check_ff_viable(branch)
+        if not ff_ok:
+            parts.append("")
+            parts.append(f"## Error\n\nRefusing: {ff_msg}.\n")
+            return "\n".join(parts) + "\n", 1
 
     git_steps = [
         (["checkout", "main"], f"git checkout main"),

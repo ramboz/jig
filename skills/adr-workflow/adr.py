@@ -247,6 +247,34 @@ def _extract_status_and_date(adr_text: str) -> tuple:
 
 _DESCRIPTION_MAX = 120
 
+# Inbox 2026-05-12 refinement: common abbreviations whose trailing period is
+# NOT a sentence boundary. The detector below looks back from each candidate
+# period and refuses to truncate when one of these endings matches.
+# Kept intentionally small: this is a sentence-boundary heuristic, not NLP.
+_ABBREVIATIONS = (
+    "e.g.", "i.e.", "etc.", "cf.", "vs.", "viz.",
+    "al.", "et al.",
+    "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sr.", "Jr.", "St.",
+)
+
+
+def _is_abbreviation_ending_at(text: str, period_index: int) -> bool:
+    """Return True iff `text[: period_index + 1]` ends with a known
+    abbreviation. `period_index` points at the candidate `.`.
+
+    Match is case-sensitive on purpose: `Mr.` should match but a stray `e.g.`
+    in a code-style identifier won't accidentally match `E.G.`.
+    """
+    head = text[: period_index + 1]
+    for abbr in _ABBREVIATIONS:
+        if head.endswith(abbr):
+            # Boundary check: the char before the abbreviation must not be a
+            # letter (otherwise `mile.` would accidentally match `le.`).
+            before_idx = len(head) - len(abbr) - 1
+            if before_idx < 0 or not head[before_idx].isalpha():
+                return True
+    return False
+
 
 def _extract_description(adr_text: str) -> str:
     """First non-empty paragraph from `## Context`, truncated at first
@@ -278,12 +306,14 @@ def _extract_description(adr_text: str) -> str:
 
     if multi_line or too_long:
         # Truncate at first sentence-ending punctuation (`.` / `?` / `!`) when
-        # followed by space or EOL. Walk char-by-char to avoid false positives
-        # inside `e.g.` etc.
+        # followed by space or EOL. Walk char-by-char and skip periods that
+        # belong to known abbreviations (`e.g.`, `i.e.`, `etc.` …).
         for i, ch in enumerate(paragraph):
             if ch in ".?!":
                 after = paragraph[i + 1: i + 2]
                 if after == "" or after.isspace():
+                    if ch == "." and _is_abbreviation_ending_at(paragraph, i):
+                        continue
                     return paragraph[: i + 1]
         # No sentence boundary found → hard-truncate.
         return paragraph[: _DESCRIPTION_MAX].rstrip() + "…"

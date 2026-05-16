@@ -25,6 +25,18 @@ TEMPLATE = (
 TODAY = date.today().strftime("%Y-%m-%d")
 
 
+def _import_adr_module():
+    """Load adr.py as a module (the skill dir has a hyphen so we can't
+    use plain `import`). Used by unit-level tests that need to call
+    internal helpers directly.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("adr", ADR_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def run_adr(*args: str, cwd: Path = None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
@@ -598,6 +610,116 @@ class SkillSurfaceTests(unittest.TestCase):
         ):
             self.assertIn(header, content,
                           f"template missing section header: {header}")
+
+
+# ---------- Inbox 2026-05-12: abbreviation handling in _extract_description ----
+
+class ExtractDescriptionAbbreviationTests(unittest.TestCase):
+    """The Context-paragraph sentence-end detector must skip common
+    abbreviations (`e.g.`, `i.e.`, `etc.`, `Mr.`, …) so the index entry
+    doesn't get cut mid-abbreviation. First hit: ADR-0004 produced
+    `... files as NNNN-<slug>.md (e.g.` — truncated after the period in
+    `e.g.`. Fix: explicit allowlist of abbreviations.
+    """
+
+    def setUp(self):
+        self.adr = _import_adr_module()
+
+    def _ctx(self, paragraph: str) -> str:
+        # Wrap the paragraph in a minimal valid ADR so the detector runs
+        # exactly the path it would for a real file.
+        return (
+            "# ADR-0099: Sample\n\n## Status\n\nAccepted\n\n"
+            f"## Context\n\n{paragraph}\n\n## Decision Options Considered\n\n_TODO_\n"
+        )
+
+    def _force_truncate(self, paragraph: str) -> str:
+        """The detector only kicks in when multi-line OR > 120 chars.
+        Pad the paragraph so truncation is guaranteed."""
+        if len(paragraph) <= 120:
+            paragraph = paragraph + " " + ("X" * (130 - len(paragraph)))
+        return self.adr._extract_description(self._ctx(paragraph))
+
+    def test_eg_not_treated_as_sentence_boundary(self):
+        """The ADR-0004 incident: a Context para that contains `e.g.` early
+        on must NOT truncate at the period inside `e.g.`."""
+        para = (
+            "Decision records live at `docs/decisions/` with filenames like "
+            "`adr-NNNN-<slug>.md` (e.g. `adr-0004-decisions-folder-naming.md`)."
+        )
+        # First force a multi-line scenario so the truncator runs.
+        out = self.adr._extract_description(self._ctx(para + "\n\nMore here."))
+        # The bug would cut at `(e.g.` — make sure we never see that.
+        self.assertNotIn("(e.g.…", out, f"out={out!r}")
+        self.assertFalse(out.endswith("(e.g."), f"out={out!r}")
+        # And the full first real sentence should survive.
+        self.assertTrue(
+            out.endswith(".md`)."),
+            f"expected the full first sentence; got {out!r}",
+        )
+
+    def test_ie_not_treated_as_sentence_boundary(self):
+        para = (
+            "We use semantic versioning, i.e. major.minor.patch, with strict "
+            "rules about backwards compatibility for shipped APIs."
+        )
+        out = self._force_truncate(para)
+        self.assertFalse(out.endswith("i.e."), f"out={out!r}")
+
+    def test_etc_not_treated_as_sentence_boundary(self):
+        para = (
+            "Supported runners include pytest, vitest, jest, etc. The "
+            "auto-detector picks one based on `package.json` and friends."
+        )
+        out = self._force_truncate(para)
+        # Should NOT end at `etc.` — should continue to the next real boundary.
+        self.assertFalse(out.endswith("etc."), f"out={out!r}")
+
+    def test_real_sentence_after_abbreviation_still_terminates(self):
+        """After an abbreviation, a real sentence boundary still wins."""
+        para = (
+            "Migrations sometimes touch packaging concerns, e.g. lockfiles "
+            "and CI configs. Subsequent runs use the cached layout instead."
+        )
+        out = self._force_truncate(para)
+        self.assertTrue(
+            out.endswith("CI configs."),
+            f"expected truncation at the real boundary; got {out!r}",
+        )
+
+    def test_normal_sentence_still_truncates(self):
+        """Regression — sentences without abbreviations still cut at the
+        first period that's followed by space."""
+        para = (
+            "Plain first sentence ends here. Then a second sentence that "
+            "should NOT appear in the index line after truncation."
+        )
+        out = self._force_truncate(para)
+        self.assertTrue(out.endswith("here."), f"out={out!r}")
+        self.assertNotIn("second sentence", out)
+
+    def test_abbreviation_at_paragraph_start_does_not_break(self):
+        """An abbreviation as the very first token shouldn't crash the
+        look-back (boundary safety on `before_idx < 0`)."""
+        para = (
+            "E.g. consider the case where every detector contradicts the "
+            "headline rule and produces a divergent suggestion downstream."
+        )
+        # No crash + something sensible comes back.
+        out = self._force_truncate(para)
+        # The capitalized `E.g.` is the same shape as `e.g.` but starts the
+        # paragraph; case-sensitive match means it WILL truncate after the
+        # second period. That's acceptable — the test is just "no crash."
+        self.assertIsInstance(out, str)
+
+    def test_mr_and_dr_titles_not_sentence_boundaries(self):
+        para = (
+            "The migration was reviewed by Dr. Foo and Mr. Bar before the "
+            "team reached consensus on the final shape of the helper."
+        )
+        out = self._force_truncate(para)
+        self.assertFalse(out.endswith("Dr."), f"out={out!r}")
+        self.assertFalse(out.endswith("Mr."), f"out={out!r}")
 
 
 if __name__ == "__main__":

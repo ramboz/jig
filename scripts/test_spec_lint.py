@@ -356,10 +356,11 @@ class LintFunctionTests(unittest.TestCase):
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
 
-def _run_lint(*args: str) -> subprocess.CompletedProcess:
+def _run_lint(*args: str, cwd: str = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SPEC_LINT), *args],
         capture_output=True, text=True,
+        cwd=cwd,
     )
 
 
@@ -455,6 +456,123 @@ class MixedLayoutLintTests(unittest.TestCase):
         # Report should reference both slices
         self.assertIn("018-01 — alpha-from-file", report)
         self.assertIn("018-02 — beta-embedded", report)
+
+
+# ---------------------------------------------------------------------------
+# Inbox 2026-05-14: --all / no-arg directory-walking mode
+# ---------------------------------------------------------------------------
+
+class WalkAllSpecsTests(unittest.TestCase):
+    """spec_lint walks every `docs/specs/*/spec.md` under cwd in one shot
+    so contributors see every offending spec in a single run (instead of
+    short-circuiting on the first failure as CI's `set -e` bash loop did).
+    """
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = Path(tempfile.mkdtemp(prefix="jig-lint-all-"))
+        (self._tmpdir / "docs" / "specs").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _seed_spec(self, slug: str, content: str) -> Path:
+        spec_dir = self._tmpdir / "docs" / "specs" / slug
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec = spec_dir / "spec.md"
+        spec.write_text(content)
+        return spec
+
+    def test_discover_specs_orders_lexicographically(self):
+        self._seed_spec("002-second", CLEAN_SPEC)
+        self._seed_spec("001-first", CLEAN_SPEC)
+        self._seed_spec("003-third", CLEAN_SPEC)
+        found = sl._discover_specs(self._tmpdir)
+        names = [p.parent.name for p in found]
+        self.assertEqual(names, ["001-first", "002-second", "003-third"])
+
+    def test_discover_specs_empty_when_no_specs_root(self):
+        empty = Path(self._tmpdir) / "empty"
+        empty.mkdir()
+        self.assertEqual(sl._discover_specs(empty), [])
+
+    def test_discover_specs_skips_dirs_without_spec_md(self):
+        # Subdir present but no spec.md inside — should be ignored
+        (self._tmpdir / "docs" / "specs" / "999-placeholder").mkdir()
+        self._seed_spec("001-real", CLEAN_SPEC)
+        found = sl._discover_specs(self._tmpdir)
+        self.assertEqual([p.parent.name for p in found], ["001-real"])
+
+    def test_lint_all_aggregates_clean_specs(self):
+        s1 = self._seed_spec("001-first", CLEAN_SPEC)
+        s2 = self._seed_spec("002-second", CLEAN_SPEC)
+        report, code = sl.lint_all([s1, s2])
+        self.assertEqual(code, 0)
+        self.assertIn("Linted 2 spec(s)", report)
+        self.assertIn("no contradictions found", report)
+
+    def test_lint_all_reports_every_offending_spec(self):
+        """The whole point of --all: every bad spec shows in one run, not just
+        the first one (which is what the bash loop short-circuited at).
+        """
+        s1 = self._seed_spec("001-clean", CLEAN_SPEC)
+        s2 = self._seed_spec("002-bad-a", CONTRADICTION_SPEC)
+        s3 = self._seed_spec("003-bad-b", MULTI_FORBIDDEN_SPEC)
+        report, code = sl.lint_all([s1, s2, s3])
+        self.assertEqual(code, 1)
+        # Both bad specs should appear in the report
+        self.assertIn("002-bad-a", report)
+        self.assertIn("003-bad-b", report)
+
+    def test_lint_all_exit_two_propagates(self):
+        """A spec that can't parse (no '## Slice' headings) yields exit 2,
+        which must dominate even if every other spec is clean.
+        """
+        s_clean = self._seed_spec("001-clean", CLEAN_SPEC)
+        s_unparse = self._seed_spec("002-unparse",
+                                     "# Just a title\n\nNo slices.\n")
+        report, code = sl.lint_all([s_clean, s_unparse])
+        self.assertEqual(code, 2)
+
+    def test_cli_no_arg_walks_docs_specs(self):
+        self._seed_spec("001-clean", CLEAN_SPEC)
+        self._seed_spec("002-bad", CONTRADICTION_SPEC)
+        result = _run_lint(cwd=str(self._tmpdir))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("001-clean", result.stdout)
+        self.assertIn("002-bad", result.stdout)
+        self.assertIn("Linted 2 spec(s)", result.stdout)
+
+    def test_cli_all_flag_equivalent_to_no_arg(self):
+        self._seed_spec("001-clean", CLEAN_SPEC)
+        result = _run_lint("--all", cwd=str(self._tmpdir))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Linted 1 spec(s)", result.stdout)
+
+    def test_cli_no_arg_no_specs_exits_two(self):
+        import tempfile
+        empty = tempfile.mkdtemp(prefix="jig-lint-empty-")
+        try:
+            result = _run_lint(cwd=empty)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("no docs/specs", result.stderr)
+        finally:
+            import shutil
+            shutil.rmtree(empty, ignore_errors=True)
+
+    def test_cli_all_with_positional_is_user_error(self):
+        spec = self._seed_spec("001-clean", CLEAN_SPEC)
+        result = _run_lint("--all", str(spec), cwd=str(self._tmpdir))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("mutually exclusive", result.stderr)
+
+    def test_cli_all_with_slice_is_user_error(self):
+        self._seed_spec("001-clean", CLEAN_SPEC)
+        result = _run_lint("--all", "--slice", "anything",
+                            cwd=str(self._tmpdir))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--slice", result.stderr)
 
 
 if __name__ == "__main__":

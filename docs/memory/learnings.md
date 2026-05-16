@@ -208,3 +208,41 @@ finally lands; prose elsewhere still describes it as deferred) and
 mid-flight AC reshapes (the AC text changes; sentences elsewhere in
 the spec / deliverables keep the old wording). Easy mistake to make
 twice; explicitly call it out in the slice's deviation log.
+
+## Prefer direct-inventory over behavioral-introspection for skill-routing tests
+
+When testing whether a skill router prefers one skill over another,
+asking the model to *behave* and then *self-report* its routing
+decision conflates three layers of potential unreliability: routing
+decision, output production, and metacognitive accuracy. In slice
+012-01's routing-dogfood (deviation §9), three independent sessions
+all produced the same wrong report about the available descriptions
+— it looked like signal, but was actually three samples of the same
+hallucination pattern. The implementer almost applied an AC #9
+fallback (disabling auto-trigger) based on the confabulated reports.
+
+**Rule of thumb:** ask the model to enumerate static metadata
+verbatim, not to introspect a dynamic decision.
+
+- **Bad** (behavioral self-report): "Which skill would you pick for a
+  PR review and why?"
+- **Good** (direct inventory): "List the skills you have access to
+  with `pr-review` in the name and paste their full description
+  fields verbatim."
+
+The direct-inventory question is harder to confabulate against
+because it asks for ground-truth enumeration of static metadata
+rather than introspection of dynamic decisions.
+
+**Secondary lesson:** when an LLM-based test gives a suspicious
+answer, **disambiguate with non-LLM evidence** (terminal `cat`,
+filesystem inspection, direct API enumeration) before concluding a
+system bug. The 012-01 incident was only resolved when the direct-
+inventory question pinned the truth — the prior three sessions had
+all been confabulating.
+
+**Applies to:** any AC that says "the skill router prefers X over Y"
+or "skill X auto-triggers on phrase Y." Prefer enumeration-based
+verification over behavioral-self-report verification.
+
+Surfaced: slice 012-01 deviation §9 (post-merge 2026-05-14).

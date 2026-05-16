@@ -1101,6 +1101,13 @@ def reserve_spec(slug: str, project_dir: Path,
         _reset_rc, _reset_out, _reset_err = _run(
             ["git", "reset", "--hard", "HEAD~1"], cwd=project_dir,
         )
+        # Refinement-todo (slice 003-03 review): `git reset --hard HEAD~1`
+        # un-strands the commit but leaves the now-empty spec dir on disk.
+        # Functionally harmless (`_next_spec_number` works either way) but
+        # untidy and surfaces as a "dirty worktree" smell on `git status`.
+        # Remove it unconditionally on race recovery; harmless if it's
+        # somehow already gone.
+        shutil.rmtree(spec_dir, ignore_errors=True)
         # Even if reset fails, the race signal already fired — surface
         # the original push failure to the user.
         raise WorkflowError(

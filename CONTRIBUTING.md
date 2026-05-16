@@ -198,7 +198,7 @@ single-page summary of these steps.
 ## Running the test suite
 
 jig uses per-skill `python3 -m unittest discover` with no top-level
-runner. To run everything (current count: 350+ tests):
+runner. To run everything (current count: 800+ tests):
 
 ```bash
 for d in skills/*/; do
@@ -207,8 +207,37 @@ done
 python3 -m unittest discover -s scripts -p "test_*.py"
 ```
 
+The repo ships [`scripts/run_tests.py`](scripts/run_tests.py) as the
+canonical wrapper (CI calls it directly); use it locally too:
+
+```bash
+python3 scripts/run_tests.py
+```
+
 When you add a new skill or top-level `scripts/`-style dir, make sure
 its tests are discoverable by the same pattern.
+
+### Test file naming — avoid bare-module collisions
+
+Python 3.14's `unittest.discover` is stricter than 3.12: it refuses
+to import two test modules with the same `__name__` across sibling
+directories. Two skills that both ship `skills/<skill>/test_skill_surface.py`
+collide because each imports as the bare module name `test_skill_surface`.
+
+**Naming rule for skill test files**: include the skill name in the
+file name so it's globally unique under `skills/*/test_*.py`. Examples:
+
+- `skills/pr-review/test_skill_surface.py` ← bare name; **don't add a second**.
+- `skills/arch-review/test_arch_review_skill_surface.py` ← correct shape.
+- `skills/migrate/test_migrate.py` ← skill name is the file name.
+- `skills/spec-workflow/test_workflow.py` ← skill name embedded.
+
+When porting a slim-baseline skill from an existing one (e.g.
+mirroring `pr-review`'s structure for a new judgment-only skill), do
+NOT copy `test_skill_surface.py` verbatim — rename to
+`test_<skill_name>_skill_surface.py` first.
+
+Surfaced by spec 014-01 deviation §1.
 
 ## Versioning
 

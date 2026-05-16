@@ -3,6 +3,7 @@
   "timestamp": "{{TIMESTAMP}}",
   "project_name": "{{PROJECT_NAME}}",
   "installed_tiers": [],
+  "installed_skills": [],
   "scaffold_signals": {
     "is_team": false,
     "has_ci": false,

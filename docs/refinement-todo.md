@@ -25,18 +25,18 @@
 **Deferred:** `jig-telemetry.sh` logs Task tool spawns as a proxy for skill invocations. This is imprecise — skills can trigger without spawning a Task.
 **Resolution trigger:** After two weeks of telemetry data. If the log is too sparse to be useful, explore the `SubagentStart` / `InstructionsLoaded` events as alternatives.
 
-### Decision: `adr.py index` sentence-end detector mishandles abbreviations
-**Deferred:** The index-description extractor in `adr.py` truncates the first Context paragraph at the first sentence-ending punctuation. It treats the period in `e.g.` / `i.e.` / `cf.` / etc. as a sentence boundary, producing index lines like `... files as NNNN-<slug>.md (e.g.` — cut mid-abbreviation. First hit while writing ADR-0004 (2026-05-12).
-**Resolution trigger:** Next time the bug bites (i.e. an ADR's Context paragraph contains an abbreviation in the first sentence). Workaround documented in the SKILL.md gotchas: rewrite the first sentence to be index-friendly and re-run `adr.py index`.
-**Mitigation idea:** extend the sentence-end detector to skip common abbreviations (`e.g.`, `i.e.`, `etc.`, `cf.`, `vs.`, `Mr.`, `Dr.`) — small allowlist, no NLP needed. Or detect "lowercase letter immediately before the period" as a not-end-of-sentence signal.
+### ~~Decision: `adr.py index` sentence-end detector mishandles abbreviations~~ — RESOLVED 2026-05-15
+~~**Deferred:** The index-description extractor in `adr.py` truncates the first Context paragraph at the first sentence-ending punctuation. It treats the period in `e.g.` / `i.e.` / `cf.` / etc. as a sentence boundary, producing index lines like `... files as NNNN-<slug>.md (e.g.` — cut mid-abbreviation. First hit while writing ADR-0004 (2026-05-12).~~
+**Resolved by:** extending `_extract_description` in `adr.py` with an explicit abbreviation allowlist (`e.g.`, `i.e.`, `etc.`, `cf.`, `vs.`, `viz.`, `al.`, `Mr.`, `Mrs.`, `Ms.`, `Dr.`, `Prof.`, `Sr.`, `Jr.`, `St.`). The new `_is_abbreviation_ending_at(text, period_index)` helper does a case-sensitive look-back at each candidate period and refuses to truncate when one of these endings matches (with a `before_idx < 0 or not isalpha()` boundary check so `mile.` doesn't accidentally match `le.`). 7 new `ExtractDescriptionAbbreviationTests` lock the behavior. Companion ADR: [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md) codifies the lifecycle.
 
-### Decision: `adr.py` accept-then-index vs. index-then-accept ordering
-**Deferred:** The `adr-workflow` SKILL.md's end-to-end example runs `accept` → `index`, but the gotchas section says the fix for a truncated index entry is to edit the ADR's first Context sentence and re-run `adr.py index` — which implicitly requires the ADR to still be editable, i.e. NOT yet accepted. The two pieces of guidance conflict. Hit when accepting ADR-0004 (2026-05-12); the truncated description was only visible *after* `index`, which ran *after* `accept`, putting the ADR in an immutable state with an ugly index entry. Worked around by treating Context cosmetic edits as not-decision-content (and thus not under the immutability rule).
+### ~~Decision: `adr.py` accept-then-index vs. index-then-accept ordering~~ — RESOLVED 2026-05-15
+~~**Deferred:** The `adr-workflow` SKILL.md's end-to-end example runs `accept` → `index`, but the gotchas section says the fix for a truncated index entry is to edit the ADR's first Context sentence and re-run `adr.py index` — which implicitly requires the ADR to still be editable, i.e. NOT yet accepted. The two pieces of guidance conflict. Hit when accepting ADR-0004 (2026-05-12); the truncated description was only visible *after* `index`, which ran *after* `accept`, putting the ADR in an immutable state with an ugly index entry. Worked around by treating Context cosmetic edits as not-decision-content (and thus not under the immutability rule).~~
 **Resolution trigger:** Spec deciding the canonical lifecycle, OR next time someone hits the same conflict.
 **Open questions:**
 - Is the canonical order `new` → edit → `index` (preview) → `accept` → `index` (final)?
 - Or do we make `accept` automatically run `index` so the two are atomic?
 - Does the immutability rule apply to every character, or only the Recommended Decision / Consequences sections?
+**Resolved by:** [ADR-0006: adr.py accept-then-index ordering](decisions/adr-0006-adr-accept-then-index-ordering.md).
 
 ### Decision: Sub-slice topology and naming
 **Deferred:** Real-world projects routinely discover mid-flight that a Ready slice is too big and needs splitting — usually triggered by an ADR. The aso-shallow-validator hit this on slice-18, which decomposed into 18.1–18.5 (skeleton → corpus-AEMCS → corpus-EDS → synthetic-battery → promotion). jig's current helpers (`workflow.py`, `land.py`, `review.py`) assume flat slice IDs and have no concept of a parent-slice / sub-slice relationship.
@@ -104,10 +104,9 @@
 **Resolution trigger:** First user-observable race-on-disk incident (e.g., two operators report seeing a "dirty worktree" error from a `new` that didn't run cleanly). Probably never bites in practice (window is sub-second).
 **Mitigation idea:** stash-or-revert the stub-create on push failure (already done in the `non-fast-forward` path). Generalize the cleanup to fire on any push-failure shape, not just race.
 
-### Decision: race-recovery `git reset --hard HEAD~1` leaves empty spec directory on disk
-**Deferred:** On `non-fast-forward` push rejection, the helper resets the commit but leaves the empty `docs/specs/NNN-<slug>/` directory. Functionally harmless (`_next_spec_number` still works) but untidy. Surfaced by the reviewer of slice 003-03 (workflow.py:1028-1035 region).
-**Resolution trigger:** First user complaint about leftover empty dirs, OR a `--clean-on-race` flag becomes wanted, OR the same issue appears in `unreserve`.
-**Mitigation idea:** `shutil.rmtree(spec_dir, ignore_errors=True)` immediately after the `git reset --hard HEAD~1` call.
+### ~~Decision: race-recovery `git reset --hard HEAD~1` leaves empty spec directory on disk~~ — RESOLVED 2026-05-15
+~~**Deferred:** On `non-fast-forward` push rejection, the helper resets the commit but leaves the empty `docs/specs/NNN-<slug>/` directory. Functionally harmless (`_next_spec_number` still works) but untidy. Surfaced by the reviewer of slice 003-03 (workflow.py:1028-1035 region).~~
+**Resolved by:** the proposed `shutil.rmtree(spec_dir, ignore_errors=True)` after the `git reset --hard HEAD~1` call. Pinned by `test_new_race_recovery_removes_empty_spec_dir` in `ReserveSpecTests` (mocks the reset so the test still detects whether the helper itself cleans up the dir).
 
 ### Decision: `workflow.py new` refuses on non-main branches, defeating reserve-on-main when work originates on a feature branch
 **Deferred:** `workflow.py new` requires the current branch to be `main` because the reservation commit lands on `main`. Caused the spec 021→022 collision-and-renumber on 2026-05-15: a feature-branch session refused to reserve spec 021 up-front ("must switch to main first"), the session continued without reservation, parallel work landed `021-migrate-copy-machinery` on origin/main in the meantime, the feature branch had to rename `docs/specs/021-contracts/ → 022-contracts/` (+ propagate the renumber across slice files, deviation logs, CLAUDE.md, ADR-0005, dogfood report, test labels) at merge-time. The very pain spec 003-03's reserve-on-main flow was built to prevent reproduced because the flow wasn't usable from where work was happening.

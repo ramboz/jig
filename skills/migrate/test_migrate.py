@@ -30,6 +30,27 @@ def run_migrate(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+# Load migrate.py as a module for direct-call tests. Mirrors the pattern in
+# skills/spec-workflow/test_workflow.py and skills/slice-land/test_land.py:
+# importlib bypasses the `from skills.migrate import migrate` import path
+# that only works under `unittest discover`. Inbox 2026-05-13 follow-up.
+import importlib.util as _ilu
+
+
+def _load_migrate():
+    # Register the module in sys.modules BEFORE exec_module so dataclass's
+    # typing machinery can resolve `cls.__module__` (Python 3.14+ raises
+    # AttributeError otherwise).
+    spec = _ilu.spec_from_file_location("_migrate_module", MIGRATE_PY)
+    mod = _ilu.module_from_spec(spec)
+    sys.modules["_migrate_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_migrate = _load_migrate()
+
+
 # -------------------- InventoryTests --------------------
 
 
@@ -530,21 +551,21 @@ class RenamePlanTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_plan_includes_dir_rename(self):
-        from skills.migrate import migrate
+        migrate = _migrate
         plan = migrate.plan_rename(self.tmpdir)
         self.assertIsNotNone(plan.dir_rename)
         self.assertEqual(plan.dir_rename.src.name, "adrs")
         self.assertEqual(plan.dir_rename.dst.name, "decisions")
 
     def test_plan_includes_file_renames(self):
-        from skills.migrate import migrate
+        migrate = _migrate
         plan = migrate.plan_rename(self.tmpdir)
         new_names = [fr.dst.name for fr in plan.file_renames]
         self.assertIn("adr-0001-foo.md", new_names)
         self.assertIn("adr-0002-bar.md", new_names)
 
     def test_plan_includes_cross_ref_rewrites(self):
-        from skills.migrate import migrate
+        migrate = _migrate
         plan = migrate.plan_rename(self.tmpdir)
         rewrite_paths = [r.path.name for r in plan.cross_ref_rewrites]
         self.assertIn("architecture.md", rewrite_paths)
@@ -1447,9 +1468,16 @@ class CopyMachineryTests(unittest.TestCase):
     # ----- AC #1 — public façade exists and is callable --------------------
     def test_public_facade_is_importable_from_scaffold(self):
         """AC #1 — `copy_machinery(plugin, target, *, force=False)` is
-        importable from `skills.scaffold-init.scaffold`."""
-        import importlib
-        mod = importlib.import_module("skills.scaffold-init.scaffold")
+        importable from `skills/scaffold-init/scaffold.py`. The dir name
+        has a hyphen, so dotted-package imports don't work — we mirror
+        the same `spec_from_file_location` pattern migrate.py uses
+        internally to load scaffold (inbox 2026-05-13 follow-up).
+        """
+        scaffold_py = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
+        spec = _ilu.spec_from_file_location("_scaffold_for_test", scaffold_py)
+        mod = _ilu.module_from_spec(spec)
+        sys.modules.setdefault("_scaffold_for_test", mod)
+        spec.loader.exec_module(mod)
         self.assertTrue(callable(getattr(mod, "copy_machinery", None)),
                         "copy_machinery is not callable on scaffold module")
 
@@ -1563,6 +1591,61 @@ class CopyMachineryTests(unittest.TestCase):
             f"stdout must stay empty on refusal; got: {r.stdout!r}",
         )
 
+    # ----- Inbox 2026-05-15 — no partial state when refusal fires ---------
+    def test_unmanaged_hooks_refusal_leaves_no_partial_state(self):
+        """Inbox 2026-05-15 (spec 016-03 deviation §7 carryover): the
+        `copy_machinery()` façade ran `_copy_skills_and_agents` BEFORE the
+        hooks safety check, leaving copied jig-* skill/agent files behind
+        when the refusal fired. Pre-flight safety check now runs first,
+        so a refused call must leave `.claude/skills/` and `.claude/agents/`
+        untouched.
+        """
+        settings_path = self.tmpdir / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(_json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Edit",
+                     "hooks": [{"type": "command",
+                                "command": "bash ./user-edit.sh",
+                                "timeout": 5}]}
+                ]
+            }
+        }, indent=2) + "\n")
+        # No `.claude/skills/` or `.claude/agents/` exists yet
+        skills_root = self.tmpdir / ".claude" / "skills"
+        agents_root = self.tmpdir / ".claude" / "agents"
+        hooks_scripts = self.tmpdir / ".claude" / "hooks" / "scripts"
+        self.assertFalse(skills_root.exists())
+        self.assertFalse(agents_root.exists())
+        self.assertFalse(hooks_scripts.exists())
+
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 3, f"stderr: {r.stderr}")
+
+        # Nothing should have been written on the refusal path.
+        self.assertFalse(
+            skills_root.exists(),
+            f"refusal left jig-* skills on disk: "
+            f"{list(skills_root.iterdir()) if skills_root.exists() else None}",
+        )
+        self.assertFalse(
+            agents_root.exists(),
+            f"refusal left jig-* agents on disk: "
+            f"{list(agents_root.iterdir()) if agents_root.exists() else None}",
+        )
+        self.assertFalse(
+            hooks_scripts.exists(),
+            f"refusal left hook scripts on disk: "
+            f"{list(hooks_scripts.iterdir()) if hooks_scripts.exists() else None}",
+        )
+        # Settings.json must also be untouched (preserved verbatim).
+        preserved = _json.loads(settings_path.read_text())
+        self.assertEqual(
+            preserved["hooks"]["PreToolUse"][0]["matcher"], "Edit",
+            "user's settings.json was modified despite refusal",
+        )
+
     # ----- AC #8 (e) — idempotent re-run -----------------------------------
     def test_8e_idempotent_rerun(self):
         """AC #8 (e) — running `copy-machinery` against a `.claude/`
@@ -1644,7 +1727,10 @@ class CopyMachineryOperationsTests(unittest.TestCase):
     def test_operations_section_suppresses_when_jig_skills_present(self):
         """AC #9 — same project, but with at least one
         `.claude/skills/jig-*/` dir present, must NOT mention
-        `copy-machinery` in Operations."""
+        `copy-machinery` in Operations. The Inventory row may still
+        reference `copy-machinery` as the refresh path; the suppression
+        rule is scoped to the Operations section.
+        """
         jig_dir = self.tmpdir / ".claude" / "skills" / "jig-migrate"
         jig_dir.mkdir(parents=True)
         (jig_dir / "SKILL.md").write_text("seed\n")
@@ -1652,11 +1738,47 @@ class CopyMachineryOperationsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0,
                          f"stderr: {r.stderr}")
         self.assertIn("## Operations", r.stdout)
+        # Scope the check to the Operations section only.
+        ops_marker = "## Operations"
+        ops_section = r.stdout[r.stdout.index(ops_marker):]
         self.assertNotIn(
-            "copy-machinery", r.stdout,
+            "copy-machinery", ops_section,
             f"operations should suppress copy-machinery when "
-            f"jig-* skills exist: {r.stdout!r}",
+            f"jig-* skills exist: {ops_section!r}",
         )
+
+    # ----- Inbox 2026-05-15 — jig-managed skills row in Inventory ---------
+    def test_inventory_surfaces_jig_managed_skills(self):
+        """Inbox 2026-05-15 — without this row, AC #9's Operations
+        suppression looked unexplained: the user sees agents listed but
+        nothing for `.claude/skills/` even though 12 jig-* dirs are present.
+        The fix adds a separate Inventory row that names them and points at
+        `copy-machinery` for refresh.
+        """
+        # Drop two jig-* dirs into the seed project
+        for name in ("jig-migrate", "jig-spec-workflow"):
+            jig_dir = self.tmpdir / ".claude" / "skills" / name
+            jig_dir.mkdir(parents=True)
+            (jig_dir / "SKILL.md").write_text("seed\n")
+        r = run_migrate("report", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}")
+        self.assertIn("## Inventory", r.stdout)
+        # New row exists and names the jig-managed skills
+        self.assertIn("(jig-managed)", r.stdout)
+        self.assertIn("jig-migrate", r.stdout)
+        self.assertIn("jig-spec-workflow", r.stdout)
+        # And points at the refresh path
+        self.assertIn("copy-machinery", r.stdout)
+
+    def test_inventory_omits_jig_row_when_no_jig_skills_present(self):
+        """The new row appears only when jig_skill_dirs is non-empty.
+        Same seed project, no jig-* dirs, so the row should be absent."""
+        r = run_migrate("report", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}")
+        self.assertIn("## Inventory", r.stdout)
+        self.assertNotIn("(jig-managed)", r.stdout)
 
     # ----- AC #6 — partial verdict branch also surfaces copy-machinery ----
     def test_operations_section_suggests_copy_machinery_on_partial_verdict(self):

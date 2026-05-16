@@ -252,6 +252,16 @@ def render_inventory(inv: Inventory, project_dir: Path) -> str:
         names = ", ".join(f"`{p.name}`" for p in inv.custom_skills)
         rows.append(f"| `.claude/skills/` | {len(inv.custom_skills)} | "
                     f"custom skills: {names} (out of 008-01 scope) |")
+    if inv.jig_skill_dirs:
+        # Inbox 2026-05-15: surface jig-managed skills so the user sees why
+        # the Operations section suppresses `copy-machinery` (AC #9). Without
+        # this row, a project with 12 jig-* skills shows nothing under
+        # `.claude/skills/` and the silence is unexplained.
+        names = ", ".join(f"`{p.name}`" for p in inv.jig_skill_dirs)
+        rows.append(f"| `.claude/skills/` (jig-managed) | "
+                    f"{len(inv.jig_skill_dirs)} | "
+                    f"jig skills installed: {names} — refresh via "
+                    f"`migrate.py copy-machinery` |")
     if inv.custom_agents:
         names = ", ".join(f"`{p.name}`" for p in inv.custom_agents)
         rows.append(f"| `.claude/agents/` | {len(inv.custom_agents)} | "

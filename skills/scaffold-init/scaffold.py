@@ -38,6 +38,31 @@ SKIP_DIRS = {
     "__pycache__", ".venv", "venv", ".tox", ".pytest_cache",
 }
 
+# Per-tier skill inventory (ADR-0007). The per-skill `installed_skills`
+# field in scaffold.json is derived from this table plus the tier-
+# selection logic. Adding a new skill to a tier means a one-line edit
+# here; the manifest, brief.md, and verify_install all pick it up.
+# Order within each tier is stable to keep `scaffold.json` diffs minimal.
+_TIER_SKILLS = {
+    "tier-0": [
+        "scaffold-init",
+        "memory-sync",
+        "spec-workflow",
+        "independent-review",
+        "migrate",
+        "vision-elicitation",
+        "contracts",  # deliberate stub per ADR-0002 — still copied
+    ],
+    "tier-1": [
+        "adr-workflow",
+        "tdd-loop",
+        "slice-land",
+        "pr-review",
+        "arch-review",
+    ],
+    "tier-2": [],  # no Tier 2 skills land in jig yet
+}
+
 
 def plugin_root() -> Path:
     """Locate the jig plugin root via CLAUDE_PLUGIN_ROOT, falling back to this script's parents."""
@@ -333,6 +358,18 @@ def _select_tiers(signals: Signals) -> tuple[list, list]:
     return installed, offered
 
 
+def _enumerate_skills(installed_tiers: list) -> list:
+    """ADR-0007 — given the installed tiers, return the flat list of
+    `<tier>/<skill>` strings that scaffold-init will install. Invariant:
+    `set(s.split("/")[0] for s in result) == set(installed_tiers)`.
+    """
+    out = []
+    for tier in installed_tiers:
+        for skill in _TIER_SKILLS.get(tier, []):
+            out.append(f"{tier}/{skill}")
+    return out
+
+
 def _hook_profile(signals: Signals) -> str:
     """CI present → strict; otherwise standard. Inert until dispatch ships."""
     return "strict" if signals.has_ci else "standard"
@@ -571,6 +608,47 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     return merged
 
 
+def _check_hooks_safety(target: Path, *, force: bool = False) -> dict:
+    """Inbox 2026-05-15 — extract the settings.json safety check so callers
+    that orchestrate multiple copy steps (`copy_machinery`) can run it
+    BEFORE any filesystem mutation, eliminating the partial-state-on-refuse
+    rough edge spec 016-03 deviation §7 noted.
+
+    Returns the parsed `existing` settings dict (empty if no settings.json
+    is present). Raises `UnmanagedHooksError` if settings.json has hook
+    entries but none carry the jig-managed marker and `force` is False.
+    Raises `RuntimeError` if settings.json exists but is invalid JSON.
+    """
+    settings_path = target / ".claude" / "settings.json"
+    existing: dict = {}
+    if not settings_path.is_file():
+        return existing
+    try:
+        existing = json.loads(settings_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"{settings_path} exists but is not valid JSON: {exc}"
+        ) from exc
+    existing_hooks = existing.get("hooks") or {}
+    has_any_hook = any(
+        (entries or []) for entries in existing_hooks.values()
+    )
+    has_jig_marker = any(
+        _is_jig_managed(entry)
+        for entries in existing_hooks.values()
+        for entry in (entries or [])
+    )
+    if has_any_hook and not has_jig_marker and not force:
+        raise UnmanagedHooksError(
+            f"{settings_path} already has hooks but none carry the "
+            "jig-managed marker — refusing to merge to avoid clobbering "
+            "third-party hook configuration. Pass --force to append "
+            "jig hooks alongside the existing entries, or remove the "
+            "file and re-run."
+        )
+    return existing
+
+
 def _copy_hooks_and_register(plugin: Path, target: Path, *,
                              force: bool = False) -> None:
     """Slice 016-02 — copy hook scripts + write/merge `.claude/settings.json`.
@@ -589,37 +667,10 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
     src_scripts = plugin / "hooks" / "scripts"
     settings_path = target / ".claude" / "settings.json"
 
-    # AC #4 (016-02) safety check — runs FIRST, before any mkdir/copy, so
-    # a refused scaffold doesn't leak partial state into the target. Read
-    # the existing settings.json (if present) to determine whether to
-    # refuse. The check is per-file ("are any of these hooks jig's?"),
-    # not per-event: if the user has any non-jig hook anywhere AND no
-    # jig marker anywhere, that's a fully-third-party-managed file.
-    existing: dict = {}
-    if settings_path.is_file():
-        try:
-            existing = json.loads(settings_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"{settings_path} exists but is not valid JSON: {exc}"
-            ) from exc
-        existing_hooks = existing.get("hooks") or {}
-        has_any_hook = any(
-            (entries or []) for entries in existing_hooks.values()
-        )
-        has_jig_marker = any(
-            _is_jig_managed(entry)
-            for entries in existing_hooks.values()
-            for entry in (entries or [])
-        )
-        if has_any_hook and not has_jig_marker and not force:
-            raise UnmanagedHooksError(
-                f"{settings_path} already has hooks but none carry the "
-                "jig-managed marker — refusing to merge to avoid clobbering "
-                "third-party hook configuration. Pass --force to append "
-                "jig hooks alongside the existing entries, or remove the "
-                "file and re-run."
-            )
+    # AC #4 (016-02) safety check — extracted to `_check_hooks_safety` so
+    # callers that orchestrate multiple copy steps can run it BEFORE any
+    # mutation. Inside this function, the check still runs first.
+    existing = _check_hooks_safety(target, force=force)
 
     # Safety check passed (or settings.json doesn't exist). Now mutate.
     dst_scripts = target / ".claude" / "hooks" / "scripts"
@@ -648,18 +699,23 @@ def copy_machinery(plugin: Path, target: Path, *,
     copy-machinery` can reuse exactly the same logic `scaffold-init` uses
     when `--with-machinery` is in effect. Internally calls, in order:
 
-      1. `_copy_skills_and_agents(plugin, target)` — slice 016-01.
-      2. `_copy_hooks_and_register(plugin, target, force=force)` — slice
-         016-02; raises `UnmanagedHooksError` on a pre-existing
-         `.claude/settings.json` that has hooks but no jig-managed marker
-         (unless `force=True`).
+      1. `_check_hooks_safety(target, force=force)` — pre-flight safety
+         check (inbox 2026-05-15): ensures we refuse BEFORE any filesystem
+         mutation when settings.json is unmanaged. Closes the partial-
+         state-on-refuse gap noted in spec 016-03 deviation §7.
+      2. `_copy_skills_and_agents(plugin, target)` — slice 016-01.
+      3. `_copy_hooks_and_register(plugin, target, force=force)` — slice
+         016-02; the safety check inside this call is now redundant but
+         kept so the function still works correctly when called directly.
 
-    Safety guarantees inherited from the underlying helpers:
+    Safety guarantees:
     - Executable bit pinned to 0o755 on copied hook scripts.
     - Marker-based merge in `.claude/settings.json` (replace-in-place by
       `metadata.managed_by_jig`, non-jig entries survive).
     - UnmanagedHooksError fires BEFORE any filesystem mutation, so a
-      refused call leaves no partial state."""
+      refused call leaves no partial state — including no copied
+      skills/agents (this is the gap inbox 2026-05-15 closes)."""
+    _check_hooks_safety(target, force=force)
     _copy_skills_and_agents(plugin, target)
     _copy_hooks_and_register(plugin, target, force=force)
 
@@ -750,6 +806,10 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     rendered = render(manifest_template, subs)
     manifest = json.loads(rendered)
     manifest["installed_tiers"] = installed_tiers
+    # ADR-0007 — derive the per-skill list from `installed_tiers` and the
+    # `_TIER_SKILLS` table. Invariant:
+    #   set(s.split("/")[0] for s in installed_skills) == set(installed_tiers)
+    manifest["installed_skills"] = _enumerate_skills(installed_tiers)
     manifest["scaffold_signals"] = asdict(signals)
     manifest["hook_profile"] = hook_profile
     if offered_tiers:

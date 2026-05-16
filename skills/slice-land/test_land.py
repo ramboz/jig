@@ -777,6 +777,33 @@ class ExecuteDryRunTests(unittest.TestCase):
         # worktree remove must appear as a suggestion, not a live command
         self.assertIn("worktree remove", report)
 
+    def test_dry_run_skips_ff_viable_check(self):
+        """Inbox 2026-05-14 regression: dry-run must not call _check_ff_viable,
+        which requires a real `main` branch in the local repo. CI's
+        actions/checkout@v4 leaves HEAD on the PR's branch with `main` only
+        as `origin/main`, so the pre-flight would fail with 'branch main not
+        found'. Dry-run prints would-be commands without verifying state.
+        """
+        from unittest.mock import patch, MagicMock
+        self.spec.write_text(
+            _spec_with_slice("007-02 — test", "DONE")
+        )
+        ff_mock = MagicMock(return_value=(False, "branch 'main' not found"))
+        with patch.object(_land, "_detect_branch", return_value="feature/test"), \
+             patch.object(_land, "_check_ff_viable", ff_mock), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=Path(self.tmpdir)):
+            report, code = _land.execute(self.spec, "007-02", mode="direct",
+                                          dry_run=True, target=Path(self.tmpdir))
+        # Even though ff-check would refuse, dry-run does not call it
+        ff_mock.assert_not_called()
+        # And the dry-run output still prints the would-be commands
+        self.assertEqual(code, 0, f"report: {report}")
+        self.assertIn("Dry-run", report)
+        self.assertIn("git checkout main", report)
+
 
 # -------------------- ExecuteSafetyTests (direct calls + mocking) --------------------
 
