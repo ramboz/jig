@@ -137,7 +137,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
 
 ### Report structure
 
-Five sections, in fixed order:
+Six sections, in fixed order:
 
 1. **Inventory** — table of detected artifacts (paths + counts + shape
    notes). Inventories everything the helper found, including items
@@ -155,11 +155,22 @@ Five sections, in fixed order:
    spec?"; "custom skills overlap jig's stock set — replace or
    layer?"; "CLAUDE.md is 59KB with sprint log — port subset or
    leave?".
-5. **Operations** — ordered list of `migrate.py <subcommand>` calls
+5. **Contract surfaces detected** — *(added by spec 022-02)* flags
+   external-interface artifacts already on disk and prose API contracts
+   that would benefit from standard schemas (OpenAPI / JSON Schema /
+   AsyncAPI / `.proto` / GraphQL SDL). Four detection types: (a)
+   existing schema artifacts, (b) prose API contracts in canonical
+   doc files, (c) env-contract triple (markdown + `.env.example` +
+   checker), (d) hand-typed boundary types (e.g.
+   `problem-details.ts`). Each detected surface gets a one-line
+   classification + recommendation; "No contract surfaces detected"
+   prose when empty. Companion to the `/jig:contracts` skill's
+   per-surface recommendation table.
+6. **Operations** — ordered list of `migrate.py <subcommand>` calls
    the user should run, with `--dry-run` first. For slice 008-01,
    the only operations mentioned are future subcommands marked
    `(slice 008-NN, not yet implemented)` — so the report's main
-   value right now is the first four sections.
+   value right now is the first five sections.
 
 ## When to invoke
 

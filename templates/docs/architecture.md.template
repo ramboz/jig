@@ -73,6 +73,24 @@ _(No decisions recorded yet. Add the first H3 when the first ADR accepts.)_
 - (state element 1 — what it is, where it lives)
 - (state element 2 — what it is, where it lives)
 
+## Contract surfaces
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _External interfaces this project commits to as caller-facing surfaces.
+> Populated by `/jig:vision-elicitation` Section 13 (added by spec 022-02);
+> consumed by `/jig:independent-review`'s reviewer-prompt conditional
+> contract-surface check and by `/jig:migrate report`'s "Contract surfaces
+> detected" section. "No external surfaces — this project is a library /
+> script / single-consumer internal tool" is a valid and honest answer;
+> the section's elicitation marker stays `status: skipped` rather than
+> being filled with a negation bullet. See
+> [`skills/contracts/SKILL.md`](../../skills/contracts/SKILL.md) for the
+> per-surface recommendation table this elicitation references._
+
+- (surface 1 — **<surface type>** (recommended artifact: <name> at `<path>`) — brief description)
+- (surface 2 — same shape)
+
 ## Open questions
 
 > Deferred items live in [refinement-todo.md](refinement-todo.md).

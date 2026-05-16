@@ -3,7 +3,8 @@
 Covers slice 017-02 ACs:
 - AC #1 — frontmatter + description shape (3 trigger phrases + template
           reference + category-based deferral hint)
-- AC #2 — questions.md exists with 12 sections from Appendix A verbatim
+- AC #2 — questions.md exists with the Appendix A sections verbatim (12 from
+          spec 017-02 + Section 13 added by spec 022-02 = 13 total)
 - AC #3 — both worked-example transcripts exist with required structure
 - AC #4 — jig worked example produces template-shaped output (the 9
           H2s from templates/docs/product-vision.md.template), with
@@ -211,7 +212,8 @@ class DescriptionBoundsTests(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------
-# AC #2: questions.md exists with 12 sections from Appendix A verbatim
+# AC #2: questions.md exists with the Appendix A sections verbatim (12 from
+# spec 017-02 + Section 13 added by spec 022-02 = 13 total).
 # ----------------------------------------------------------------------------
 
 
@@ -230,6 +232,7 @@ EXPECTED_QUESTION_SECTIONS = [
     "Design principles & constraints",
     "How new work enters",
     "Open questions",
+    "Contract surfaces",  # added by spec 022-02 (slice 022-02 AC #1)
 ]
 
 
@@ -242,13 +245,15 @@ class QuestionsTests(unittest.TestCase):
         self.assertTrue(QUESTIONS_MD.is_file(),
                         f"questions.md must exist at {QUESTIONS_MD}")
 
-    def test_has_12_sections(self):
-        # Sections are H3 headings of the form "### Section N — <name>"
+    def test_has_13_sections(self):
+        # Sections are H3 headings of the form "### Section N — <name>".
+        # 12 from spec 017 + 1 (Contract surfaces) added by spec 022-02.
         headings = re.findall(r"^## Section \d+ — (.+?)\s*(?:\*\(|$)",
                               self.text, flags=re.MULTILINE)
         self.assertEqual(
-            len(headings), 12,
-            f"questions.md must have exactly 12 sections (AC #2); got {len(headings)}",
+            len(headings), 13,
+            f"questions.md must have exactly 13 sections (AC #2 from 017-02 "
+            f"+ AC #1 from 022-02); got {len(headings)}",
         )
 
     def test_section_names_match_appendix_a(self):
@@ -301,14 +306,17 @@ class WorkedExampleJigTests(unittest.TestCase):
 
     def test_walks_through_sections_with_qa_pairs(self):
         # AC #3: shows question → answer → rendered section heading + body.
-        # Pin: at least 8 of the 12 sections appear with a Q/A pair (allow
-        # skipped sections to be elided in the worked example).
+        # Pin: at least 8 of the (now 13, originally 12) sections appear
+        # with a Q/A pair (allow skipped sections to be elided in the
+        # worked example). The worked-example file documents the original
+        # 12-section walk-through; Section 13 (Contract surfaces, added
+        # by spec 022-02) is intentionally not walked here.
         present = sum(1 for sec in EXPECTED_QUESTION_SECTIONS
                       if sec in self.text)
         self.assertGreaterEqual(
             present, 8,
-            f"worked-example-jig.md must walk through ≥8 of the 12 sections "
-            f"with Q/A pairs; got {present}",
+            f"worked-example-jig.md must walk through ≥8 of the question "
+            f"sections with Q/A pairs; got {present}",
         )
 
     def test_references_real_vision_md(self):
@@ -360,13 +368,15 @@ class WorkedExampleYarnFinderTests(unittest.TestCase):
 
     def test_walks_through_sections_with_qa_pairs(self):
         # AC #3: shows question → answer pattern.
-        # Pin: at least 8 of the 12 sections have Q/A coverage.
+        # Pin: at least 8 of the question sections have Q/A coverage.
+        # (Originally 12; spec 022-02 added Section 13 which the
+        # worked example intentionally doesn't walk.)
         present = sum(1 for sec in EXPECTED_QUESTION_SECTIONS
                       if sec in self.text)
         self.assertGreaterEqual(
             present, 8,
-            f"worked-example-yarnfinder.md must walk through ≥8 of the 12 "
-            f"sections; got {present}",
+            f"worked-example-yarnfinder.md must walk through ≥8 of the "
+            f"question sections; got {present}",
         )
 
     def test_yarnfinder_concepts_mapped_to_template_slots(self):
@@ -423,7 +433,8 @@ class BodyTests(unittest.TestCase):
 
     def test_references_questions_file(self):
         # Progressive disclosure: SKILL.md body must point to questions.md
-        # rather than inlining the 12-section question set.
+        # rather than inlining the full question set (12 sections originally
+        # per spec 017-02; 13 since Section 13 added by spec 022-02).
         self.assertIn(
             "questions.md", self.body,
             "SKILL.md body must reference questions.md for the question set",

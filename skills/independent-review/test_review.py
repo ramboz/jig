@@ -409,5 +409,195 @@ class MixedLayoutResolutionTests(unittest.TestCase):
         self.assertIn("018-02 — beta-via-section", result.stdout)
 
 
+# ---------------------------------------------------------------------------
+# Slice 022-02 — contract-surface check conditional on architecture.md slot
+# ---------------------------------------------------------------------------
+
+
+CONTRACT_SURFACE_HINT = "Contract-surface check"
+
+
+class ContractSurfaceCheckTests(unittest.TestCase):
+    """Slice 022-02 AC #2: the implementation- and reconciliation-prompt
+    builders append a `Contract-surface check` bullet to their Evaluate
+    block IFF the project's `docs/architecture.md` has a
+    `## Contract surfaces` section with at least one declared-surface
+    bullet (matching the wizard output shape from spec 022-02 AC #1).
+
+    Each test sets up a fixture project root with `docs/architecture.md`
+    + a spec under `docs/specs/<slug>/spec.md`, runs `review.py`, and
+    asserts the presence/absence of the contract-surface hint."""
+
+    def _make_project(self, arch_md_body: str) -> Path:
+        """Build a tmpdir project layout:
+            <root>/docs/architecture.md   (body = arch_md_body)
+            <root>/docs/specs/myspec/spec.md  (synthetic, one slice)
+        Returns the spec path."""
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-csurf-"))
+        self._tmpdirs.append(root)
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "architecture.md").write_text(arch_md_body)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    # ---- impl prompt ----
+
+    def test_impl_prompt_omits_check_when_no_contract_surfaces_section(self):
+        spec = self._make_project(
+            "# Architecture\n\n## Tech stack\n\nPython.\n\n## Data model\n\nFiles.\n"
+        )
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(
+            CONTRACT_SURFACE_HINT, result.stdout,
+            "no `## Contract surfaces` section → contract-surface "
+            "hint must be absent (022-02 AC #2: no surfaces → no check)",
+        )
+
+    def test_impl_prompt_omits_check_when_surfaces_section_skipped(self):
+        # Wizard wrote the section but the user skipped — no bullets.
+        spec = self._make_project(
+            "# Architecture\n\n"
+            "<!-- elicited: 2026-05-15 / status: skipped -->\n"
+            "## Contract surfaces\n\n"
+            "_Skipped at elicitation; no external surfaces declared._\n"
+        )
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(
+            CONTRACT_SURFACE_HINT, result.stdout,
+            "`## Contract surfaces` section exists but is empty/skipped → "
+            "contract-surface hint must be absent",
+        )
+
+    def test_impl_prompt_includes_check_when_surfaces_declared(self):
+        spec = self._make_project(
+            "# Architecture\n\n"
+            "<!-- elicited: 2026-05-15 / status: filled -->\n"
+            "## Contract surfaces\n\n"
+            "External interfaces this project commits to:\n\n"
+            "- **HTTP API** (recommended: OpenAPI 3.x at `openapi.yaml`) — `/v1/foo`, `/v1/bar`\n"
+            "- **Internal data shapes** (recommended: JSON Schema) — `src/events/*.schema.json`\n\n"
+            "## Next section\n\nStuff.\n"
+        )
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            CONTRACT_SURFACE_HINT, result.stdout,
+            "declared surfaces → contract-surface hint MUST appear in the "
+            "Evaluate section (022-02 AC #2)",
+        )
+        # Hint must be phrased as a suggestion, not a blocker (AC #4).
+        self.assertIn(
+            "suggestion", result.stdout.lower(),
+            "contract-surface hint must frame as suggestion (not blocker) — "
+            "022-02 AC #4 nudge-don't-mandate audit",
+        )
+
+    # ---- recon prompt ----
+
+    def test_recon_prompt_omits_check_when_no_surfaces(self):
+        spec = self._make_project("# Architecture\n\n## Tech stack\n\nGo.\n")
+        result = run_review("reconciliation", str(spec), "099-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(CONTRACT_SURFACE_HINT, result.stdout)
+
+    def test_recon_prompt_includes_check_when_surfaces_declared(self):
+        spec = self._make_project(
+            "# Architecture\n\n## Contract surfaces\n\n"
+            "- **GraphQL** (recommended: SDL at `schema.graphql`)\n"
+        )
+        result = run_review("reconciliation", str(spec), "099-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            CONTRACT_SURFACE_HINT, result.stdout,
+            "022-02 AC #2: reconciliation prompt must ALSO grow the hint "
+            "when surfaces are declared (both prompts get the gate)",
+        )
+
+    # ---- detection edge cases ----
+
+    def test_detection_is_section_scoped(self):
+        """A `## Contract surfaces` heading later in the doc should bound
+        cleanly — bullets in OTHER sections must not satisfy the detector.
+        This guards against the failure mode where a `- **Foo**` bullet
+        in `## Data model` triggers a false positive."""
+        spec = self._make_project(
+            "# Architecture\n\n"
+            "## Contract surfaces\n\n"
+            "_Skipped at elicitation — no surfaces declared._\n\n"
+            "## Data model\n\n"
+            "- **JobStore** — append-only event log.\n"
+            "- **CacheLayer** — per-customer build artefacts.\n"
+        )
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Bullets are in `## Data model`, NOT in `## Contract surfaces`.
+        # The detector must scope to the Contract-surfaces section only.
+        self.assertNotIn(
+            CONTRACT_SURFACE_HINT, result.stdout,
+            "detector must scope to `## Contract surfaces` body — bullets "
+            "elsewhere must not trigger the hint",
+        )
+
+    def test_detection_works_when_section_is_last_in_file(self):
+        """No trailing H2 → section bounds extend to EOF. Reviewer prompt
+        should still include the check when at least one bullet is present."""
+        spec = self._make_project(
+            "# Architecture\n\n## Contract surfaces\n\n"
+            "- **HTTP API** (recommended: OpenAPI 3.x)\n"
+        )
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(CONTRACT_SURFACE_HINT, result.stdout)
+
+    def test_negation_bullet_is_not_a_declaration(self):
+        """A bullet like `- **No external surfaces** — library only` is the
+        user opting out in-bullet rather than skipping the whole section.
+        Detector must NOT treat it as a declared surface (022-02
+        post-impl-review fix per reviewer SPECIFIC ISSUE on
+        `_DECLARED_SURFACE_BULLET_RE` false positives)."""
+        for neg in [
+            "- **No external surfaces** — this is a library only.",
+            "- **None** — single-consumer internal tool.",
+            "- **TBD** — surfaces not yet declared.",
+            "- **Not yet** — pre-product-market-fit prototype.",
+            "- **Skipped** — opting out for now.",
+        ]:
+            spec = self._make_project(
+                f"# Architecture\n\n## Contract surfaces\n\n{neg}\n"
+            )
+            result = run_review("implementation", str(spec), "099-01", "x.py")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(
+                CONTRACT_SURFACE_HINT, result.stdout,
+                f"negation-bullet {neg!r} must NOT trigger the contract "
+                "hint — it's an in-bullet opt-out, not a declaration",
+            )
+
+    def test_mixed_negation_and_declaration_fires(self):
+        """If even ONE bullet is a real declaration, the hint fires —
+        even alongside negation bullets explaining what's NOT exposed."""
+        spec = self._make_project(
+            "# Architecture\n\n## Contract surfaces\n\n"
+            "- **No async messaging** — synchronous only.\n"
+            "- **HTTP API** (recommended: OpenAPI 3.x) — `/v1/foo`\n"
+        )
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(CONTRACT_SURFACE_HINT, result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

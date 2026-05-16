@@ -2,7 +2,7 @@
 name: vision-elicitation
 description: >
   Lightweight baseline elicitation pass that fills in `docs/product-vision.md`
-  and the four `docs/architecture.md` elicitation slots after `scaffold-init`.
+  and the five `docs/architecture.md` elicitation slots after `scaffold-init`.
   Auto-triggers when you say set up project vision, elicit architecture,
   define what we're building, run the vision wizard, refresh the project
   pitch, or capture product scope. Defers to any other installed skill whose
@@ -34,23 +34,26 @@ user-invocable: true
 
 ## What this skill does
 
-Runs a structured 12-section Q&A immediately after `scaffold-init`, then
+Runs a structured 13-section Q&A immediately after `scaffold-init`, then
 writes the captured answers into the elicitation slots that slice 017-01
-introduced:
+introduced (extended by slice 022-02 with Section 13 — Contract surfaces
+— feeding the `/jig:contracts` skill):
 
 - `docs/product-vision.md` — 9 H2 sections (Identity, Target users, Core
   problem, Competitive landscape, Scope, Stack, Design principles &
   constraints, How new work enters, Open questions). Each section's
   `<!-- elicited: PENDING / status: unfilled -->` marker transitions
   to `status: filled` (with today's ISO date) or `status: skipped`.
-- `docs/architecture.md` — 4 elicitation slots (Repository structure,
-  Tech stack, Module boundaries, Data model). Same marker transition.
-  Two sibling sections (Core architecture decisions, Open questions)
-  carry no markers and are populated by ADRs / refinement-todo entries
-  over time, not by elicitation.
+- `docs/architecture.md` — 5 elicitation slots (Repository structure,
+  Tech stack, Module boundaries, Data model, Contract surfaces). Same
+  marker transition. Two sibling sections (Core architecture decisions,
+  Open questions) carry no markers and are populated by ADRs /
+  refinement-todo entries over time, not by elicitation. The Contract
+  surfaces slot was added by spec 022-02 to feed the `/jig:contracts`
+  skill.
 
-The 12 Q&A sections map 1:1 to vision + arch slots (5 sections feed
-vision-only slots, 4 sections feed arch-only slots, 1 section feeds
+The 13 Q&A sections map 1:1 to vision + arch slots (5 sections feed
+vision-only slots, 5 sections feed arch-only slots, 1 section feeds
 the refinement-todo entries that the arch Open questions footer points
 to, and 2 sections feed vision-only slots that don't have a single-slot
 mirror — see [`questions.md`](questions.md) for the canonical mapping).
@@ -102,7 +105,7 @@ The skill is **judgment-only** — no `.py` helper. Claude reads the
 question set, conducts the Q&A inline with the user, and writes the
 rendered answers via the Edit tool. The per-section flow is:
 
-1. **Load the question set** from [`questions.md`](questions.md). 12
+1. **Load the question set** from [`questions.md`](questions.md). 13
    sections; each lists 1–4 questions plus optional follow-ups.
 2. **Detect existing markers.** Open the project's
    `docs/product-vision.md` and `docs/architecture.md`. Find each
@@ -124,7 +127,7 @@ rendered answers via the Edit tool. The per-section flow is:
    - Answered → `<!-- elicited: YYYY-MM-DD / status: filled -->`
    - Skipped → `<!-- elicited: YYYY-MM-DD / status: skipped -->`
 5. **Move to the next section.** No looping; no upselling; stop when
-   all 12 sections have been visited.
+   all 13 sections have been visited.
 
 ### Per-section flow, not per-question flow
 

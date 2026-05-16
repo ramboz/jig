@@ -108,6 +108,14 @@ Jig is a workflow layer, not a data application (per [product-vision.md](product
 - `.jig/skill-usage.jsonl` — telemetry append-only log (deferred until a real consumer exists)
 - `docs/specs/**/spec.md` — the only project-level state jig owns; everything else lives in the dev's repo, owned by the dev
 
+## Contract surfaces
+
+<!-- elicited: 2026-05-15 / status: skipped -->
+
+_Skipped: jig does not currently expose schema-shaped external interfaces. It is a Claude Code plugin — the only external surfaces are SKILL.md frontmatter (consumed by the Claude Code router) and CLI argparse interfaces on the `.py` helpers (consumed by humans + scripts). Neither warrants an OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL artifact. If jig later grows an HTTP / events / RPC surface (e.g. a telemetry sink endpoint, a remote-spec-status query API), this section gets filled per the `/jig:contracts` skill's per-surface recommendation table._
+
+_Self-coherence note (spec 022-02): this slot exists so the `/jig:independent-review` reviewer-prompt's conditional contract-surface check stays quiet on jig's own slice reviews — the `status: skipped` marker + the no-bullet body together signal "no surfaces to check" to the detector. See [skills/contracts/SKILL.md](../skills/contracts/SKILL.md) for the per-surface recommendation table the elicitation references._
+
 ## Open questions
 
 - `SubagentStart` hook event: documented in changelog (v2.0.43) but absent from official plugin docs. Deferred — see `docs/refinement-todo.md`.

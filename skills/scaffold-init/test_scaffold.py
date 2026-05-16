@@ -1087,6 +1087,10 @@ class VisionTemplateSlotsTests(unittest.TestCase):
         "Tech stack",
         "Module boundaries",
         "Data model",
+        # Added by spec 022-02: Contract surfaces feeds the
+        # `/jig:contracts` reviewer-prompt and `/jig:migrate report`
+        # integrations. Marker shape identical to the original four.
+        "Contract surfaces",
     ]
     # Two sections exist but are NOT elicitation slots — they carry no marker.
     # "Core architecture decisions" is populated incrementally by ADRs over
@@ -1157,17 +1161,21 @@ class VisionTemplateSlotsTests(unittest.TestCase):
                 f"on the line(s) immediately after the heading (slice 017-01 AC #4)",
             )
 
-    # AC #4 sub: exactly 4 markers total — no duplicates, no fifth slot.
-    # Tightening per implementation-reviewer feedback (deviation §3).
-    def test_architecture_template_has_exactly_four_markers(self):
+    # AC #4 sub: exactly 5 markers total — no duplicates, no extra slot.
+    # Originally 4 (slice 017-01 AC #4); slice 022-02 added the Contract
+    # surfaces slot, raising the count to 5.
+    def test_architecture_template_has_exactly_five_markers(self):
         body = self._read("templates/docs/architecture.md.template")
         count = body.count(self.UNFILLED_MARKER)
         self.assertEqual(
-            count, 4,
-            f"architecture.md.template must contain exactly 4 unfilled "
-            f"markers (one per elicitation slot); got {count}. A duplicate "
-            f"marker or a marker on the Core architecture decisions / "
-            f"Open questions sections would break this assertion (slice 017-01 AC #4).",
+            count, 5,
+            f"architecture.md.template must contain exactly 5 unfilled "
+            f"markers (one per elicitation slot — Repository structure / "
+            f"Tech stack / Module boundaries / Data model / Contract "
+            f"surfaces); got {count}. A duplicate marker or a marker on "
+            f"the Core architecture decisions / Open questions sections "
+            f"would break this assertion (slice 017-01 AC #4 + slice "
+            f"022-02 AC #1).",
         )
 
     # AC #4 sub: non-elicitation sections (decisions, open questions) carry NO marker
@@ -1328,11 +1336,12 @@ class VisionTemplateSlotsTests(unittest.TestCase):
             arch_body = arch.read_text(encoding="utf-8")
             marker_count = arch_body.count(self.UNFILLED_MARKER)
             self.assertEqual(
-                marker_count, 4,
-                f"scaffolded docs/architecture.md must contain exactly 4 "
+                marker_count, 5,
+                f"scaffolded docs/architecture.md must contain exactly 5 "
                 f"unfilled-marker comments (Repository structure / Tech "
-                f"stack / Module boundaries / Data model); got "
-                f"{marker_count} (slice 017-01 AC #7)",
+                f"stack / Module boundaries / Data model / Contract "
+                f"surfaces); got {marker_count} (slice 017-01 AC #7 + "
+                f"slice 022-02 AC #1)",
             )
             # And each of the 4 named slots is present as an H2 in the
             # scaffolded file (catches reordering / renaming bugs in the

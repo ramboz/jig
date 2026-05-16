@@ -541,9 +541,316 @@ def render_report(inv: Inventory, verdict: str, project_dir: Path) -> str:
     parts.append("")
     parts.append(render_ambiguities(inv))
     parts.append("")
+    parts.append(render_contract_surfaces(project_dir))
+    parts.append("")
     parts.append(render_operations(inv, verdict))
     parts.append("")
     return "\n".join(parts)
+
+
+# ---------- Contract-surface detection (slice 022-02) ----------
+#
+# Read-only detection for the `## Contract surfaces detected` section.
+# Each helper returns a list of bullet strings; the renderer dedupes
+# and joins. Detection scope per slice 022-02 AC #3:
+#   (a) existing schema artifacts on disk
+#   (b) prose API contracts in docs/architecture.md
+#   (c) env-contract-style patterns
+#   (d) hand-typed boundary types (RFC 7807-style)
+#
+# All file operations here are READS only — SafetyTests scans this
+# region for write-shaped calls and refuses any.
+
+# Skip-set for directory traversal. Mirrors the post-sentinel
+# `_SKIP_PATH_NAMES` (which is defined alongside the mutating code path)
+# but lives above the sentinel so SafetyTests sees it as part of the
+# read-only region. Both sets stay in sync; if one grows, grow the other.
+_CSURFACE_SKIP_DIRS = frozenset({
+    ".git", "node_modules", ".venv", "venv", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".tox", "dist", "build",
+    ".next", ".cache", "worktrees", ".claude",
+})
+
+# Filename patterns for schema artifacts (case-insensitive).
+_SCHEMA_FILENAME_RES = (
+    (re.compile(r"^openapi\.(ya?ml|json)$", re.IGNORECASE), "HTTP API",
+     "OpenAPI 3.x", "spectral lint + openapi-typescript"),
+    (re.compile(r"^asyncapi\.(ya?ml|json)$", re.IGNORECASE), "Event bus / async messaging",
+     "AsyncAPI", "asyncapi/parser + asyncapi/generator"),
+    (re.compile(r"^.+\.proto$", re.IGNORECASE), "RPC",
+     "Protocol Buffers", "buf lint + buf generate"),
+    (re.compile(r"^schema\.graphqls?$", re.IGNORECASE), "GraphQL",
+     "GraphQL SDL", "graphql-inspector + graphql-codegen"),
+    (re.compile(r"^.+\.schema\.json$", re.IGNORECASE), "Internal data shape",
+     "JSON Schema", "ajv validate + quicktype"),
+)
+
+# Filename patterns for hand-typed boundary types (the drift symptom —
+# a file whose name suggests an inline schema reimplementation).
+_HANDTYPED_BOUNDARY_RES = (
+    re.compile(r"^problem[-_]?details?\.(ts|tsx|js|jsx|mjs|py|go|rb|java|kt|rs)$",
+               re.IGNORECASE),
+)
+
+
+def _walk_for_files(project_dir: Path, max_depth: int = 8):
+    """Yield every file under `project_dir`, honoring _CSURFACE_SKIP_DIRS.
+    Depth-bounded (default 8) to keep large monorepos tractable.
+
+    READ-ONLY: only `Path.iterdir` and `Path.is_file` are used. No
+    mutating operations.
+    """
+    if not project_dir.is_dir():
+        return
+
+    def _walk(root: Path, depth: int):
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(root.iterdir())
+        except (OSError, PermissionError):
+            return
+        for entry in entries:
+            if entry.is_dir():
+                if entry.name in _CSURFACE_SKIP_DIRS:
+                    continue
+                yield from _walk(entry, depth + 1)
+                continue
+            if entry.is_file():
+                yield entry
+
+    yield from _walk(project_dir, 0)
+
+
+def _detect_schema_artifacts(project_dir: Path) -> list:
+    """AC #3(a) — flag existing OpenAPI / AsyncAPI / .proto / GraphQL SDL /
+    JSON Schema files. One bullet per match, with surface classification +
+    recommended tooling (mirrors the contracts skill's per-surface table)."""
+    hits = []
+    for fp in _walk_for_files(project_dir):
+        name = fp.name
+        for pattern, surface, artifact, tooling in _SCHEMA_FILENAME_RES:
+            if pattern.match(name):
+                rel = fp.relative_to(project_dir).as_posix()
+                hits.append(
+                    f"- **{surface} artifact**: `{rel}` ({artifact}) — "
+                    f"matches `/jig:contracts` recommendation; wire `{tooling}` "
+                    f"in CI if not already."
+                )
+                break
+    return hits
+
+
+# Match a prose API "endpoint table row": a Markdown table cell containing
+# one of the HTTP verbs (GET / POST / PUT / DELETE / PATCH / HEAD / OPTIONS)
+# possibly wrapped in backticks. Used as one signal that an architecture.md
+# H2 section is prose-API-shaped.
+_HTTP_VERB_ROW_RE = re.compile(
+    r"\|\s*`?(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)`?\s*\|",
+    re.IGNORECASE,
+)
+
+# Match a fenced jsonc / json code block — the second prose-API signal.
+_JSONC_FENCE_RE = re.compile(r"```(?:jsonc|json)\b")
+
+
+def _detect_prose_api_in_architecture(project_dir: Path) -> list:
+    """AC #3(b) — flag prose API contracts in canonical doc files.
+
+    Two-tier heuristic:
+
+    1. For `docs/architecture.md` — per-section detection (both signals
+       must appear in the SAME H2 section). High precision: architecture
+       docs are broad and a section-scoped match avoids false positives
+       from unrelated tables / examples.
+    2. For dedicated contract-shaped docs (`api-contract.md`,
+       `api-spec.md`, `api.md`, `contracts.md` under `docs/`) — document-
+       level detection (both signals anywhere in the file). These files
+       are *named* as contracts; a per-section gate misses the common
+       shape where the endpoint table is in §1 and the jsonc bodies are
+       in §2..§N (the aso-shallow-validator shape).
+
+    For per-section matches, the bullet cites the matching §<heading>;
+    for whole-doc matches, the bullet cites just the file.
+    """
+    docs_dir = project_dir / "docs"
+    hits = []
+
+    # Tier 1: per-section detection for architecture.md
+    arch_path = docs_dir / "architecture.md"
+    try:
+        arch_text = arch_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, FileNotFoundError):
+        arch_text = None
+    if arch_text:
+        rel = arch_path.relative_to(project_dir).as_posix()
+        h2_matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", arch_text))
+        for i, hm in enumerate(h2_matches):
+            section_start = hm.end()
+            section_end = (h2_matches[i + 1].start()
+                           if i + 1 < len(h2_matches) else len(arch_text))
+            body = arch_text[section_start:section_end]
+            # Skip the wizard-declared "Contract surfaces" section itself.
+            if hm.group(1).strip().lower() == "contract surfaces":
+                continue
+            if _HTTP_VERB_ROW_RE.search(body) and _JSONC_FENCE_RE.search(body):
+                heading = hm.group(1).strip()
+                hits.append(
+                    f"- **Prose API contract** in `{rel}` §{heading}: "
+                    f"candidate for OpenAPI 3.x extraction (endpoint "
+                    f"table + jsonc bodies present). See "
+                    f"`skills/contracts/worked-example-openapi-http.md` "
+                    f"for the recommended migration path."
+                )
+
+    # Tier 2: whole-doc detection for dedicated contract files
+    contract_candidates = [
+        docs_dir / "api-contract.md",
+        docs_dir / "api-spec.md",
+        docs_dir / "api.md",
+        docs_dir / "contracts.md",
+    ]
+    for path in contract_candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, FileNotFoundError):
+            continue
+        if _HTTP_VERB_ROW_RE.search(text) and _JSONC_FENCE_RE.search(text):
+            rel = path.relative_to(project_dir).as_posix()
+            hits.append(
+                f"- **Prose API contract** in `{rel}` (whole document): "
+                f"candidate for OpenAPI 3.x extraction (endpoint table + "
+                f"jsonc bodies present). See "
+                f"`skills/contracts/worked-example-openapi-http.md` for "
+                f"the recommended migration path."
+            )
+    return hits
+
+
+def _detect_env_contract_pattern(project_dir: Path) -> list:
+    """AC #3(c) — flag the bespoke env-contract triple (markdown doc +
+    .env.example seed + checker). Emit one line summarizing which parts
+    of the triple are present and what's missing."""
+    doc = (project_dir / "docs" / "env-contract.md").is_file()
+    seed = (project_dir / ".env.example").is_file()
+    # Checker heuristic, layered:
+    #   1. ANY file inside `tools/env-contract/` — the directory name
+    #      carries the semantic (this is the aso-shallow-validator shape:
+    #      `tools/env-contract/check.mjs` — file name is short, dir name
+    #      is the contract).
+    #   2. Files under `tools/`, `scripts/`, or repo root whose NAME
+    #      contains `env-contract` / `env_contract` (e.g.
+    #      `check-env-contract.sh`, `env_contract_check.py`).
+    checker = False
+    contract_dir = project_dir / "tools" / "env-contract"
+    if contract_dir.is_dir():
+        try:
+            for fp in contract_dir.iterdir():
+                if fp.is_file():
+                    checker = True
+                    break
+        except (OSError, PermissionError):
+            pass
+    if not checker:
+        for cand_dir in [project_dir / "scripts",
+                         project_dir / "tools",
+                         project_dir]:
+            if not cand_dir.is_dir():
+                continue
+            try:
+                entries = list(cand_dir.iterdir())
+            except (OSError, PermissionError):
+                continue
+            for fp in entries:
+                if not fp.is_file():
+                    continue
+                n = fp.name.lower()
+                if "env-contract" in n or "env_contract" in n:
+                    checker = True
+                    break
+            if checker:
+                break
+
+    present = sum([doc, seed, checker])
+    if present == 0:
+        return []
+    if present == 3:
+        return [
+            "- **env-contract pattern** detected (full triple: "
+            "`docs/env-contract.md` + `.env.example` + checker script). "
+            "Bespoke alternative to JSON Schema for env vars; well-shaped, "
+            "no migration recommended. See `skills/contracts/SKILL.md` "
+            "Config / env vars row for the rationale."
+        ]
+    # Partial — name what's missing.
+    missing = []
+    if not doc:
+        missing.append("`docs/env-contract.md`")
+    if not seed:
+        missing.append("`.env.example`")
+    if not checker:
+        missing.append("checker script (under `tools/env-contract/` or `scripts/`)")
+    return [
+        f"- **Partial env-contract pattern** ({present} of 3): missing "
+        f"{', '.join(missing)}. Either complete the triple, migrate to "
+        f"per-config JSON Schema, or document the partial state."
+    ]
+
+
+def _detect_handtyped_boundary_types(project_dir: Path) -> list:
+    """AC #3(d) — flag files whose name suggests an inline schema
+    reimplementation (e.g., `problem-details.ts`). Heuristic — high
+    precision; modest recall (only the canonical RFC 7807-style names)."""
+    hits = []
+    for fp in _walk_for_files(project_dir):
+        for pattern in _HANDTYPED_BOUNDARY_RES:
+            if pattern.match(fp.name):
+                rel = fp.relative_to(project_dir).as_posix()
+                hits.append(
+                    f"- **Hand-typed boundary type**: `{rel}` — name "
+                    f"suggests an inline RFC 7807 (Problem Details) "
+                    f"schema reimplementation. Candidate for codegen "
+                    f"from the project's OpenAPI / JSON Schema artifact "
+                    f"once it exists. See "
+                    f"`skills/contracts/worked-example-openapi-http.md` "
+                    f"§After for the typed-codegen pattern."
+                )
+                break
+    return hits
+
+
+def render_contract_surfaces(project_dir: Path) -> str:
+    """AC #3 of slice 022-02 — `## Contract surfaces detected` section."""
+    bullets = []
+    bullets.extend(_detect_schema_artifacts(project_dir))
+    bullets.extend(_detect_prose_api_in_architecture(project_dir))
+    bullets.extend(_detect_env_contract_pattern(project_dir))
+    bullets.extend(_detect_handtyped_boundary_types(project_dir))
+
+    if not bullets:
+        return (
+            "## Contract surfaces detected\n\n"
+            "_No contract surfaces detected._ This project does not appear "
+            "to expose schema-shaped external interfaces. If this is "
+            "wrong (e.g., a prose API contract lives in an unscanned "
+            "doc, or a schema artifact uses a non-canonical name), "
+            "declare the surface via `/jig:vision-elicitation` Section 13 "
+            "(Contract surfaces). The `/jig:contracts` skill's per-surface "
+            "recommendation table covers HTTP / events / RPC / GraphQL / "
+            "internal data shapes / config / CLI output."
+        )
+
+    intro = (
+        "Detected via file-and-pattern heuristics. Each line is a "
+        "*recommendation*, not a migration order — the dev decides per "
+        "surface (per `/jig:contracts`'s nudge-don't-mandate ethos). See "
+        "`skills/contracts/SKILL.md` for the per-surface recommendation "
+        "table."
+    )
+    return (
+        "## Contract surfaces detected\n\n"
+        f"{intro}\n\n" + "\n".join(bullets)
+    )
 
 
 def report(project_dir: Path) -> tuple:

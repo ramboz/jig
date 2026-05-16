@@ -1714,5 +1714,259 @@ class CopyMachinerySkillSurfaceTests(unittest.TestCase):
         self.assertIn("--force", self.skill_text)
 
 
+# ---------------------------------------------------------------------------
+# Slice 022-02 — `## Contract surfaces detected` section in `report` output
+# ---------------------------------------------------------------------------
+
+
+CONTRACT_HEADING = "## Contract surfaces detected"
+
+
+class ContractSurfacesReportTests(unittest.TestCase):
+    """Slice 022-02 AC #3 — `migrate.py report` emits a 'Contract surfaces
+    detected' section listing schema artifacts (a), prose API contracts (b),
+    env-contract patterns (c), and hand-typed boundary types (d). Each
+    detection type covered by at least one tmpdir fixture."""
+
+    def setUp(self):
+        import tempfile
+        self.tmpdirs: list[Path] = []
+        self._tempfile = tempfile
+
+    def tearDown(self):
+        import shutil
+        for d in self.tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _make_project(self, files: dict) -> Path:
+        """Build a tmpdir with the given relative-path → text mapping."""
+        root = Path(self._tempfile.mkdtemp(prefix="jig-mig-csurf-"))
+        self.tmpdirs.append(root)
+        for relpath, content in files.items():
+            target = root / relpath
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        return root
+
+    def _report(self, root: Path) -> str:
+        r = run_migrate("report", str(root))
+        # exit may be 0 (adoptable / not-yet-spec-driven) or 1 (partial);
+        # we only care that it ran cleanly and emitted the section.
+        self.assertIn(r.returncode, (0, 1),
+                      f"exit {r.returncode}; stderr: {r.stderr}")
+        self.assertIn(CONTRACT_HEADING, r.stdout)
+        return r.stdout
+
+    # ---- empty case ----
+
+    def test_empty_project_emits_no_surfaces_detected_prose(self):
+        root = self._make_project({})
+        out = self._report(root)
+        self.assertIn("_No contract surfaces detected._", out)
+        self.assertIn("/jig:vision-elicitation", out)
+        self.assertIn("Section 13", out)
+
+    # ---- (a) schema artifacts ----
+
+    def test_detects_openapi_yaml(self):
+        root = self._make_project({
+            "openapi.yaml": "openapi: 3.0.3\ninfo:\n  title: x\n",
+        })
+        out = self._report(root)
+        self.assertIn("**HTTP API artifact**", out)
+        self.assertIn("openapi.yaml", out)
+        self.assertIn("OpenAPI 3.x", out)
+        self.assertIn("spectral", out)
+
+    def test_detects_asyncapi_yaml(self):
+        root = self._make_project({
+            "asyncapi.yaml": "asyncapi: 2.6.0\n",
+        })
+        out = self._report(root)
+        self.assertIn("**Event bus / async messaging artifact**", out)
+        self.assertIn("AsyncAPI", out)
+
+    def test_detects_dot_proto(self):
+        root = self._make_project({
+            "proto/foo.proto": "syntax = \"proto3\";\nmessage Foo {}\n",
+        })
+        out = self._report(root)
+        self.assertIn("**RPC artifact**", out)
+        self.assertIn("foo.proto", out)
+        self.assertIn("buf lint", out)
+
+    def test_detects_graphql_sdl(self):
+        root = self._make_project({
+            "schema.graphql": "type Query { hello: String }\n",
+        })
+        out = self._report(root)
+        self.assertIn("**GraphQL artifact**", out)
+        self.assertIn("schema.graphql", out)
+
+    def test_detects_json_schema(self):
+        root = self._make_project({
+            "src/events/feedback.schema.json": '{"type":"object"}\n',
+        })
+        out = self._report(root)
+        self.assertIn("**Internal data shape artifact**", out)
+        self.assertIn("feedback.schema.json", out)
+        self.assertIn("ajv", out)
+
+    def test_skips_artifacts_inside_node_modules(self):
+        # Skip-set must exclude node_modules; a fixture openapi.yaml inside
+        # node_modules/some-pkg/ must NOT be reported.
+        root = self._make_project({
+            "node_modules/some-pkg/openapi.yaml": "openapi: 3.0.3\n",
+        })
+        out = self._report(root)
+        # Section heading present, but the bullet must not surface.
+        self.assertIn(CONTRACT_HEADING, out)
+        self.assertNotIn("**HTTP API artifact**", out)
+
+    # ---- (b) prose API contracts ----
+
+    def test_detects_prose_api_in_architecture_md(self):
+        root = self._make_project({
+            "docs/architecture.md": (
+                "# Architecture\n\n"
+                "## 5. API contract\n\n"
+                "### Endpoints\n\n"
+                "| Method | Path | Purpose |\n"
+                "|--------|------|---------|\n"
+                "| `POST` | `/v1/foo` | submit |\n"
+                "| `GET`  | `/v1/foo/{id}` | poll |\n\n"
+                "### Request\n\n"
+                "```jsonc\n"
+                "{ \"requestId\": \"req_01\", \"customerId\": \"acme\" }\n"
+                "```\n"
+            ),
+        })
+        out = self._report(root)
+        self.assertIn("**Prose API contract**", out)
+        self.assertIn("§5. API contract", out)
+        self.assertIn("worked-example-openapi-http.md", out)
+
+    def test_detects_prose_api_in_api_contract_md_whole_doc(self):
+        # Validator-shape: contract moved out of architecture.md into a
+        # sibling docs/api-contract.md, with table in §1 and jsonc in §2.
+        # Per the Tier-2 (whole-document) heuristic for dedicated contract
+        # docs, both signals anywhere in the file is enough.
+        root = self._make_project({
+            "docs/api-contract.md": (
+                "# API contract\n\n## 1 Endpoints\n\n"
+                "| Method | Path |\n|--------|------|\n"
+                "| `POST` | `/v1/validate` |\n\n"
+                "## 2 Request\n\n```jsonc\n"
+                "{ \"requestId\": \"req_01\" }\n```\n"
+            ),
+        })
+        out = self._report(root)
+        self.assertIn("**Prose API contract**", out)
+        self.assertIn("api-contract.md", out)
+        self.assertIn("whole document", out)
+
+    def test_prose_api_requires_both_signals(self):
+        # H2 with endpoint table but NO jsonc fence → no detection.
+        root = self._make_project({
+            "docs/architecture.md": (
+                "## Endpoints\n\n"
+                "| Method | Path |\n|--------|------|\n"
+                "| GET | /health |\n"
+            ),
+        })
+        out = self._report(root)
+        self.assertNotIn("**Prose API contract**", out)
+
+    def test_prose_detection_skips_contract_surfaces_section(self):
+        # The wizard's own output declares surfaces in a `## Contract surfaces`
+        # H2. That section may contain example endpoint-tables or jsonc — it
+        # must not be flagged as a prose-API-to-migrate.
+        root = self._make_project({
+            "docs/architecture.md": (
+                "## Contract surfaces\n\n"
+                "- **HTTP API** (recommended: OpenAPI 3.x)\n\n"
+                "| Method | Path |\n|--------|------|\n"
+                "| `POST` | `/v1/foo` |\n\n"
+                "```jsonc\n{ \"requestId\": \"x\" }\n```\n"
+            ),
+        })
+        out = self._report(root)
+        self.assertNotIn("**Prose API contract**", out)
+
+    # ---- (c) env-contract patterns ----
+
+    def test_detects_full_env_contract_triple(self):
+        root = self._make_project({
+            "docs/env-contract.md": "# Env contract\n",
+            ".env.example": "FOO=bar\n",
+            "tools/env-contract/check.mjs": "// checker\n",
+        })
+        out = self._report(root)
+        self.assertIn("**env-contract pattern** detected", out)
+        self.assertIn("full triple", out)
+
+    def test_detects_partial_env_contract(self):
+        # Only the doc + seed, no checker.
+        root = self._make_project({
+            "docs/env-contract.md": "# Env contract\n",
+            ".env.example": "FOO=bar\n",
+        })
+        out = self._report(root)
+        self.assertIn("**Partial env-contract pattern**", out)
+        self.assertIn("2 of 3", out)
+        self.assertIn("checker script", out)
+
+    # ---- (d) hand-typed boundary types ----
+
+    def test_detects_problem_details_ts(self):
+        root = self._make_project({
+            "src/problem-details.ts": "export type ProblemDetails = {};\n",
+        })
+        out = self._report(root)
+        self.assertIn("**Hand-typed boundary type**", out)
+        self.assertIn("problem-details.ts", out)
+        self.assertIn("RFC 7807", out)
+
+    def test_detects_problem_details_py(self):
+        root = self._make_project({
+            "app/problem_details.py": "class ProblemDetails: pass\n",
+        })
+        out = self._report(root)
+        self.assertIn("**Hand-typed boundary type**", out)
+        self.assertIn("problem_details.py", out)
+
+
+# Slice 022-02 SafetyTests extension: the new contract-surface detection
+# code lives in the read-only region. Verify it doesn't introduce write-
+# shaped calls. (The existing SafetyTests class scans the whole region;
+# this test just ensures the new function names are inside it.)
+
+
+class ContractSurfaceCodeIsReadOnly(unittest.TestCase):
+    """The contract-surface detection helpers must live ABOVE the SAFETY
+    sentinel — they're part of the read-only `report` code path."""
+
+    def test_render_contract_surfaces_is_read_only(self):
+        src = MIGRATE_PY.read_text()
+        idx = src.find(
+            "# ---------- BEGIN MUTATING CODE PATH (rename-decisions) ----------"
+        )
+        self.assertGreater(idx, 0, "safety sentinel must exist")
+        read_only = src[:idx]
+        for fn in [
+            "def render_contract_surfaces(",
+            "def _detect_schema_artifacts(",
+            "def _detect_prose_api_in_architecture(",
+            "def _detect_env_contract_pattern(",
+            "def _detect_handtyped_boundary_types(",
+            "def _walk_for_files(",
+        ]:
+            self.assertIn(
+                fn, read_only,
+                f"{fn} must live in the read-only region "
+                f"(above the MUTATING sentinel)",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

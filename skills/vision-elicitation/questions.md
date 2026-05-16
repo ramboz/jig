@@ -1,9 +1,12 @@
 # Question set — `/jig:vision-elicitation`
 
-> Canonical 12-section Q&A flow. Mirrors Appendix A of
-> [spec 017](../../docs/specs/017-vision-elicitation/spec.md). The skill
-> asks each section in order; each section is independently skippable;
-> the skill stops when all 12 have been visited.
+> Canonical 13-section Q&A flow. Sections 1–12 mirror Appendix A of
+> [spec 017](../../docs/specs/017-vision-elicitation/spec.md); Section
+> 13 (Contract surfaces) was added by
+> [spec 022-02](../../docs/specs/022-contracts/slice-02-integration-touchpoints.md)
+> to feed the `/jig:contracts` skill. The skill asks each section in
+> order; each section is independently skippable; the skill stops when
+> all 13 have been visited.
 
 ## Rules
 
@@ -14,7 +17,7 @@
   "improving." Two narrow exceptions: markdown structure (bullets,
   tables, sub-bullets per template shape) and preserving the user's
   declared section ordering.
-- **Stop conditions.** All 12 sections have a marker (`filled` or
+- **Stop conditions.** All 13 sections have a marker (`filled` or
   `skipped`). No looping; no upselling.
 - **Marker convention** (per [docs/conventions.md](../../docs/conventions.md)
   "Elicitation slots" rule):
@@ -38,13 +41,20 @@
 | 10 — Design principles & constraints | `## Design principles & constraints` | product-vision.md |
 | 11 — How new work enters | `## How new work enters` | product-vision.md |
 | 12 — Open questions | refinement-todo.md entries (architecture.md Open questions footer points there) | refinement-todo.md |
+| 13 — Contract surfaces | `## Contract surfaces` | architecture.md |
 
 > The vision template's `## Stack` H2 has no Q&A producer in this
-> 12-section design. That's the intentional gap recorded in slice
+> 13-section design. That's the intentional gap recorded in slice
 > 017-01's deviation log §7 — Stack content varies between vision
 > (platform framing) and arch (concrete runtime/db), and the skill
 > writes only the latter. Future work may dual-write or remove the
 > vision-side Stack section.
+
+> Section 13 (Contract surfaces) was added by spec 022-02 to feed the
+> `/jig:contracts` skill's nudge-toward-standard-artifacts workflow.
+> See [skills/contracts/SKILL.md](../contracts/SKILL.md) for the
+> per-surface recommendation table referenced by the section's
+> question.
 
 ---
 
@@ -188,3 +198,34 @@ to that file).
 - **Q12.1:** "What's still uncertain? List architectural questions
   that don't have answers yet. (Bullets here become refinement-todo
   rows automatically.)"
+
+## Section 13 — Contract surfaces *(always asked; feeds architecture.md; per spec 022-02)*
+
+Produces: architecture.md's `## Contract surfaces` slot. The dev's
+declared surfaces and chosen artifacts (or "no artifact yet"
+acknowledgments) get written here so the `/jig:contracts` skill's
+reviewer-prompt integration (spec 022-02 AC #2) can read them at
+slice-review time. Skipping this section is an acceptable opt-out —
+the reviewer-prompt check is conditional on the section existing
+with at least one declared surface (per spec 022-02's nudge-don't-mandate
+convention).
+
+- **Q13.1:** "What **external surfaces** does this project commit to
+  as caller-facing interfaces? List the categories that apply: HTTP
+  API, event bus / async messaging, RPC, GraphQL, internal data
+  shapes (cross-service envelopes), CLI output, config / env vars.
+  For each, in one line, name the recommended artifact (see
+  [skills/contracts/SKILL.md](../contracts/SKILL.md) for the
+  per-surface recommendation table) or write 'no artifact yet' if
+  the surface exists but no schema is committed. 'No external
+  surfaces' is a valid and honest answer — this project may be a
+  library, a script, or a single-consumer internal tool."
+- **Q13.2** *(per declared surface)*: "Where does the artifact live
+  on disk? (e.g. `openapi.yaml`, `src/events/*.schema.json`,
+  `proto/*.proto`, `schema.graphql`.) 'Not yet committed' is a
+  valid answer; it surfaces the gap to the next reviewer."
+- **Q13.3** *(optional)*: "Any stack-coupled alternative chosen
+  instead of the canonical artifact? (e.g. Zod / TypeBox / Pydantic
+  for internal data shapes instead of JSON Schema.) If yes, consider
+  capturing the rationale via `/jig:adr-workflow` per ADR-0005's
+  opt-out convention."

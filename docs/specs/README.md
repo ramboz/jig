@@ -72,6 +72,8 @@
 | [019-land-deviation-log-tolerance](019-land-deviation-log-tolerance/spec.md) | 019-01 — no-deviation-log-flag | **DONE** |  |
 | [020-migrate-slice-to-spec](020-migrate-slice-to-spec/spec.md) | 020-01 — slice-to-spec-skill-md | **DONE** |  |
 | [021-migrate-copy-machinery](021-migrate-copy-machinery/spec.md) | 021-01 — copy-machinery-subcommand | **DONE** |  |
+| [022-contracts](022-contracts/spec.md) | 022-01 — contracts-skill-md | **DONE** |  |
+| [022-contracts](022-contracts/spec.md) | 022-02 — integration-touchpoints | **DONE** |  |
 
 ## Deferred slices
 

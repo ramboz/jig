@@ -90,10 +90,126 @@ RECONCILIATION NOTES:
 Be terse but specific. Cite file:line when flagging issues."""
 
 
+# -------- Contract-surface check (slice 022-02) --------
+
+# Matches the H2 heading that the `/jig:vision-elicitation` skill writes
+# when Section 13 (Contract surfaces — added by spec 022-02) is filled.
+_CONTRACT_SURFACES_HEADING_RE = re.compile(
+    r"(?m)^##\s+Contract\s+surfaces\s*$",
+)
+
+# Match a candidate "declared surface" bullet — the wizard writes lines
+# like `- **HTTP API** (recommended artifact: OpenAPI 3.x at `openapi.yaml`)
+# — …` under the `## Contract surfaces` H2. The regex finds the bold
+# token; `_is_declared_surface_bullet` then filters out negation phrasings
+# (e.g. `- **No external surfaces** — this is a library`) that a user
+# might write in lieu of leaving the section skipped. A skipped section
+# produces a `<!-- elicited: … / status: skipped -->` marker with no
+# declared-surface bullet, so this gate stays quiet.
+_DECLARED_SURFACE_BULLET_RE = re.compile(
+    r"(?m)^-\s+\*\*([^*]+)\*\*",
+)
+
+# Negation tokens at the START of a bullet's bold text — these signal a
+# user opting OUT in-bullet instead of via the marker. Treat as "not a
+# real declaration." Lowercase-compared; trailing whitespace stripped.
+_NEGATION_BOLD_PREFIXES = (
+    "no ", "no external", "not ", "none", "n/a",
+    "tbd", "skipped", "deferred", "not yet",
+)
+
+
+def _is_declared_surface_bullet(bold_text: str) -> bool:
+    """True iff the bullet's bold token looks like a real surface
+    declaration. Filters out negation phrasings that produce false
+    positives (e.g. `- **No external surfaces** — this is a library`)."""
+    bold = bold_text.strip().lower()
+    return not any(bold.startswith(neg) for neg in _NEGATION_BOLD_PREFIXES)
+
+
+def _find_project_root(spec_path: Path) -> Path | None:
+    """Walk up from `spec_path` looking for a sibling `docs/architecture.md`.
+    Returns the directory containing `docs/` or None on miss.
+
+    Conservative: bails on miss rather than guessing. Used to find the
+    project-root so the reviewer-prompt conditional check can read
+    `docs/architecture.md` for a `## Contract surfaces` declaration.
+    """
+    spec_path = Path(spec_path).resolve()
+    for candidate in [spec_path.parent, *spec_path.parents]:
+        if (candidate / "docs" / "architecture.md").is_file():
+            return candidate
+    return None
+
+
+def has_declared_contract_surfaces(project_root: Path) -> bool:
+    """Return True iff `<project_root>/docs/architecture.md` has a
+    `## Contract surfaces` section with at least one declared-surface
+    bullet. Used to decide whether `build_*_prompt` should append the
+    contract-surface evaluation hint.
+
+    Conservative on every error mode (missing file, unreadable, no
+    `## Contract surfaces` section, section present but empty / skipped):
+    returns False. No reviewer-prompt noise when the project hasn't
+    declared surfaces (per spec 022-02 AC #2's "no surfaces → no check"
+    requirement).
+    """
+    arch_path = Path(project_root) / "docs" / "architecture.md"
+    try:
+        text = arch_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    heading_match = _CONTRACT_SURFACES_HEADING_RE.search(text)
+    if not heading_match:
+        return False
+    # Bound the section: from end-of-heading to next `## ` (or EOF).
+    section_start = heading_match.end()
+    next_h2 = re.search(r"(?m)^##\s+", text[section_start:])
+    section_body = (text[section_start:section_start + next_h2.start()]
+                    if next_h2 else text[section_start:])
+    # Require at least one non-negation bullet. A bullet whose bold token
+    # starts with a negation prefix (e.g. "No external surfaces") is
+    # treated as an in-bullet opt-out, not a declaration.
+    for match in _DECLARED_SURFACE_BULLET_RE.finditer(section_body):
+        if _is_declared_surface_bullet(match.group(1)):
+            return True
+    return False
+
+
+def _contract_surface_check_block() -> str:
+    """The conditional evaluation hint appended to both implementation and
+    reconciliation prompts when the project has declared contract surfaces.
+
+    Wording mirrors spec 022-02 AC #2: "slice touches a declared contract
+    surface? artifact updated in the same change-set?" Phrased as a
+    suggestion-not-blocker per the nudge-don't-mandate ethos (AC #4)."""
+    return """\
+- **Contract-surface check** (added by spec 022-02 because this project
+  declared external contract surfaces in `docs/architecture.md`'s
+  `## Contract surfaces` section): does this slice touch any of those
+  declared surfaces (HTTP API / event bus / RPC / GraphQL / internal
+  data shapes / config / CLI output)? If yes, is the corresponding
+  artifact (`openapi.yaml` / `*.schema.json` / `*.proto` /
+  `schema.graphql` / etc.) updated in the same change-set as the
+  code change? Flag a *suggestion* not a *blocker* — the project may
+  have a documented opt-out (ADR or in-section note)."""
+
+
 def build_implementation_prompt(spec_path: Path, slice_label: str,
                                 deliverables: list) -> str:
-    """Construct the standard implementation-review prompt."""
+    """Construct the standard implementation-review prompt.
+
+    Slice 022-02 added a conditional contract-surface check: if the
+    project's `docs/architecture.md` has a `## Contract surfaces`
+    section with at least one declared surface, the Evaluate block
+    grows an extra bullet asking the reviewer to flag missing artifact
+    updates. Quiet when no surfaces are declared.
+    """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    extra_check = ""
+    project_root = _find_project_root(spec_path)
+    if project_root and has_declared_contract_surfaces(project_root):
+        extra_check = "\n" + _contract_surface_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -116,14 +232,25 @@ For each acceptance criterion in slice {slice_label}, verify:
 - Is it met by the deliverable?
 - Are tests exercising the AC meaningfully (not just superficial assertions)?
 - Are there bugs (correctness, edge cases)?
-- Any security or robustness concerns relevant to this change?
+- Any security or robustness concerns relevant to this change?{extra_check}
 
 {_OUTPUT_FORMAT}
 """
 
 
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
-    """Construct the standard reconciliation-review prompt."""
+    """Construct the standard reconciliation-review prompt.
+
+    Slice 022-02 added a conditional contract-surface check: if the
+    project's `docs/architecture.md` declares contract surfaces, the
+    Evaluate block grows a bullet asking the reviewer to verify the
+    deviation log accounts for any artifact updates (or documents the
+    opt-out). Quiet when no surfaces are declared.
+    """
+    extra_check = ""
+    project_root = _find_project_root(spec_path)
+    if project_root and has_declared_contract_surfaces(project_root):
+        extra_check = "\n" + _contract_surface_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -150,7 +277,7 @@ For each deviation-log claim:
 - Does the code/doc match what's described?
 - Is anything important silently changed but not logged?
 - Is anything overstated or invented post-hoc?
-- Is the scope appropriate (no scope creep in doc updates)?
+- Is the scope appropriate (no scope creep in doc updates)?{extra_check}
 
 {_OUTPUT_FORMAT}
 """
