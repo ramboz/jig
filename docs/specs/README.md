@@ -71,7 +71,7 @@
 | [018-slice-per-file](018-slice-per-file/spec.md) | 018-04 — migrate-split-slices | **DONE** |  |
 | [019-land-deviation-log-tolerance](019-land-deviation-log-tolerance/spec.md) | 019-01 — no-deviation-log-flag | **DONE** |  |
 | [020-migrate-slice-to-spec](020-migrate-slice-to-spec/spec.md) | 020-01 — slice-to-spec-skill-md | **DONE** |  |
-| [021-migrate-copy-machinery](021-migrate-copy-machinery/spec.md) | 021-01 — copy-machinery-subcommand | DRAFT |  |
+| [021-migrate-copy-machinery](021-migrate-copy-machinery/spec.md) | 021-01 — copy-machinery-subcommand | **DONE** |  |
 
 ## Deferred slices
 
