@@ -19,13 +19,9 @@
 **Deferred:** Confirmed `{ "continue": true, "additionalContext": "..." }` for these events, but the plan review flagged this as needing empirical verification.
 **Resolution trigger:** Slice 002-03 (auto-detect-hooks) — test both hooks against real sessions.
 
-### Decision: AI-first onboarding doc separate from CLAUDE.md
-**Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. Today CLAUDE.md is doing double duty — it's both the high-frequency hot cache loaded every session AND the de facto "how to operate this repo as an agent" onboarding doc. Spec 025 (CLAUDE.md hygiene, in flight in worktree gifted-sutherland) slims the hot cache by pushing spec narratives to the status board, but the onboarding content (skill inventory, session workflow, doc-map, constraints-for-agents) doesn't have an obvious destination once the file is slimmed.
-**Resolution trigger:** Spec 025 lands AND the slimming removes content that previously served as agent-onboarding context (e.g., the "Skills in this repo" table, the "Session workflow" section, the "Constraints for agents working on this repo" stanza). If those sections survive in CLAUDE.md post-025, no new doc is needed. If they get cut, they need a home — likely `docs/AI-ONBOARDING.md` or similar, referenced from CLAUDE.md's "Key documents" table.
-**Open questions:**
-- Single onboarding doc or split (one for "how to author skills" + one for "how to operate the lifecycle")?
-- Relation to mysticat-pattern `AGENTS.md` adoption (deferred in the existing entry below)?
-**Mitigation idea:** Re-evaluate post-spec-025 close-out. If the slimming preserved onboarding content, close this entry. Otherwise spin a new spec.
+### ~~Decision: AI-first onboarding doc separate from CLAUDE.md~~ — RESOLVED 2026-05-18
+~~**Deferred:** Today CLAUDE.md is doing double duty — both the high-frequency hot cache AND the de facto "how to operate this repo as an agent" onboarding doc. Spec 025 slims the hot cache; the open question was whether the onboarding content would survive.~~
+**Resolved by:** [Spec 025-01](specs/025-claude-md-hygiene/spec.md) landed with the onboarding content **preserved in CLAUDE.md**: the "Skills in this repo" table, the "Session workflow" section, and the "Constraints for agents working on this repo" stanza all survived the slim (the table got slimmed per-row but the section stayed; the workflow + constraints sections were untouched). The slimming hit Active-specs + Sprint-focus + ADR stanzas instead — content that wasn't serving as onboarding. **No separate `docs/AI-ONBOARDING.md` needed.** If a future audit re-raises this (e.g., the Constraints section grows past ~10 bullets, or a contributor reports CLAUDE.md as confusing for "how do I author skills" vs "what's in flight"), spin a new spec at that point.
 
 ## Conventions
 
