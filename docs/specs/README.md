@@ -76,6 +76,11 @@
 | [022-contracts](022-contracts/spec.md) | 022-02 — integration-touchpoints | **DONE** |  |
 | [023-clarify](023-clarify/spec.md) | 023-01 — clarify-skill-md | **DONE** | 30 tests; lightweight ambiguity scan; six-category taxonomy; no `.py` helper; ships without spec-kit deferral hint (per user direction) |
 | [024-analyze](024-analyze/spec.md) | 024-01 — analyze-skill-md | **DONE** | 38 surface + 7 PrinciplesCheckBlock tests; non-destructive consistency report; bundles constitution-gate (unconditional `_principles_check_block()` in `review.py`) |
+| [026-context-fill-telemetry](026-context-fill-telemetry/spec.md) | 026-01 — estimator-and-soft-warn-hook | DRAFT |  |
+| [027-post-tool-edit-verification](027-post-tool-edit-verification/spec.md) | 027-01 — post-edit-verify-hook | DRAFT |  |
+| [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-01 — adr-numbering-on-main | DRAFT |  |
+| [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-02 — inbox-and-refinement-todo-append-lock | DRAFT |  |
+| [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-03 — status-board-regen-race-check | DRAFT |  |
 
 ## Deferred slices
 

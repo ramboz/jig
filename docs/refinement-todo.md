@@ -19,6 +19,14 @@
 **Deferred:** Confirmed `{ "continue": true, "additionalContext": "..." }` for these events, but the plan review flagged this as needing empirical verification.
 **Resolution trigger:** Slice 002-03 (auto-detect-hooks) — test both hooks against real sessions.
 
+### Decision: AI-first onboarding doc separate from CLAUDE.md
+**Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. Today CLAUDE.md is doing double duty — it's both the high-frequency hot cache loaded every session AND the de facto "how to operate this repo as an agent" onboarding doc. Spec 025 (CLAUDE.md hygiene, in flight in worktree gifted-sutherland) slims the hot cache by pushing spec narratives to the status board, but the onboarding content (skill inventory, session workflow, doc-map, constraints-for-agents) doesn't have an obvious destination once the file is slimmed.
+**Resolution trigger:** Spec 025 lands AND the slimming removes content that previously served as agent-onboarding context (e.g., the "Skills in this repo" table, the "Session workflow" section, the "Constraints for agents working on this repo" stanza). If those sections survive in CLAUDE.md post-025, no new doc is needed. If they get cut, they need a home — likely `docs/AI-ONBOARDING.md` or similar, referenced from CLAUDE.md's "Key documents" table.
+**Open questions:**
+- Single onboarding doc or split (one for "how to author skills" + one for "how to operate the lifecycle")?
+- Relation to mysticat-pattern `AGENTS.md` adoption (deferred in the existing entry below)?
+**Mitigation idea:** Re-evaluate post-spec-025 close-out. If the slimming preserved onboarding content, close this entry. Otherwise spin a new spec.
+
 ## Conventions
 
 ### Decision: Skill telemetry granularity
@@ -46,6 +54,15 @@
 - Should sub-slices live in the same dir as the parent, or under a `slice-18/` subdir?
 - Does the parent slice stay open as an index, or close when all children are Done?
 - How does `land.py prepare` aggregate sub-slice readiness — all children Done, or each child landed independently?
+
+### Decision: Memory-recall verification (claims-from-memory linter)
+**Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. The user-global CLAUDE.md has a "Before recommending from memory, verify" stanza, but enforcement is convention-only. When the agent says "spec NNN has slice X" or "function Y exists at file Z", no tool fact-checks the claim before action. The reviewer subagent catches some of this at the slice boundary, but mid-session hallucinations against the memory layer remain unflagged.
+**Resolution trigger:** First observable mid-session hallucination where the agent acted on a stale memory claim AND the resulting bug survived past reconciliation (i.e., the reviewer didn't catch it). Until that happens, the convention-only stance is upheld manually. ALSO: revisit if/when spec 025-02 (the deferred `workflow.py audit-claude-md` helper) ships — it covers the doc-to-reality direction; this entry covers the agent-claim-to-reality direction.
+**Open questions:**
+- Where would the linter live (hook? helper? skill?)?
+- Surface as same-turn warning vs end-of-session report?
+- Granularity: spec/slice references only, or also file paths and symbol names?
+**Mitigation idea:** The cheapest first cut would be a `Stop`-hook regex that flags assistant messages claiming `spec NNN` / `slice NNN-NN` / `ADR-NNNN` and cross-checks against the on-disk inventory. Surface as `additionalContext` next turn.
 
 ## Operations
 
@@ -126,3 +143,12 @@
 - Or copy unprefixed as `.claude/skills/_common/`? Cleaner from the helper's perspective (no import rewrite needed) but breaks the `jig-<name>/` naming convention from slice 016-01.
 - Or vendor `_common/` inside each `.claude/skills/jig-<name>/_common/` (per-skill copy)? Highest disk cost, simplest import semantics.
 **Mitigation idea:** spec 016-04 (`update-skill`, currently DRAFT) is the natural home for this fix — it'd ship as part of the same "scaffold-mode parity tightening" arc that 016-01/02/03 began. Until then, scaffolded projects that need to run jig helpers should invoke jig's source-repo `workflow.py` / `review.py` / etc. with `--project-dir <target>` (where the helper supports it) or by path argument.
+
+### Decision: Skill-routing observability
+**Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. Jig now ships 13 active skills (`scaffold-init`, `memory-sync`, `spec-workflow`, `independent-review`, `contracts`, `adr-workflow`, `tdd-loop`, `slice-land`, `migrate`, `pr-review`, `arch-review`, `clarify`, `analyze`). The Claude Code skill router picks one per user intent — but jig has no telemetry on which skills fire when, whether the router picks the *right* skill, or whether the deferral hints (pr-review/arch-review/contracts route to richer user-installed skills) actually fire. `jig-telemetry.sh` logs `Task` tool spawns; it does not log Skill / slash-command invocations.
+**Resolution trigger:** First observable routing mismatch (user invokes intent X, wrong skill fires) that surfaces in a deviation log or post-mortem. ALSO: revisit if/when a new judgment-skill (eighth+) ships and the routing surface grows further. Probably not bites in practice today — the 13 skills are well-differentiated by description — but the lack of observability means we can't tell.
+**Open questions:**
+- Extend `jig-telemetry.sh` to log Skill events as well as Task events? (Requires the Skill event being routable to a hook, which may not be supported by the Claude Code hook surface — verify before specifying.)
+- Or: add a `workflow.py routing-stats` subcommand that reads `.claude/skill-usage.jsonl` and surfaces the routing histogram?
+- Or: defer entirely to a future `SubagentStart` event (per the existing SubagentStart deferred entry above)?
+**Mitigation idea:** Cheapest first cut: extend `jig-telemetry.sh` to also fire on `UserPromptSubmit` and log the prompt prefix + detected slash command — gives a coarse "what skills did this session try to invoke" record. Pair with a manual review pass after 2 weeks (same cadence as the existing "Skill telemetry granularity" entry).
