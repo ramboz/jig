@@ -40,13 +40,18 @@ from pathlib import Path
 # so spec_lint sees both file-per-slice and embedded-in-spec.md layouts.
 # Kept inside a try/except so the script still runs (degraded — embedded
 # only) if it's ever invoked outside a tree containing skills/_common/.
+#
+# Slice 029-01: also imports `parse_frontmatter` for the `kind` enum
+# validation and spike body-shape soft-warn. Same try/except fallback.
 try:
     _common_dir = Path(__file__).resolve().parent.parent / "skills" / "_common"
     if str(_common_dir) not in sys.path:
         sys.path.insert(0, str(_common_dir))
     from parsing import iter_slices as _iter_slices_common  # type: ignore
+    from parsing import parse_frontmatter as _parse_frontmatter  # type: ignore
 except ImportError:  # pragma: no cover — bare-script fallback
     _iter_slices_common = None
+    _parse_frontmatter = None
 
 # ---------------------------------------------------------------------------
 # Slice parsing — historically mirrored _common/parsing.py to keep this
@@ -167,6 +172,99 @@ def _extract_phrases_near(text: str, marker_re: re.Pattern, window: int = 600) -
 
 
 # ---------------------------------------------------------------------------
+# Slice 029-01: `kind:` enum validation + spike body-shape soft-warn.
+#
+# The `kind` field on slice frontmatter is a typed enum (default unset).
+# Allowed values: `spike` (research/timeboxed unknown reduction), `feature`
+# (documented explicit-default synonym for unset).
+#
+# `kind: spike` slices carry four labelled body blocks (Question /
+# Time-box / Findings / Outcome). spec_lint hard-errors on unknown enum
+# values and soft-warns on missing spike body labels (warns, not errors —
+# mid-flight spikes legitimately have empty Findings/Outcome).
+# ---------------------------------------------------------------------------
+
+ALLOWED_KIND_VALUES = ("spike", "feature")
+
+SPIKE_BODY_LABELS = (
+    "**Question:**",
+    "**Time-box:**",
+    "**Findings:**",
+    "**Outcome:**",
+)
+
+
+def _extract_kind(section: str) -> str:
+    """Return the `kind:` scalar from a slice section's frontmatter, or
+    empty string when no `kind:` field is present.
+
+    Handles both layouts (mirrors workflow.py's `_split_slice_section`):
+      - File-per-slice: frontmatter at column 0 of `section`.
+      - Embedded: section starts with `## Slice ...`; frontmatter, if
+        any, follows on the next lines.
+
+    Falls back to a regex-based scan when `_parse_frontmatter` isn't
+    importable (bare-script invocation outside a jig tree).
+    """
+    if section.startswith("##"):
+        nl = section.find("\n")
+        body = section[nl + 1:] if nl >= 0 else ""
+    else:
+        body = section
+
+    if _parse_frontmatter is not None:
+        fields, _ = _parse_frontmatter(body)
+        return str(fields.get("kind", "")).strip()
+
+    # Bare-script fallback: pull `kind:` out of any leading `---` block.
+    m = re.match(r"\A(\s*\n)?---\n(.*?)\n---\n", body, re.DOTALL)
+    if not m:
+        return ""
+    for line in m.group(2).splitlines():
+        line = line.strip()
+        if line.startswith("kind:"):
+            return line.partition(":")[2].strip().strip("\"'")
+    return ""
+
+
+def check_kind_and_body_shape(label: str, section: str) -> tuple:
+    """Return (errors: list[str], warnings: list[str]).
+
+    Errors fire when `kind:` is set to an unknown enum value. Each error
+    names the offending value AND the allowed values so the author can
+    fix the typo without consulting docs.
+
+    Warnings fire when `kind: spike` is set but one or more of the four
+    labelled body blocks is missing. Each warning names the missing
+    label(s). Spikes mid-flight legitimately have empty Findings/Outcome,
+    so this is soft-warn — not a hard refusal.
+    """
+    errors: list = []
+    warnings: list = []
+
+    kind = _extract_kind(section)
+    if not kind:
+        return errors, warnings
+
+    if kind not in ALLOWED_KIND_VALUES:
+        allowed = ", ".join(repr(v) for v in ALLOWED_KIND_VALUES)
+        errors.append(
+            f"unknown `kind:` value {kind!r}; allowed values: {allowed}"
+        )
+        return errors, warnings
+
+    if kind == "spike":
+        missing = [lbl for lbl in SPIKE_BODY_LABELS if lbl not in section]
+        if missing:
+            shown = ", ".join(missing)
+            warnings.append(
+                "spike slice missing body label(s): " + shown
+            )
+
+    return errors, warnings
+
+
+# ---------------------------------------------------------------------------
 # Contradiction detection
 # ---------------------------------------------------------------------------
 
@@ -191,6 +289,11 @@ def check_slice(label: str, slice_text: str) -> tuple:
       - AC #X says phrase P must appear verbatim
       - AC #Y (Y ≠ X) says substring S must NOT appear
       - S appears (case-insensitively) inside P
+
+    Note: this function checks ACs for phrase contradictions only.
+    Slice 029-01 added a separate `check_kind_and_body_shape` helper for
+    `kind:` enum + spike body-shape validation; `lint()` calls both and
+    merges the results. Existing callers of `check_slice` are unaffected.
     """
     ac_items = _parse_ac_items(slice_text)
     contradictions = []
@@ -233,15 +336,30 @@ def check_slice(label: str, slice_text: str) -> tuple:
 def render_report(results: list, spec_path: Path) -> tuple:
     """Return (report_text: str, exit_code: int).
 
-    results is a list of (slice_label, contradictions, warnings).
+    Each row in `results` is one of:
+      - (slice_label, contradictions, warnings)            — legacy 3-tuple
+      - (slice_label, contradictions, errors, warnings)    — slice 029-01 shape
+
+    Slice 029-01 added a per-slice `errors` channel for `kind:` enum
+    validation. Errors are hard failures (exit 1) — distinct from
+    contradictions, which are also exit 1, and from warnings, which are
+    informational unless --strict is set.
     """
     lines = [f"## Spec lint: {spec_path}", ""]
     any_contradiction = False
+    any_error = False
 
-    for label, contradictions, warnings in results:
+    for row in results:
+        if len(row) == 4:
+            label, contradictions, errors, warnings = row
+        else:
+            # Legacy 3-tuple — fill missing errors.
+            label, contradictions, warnings = row
+            errors = []
+
         lines.append(f"### Slice {label}")
         lines.append("")
-        if not contradictions and not warnings:
+        if not contradictions and not errors and not warnings:
             lines.append("✓ No AC contradictions detected.")
         else:
             for c in contradictions:
@@ -254,11 +372,14 @@ def render_report(results: list, spec_path: Path) -> tuple:
                 lines.append(
                     f"   \"{c.forbidden}\" appears inside the required phrase."
                 )
+            for e in errors:
+                any_error = True
+                lines.append(f"✗  {e}")
             for w in warnings:
                 lines.append(f"⚐  {w}")
         lines.append("")
 
-    exit_code = 1 if any_contradiction else 0
+    exit_code = 1 if (any_contradiction or any_error) else 0
     return "\n".join(lines), exit_code
 
 
@@ -367,12 +488,16 @@ def lint(spec_path: Path, slice_fragment: str = None, strict: bool = False) -> t
     results = []
     for label, section in slices:
         contradictions, warnings = check_slice(label, section)
-        results.append((label, contradictions, warnings))
+        # Slice 029-01: also check `kind:` enum + spike body shape.
+        kind_errors, kind_warnings = check_kind_and_body_shape(label, section)
+        # Merge the kind warnings into the per-slice warnings channel.
+        all_warnings = warnings + kind_warnings
+        results.append((label, contradictions, kind_errors, all_warnings))
 
     report, code = render_report(results, spec_path)
 
     if strict:
-        has_warnings = any(w for _, _, ws in results for w in ws)
+        has_warnings = any(w for row in results for w in row[-1])
         if has_warnings:
             code = 1
 

@@ -1673,5 +1673,171 @@ class MixedLayoutStatusBoardTests(unittest.TestCase):
         self.assertRegex(board, r"099-02 — beta\s*\|\s*DRAFT")
 
 
+# ---------- spike documentation surface (slice 029-01) ----------
+
+
+class SpikeSliceTemplateTests(unittest.TestCase):
+    """Slice 029-01 AC #4: the slice template documents the spike body
+    shape under a `kind: spike` subsection.
+
+    AC #7 also concerns this surface — the three outcome forms
+    (`ADR-NNNN created`, `spec NNN-NN unblocked`, `abandoned (reason)`)
+    and the semicolon multi-outcome convention must be documented here
+    so the template, SKILL.md, and SPIDR primer agree.
+    """
+
+    def setUp(self):
+        template = (REPO_ROOT / "templates" / "docs" / "specs"
+                    / "slice-template.md")
+        self.template = template
+        self.text = template.read_text()
+
+    def test_template_has_spike_subsection_heading(self):
+        # AC #4: a subsection introducing the spike body shape exists.
+        self.assertRegex(
+            self.text,
+            r"(?im)^###\s+.*kind:\s*spike.*",
+            "expected a '### For `kind: spike` slices' (or similar) "
+            "subsection in the slice template",
+        )
+
+    def test_template_lists_all_four_spike_labels(self):
+        # AC #4: the four labelled blocks are documented.
+        for label in ("**Question:**", "**Time-box:**",
+                      "**Findings:**", "**Outcome:**"):
+            self.assertIn(label, self.text,
+                          f"spike body label {label!r} missing from template")
+
+    def test_template_documents_three_outcome_forms(self):
+        # AC #7: all three outcome forms documented.
+        self.assertIn("ADR-NNNN created", self.text)
+        self.assertIn("spec NNN-NN unblocked", self.text)
+        self.assertIn("abandoned (reason)", self.text)
+
+    def test_template_documents_semicolon_multi_outcome(self):
+        # AC #7: multiple outcomes joined by `;` documented.
+        self.assertIn(";", self.text)
+        # Cheap pin: at least one prose mention of "semicolon" or "multiple"
+        # near the spike section.
+        self.assertRegex(
+            self.text,
+            r"(?is)kind:\s*spike.*(semicolon|multiple outcomes)",
+            "template must say multiple outcomes are separated by `;`",
+        )
+
+
+class SpidrPrimerSpikeTests(unittest.TestCase):
+    """Slice 029-01 AC #5 + AC #8: the SPIDR primer at
+    `docs/spec-workflow/spidr-primer.md` documents the
+    "when S fires → kind: spike" rule with a worked example.
+    """
+
+    def setUp(self):
+        primer = REPO_ROOT / "docs" / "spec-workflow" / "spidr-primer.md"
+        self.primer_path = primer
+        self.assertTrue(primer.is_file(),
+                        f"SPIDR primer must exist at {primer}")
+        self.text = primer.read_text()
+
+    def test_primer_documents_when_s_fires_rule(self):
+        # AC #5: explicit "when the S axis fires, mark `kind: spike`" rule.
+        # Match the load-bearing phrasing: a mention of `kind: spike` near
+        # the discussion of when the Spike axis applies.
+        self.assertIn("kind: spike", self.text,
+                      "SPIDR primer must reference `kind: spike` explicitly")
+        # The rule should appear in the context of S/Spike axis.
+        self.assertRegex(
+            self.text,
+            r"(?is)(spike|S axis|S\s*—)[^\n]*?kind:\s*spike|"
+            r"kind:\s*spike[^\n]*?(spike|S axis|S\s*—)",
+            "the `kind: spike` rule must appear in the context of the S axis",
+        )
+
+    def test_primer_worked_example_has_four_labels(self):
+        # AC #8: a worked spike example with all four labels.
+        for label in ("**Question:**", "**Time-box:**",
+                      "**Findings:**", "**Outcome:**"):
+            self.assertIn(label, self.text,
+                          f"SPIDR primer worked example missing {label!r}")
+
+    def test_primer_worked_example_has_concrete_outcome(self):
+        # AC #8: the worked example should show one of the three outcome
+        # forms (ADR-NNNN / spec NNN-NN / abandoned) concretely.
+        outcome_section = self.text
+        self.assertRegex(
+            outcome_section,
+            r"(?im)\*\*Outcome:\*\*[^\n]*?"
+            r"(ADR-\d{4}\s+created|spec\s+\d{3}-\d{2}\s+unblocked"
+            r"|abandoned\s*\([^)]+\))",
+            "worked example must show a concrete Outcome value",
+        )
+
+    def test_primer_documents_three_outcome_forms(self):
+        # AC #7: outcome forms documented in the primer too.
+        self.assertIn("ADR-NNNN created", self.text)
+        self.assertIn("spec NNN-NN unblocked", self.text)
+        self.assertIn("abandoned (reason)", self.text)
+
+
+class SpecWorkflowSkillMdSpikeTests(unittest.TestCase):
+    """Slice 029-01 AC #6 + AC #7: `skills/spec-workflow/SKILL.md` gains a
+    "Spike slices" subsection covering (a) when to introduce a spike,
+    (b) the four-label body shape, (c) always-nested rule, (d) abandoned
+    failure mode.
+    """
+
+    def setUp(self):
+        skill = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
+        self.skill_path = skill
+        self.text = skill.read_text()
+
+    def test_skill_has_spike_slices_subsection(self):
+        # AC #6: a `## Spike slices` (or `### Spike slices`) section exists.
+        self.assertRegex(
+            self.text,
+            r"(?im)^#{2,3}\s+Spike slices\s*$",
+            "expected a 'Spike slices' subsection in spec-workflow/SKILL.md",
+        )
+
+    def test_skill_lists_four_body_labels(self):
+        # AC #6(b): the four labelled blocks are named.
+        for label in ("Question", "Time-box", "Findings", "Outcome"):
+            self.assertIn(label, self.text,
+                          f"SKILL.md missing spike body label {label!r}")
+
+    def test_skill_documents_always_nested_rule(self):
+        # AC #6(c): the always-nested rule must be stated.
+        # Look for "always nested" or "never standalone" phrasing near
+        # the spike section.
+        self.assertRegex(
+            self.text,
+            r"(?is)spike slices.*?(always[- ]nested|never standalone"
+            r"|no standalone|no\s+`?docs/spikes/?`?)",
+            "SKILL.md must document the always-nested rule for spikes",
+        )
+
+    def test_skill_documents_abandoned_failure_mode(self):
+        # AC #6(d): abandoned-spike manual reshape pattern documented.
+        self.assertRegex(
+            self.text,
+            r"(?is)abandon",
+            "SKILL.md must document the abandoned-spike failure mode",
+        )
+        # The mode must mention manual review / audit of dependents,
+        # not automatic cascade.
+        self.assertRegex(
+            self.text,
+            r"(?is)(manual|human).*?(audit|reshape|review).*?depend|"
+            r"depend.*?(manual|human).*?(audit|reshape|review)",
+            "SKILL.md must say abandoned spikes require manual dependent audit",
+        )
+
+    def test_skill_documents_three_outcome_forms(self):
+        # AC #7: outcome forms appear in SKILL.md too.
+        self.assertIn("ADR-NNNN created", self.text)
+        self.assertIn("spec NNN-NN unblocked", self.text)
+        self.assertIn("abandoned (reason)", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()

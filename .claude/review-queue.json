@@ -1,13 +1,13 @@
 {
-  "spec": "docs/specs/024-analyze/spec.md",
-  "slice": "024-01",
+  "spec": "docs/specs/029-spike-slices/spec.md",
+  "slice": "029-01",
   "files": [
-    "skills/analyze/SKILL.md",
-    "skills/analyze/test_analyze_skill_surface.py",
-    "skills/analyze/worked-example-jig.md",
-    "skills/analyze/worked-example-saas.md",
-    "skills/independent-review/review.py",
-    "skills/independent-review/test_review.py",
-    "skills/scaffold-init/scaffold.py"
+    "scripts/spec_lint.py",
+    "scripts/test_spec_lint.py",
+    "skills/_common/test_parsing.py",
+    "skills/spec-workflow/SKILL.md",
+    "skills/spec-workflow/test_workflow.py",
+    "templates/docs/specs/slice-template.md",
+    "docs/spec-workflow/spidr-primer.md"
   ]
 }

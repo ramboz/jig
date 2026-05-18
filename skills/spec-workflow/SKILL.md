@@ -48,7 +48,54 @@ only the DB or only the parser is horizontal phasing — re-split.
 
 See [`worked-example-spidr-split.md`](worked-example-spidr-split.md)
 for one applied example per axis plus a jig-native dogfood case (spec
-017's three-axis split).
+017's three-axis split). The canonical primer for all five axes lives
+at [`docs/spec-workflow/spidr-primer.md`](../../docs/spec-workflow/spidr-primer.md).
+
+### Spike slices
+
+When SPIDR's S axis fires during decomposition (none of P / I / D / R
+apply because the team doesn't yet know enough to pick), the
+resulting slice is marked `kind: spike` in its frontmatter — the
+typed enum that `spec_lint.py` validates.
+
+**When to introduce a spike during decomposition.** Reach for S only
+after trying R / D / I / P. The bias to resist is "let me research
+this first" as a prelude to "now let me build it as one big slab" —
+that is horizontal phasing in a trench coat. If the spike would
+conclude with "now ship the implementation," the implementation IS
+the slice, and the research goes inside it.
+
+**Body shape (four labelled blocks).** A `kind: spike` slice carries
+four blocks alongside the standard Goal / DoR / AC / DoD scaffolding:
+
+- **Question** — one sentence stating the open question. Set at DRAFT.
+- **Time-box** — explicit budget (e.g., "1 day", "4 hours"). Set at DRAFT.
+- **Findings** — bullet evidence collected during the spike. Filled
+  during IN_PROGRESS.
+- **Outcome** — one of `ADR-NNNN created` / `spec NNN-NN unblocked` /
+  `abandoned (reason)`. Multiple outcomes separated by `;`
+  (e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE.
+
+`spec_lint.py` soft-warns when a `kind: spike` slice is missing any of
+the four labels — mid-flight spikes legitimately have empty Findings /
+Outcome, so this is a warning, not a hard error.
+
+**Always nested, never standalone.** Spike slices live inside a real
+spec — never as a standalone `docs/spikes/` artifact. The
+1-slice-spec case (no clear downstream spec yet, just an
+investigation) collapses to "spawn a normal spec where the only slice
+is `kind: spike`." This forces the investigator to articulate the
+downstream change up front and keeps jig at two numbered families
+(specs+slices, ADRs).
+
+**Abandoned-spike manual-reshape failure mode.** When a spike's
+Outcome is `abandoned (reason)`, dependents are NOT automatically
+cascade-flagged. The human (or the next session) audits each
+dependent slice and decides whether the original design still holds.
+Automation here over-fires: "approach A abandoned" often means
+"approach B from the same findings still satisfies the dependents."
+`workflow.py` deliberately stays out of the cascade business; the
+SKILL.md hand-off is the documented gate.
 
 ## How to use
 

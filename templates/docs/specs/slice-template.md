@@ -35,6 +35,36 @@ check below)._
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 
+### For `kind: spike` slices
+
+When the slice's frontmatter has `kind: spike`, the body carries four
+extra labelled blocks alongside the standard Goal / DoR / AC / DoD
+scaffolding. Spike slices are timeboxed investigation, not feature
+work — they reduce an unknown before committing to a design.
+
+```markdown
+**Question:** _One sentence stating the open question. Set at DRAFT._
+
+**Time-box:** _Explicit budget — e.g., "1 day", "4 hours". Set at DRAFT._
+
+**Findings:** _Bullet evidence collected during the spike. Filled
+during IN_PROGRESS._
+
+**Outcome:** _One of: `ADR-NNNN created` / `spec NNN-NN unblocked` /
+`abandoned (reason)`. Multiple outcomes separated by `;`
+(e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE._
+```
+
+`spec_lint.py` validates the `kind:` enum (allowed values: `spike`,
+`feature`) and soft-warns when a `kind: spike` slice is missing any of
+the four labels. Mid-flight spikes legitimately have empty Findings /
+Outcome, so this is a warning, not a hard error.
+
+See `skills/spec-workflow/SKILL.md` (Spike slices subsection) and
+`docs/spec-workflow/spidr-primer.md` for the always-nested rule (spike
+slices live inside a real spec, never as standalone `docs/spikes/`
+artifacts) and the abandoned-outcome manual-reshape failure mode.
+
 ### Close-out (post-DONE)
 
 These items can only be ticked AFTER the final `RECONCILED → DONE`
