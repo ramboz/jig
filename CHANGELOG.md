@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.0](https://github.com/ramboz/jig/compare/v1.2.0...v1.3.0) (2026-05-18)
+
+
+### Features
+
+* **analyze:** spec 024-01 — analyze skill + constitution-gate principles-check ([3b9aca9](https://github.com/ramboz/jig/commit/3b9aca93b63a853082f1aef3e1fdb4c6a80f1ddf))
+* **clarify:** spec 023-01 — clarify skill (judgment-style, six-category scan) ([77fc3d3](https://github.com/ramboz/jig/commit/77fc3d3320e695e2b1cc011972e82fe7c746f7b1))
+* **contracts:** spec 022 — promote stub to judgment-skill + three integrations ([61f51c0](https://github.com/ramboz/jig/commit/61f51c03abe5e443f3c44d2c883bedc67239922b))
+* **migrate:** spec 020 slice 020-01 — agentic slice-to-spec workflow ([bfa4e17](https://github.com/ramboz/jig/commit/bfa4e178a94f17d098c13bdb6550bbef3988045d))
+* **migrate:** spec 021 slice 021-01 — copy-machinery subcommand ([dedbd74](https://github.com/ramboz/jig/commit/dedbd74541a196b04df42641c605780e01b43426))
+
+
+### Documentation
+
+* **refinement-todo:** park two follow-ups from spec 022 close-out ([76b864e](https://github.com/ramboz/jig/commit/76b864ea1d1977a58ad55f0335872f79e5c0f808))
+* **specs:** draft spec 023-clarify + 024-analyze (DRAFT) ([d77673b](https://github.com/ramboz/jig/commit/d77673b5d3ab352ff99ae76bd2b9d29543b1264f))
+* **specs:** reserve 023-clarify ([1c0d906](https://github.com/ramboz/jig/commit/1c0d906a2e05b9c85510d33ac28c55cc307913f9))
+* **specs:** reserve 024-analyze ([cd91bac](https://github.com/ramboz/jig/commit/cd91bac4065eaa9e44760767e1e164c5781c6c24))
+
 ## [1.2.0](https://github.com/ramboz/jig/compare/v1.1.0...v1.2.0) (2026-05-15)
 
 
