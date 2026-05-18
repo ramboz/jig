@@ -108,6 +108,9 @@ drivers once Tier 0 is in place.
 8. **`slice-land`** — readiness check + landing checklist (direct merge or PR)
 9. **`pr-review`** — slim baseline four-section review; defers to richer user skills
 10. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern
+11. **`contracts`** — judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL); defers to richer user skills
+12. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications` (per spec 023, **no** deferral hint to spec-kit per explicit user direction 2026-05-18)
+13. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate (per spec 024 AC #6 — `_principles_check_block()` appended unconditionally to every reviewer prompt). Same no-deferral-hint stance as clarify
 
 ### Tier 2 — opt-in by signal (deferred until pain reported)
 
@@ -116,7 +119,7 @@ user signal yet. Tier 2 stays empty until pain is reported.
 
 ### MVP scope (already shipped)
 
-Tier 0 + Tier 1 are both **effectively complete** as of 2026-05-15.
+Tier 0 + Tier 1 are both **effectively complete** as of 2026-05-18.
 See [docs/specs/README.md](specs/README.md) for the status board.
 
 ### Out of scope (deliberately)
@@ -153,11 +156,19 @@ reconciliation.
    of what `scaffold-init` produces — including this vision document
    (and the audit gap it closes).
 5. **Bring your own depth; jig provides the floor.** Where jig ships a
-   "lightweight baseline" skill (today: `pr-review`, `arch-review`),
-   the auto-trigger description includes a *category-based deferral
-   hint* so a richer user-installed skill in the same category wins
-   without configuration. Jig stays opinionated about *workflow*; it
-   stays out of the way of *judgment skills* the user has invested in.
+   "lightweight baseline" skill, **the deferral pattern is per-skill,
+   not universal**. Some baselines carry a *category-based deferral
+   hint* in their auto-trigger description so a richer user-installed
+   skill in the same category wins without configuration (today:
+   `pr-review`, `arch-review`, `contracts`); others ship as standalone
+   baselines when the user explicitly prefers jig's version remain the
+   primary entry point (today: `clarify`, `analyze` — per the
+   2026-05-18 spec-kit-gap-analysis decision). Both shapes honor the
+   principle: jig stays opinionated about *workflow* and out of the way
+   of *judgment skills the user has invested in* — the only question is
+   whether the user has installed a richer alternative they want
+   auto-routed to, or whether jig's baseline is the right standalone
+   default for that surface.
 6. **No backwards-compat shims when conventions change.** When a
    convention is wrong, flip it wholly (e.g. ADR-0004's `docs/adrs/`
    → `docs/decisions/` rename was a clean cut, not a dual-read

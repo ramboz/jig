@@ -74,8 +74,8 @@
 | [021-migrate-copy-machinery](021-migrate-copy-machinery/spec.md) | 021-01 — copy-machinery-subcommand | **DONE** |  |
 | [022-contracts](022-contracts/spec.md) | 022-01 — contracts-skill-md | **DONE** |  |
 | [022-contracts](022-contracts/spec.md) | 022-02 — integration-touchpoints | **DONE** |  |
-| [023-clarify](023-clarify/spec.md) | 023-01 — clarify-skill-md | DRAFT |  |
-| [024-analyze](024-analyze/spec.md) | 024-01 — analyze-skill-md | DRAFT |  |
+| [023-clarify](023-clarify/spec.md) | 023-01 — clarify-skill-md | **DONE** | 30 tests; lightweight ambiguity scan; six-category taxonomy; no `.py` helper; ships without spec-kit deferral hint (per user direction) |
+| [024-analyze](024-analyze/spec.md) | 024-01 — analyze-skill-md | **DONE** | 38 surface + 7 PrinciplesCheckBlock tests; non-destructive consistency report; bundles constitution-gate (unconditional `_principles_check_block()` in `review.py`) |
 
 ## Deferred slices
 
