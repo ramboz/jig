@@ -511,11 +511,13 @@ direction; total 10 tests in this file across 4 test classes
 
 - [x] `docs/specs/README.md` regenerated.
 - [x] CLAUDE.md Hot Cache updated.
-- [ ] Post-v1.0.0 merge: `release-as: "1.0.0"` removed from
+- [x] Post-v1.0.0 merge: `release-as: "1.0.0"` removed from
   `.github/release-please-config.json` and a `chore(release): unpin
   release-as after v1.0.0` follow-up PR raised. Tracked here, not
   in this slice's DoD (depends on the v1.0.0 release PR being
-  merged, which happens after this slice DoNE).
+  merged, which happens after this slice DoNE). — Resolved 2026-05-18:
+  config has no `release-as` field; release-please has driven v1.0.0
+  → v1.1.0 → v1.2.0 → v1.3.0 naturally.
 
 ---
 
@@ -728,10 +730,13 @@ MissingLicenseWarningTests).
 
 - [x] `docs/specs/README.md` regenerated.
 - [x] CLAUDE.md Hot Cache updated.
-- [ ] The v1.0.0 release (created by 013-02's PR merge) gets the
+- [x] The v1.0.0 release (created by 013-02's PR merge) gets the
   zip retroactively attached IF the slice landed after the release.
   If 013-03 lands before v1.0.0, the zip is automatically attached
   via the `package` job. Either path produces the same end state.
+  — Resolved 2026-05-18: `gh release view v1.0.0` confirms
+  `jig-v1.0.0.zip` is attached (113,557 bytes, sha256
+  `f93b2cd064bb932195f2bd1585f08748d7df6843102b6705db510551a431324a`).
 
 ---
 
@@ -828,7 +833,10 @@ README (public docs), CONTRIBUTING.md (contributor docs), LICENSE
   references `LICENSE`.
 - [x] `scripts/test_validate_manifests.py` updated per AC #7.
 - [x] Full test suite green.
-- [ ] Dogfood per AC #8 completed and recorded in deviation log.
+- [x] Dogfood per AC #8 completed and recorded in deviation log.
+  — Resolved 2026-05-18: user-driven dogfood ran successfully
+  (`/plugin marketplace add ramboz/jig` + `/plugin install jig@jig`
+  in a fresh Claude Code session); jig skills discoverable post-install.
 - [x] Implementation review passed.
 - [x] Deviation log written.
 - [x] Reconciliation review passed.
@@ -912,12 +920,14 @@ and needs to interop with pre-013-04 installs.
   RESOLVED with a reference back to this spec. — N/A; no such inbox
   entry existed at the time of close-out (verified via `grep -n
   "Public installability" docs/inbox.md` returning no matches).
-- [ ] **User-driven dogfood per AC #8** — fresh Claude Code session,
+- [x] **User-driven dogfood per AC #8** — fresh Claude Code session,
   `/plugin marketplace add ramboz/jig` + `/plugin install jig@jig`,
   confirm `/jig:scaffold-init` (or any other jig skill) is
   discoverable. Result recorded here with timestamp. Only fires
   after this PR merges to `main` (the marketplace.json rename
-  is on `main`).
+  is on `main`). — Resolved 2026-05-18: user confirmed the
+  marketplace add + plugin install completed successfully in a fresh
+  session and jig skills were discoverable. Spec 013 fully closed.
 
 ---
 
