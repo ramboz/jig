@@ -1,11 +1,13 @@
 {
-  "spec": "docs/specs/023-clarify/spec.md",
-  "slice": "023-01",
+  "spec": "docs/specs/024-analyze/spec.md",
+  "slice": "024-01",
   "files": [
-    "skills/clarify/SKILL.md",
-    "skills/clarify/test_clarify_skill_surface.py",
-    "skills/clarify/worked-example-jig.md",
-    "skills/clarify/worked-example-saas.md",
+    "skills/analyze/SKILL.md",
+    "skills/analyze/test_analyze_skill_surface.py",
+    "skills/analyze/worked-example-jig.md",
+    "skills/analyze/worked-example-saas.md",
+    "skills/independent-review/review.py",
+    "skills/independent-review/test_review.py",
     "skills/scaffold-init/scaffold.py"
   ]
 }

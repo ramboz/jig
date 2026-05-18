@@ -195,6 +195,27 @@ def _contract_surface_check_block() -> str:
   have a documented opt-out (ADR or in-section note)."""
 
 
+# -------- Principles check (slice 024-01 — constitution-gate) --------
+
+
+def _principles_check_block() -> str:
+    """The UNCONDITIONAL evaluation hint appended to both implementation and
+    reconciliation prompts. Unlike the contract-surface check (which gates
+    on `has_declared_contract_surfaces`), principle adherence is universal
+    — every slice review gets this fragment.
+
+    Names principles 1 and 7 by their short-names so a reviewer can grep
+    `docs/product-vision.md` § Design principles for the canonical text.
+    Stays under 500 characters per prompt-size hygiene (same precedent
+    as `_contract_surface_check_block()`)."""
+    return """\
+- **Principles check** (added by spec 024-01 — constitution-gate): verify
+  this slice doesn't violate any of the seven design principles listed in
+  `docs/product-vision.md` § Design principles — from principles 1 (hooks
+  deterministic / skills judgment) through principles 7 (scaffolding beats
+  renting). Flag violations as findings."""
+
+
 def build_implementation_prompt(spec_path: Path, slice_label: str,
                                 deliverables: list) -> str:
     """Construct the standard implementation-review prompt.
@@ -204,12 +225,20 @@ def build_implementation_prompt(spec_path: Path, slice_label: str,
     section with at least one declared surface, the Evaluate block
     grows an extra bullet asking the reviewer to flag missing artifact
     updates. Quiet when no surfaces are declared.
+
+    Slice 024-01 added an UNCONDITIONAL principles-check block — every
+    review (regardless of project state) gets a line asking the reviewer
+    to verify the slice doesn't violate any of the seven principles in
+    `docs/product-vision.md` § Design principles.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     extra_check = ""
     project_root = _find_project_root(spec_path)
     if project_root and has_declared_contract_surfaces(project_root):
         extra_check = "\n" + _contract_surface_check_block()
+    # Slice 024-01: append the principles-check block UNCONDITIONALLY.
+    # No gating on project state — principle adherence is universal.
+    extra_check += "\n" + _principles_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -246,11 +275,17 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     Evaluate block grows a bullet asking the reviewer to verify the
     deviation log accounts for any artifact updates (or documents the
     opt-out). Quiet when no surfaces are declared.
+
+    Slice 024-01 added an UNCONDITIONAL principles-check block — every
+    reconciliation review gets a line asking the reviewer to verify
+    the deviation log doesn't paper over principle violations.
     """
     extra_check = ""
     project_root = _find_project_root(spec_path)
     if project_root and has_declared_contract_surfaces(project_root):
         extra_check = "\n" + _contract_surface_check_block()
+    # Slice 024-01: append the principles-check block UNCONDITIONALLY.
+    extra_check += "\n" + _principles_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job

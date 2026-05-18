@@ -599,5 +599,180 @@ class ContractSurfaceCheckTests(unittest.TestCase):
         self.assertIn(CONTRACT_SURFACE_HINT, result.stdout)
 
 
+# ---------------------------------------------------------------------------
+# Slice 024-01 — unconditional principles-check block (constitution-gate)
+# ---------------------------------------------------------------------------
+
+
+PRINCIPLES_CHECK_HINT = "Principles check"
+
+
+class PrinciplesCheckBlockTests(unittest.TestCase):
+    """Slice 024-01 AC #6: the implementation- and reconciliation-prompt
+    builders UNCONDITIONALLY append a `Principles check` bullet to their
+    Evaluate block, asking the reviewer to verify the slice doesn't
+    violate any of the seven principles in `docs/product-vision.md`
+    § Design principles.
+
+    Unlike `_contract_surface_check_block()` (which is gated on
+    `has_declared_contract_surfaces`), this block has NO gate — principle
+    adherence is universal.
+
+    Tests cover:
+      (a) helper returns a block containing "principles 1" and
+          "principles 7" grep markers
+      (b) both prompt builders include the block
+      (c) the block references `docs/product-vision.md`
+      (d) the block stays under 500 characters (prompt-size hygiene)
+      (e) the block appends UNCONDITIONALLY (no gating on contract-surface
+          presence or similar — different from 022-02's helper)
+    """
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        """Load `review.py` as a module so we can call `_principles_check_block`
+        directly. Using importlib keeps this independent of subprocess
+        invocation — we just need the in-process return value."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_024", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    # ---- (a) helper-level: block contains principle-1 and principle-7 markers
+
+    def test_helper_block_names_principle_1_and_7(self):
+        module = self._import_review_module()
+        block = module._principles_check_block()
+        block_lower = block.lower()
+        self.assertIn(
+            "principles 1", block_lower,
+            "helper must reference 'principles 1' as a grep marker for "
+            "principle-1 (hooks deterministic / skills judgment)",
+        )
+        self.assertIn(
+            "principles 7", block_lower,
+            "helper must reference 'principles 7' as a grep marker for "
+            "principle-7 (scaffolding beats renting)",
+        )
+
+    # ---- (b) both prompt builders include the block
+
+    def _make_minimal_spec(self) -> Path:
+        """Build a tmpdir with `docs/architecture.md` containing NO
+        contract-surfaces section — this proves the block appears even
+        when the contract-surface check is OMITTED."""
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-pchk-"))
+        self._tmpdirs.append(root)
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "architecture.md").write_text(
+            "# Architecture\n\n## Tech stack\n\nPython.\n"
+        )
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def test_impl_prompt_includes_principles_block(self):
+        spec = self._make_minimal_spec()
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            PRINCIPLES_CHECK_HINT, result.stdout,
+            "024-01 AC #6: implementation prompt MUST include the "
+            "Principles check block unconditionally",
+        )
+
+    def test_recon_prompt_includes_principles_block(self):
+        spec = self._make_minimal_spec()
+        result = run_review("reconciliation", str(spec), "099-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            PRINCIPLES_CHECK_HINT, result.stdout,
+            "024-01 AC #6: reconciliation prompt MUST include the "
+            "Principles check block unconditionally",
+        )
+
+    # ---- (c) the block references docs/product-vision.md
+
+    def test_helper_block_references_product_vision_md(self):
+        module = self._import_review_module()
+        block = module._principles_check_block()
+        self.assertIn(
+            "docs/product-vision.md", block,
+            "block must cite `docs/product-vision.md` so the reviewer "
+            "can grep the seven principles",
+        )
+        self.assertIn(
+            "Design principles", block,
+            "block must name the `## Design principles` section",
+        )
+
+    # ---- (d) the block stays under 500 characters (prompt-size hygiene)
+
+    def test_helper_block_under_500_chars(self):
+        module = self._import_review_module()
+        block = module._principles_check_block()
+        self.assertLess(
+            len(block), 500,
+            f"prompt-size hygiene: block must be < 500 chars; got "
+            f"{len(block)}. Same precedent as `_contract_surface_check_block()`.",
+        )
+
+    # ---- (e) the block appends UNCONDITIONALLY (no gating)
+
+    def test_block_appears_with_no_arch_md(self):
+        """Even when the project has NO `docs/architecture.md` (which
+        would silence the contract-surface check), the principles block
+        must still fire — it has no gate."""
+        # Build a tmpdir with no docs/architecture.md at all.
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-pchk-noarch-"))
+        self._tmpdirs.append(root)
+        spec = root / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            PRINCIPLES_CHECK_HINT, result.stdout,
+            "024-01 AC #6: principles block must appear even without "
+            "architecture.md — no gating",
+        )
+        # And the contract-surface hint must NOT appear (no arch.md).
+        self.assertNotIn(
+            CONTRACT_SURFACE_HINT, result.stdout,
+            "no architecture.md → contract-surface hint stays absent; "
+            "the two checks are independent",
+        )
+
+    def test_block_appears_alongside_contract_surface_hint(self):
+        """When BOTH checks fire (declared surfaces + universal principles),
+        both blocks must be present in the prompt."""
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-pchk-both-"))
+        self._tmpdirs.append(root)
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "architecture.md").write_text(
+            "# Architecture\n\n## Contract surfaces\n\n"
+            "- **HTTP API** (recommended: OpenAPI 3.x) — `/v1/foo`\n"
+        )
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(CONTRACT_SURFACE_HINT, result.stdout)
+        self.assertIn(PRINCIPLES_CHECK_HINT, result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

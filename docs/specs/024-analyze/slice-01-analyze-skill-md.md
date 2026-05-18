@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-05-18
 ---
 
 ## Slice 024-01 — analyze-skill-md
@@ -264,20 +264,26 @@ gets a small additive helper following slice 022-02's
 > on REVIEWED → RECONCILED. Every other box below must be ticked
 > **after** the corresponding evidence exists.
 
-- [ ] All 10 ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All 10 ACs pass; full test suite green (977 pass + 3 skipped,
+      up from 932; +45 new tests: 38 analyze surface + 7
+      PrinciplesCheckBlock).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture; six-class surface pattern + new `PrinciplesCheckBlockTests`
-      class in `test_review.py` covers AC #1-#6.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+      class in `test_review.py` covers AC #1-#6. Two bonus surface
+      classes (OutputFormatTests + NoPyHelperTests) are additive.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py` (and now includes the principles-check from AC #6,
-      so the slice exercises the very change it ships).
-- [ ] Implementation review passed.
-- [ ] SKILL.md dogfood against this slice's own spec.md (AC #10),
-      with output recorded in the deviation log.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+      so the slice exercises the very change it ships). _(Implementation
+      review verdict: `pass`, zero SPECIFIC ISSUES. Four reconciliation
+      notes folded into §1-§4 below.)_
+- [x] Implementation review passed.
+- [x] SKILL.md dogfood against this slice's own spec.md (AC #10),
+      with output recorded in deviation §5 below.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. _(No new refinement-todo
+      deferrals; one new inbox entry — see §7 below.)_
 
 ### Close-out (post-DONE)
 
@@ -306,5 +312,164 @@ the spec-author missed. Two surfaces, one slice; both observable.
 
 The original spec is preserved above. Implementation notes:
 
-_TBD — numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+**Implementation review** verdict was `pass`, zero SPECIFIC ISSUES.
+Four non-blocking reconciliation notes (§1-§4 below). All deliverables
+shipped per ACs #1-#7; AC #8 / #9 / #10 are post-DONE close-out items
+(handled together with slice 023-01's close-out in a single final
+pass).
+
+1. **Two micro-tweaks to SKILL.md prose for test signal.** The
+   `BodyTests.test_sections_in_order` substring walker uses
+   `body_lower.find(phrase)` which returns the **first** occurrence.
+   The original prose ("across six finding categories" in the
+   "What this skill does" paragraph; "read-only secondary inputs"
+   in the same section) caused the substring search to find the
+   category-list-by-name and the inputs-section-by-name before
+   their respective H2 headings, producing an out-of-order false
+   failure. Implementer replaced these with non-overlapping
+   phrasings ("across the six-category taxonomy" /
+   "read-only cross-reference docs") at `SKILL.md:36` and `:39`.
+   No semantic loss — both alternatives mean the same thing.
+   _Same regex-fragility concern logged by slice 012-01's nits and
+   filed cross-skill in slice 023-01's
+   `judgment-skills/test/code-block-aware-h2-h3:` inbox entry._
+2. **Dual phrasing in the SKILL.md body** (reconciliation reviewer
+   note). The "read-only secondary inputs" → "read-only cross-reference
+   docs" rename was applied only at line 39 ("What this skill
+   does" paragraph), but the same phrase still appears at line 103
+   in the Inputs H3. Two phrasings in the same skill body for
+   semantically identical concepts. Acceptable today (line 103 is
+   the H3 title context, distinct enough that readers see them as
+   adjacent rather than synonymous), but a future cleanup could
+   harmonize the two locations. Filed for awareness, not action.
+3. **AC #8 explicit `tier-1/analyze` test row not added.** Same
+   pattern as slice 023-01 for `tier-1/clarify`: the one-line
+   `_TIER_SKILLS` addition is not pinned by a dedicated
+   `assertIn("tier-1/analyze", ...)` test row. The existing
+   `test_scaffold.py::test_test_signals_install_tier_1` only
+   regression-pins `tier-1/tdd-loop` as a representative.
+   Already filed to inbox during slice 023-01's reconciliation
+   as `scaffold/test/install-list-tier-1-full-set:` — adding
+   analyze does not re-file. The fix benefits all Tier 1 skills
+   (now seven of them: adr-workflow, tdd-loop, slice-land,
+   pr-review, arch-review, clarify, analyze) in one pass.
+4. **AC #6 character budget verification.** The implementer's
+   own report had a minor internal inconsistency (469 chars in
+   one summary line, 485 chars in another); reconciliation
+   reviewer measured "~370-400 characters". **Precise measurement
+   via `len(_principles_check_block())` is 337 characters** (well
+   under the 500-char ceiling per AC #6). Both grep markers
+   ("principles 1" and "principles 7") present per AC #6.
+   _Methodology note: future deviation logs should report exact
+   measurements (`wc -l`, `len(...)`) rather than approximations —
+   this slice had three independent counts (~485, ~370-400, 337)
+   that all bracketed the true value. Captured as a procedural
+   improvement, not a follow-up._
+
+5. **AC #10 dogfood — analyze applied to spec 024-analyze itself
+   (this slice's own spec).** Six-category scan + finding-table
+   pass against `docs/specs/024-analyze/spec.md` +
+   `slice-01-analyze-skill-md.md` as a prompt-to-self.
+
+   **Findings (3 total):**
+
+   | # | Severity | Category | Location | Finding |
+   |---|---|---|---|---|
+   | 1 | MEDIUM | Coverage Gaps | slice-01-analyze-skill-md.md:236-239 (AC #8) | AC #8 prescribes a scaffold install-list test row but no explicit `tier-1/analyze` assertion was added (same pattern as slice 023-01's AC #7). Same root cause filed in inbox under `scaffold/test/install-list-tier-1-full-set:`. |
+   | 2 | LOW | Terminology Drift | spec.md:13-15 + AC #6 | The constitution-gate concept appears as both "constitution-gate" (spec Overview, multiple times) and "principle violations" (Goals #2, AC #6 line description). Both refer to the same thing; the link is implicit. A future reader could trip on the dual term. Not blocking — context makes the connection obvious in every appearance. |
+   | 3 | LOW | Ambiguity | spec.md:96-99 (Goal #3) | "Maximum 50 findings per run" doesn't say "per spec" or "per invocation". Context implies per-invocation, but a strict reader could ask whether the limit accumulates across multiple `/jig:analyze` calls in a session. Worked example shows 6 findings per spec (well under 50), so the ambiguity is academic, not blocking. |
+
+   **Coverage summary:**
+   | Category | Findings |
+   |---|---|
+   | Duplication | 0 |
+   | Ambiguity | 1 (LOW) |
+   | Underspecification | 0 |
+   | Principle Violations | 0 |
+   | Coverage Gaps | 1 (MEDIUM) |
+   | Terminology Drift | 1 (LOW) |
+
+   **Dogfood verdict:** The analyze SKILL.md prose produces useful
+   output on its own spec. The 1 MEDIUM finding is a real coverage
+   gap that the reviewer also flagged (independent corroboration
+   = honest signal). The 2 LOW findings are pure surface-level
+   ambiguity / terminology hits that wouldn't block merge but are
+   worth flagging in a real review. **Principle Violations = 0**
+   is the right call — this slice adds a skill and a small helper,
+   doesn't introduce new subagent types, doesn't violate context
+   economy, doesn't propose backwards-compat shims.
+
+   _Meta-observation: analyze run on its own spec produced 3
+   findings; reviewer pass earlier produced ~0 SPECIFIC ISSUES +
+   4 reconciliation notes. Different surfaces; complementary
+   coverage. The two-layer safety net (reviewer + analyze) is the
+   intended outcome — analyze catches the **non-blocking
+   surface-level** drift that reviewer triage would deprioritize._
+
+6. **Judgment calls captured by the implementer:**
+   - **Worked-example #1 spec choice:** spec 017-vision-elicitation
+     in its mid-reshape window — 7 known staleness incidents per
+     CLAUDE.md hot-cache make it a high-signal real-world
+     historical moment. Six findings spanning all six categories.
+   - **Severity defaults:** principles 1-3 → HIGH (load-bearing
+     architecture: hooks/skills duality, context economy, three
+     subagents); principles 4-7 → MEDIUM (governance norms:
+     dogfooding, deferral, no-shims, scaffolding). Per the spec's
+     open-question lean. SKILL.md body explicitly notes the model
+     can override either default based on context.
+   - **`_principles_check_block()` wording** (3 lines, **337
+     chars** per precise `len()` measurement): names both
+     "principles 1" and "principles 7" as grep markers,
+     references `docs/product-vision.md` § Design principles,
+     asks the reviewer to flag violations as findings. Under
+     500-char ceiling per AC #6.
+   - **Two bonus test classes** added beyond AC #5's six:
+     `OutputFormatTests` (formalizes AC #4's column-header /
+     severity-levels / max-50 assertions) and `NoPyHelperTests`
+     (pins spec Non-goals). Additive, not substitutive — the
+     six required classes are all present with canonical names.
+   - **Unconditional append for `_principles_check_block()`** —
+     contract-surface check is conditional (`has_declared_contract_surfaces`
+     gate) because not every project declares surfaces; principle
+     adherence is universal, so the principles-check has no gate.
+     Reviewer verified the no-gate at `review.py:241` and `:288`.
+
+7. **One new inbox entry** filed during reconciliation:
+   - `analyze/spec-coherence/dual-term-constitution-gate:` Captured
+     as dogfood finding #2 above — the spec uses "constitution-gate"
+     and "principle violations" interchangeably. Either harmonize
+     in a future tightening pass (after analyze proves out in
+     real use), or leave as-is if subsequent readings show no
+     comprehension friction. Low priority; non-blocking.
+
+**Doc updates from this slice:**
+
+- `skills/analyze/SKILL.md` — net-new (~380 lines). Active
+  frontmatter; eight required H2 sections; six-category H3
+  taxonomy with 3-5 "what triggers a finding" bullets per
+  category; explicit `## Output format` spec; severity
+  scoring section.
+- `skills/analyze/test_analyze_skill_surface.py` — net-new
+  (~595 lines). 38 tests across 8 classes (six required +
+  bonus `OutputFormatTests` + bonus `NoPyHelperTests`).
+- `skills/analyze/worked-example-jig.md` — net-new. Spec 017
+  mid-reshape; 6 findings spanning all 6 categories.
+- `skills/analyze/worked-example-saas.md` — net-new. OAuth
+  hypothetical; 8 findings spanning 5 of 6 categories
+  (Principle Violations = 0 since the SaaS team doesn't share
+  jig's principles — explicitly explained in the example).
+- `skills/independent-review/review.py` — added
+  `_principles_check_block()` helper. Unconditional append
+  to both `build_implementation_prompt()` and
+  `build_reconciliation_prompt()` (review.py:~241 and :~288).
+- `skills/independent-review/test_review.py` — new
+  `PrinciplesCheckBlockTests` class (7 tests: helper direct +
+  impl-prompt presence + recon-prompt presence + product-vision.md
+  reference + character budget + no-arch-md edge case +
+  both-checks-coexist).
+- `skills/scaffold-init/scaffold.py` — +1 line: `"analyze"`
+  under `_TIER_SKILLS["tier-1"]` (line 63, immediately after
+  `"clarify"` which slice 023-01 added at line 62).
+- `docs/inbox.md` — one new entry per §7 above.
+- No new ADR required.
+- No `architecture.md` changes.
