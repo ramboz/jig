@@ -23,6 +23,55 @@ jig/
 └── docs/                          # Dev docs for building jig itself (dogfooded)
 ```
 
+## Runtime wiring
+
+How a session actually flows in plugin-install mode. The LLM layer (user →
+Claude → skill router → SKILL.md → helper or subagent → on-disk state) is
+non-deterministic; the five hooks form the deterministic spine that fires on
+fixed events and can inject context or block tool calls.
+
+```mermaid
+flowchart TB
+    user([User message])
+    claude[Claude]
+    router{{Skill router<br/>auto-trigger by description}}
+    skill["SKILL.md body<br/>(progressive load)"]
+
+    user --> claude
+    claude --> router
+    router --> skill
+    skill -->|bash recipe| helpers["scripts/*.py<br/>workflow · review · adr · tdd<br/>land · migrate · scaffold"]
+    skill -->|Task tool| subs["Subagents<br/>implementer (writes)<br/>reviewer (read-only)<br/>architect (rare)"]
+
+    helpers --> jig[(.jig/scaffold.json)]
+    helpers --> adrs[(docs/decisions/)]
+    helpers --> specs[(docs/specs/)]
+    subs --> specs
+    subs --> memory[(CLAUDE.md<br/>+ docs/memory/)]
+
+    subgraph hookspine["Deterministic spine — 5 hooks"]
+        direction TB
+        h1["SessionStart<br/>jig-context-check<br/>warn when MCP servers &gt; 8"]
+        h2["UserPromptSubmit<br/>jig-memory-scan<br/>surface unknown references"]
+        h3["PreToolUse · Task<br/>jig-telemetry<br/>async log, never blocks"]
+        h4["PreToolUse · Edit/Write<br/>jig-spec-gate<br/>blocks conventions.md edits"]
+        h5["Stop<br/>jig-task-capture<br/>surface TODOs next turn"]
+    end
+
+    h2 -. additionalContext .-> claude
+    h4 -. exit 2 = blocks Edit .-> claude
+    h5 -. next-turn context .-> claude
+```
+
+- **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
+- **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only.
+- **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
+- **Hook spine** intercepts at four Claude Code events. Two hooks read-only (`telemetry`, `context-check`); two inject `additionalContext` (`memory-scan`, `task-capture`); one can block tool calls with exit-code 2 (`spec-gate`).
+
+Scaffold-mode wiring is identical in shape — only path strings differ
+(`${CLAUDE_PROJECT_DIR}/.claude/...` instead of `${CLAUDE_PLUGIN_ROOT}/...`).
+See the **Dual-distribution** decision below for the rewrite details.
+
 ## Core architecture decisions
 
 ### Hooks are the deterministic spine; skills are the LLM layer

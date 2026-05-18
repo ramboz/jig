@@ -8,25 +8,41 @@ We use the workflow jig is designed to produce — dogfooding from day one.
 
 ## Spec lifecycle
 
-Every non-trivial piece of work gets a spec in `docs/specs/NNN-name/`:
+Every non-trivial piece of work gets a spec in `docs/specs/NNN-name/`. The
+lifecycle is a forward path with three review-driven back-edges and a parked
+sidetrack (`DEFERRED`), with TDD's red→green→refactor cycle nested inside
+`IN_PROGRESS`:
 
-```
-DRAFT
-  ↓ (spec written, ACs defined)
-READY_FOR_REVIEW
-  ↓ (independent reviewer pass on the spec itself)
-READY_FOR_IMPLEMENTATION
-  ↓ (implementer picks up the slice)
-IN_PROGRESS
-  ↓ (implementer done, deliverable on disk)
-REVIEWED
-  ↓ (independent reviewer pass on the implementation)
-RECONCILED
-  ↓ (docs updated, deviation log produced, reconciliation review pass)
-DONE
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT
+    DRAFT --> READY_FOR_REVIEW: spec written
+    READY_FOR_REVIEW --> DRAFT: review needs-changes
+    READY_FOR_REVIEW --> READY_FOR_IMPLEMENTATION: review pass
+    READY_FOR_IMPLEMENTATION --> IN_PROGRESS: implementer picks up
+    READY_FOR_IMPLEMENTATION --> DEFERRED: parked w/ trigger
+
+    state IN_PROGRESS {
+        [*] --> Red
+        Red --> Green: test passes
+        Green --> Refactor
+        Refactor --> Red: next behavior
+        Refactor --> [*]: slice complete
+    }
+
+    IN_PROGRESS --> REVIEWED: deliverable on disk
+    REVIEWED --> IN_PROGRESS: needs-changes
+    REVIEWED --> RECONCILED: review pass + deviation log
+    RECONCILED --> IN_PROGRESS: reconciliation fails
+    RECONCILED --> DONE: reconciliation pass
+    DEFERRED --> DRAFT: trigger met
+    DONE --> [*]
 ```
 
-Each transition is a checkpoint. The Stop hook blocks completion if reconciliation hasn't happened.
+Each forward transition is a checkpoint; each back-edge is a reasoning loop
+(spec review, implementation review, reconciliation review, TDD). The Stop
+hook blocks completion if reconciliation hasn't happened. State names match
+`VALID_STATUSES` in [skills/spec-workflow/workflow.py](../skills/spec-workflow/workflow.py).
 
 ## SPIDR splitting
 
