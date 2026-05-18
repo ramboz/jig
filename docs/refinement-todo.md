@@ -70,9 +70,9 @@
 ~~**Deferred:** The mechanism to flip docs from `Draft` to `Stable` (after 3-5 reconciled specs) is described but not implemented.~~
 **Resolved by:** [ADR-0001: scaffold-stable trigger](adrs/adr-0001-scaffold-stable.md). Threshold is **3 reconciled slices**; flip mechanism remains manual for now (one-liner sed; a `stabilize.py` helper is a candidate for a future slice if needed).
 
-### Decision: Scaffold.json manifest format
-**Deferred:** The `scaffold.json` install-state manifest is referenced in the design but its schema is undefined.
-**Resolution trigger:** Slice 001-01 (greenfield-scaffold). The implementer defines the schema as the first deliverable.
+### ~~Decision: Scaffold.json manifest format~~ — RESOLVED 2026-05-18
+~~**Deferred:** The `scaffold.json` install-state manifest is referenced in the design but its schema is undefined.~~
+**Resolved by:** Slice 001-01 (greenfield-scaffold) defined the initial schema (fields: `schema_version`, `installed_skills`, `scaffold_mode`, plus signal-detection results). [ADR-0007](decisions/adr-0007-scaffold-json-installed-skills.md) formalized the `installed_skills` field shape. Schema lives in `skills/scaffold-init/scaffold.py` (`JIG_VERSION` constant + manifest construction in the main flow); `_TIER_SKILLS` is the per-tier source of truth.
 
 ### Decision: Signal detection time-box and resource bounds
 **Deferred:** Spike 001a calls for a 3-second wall-clock time-box and "no recursion deeper than 2 levels" with skip-dirs. The current `detect_signals()` honors the depth/skip-dir rule implicitly (no rglob in detectors) but does NOT enforce a wall-clock limit. `_read_text_safe()` reads files unboundedly — a multi-GB `requirements.txt` would be fully read into memory.
@@ -81,7 +81,8 @@
 
 ### Decision: jig-memory-scan + jig-task-capture firing-rate measurement
 **Deferred:** Slice 002-03 tuned the heuristics deterministically (strip code blocks / URLs / absolute paths; common-acronym skiplist) but did not measure actual firing rate against real session traffic. AC #5 calls for 10–40% as the healthy band; we have no telemetry yet.
-**Resolution trigger:** After ~2 weeks of jig being enabled in a real session, scan the captured stderr/stdout of these hooks (or add a lightweight counter file in `.claude/`) and either confirm we're in band, or tune the COMMON acronym set / regex specificity.
+**Status as of 2026-05-18:** Original 2-week trigger window has elapsed without anyone reporting hook-firing noise or unknown-reference spam. Treating as "never bites in practice" without formally resolving — re-open if (a) a session reports excessive firing, OR (b) a contributor decides to implement the `.claude/hook-firing.jsonl` mitigation to actually measure.
+**Resolution trigger (revised):** First user-reported noise complaint OR explicit ask for telemetry. Default treatment: no action.
 **Mitigation idea:** add a `.claude/hook-firing.jsonl` write at the bottom of each hook (one line per fire) — cheap, gitignored, easy to grep.
 **Watch-list (reviewer-flagged low-priority items):**
 - Schemeless URLs like `example.com/FooBar` leak `FooBar` (the strip regex requires `http(s)://`)

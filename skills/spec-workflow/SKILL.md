@@ -201,6 +201,12 @@ status flip is allowed. Each item is a gate.
       `JIG_CONVENTIONS_APPROVED=1`).
 - [ ] **Inbox triage** — sweep `docs/inbox.md` for items resolved by this slice;
       move them to the relevant memory file or strike them through.
+- [ ] **CLAUDE.md hygiene** — if this slice closes the spec (all non-deferred
+      slices DONE), apply the compress-on-close-out rule per the slice
+      template's `### Close-out (post-DONE)` section. CLAUDE.md's "Active
+      specs" section should only carry in-flight work; load-bearing
+      per-slice invariants migrate to the status board Notes column (which
+      `workflow.py status-board` preserves across regen).
 - [ ] **Memory-sync** — run `/jig:memory-sync` (or invoke `memory.py` directly)
       to persist any new domain terms, dead-end learnings, or tool decisions
       that emerged during implementation. **This is where slice 002-04's

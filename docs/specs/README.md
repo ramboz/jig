@@ -37,7 +37,7 @@
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-03 — jig-self-migration | **DONE** |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-04 — slice-to-spec-mapping | DEFERRED |  |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-05 — scaffold-init --migrate suggestion | **DONE** |  |
-| [009-dod-close-out-separation](009-dod-close-out-separation/spec.md) | 009-01 — close-out-section-recognition | **DONE** |  |
+| [009-dod-close-out-separation](009-dod-close-out-separation/spec.md) | 009-01 — close-out-section-recognition | **DONE** | `check_dod` recognizes `### Close-out (post-DONE)` subsection and excludes its checkboxes from the count; consumed by template + spec 025-01 |
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-01 — local-plugin-install | **DONE** | 20 new tests (351 total); first real reviewer dogfood — reviewer + architect refused write, implementer wrote |
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-02 — subagent-type-fallback-upgrade | **DONE** | 11 new tests (362 total); real `jig:reviewer` dogfood clean; install-snapshot lag flagged for follow-up |
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-03 — scaffold-json-self-install-marker | DEFERRED |  |
@@ -76,6 +76,7 @@
 | [022-contracts](022-contracts/spec.md) | 022-02 — integration-touchpoints | **DONE** |  |
 | [023-clarify](023-clarify/spec.md) | 023-01 — clarify-skill-md | **DONE** | 30 tests; lightweight ambiguity scan; six-category taxonomy; no `.py` helper; ships without spec-kit deferral hint (per user direction) |
 | [024-analyze](024-analyze/spec.md) | 024-01 — analyze-skill-md | **DONE** | 38 surface + 7 PrinciplesCheckBlock tests; non-destructive consistency report; bundles constitution-gate (unconditional `_principles_check_block()` in `review.py`) |
+| [025-claude-md-hygiene](025-claude-md-hygiene/spec.md) | 025-01 — cleanup-and-close-out-rule | **DONE** | Slice close-out rule reframed: compress (not add) on spec completion. Codified in `templates/docs/specs/slice-template.md` Close-out section + `skills/spec-workflow/SKILL.md` "CLAUDE.md hygiene" reconciliation gate. CLAUDE.md compressed 111 → 86 lines (~22%); Active-specs 25 → 1. |
 | [026-context-fill-telemetry](026-context-fill-telemetry/spec.md) | 026-01 — estimator-and-soft-warn-hook | DRAFT |  |
 | [027-post-tool-edit-verification](027-post-tool-edit-verification/spec.md) | 027-01 — post-edit-verify-hook | DRAFT |  |
 | [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-01 — adr-numbering-on-main | DRAFT |  |
