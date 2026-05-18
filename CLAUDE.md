@@ -24,7 +24,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 
 ### Active specs
 
-_(none currently in flight — see [docs/specs/README.md](docs/specs/README.md) for the full status board)_
+- **029-spike-slices** (mid-flight): 029-01 DONE — typed `kind` enum on slice frontmatter (`spike` is the first non-default value); body-shape labels `**Question:** / **Time-box:** / **Findings:** / **Outcome:**` for `kind: spike` slices; `spec_lint.py` hard-errors on unknown enum, soft-warns on missing spike labels (escalates to error under `--strict`). Standalone SPIDR primer at [docs/spec-workflow/spidr-primer.md](docs/spec-workflow/spidr-primer.md) (canonical reference; SKILL.md `## SPIDR splitting` is the operational entry point). 029-02 (status-board spike marker) DRAFT next.
 
 ### Deferred decisions
 
@@ -52,7 +52,7 @@ _(none currently in flight — see [docs/specs/README.md](docs/specs/README.md) 
 | `/jig:scaffold-init` | Initialize jig in a fresh project. Copies skills + agents + hooks + settings.json into the target's `.claude/` by default; `--plugin-only` opts out. Refuses on spec-driven layouts without `scaffold.json` (routes to `/jig:migrate`). | Yes (explicit) |
 | `/jig:vision-elicitation` | Lightweight wizard that fills the elicitation slots in `docs/product-vision.md` and `docs/architecture.md` after scaffold-init. Re-runnable with hash-based edit detection (per-section refresh / skip / diff). Judgment-only, no `.py` helper. | Yes (auto + explicit) |
 | `/jig:memory-sync` | Persist domain terms, learnings, and project knowledge to the CLAUDE.md hot cache + `docs/memory/` + `docs/inbox.md`. | Yes (explicit) |
-| `/jig:spec-workflow` | `workflow.py` for spec lifecycle: `new <slug>` reserves a spec number on `origin/main` (PR-fallback when push refused); `transition` (auto-ticks the two review-passed boxes); `status-board` regen (preserves Notes column); `stale` audits `last_verified`. | Yes (auto + explicit) |
+| `/jig:spec-workflow` | `workflow.py` for spec lifecycle: `new <slug>` reserves a spec number on `origin/main` (PR-fallback when push refused); `transition` (auto-ticks the two review-passed boxes); `status-board` regen (preserves Notes column); `stale` audits `last_verified`. Recognizes `kind: spike` slices (per spec 029) with a four-block body shape (Question / Time-box / Findings / Outcome) — see [docs/spec-workflow/spidr-primer.md](docs/spec-workflow/spidr-primer.md). | Yes (auto + explicit) |
 | `/jig:independent-review` | `review.py` builds standardized prompts for implementation + reconciliation review. `subagent-type` picks `reviewer` (plugin install) or `general-purpose` (fallback). Reviewer prompts conditionally check declared contract surfaces and unconditionally check design-principle adherence. | Yes (auto + explicit) |
 | `/jig:contracts` | Judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL). Defers to richer user-installed `~/.claude/skills/contracts/`. | Yes (auto + explicit) |
 | `/jig:adr-workflow` | `adr.py` helper: `new` / `accept` / `index` / `resolve-todo`. Writes to `docs/decisions/adr-NNNN-<slug>.md`. | Yes (auto + explicit) |
