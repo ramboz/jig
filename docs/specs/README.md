@@ -74,6 +74,8 @@
 | [021-migrate-copy-machinery](021-migrate-copy-machinery/spec.md) | 021-01 — copy-machinery-subcommand | **DONE** |  |
 | [022-contracts](022-contracts/spec.md) | 022-01 — contracts-skill-md | **DONE** |  |
 | [022-contracts](022-contracts/spec.md) | 022-02 — integration-touchpoints | **DONE** |  |
+| [023-clarify](023-clarify/spec.md) | 023-01 — clarify-skill-md | DRAFT |  |
+| [024-analyze](024-analyze/spec.md) | 024-01 — analyze-skill-md | DRAFT |  |
 
 ## Deferred slices
 
