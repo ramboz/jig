@@ -27,6 +27,29 @@ user-invocable: true
 - Enforces the reconciliation checklist before a slice goes DONE.
 - Consults `docs/memory/glossary.md` when drafting ACs to surface unknown domain terms.
 
+## SPIDR splitting
+
+All non-trivial specs are SPIDR-split into vertical slices before
+implementation begins. **Spike is the last resort — try Path /
+Interface / Data / Rules first.**
+
+- **S — Spike**: research/learning activity. Only when none of P/I/D/R
+  apply. AI agents default to spiking too eagerly — resist.
+- **P — Path**: split by alternative paths through the story (happy
+  path first, edge paths later).
+- **I — Interface**: split by UI / platform / channel (minimal first,
+  polish later).
+- **D — Data**: split by data subset or format (less data first).
+- **R — Rules**: split by business rules (simple first, edge cases later).
+
+**Anti-horizontal-phasing rule:** every slice must touch the
+user-facing layer and deliver end-to-end value. A slice that touches
+only the DB or only the parser is horizontal phasing — re-split.
+
+See [`worked-example-spidr-split.md`](worked-example-spidr-split.md)
+for one applied example per axis plus a jig-native dogfood case (spec
+017's three-axis split).
+
 ## How to use
 
 ### Creating a new spec
