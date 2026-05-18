@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified:
 ---
@@ -71,17 +71,17 @@ feature-shaped slice forces on research work.
    primer so new contributors see the shape end-to-end.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases: `kind:` field absent (parses as today);
       `kind: spike` with all four labels (passes spec_lint clean);
       `kind: spike` with missing labels (warns); `kind: bogus`
       (errors); `kind: spike` Outcome field with multiple
       semicolon-separated outcomes (parses).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
 - [ ] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
@@ -115,5 +115,100 @@ without it (spikes are findable via grep on `kind: spike` until
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+**1. DoR mismatch: SPIDR primer file did not exist.** The slice's DoR
+claimed `✅ SPIDR primer at docs/spec-workflow/spidr-primer.md
+documents the five techniques`. In reality, commit 6241f52 ("add
+SPIDR primer + worked-example sibling") added the primer **content
+as a `## SPIDR splitting` section inside `skills/spec-workflow/SKILL.md`**
+plus a sibling `worked-example-spidr-split.md` — no standalone file
+at the path the DoR named. The implementer created
+`docs/spec-workflow/spidr-primer.md` from scratch as the canonical
+standalone primer (113 lines: all five SPIDR axes + the new
+"when S fires, mark `kind: spike`" rule + the worked spike example).
+The SKILL.md `## SPIDR splitting` section remains as the operational
+entry point and cross-references the primer; the primer is now the
+canonical reference. AC #5 is satisfied (the primer documents the
+rule and the worked example), but via fresh-file creation rather
+than an "extension" of an existing file. Spec authors should verify
+DoR claims against the file system, not against memory of recent
+commit titles.
+
+**2. Open question resolution — default `kind` value.** Spec's Open
+questions section asked: (a) `kind` unset means feature implicitly,
+or (b) explicit `kind: feature` default in template + soft-warn on
+unset. **Resolved (a)** per the spec's lean. No warning fires when
+`kind:` is absent; the template does not include the `kind:` line
+by default; `kind: feature` is accepted as an explicit-default
+synonym for unset.
+
+**3. Open question resolution — body-shape validation strictness.**
+Spec leaned "yes, but soft warn." **Resolved soft-warn.** Missing
+labels emit warnings (informational unless `--strict`). Spikes
+mid-flight legitimately have empty Findings/Outcome.
+
+**4. Open question resolution — Outcome enum: free-form vs
+structured.** Spec leaned (a) free-form `abandoned (reason)`.
+**Resolved (a).** spec_lint does not parse the Outcome value
+structurally — it only checks that the `**Outcome:**` label is
+present. Docs prescribe the three canonical forms; lint does not
+enforce them.
+
+**5. `--strict` mode contract pinned.** Body-shape warnings escalate
+to exit 1 under `--strict`. Not explicitly an AC in the slice, but
+`test_warning_is_soft_unless_strict` and
+`test_embedded_kind_spike_missing_labels_warns` rely on this. Future
+contributors should treat `--strict` as the load-bearing CI gate.
+
+**6. Over-delivery: `KindEmbeddedSliceLayoutTests`.** AC #1 only
+required `kind` parsing for the file-per-slice layout. The
+implementer added 3 extra tests covering the spec-015 embedded
+layout (frontmatter-after-heading): bogus enum, spike with all
+labels, spike with missing labels. Deliberate over-delivery so the
+enum + body-shape contract holds for both layouts, given some
+existing jig specs still use the embedded shape. Recorded so future
+contributors don't see it as accidental scope.
+
+**7. Template subsection placement.** The new `### For \`kind:
+spike\` slices` subsection in `templates/docs/specs/slice-template.md`
+was placed BEFORE `### Close-out (post-DONE)`. AC #4 does not
+dictate placement. Rationale: spike body shape is an authoring
+concern; close-out is a landing concern. Authoring details ship
+above landing details in the template flow.
+
+**8. Reviewer findings — three SPECIFIC ISSUES addressed inline,
+verdict pass.** The implementation reviewer (subagent_type
+`jig:reviewer`, runtime 2026-05-18) returned `pass` with three
+small issues, all addressed before transitioning to REVIEWED:
+
+  - **`skills/spec-workflow/SKILL.md:71-77`** — the body-shape
+    bullet list used `**Question** — ...` (em-dash, no colon)
+    while the lint surface requires `**Question:** — ...` (with
+    colon). Fixed: bullets now write `**Question:** — ...` etc.,
+    plus a load-bearing prose sentence ("Each label must be
+    written with the trailing colon — that is what `spec_lint.py`
+    matches against") above the list.
+  - **`scripts/spec_lint.py` bare-script fallback** — the fallback
+    path that handles bare-script invocation outside a jig tree
+    used `.strip("\"'")` but did not strip inline `# comment`
+    tails, diverging from `_common.parsing._parse_scalar`'s
+    behavior. Fixed: the fallback now mirrors `_parse_scalar`
+    (split on `#` if unquoted; then strip matched surrounding
+    quotes).
+  - **`scripts/test_spec_lint.py::test_feature_slice_no_body_shape_warning`** —
+    the test asserted that spike labels do NOT appear in the lint
+    output for a `kind: feature` slice but did not assert the
+    slice was actually linted (false-positive risk if
+    `iter_slices` silently skipped the fixture). Fixed: added
+    `self.assertIn("099-01", report, ...)` as a positive sanity
+    check.
+
+Test suite re-ran green after fixes: 1022 tests, 3 skipped, no
+regressions.
+
+**9. No deferrals → refinement-todo not touched.** No design
+decisions were deferred during implementation. The four open
+questions in the spec all resolved within the slice (see deviation
+entries 2-4 above + the Outcome enum entry). `docs/refinement-todo.md`
+is unchanged; the DoD's conditional "if any decisions were deferred"
+line is vacuously satisfied (left unticked since the file was not
+touched — accurate reflection rather than vacuous tick).

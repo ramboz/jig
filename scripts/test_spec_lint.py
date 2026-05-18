@@ -805,6 +805,10 @@ class SpikeBodyShapeValidationTests(unittest.TestCase):
         )
         report, code = sl.lint(spec_a, strict=True)
         self.assertEqual(code, 0, msg=report)
+        # Positive sanity: the slice fixture was actually linted (catch
+        # silent-skip regressions in iter_slices or section splitting).
+        self.assertIn("099-01", report,
+                      f"feature slice was not visible in lint output: {report}")
         for label in ("Question", "Time-box", "Findings", "Outcome"):
             # The spike body warning string should not appear.
             # (Using both labels lowered into a string to avoid false-positive

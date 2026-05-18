@@ -66,13 +66,15 @@ conclude with "now ship the implementation," the implementation IS
 the slice, and the research goes inside it.
 
 **Body shape (four labelled blocks).** A `kind: spike` slice carries
-four blocks alongside the standard Goal / DoR / AC / DoD scaffolding:
+four blocks alongside the standard Goal / DoR / AC / DoD scaffolding.
+**Each label must be written with the trailing colon (`**Question:**`,
+etc.) — that is what `spec_lint.py` matches against.**
 
-- **Question** — one sentence stating the open question. Set at DRAFT.
-- **Time-box** — explicit budget (e.g., "1 day", "4 hours"). Set at DRAFT.
-- **Findings** — bullet evidence collected during the spike. Filled
+- **Question:** — one sentence stating the open question. Set at DRAFT.
+- **Time-box:** — explicit budget (e.g., "1 day", "4 hours"). Set at DRAFT.
+- **Findings:** — bullet evidence collected during the spike. Filled
   during IN_PROGRESS.
-- **Outcome** — one of `ADR-NNNN created` / `spec NNN-NN unblocked` /
+- **Outcome:** — one of `ADR-NNNN created` / `spec NNN-NN unblocked` /
   `abandoned (reason)`. Multiple outcomes separated by `;`
   (e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE.
 

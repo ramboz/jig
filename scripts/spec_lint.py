@@ -217,13 +217,20 @@ def _extract_kind(section: str) -> str:
         return str(fields.get("kind", "")).strip()
 
     # Bare-script fallback: pull `kind:` out of any leading `---` block.
+    # Mirrors `_common.parsing._parse_scalar`: strip inline `# comment`
+    # tail when value is unquoted, then strip matched surrounding quotes.
     m = re.match(r"\A(\s*\n)?---\n(.*?)\n---\n", body, re.DOTALL)
     if not m:
         return ""
     for line in m.group(2).splitlines():
         line = line.strip()
         if line.startswith("kind:"):
-            return line.partition(":")[2].strip().strip("\"'")
+            value = line.partition(":")[2].strip()
+            if "#" in value and not (value.startswith('"') or value.startswith("'")):
+                value = value.split("#", 1)[0].rstrip()
+            if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
+                value = value[1:-1]
+            return value
     return ""
 
 
