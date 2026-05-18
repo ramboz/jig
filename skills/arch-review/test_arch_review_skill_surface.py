@@ -42,6 +42,16 @@ def _normalize(s: str) -> str:
     return " ".join(s.lower().split())
 
 
+_FENCED_BLOCK_RE = re.compile(r"(?ms)^```.*?^```[ \t]*$")
+
+
+def _strip_fenced_blocks(text: str) -> str:
+    """Remove fenced ```...``` regions so H2/H3-shaped lines inside code
+    examples don't trip the `_h2_positions` regex helper.
+    Offsets refer to the returned (stripped) body, not the source."""
+    return _FENCED_BLOCK_RE.sub("", text)
+
+
 class FrontmatterTests(unittest.TestCase):
     """AC #1 — active frontmatter (name + user-invocable + no disable)."""
 
@@ -141,6 +151,20 @@ class DescriptionTests(unittest.TestCase):
         self.assertIn("adr authorship or scaffolding", self.normalized)
         self.assertIn("/jig:adr-workflow", self.normalized)
 
+    def test_do_not_use_clause_exclusions_in_spec_mandated_order(self):
+        # AC #1 mandates the three exclusions appear in this exact order:
+        # PR/diff review → spec-compliance → ADR authorship. Filed as inbox
+        # `clarify/test/exclusion-ordering` (2026-05-18, observation extends
+        # to arch-review) — substring presence alone doesn't catch drift.
+        a = self.normalized.find("pr/diff review")
+        b = self.normalized.find("spec-compliance review of a finished slice")
+        c = self.normalized.find("adr authorship or scaffolding")
+        self.assertNotEqual(a, -1, "missing exclusion (a) PR/diff review")
+        self.assertNotEqual(b, -1, "missing exclusion (b) spec-compliance")
+        self.assertNotEqual(c, -1, "missing exclusion (c) ADR authorship")
+        self.assertLess(a, b, "exclusion (a) must precede (b) in spec-mandated order")
+        self.assertLess(b, c, "exclusion (b) must precede (c) in spec-mandated order")
+
 
 class DescriptionBoundsTests(unittest.TestCase):
     """AC #3 (anti-greediness) — the normalized description does NOT contain
@@ -198,10 +222,25 @@ class BodyTests(unittest.TestCase):
 
     def _h2_positions(self, body: str):
         """Return list of (heading_text_lower, char_offset) for every H2."""
+        body = _strip_fenced_blocks(body)
         results = []
         for m in re.finditer(r"(?m)^##\s+(.+?)\s*$", body):
             results.append((m.group(1).lower(), m.start()))
         return results
+
+    def test_fenced_block_h2_h3_are_ignored(self):
+        synthetic = (
+            "## Real H2\n"
+            "Text.\n"
+            "```\n"
+            "## Fake H2 in code block\n"
+            "### Fake H3 in code block\n"
+            "```\n"
+            "### Real H3\n"
+        )
+        headings = [h for h, _ in self._h2_positions(synthetic)]
+        self.assertIn("real h2", headings)
+        self.assertNotIn("fake h2 in code block", headings)
 
     def test_has_what_this_skill_does(self):
         positions = self._h2_positions(self.body)

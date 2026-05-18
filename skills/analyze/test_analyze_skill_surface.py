@@ -55,6 +55,16 @@ def _normalize(s: str) -> str:
     return " ".join(s.lower().split())
 
 
+_FENCED_BLOCK_RE = re.compile(r"(?ms)^```.*?^```[ \t]*$")
+
+
+def _strip_fenced_blocks(text: str) -> str:
+    """Remove fenced ```...``` regions so H2/H3-shaped lines inside code
+    examples don't trip the `_h2_positions` / `_h3_blocks` regex helpers.
+    Offsets refer to the returned (stripped) body, not the source."""
+    return _FENCED_BLOCK_RE.sub("", text)
+
+
 class FrontmatterTests(unittest.TestCase):
     """AC #1 — active frontmatter (name + user-invocable + no disable)."""
 
@@ -206,10 +216,25 @@ class BodyTests(unittest.TestCase):
         cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
 
     def _h2_positions(self, body: str):
+        body = _strip_fenced_blocks(body)
         results = []
         for m in re.finditer(r"(?m)^##\s+(.+?)\s*$", body):
             results.append((m.group(1).lower(), m.start()))
         return results
+
+    def test_fenced_block_h2_h3_are_ignored(self):
+        synthetic = (
+            "## Real H2\n"
+            "Text.\n"
+            "```\n"
+            "## Fake H2 in code block\n"
+            "### Fake H3 in code block\n"
+            "```\n"
+            "### Real H3\n"
+        )
+        headings = [h for h, _ in self._h2_positions(synthetic)]
+        self.assertIn("real h2", headings)
+        self.assertNotIn("fake h2 in code block", headings)
 
     def test_has_what_this_skill_does(self):
         positions = self._h2_positions(self.body)
@@ -367,6 +392,7 @@ class FindingCategoryTests(unittest.TestCase):
         """Return [(heading_text, block_text), ...] for every H3 in the body.
         block_text is everything from the H3 line up to (but not including)
         the next H2 or H3 heading."""
+        body = _strip_fenced_blocks(body)
         blocks = []
         positions = []
         for m in re.finditer(r"(?m)^###\s+(.+?)\s*$", body):

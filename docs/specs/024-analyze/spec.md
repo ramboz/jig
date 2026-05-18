@@ -56,6 +56,21 @@ The user explicitly chose **not** to ship a category-based deferral
 hint to spec-kit's richer `/speckit.analyze` (2026-05-18 conversation).
 Jig's analyze ships as a standalone baseline.
 
+**Terminology.** This spec uses two terms for the same underlying
+concept (slice-level enforcement of `docs/product-vision.md` §
+Design principles) at two surfaces:
+
+- **Principle violations** — the analyze **finding category name**
+  (Goals #2; surfaced by `/jig:analyze` when scanning a spec).
+- **Constitution-gate** — the colloquial label for the
+  **reviewer-prompt enforcement piece** (AC #6;
+  `_principles_check_block()` in `review.py`). Borrowed from
+  spec-kit's "constitution.md" pattern as a familiar cross-tool
+  cue, even though jig has no separate constitution artifact.
+
+Same concept, two enforcement surfaces: detection (analyze) and
+slice-review gate (`review.py`).
+
 ## Why now
 
 - **Direct gap from the spec-kit comparison (2026-05-18).** Second of

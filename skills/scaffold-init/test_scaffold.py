@@ -1412,5 +1412,90 @@ class VisionTemplateSlotsTests(unittest.TestCase):
                 )
 
 
+class TierSkillSetTests(unittest.TestCase):
+    """Pin the full per-tier skill inventory emitted to scaffold.json.
+
+    Catches one-line typos in `scaffold.py`'s `_TIER_SKILLS` table in CI
+    rather than in downstream scaffold dogfooding. Filed as the inbox
+    item `scaffold/test/install-list-tier-1-full-set` (2026-05-18)."""
+
+    EXPECTED_TIER_0 = [
+        "scaffold-init",
+        "memory-sync",
+        "spec-workflow",
+        "independent-review",
+        "migrate",
+        "vision-elicitation",
+        "contracts",
+    ]
+
+    EXPECTED_TIER_1 = [
+        "adr-workflow",
+        "tdd-loop",
+        "slice-land",
+        "pr-review",
+        "arch-review",
+        "clarify",
+        "analyze",
+    ]
+
+    # tier-2 is empty in scaffold.py today; this assertion turns a future
+    # tier-2 addition into a deliberate test update.
+    EXPECTED_TIER_2: list[str] = []
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-tier-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _manifest(self):
+        return json.loads((self.target / "scaffold.json").read_text())
+
+    def _skills_in_tier(self, manifest: dict, tier: str) -> list[str]:
+        prefix = f"{tier}/"
+        return [
+            s[len(prefix):]
+            for s in manifest.get("installed_skills", [])
+            if s.startswith(prefix)
+        ]
+
+    def test_tier_0_is_pinned(self):
+        result = run_scaffold_with_args(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        actual = self._skills_in_tier(self._manifest(), "tier-0")
+        self.assertEqual(
+            actual, self.EXPECTED_TIER_0,
+            f"tier-0 set drift: expected {self.EXPECTED_TIER_0}, got {actual}",
+        )
+
+    def test_tier_1_is_pinned(self):
+        result = run_scaffold_with_args(self.target, "--has-tests")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        actual = self._skills_in_tier(self._manifest(), "tier-1")
+        self.assertEqual(
+            actual, self.EXPECTED_TIER_1,
+            f"tier-1 set drift: expected {self.EXPECTED_TIER_1}, got {actual}",
+        )
+
+    def test_tier_2_is_empty(self):
+        # Even with the tier-2 trigger present, no tier-2 skills exist yet —
+        # tier-2 stays in `offered_tiers` but never lands as `tier-2/<name>`
+        # in `installed_skills` because the table is empty.
+        result = run_scaffold_with_args(
+            self.target, "--has-tests", "--plans-ai",
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        manifest = self._manifest()
+        actual = self._skills_in_tier(manifest, "tier-2")
+        self.assertEqual(
+            actual, self.EXPECTED_TIER_2,
+            f"tier-2 set drift: expected {self.EXPECTED_TIER_2}, got {actual}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
