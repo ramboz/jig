@@ -1,10 +1,11 @@
 {
-  "spec": "docs/specs/021-migrate-copy-machinery/spec.md",
-  "slice": "021-01",
+  "spec": "docs/specs/023-clarify/spec.md",
+  "slice": "023-01",
   "files": [
-    "skills/scaffold-init/scaffold.py",
-    "skills/migrate/migrate.py",
-    "skills/migrate/test_migrate.py",
-    "skills/migrate/SKILL.md"
+    "skills/clarify/SKILL.md",
+    "skills/clarify/test_clarify_skill_surface.py",
+    "skills/clarify/worked-example-jig.md",
+    "skills/clarify/worked-example-saas.md",
+    "skills/scaffold-init/scaffold.py"
   ]
 }

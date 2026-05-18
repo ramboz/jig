@@ -59,6 +59,7 @@ _TIER_SKILLS = {
         "slice-land",
         "pr-review",
         "arch-review",
+        "clarify",
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }
