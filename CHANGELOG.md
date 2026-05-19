@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.0](https://github.com/ramboz/jig/compare/v1.4.0...v1.5.0) (2026-05-19)
+
+
+### Features
+
+* **spec-workflow:** roll spec.md status up from slice states ([e72c8b2](https://github.com/ramboz/jig/commit/e72c8b2ee1339963aeb3da0f443e004b1123a2f5))
+* **spec-workflow:** wire arch-review on-demand pass into post-impl flow (031-02) ([4831112](https://github.com/ramboz/jig/commit/4831112d7c6cbe9c34870acac8aae8fd3f909a0d))
+* **spec-workflow:** wire pr-review craft pass into post-impl flow (031-01) ([b353434](https://github.com/ramboz/jig/commit/b353434e13e0d2acf9530fe515d5d0e1edc92206))
+
+
+### Documentation
+
+* reflect three-pass post-impl review across user-facing docs ([732cf88](https://github.com/ramboz/jig/commit/732cf88ab9e7a424ee4c0fbc3dc362414be48859))
+* **specs:** close out 030-01 — spec.md status rollup ([eeddc47](https://github.com/ramboz/jig/commit/eeddc47f29eb91e7945c4f7ef33ff1cb6f8c4416))
+* **specs:** draft 031-multi-perspective-review + 2 slices ([d7237d5](https://github.com/ramboz/jig/commit/d7237d5bad12a5f6cd088665c80404ac943dd7fb))
+* **specs:** reserve 031-multi-perspective-review ([258d88a](https://github.com/ramboz/jig/commit/258d88aad0ba22169fcda18c7f367e327619f4be))
+* **specs:** roll up 029 spec.md status to DONE ([9c6eaaa](https://github.com/ramboz/jig/commit/9c6eaaaa14e1f3a71c73ced1eafe6615696f4cf0))
+
 ## [1.4.0](https://github.com/ramboz/jig/compare/v1.3.0...v1.4.0) (2026-05-19)
 
 
