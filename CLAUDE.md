@@ -24,7 +24,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 
 ### Active specs
 
-_(none currently in flight — see [docs/specs/README.md](docs/specs/README.md) for the full status board)_
+- **028 — parallel-session locks for shared mutable artifacts.** Slice 028-01 (`adr.py new` reserves on origin/main, parity with `workflow.py new`) DONE. Slices 028-02 (inbox + refinement-todo append-lock) and 028-03 (status-board regen race-check) still DRAFT.
 
 ### Deferred decisions
 
