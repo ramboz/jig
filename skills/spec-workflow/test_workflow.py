@@ -1673,5 +1673,398 @@ class MixedLayoutStatusBoardTests(unittest.TestCase):
         self.assertRegex(board, r"099-02 — beta\s*\|\s*DRAFT")
 
 
+class ComputeSpecStatusTests(unittest.TestCase):
+    """Slice 030-01 AC #1: `compute_spec_status(spec_path)` derives the
+    spec-level rollup from slice states. Pure-function tests across the
+    enumerated fixtures: empty, single-DRAFT, single-DONE, single-DEFERRED,
+    all-DEFERRED, mixed-DONE-DRAFT, mixed-DONE-DEFERRED,
+    mixed-IN_PROGRESS-DONE, legacy embedded, file-per-slice, both layouts."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-rollup-"))
+        self.spec_dir = self.tmpdir / "spec-dir"
+        self.spec_dir.mkdir()
+        self.spec_md = self.spec_dir / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_spec_md(self, body: str = "") -> None:
+        """Write a spec.md with frontmatter and optional body (embedded
+        sections)."""
+        self.spec_md.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec X\n\n## Overview\n\nSyn.\n"
+            + body
+        )
+
+    def _write_slice_file(self, name: str, status: str,
+                          filename: str = None) -> None:
+        """Write a file-per-slice file with frontmatter status."""
+        if filename is None:
+            # Derive a default filename from the slice fragment portion.
+            tag = name.split()[0].replace("—", "").replace("-", "")[:6]
+            filename = f"slice-{tag}.md"
+        path = self.spec_dir / filename
+        path.write_text(
+            f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n---\n\n"
+            f"## Slice {name}\n\n**Goal:** placeholder.\n"
+        )
+
+    def _embedded(self, name: str, status: str) -> str:
+        """Build an embedded `## Slice ...` block w/ `**STATUS:**` marker."""
+        return (
+            f"\n## Slice {name}\n\n**STATUS: {status}**\n\n"
+            f"**Goal:** placeholder.\n"
+        )
+
+    # AC #1: empty spec dir (no slices at all)
+    def test_empty_spec_returns_draft(self):
+        self._write_spec_md()
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DRAFT")
+
+    # AC #1: single DRAFT slice → DRAFT
+    def test_single_draft_slice_returns_draft(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "DRAFT")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DRAFT")
+
+    # AC #1: single DONE slice → DONE
+    def test_single_done_slice_returns_done(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "DONE")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DONE")
+
+    # AC #1: single DEFERRED slice → DRAFT (no live work)
+    def test_single_deferred_slice_returns_draft(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "DEFERRED")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DRAFT")
+
+    # AC #1: all slices DEFERRED → DRAFT
+    def test_all_deferred_returns_draft(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "DEFERRED",
+                               filename="slice-01-a.md")
+        self._write_slice_file("100-02 beta", "DEFERRED",
+                               filename="slice-02-b.md")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DRAFT")
+
+    # AC #1: mixed DONE + DRAFT → IN_PROGRESS (work has begun)
+    def test_mixed_done_draft_returns_in_progress(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "DONE",
+                               filename="slice-01-a.md")
+        self._write_slice_file("100-02 beta", "DRAFT",
+                               filename="slice-02-b.md")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md),
+                         "IN_PROGRESS")
+
+    # AC #1: mixed DONE + DEFERRED → DONE (every non-DEFERRED slice is DONE)
+    def test_mixed_done_deferred_returns_done(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "DONE",
+                               filename="slice-01-a.md")
+        self._write_slice_file("100-02 beta", "DEFERRED",
+                               filename="slice-02-b.md")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DONE")
+
+    # AC #1: mixed IN_PROGRESS + DONE → IN_PROGRESS
+    def test_mixed_in_progress_done_returns_in_progress(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "IN_PROGRESS",
+                               filename="slice-01-a.md")
+        self._write_slice_file("100-02 beta", "DONE",
+                               filename="slice-02-b.md")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md),
+                         "IN_PROGRESS")
+
+    # AC #1: a single READY_FOR_REVIEW slice → IN_PROGRESS (active work)
+    def test_single_ready_for_review_returns_in_progress(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "READY_FOR_REVIEW")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md),
+                         "IN_PROGRESS")
+
+    # AC #1: a single REVIEWED slice → IN_PROGRESS
+    def test_single_reviewed_returns_in_progress(self):
+        self._write_spec_md()
+        self._write_slice_file("100-01 alpha", "REVIEWED")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md),
+                         "IN_PROGRESS")
+
+    # AC #1: legacy embedded-section spec.md with a DONE slice
+    def test_legacy_embedded_done_returns_done(self):
+        self._write_spec_md(self._embedded("100-01 alpha", "DONE"))
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DONE")
+
+    # AC #1: legacy embedded section with mixed DONE + DRAFT → IN_PROGRESS
+    def test_legacy_embedded_mixed_returns_in_progress(self):
+        body = (
+            self._embedded("100-01 alpha", "DONE")
+            + self._embedded("100-02 beta", "DRAFT")
+        )
+        self._write_spec_md(body)
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md),
+                         "IN_PROGRESS")
+
+    # AC #1: both layouts in one spec (mid-migration shape)
+    def test_mixed_layouts_in_one_spec(self):
+        # Slice file: DONE.  Embedded: DRAFT.  Mixed → IN_PROGRESS.
+        self._write_spec_md(self._embedded("100-02 beta", "DRAFT"))
+        self._write_slice_file("100-01 alpha", "DONE",
+                               filename="slice-01-a.md")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md),
+                         "IN_PROGRESS")
+
+    # AC #1: both layouts, all DONE
+    def test_mixed_layouts_all_done(self):
+        self._write_spec_md(self._embedded("100-02 beta", "DONE"))
+        self._write_slice_file("100-01 alpha", "DONE",
+                               filename="slice-01-a.md")
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DONE")
+
+    # AC #6: spec.md without frontmatter still gets a computed status
+    # (it's the WRITE step that's skipped, not the compute).
+    def test_no_frontmatter_still_computes(self):
+        # Write a spec.md that has NO frontmatter block at all
+        self.spec_md.write_text("# Spec\n\n## Overview\n\nSyn.\n")
+        self._write_slice_file("100-01 alpha", "DONE")
+        # compute_spec_status still returns its rule-derived value
+        self.assertEqual(_workflow.compute_spec_status(self.spec_md), "DONE")
+
+
+class TransitionRollupTests(unittest.TestCase):
+    """Slice 030-01 AC #2: `workflow.py transition` writes the rollup
+    to spec.md frontmatter `status:` after the slice mutation."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-tr-rollup-"))
+        self.spec_dir = self.tmpdir / "spec-dir"
+        self.spec_dir.mkdir()
+        self.spec_md = self.spec_dir / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_spec_md(self, status: str = "DRAFT") -> None:
+        self.spec_md.write_text(
+            f"---\nstatus: {status}\n---\n\n# Spec X\n\n## Overview\n\nSyn.\n"
+        )
+
+    def _write_slice_file(self, name: str, status: str,
+                          filename: str = "slice-01-a.md") -> None:
+        (self.spec_dir / filename).write_text(
+            f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n---\n\n"
+            f"## Slice {name}\n\n**Goal:** placeholder.\n"
+        )
+
+    # AC #2: transition writes rollup to spec.md
+    def test_transition_writes_rollup_to_spec_md(self):
+        self._write_spec_md(status="DRAFT")
+        self._write_slice_file("200-01 alpha", "DRAFT")
+        result = run_workflow(
+            "transition", str(self.spec_md), "200-01", "IN_PROGRESS",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self.spec_md.read_text()
+        # spec.md frontmatter status should now be IN_PROGRESS (rollup)
+        m = re.search(r"^status:\s*(\w+)", text, re.MULTILINE)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "IN_PROGRESS",
+                         f"expected IN_PROGRESS rollup, spec.md was:\n{text}")
+
+    # AC #2: rollup flips to DONE when only DONE slices remain
+    def test_transition_to_done_flips_spec_to_done(self):
+        self._write_spec_md(status="DRAFT")
+        self._write_slice_file("200-01 alpha", "RECONCILED")
+        result = run_workflow(
+            "transition", str(self.spec_md), "200-01", "DONE",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = self.spec_md.read_text()
+        m = re.search(r"^status:\s*(\w+)", text, re.MULTILINE)
+        self.assertEqual(m.group(1), "DONE",
+                         f"expected DONE rollup, spec.md was:\n{text}")
+
+    # AC #2: idempotent — same rollup value → no spurious write
+    def test_transition_rollup_is_idempotent(self):
+        # Two slices: both DRAFT. spec.md frontmatter already says DRAFT.
+        self._write_spec_md(status="DRAFT")
+        self._write_slice_file("200-01 alpha", "DRAFT",
+                               filename="slice-01-a.md")
+        self._write_slice_file("200-02 beta", "DRAFT",
+                               filename="slice-02-b.md")
+        before = self.spec_md.read_text()
+        # Transition one slice DRAFT → DRAFT (no-op-ish; rollup stays DRAFT
+        # because the OTHER slice is still DRAFT).
+        # Use a real change that doesn't flip rollup: transition to DRAFT.
+        # We need a state transition that keeps both slices as DRAFT in
+        # aggregate; transitioning 200-01 to DEFERRED keeps spec DRAFT
+        # (the other slice is still DRAFT, all non-DEFERRED are DRAFT).
+        result = run_workflow(
+            "transition", str(self.spec_md), "200-01", "DEFERRED",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        after = self.spec_md.read_text()
+        # spec.md status field should still be DRAFT
+        m = re.search(r"^status:\s*(\w+)", after, re.MULTILINE)
+        self.assertEqual(m.group(1), "DRAFT",
+                         f"expected DRAFT rollup, spec.md was:\n{after}")
+        # spec.md content unchanged (idempotent — no spurious write)
+        self.assertEqual(before, after,
+                         "spec.md was rewritten despite no rollup change")
+
+    # AC #4: spec.md without frontmatter is left untouched
+    def test_transition_does_not_write_to_no_frontmatter_spec(self):
+        # Write a spec.md without frontmatter
+        no_fm = "# Spec X\n\n## Overview\n\nNo frontmatter here.\n"
+        self.spec_md.write_text(no_fm)
+        self._write_slice_file("200-01 alpha", "DRAFT")
+        result = run_workflow(
+            "transition", str(self.spec_md), "200-01", "DONE",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # spec.md content unchanged (no frontmatter insertion)
+        self.assertEqual(self.spec_md.read_text(), no_fm,
+                         "spec.md without frontmatter was modified — "
+                         "defensive case should leave it untouched")
+
+    # AC #2: slice mutation still happens (rollup is ADDITIONAL, not replacement)
+    def test_transition_still_writes_slice_status(self):
+        self._write_spec_md(status="DRAFT")
+        self._write_slice_file("200-01 alpha", "DRAFT")
+        result = run_workflow(
+            "transition", str(self.spec_md), "200-01", "IN_PROGRESS",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # The slice's status should be updated too
+        slice_text = (self.spec_dir / "slice-01-a.md").read_text()
+        self.assertIn("status: IN_PROGRESS", slice_text)
+
+
+class StatusBoardRollupTests(unittest.TestCase):
+    """Slice 030-01 AC #3: `workflow.py status-board` writes the rollup
+    to every spec.md it walks (during regen)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-board-rollup-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        (self.target / "docs/specs").mkdir(parents=True)
+        # Seed the board file so status-board has something to regenerate
+        (self.target / "docs/specs/README.md").write_text(
+            "# Status board\n\n| Spec | Slice | Status | Notes |\n"
+            "|---|---|---|---|\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mk_spec(self, dirname: str, frontmatter_status: str,
+                  slices: list) -> Path:
+        """Build a spec dir with a spec.md (frontmatter `status:`) and a
+        set of file-per-slice files. `slices` is [(name, status), ...]."""
+        spec_dir = self.target / "docs/specs" / dirname
+        spec_dir.mkdir(parents=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            f"---\nstatus: {frontmatter_status}\n---\n\n"
+            f"# Spec\n\n## Overview\n\nSyn.\n"
+        )
+        for i, (name, status) in enumerate(slices, start=1):
+            (spec_dir / f"slice-{i:02d}-x.md").write_text(
+                f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n---\n\n"
+                f"## Slice {name}\n\n**Goal:** placeholder.\n"
+            )
+        return spec_md
+
+    # AC #3: status-board flips DRAFT → DONE for fully-done specs
+    def test_status_board_flips_done_specs(self):
+        spec_md = self._mk_spec("300-alpha", "DRAFT",
+                                 [("300-01 a", "DONE"),
+                                  ("300-02 b", "DONE")])
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        m = re.search(r"^status:\s*(\w+)", spec_md.read_text(),
+                      re.MULTILINE)
+        self.assertEqual(m.group(1), "DONE",
+                         f"expected DONE rollup, spec.md was:\n"
+                         f"{spec_md.read_text()}")
+
+    # AC #3: status-board flips DRAFT → IN_PROGRESS for partial-done specs
+    def test_status_board_flips_in_progress_specs(self):
+        spec_md = self._mk_spec("301-beta", "DRAFT",
+                                 [("301-01 a", "DONE"),
+                                  ("301-02 b", "IN_PROGRESS")])
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        m = re.search(r"^status:\s*(\w+)", spec_md.read_text(),
+                      re.MULTILINE)
+        self.assertEqual(m.group(1), "IN_PROGRESS",
+                         f"expected IN_PROGRESS rollup, spec.md was:\n"
+                         f"{spec_md.read_text()}")
+
+    # AC #3: status-board leaves an already-correct spec.md untouched
+    # (idempotent — no spurious write)
+    def test_status_board_idempotent_on_correct_specs(self):
+        spec_md = self._mk_spec("302-gamma", "DONE",
+                                 [("302-01 a", "DONE")])
+        before = spec_md.read_text()
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        after = spec_md.read_text()
+        # spec.md not changed (rollup matched what's already there)
+        self.assertEqual(before, after,
+                         f"spec.md was rewritten despite no rollup change")
+
+    # AC #3: status-board writes regardless of board-table-changes
+    # (a spec whose status flips DRAFT → DONE updates spec.md even if
+    # the board's per-slice rows are unchanged from the previous version).
+    def test_status_board_writes_spec_even_when_table_unchanged(self):
+        # Set up a fully-DONE spec with frontmatter status: DRAFT
+        spec_md = self._mk_spec("303-delta", "DRAFT",
+                                 [("303-01 a", "DONE")])
+        # First regen to establish baseline table content
+        run_workflow("status-board", str(self.target))
+        # After first regen: spec.md should be DONE, board table reflects DONE.
+        first_text = spec_md.read_text()
+        m = re.search(r"^status:\s*(\w+)", first_text, re.MULTILINE)
+        self.assertEqual(m.group(1), "DONE")
+        # Manually flip spec.md back to DRAFT (simulating drift)
+        spec_md.write_text(first_text.replace(
+            "status: DONE", "status: DRAFT"
+        ))
+        # Second regen — table content already matches slices (idempotent
+        # on its own), but spec.md frontmatter is now stale. The rollup
+        # write should fire regardless.
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        m = re.search(r"^status:\s*(\w+)", spec_md.read_text(),
+                      re.MULTILINE)
+        self.assertEqual(m.group(1), "DONE",
+                         "rollup write should fire even when the board "
+                         "table itself is already current")
+
+    # AC #4: status-board leaves a spec.md without frontmatter alone
+    def test_status_board_does_not_write_to_no_frontmatter_spec(self):
+        spec_dir = self.target / "docs/specs/304-epsilon"
+        spec_dir.mkdir(parents=True)
+        spec_md = spec_dir / "spec.md"
+        no_fm = "# Spec\n\n## Overview\n\nLegacy.\n"
+        spec_md.write_text(no_fm)
+        (spec_dir / "slice-01-a.md").write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 304-01 — alpha\n\n**Goal:** placeholder.\n"
+        )
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # spec.md content unchanged (no frontmatter insertion)
+        self.assertEqual(spec_md.read_text(), no_fm,
+                         "spec.md without frontmatter was modified")
+
+
 if __name__ == "__main__":
     unittest.main()
