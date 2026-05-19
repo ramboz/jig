@@ -67,6 +67,7 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
     for name in (
         "jig-context-check.sh",
         "jig-memory-scan.sh",
+        "jig-post-edit-verify.sh",
         "jig-spec-gate.sh",
         "jig-task-capture.sh",
         "jig-telemetry.sh",

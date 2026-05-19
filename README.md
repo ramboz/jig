@@ -100,7 +100,7 @@ In a Claude Code session at your project root:
 
 This produces `<your-project>/.claude/skills/jig-*/`,
 `.claude/agents/jig-*.md`, `.claude/hooks/scripts/jig-*.sh`, and
-`.claude/settings.json` registering the five jig hooks against the
+`.claude/settings.json` registering the six jig hooks against the
 project-local paths. The pre-016-03 docs-only behavior is preserved
 via `python3 scaffold.py --plugin-only <target>` if you want to
 combine scaffolded docs with a plugin-installed runtime.

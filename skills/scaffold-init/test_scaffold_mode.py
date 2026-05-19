@@ -330,12 +330,15 @@ class WithMachineryDocsRegressionTests(unittest.TestCase):
 EXPECTED_HOOK_SCRIPTS = (
     "jig-context-check.sh",
     "jig-memory-scan.sh",
+    "jig-post-edit-verify.sh",
     "jig-spec-gate.sh",
     "jig-task-capture.sh",
     "jig-telemetry.sh",
 )
 
-EXPECTED_HOOK_EVENTS = ("PreToolUse", "SessionStart", "UserPromptSubmit", "Stop")
+EXPECTED_HOOK_EVENTS = (
+    "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop",
+)
 
 
 class CopyHooksAndRegisterTests(unittest.TestCase):
@@ -356,9 +359,9 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     # ----- AC #6 (h) --------------------------------------------------------
-    def test_h_all_five_hook_scripts_exist_and_are_executable(self):
-        """AC #6 (h) — all five hook scripts exist under
-        .claude/hooks/scripts/ and are executable (0o755)."""
+    def test_h_all_hook_scripts_exist_and_are_executable(self):
+        """AC #6 (h) — every hook script in EXPECTED_HOOK_SCRIPTS exists
+        under .claude/hooks/scripts/ and is executable (0o755)."""
         scripts_dir = self.target / ".claude" / "hooks" / "scripts"
         self.assertTrue(scripts_dir.is_dir(),
                         f".claude/hooks/scripts missing: {scripts_dir}")
@@ -384,9 +387,9 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
                              f"hook script {name} content drifted from source")
 
     # ----- AC #6 (i) --------------------------------------------------------
-    def test_i_settings_json_registers_all_four_hook_events(self):
+    def test_i_settings_json_registers_all_hook_events(self):
         """AC #6 (i) — .claude/settings.json parses as JSON and contains
-        entries for all four hook events referencing
+        entries for all expected hook events referencing
         ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/jig-*.sh."""
         settings_path = self.target / ".claude" / "settings.json"
         self.assertTrue(settings_path.is_file(),
@@ -408,11 +411,11 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
             r"\$\{CLAUDE_PROJECT_DIR\}/\.claude/hooks/scripts/jig-[a-z-]+\.sh",
             settings_path.read_text(),
         )
-        # Exactly five command references — one per hook script.
+        # One command reference per hook script.
         self.assertEqual(
-            len(project_dir_refs), 5,
-            f"expected 5 ${{CLAUDE_PROJECT_DIR}} script refs, got "
-            f"{len(project_dir_refs)}: {project_dir_refs}",
+            len(project_dir_refs), len(EXPECTED_HOOK_SCRIPTS),
+            f"expected {len(EXPECTED_HOOK_SCRIPTS)} ${{CLAUDE_PROJECT_DIR}} "
+            f"script refs, got {len(project_dir_refs)}: {project_dir_refs}",
         )
 
     def test_settings_json_shape_mirrors_source_hooks_json(self):
