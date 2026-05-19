@@ -51,5 +51,21 @@ suite.addTests(loader.discover(
     top_level_dir=str(ROOT / "scripts"),
 ))
 
+# Slice 026-01 — hook-helper and hook-integration tests under
+# hooks/scripts/{,lib}/. Same pattern as the skills loop: pin
+# top_level_dir per directory because the dir name contains a hyphen
+# in the parent path (`.claude/worktrees/…`), and so unittest needs an
+# explicit anchor for the importability check.
+for hook_test_dir in (ROOT / "hooks" / "scripts", ROOT / "hooks" / "scripts" / "lib"):
+    if not hook_test_dir.is_dir():
+        continue
+    if not any(hook_test_dir.glob("test_*.py")):
+        continue
+    suite.addTests(loader.discover(
+        start_dir=str(hook_test_dir),
+        pattern="test_*.py",
+        top_level_dir=str(hook_test_dir),
+    ))
+
 result = unittest.TextTestRunner(verbosity=1).run(suite)
 sys.exit(0 if result.wasSuccessful() else 1)

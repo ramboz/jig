@@ -386,6 +386,34 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
             self.assertEqual(source, copied,
                              f"hook script {name} content drifted from source")
 
+    def test_hook_lib_directory_copied(self):
+        """Slice 026-01 — hooks/scripts/lib/ ships beside the .sh files so
+        jig-context-check.sh can import the context_fill helper after a
+        scaffold install (not just in the source plugin tree). Test
+        modules (test_*.py) are NOT shipped — runtime only."""
+        src_lib = REPO_ROOT / "hooks" / "scripts" / "lib"
+        if not src_lib.is_dir():
+            self.skipTest("source hooks/scripts/lib/ missing")
+        dst_lib = self.target / ".claude" / "hooks" / "scripts" / "lib"
+        self.assertTrue(dst_lib.is_dir(),
+                        f"scaffolded lib/ missing: {dst_lib}")
+        # Every runtime .py in the source lib/ is present and byte-
+        # identical in the scaffolded copy. test_*.py is excluded.
+        runtime_pys = [p for p in sorted(src_lib.glob("*.py"))
+                       if not p.name.startswith("test_")]
+        self.assertGreater(len(runtime_pys), 0,
+                           "source lib/ has no runtime .py files")
+        for src_py in runtime_pys:
+            dst_py = dst_lib / src_py.name
+            self.assertTrue(dst_py.is_file(),
+                            f"scaffolded lib/{src_py.name} missing")
+            self.assertEqual(src_py.read_bytes(), dst_py.read_bytes(),
+                             f"lib/{src_py.name} content drifted")
+        # And tests are NOT shipped.
+        for src_py in sorted(src_lib.glob("test_*.py")):
+            self.assertFalse((dst_lib / src_py.name).exists(),
+                             f"test module {src_py.name} should not ship")
+
     # ----- AC #6 (i) --------------------------------------------------------
     def test_i_settings_json_registers_all_hook_events(self):
         """AC #6 (i) — .claude/settings.json parses as JSON and contains
