@@ -1,13 +1,9 @@
 {
   "spec": "docs/specs/029-spike-slices/spec.md",
-  "slice": "029-01",
+  "slice": "029-02",
   "files": [
-    "scripts/spec_lint.py",
-    "scripts/test_spec_lint.py",
-    "skills/_common/test_parsing.py",
-    "skills/spec-workflow/SKILL.md",
+    "skills/spec-workflow/workflow.py",
     "skills/spec-workflow/test_workflow.py",
-    "templates/docs/specs/slice-template.md",
-    "docs/spec-workflow/spidr-primer.md"
+    "docs/specs/README.md"
   ]
 }

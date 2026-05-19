@@ -3,6 +3,12 @@
 > Current state of all specs. Maintained by `workflow.py status-board` — re-run
 > any time to sync with `docs/specs/*/spec.md`. The Notes column is preserved
 > across regen, so curate it freely.
+>
+> A leading 🔬 in the Slice column flags slices marked `kind: spike` in their
+> frontmatter — timeboxed investigation, not feature work (see [SPIDR
+> primer](../spec-workflow/spidr-primer.md) and `skills/spec-workflow/SKILL.md`
+> for the body shape). The marker is recomputed from each slice's `kind:` field
+> on every regen — it is never stored separately in this file.
 
 | Spec | Slice | Status | Notes |
 |------|-------|--------|-------|
@@ -83,7 +89,7 @@
 | [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-02 — inbox-and-refinement-todo-append-lock | DRAFT |  |
 | [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-03 — status-board-regen-race-check | DRAFT |  |
 | [029-spike-slices](029-spike-slices/spec.md) | 029-01 — kind-frontmatter-and-body-shape | **DONE** | Adds `kind` enum to slice frontmatter; `kind: spike` is the first non-default value. `spec_lint.py` hard-errors on unknown enum + soft-warns on missing spike body labels (Question/Time-box/Findings/Outcome); standalone SPIDR primer landed at `docs/spec-workflow/spidr-primer.md`. +34 tests; 988 → 1022 green. |
-| [029-spike-slices](029-spike-slices/spec.md) | 029-02 — status-board-spike-marker | DRAFT |  |
+| [029-spike-slices](029-spike-slices/spec.md) | 029-02 — status-board-spike-marker | IN_PROGRESS |  |
 
 ## Deferred slices
 

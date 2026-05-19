@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: [029-01]
 last_verified:
 ---
@@ -53,8 +53,8 @@ grep for `kind: spike` or open individual slice files.
    file on the second run (no marker churn, no whitespace drift).
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases: all-spike spec; no-spike spec; mixed
       spike+feature spec; spec where the only slice is a spike
       (1-slice-spec case from spec 029 Overview).

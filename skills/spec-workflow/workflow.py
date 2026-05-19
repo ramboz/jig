@@ -60,6 +60,15 @@ _AUTO_TICK_LABELS = {
 # subsection are post-DONE follow-up and NOT eligible for auto-tick.
 _CLOSE_OUT_RE = re.compile(r"(?im)^###\s+close[- ]?out\b")
 
+# Slice 029-02: visible marker prepended to a slice's row when the slice's
+# frontmatter carries `kind: spike`. Single emoji (no schema churn — see
+# spec 029 Open question #3 lean), recomputed at render time from each
+# slice's `kind:` field (so the marker is never the source of truth; the
+# slice frontmatter is). Manual edits to the board that strip the marker
+# are re-added on the next regen; manual edits to a slice's `kind:` field
+# propagate on the next regen.
+SPIKE_MARKER = "\U0001f52c"  # 🔬
+
 
 class WorkflowError(RuntimeError):
     """Raised for user-facing workflow errors (CLI exits non-zero)."""
@@ -382,9 +391,13 @@ def _extract_resolution_trigger(section: str) -> str:
 
 def collect_slices(project_dir: Path) -> list:
     """Walk docs/specs/*/spec.md and collect (spec_dir, slice_label, status,
-    resolution_trigger) tuples in file order. resolution_trigger is the
-    empty string when the slice is not DEFERRED (or simply has no
-    `**Resolution trigger:**` line)."""
+    resolution_trigger, kind) tuples in file order. resolution_trigger is
+    the empty string when the slice is not DEFERRED (or simply has no
+    `**Resolution trigger:**` line). `kind` is the slice's frontmatter
+    `kind:` value (slice 029-01: `"spike"` / `"feature"` / `""` for
+    unset). Slice 029-02 reads this to drive the marker in
+    `render_status_table` — recomputed every regen from the slice's
+    frontmatter, so the marker is never stored separately."""
     specs_dir = project_dir / "docs" / "specs"
     if not specs_dir.is_dir():
         return []
@@ -408,14 +421,26 @@ def collect_slices(project_dir: Path) -> list:
                     status = sm.group(1)
             trigger = (_extract_resolution_trigger(section)
                        if status == "DEFERRED" else "")
-            rows.append((spec_dir, loc.label, status or "UNKNOWN", trigger))
+            # Slice 029-02: read `kind:` from frontmatter (slice 029-01
+            # convention). Defaults to "" when unset — same as feature.
+            kind = str(fm_fields.get("kind", "")).strip()
+            rows.append(
+                (spec_dir, loc.label, status or "UNKNOWN", trigger, kind),
+            )
     return rows
 
 
 def parse_existing_notes(existing: str) -> dict:
     """Extract a {(spec_dir, slice_label): notes_text} map from the current
     board's table. Used to preserve curated Notes across regen — the workflow's
-    most valuable per-row content (test counts, review state, links)."""
+    most valuable per-row content (test counts, review state, links).
+
+    Slice 029-02: the slice cell may be marker-prefixed (`🔬 <label>`) for
+    spike rows. The marker is stripped when computing the lookup key so
+    notes-preservation is stable across marker comes/goes (e.g. a slice
+    whose `kind:` changes between regens, or a user who hand-strips the
+    marker on the board — see AC #2).
+    """
     notes_map = {}
     # Match `| [spec-link]... | slice | status | notes |` rows; preamble + headers skipped.
     # Two constraints are load-bearing for not gluing adjacent rows together:
@@ -439,6 +464,12 @@ def parse_existing_notes(existing: str) -> dict:
         # Skip the header row ("Spec" / "Slice" / "Status" / "Notes")
         if spec_dir.lower() == "spec":
             continue
+        # Slice 029-02: strip a leading `SPIKE_MARKER ` prefix so the
+        # lookup key is the unmarked label. Without this, a hand-curated
+        # note on a spike row would orphan whenever the marker comes
+        # or goes across regens.
+        if label.startswith(SPIKE_MARKER):
+            label = label[len(SPIKE_MARKER):].lstrip()
         notes_map[(spec_dir, label)] = notes
     return notes_map
 
@@ -446,15 +477,30 @@ def parse_existing_notes(existing: str) -> dict:
 def render_status_table(rows: list, notes_map: dict = None) -> str:
     """Build the Markdown table for the status board. `notes_map` carries
     Notes from the prior version of the board, looked up by (spec_dir, label).
-    Tolerates both 3-tuple (legacy) and 4-tuple (slice 014-02) row shapes."""
+    Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), and 5-tuple
+    (slice 029-02, with `kind`) row shapes.
+
+    Slice 029-02: when a row's `kind == "spike"`, the slice cell is
+    prepended with the `SPIKE_MARKER` glyph + a space. The marker is a
+    pure rendering concern — `notes_map` is keyed by the unmarked label
+    so curated notes survive across runs where the marker comes or goes.
+    """
     notes_map = notes_map or {}
     lines = ["| Spec | Slice | Status | Notes |", "|------|-------|--------|-------|"]
     for row in rows:
         spec_dir, label, status = row[0], row[1], row[2]
+        kind = row[4] if len(row) >= 5 else ""
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
         status_cell = f"**{status}**" if status == "DONE" else status
         notes = notes_map.get((spec_dir, label), "")
-        lines.append(f"| {spec_link} | {label} | {status_cell} | {notes} |")
+        # Slice 029-02: prepend the spike marker on the slice cell only
+        # when the slice's `kind == "spike"`. Single-emoji + space prefix;
+        # no schema churn, no new column.
+        if kind == "spike":
+            slice_cell = f"{SPIKE_MARKER} {label}"
+        else:
+            slice_cell = label
+        lines.append(f"| {spec_link} | {slice_cell} | {status_cell} | {notes} |")
     return "\n".join(lines) + "\n"
 
 
