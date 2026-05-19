@@ -84,6 +84,8 @@
 | [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-03 — status-board-regen-race-check | DRAFT |  |
 | [029-spike-slices](029-spike-slices/spec.md) | 029-01 — tbd | DRAFT |  |
 | [030-spec-status-rollup](030-spec-status-rollup/spec.md) | 030-01 — rollup-on-transition-and-regen | **DONE** | +25 tests; spec.md `status:` is derived from non-DEFERRED slice states (DONE / IN_PROGRESS / DRAFT). Writes from `transition` + `status-board`; idempotent; defensive on no-frontmatter. Backfill flipped 23 stale DRAFTs to DONE. |
+| [031-multi-perspective-review](031-multi-perspective-review/spec.md) | 031-01 — pr-review-pass | DRAFT |  |
+| [031-multi-perspective-review](031-multi-perspective-review/spec.md) | 031-02 — arch-review-trigger | DRAFT |  |
 
 ## Deferred slices
 
