@@ -364,6 +364,12 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     # file-per-slice ones.
     loc.path.write_text(new_text)
 
+    # Slice 030-01: roll up spec.md's frontmatter `status:` from the
+    # current slice states. Idempotent — no-op when the rollup matches
+    # what's already in spec.md (or when spec.md has no frontmatter).
+    # Ordered AFTER the slice write so the rollup reflects the new state.
+    _write_spec_rollup(spec_md)
+
     return f"transitioned {slice_name}: {old_status} → {new_status}"
 
 
@@ -378,6 +384,84 @@ def _extract_resolution_trigger(section: str) -> str:
     Returns "" when absent."""
     m = _RESOLUTION_TRIGGER_RE.search(section)
     return m.group(1).strip() if m else ""
+
+
+def compute_spec_status(spec_path: Path) -> str:
+    """Slice 030-01: derive the spec-level rollup from slice states.
+
+    Returns one of "DRAFT", "IN_PROGRESS", "DONE":
+      - No slices at all                                        → DRAFT
+      - All slices DEFERRED                                     → DRAFT
+      - All non-DEFERRED slices are DRAFT                       → DRAFT
+      - At least one non-DEFERRED slice AND every non-DEFERRED
+        slice has status DONE                                   → DONE
+      - Anything else (mix of DONE+DRAFT, any IN_PROGRESS,
+        REVIEWED, RECONCILED, READY_FOR_REVIEW, ...)            → IN_PROGRESS
+
+    Pure function: reads spec slices via `iter_slices` (dual-layout,
+    matches `collect_slices`'s status-read pattern). Defensive: a spec.md
+    without frontmatter still gets a computed status — the WRITE step
+    (handled by callers `transition` / `status-board`) is what's skipped
+    on missing frontmatter, not the compute.
+    """
+    statuses = []
+    for loc in _iter_slices_common(spec_path):
+        section = loc.text[loc.start:loc.end]
+        fm_fields, _ = _slice_frontmatter(section)
+        if fm_fields.get("status"):
+            statuses.append(fm_fields["status"])
+            continue
+        m = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
+        if m:
+            statuses.append(m.group(1))
+
+    # No slices at all → DRAFT
+    if not statuses:
+        return "DRAFT"
+
+    non_deferred = [s for s in statuses if s != "DEFERRED"]
+
+    # Every slice is DEFERRED → DRAFT (no live work)
+    if not non_deferred:
+        return "DRAFT"
+
+    # Every non-DEFERRED slice is DONE → DONE
+    if all(s == "DONE" for s in non_deferred):
+        return "DONE"
+
+    # Every non-DEFERRED slice is DRAFT → DRAFT (no work begun)
+    if all(s == "DRAFT" for s in non_deferred):
+        return "DRAFT"
+
+    # Mix of DONE + DRAFT, or any active state → IN_PROGRESS
+    return "IN_PROGRESS"
+
+
+def _write_spec_rollup(spec_path: Path) -> bool:
+    """Slice 030-01: idempotently update spec.md's frontmatter `status:`
+    field to the computed rollup. Returns True if the file was written
+    (rollup value changed), False otherwise.
+
+    Defensive — when spec.md has NO frontmatter block at all, return
+    False without writing (no frontmatter insertion; lazy-migration
+    consistent with slice 015-01).
+    """
+    if not spec_path.is_file():
+        return False
+    text = spec_path.read_text()
+    fields, _ = parse_frontmatter(text)
+    if not fields:
+        # No frontmatter block → leave the file alone (defensive).
+        return False
+    computed = compute_spec_status(spec_path)
+    current = fields.get("status", "")
+    if current == computed:
+        return False
+    new_text = set_frontmatter_field(text, "status", computed)
+    if new_text == text:
+        return False
+    spec_path.write_text(new_text)
+    return True
 
 
 def collect_slices(project_dir: Path) -> list:
@@ -492,7 +576,10 @@ def regenerate_status_board(project_dir: Path) -> str:
     Preserves preamble before the first `| Spec` line AND Notes column
     content from the existing table. Slice 014-02: appends a separate
     `## Deferred slices` table after the active table when any slice
-    is in `DEFERRED`. Idempotent."""
+    is in `DEFERRED`. Slice 030-01: also writes the spec.md `status:`
+    rollup for each walked spec (idempotent — only writes when the
+    computed value differs from what's currently in spec.md frontmatter,
+    and skipped for spec.md files without frontmatter). Idempotent."""
     board_path = project_dir / "docs" / "specs" / "README.md"
     if not board_path.is_file():
         raise WorkflowError(f"status board not found: {board_path}")
@@ -503,6 +590,16 @@ def regenerate_status_board(project_dir: Path) -> str:
     rows = collect_slices(project_dir)
     new_table = render_status_table(rows, notes_map)
     deferred_section = render_deferred_table(rows)
+
+    # Slice 030-01: roll up spec-level status to spec.md frontmatter for
+    # every spec walked. Side-effect of regen — independent of whether
+    # the board's table text itself changed, so a spec whose frontmatter
+    # drifted from its slice states still gets corrected. Idempotent
+    # per spec via `_write_spec_rollup`.
+    specs_dir = project_dir / "docs" / "specs"
+    if specs_dir.is_dir():
+        for spec_md in sorted(specs_dir.glob("*/spec.md")):
+            _write_spec_rollup(spec_md)
 
     m = re.search(r"(?m)^\|\s*Spec\b", existing)
     if m:

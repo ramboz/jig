@@ -1458,7 +1458,6 @@ class MixedLayoutTransitionTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_transition_writes_to_slice_file_not_spec_md(self):
-        spec_before = self.spec.read_text()
         result = run_workflow(
             "transition", str(self.spec), "018-01", "IN_PROGRESS",
         )
@@ -1466,8 +1465,22 @@ class MixedLayoutTransitionTests(unittest.TestCase):
         # Slice file's frontmatter updated
         slice_after = self.slice_file.read_text()
         self.assertIn("status: IN_PROGRESS", slice_after)
-        # spec.md UNCHANGED — the write must go to loc.path, not blindly spec_md
-        self.assertEqual(self.spec.read_text(), spec_before)
+        # spec.md's slice content section is UNCHANGED — the slice
+        # mutation must go to loc.path, not blindly spec_md. Slice 030-01
+        # adds an additional valid write to spec.md's frontmatter
+        # `status:` field (rollup), so the file is allowed to change ONLY
+        # in that field. The embedded slice section (018-02) must not
+        # have been touched.
+        spec_after = self.spec.read_text()
+        m = re.search(
+            r"## Slice 018-02[^\n]*\n+\*\*STATUS:\s+(\w+)\*\*", spec_after,
+        )
+        self.assertIsNotNone(m)
+        self.assertEqual(
+            m.group(1), "DRAFT",
+            "spec.md's embedded slice 018-02 should remain DRAFT — only "
+            "the slice file's 018-01 was transitioned",
+        )
 
     def test_transition_writes_to_spec_md_for_embedded_slice(self):
         slice_before = self.slice_file.read_text()

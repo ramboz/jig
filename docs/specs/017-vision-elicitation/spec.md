@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: vision-elicitation
 tier: 0
 ---

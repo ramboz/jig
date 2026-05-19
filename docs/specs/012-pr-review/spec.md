@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: pr-review
 tier: 1
 ---

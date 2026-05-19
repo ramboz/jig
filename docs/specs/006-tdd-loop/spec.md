@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: tdd-loop
 tier: 1
 ---

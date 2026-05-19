@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: arch-review
 tier: 1
 ---

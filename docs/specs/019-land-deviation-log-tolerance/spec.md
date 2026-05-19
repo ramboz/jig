@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: slice-land
 tier: 1
 ---

@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: adr-workflow
 tier: 1
 ---

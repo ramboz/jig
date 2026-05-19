@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: contracts
 tier: 1
 ---

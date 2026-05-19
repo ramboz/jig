@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-05-18
 ---
 
 ## Slice 030-01 — rollup-on-transition-and-regen
@@ -90,12 +90,14 @@ status board regen keeps it that way going forward.
       mixed shapes / dual-layout) are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation (e.g. the three-vs-two state
-      collapse decision from the spec's Open questions).
+      deferred during implementation. (Both pre-impl open
+      questions — three-vs-two states, all-DEFERRED-shape — were
+      locked by the user before implementation, so this row is
+      expected to stay empty.)
 
 ### Close-out (post-DONE)
 
@@ -131,4 +133,118 @@ trustworthy again."
 
 The original spec is preserved above. Implementation notes:
 
-_TBD — populated during reconciliation._
+**Implementation:**
+
+- **Code added.** `compute_spec_status(spec_path) -> str` (pure
+  function, ~30 LOC) + `_write_spec_rollup(spec_path) -> bool` (private
+  helper for the write side, ~15 LOC). Both in
+  `skills/spec-workflow/workflow.py`. The `compute_spec_status`
+  function lives just above `collect_slices` (re-uses the same
+  `iter_slices` + `_slice_frontmatter` + `**STATUS:**` fallback read
+  pattern). The `_write_spec_rollup` helper centralizes the
+  idempotence + no-frontmatter-skip behavior.
+- **Integration call sites.** Two new lines in `workflow.py`:
+  - `transition()` — single call to `_write_spec_rollup(spec_md)`
+    inserted AFTER the slice file write (per AC #2 ordering).
+  - `regenerate_status_board()` — loop over `specs_dir.glob("*/spec.md")`
+    calling `_write_spec_rollup` for each. The loop runs unconditionally
+    on every regen, independent of whether the board's table text
+    changed (per AC #3).
+- **Tests added.** 25 new tests across 3 new test classes in
+  `skills/spec-workflow/test_workflow.py`:
+  - `ComputeSpecStatusTests` (15 tests) — covers every fixture
+    enumerated in AC #1: empty / single-DRAFT / single-DONE /
+    single-DEFERRED / all-DEFERRED / mixed-DONE-DRAFT /
+    mixed-DONE-DEFERRED / mixed-IN_PROGRESS-DONE / single
+    READY_FOR_REVIEW / single REVIEWED / legacy embedded DONE /
+    legacy embedded mixed / mixed-layouts-IN_PROGRESS / mixed-layouts-DONE /
+    no-frontmatter-still-computes.
+  - `TransitionRollupTests` (5 tests) — AC #2 + AC #4 integration:
+    rollup write to spec.md after slice mutation, DRAFT→IN_PROGRESS
+    flip, DRAFT→DONE flip via RECONCILED→DONE, idempotent no-write
+    when rollup unchanged, no write when spec.md has no frontmatter,
+    slice mutation still occurs (rollup is additional, not replacement).
+  - `StatusBoardRollupTests` (5 tests) — AC #3 + AC #4 integration:
+    flips DONE specs, flips IN_PROGRESS specs, idempotent on correct
+    specs, writes even when board table is unchanged (the
+    "drift-correction" path), skips spec.md without frontmatter.
+- **One pre-existing test updated.** `MixedLayoutTransitionTests
+  .test_transition_writes_to_slice_file_not_spec_md` asserted spec.md
+  was byte-identical after a transition to a slice file. Slice 030-01's
+  rollup intentionally adds an additional write to spec.md's
+  frontmatter `status:` field when the rollup value differs. The
+  test's intent (slice mutation goes to the slice file, NOT to
+  spec.md's slice content) is preserved by asserting spec.md's
+  embedded 018-02 STATUS marker stays DRAFT — only the frontmatter
+  field is allowed to change. No production deviation; the existing
+  test was over-strict for the new behavior.
+- **Test totals.** Before: 988 tests passing. After: 1013 tests
+  passing. Delta: +25 (all new in test_workflow.py). No regressions.
+- **Backfill verification (AC #5).** Ran `python3
+  skills/spec-workflow/workflow.py status-board .` from the jig
+  project root. Counts:
+  - **Before backfill:** 29/29 spec.md files showed `status: DRAFT`.
+  - **After backfill:** 23 DONE, 2 IN_PROGRESS, 4 DRAFT.
+  - **DONE (23):** 001-015, 017-025 (every spec whose non-DEFERRED
+    slices are all DONE today).
+  - **IN_PROGRESS (2):** 016 (slice 016-04 has "DEFERRED" in its
+    heading title but its body STATUS marker reads `DRAFT` — a
+    data nit in that spec's slice header, not a rollup bug; the
+    rollup correctly counts it as DRAFT, which drives IN_PROGRESS
+    given mixed DONE+DRAFT) and 030 (this slice itself, with
+    030-01 at REVIEWED at the time of backfill).
+  - **DRAFT (4):** 026, 027, 028, 029 (newly reserved, all slices
+    still DRAFT).
+  - Board's table text unchanged by the backfill (the per-slice rows
+    were already accurate — only the spec.md frontmatter was stale).
+  - Second invocation of `status-board` produces no further diff
+    (idempotent).
+- **Anti-horizontal-phasing check (per slice template):** every
+  spec.md in the repo now carries a trustworthy `status:` field
+  visible in `git diff` and `cat`. End-to-end signal delivered.
+
+**Reconciliation notes:**
+
+- **Implementation review (pass).** Surfaced two findings:
+  (1) a deviation-log inaccuracy claiming slice 016-04 had
+  STATUS marker read `REVIEWED` when it actually read `DRAFT`
+  — corrected in this log (see "IN_PROGRESS (2)" entry above).
+  (2) `_write_spec_rollup`'s no-frontmatter detection uses
+  `if not fields` rather than `body_offset == 0` — reviewer
+  flagged as imprecise but low-priority ("defer if no concrete
+  drift surfaces"). Deferred; no change.
+- **Reconciliation review (pass).** Confirmed deviation log
+  matches reality. Two reconciliation notes:
+  (1) The DoD's "decisions deferred during implementation" row
+  cited an example ("three-vs-two state collapse decision from
+  the spec's Open questions") referencing an Open questions
+  section that was removed pre-impl when the user locked both
+  decisions. Updated the DoD row to reflect that both questions
+  were locked and the row is expected to stay empty.
+  (2) The spec preamble cites "28 spec.md files" — accurate at
+  drafting time (2026-05-18 mid-session), but the actual
+  backfill ran over 29 specs (after 029 was reserved earlier
+  the same day and 030 itself was added). Normal counts drift;
+  no doc update.
+- **Status board staleness at close-out.** During reconciliation,
+  `docs/specs/README.md` line 86 shows 030-01 as `IN_PROGRESS`
+  while the slice frontmatter is `REVIEWED`. This is transient —
+  the post-DONE board regen (close-out checklist item) will
+  refresh the row.
+- **SKILL.md note pending close-out.** The DoD close-out items
+  include "skills/spec-workflow/SKILL.md mentions the rollup
+  behavior in a one-sentence note." Deferred to post-DONE
+  per the close-out section convention.
+- **Dogfood-surfaced footgun (parked in inbox).** Running
+  `workflow.py transition` on this slice file with quoted
+  `**STATUS: X**` strings in the deviation log clobbered one of
+  them — the helper's `(\*\*STATUS:\s*)([A-Z_]+)(\*\*)` regex is
+  not anchored to the slice's own status line and will match the
+  first occurrence anywhere in the section body, including prose
+  examples. Today's slice file was patched by rewording (no
+  asterisks around `STATUS: X`). Spec 017's four slice files
+  contain similar prose markers; they're all DONE so the bite
+  surface is small. Follow-up parked in `docs/inbox.md`.
+- **Scope: clean.** No unplanned doc or code changes outside
+  the slice's declared surface. All edits are accounted for in
+  the bullets above.

@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: analyze
 tier: 1
 ---
