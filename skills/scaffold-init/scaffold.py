@@ -686,6 +686,19 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
             # across umasks (e.g. 0o022 vs. 0o077).
             os.chmod(dst, 0o755)
 
+        # Slice 026-01 — hooks/scripts/lib/ ships beside the .sh files
+        # so jig-context-check.sh can import its helper after a scaffold
+        # install. Copy .py files only (no __pycache__, no test_*.py —
+        # the scaffolded install carries runtime modules, not tests).
+        src_lib = src_scripts / "lib"
+        if src_lib.is_dir():
+            dst_lib = dst_scripts / "lib"
+            dst_lib.mkdir(exist_ok=True)
+            for py in sorted(src_lib.glob("*.py")):
+                if py.name.startswith("test_"):
+                    continue
+                (dst_lib / py.name).write_bytes(py.read_bytes())
+
     jig_hooks = _build_jig_hook_entries(plugin)
     merged = _merge_settings(existing, jig_hooks)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
