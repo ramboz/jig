@@ -1,9 +1,8 @@
 {
-  "spec": "docs/specs/029-spike-slices/spec.md",
-  "slice": "029-02",
+  "spec": "docs/specs/028-parallel-session-locks/spec.md",
+  "slice": "028-01",
   "files": [
-    "skills/spec-workflow/workflow.py",
-    "skills/spec-workflow/test_workflow.py",
-    "docs/specs/README.md"
+    "skills/adr-workflow/adr.py",
+    "skills/adr-workflow/test_adr.py"
   ]
 }
