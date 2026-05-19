@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.0](https://github.com/ramboz/jig/compare/v1.3.0...v1.4.0) (2026-05-19)
+
+
+### Features
+
+* **spec-workflow:** 029-01 — kind: spike frontmatter + body-shape validation ([9a57fe7](https://github.com/ramboz/jig/commit/9a57fe74e63702d9d96813a6373f46e486bf8a2b))
+* **spec-workflow:** 029-02 — status-board spike marker ([6b7b36d](https://github.com/ramboz/jig/commit/6b7b36d402f66a269021412eea9b223f56c8b42f))
+
+
+### Documentation
+
+* add workflow + runtime wiring Mermaid diagrams ([b31ef9e](https://github.com/ramboz/jig/commit/b31ef9eac801407e2effceca917f4014d033c69c))
+* **refinement-todo:** close "AI-first onboarding doc" entry ([9d5ebba](https://github.com/ramboz/jig/commit/9d5ebba9adc894a176851ced3cf865e25ef03b75))
+* **spec-workflow:** add SPIDR primer + worked-example sibling ([6241f52](https://github.com/ramboz/jig/commit/6241f52485356addb8da109a218ac3400fc0e6c7))
+* **specs:** close out spec 013 — all four close-out items resolved ([a4b2433](https://github.com/ramboz/jig/commit/a4b2433bbf3c9521651a4b54db5757a6badd0245))
+* **specs:** close out spec 025 — CLAUDE.md compress-on-close-out rule ([e4fe5e9](https://github.com/ramboz/jig/commit/e4fe5e9f6038d3b2ef756ec96f7146d30b93b2d3))
+* **specs:** draft 026-028 + refinement-todo entries for jig's long-running-session gaps ([1d5593f](https://github.com/ramboz/jig/commit/1d5593f6c2b1542ebabe4cf380d7962aeea47f34))
+* **specs:** draft 029-spike-slices ([6bc01cf](https://github.com/ramboz/jig/commit/6bc01cf6d4deec4aa3f3c384aa4ad6a867a64245))
+* **specs:** reserve 029-spike-slices ([171a3b7](https://github.com/ramboz/jig/commit/171a3b7164d13385c7e90c589f1507082101822c))
+* **specs:** reserve 030-spec-status-rollup ([859d567](https://github.com/ramboz/jig/commit/859d567a7f974807e5220fceefe15e42881e03df))
+
 ## [1.3.0](https://github.com/ramboz/jig/compare/v1.2.0...v1.3.0) (2026-05-18)
 
 
