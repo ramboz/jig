@@ -511,7 +511,13 @@ def render_deferred_table(rows: list) -> str:
     """Slice 014-02: separate table for `DEFERRED` slices with the
     Resolution trigger as the per-row context. Returns the empty string
     when no rows are deferred (so the section is fully omitted, not
-    rendered as a heading with an empty table)."""
+    rendered as a heading with an empty table).
+
+    Slice 029-02: tolerates the 5-tuple row shape and prepends the
+    `SPIKE_MARKER` glyph for `kind == "spike"` rows so DEFERRED spikes
+    are visually consistent with active spikes in the upper table.
+    Falls back to no-marker rendering for legacy 3- or 4-tuple rows
+    (no kind field available)."""
     deferred = [r for r in rows if len(r) >= 3 and r[2] == "DEFERRED"]
     if not deferred:
         return ""
@@ -528,8 +534,10 @@ def render_deferred_table(rows: list) -> str:
     for row in deferred:
         spec_dir, label = row[0], row[1]
         trigger = row[3] if len(row) >= 4 else ""
+        kind = row[4] if len(row) >= 5 else ""
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
-        lines.append(f"| {spec_link} | {label} | {trigger} |")
+        slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
+        lines.append(f"| {spec_link} | {slice_cell} | {trigger} |")
     return "\n".join(lines) + "\n"
 
 

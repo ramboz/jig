@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: [029-01]
 last_verified:
 ---
@@ -58,10 +58,10 @@ grep for `kind: spike` or open individual slice files.
       fixture. Edge cases: all-spike spec; no-spike spec; mixed
       spike+feature spec; spec where the only slice is a spike
       (1-slice-spec case from spec 029 Overview).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
 - [ ] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
@@ -94,5 +94,103 @@ surfaces it.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+**1. Marker form resolved — `🔬` (microscope emoji).** Spec's Open
+question #3 listed three candidates (leading icon, prefix tag, new
+column) with a lean toward the icon. **Resolved icon (`U+1F52C`).**
+Rationale: single Unicode glyph (predictable width, no column-shape
+drift); prepended to the slice cell with a space separator; no
+schema churn (still 4 cells / 5 pipes per row); round-trips cleanly
+through the existing `parse_existing_notes` regex.
+
+**2. Marker stored as a constant, not a magic string.** Introduced
+`SPIKE_MARKER = "\U0001f52c"` at module scope in `workflow.py`.
+`render_status_table`, `render_deferred_table`, and
+`parse_existing_notes` all reference the constant. Tests reference
+the same glyph via `self.MARKER = "\U0001f52c"`. A future marker
+change is a one-line edit.
+
+**3. Marker derived from `kind:` at render time, not stored
+separately.** Per AC #2, the board file itself never carries the
+marker as canonical state — `collect_slices` reads `kind` from each
+slice's frontmatter on every regen, and `render_*_table` applies
+the prefix. Two consecutive regens produce identical output (AC #7
+idempotency held). `parse_existing_notes` strips the marker prefix
+before keying the notes-map lookup so curated notes survive flipping
+a slice's `kind:` field or hand-stripping the marker. Tests
+`test_marker_derived_from_kind_field_on_regen` +
+`test_flipping_kind_field_propagates_on_next_regen` exercise both
+directions.
+
+**4. Tuple-shape extended to 5-tuple, backward-compatible.**
+`collect_slices` now returns `(spec_dir, label, status, trigger,
+kind)`. `render_status_table` and `render_deferred_table` both
+length-check the row tuple and fall back to `kind == ""` for legacy
+3- or 4-tuple rows. Existing callers and tests pass unchanged.
+
+**5. Reviewer findings — three SPECIFIC ISSUES addressed inline,
+verdict went from `needs-changes` to effectively `pass`.** The
+implementation reviewer (jig:reviewer subagent, 2026-05-18) caught
+three real gaps, all fixed inline before transitioning to REVIEWED:
+
+  - **`templates/docs/specs/README.md.template`** — the scaffold
+    template was not updated with the spike-marker preamble.
+    Newly-scaffolded projects would lack AC #4 documentation. Fixed:
+    template gained the same `> A leading 🔬 in the Slice column …`
+    paragraph as the in-repo board (adapted for the scaffold's
+    lighter style — drops the `[SPIDR primer]` cross-link since
+    scaffolded projects don't ship that artifact at a stable path).
+  - **`render_deferred_table` did not honor `kind` for DEFERRED
+    spike slices.** AC #1 says "Spike slices carry a visible marker
+    in the status board" without restricting to the active table.
+    Fixed: `render_deferred_table` now consumes the 5-tuple shape
+    too and prepends the marker for `kind == "spike"`. Two new
+    tests (`test_deferred_spike_renders_with_marker`,
+    `test_deferred_non_spike_renders_without_marker`) pin the
+    behaviour.
+  - **Misleading test comment claimed a template-pinning test
+    existed when it didn't.** Fixed: comment now cross-references
+    the new `test_scaffold_template_documents_spike_marker` (added
+    in the same fixup) which actually pins the template's preamble
+    structure.
+
+Three new tests added during the fixup: 1036 → 1039 grand total
+(3 skipped), still no regressions.
+
+**6. Embedded-layout coverage NOT added (deliberate scope
+narrowing).** The 14 original tests + 3 fixup tests all use
+file-per-slice fixtures (frontmatter-first layout from spec 018).
+No test exercises the embedded `## Slice` layout with a `kind:
+spike` slice. Rationale: 029-01 ships `kind` parsing for both
+layouts (via the `KindEmbeddedSliceLayoutTests` over-delivery), so
+the underlying support is tested at the parser level; the
+rendering pipeline reads through the same `iter_slices` path, so
+the marker would surface for embedded-layout spikes too. No
+observed gap; reviewer flagged this as "minor / completeness" and
+recorded here for future reference.
+
+**7. Hand-added marker on a non-spike row — uncovered edge case.**
+On regen, a hand-added marker on a row whose underlying slice is
+NOT `kind: spike` would vanish (correct behavior — the marker is
+re-derived from frontmatter). The current test suite doesn't
+exercise this inverse direction. Reviewer flagged as a minor
+completeness note; recorded here, no test added (the existing
+`test_marker_derived_from_kind_field_on_regen` covers the primary
+direction and the parse-side stripping in `parse_existing_notes`
+covers the notes-preservation concern, which is the load-bearing
+property).
+
+**8. Stronger AC #7 idempotency pin (mtime equality) NOT added.**
+Reviewer suggested also asserting file mtime equality on consecutive
+regens. Current tests cover contents-equality + the "already
+current" stdout message; mtime equality would catch a class of
+filesystem-touch regressions not currently observed. Filed as a
+minor reconciliation note rather than a fix — adding mtime checks
+would require slightly more fixture plumbing for not-clearly-needed
+coverage.
+
+**9. No deferrals → refinement-todo not touched.** Marker form (the
+only open question relevant to this slice — #3 in spec) resolved in
+entry 1. No design decisions deferred. `docs/refinement-todo.md`
+unchanged; DoD's conditional "if any decisions were deferred" line
+vacuously satisfied (left unticked — accurate reflection of "file
+not touched" rather than vacuous tick).

@@ -2022,9 +2022,10 @@ class StatusBoardSpikeMarkerTests(unittest.TestCase):
         means without grepping for `kind: spike`. The status-board
         preamble (or a small header sentence) names the marker."""
         # Existing repo's board carries the documentation; scaffolded
-        # projects get the same documentation via the template (a separate
-        # template-pinning test asserts that). Here we pin the in-repo
-        # board itself, which is what real readers see.
+        # projects get the same documentation via the template (pinned
+        # by `test_scaffold_template_documents_spike_marker` below).
+        # Here we pin the in-repo board itself, which is what real
+        # readers see.
         board_path = REPO_ROOT / "docs" / "specs" / "README.md"
         text = board_path.read_text()
         # The preamble lives above the first `| Spec` table header.
@@ -2197,6 +2198,70 @@ class StatusBoardSpikeMarkerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("already current", result.stdout,
                        f"idempotent regen path skipped; stdout:\n{result.stdout}")
+
+    # ----- AC #4 (scaffold parity): the scaffold template carries the
+    # same marker documentation so newly-scaffolded projects don't need
+    # to re-discover the convention.
+
+    def test_scaffold_template_documents_spike_marker(self):
+        """The scaffold template at `templates/docs/specs/README.md.template`
+        carries the spike-marker explanation so freshly-scaffolded
+        projects ship with the documentation already in place — same
+        AC #4 surface as the in-repo board (pinned above)."""
+        template_path = REPO_ROOT / "templates" / "docs" / "specs" / "README.md.template"
+        text = template_path.read_text()
+        # Preamble sits above the first `| Spec` table header (same
+        # layout as the rendered board).
+        m = re.search(r"(?m)^\|\s*Spec\b", text)
+        self.assertIsNotNone(m, "no `| Spec` table header in template")
+        preamble = text[: m.start()]
+        self.assertIn(self.MARKER, preamble,
+                       f"template preamble must show the marker glyph; got:\n{preamble}")
+        self.assertRegex(
+            preamble,
+            r"(?i)spike",
+            "template preamble must mention 'spike' so the marker meaning is recoverable",
+        )
+
+    # ----- AC #1 (deferred-table parity): DEFERRED `kind: spike` rows
+    # render with the marker too — same visual contract as active rows.
+
+    def test_deferred_spike_renders_with_marker(self):
+        """A DEFERRED spike slice carries the marker in the `## Deferred
+        slices` table, same as it would in the active table."""
+        self._write_spike_slice("160-deferred-spike",
+                                 "160-01 — investigate-later",
+                                 "DEFERRED")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        # Locate the deferred section and scope the assertion to it.
+        deferred_idx = board.find("## Deferred slices")
+        self.assertNotEqual(deferred_idx, -1,
+                            f"no deferred section in board:\n{board}")
+        deferred = board[deferred_idx:]
+        self.assertIn(f"{self.MARKER} 160-01 — investigate-later", deferred,
+                      f"deferred spike row missing marker; section:\n{deferred}")
+
+    def test_deferred_non_spike_renders_without_marker(self):
+        """A DEFERRED non-spike slice renders unchanged in the deferred
+        table — the marker is spike-only."""
+        self._write_feature_slice("161-deferred-feature",
+                                   "161-01 — wait-on-trigger",
+                                   "DEFERRED")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        deferred_idx = board.find("## Deferred slices")
+        self.assertNotEqual(deferred_idx, -1,
+                            f"no deferred section in board:\n{board}")
+        deferred = board[deferred_idx:]
+        # The row exists in the deferred section.
+        self.assertIn("161-01 — wait-on-trigger", deferred,
+                      f"deferred feature row missing; section:\n{deferred}")
+        # And does NOT carry the marker prefix on its slice cell.
+        self.assertNotIn(f"{self.MARKER} 161-01", deferred,
+                         f"deferred feature row erroneously carries marker; section:\n{deferred}")
 
 
 if __name__ == "__main__":
