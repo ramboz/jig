@@ -64,7 +64,7 @@ flowchart TB
 ```
 
 - **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
-- **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only.
+- **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only. `pr-review` and `arch-review` stay judgment-only as skills, but are *invoked* deterministically from the post-implementation flow via `review.py pr-review` / `review.py arch-review` prompt builders (see [skills/spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) § "After implementation").
 - **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
 - **Hook spine** intercepts at four Claude Code events. Two hooks read-only (`telemetry`, `context-check`); two inject `additionalContext` (`memory-scan`, `task-capture`); one can block tool calls with exit-code 2 (`spec-gate`).
 
@@ -124,7 +124,7 @@ project-scoped-wins precedence; jig introduces no new arbiter.
 
 *Roster:*
 - `implementer`: TDD discipline, writes deliverables
-- `reviewer`: read-only, fresh context per review
+- `reviewer`: read-only, fresh context per review. Fires 1–3 times per slice under the multi-perspective post-implementation flow: once for compliance, once for craft (`pr-review`), and once for arch (`arch-review`) when the slice's frontmatter declares `arch_review: true`. Reused as the agent shape for all three passes — no `pr-reviewer` or `arch-reviewer` agent.
 - `architect`: rare, ADR-style output
 
 As of [spec 011-01 (plugin-self-install)](specs/011-plugin-self-install/spec.md),

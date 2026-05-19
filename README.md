@@ -23,7 +23,7 @@ jig encodes all of this so you don't rediscover it session by session.
 jig installs a focused, opinionated workflow layer into your project:
 
 - **Spec-driven development** — SPIDR-split vertical slices with Definition of Done per slice
-- **Independent review** — a reviewer subagent with fresh context evaluates every implementation
+- **Multi-perspective review** — every slice runs through compliance (`jig:independent-review`, always) + craft (`pr-review`, always) + architecture (`arch-review`, on-demand via `arch_review: true` slice frontmatter). The craft + arch passes defer to richer user-installed skills when present.
 - **Typed contracts** — enforced boundaries at module interfaces for AI-legible codebases
 - **Memory layer** — cross-session continuity via hot cache + deep storage + inbox
 - **Deterministic gates** — hooks enforce "this MUST happen"; skills handle "when relevant"
@@ -70,6 +70,12 @@ are the two current instances.
 This keeps jig opinionated about *workflow* (spec-driven, reviewer-gated,
 deterministic helpers) while staying out of the way of *judgment skills*
 you've already invested in.
+
+The `pr-review` and `arch-review` skills are not just on-demand — the
+`spec-workflow` skill auto-triggers them as part of the post-implementation
+review for every slice (craft pass always; arch pass on-demand via
+`arch_review: true` in the slice's frontmatter). Your installed skill wins
+the dispatch automatically.
 
 ## Installation
 

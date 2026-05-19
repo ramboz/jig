@@ -95,7 +95,7 @@ The minimum coherent workflow. Nothing useful without all five.
 1. **`scaffold-init`** — generate docs/, hot-cache CLAUDE.md, settings.json
 2. **`memory-sync`** — cross-session continuity; hot cache + deep storage + inbox
 3. **`spec-workflow`** — SPIDR-split slices; DRAFT → DONE state machine; status board
-4. **`independent-review`** — reviewer subagent with fresh context, every implementation
+4. **`independent-review`** — reviewer subagent with fresh context. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
 5. **`migrate`** — sibling entry path for projects that already have specs
 
 ### Tier 1 — default-on (the working surface)
@@ -106,8 +106,8 @@ drivers once Tier 0 is in place.
 6. **`adr-workflow`** — capture decisions; resolve refinement-todo entries
 7. **`tdd-loop`** — auto-detected test runner; normalized exit codes (0/1/2)
 8. **`slice-land`** — readiness check + landing checklist (direct merge or PR)
-9. **`pr-review`** — slim baseline four-section review; defers to richer user skills
-10. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern
+9. **`pr-review`** — slim baseline four-section review; defers to richer user skills. `spec-workflow` invokes it automatically as the **craft pass** of the post-implementation review (always runs).
+10. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern. `spec-workflow` invokes it automatically as the **arch pass** of the post-implementation review, **on-demand** when the slice's frontmatter declares `arch_review: true`.
 11. **`contracts`** — judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL); defers to richer user skills
 12. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications` (per spec 023, **no** deferral hint to spec-kit per explicit user direction 2026-05-18)
 13. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate (per spec 024 AC #6 — `_principles_check_block()` appended unconditionally to every reviewer prompt). Same no-deferral-hint stance as clarify

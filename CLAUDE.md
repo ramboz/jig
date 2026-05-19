@@ -69,7 +69,7 @@ _(none currently in flight — see [docs/specs/README.md](docs/specs/README.md) 
 1. Check [docs/specs/README.md](docs/specs/README.md) for current status.
 2. Pick up next `READY_FOR_IMPLEMENTATION` slice.
 3. Spawn `implementer` subagent with the spec path.
-4. After deliverable is on disk, spawn `reviewer` subagent.
+4. After deliverable is on disk, run the post-implementation review — three passes: compliance via `jig:independent-review` (always), craft via `pr-review` (always), arch via `arch-review` (only when slice frontmatter has `arch_review: true`). See [docs/workflow.md](docs/workflow.md#post-implementation-review) and [skills/spec-workflow/SKILL.md](skills/spec-workflow/SKILL.md) § "After implementation" for the block rule.
 5. Reconcile: update docs, write deviation log, run reconciliation review.
 6. Run `/jig:memory-sync` to consolidate learnings.
 7. Update spec status and status board.

@@ -30,7 +30,7 @@ stateDiagram-v2
         Refactor --> [*]: slice complete
     }
 
-    IN_PROGRESS --> REVIEWED: deliverable on disk
+    IN_PROGRESS --> REVIEWED: all required review passes pass
     REVIEWED --> IN_PROGRESS: needs-changes
     REVIEWED --> RECONCILED: review pass + deviation log
     RECONCILED --> IN_PROGRESS: reconciliation fails
@@ -61,11 +61,37 @@ All specs are SPIDR-split before implementation begins:
 1. Check `docs/specs/README.md` for current status board.
 2. Pick up the next `READY_FOR_IMPLEMENTATION` slice.
 3. Spawn the `implementer` subagent with the spec path.
-4. After deliverable is on disk, trigger `independent-review`.
-5. Address reviewer findings.
+4. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — three passes via `jig:independent-review`, `pr-review`, and optionally `arch-review`).
+5. Address reviewer findings; `[blocker]`-tagged craft/arch findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.
 6. Run reconciliation: update `architecture.md` if module boundaries changed; annotate spec with deviation log; run reconciliation review.
 7. Update spec status to `DONE`. Update `docs/specs/README.md`.
 8. Run `memory-sync` to consolidate learnings.
+
+## Post-implementation review
+
+Every slice goes through up to three review passes between IN_PROGRESS
+and REVIEWED.
+
+1. **Compliance pass — `jig:independent-review`** (always). Reviewer
+   subagent with fresh context evaluates the deliverable against the
+   slice's acceptance criteria. Verdict envelope: VERDICT / REASONING /
+   SPECIFIC ISSUES / RECONCILIATION NOTES. `fail` or `needs-changes`
+   blocks the transition.
+2. **Craft pass — `pr-review`** (always). Routes to the most-specific
+   installed `pr-review` skill (user > project > `jig:pr-review`) via
+   the Claude Code skill router. Output: scope / blockers / nits /
+   strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES
+   entries tagged `[blocker]` / `[nit]` / `[strength]`. Only
+   `[blocker]`-tagged entries block; `[nit]` and `needs-changes`
+   become reconciliation-log items.
+3. **Arch pass — `arch-review`** (on-demand). Runs only when the
+   slice's frontmatter declares `arch_review: true`. Routes to the
+   most-specific installed `arch-review` skill (user > project >
+   `jig:arch-review`). Output: summary / strengths / concerns / open
+   questions. Same block rule as the craft pass.
+
+Order: compliance → craft → (arch if flagged). All required passes
+must `pass` for the IN_PROGRESS → REVIEWED transition.
 
 ## Reconciliation rules
 
