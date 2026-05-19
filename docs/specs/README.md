@@ -90,7 +90,9 @@
 | [028-parallel-session-locks](028-parallel-session-locks/spec.md) | 028-03 — status-board-regen-race-check | DRAFT |  |
 | [029-spike-slices](029-spike-slices/spec.md) | 029-01 — kind-frontmatter-and-body-shape | **DONE** | Adds `kind` enum to slice frontmatter; `kind: spike` is the first non-default value. `spec_lint.py` hard-errors on unknown enum + soft-warns on missing spike body labels (Question/Time-box/Findings/Outcome); standalone SPIDR primer landed at `docs/spec-workflow/spidr-primer.md`. +34 tests; 988 → 1022 green. |
 | [029-spike-slices](029-spike-slices/spec.md) | 029-02 — status-board-spike-marker | **DONE** | Spike slices render with a leading 🔬 prefix in their row (`SPIKE_MARKER` constant in `workflow.py`, derived from `kind:` at render time). Both active + deferred tables; scaffold template carries the same preamble. +17 tests; 1022 → 1039 green. |
-| [030-spec-status-rollup](030-spec-status-rollup/spec.md) | 030-01 — tbd | DRAFT |  |
+| [030-spec-status-rollup](030-spec-status-rollup/spec.md) | 030-01 — rollup-on-transition-and-regen | **DONE** | +25 tests; spec.md `status:` is derived from non-DEFERRED slice states (DONE / IN_PROGRESS / DRAFT). Writes from `transition` + `status-board`; idempotent; defensive on no-frontmatter. Backfill flipped 23 stale DRAFTs to DONE. |
+| [031-multi-perspective-review](031-multi-perspective-review/spec.md) | 031-01 — pr-review-pass | DRAFT |  |
+| [031-multi-perspective-review](031-multi-perspective-review/spec.md) | 031-02 — arch-review-trigger | DRAFT |  |
 
 ## Deferred slices
 
