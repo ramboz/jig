@@ -1686,6 +1686,596 @@ class MixedLayoutStatusBoardTests(unittest.TestCase):
         self.assertRegex(board, r"099-02 — beta\s*\|\s*DRAFT")
 
 
+# ---------- spike documentation surface (slice 029-01) ----------
+
+
+class SpikeSliceTemplateTests(unittest.TestCase):
+    """Slice 029-01 AC #4: the slice template documents the spike body
+    shape under a `kind: spike` subsection.
+
+    AC #7 also concerns this surface — the three outcome forms
+    (`ADR-NNNN created`, `spec NNN-NN unblocked`, `abandoned (reason)`)
+    and the semicolon multi-outcome convention must be documented here
+    so the template, SKILL.md, and SPIDR primer agree.
+    """
+
+    def setUp(self):
+        template = (REPO_ROOT / "templates" / "docs" / "specs"
+                    / "slice-template.md")
+        self.template = template
+        self.text = template.read_text()
+
+    def test_template_has_spike_subsection_heading(self):
+        # AC #4: a subsection introducing the spike body shape exists.
+        self.assertRegex(
+            self.text,
+            r"(?im)^###\s+.*kind:\s*spike.*",
+            "expected a '### For `kind: spike` slices' (or similar) "
+            "subsection in the slice template",
+        )
+
+    def test_template_lists_all_four_spike_labels(self):
+        # AC #4: the four labelled blocks are documented.
+        for label in ("**Question:**", "**Time-box:**",
+                      "**Findings:**", "**Outcome:**"):
+            self.assertIn(label, self.text,
+                          f"spike body label {label!r} missing from template")
+
+    def test_template_documents_three_outcome_forms(self):
+        # AC #7: all three outcome forms documented.
+        self.assertIn("ADR-NNNN created", self.text)
+        self.assertIn("spec NNN-NN unblocked", self.text)
+        self.assertIn("abandoned (reason)", self.text)
+
+    def test_template_documents_semicolon_multi_outcome(self):
+        # AC #7: multiple outcomes joined by `;` documented.
+        self.assertIn(";", self.text)
+        # Cheap pin: at least one prose mention of "semicolon" or "multiple"
+        # near the spike section.
+        self.assertRegex(
+            self.text,
+            r"(?is)kind:\s*spike.*(semicolon|multiple outcomes)",
+            "template must say multiple outcomes are separated by `;`",
+        )
+
+
+class SpidrPrimerSpikeTests(unittest.TestCase):
+    """Slice 029-01 AC #5 + AC #8: the SPIDR primer at
+    `docs/spec-workflow/spidr-primer.md` documents the
+    "when S fires → kind: spike" rule with a worked example.
+    """
+
+    def setUp(self):
+        primer = REPO_ROOT / "docs" / "spec-workflow" / "spidr-primer.md"
+        self.primer_path = primer
+        self.assertTrue(primer.is_file(),
+                        f"SPIDR primer must exist at {primer}")
+        self.text = primer.read_text()
+
+    def test_primer_documents_when_s_fires_rule(self):
+        # AC #5: explicit "when the S axis fires, mark `kind: spike`" rule.
+        # Match the load-bearing phrasing: a mention of `kind: spike` near
+        # the discussion of when the Spike axis applies.
+        self.assertIn("kind: spike", self.text,
+                      "SPIDR primer must reference `kind: spike` explicitly")
+        # The rule should appear in the context of S/Spike axis.
+        self.assertRegex(
+            self.text,
+            r"(?is)(spike|S axis|S\s*—)[^\n]*?kind:\s*spike|"
+            r"kind:\s*spike[^\n]*?(spike|S axis|S\s*—)",
+            "the `kind: spike` rule must appear in the context of the S axis",
+        )
+
+    def test_primer_worked_example_has_four_labels(self):
+        # AC #8: a worked spike example with all four labels.
+        for label in ("**Question:**", "**Time-box:**",
+                      "**Findings:**", "**Outcome:**"):
+            self.assertIn(label, self.text,
+                          f"SPIDR primer worked example missing {label!r}")
+
+    def test_primer_worked_example_has_concrete_outcome(self):
+        # AC #8: the worked example should show one of the three outcome
+        # forms (ADR-NNNN / spec NNN-NN / abandoned) concretely.
+        outcome_section = self.text
+        self.assertRegex(
+            outcome_section,
+            r"(?im)\*\*Outcome:\*\*[^\n]*?"
+            r"(ADR-\d{4}\s+created|spec\s+\d{3}-\d{2}\s+unblocked"
+            r"|abandoned\s*\([^)]+\))",
+            "worked example must show a concrete Outcome value",
+        )
+
+    def test_primer_documents_three_outcome_forms(self):
+        # AC #7: outcome forms documented in the primer too.
+        self.assertIn("ADR-NNNN created", self.text)
+        self.assertIn("spec NNN-NN unblocked", self.text)
+        self.assertIn("abandoned (reason)", self.text)
+
+
+class SpecWorkflowSkillMdSpikeTests(unittest.TestCase):
+    """Slice 029-01 AC #6 + AC #7: `skills/spec-workflow/SKILL.md` gains a
+    "Spike slices" subsection covering (a) when to introduce a spike,
+    (b) the four-label body shape, (c) always-nested rule, (d) abandoned
+    failure mode.
+    """
+
+    def setUp(self):
+        skill = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
+        self.skill_path = skill
+        self.text = skill.read_text()
+
+    def test_skill_has_spike_slices_subsection(self):
+        # AC #6: a `## Spike slices` (or `### Spike slices`) section exists.
+        self.assertRegex(
+            self.text,
+            r"(?im)^#{2,3}\s+Spike slices\s*$",
+            "expected a 'Spike slices' subsection in spec-workflow/SKILL.md",
+        )
+
+    def test_skill_lists_four_body_labels(self):
+        # AC #6(b): the four labelled blocks are named.
+        for label in ("Question", "Time-box", "Findings", "Outcome"):
+            self.assertIn(label, self.text,
+                          f"SKILL.md missing spike body label {label!r}")
+
+    def test_skill_documents_always_nested_rule(self):
+        # AC #6(c): the always-nested rule must be stated.
+        # Look for "always nested" or "never standalone" phrasing near
+        # the spike section.
+        self.assertRegex(
+            self.text,
+            r"(?is)spike slices.*?(always[- ]nested|never standalone"
+            r"|no standalone|no\s+`?docs/spikes/?`?)",
+            "SKILL.md must document the always-nested rule for spikes",
+        )
+
+    def test_skill_documents_abandoned_failure_mode(self):
+        # AC #6(d): abandoned-spike manual reshape pattern documented.
+        self.assertRegex(
+            self.text,
+            r"(?is)abandon",
+            "SKILL.md must document the abandoned-spike failure mode",
+        )
+        # The mode must mention manual review / audit of dependents,
+        # not automatic cascade.
+        self.assertRegex(
+            self.text,
+            r"(?is)(manual|human).*?(audit|reshape|review).*?depend|"
+            r"depend.*?(manual|human).*?(audit|reshape|review)",
+            "SKILL.md must say abandoned spikes require manual dependent audit",
+        )
+
+    def test_skill_documents_three_outcome_forms(self):
+        # AC #7: outcome forms appear in SKILL.md too.
+        self.assertIn("ADR-NNNN created", self.text)
+        self.assertIn("spec NNN-NN unblocked", self.text)
+        self.assertIn("abandoned (reason)", self.text)
+
+
+# ---------- status-board spike marker (slice 029-02) ----------
+
+
+class StatusBoardSpikeMarkerTests(unittest.TestCase):
+    """Slice 029-02: `kind: spike` slices render with a visible marker
+    in the status board, derived from the slice's `kind:` field at render
+    time. The marker is additive — it does not introduce a new column,
+    change column shape, or break parser round-trips."""
+
+    # The marker chosen (per spec Open question #3 lean): a leading
+    # microscope emoji on the slice cell. Single-char prefix, no schema
+    # churn, survives the `parse_existing_notes` regex round-trip.
+    MARKER = "\U0001f52c"  # 🔬
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-spike-board-"))
+        self.target = self.tmpdir / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_spike_slice(self, spec_dir: str, label: str,
+                            status: str, kind: str = "spike") -> Path:
+        """Create a file-per-slice spec dir with a `kind: spike`
+        frontmatter slice."""
+        sd = self.target / "docs/specs" / spec_dir
+        sd.mkdir(parents=True, exist_ok=True)
+        # Stub spec.md (frontmatter only — slice lives in slice-NN-*.md).
+        spec_md = sd / "spec.md"
+        if not spec_md.is_file():
+            spec_md.write_text("---\nstatus: DRAFT\n---\n\n# Spec\n")
+        # File-per-slice slice file with `kind:` frontmatter.
+        slice_num = label.split()[0].split("-")[1]  # "029-02 alpha" → "02"
+        slice_file = sd / f"slice-{slice_num}-test.md"
+        kind_line = f"kind: {kind}\n" if kind else ""
+        slice_file.write_text(
+            f"---\nstatus: {status}\ndependencies: []\n{kind_line}---\n\n"
+            f"## Slice {label}\n\n**Goal:** investigate something.\n"
+        )
+        return slice_file
+
+    def _write_feature_slice(self, spec_dir: str, label: str,
+                              status: str) -> Path:
+        """Create a regular (non-spike) slice — no `kind:` field, or
+        `kind: feature`. Default: no `kind:` field at all (most realistic
+        for legacy slices)."""
+        return self._write_spike_slice(spec_dir, label, status, kind="")
+
+    def _read_board(self) -> str:
+        return (self.target / "docs/specs/README.md").read_text()
+
+    # ----- AC #1: spike slices carry the marker; non-spike unchanged.
+
+    def test_spike_slice_renders_with_marker(self):
+        self._write_spike_slice("100-spike-test", "100-01 — investigate-x",
+                                 "DRAFT")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        # The slice cell carries the marker prefix on the spike slice row.
+        # Anchor against the slice label so we catch the prefix and the
+        # column shape together.
+        self.assertRegex(
+            board,
+            rf"\|\s*{re.escape(self.MARKER)}\s+100-01 — investigate-x\s*\|",
+            f"spike row missing marker; board:\n{board}",
+        )
+
+    def test_non_spike_slice_renders_without_marker(self):
+        self._write_feature_slice("101-feature", "101-01 — regular-work",
+                                   "DRAFT")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        # The non-spike slice cell has no leading marker.
+        self.assertIn("101-01 — regular-work", board)
+        self.assertNotRegex(
+            board,
+            rf"\|\s*{re.escape(self.MARKER)}\s+101-01 — regular-work",
+            f"non-spike row has unexpected marker; board:\n{board}",
+        )
+
+    def test_explicit_kind_feature_renders_without_marker(self):
+        """`kind: feature` (the documented explicit-default synonym for
+        unset) must NOT trigger the marker."""
+        self._write_spike_slice("102-feature-explicit",
+                                 "102-01 — explicit-feature",
+                                 "DRAFT", kind="feature")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        self.assertIn("102-01 — explicit-feature", board)
+        self.assertNotRegex(
+            board,
+            rf"\|\s*{re.escape(self.MARKER)}\s+102-01 — explicit-feature",
+        )
+
+    # ----- AC #2: marker is derived from `kind:`, not stored separately.
+
+    def test_marker_derived_from_kind_field_on_regen(self):
+        """Manual-edit-to-the-board that strips the marker is re-added
+        on the next regen (marker is recomputed from each slice's `kind:`,
+        not stored in the board itself)."""
+        self._write_spike_slice("110-derive", "110-01 — a-spike", "DRAFT")
+        # First regen — marker present.
+        run_workflow("status-board", str(self.target))
+        board1 = self._read_board()
+        self.assertIn(self.MARKER, board1)
+        # Hand-strip the marker from the board (manual edit).
+        stripped = board1.replace(f"{self.MARKER} 110-01", "110-01")
+        self.assertNotEqual(stripped, board1)
+        (self.target / "docs/specs/README.md").write_text(stripped)
+        # Second regen — marker is restored from the slice's `kind:`.
+        run_workflow("status-board", str(self.target))
+        board2 = self._read_board()
+        self.assertIn(f"{self.MARKER} 110-01", board2,
+                       "marker must be re-added on regen even after manual strip")
+
+    def test_flipping_kind_field_propagates_on_next_regen(self):
+        """Editing the slice's `kind:` field from `spike` to nothing
+        (regular feature) removes the marker on the next regen."""
+        slice_file = self._write_spike_slice(
+            "111-flip", "111-01 — flippable", "DRAFT",
+        )
+        run_workflow("status-board", str(self.target))
+        board_with = self._read_board()
+        self.assertIn(f"{self.MARKER} 111-01", board_with)
+        # Now flip the slice's frontmatter — drop `kind: spike`.
+        original = slice_file.read_text()
+        flipped = original.replace("kind: spike\n", "")
+        self.assertNotEqual(flipped, original)
+        slice_file.write_text(flipped)
+        # Re-regen the board — marker should be gone for this slice.
+        run_workflow("status-board", str(self.target))
+        board_after = self._read_board()
+        self.assertIn("111-01 — flippable", board_after)
+        self.assertNotRegex(
+            board_after,
+            rf"\|\s*{re.escape(self.MARKER)}\s+111-01",
+            "marker must vanish when `kind: spike` is removed from the slice",
+        )
+
+    # ----- AC #3: marker does not break parsers; round-trip preserved.
+
+    def test_marker_does_not_corrupt_notes_preservation(self):
+        """The marker must round-trip through `parse_existing_notes` —
+        manual notes on a spike row must survive subsequent regens
+        unchanged, with the marker still in place."""
+        self._write_spike_slice("120-roundtrip", "120-01 — survive-notes",
+                                 "DRAFT")
+        run_workflow("status-board", str(self.target))
+        board_path = self.target / "docs/specs/README.md"
+        first = board_path.read_text()
+        # Find the spike row and curate a note on it.
+        # The row reads: `| [spec] | 🔬 120-01 — survive-notes | DRAFT |  |`
+        # We replace the trailing empty notes cell with a curated note.
+        empty_cell = (
+            f"| {self.MARKER} 120-01 — survive-notes | DRAFT |  |"
+        )
+        curated_cell = (
+            f"| {self.MARKER} 120-01 — survive-notes | DRAFT "
+            f"| curated note — spike-row test |"
+        )
+        self.assertIn(empty_cell, first,
+                       f"baseline row shape missing; board:\n{first}")
+        board_path.write_text(first.replace(empty_cell, curated_cell))
+        # Re-regen — note must survive AND marker stays.
+        run_workflow("status-board", str(self.target))
+        final = board_path.read_text()
+        self.assertIn("curated note — spike-row test", final,
+                       f"curated note on spike row lost on regen; board:\n{final}")
+        self.assertIn(f"{self.MARKER} 120-01 — survive-notes", final)
+
+    # ----- AC #4: marker is documented (status-board preamble).
+
+    def test_status_board_preamble_documents_the_marker(self):
+        """A reader who sees `🔬` should be able to find out what it
+        means without grepping for `kind: spike`. The status-board
+        preamble (or a small header sentence) names the marker."""
+        # Existing repo's board carries the documentation; scaffolded
+        # projects get the same documentation via the template (pinned
+        # by `test_scaffold_template_documents_spike_marker` below).
+        # Here we pin the in-repo board itself, which is what real
+        # readers see.
+        board_path = REPO_ROOT / "docs" / "specs" / "README.md"
+        text = board_path.read_text()
+        # The preamble lives above the first `| Spec` table header.
+        m = re.search(r"(?m)^\|\s*Spec\b", text)
+        self.assertIsNotNone(m, "no `| Spec` table header in board")
+        preamble = text[: m.start()]
+        # Marker + an explanatory mention of "spike" in the preamble.
+        self.assertIn(self.MARKER, preamble,
+                       f"preamble must show the marker glyph; got:\n{preamble}")
+        self.assertRegex(
+            preamble,
+            r"(?i)spike",
+            "preamble must mention 'spike' so the marker meaning is recoverable",
+        )
+
+    # ----- AC #5: tests cover presence, absence, and mixed.
+
+    def test_no_spike_spec_renders_with_no_markers(self):
+        """A spec with no spike slices produces a status board with no
+        marker character anywhere in its rows."""
+        self._write_feature_slice("130-no-spikes", "130-01 — a", "DRAFT")
+        self._write_feature_slice("130-no-spikes", "130-02 — b", "DRAFT")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        # Pull only the active table rows for this spec; the preamble
+        # documents the marker so we must scope the assertion to rows.
+        active = board.split("## Deferred slices")[0]
+        spec_rows = [
+            ln for ln in active.splitlines()
+            if "130-no-spikes" in ln
+        ]
+        self.assertEqual(len(spec_rows), 2)
+        for row in spec_rows:
+            self.assertNotIn(
+                self.MARKER, row,
+                f"unexpected marker on non-spike row: {row!r}",
+            )
+
+    def test_mixed_spec_marks_spikes_only(self):
+        """A spec with one spike + one feature slice marks only the spike."""
+        self._write_spike_slice("131-mixed", "131-01 — a-spike",
+                                 "DRAFT", kind="spike")
+        self._write_feature_slice("131-mixed", "131-02 — a-feature", "DRAFT")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        active = board.split("## Deferred slices")[0]
+        spike_rows = [
+            ln for ln in active.splitlines() if "131-01 — a-spike" in ln
+        ]
+        feature_rows = [
+            ln for ln in active.splitlines() if "131-02 — a-feature" in ln
+        ]
+        self.assertEqual(len(spike_rows), 1)
+        self.assertEqual(len(feature_rows), 1)
+        self.assertIn(self.MARKER, spike_rows[0])
+        self.assertNotIn(self.MARKER, feature_rows[0])
+
+    def test_all_spike_spec_marks_every_row(self):
+        """A spec where every slice is a spike — all rows carry the marker."""
+        self._write_spike_slice("132-all-spike", "132-01 — q1",
+                                 "DRAFT", kind="spike")
+        self._write_spike_slice("132-all-spike", "132-02 — q2",
+                                 "IN_PROGRESS", kind="spike")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        active = board.split("## Deferred slices")[0]
+        spec_rows = [
+            ln for ln in active.splitlines() if "132-all-spike" in ln
+        ]
+        self.assertEqual(len(spec_rows), 2)
+        for row in spec_rows:
+            self.assertIn(
+                self.MARKER, row,
+                f"row missing marker in all-spike spec: {row!r}",
+            )
+
+    def test_one_slice_spec_with_spike_renders_marker(self):
+        """The 1-slice-spec case from the 029 Overview: a normal spec
+        where the only slice is `kind: spike` (the "investigation with
+        no clear downstream spec yet" pattern). The marker still renders
+        — this is exactly the scenario the spike workflow targets."""
+        self._write_spike_slice("133-one-slice", "133-01 — sole-spike",
+                                 "DRAFT", kind="spike")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        active = board.split("## Deferred slices")[0]
+        spec_rows = [
+            ln for ln in active.splitlines() if "133-one-slice" in ln
+        ]
+        self.assertEqual(len(spec_rows), 1)
+        self.assertIn(self.MARKER, spec_rows[0])
+
+    # ----- AC #6: no regressions to existing column shape.
+
+    def test_existing_column_shape_unchanged(self):
+        """Snapshot the row shape: pipe count + cell-content shape on a
+        spike row matches a non-spike row except for the marker prefix
+        in the slice cell. The marker is additive — no new column, no
+        re-alignment."""
+        self._write_spike_slice("140-shape", "140-01 — spike-row",
+                                 "DRAFT", kind="spike")
+        self._write_feature_slice("140-shape", "140-02 — feature-row",
+                                   "DRAFT")
+        run_workflow("status-board", str(self.target))
+        board = self._read_board()
+        active = board.split("## Deferred slices")[0]
+        spike_rows = [
+            ln for ln in active.splitlines() if "140-01 — spike-row" in ln
+        ]
+        feature_rows = [
+            ln for ln in active.splitlines() if "140-02 — feature-row" in ln
+        ]
+        self.assertEqual(len(spike_rows), 1)
+        self.assertEqual(len(feature_rows), 1)
+        # Same pipe count (i.e., same column count).
+        self.assertEqual(
+            spike_rows[0].count("|"), feature_rows[0].count("|"),
+            f"column count drift between rows:\n"
+            f"  spike:   {spike_rows[0]!r}\n  feature: {feature_rows[0]!r}",
+        )
+        # Spike row has exactly 5 pipes (4 cells).
+        self.assertEqual(spike_rows[0].count("|"), 5,
+                          f"unexpected pipe count on spike row: "
+                          f"{spike_rows[0]!r}")
+        # Snapshot: spike row's slice cell content is exactly
+        # `<marker> <label>` (single space).
+        expected_spike_cell = f"| {self.MARKER} 140-01 — spike-row |"
+        self.assertIn(
+            expected_spike_cell, spike_rows[0],
+            f"spike row cell shape drift; got: {spike_rows[0]!r}",
+        )
+        # Snapshot: feature row's slice cell content is exactly `<label>`.
+        expected_feature_cell = "| 140-02 — feature-row |"
+        self.assertIn(
+            expected_feature_cell, feature_rows[0],
+            f"feature row cell shape drift; got: {feature_rows[0]!r}",
+        )
+
+    # ----- AC #7: regen idempotency.
+
+    def test_status_board_regen_idempotent_with_spike(self):
+        """Two consecutive regens against a spike-bearing project produce
+        identical output."""
+        self._write_spike_slice("150-idem", "150-01 — spike-idem", "DRAFT")
+        self._write_feature_slice("150-idem", "150-02 — feature-idem", "DRAFT")
+        run_workflow("status-board", str(self.target))
+        first = self._read_board()
+        run_workflow("status-board", str(self.target))
+        second = self._read_board()
+        self.assertEqual(
+            first, second,
+            "non-idempotent regen — diff suggests marker round-trip churn",
+        )
+        # And the marker is present in both passes.
+        self.assertIn(f"{self.MARKER} 150-01 — spike-idem", first)
+        self.assertIn(f"{self.MARKER} 150-01 — spike-idem", second)
+
+    def test_status_board_idempotency_message_when_current(self):
+        """When the board is already current, regen prints the
+        already-current message (slice 003-01 idempotency contract held)."""
+        self._write_spike_slice("151-idem", "151-01 — spike-curr", "DRAFT")
+        # First regen produces the canonical state.
+        run_workflow("status-board", str(self.target))
+        # Second regen — already-current message must surface.
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("already current", result.stdout,
+                       f"idempotent regen path skipped; stdout:\n{result.stdout}")
+
+    # ----- AC #4 (scaffold parity): the scaffold template carries the
+    # same marker documentation so newly-scaffolded projects don't need
+    # to re-discover the convention.
+
+    def test_scaffold_template_documents_spike_marker(self):
+        """The scaffold template at `templates/docs/specs/README.md.template`
+        carries the spike-marker explanation so freshly-scaffolded
+        projects ship with the documentation already in place — same
+        AC #4 surface as the in-repo board (pinned above)."""
+        template_path = REPO_ROOT / "templates" / "docs" / "specs" / "README.md.template"
+        text = template_path.read_text()
+        # Preamble sits above the first `| Spec` table header (same
+        # layout as the rendered board).
+        m = re.search(r"(?m)^\|\s*Spec\b", text)
+        self.assertIsNotNone(m, "no `| Spec` table header in template")
+        preamble = text[: m.start()]
+        self.assertIn(self.MARKER, preamble,
+                       f"template preamble must show the marker glyph; got:\n{preamble}")
+        self.assertRegex(
+            preamble,
+            r"(?i)spike",
+            "template preamble must mention 'spike' so the marker meaning is recoverable",
+        )
+
+    # ----- AC #1 (deferred-table parity): DEFERRED `kind: spike` rows
+    # render with the marker too — same visual contract as active rows.
+
+    def test_deferred_spike_renders_with_marker(self):
+        """A DEFERRED spike slice carries the marker in the `## Deferred
+        slices` table, same as it would in the active table."""
+        self._write_spike_slice("160-deferred-spike",
+                                 "160-01 — investigate-later",
+                                 "DEFERRED")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        # Locate the deferred section and scope the assertion to it.
+        deferred_idx = board.find("## Deferred slices")
+        self.assertNotEqual(deferred_idx, -1,
+                            f"no deferred section in board:\n{board}")
+        deferred = board[deferred_idx:]
+        self.assertIn(f"{self.MARKER} 160-01 — investigate-later", deferred,
+                      f"deferred spike row missing marker; section:\n{deferred}")
+
+    def test_deferred_non_spike_renders_without_marker(self):
+        """A DEFERRED non-spike slice renders unchanged in the deferred
+        table — the marker is spike-only."""
+        self._write_feature_slice("161-deferred-feature",
+                                   "161-01 — wait-on-trigger",
+                                   "DEFERRED")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        board = self._read_board()
+        deferred_idx = board.find("## Deferred slices")
+        self.assertNotEqual(deferred_idx, -1,
+                            f"no deferred section in board:\n{board}")
+        deferred = board[deferred_idx:]
+        # The row exists in the deferred section.
+        self.assertIn("161-01 — wait-on-trigger", deferred,
+                      f"deferred feature row missing; section:\n{deferred}")
+        # And does NOT carry the marker prefix on its slice cell.
+        self.assertNotIn(f"{self.MARKER} 161-01", deferred,
+                         f"deferred feature row erroneously carries marker; section:\n{deferred}")
+
 class ComputeSpecStatusTests(unittest.TestCase):
     """Slice 030-01 AC #1: `compute_spec_status(spec_path)` derives the
     spec-level rollup from slice states. Pure-function tests across the
@@ -2077,6 +2667,7 @@ class StatusBoardRollupTests(unittest.TestCase):
         # spec.md content unchanged (no frontmatter insertion)
         self.assertEqual(spec_md.read_text(), no_fm,
                          "spec.md without frontmatter was modified")
+
 
 
 if __name__ == "__main__":

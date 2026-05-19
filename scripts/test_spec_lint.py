@@ -575,5 +575,324 @@ class WalkAllSpecsTests(unittest.TestCase):
         self.assertIn("--slice", result.stderr)
 
 
+# ---------------------------------------------------------------------------
+# Slice 029-01: `kind:` enum validation + spike body-shape soft-warn.
+# ---------------------------------------------------------------------------
+
+
+def _make_slice_file(kind: str = None, body: str = "") -> str:
+    """Build a file-per-slice fixture with optional `kind:` frontmatter
+    field. Default body is empty so callers can pass spike-shaped blocks.
+    """
+    lines = ["---", "status: DRAFT"]
+    if kind is not None:
+        lines.append(f"kind: {kind}")
+    lines.append("dependencies: []")
+    lines.append("last_verified:")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Slice 099-01 — kind-fixture")
+    lines.append("")
+    lines.append("**Acceptance Criteria:**")
+    lines.append("")
+    lines.append("1. Trivial AC.")
+    lines.append("")
+    if body:
+        lines.append(body)
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+SPIKE_FULL_BODY = (
+    "**Question:** Should we use library A or library B?\n\n"
+    "**Time-box:** 1 day\n\n"
+    "**Findings:**\n- A is faster but lacks feature X.\n"
+    "- B has feature X but the API is awkward.\n\n"
+    "**Outcome:** ADR-0007 created"
+)
+
+
+class KindEnumValidationTests(unittest.TestCase):
+    """Slice 029-01 AC #2: `spec_lint.py` validates the `kind` enum.
+
+    Unknown values are hard errors (exit 1), reported with a clear message
+    naming the allowed values. Allowed values: `spike`, `feature`.
+    Unset/absent `kind` is fine (default).
+    """
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = Path(tempfile.mkdtemp(prefix="jig-lint-kind-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_slice(self, name: str, content: str) -> Path:
+        spec = self._tmpdir / "spec.md"
+        # Minimum spec.md to anchor iter_slices' walk.
+        spec.write_text("---\nstatus: DRAFT\n---\n\n# Spec 099\n")
+        slice_path = self._tmpdir / name
+        slice_path.write_text(content)
+        return spec
+
+    def test_kind_spike_passes(self):
+        # `kind: spike` is in the enum; with body filled, lint is clean.
+        spec = self._write_slice(
+            "slice-01-spike.md",
+            _make_slice_file(kind="spike", body=SPIKE_FULL_BODY),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+
+    def test_kind_feature_passes(self):
+        # `kind: feature` is the documented explicit-default synonym.
+        spec = self._write_slice(
+            "slice-01-feature.md",
+            _make_slice_file(kind="feature"),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+
+    def test_kind_absent_passes(self):
+        # No `kind:` field at all — default behavior, no warning, no error.
+        spec = self._write_slice(
+            "slice-01-no-kind.md",
+            _make_slice_file(kind=None),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+
+    def test_kind_bogus_is_hard_error(self):
+        # Unknown value -> exit 1.
+        spec = self._write_slice(
+            "slice-01-bogus.md",
+            _make_slice_file(kind="bogus"),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 1, msg=report)
+        # Error message names the offending value
+        self.assertIn("bogus", report)
+        # Error message names the allowed values
+        self.assertIn("spike", report)
+        self.assertIn("feature", report)
+
+    def test_kind_bogus_other_value(self):
+        # Different unknown value still fires.
+        spec = self._write_slice(
+            "slice-01-refactor.md",
+            _make_slice_file(kind="refactor"),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 1, msg=report)
+        self.assertIn("refactor", report)
+
+
+class SpikeBodyShapeValidationTests(unittest.TestCase):
+    """Slice 029-01 AC #3: `kind: spike` slices missing one of the four
+    labelled body blocks (`**Question:**`, `**Time-box:**`,
+    `**Findings:**`, `**Outcome:**`) emit a WARNING (not a hard error).
+
+    Spikes mid-flight legitimately have empty Findings/Outcome. The
+    warning should name the missing label(s) so the author knows which
+    blocks still need filling.
+
+    Edge cases also covered here:
+      - Outcome with multiple semicolon-separated values parses cleanly.
+      - The four labels are checked case-sensitively; `**question:**`
+        with lower-case 'q' is not the same label.
+    """
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = Path(tempfile.mkdtemp(prefix="jig-lint-spike-body-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_slice(self, name: str, content: str) -> Path:
+        spec = self._tmpdir / "spec.md"
+        spec.write_text("---\nstatus: DRAFT\n---\n\n# Spec 099\n")
+        slice_path = self._tmpdir / name
+        slice_path.write_text(content)
+        return spec
+
+    def test_spike_with_all_four_labels_clean(self):
+        spec = self._write_slice(
+            "slice-01-full-spike.md",
+            _make_slice_file(kind="spike", body=SPIKE_FULL_BODY),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+        # No spike-shape warnings emitted.
+        self.assertNotIn("missing", report.lower())
+
+    def test_spike_missing_findings_warns(self):
+        body = (
+            "**Question:** open question?\n\n"
+            "**Time-box:** 1 day\n\n"
+            "**Outcome:** abandoned (lib unmaintained)"
+        )
+        spec = self._write_slice(
+            "slice-01-no-findings.md",
+            _make_slice_file(kind="spike", body=body),
+        )
+        report, code = sl.lint(spec)
+        # Default strict=False: warnings are informational; exit still 0.
+        self.assertEqual(code, 0, msg=report)
+        self.assertIn("Findings", report)
+
+    def test_spike_missing_outcome_warns(self):
+        body = (
+            "**Question:** an unknown.\n\n"
+            "**Time-box:** 4 hours\n\n"
+            "**Findings:**\n- evidence A.\n"
+        )
+        spec = self._write_slice(
+            "slice-01-no-outcome.md",
+            _make_slice_file(kind="spike", body=body),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+        self.assertIn("Outcome", report)
+
+    def test_spike_missing_question_and_timebox_warns(self):
+        body = (
+            "**Findings:**\n- bullet.\n\n"
+            "**Outcome:** abandoned (n/a)"
+        )
+        spec = self._write_slice(
+            "slice-01-no-q-tb.md",
+            _make_slice_file(kind="spike", body=body),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+        self.assertIn("Question", report)
+        self.assertIn("Time-box", report)
+
+    def test_spike_with_no_labels_at_all_warns_for_each(self):
+        spec = self._write_slice(
+            "slice-01-no-labels.md",
+            _make_slice_file(kind="spike"),
+        )
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 0, msg=report)
+        # All four labels named in the warning.
+        for label in ("Question", "Time-box", "Findings", "Outcome"):
+            self.assertIn(label, report)
+
+    def test_warning_is_soft_unless_strict(self):
+        # Hard error promotion under --strict (existing behavior).
+        spec = self._write_slice(
+            "slice-01-partial.md",
+            _make_slice_file(kind="spike",
+                             body="**Question:** open?\n"),
+        )
+        # Without strict: warning, exit 0.
+        report_loose, code_loose = sl.lint(spec, strict=False)
+        self.assertEqual(code_loose, 0, msg=report_loose)
+        # With strict: warning escalates to exit 1.
+        report_strict, code_strict = sl.lint(spec, strict=True)
+        self.assertEqual(code_strict, 1, msg=report_strict)
+
+    def test_feature_slice_no_body_shape_warning(self):
+        # `kind: feature` (or unset) should NEVER trigger the spike body
+        # shape soft-warn.
+        spec_a = self._write_slice(
+            "slice-01-feature.md",
+            _make_slice_file(kind="feature"),
+        )
+        report, code = sl.lint(spec_a, strict=True)
+        self.assertEqual(code, 0, msg=report)
+        # Positive sanity: the slice fixture was actually linted (catch
+        # silent-skip regressions in iter_slices or section splitting).
+        self.assertIn("099-01", report,
+                      f"feature slice was not visible in lint output: {report}")
+        for label in ("Question", "Time-box", "Findings", "Outcome"):
+            # The spike body warning string should not appear.
+            # (Using both labels lowered into a string to avoid false-positive
+            # matches on stray content.)
+            self.assertNotIn(f"{label}:", report,
+                             f"feature slice mentioned {label} in lint output")
+
+    def test_spike_outcome_multiple_semicolon_separated(self):
+        # Edge case: Outcome value with multiple semicolon-separated parts
+        # parses cleanly and emits no warning.
+        body = (
+            "**Question:** open?\n\n"
+            "**Time-box:** 1 day\n\n"
+            "**Findings:**\n- alpha.\n\n"
+            "**Outcome:** ADR-0007 created; spec 030-02 unblocked"
+        )
+        spec = self._write_slice(
+            "slice-01-multi.md",
+            _make_slice_file(kind="spike", body=body),
+        )
+        report, code = sl.lint(spec, strict=True)
+        self.assertEqual(code, 0, msg=report)
+
+
+class KindEmbeddedSliceLayoutTests(unittest.TestCase):
+    """Slice 029-01: `kind:` enum + spike body-shape soft-warn also fires
+    on embedded `## Slice` sections inside `spec.md` (legacy layout).
+
+    Spec 018-02 routes spec_lint through `_common.iter_slices`, which
+    walks both file-per-slice and embedded layouts. The kind extraction
+    handles both via `_split_slice_section`-style heading-strip logic;
+    this class pins that the kind error/warning surface is layout-agnostic.
+    """
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = Path(tempfile.mkdtemp(prefix="jig-lint-embedded-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_embedded_spec(self, kind: str, body: str = "") -> Path:
+        # Heading-first, frontmatter-after — the legacy embedded shape.
+        spec = self._tmpdir / "spec.md"
+        kind_line = f"kind: {kind}\n" if kind else ""
+        section = (
+            "## Slice 099-01 — embedded-fixture\n\n"
+            f"---\nstatus: DRAFT\n{kind_line}dependencies: []\n"
+            "last_verified:\n---\n\n"
+            "**Acceptance Criteria:**\n\n1. Trivial.\n\n"
+        )
+        if body:
+            section += body + "\n\n"
+        spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec X\n\n" + section
+        )
+        return spec
+
+    def test_embedded_kind_bogus_is_hard_error(self):
+        spec = self._write_embedded_spec("bogus")
+        report, code = sl.lint(spec)
+        self.assertEqual(code, 1, msg=report)
+        self.assertIn("bogus", report)
+
+    def test_embedded_kind_spike_missing_labels_warns(self):
+        spec = self._write_embedded_spec("spike")
+        report, code = sl.lint(spec, strict=True)
+        # Soft warning under --strict promotes to exit 1.
+        self.assertEqual(code, 1, msg=report)
+        for label in ("Question", "Time-box", "Findings", "Outcome"):
+            self.assertIn(label, report)
+
+    def test_embedded_kind_spike_full_body_clean(self):
+        body = (
+            "**Question:** open?\n\n"
+            "**Time-box:** 1 day\n\n"
+            "**Findings:**\n- evidence.\n\n"
+            "**Outcome:** abandoned (no signal)"
+        )
+        spec = self._write_embedded_spec("spike", body=body)
+        report, code = sl.lint(spec, strict=True)
+        self.assertEqual(code, 0, msg=report)
+
+
 if __name__ == "__main__":
     unittest.main()

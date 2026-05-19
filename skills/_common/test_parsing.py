@@ -491,5 +491,70 @@ class IterSlicesTests(_SpecDirFixture):
         self.assertEqual([l.path.name for l in locs], ["slice-01-good.md"])
 
 
+# ---------- spike `kind` frontmatter (slice 029-01) ----------
+
+
+class KindFrontmatterTests(unittest.TestCase):
+    """Slice 029-01 AC #1: the `kind` field parses cleanly via
+    `parse_frontmatter`. The parser itself is generic over scalar field
+    names — this class pins the expected behavior for the typed enum
+    so we don't accidentally regress it.
+
+    `kind: spike` parses to a string. `kind: feature` (the documented
+    explicit-default synonym for unset) parses too. A slice without
+    `kind:` parses identically to today (no `kind` key in the result
+    dict). All three are tested here as the parsing-layer contract.
+    """
+
+    def test_kind_spike_parses_as_string(self):
+        text = (
+            "---\nstatus: DRAFT\nkind: spike\ndependencies: []\n"
+            "last_verified:\n---\n\nBody.\n"
+        )
+        fields, _ = parse_frontmatter(text)
+        self.assertEqual(fields["kind"], "spike")
+        self.assertEqual(fields["status"], "DRAFT")
+        self.assertEqual(fields["dependencies"], [])
+
+    def test_kind_feature_parses_as_string(self):
+        # The documented explicit-default synonym for unset still parses.
+        text = "---\nstatus: DRAFT\nkind: feature\n---\nBody.\n"
+        fields, _ = parse_frontmatter(text)
+        self.assertEqual(fields["kind"], "feature")
+
+    def test_kind_absent_parses_identically_to_today(self):
+        # Regression: a slice without `kind:` has no `kind` key in the
+        # fields dict, and the parse is otherwise indistinguishable.
+        text_with_kind = "---\nstatus: DRAFT\nkind: spike\n---\nBody.\n"
+        text_without_kind = "---\nstatus: DRAFT\n---\nBody.\n"
+        fields_with, _ = parse_frontmatter(text_with_kind)
+        fields_without, _ = parse_frontmatter(text_without_kind)
+        self.assertIn("kind", fields_with)
+        self.assertNotIn("kind", fields_without)
+        # Other fields preserved identically.
+        self.assertEqual(fields_with["status"], fields_without["status"])
+
+    def test_kind_field_alongside_full_frontmatter(self):
+        # Frontmatter ordering shouldn't matter for the typed kind field.
+        text = (
+            "---\nkind: spike\nstatus: IN_PROGRESS\n"
+            "dependencies: [029-01, adr-0005]\n"
+            "last_verified: 2026-05-18\n---\nBody.\n"
+        )
+        fields, _ = parse_frontmatter(text)
+        self.assertEqual(fields["kind"], "spike")
+        self.assertEqual(fields["status"], "IN_PROGRESS")
+        self.assertEqual(fields["dependencies"], ["029-01", "adr-0005"])
+        self.assertEqual(fields["last_verified"], "2026-05-18")
+
+    def test_set_frontmatter_kind_field(self):
+        # Round-trip: set the field via `set_frontmatter_field`, parse back.
+        text = "---\nstatus: DRAFT\n---\nBody.\n"
+        new = set_frontmatter_field(text, "kind", "spike")
+        fields, _ = parse_frontmatter(new)
+        self.assertEqual(fields["kind"], "spike")
+        self.assertEqual(fields["status"], "DRAFT")
+
+
 if __name__ == "__main__":
     unittest.main()
