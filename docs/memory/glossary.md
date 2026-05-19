@@ -50,7 +50,7 @@ target's `.claude/` directory under `jig-` prefixed names (e.g.
 SKILL.md path strings are rewritten from `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` to
 `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`, and hook command paths from
 `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/` to `${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/`,
-both at copy time. `.claude/settings.json` is generated (or merged) with the five jig hooks
+both at copy time. `.claude/settings.json` is generated (or merged) with the six jig hooks
 registered under `metadata: {managed_by_jig: true}` so re-runs replace-in-place rather than
 duplicate. A safety check (`UnmanagedHooksError`) refuses to overwrite settings.json when
 hooks exist but none carry the jig marker; `--force` is the escape. The dev owns the in-repo

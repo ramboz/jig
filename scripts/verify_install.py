@@ -139,6 +139,7 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 _EXPECTED_HOOK_SCRIPTS = (
     "jig-context-check.sh",
     "jig-memory-scan.sh",
+    "jig-post-edit-verify.sh",
     "jig-spec-gate.sh",
     "jig-task-capture.sh",
     "jig-telemetry.sh",
@@ -177,7 +178,7 @@ def check_scaffold_agents_present(project_root: Path) -> CheckResult:
 
 
 def check_scaffold_hook_scripts_present(project_root: Path) -> CheckResult:
-    """All five jig hook scripts exist under `.claude/hooks/scripts/`."""
+    """All expected jig hook scripts exist under `.claude/hooks/scripts/`."""
     scripts_dir = project_root / ".claude" / "hooks" / "scripts"
     if not scripts_dir.is_dir():
         return False, f".claude/hooks/scripts/ dir missing at {scripts_dir}"
@@ -187,7 +188,9 @@ def check_scaffold_hook_scripts_present(project_root: Path) -> CheckResult:
     ]
     if missing:
         return False, f"missing hook script(s): {', '.join(missing)}"
-    return True, "all five scaffolded hook scripts present"
+    return True, (
+        f"all {len(_EXPECTED_HOOK_SCRIPTS)} scaffolded hook scripts present"
+    )
 
 
 def check_scaffold_settings_registration(project_root: Path) -> CheckResult:
