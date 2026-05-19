@@ -221,10 +221,12 @@ class SkillPromotionTests(unittest.TestCase):
         self.assertIn("review.py", self.skill,
                       "SKILL.md must reference the review.py helper")
 
-    def test_skill_describes_both_modes(self):
-        # Must explain implementation review AND reconciliation review
+    def test_skill_describes_all_modes(self):
+        # Must explain all three modes: implementation, pr-review (slice
+        # 031-01 craft pass), and reconciliation.
         self.assertRegex(self.skill, r"(?i)implementation\s+review")
         self.assertRegex(self.skill, r"(?i)reconciliation\s+review")
+        self.assertRegex(self.skill, r"(?i)pr-review|craft\s+pass")
 
 
 class SubagentTypeTests(unittest.TestCase):
@@ -772,6 +774,265 @@ class PrinciplesCheckBlockTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(CONTRACT_SURFACE_HINT, result.stdout)
         self.assertIn(PRINCIPLES_CHECK_HINT, result.stdout)
+
+
+# ---------------------------------------------------------------------------
+# Slice 031-01 — pr-review mode (post-implementation craft pass)
+# ---------------------------------------------------------------------------
+
+
+class PrReviewPromptTests(unittest.TestCase):
+    """Slice 031-01 AC #1: `review.py pr-review <spec> <slice> <deliverable>...`
+    builds a self-contained prompt that:
+      - tells the reviewer it's seeing the work for the first time
+      - cites the deliverable file paths verbatim
+      - does NOT re-evaluate ACs (that's the compliance pass's job)
+      - names the four canonical output buckets (scope / blockers / nits /
+        strengths) the `jig:pr-review` skill produces
+      - instructs the reviewer to apply the craft concerns from the
+        most-specific `pr-review` SKILL.md reachable
+      - wraps the output in the standard VERDICT/REASONING/SPECIFIC
+        ISSUES/RECONCILIATION NOTES envelope
+      - tags SPECIFIC ISSUES entries [blocker]/[nit]/[strength]
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-prr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "031-01 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self, *extra_args: str):
+        result = run_review(
+            "pr-review", str(self.spec), "031-01",
+            "skills/foo/foo.py", "skills/foo/test_foo.py", *extra_args,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result.stdout
+
+    # AC #1 — standard preamble
+    def test_includes_standard_preamble(self):
+        prompt = self._prompt()
+        self.assertIn("You are an independent reviewer", prompt)
+        self.assertIn("seeing this work for the first time", prompt)
+
+    # AC #1 — cites deliverable paths verbatim
+    def test_lists_deliverable_paths_verbatim(self):
+        prompt = self._prompt()
+        self.assertIn("skills/foo/foo.py", prompt)
+        self.assertIn("skills/foo/test_foo.py", prompt)
+
+    # AC #1 — does NOT re-evaluate ACs
+    def test_does_not_re_evaluate_acceptance_criteria(self):
+        prompt = self._prompt()
+        # The compliance pass owns AC re-evaluation; the craft pass must NOT
+        # tell the reviewer to walk each AC.
+        self.assertNotRegex(
+            prompt,
+            r"(?i)for\s+each\s+acceptance\s+criterion",
+            "pr-review prompt must not re-evaluate ACs — that's the "
+            "compliance pass's job (031-01 AC #1)",
+        )
+
+    # AC #1 — names the four canonical output buckets
+    def test_names_four_output_buckets(self):
+        prompt = self._prompt()
+        for bucket in ("Scope", "Blockers", "Nits", "Strengths"):
+            self.assertIn(
+                bucket, prompt,
+                f"pr-review prompt must name the '{bucket}' output bucket "
+                f"(031-01 AC #1: scope / blockers / nits / strengths)",
+            )
+
+    # AC #1 — instructs reviewer to apply pr-review skill's craft concerns
+    def test_instructs_reviewer_to_apply_pr_review_skill(self):
+        prompt = self._prompt()
+        # The prompt must point the reviewer at the `pr-review` SKILL.md so
+        # the most-specific installed one wins (031-01 AC #4).
+        self.assertRegex(
+            prompt,
+            r"(?is)pr-review.*SKILL\.md",
+            "pr-review prompt must instruct reviewer to apply the most-"
+            "specific `pr-review` SKILL.md concerns (031-01 AC #1 + #4)",
+        )
+
+    # AC #1 — wraps output in canonical envelope
+    def test_includes_verdict_envelope(self):
+        prompt = self._prompt()
+        for marker in ("VERDICT", "REASONING", "SPECIFIC ISSUES",
+                       "RECONCILIATION NOTES"):
+            self.assertIn(
+                marker, prompt,
+                f"pr-review prompt must wrap output in the canonical "
+                f"envelope; missing marker: {marker} (031-01 AC #1)",
+            )
+        # And the verdict options must be the same enumerated set
+        self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    # AC #1 — SPECIFIC ISSUES entries tagged [blocker] / [nit] / [strength]
+    def test_specific_issues_entries_tagged(self):
+        prompt = self._prompt()
+        # The prompt must instruct the reviewer to tag SPECIFIC ISSUES
+        # entries [blocker] / [nit] / [strength] so the workflow can
+        # decide what blocks vs. becomes a reconciliation-log entry.
+        for tag in ("[blocker]", "[nit]", "[strength]"):
+            self.assertIn(
+                tag, prompt,
+                f"pr-review prompt must instruct reviewer to tag SPECIFIC "
+                f"ISSUES entries with {tag} (031-01 AC #1)",
+            )
+
+    # AC #5 — read-only constraint (inherited from preamble + prohibitions)
+    def test_includes_read_only_directive(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)do not\s+(?:write|modify|edit).+files?|read-only",
+        )
+
+    # Spec path appears for context
+    def test_includes_spec_path(self):
+        prompt = self._prompt()
+        self.assertIn(str(self.spec), prompt)
+
+    # Slice label appears for context
+    def test_includes_slice_label(self):
+        prompt = self._prompt()
+        self.assertIn("031-01", prompt)
+
+    # CLI surface — requires at least one deliverable
+    def test_pr_review_requires_at_least_one_deliverable(self):
+        result = run_review("pr-review", str(self.spec), "031-01")
+        self.assertNotEqual(result.returncode, 0)
+
+    # CLI surface — fails cleanly on missing spec
+    def test_pr_review_refuses_missing_spec(self):
+        missing = Path(self.tmpdir) / "nope.md"
+        result = run_review("pr-review", str(missing), "031-01", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    # CLI surface — fails cleanly on unknown slice
+    def test_pr_review_refuses_unknown_slice(self):
+        result = run_review("pr-review", str(self.spec), "999-99", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+
+class PrReviewSubagentTypeTests(unittest.TestCase):
+    """Slice 031-01 AC #2: `review.py subagent-type pr-review` returns the
+    same precedence the existing `subagent-type` subcommand uses for
+    `jig:reviewer` (plugin) vs. `general-purpose` (running from source)."""
+
+    def _run(self, *args: str, env_overrides=None, drop_plugin_root: bool = False):
+        env = os.environ.copy()
+        if drop_plugin_root:
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+        if env_overrides:
+            env.update(env_overrides)
+        return subprocess.run(
+            [sys.executable, str(REVIEW), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_pr_review_returns_reviewer_when_plugin_root_set(self):
+        # AC #2: same precedence rule as implementation/reconciliation
+        result = self._run(
+            "subagent-type", "pr-review",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "reviewer")
+
+    def test_pr_review_returns_general_purpose_when_plugin_root_unset(self):
+        result = self._run("subagent-type", "pr-review", drop_plugin_root=True)
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "general-purpose")
+
+    def test_pr_review_returns_general_purpose_when_reviewer_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            result = self._run(
+                "subagent-type", "pr-review",
+                env_overrides={"CLAUDE_PLUGIN_ROOT": td},
+            )
+            self.assertEqual(result.returncode, 0,
+                             msg=f"stderr: {result.stderr}")
+            self.assertEqual(result.stdout.strip(), "general-purpose")
+
+
+class SpecWorkflowSkillThreePassTests(unittest.TestCase):
+    """Slice 031-01 AC #3 + AC #6: `skills/spec-workflow/SKILL.md`
+    § "After implementation" documents the three-pass flow:
+      1. Compliance (jig:independent-review) — always.
+      2. Craft (pr-review) — always.
+      3. (Slice 031-02 adds arch — out of scope here.)
+
+    The SKILL.md prose must:
+      - mention BOTH the compliance and craft passes under
+        "After implementation"
+      - name the order (compliance → craft)
+      - name the block rule (fail blocks; needs-changes blocks for
+        compliance, becomes a reconciliation-log entry for craft)
+    """
+
+    SKILL_MD = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
+
+    def setUp(self):
+        self.skill = self.SKILL_MD.read_text()
+
+    def _after_implementation_section(self) -> str:
+        """Slice the SKILL.md to just the `### After implementation`
+        section (up to the next `### ` or `## ` heading)."""
+        m = re.search(
+            r"(?m)^###\s+After\s+implementation\s*$", self.skill,
+        )
+        self.assertIsNotNone(m, "SKILL.md must have '### After implementation'")
+        rest = self.skill[m.end():]
+        nxt = re.search(r"(?m)^(?:###|##)\s", rest)
+        return rest[: nxt.start()] if nxt else rest
+
+    def test_after_implementation_mentions_both_passes(self):
+        section = self._after_implementation_section()
+        section_lower = section.lower()
+        # Compliance pass
+        self.assertIn(
+            "independent-review", section_lower,
+            "After implementation must name the compliance pass via "
+            "jig:independent-review (031-01 AC #3)",
+        )
+        # Craft pass
+        self.assertIn(
+            "pr-review", section_lower,
+            "After implementation must name the craft pass via "
+            "pr-review (031-01 AC #3)",
+        )
+
+    def test_after_implementation_names_pass_order(self):
+        section = self._after_implementation_section()
+        # The order must be discoverable: compliance must appear before craft
+        compliance_pos = section.lower().find("independent-review")
+        craft_pos = section.lower().find("pr-review")
+        self.assertGreater(compliance_pos, -1)
+        self.assertGreater(craft_pos, -1)
+        self.assertLess(
+            compliance_pos, craft_pos,
+            "SKILL.md must document compliance → craft order "
+            "(031-01 AC #3: compliance first, then craft)",
+        )
+
+    def test_after_implementation_names_block_rule(self):
+        section = self._after_implementation_section()
+        # The block rule: any `fail` blocks; `needs-changes` is split —
+        # blocks for compliance, becomes a reconciliation-log entry for
+        # craft. Look for "fail" + "block" in the prose.
+        self.assertRegex(
+            section,
+            r"(?is)fail.*block|block.*fail",
+            "After implementation must name the block rule "
+            "(any `fail` blocks REVIEWED transition) (031-01 AC #3)",
+        )
 
 
 if __name__ == "__main__":

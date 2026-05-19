@@ -1,11 +1,12 @@
 """
 jig independent-review helper — slices 004-01 (review-helper) + 011-02
-(subagent-type-fallback-upgrade)
+(subagent-type-fallback-upgrade) + 031-01 (pr-review-pass).
 
 Builds the standardized reviewer-subagent prompt for either an implementation
-review or a reconciliation review. The helper does NOT spawn the subagent
-itself — Claude owns the Task invocation. This script just makes the prompt
-consistent across 100+ invocations.
+review, a reconciliation review, or (slice 031-01) a craft pr-review pass.
+The helper does NOT spawn the subagent itself — Claude owns the Task
+invocation. This script just makes the prompt consistent across 100+
+invocations.
 
 Slice 011-02 added the `subagent-type` subcommand: it inspects
 `${CLAUDE_PLUGIN_ROOT}` and prints either `reviewer` (jig installed as a
@@ -13,10 +14,20 @@ plugin — real subagent reachable) or `general-purpose` (fallback). SKILL.md's
 bash recipe uses it to pick the Task tool's `subagent_type` argument
 deterministically.
 
+Slice 031-01 added the `pr-review` subcommand: a craft-pass prompt that
+mirrors `implementation` but instructs the reviewer to apply the four-bucket
+craft concerns (scope / blockers / nits / strengths) from the most-specific
+`pr-review` SKILL.md reachable in the environment, with SPECIFIC ISSUES
+entries tagged `[blocker]`/`[nit]`/`[strength]` so the workflow can decide
+what blocks vs. becomes a reconciliation-log entry. Skill-routing dispatch
+runs via SKILL.md prose — no filesystem detection here (see spec 031-01
+AC #4 and the spec.md Open question on routing dispatch).
+
 Usage:
     python3 review.py implementation <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py reconciliation <spec.md> <slice-fragment>
-    python3 review.py subagent-type {implementation|reconciliation}
+    python3 review.py pr-review     <spec.md> <slice-fragment> <deliverable-path>...
+    python3 review.py subagent-type {implementation|reconciliation|pr-review}
 """
 
 import argparse
@@ -267,6 +278,106 @@ For each acceptance criterion in slice {slice_label}, verify:
 """
 
 
+# -------- pr-review prompt (slice 031-01) --------
+
+
+_PR_REVIEW_OUTPUT_FORMAT = """\
+## Output (required — do not deviate)
+
+```
+VERDICT: pass | fail | needs-changes
+
+REASONING:
+<2-4 sentences>
+
+SPECIFIC ISSUES:
+- [blocker] <file:line> — <description>
+- [nit] <file:line> — <description>
+- [strength] <file:line> — <description>
+(omit section if none; tag every entry with one of [blocker] / [nit] /
+ [strength] so the workflow can decide what blocks vs. logs)
+
+RECONCILIATION NOTES:
+<nits and strengths that should land in the deviation log rather than
+ block the REVIEWED transition>
+```
+
+Be terse but specific. Cite file:line when flagging issues."""
+
+
+def build_pr_review_prompt(spec_path: Path, slice_label: str,
+                           deliverables: list) -> str:
+    """Construct the standard pr-review (craft pass) prompt.
+
+    Slice 031-01: the orchestrator runs this pass AFTER the compliance
+    pass (`build_implementation_prompt`) and BEFORE the REVIEWED
+    transition. The pass produces the four canonical buckets the
+    `jig:pr-review` skill emits — scope / blockers / nits / strengths —
+    wrapped in the same VERDICT / REASONING / SPECIFIC ISSUES /
+    RECONCILIATION NOTES envelope as the compliance pass so the workflow
+    can consume one verdict shape regardless of which pass produced it.
+
+    Skill-routing dispatch is intentionally NOT done here — Claude's
+    skill router resolves user > project > `jig:pr-review` precedence
+    from each skill's description hints. The prompt below points the
+    reviewer at "the most-specific `pr-review` SKILL.md reachable"
+    without naming a specific install path.
+
+    NOTE: unlike `build_implementation_prompt` and
+    `build_reconciliation_prompt`, this builder does NOT append
+    `_principles_check_block()`. The craft pass is scoped to scope /
+    blockers / nits / strengths only — constitution-adherence is the
+    compliance pass's job (and is repeated on the reconciliation pass).
+    Adding it here would duplicate work and conflict with the four-bucket
+    framing the `jig:pr-review` skill description establishes.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job
+
+You are running the **craft pass** (pr-review) on slice **{slice_label}**.
+The compliance pass (jig:independent-review) has already evaluated the
+slice against its acceptance criteria — that work is done, and you must
+NOT re-evaluate it. Your job is to evaluate the *craft* of the
+implementation: scope, blockers, nits, and strengths.
+
+Apply the craft concerns described in the most-specific `pr-review`
+SKILL.md reachable in the environment (a user-installed `pr-review`
+skill at `~/.claude/skills/pr-review/`, a project-installed one at
+`.claude/skills/pr-review/`, or the bundled `jig:pr-review` baseline —
+whichever Claude's skill router resolves to). The four canonical output
+buckets that skill produces are:
+
+1. **Scope** — what the change touches, what it does not touch.
+2. **Blockers** — concrete must-fix items (correctness, security, missing
+   tests for risky logic).
+3. **Nits** — nice-to-haves and small polish items.
+4. **Strengths** — patterns or choices worth repeating.
+
+## What to read (in this order)
+
+1. The spec — `{spec_path}`. Read slice **{slice_label}** for context,
+   but do NOT re-evaluate the acceptance criteria — that's the
+   compliance pass's job.
+2. The deliverables:
+{deliverable_lines}
+3. Any related files in the repo you need to verify whether the new
+   code follows existing patterns (read-only).
+
+{_PROHIBITIONS}
+## Evaluate
+
+- Does the implementation match the spec's stated scope?
+- Are there correctness, security, or robustness concerns?
+- Are tests exercising the change meaningfully?
+- Are there nits worth flagging (naming, structure, idioms)?
+- What does the change get right that's worth calling out?
+
+{_PR_REVIEW_OUTPUT_FORMAT}
+"""
+
+
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     """Construct the standard reconciliation-review prompt.
 
@@ -366,15 +477,25 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("spec", help="path to spec.md")
     pr.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
 
+    # Slice 031-01: craft (pr-review) pass — mirrors `implementation`
+    # signature; differs in prompt content + output buckets.
+    pp = sub.add_parser(
+        "pr-review",
+        help="construct a craft-pass (pr-review) prompt",
+    )
+    pp.add_argument("spec", help="path to spec.md")
+    pp.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pp.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+
     pt = sub.add_parser(
         "subagent-type",
         help="print the subagent_type name SKILL.md should pass to Task",
     )
     pt.add_argument(
         "mode",
-        choices=["implementation", "reconciliation"],
+        choices=["implementation", "reconciliation", "pr-review"],
         help=(
-            "review mode (currently informational — both modes return the "
+            "review mode (currently informational — every mode returns the "
             "same name; the choice exists for forward compatibility)"
         ),
     )
@@ -404,6 +525,8 @@ def main(argv: list) -> int:
         slice_label = find_slice_label(spec, ns.slice)
         if ns.command == "implementation":
             prompt = build_implementation_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "pr-review":
+            prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
         else:
             prompt = build_reconciliation_prompt(spec, slice_label)
         sys.stdout.write(prompt)

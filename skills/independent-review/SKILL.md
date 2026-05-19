@@ -17,12 +17,20 @@ user-invocable: true
 ## What this skill does
 
 Constructs the standardized reviewer-subagent prompt and tells Claude when /
-how to spawn the Task. The skill has two modes, matching the two review passes
+how to spawn the Task. The skill has three modes, matching the review passes
 every slice runs:
 
 - **Implementation review** — after the implementer writes the deliverable to
   disk. The reviewer evaluates each acceptance criterion against the actual
-  files; returns `pass | fail | needs-changes`.
+  files; returns `pass | fail | needs-changes`. This is the **compliance
+  pass** in spec-workflow's multi-pass flow.
+- **Pr-review (craft pass)** — slice 031-01. After the compliance pass
+  returns, the orchestrator runs a craft-pass review that produces the
+  four-bucket output (scope / blockers / nits / strengths) the
+  `jig:pr-review` skill emits, wrapped in the same verdict envelope as the
+  compliance pass. SPECIFIC ISSUES entries are tagged `[blocker]` / `[nit]`
+  / `[strength]` so the workflow can decide what blocks the REVIEWED
+  transition vs. what becomes a reconciliation-log entry.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -51,6 +59,29 @@ installed as a plugin (the real filesystem-based agent is reachable),
 `general-purpose` when running from source. Wait for the verdict. Address
 any `fail`/`needs-changes` findings; rerun the helper + Task as needed
 until `pass`.
+
+### Pr-review (craft pass — slice 031-01)
+
+After the compliance pass returns `pass`, run the craft pass:
+
+```bash
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  pr-review \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  "<deliverable-path-1>" "<deliverable-path-2>" ...)
+SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type pr-review)
+```
+
+Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
+points the reviewer at the most-specific `pr-review` SKILL.md reachable
+in the environment — Claude's skill router resolves user > project >
+`jig:pr-review` precedence via the skill description hints. The pass
+returns the canonical four output buckets (scope / blockers / nits /
+strengths) wrapped in the same verdict envelope as the compliance
+pass. SPECIFIC ISSUES entries are tagged `[blocker]` / `[nit]` /
+`[strength]`; only `[blocker]` entries block the REVIEWED transition.
 
 ### Reconciliation review
 

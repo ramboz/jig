@@ -155,10 +155,68 @@ SKILL.md hand-off is the documented gate.
 
 ### After implementation
 
-1. Spawn the `reviewer` subagent against the deliverable. Reviewer is read-only;
-   it returns `pass | fail | needs-changes`.
-2. Address reviewer findings, adding regression tests for any real bugs found.
-3. Transition: `transition <spec.md> <slice> REVIEWED`.
+Slice 031-01 wired a **multi-pass review flow** into the post-implementation
+step. Every slice runs through two passes before the `IN_PROGRESS → REVIEWED`
+transition; a third (architecture) pass fires on demand per slice 031-02.
+
+The orchestrator runs the passes in this order:
+
+1. **Compliance pass — `jig:independent-review`** (always). Spawn the
+   `reviewer` subagent against the deliverable using the prompt built by
+   `review.py implementation`. Reviewer is read-only; it evaluates each
+   acceptance criterion and returns
+   `pass | fail | needs-changes`.
+
+2. **Craft pass — `pr-review`** (always). After the compliance pass
+   returns, build the craft-pass prompt with `review.py pr-review` and
+   spawn a second `reviewer`-shaped subagent. The prompt instructs the
+   reviewer to apply the four-bucket craft concerns (scope / blockers /
+   nits / strengths) from the most-specific `pr-review` SKILL.md
+   reachable in the environment — Claude's skill router resolves
+   user > project > `jig:pr-review` precedence via the skill description
+   hints, so the orchestrator does NOT do filesystem detection. The
+   pass returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
+   RECONCILIATION NOTES` envelope as the compliance pass, with
+   SPECIFIC ISSUES entries tagged `[blocker]` / `[nit]` / `[strength]`.
+
+3. (Slice 031-02 adds an on-demand **arch pass** via `arch-review`,
+   gated by `arch_review: true` in slice frontmatter. Out of scope here.)
+
+**Block rule for the REVIEWED transition.** Both required passes
+(compliance + craft) must pass before `transition <slice> REVIEWED`:
+
+- Any `fail` verdict from any pass blocks the transition.
+- `needs-changes` from the compliance pass blocks (the implementer
+  addresses findings and re-runs).
+- `needs-changes` from the craft pass does NOT block — the
+  `[nit]`-tagged entries become reconciliation-log items (the
+  implementer captures them in the deviation log during reconciliation).
+  Only `[blocker]`-tagged entries from the craft pass block the
+  transition.
+
+After both passes pass:
+
+4. Address any reviewer findings, adding regression tests for any real
+   bugs found by either pass.
+5. Transition: `transition <spec.md> <slice> REVIEWED`.
+
+```bash
+# Compliance pass (always)
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  implementation "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+  "<deliverable-path-1>" ...)
+SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type implementation)
+# … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+
+# Craft pass (always)
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  pr-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+  "<deliverable-path-1>" ...)
+SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type pr-review)
+# … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+```
 
 ### Reconciliation (REVIEWED → RECONCILED)
 
