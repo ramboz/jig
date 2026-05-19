@@ -25,6 +25,8 @@ argument. Files are named `adr-NNNN-<slug>.md` per ADR-0004.
 import argparse
 import os
 import re
+import shutil
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -104,15 +106,33 @@ def _slug_to_title(slug: str) -> str:
     return " ".join(p[0].upper() + p[1:] if p else p for p in parts)
 
 
+def _check_slug_collision(existing: list, slug: str) -> None:
+    """Raise AdrError if any `existing` ADR file already uses `slug` as
+    its body (NNNN-<slug>). Shared by `cmd_new` and `reserve_adr` — both
+    paths must refuse the same collisions."""
+    for p in existing:
+        # Strip leading "adr-NNNN-" prefix (9 chars).
+        body = p.stem[9:] if len(p.stem) > 9 else ""
+        if body == slug:
+            raise AdrError(f"slug collision: {p.name} already exists")
+
+
+def _render_adr_content(template_text: str, number: str, title: str,
+                        today_iso: str) -> str:
+    """Apply the three template placeholders. Shared by `cmd_new` and
+    `reserve_adr` so the rendered shape stays consistent across both."""
+    content = template_text.replace(PLACEHOLDER_NUMBER, number)
+    content = content.replace(PLACEHOLDER_TITLE, title)
+    content = content.replace(PLACEHOLDER_DATE, today_iso)
+    return content
+
+
 # ---------- new ----------
 
 
 def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
     """Scaffold `docs/decisions/adr-NNNN-<slug>.md` from the template."""
-    if not slug or not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
-        raise AdrError(
-            f"invalid slug: '{slug}' (use lowercase letters, digits, hyphens)"
-        )
+    _validate_slug(slug)
     if not adrs_dir.is_dir():
         raise AdrError(f"decisions directory not found: {adrs_dir}")
 
@@ -120,14 +140,8 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
     if not template.is_file():
         raise AdrError(f"template not found: {template}")
 
-    # Slug collision check — ANY existing `adr-NNNN-<slug>.md` with the
-    # same slug body is a conflict, even at a different number.
     existing = _adr_files(adrs_dir)
-    for p in existing:
-        # Strip leading "adr-NNNN-" prefix (9 chars) and trailing ".md".
-        body = p.stem[9:] if len(p.stem) > 9 else ""
-        if body == slug:
-            raise AdrError(f"slug collision: {p.name} already exists")
+    _check_slug_collision(existing, slug)
 
     # Auto-number: max existing + 1, or 1 if none. Zero-padded to 4 digits.
     if existing:
@@ -139,16 +153,394 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
     if not title:
         title = _slug_to_title(slug)
 
-    content = template.read_text()
-    content = content.replace(PLACEHOLDER_NUMBER, number)
-    content = content.replace(PLACEHOLDER_TITLE, title)
-    content = content.replace(PLACEHOLDER_DATE, _today())
+    content = _render_adr_content(template.read_text(), number, title,
+                                  _today())
 
     target = adrs_dir / f"adr-{number}-{slug}.md"
     if target.exists():  # Defensive — auto-num should have prevented this.
         raise AdrError(f"target already exists: {target}")
     _atomic_write(target, content)
     return target
+
+
+# ---------- Slice 028-01: reserve-adr-on-main ----------
+# Inline-mirror of workflow.py 003-03 helpers per ADR-0002's "three-callers
+# triggers extraction" rule (ADR-0003 applied that rule to find_slice_section
+# — this is the same precedent, two callers, extraction deferred). Mirrored:
+# _PUSH_PROTECTION_SIGNALS, _PUSH_RACE_SIGNALS, _run, _classify_push_failure,
+# _preflight_branch_and_worktree, _check_gh_and_remote, _do_pr_fallback,
+# _build_pr_body. `_validate_slug` is shared with cmd_new and uses adr.py's
+# looser `^[a-z0-9][a-z0-9-]*$` regex (intentionally divergent from
+# workflow.py's `^[a-z][a-z0-9-]*$` so existing digit-prefixed ADR slugs
+# don't silently break).
+
+_PUSH_PROTECTION_SIGNALS = (
+    "protected branch",
+    "permission denied",
+    "pre-receive hook declined",
+    "not authorized",
+    "cannot lock ref",
+)
+
+_PUSH_RACE_SIGNALS = (
+    "non-fast-forward",
+    "fetch first",
+    "[rejected]",
+    "rejected",
+)
+
+
+def _run(argv: list, cwd: Path) -> tuple:
+    """Run a subprocess and return (returncode, stdout, stderr).
+
+    Uses module-level `subprocess.run` so tests can patch it via
+    `patch.object(_adr, "subprocess")`. Inline-mirror of workflow.py's
+    `_run` (slice 003-03) per ADR-0002's three-callers rule."""
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, cwd=str(cwd),
+        )
+    except FileNotFoundError:
+        return 127, "", f"{argv[0]}: not found on PATH"
+    return result.returncode, result.stdout or "", result.stderr or ""
+
+
+def _classify_push_failure(stderr: str) -> str:
+    """Classify a `git push origin main` stderr into one of:
+      - "protection" — protected branch / permission denied / ...
+      - "race" — non-fast-forward / fetch first / rejected
+      - "other" — anything else
+
+    Race wins over protection if both appear (race recovery requires the
+    stranded commit drop)."""
+    low = stderr.lower()
+    for sig in _PUSH_RACE_SIGNALS:
+        if sig in low:
+            return "race"
+    for sig in _PUSH_PROTECTION_SIGNALS:
+        if sig in low:
+            return "protection"
+    return "other"
+
+
+def _validate_slug(slug: str) -> None:
+    """Raise AdrError naming both the slug and the violated rule. The
+    check happens BEFORE any mutation (preflight or git call).
+
+    The regex (`^[a-z0-9][a-z0-9-]*$`) deliberately accepts a leading
+    digit — intentionally looser than workflow.py's `^[a-z][a-z0-9-]*$`."""
+    if not slug:
+        raise AdrError(
+            "invalid slug: empty (use lowercase letters, digits, hyphens)"
+        )
+    if not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
+        raise AdrError(
+            f"invalid slug: {slug!r} (use lowercase letters, digits, "
+            f"hyphens; must start with a letter or digit)"
+        )
+
+
+def _preflight_branch_and_worktree(project_dir: Path) -> None:
+    """Refuse if current branch != main, or worktree is dirty. Both
+    checks happen BEFORE any file mutation. Applies even to --no-push
+    (parity with workflow.py 003-03)."""
+    rc, stdout, stderr = _run(
+        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"could not determine current branch (git: {stderr.strip()})"
+        )
+    branch = stdout.strip()
+    if branch != "main":
+        raise AdrError(
+            f"refusing: current branch is {branch!r}, must be 'main' "
+            f"(reservation lands on main; switch with `git checkout main`)"
+        )
+
+    rc, stdout, _stderr = _run(
+        ["git", "status", "--porcelain"], cwd=project_dir,
+    )
+    if rc != 0:
+        # Non-fatal if status itself fails; downstream git will fail anyway.
+        return
+    if stdout.strip():
+        raise AdrError(
+            "refusing: working tree has uncommitted changes (rule: "
+            "clean worktree required). Run `git status` to see them, "
+            "then stash or commit before reserving."
+        )
+
+
+def _check_gh_and_remote(project_dir: Path) -> None:
+    """PR-fallback prereqs: `gh` on PATH AND `origin` URL contains
+    `github.com`."""
+    if shutil.which("gh") is None:
+        raise AdrError(
+            "refusing PR-fallback: 'gh' CLI not found on PATH. "
+            "Install GitHub CLI (https://cli.github.com/) or re-run "
+            "with `--no-push` to commit locally only."
+        )
+    rc, stdout, stderr = _run(
+        ["git", "config", "--get", "remote.origin.url"], cwd=project_dir,
+    )
+    if rc != 0 or not stdout.strip():
+        raise AdrError(
+            "refusing PR-fallback: no 'origin' remote configured "
+            f"(git: {stderr.strip() or 'empty url'})"
+        )
+    url = stdout.strip()
+    if "github.com" not in url:
+        raise AdrError(
+            f"refusing PR-fallback: remote 'origin' does not point at "
+            f"github.com (url: {url}). PR-fallback requires a GitHub "
+            f"remote; re-run with `--no-push` for local-only commit."
+        )
+
+
+def _build_pr_body(number: str, slug: str) -> str:
+    """Compose a PR body explaining the reservation. Mirrors the shape
+    of workflow.py 003-03's _build_pr_body but references spec 028-01."""
+    return (
+        f"Reserves ADR number `{number}` for slug `{slug}` on the "
+        f"shared trunk, so parallel worktrees cannot both claim the "
+        f"same `NNNN`.\n"
+        f"\n"
+        f"This PR adds the scaffold `docs/decisions/adr-{number}-{slug}.md` "
+        f"(Status: Proposed; sections per ADR-0004). The actual decision "
+        f"body will be drafted in a separate feature branch.\n"
+        f"\n"
+        f"Generated by `adr.py new {slug}` "
+        f"(see spec 028-01 adr-numbering-on-main for rationale).\n"
+    )
+
+
+def _do_pr_fallback(project_dir: Path, branch_name: str,
+                    number: str, slug: str, pr_body: str) -> None:
+    """Branch-and-PR sequence. Any step's failure aborts and surfaces
+    what state the user's repo is left in.
+
+    Sequence (inline-mirror of workflow.py 003-03 _do_pr_fallback):
+      1. git branch <branch> HEAD
+      2. git reset --hard origin/main
+      3. git checkout <branch>
+      4. git push -u origin <branch>
+      5. gh pr create --title ... --body ...
+    """
+    _check_gh_and_remote(project_dir)
+
+    # 1. Create the branch at the reservation commit.
+    rc, _out, err = _run(
+        ["git", "branch", branch_name, "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback failed at `git branch {branch_name} HEAD`: "
+            f"{err.strip()}. The reservation commit is still on local main; "
+            f"re-run after fixing, or `git reset --hard origin/main` to drop it."
+        )
+
+    # 2. Reset local main so it no longer carries the stranded commit.
+    rc, _out, err = _run(
+        ["git", "reset", "--hard", "origin/main"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback failed at `git reset --hard origin/main`: "
+            f"{err.strip()}. The reservation commit lives on local "
+            f"{branch_name!r}; check `git log {branch_name}` to confirm "
+            f"before pushing manually."
+        )
+
+    # 3. Switch to the reservation branch.
+    rc, _out, err = _run(
+        ["git", "checkout", branch_name], cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback failed at `git checkout {branch_name}`: "
+            f"{err.strip()}. The branch exists locally; switch to it "
+            f"manually with `git checkout {branch_name}`."
+        )
+
+    # 4. Push the branch to origin.
+    rc, _out, err = _run(
+        ["git", "push", "-u", "origin", branch_name], cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback failed at `git push -u origin {branch_name}`: "
+            f"{err.strip()}. The reservation commit lives on local "
+            f"{branch_name!r}; push manually once the remote allows it."
+        )
+
+    # 5. Open the PR.
+    title = f"docs(decisions): reserve adr-{number}-{slug}"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback failed at `gh pr create`: {err.strip()}. "
+            f"The branch is already pushed to origin/{branch_name}; "
+            f"open the PR manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def reserve_adr(slug: str, project_dir: Path, title: str = "",
+                no_push: bool = False, pr_mode: bool = False) -> int:
+    """Slice 028-01 entry point. Reserve the next free ADR number by
+    committing a stub `adr-NNNN-<slug>.md` and (by default) pushing it
+    to origin/main. PR-fallback when direct push is refused; race-on-
+    push surfaces as a re-run instruction (no auto-renumber).
+
+    Returns the intended process exit code (0 on success). Raises
+    AdrError for refusals — main() converts these to exit 2.
+    """
+    # Bad slug refuses BEFORE any git invocation (parity with
+    # workflow.py 003-03 AC #5).
+    _validate_slug(slug)
+
+    # docs/decisions/ must exist — parity with workflow.py's docs/specs/
+    # guard.
+    adrs_dir = project_dir / "docs" / "decisions"
+    if not adrs_dir.is_dir():
+        raise AdrError(
+            f"refusing: docs/decisions/ not found under {project_dir} "
+            f"(not inside a scaffolded jig project)"
+        )
+
+    # Preflight (not-on-main, dirty-worktree) applies even to --no-push
+    # so the reservation commit always lands on a clean main.
+    _preflight_branch_and_worktree(project_dir)
+
+    # Fetch origin/main so the next-number scan + slug-collision check
+    # reflect the freshest state. Skipped for --no-push.
+    if not no_push:
+        rc, _out, err = _run(
+            ["git", "fetch", "origin", "main"], cwd=project_dir,
+        )
+        # A failed fetch isn't fatal — we proceed with the local view.
+        # The push step catches any out-of-date condition via the
+        # race-on-push classifier.
+        if rc != 0:
+            sys.stderr.write(
+                f"warning: `git fetch origin main` failed: "
+                f"{err.strip()}; proceeding with local view\n"
+            )
+
+    # Slug-collision check runs AFTER fetch (collision view is freshest)
+    # but BEFORE writing the new file.
+    existing = _adr_files(adrs_dir)
+    _check_slug_collision(existing, slug)
+
+    # Auto-number: max + 1, or 1 if none. 4-digit zero-pad.
+    if existing:
+        next_n = max(_parse_adr_number(p.name) for p in existing) + 1
+    else:
+        next_n = 1
+    number = f"{next_n:04d}"
+
+    if not title:
+        title = _slug_to_title(slug)
+
+    # Render and atomically write the file.
+    template = _template_path()
+    if not template.is_file():
+        raise AdrError(f"template not found: {template}")
+    today_iso = _today()
+    content = _render_adr_content(template.read_text(), number, title,
+                                  today_iso)
+    target = adrs_dir / f"adr-{number}-{slug}.md"
+    if target.exists():  # Defensive — auto-num should have prevented this.
+        raise AdrError(f"target already exists: {target}")
+    _atomic_write(target, content)
+
+    # Stage + commit locally.
+    rel_path = f"docs/decisions/adr-{number}-{slug}.md"
+    rc, _out, err = _run(["git", "add", rel_path], cwd=project_dir)
+    if rc != 0:
+        raise AdrError(
+            f"`git add {rel_path}` failed: {err.strip()}. "
+            f"The stub ADR file is on disk; stage and commit manually."
+        )
+    commit_msg = f"docs(decisions): reserve adr-{number}-{slug}"
+    rc, _out, err = _run(
+        ["git", "commit", "-m", commit_msg], cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"`git commit` failed: {err.strip()}. "
+            f"The stub ADR file is staged; commit manually."
+        )
+
+    print(f"reserved adr-{number}-{slug}")
+    print(str(target.resolve()))
+
+    # --no-push stops here.
+    if no_push:
+        return 0
+
+    pr_body = _build_pr_body(number, slug)
+    branch_name = f"reserve/adr-{number}-{slug}"
+
+    # --pr skips the direct-push attempt entirely.
+    if pr_mode:
+        _do_pr_fallback(project_dir, branch_name, number, slug, pr_body)
+        return 0
+
+    # Default: try direct push first.
+    rc, _out, err = _run(
+        ["git", "push", "origin", "main"], cwd=project_dir,
+    )
+    if rc == 0:
+        print(f"reserved adr-{number}-{slug} on origin/main")
+        return 0
+
+    kind = _classify_push_failure(err)
+    if kind == "race":
+        # Drop the stranded commit so re-run starts clean.
+        sys.stderr.write(
+            f"race detected: origin/main advanced during reservation. "
+            f"Re-run 'adr.py new {slug}' to pick the next free "
+            f"number.\n"
+        )
+        _reset_rc, _reset_out, _reset_err = _run(
+            ["git", "reset", "--hard", "HEAD~1"], cwd=project_dir,
+        )
+        # `git reset --hard HEAD~1` un-strands the commit but leaves the
+        # ADR file on disk (under mocking, also under real git when the
+        # file path was outside the index when reset ran). Remove it
+        # unconditionally on race recovery; harmless if already gone.
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        raise AdrError(
+            f"race-on-push: {err.strip()}"
+        )
+
+    if kind == "protection":
+        sys.stderr.write(
+            f"direct push refused ({err.strip()}); falling back to "
+            f"PR mode...\n"
+        )
+        _do_pr_fallback(project_dir, branch_name, number, slug, pr_body)
+        return 0
+
+    # Anything else: hard error; leave commit in place.
+    raise AdrError(
+        f"`git push origin main` failed: {err.strip()} "
+        f"(local commit left in place; inspect with `git log -1` "
+        f"and decide how to recover)."
+    )
+
+
+# ---------- end slice 028-01 ----------
 
 
 # ---------- accept ----------
@@ -521,6 +913,21 @@ def _build_parser() -> argparse.ArgumentParser:
     pn = sub.add_parser("new", help="scaffold a new ADR file")
     pn.add_argument("slug", help="kebab-case slug, e.g. my-decision")
     pn.add_argument("--title", default="", help="Title (default: title-cased slug)")
+    # Slice 028-01: reserve-on-main with PR-fallback. --no-push opts out
+    # of the remote interaction (local-only allocation).
+    push_group = pn.add_mutually_exclusive_group()
+    push_group.add_argument(
+        "--no-push", action="store_true",
+        help="Skip the direct push to origin/main (local-only allocation)",
+    )
+    push_group.add_argument(
+        "--pr", action="store_true",
+        help="Skip the direct-push attempt; go straight to branch + PR",
+    )
+    pn.add_argument(
+        "--project-dir", default=None,
+        help="Project root (default: current working directory)",
+    )
 
     pa = sub.add_parser("accept", help="flip an ADR's Status from Proposed → Accepted")
     pa.add_argument("number", help="4-digit ADR number (e.g. 0003)")
@@ -545,10 +952,12 @@ def main(argv: list) -> int:
 
     try:
         if ns.cmd == "new":
-            adrs_dir = Path.cwd() / "docs" / "decisions"
-            target = cmd_new(adrs_dir, ns.slug, ns.title)
-            print(str(target.relative_to(Path.cwd())) if target.is_relative_to(Path.cwd())
-                  else str(target))
+            # Slice 028-01: default behavior changed from local-only to
+            # reserve-on-main with PR-fallback. --no-push opts out.
+            project_dir = (Path(ns.project_dir).resolve()
+                           if ns.project_dir else Path.cwd())
+            reserve_adr(ns.slug, project_dir, title=ns.title,
+                        no_push=ns.no_push, pr_mode=ns.pr)
         elif ns.cmd == "accept":
             adrs_dir = Path.cwd() / "docs" / "decisions"
             target = cmd_accept(adrs_dir, ns.number)

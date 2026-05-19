@@ -106,6 +106,25 @@ def write_refinement_todo(path: Path) -> None:
 
 # ---------- NewTests (AC #1, #6) ----------
 
+
+def _git_init_on_main(repo_dir: Path) -> None:
+    """Initialize a fresh git repo on branch `main` with one empty commit.
+
+    Required because slice 028-01 added preflight checks (must be on main +
+    clean worktree) that fire even for `--no-push`. The existing NewTests
+    use this so their `--no-push` CLI invocations satisfy the preflight."""
+    env = os.environ.copy()
+    env["GIT_AUTHOR_NAME"] = "Test"
+    env["GIT_AUTHOR_EMAIL"] = "test@example.invalid"
+    env["GIT_COMMITTER_NAME"] = "Test"
+    env["GIT_COMMITTER_EMAIL"] = "test@example.invalid"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo_dir)],
+                   env=env, check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo_dir), "commit",
+                    "--allow-empty", "-q", "-m", "init"],
+                   env=env, check=True, capture_output=True)
+
+
 class NewTests(unittest.TestCase):
 
     def setUp(self):
@@ -113,13 +132,38 @@ class NewTests(unittest.TestCase):
         self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
+        # Slice 028-01: `--no-push` still runs preflight; need a real git
+        # repo on main with a clean worktree.
+        _git_init_on_main(Path(self.tmpdir))
+        self._git_env = {**os.environ,
+                         "GIT_AUTHOR_NAME": "Test",
+                         "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                         "GIT_COMMITTER_NAME": "Test",
+                         "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+        self._stage_and_commit("scaffold")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def _stage_and_commit(self, message: str) -> None:
+        """Stage every change in the tmp repo and commit with `message`.
+        Used by tests that drop seed ADR files into docs/decisions/ via
+        write_sample_adr — the preflight check requires a clean tree.
+        Slice 028-01 design note."""
+        subprocess.run(["git", "-C", self.tmpdir, "add", "-A"],
+                       check=True, capture_output=True, env=self._git_env)
+        subprocess.run(["git", "-C", self.tmpdir, "commit", "-q",
+                        "--allow-empty", "-m", message],
+                       check=True, capture_output=True, env=self._git_env)
+
+    def _seed(self, *paths) -> None:
+        """Stage + commit seed files so the worktree is clean before the
+        helper runs."""
+        self._stage_and_commit("seed")
+
     def test_auto_number_starts_at_0001(self):
         """Empty docs/decisions/ → first ADR numbered 0001."""
-        result = run_adr("new", "first-decision", cwd=Path(self.tmpdir))
+        result = run_adr("new", "first-decision", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         adr_path = self.adrs_dir / "adr-0001-first-decision.md"
         self.assertTrue(adr_path.is_file(), f"expected file not created: {adr_path}")
@@ -128,7 +172,8 @@ class NewTests(unittest.TestCase):
         """Existing 0001, 0002 → next is 0003."""
         write_sample_adr(self.adrs_dir / "adr-0001-foo.md", "0001", "foo", "Foo")
         write_sample_adr(self.adrs_dir / "adr-0002-bar.md", "0002", "bar", "Bar")
-        result = run_adr("new", "baz", cwd=Path(self.tmpdir))
+        self._seed()
+        result = run_adr("new", "baz", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertTrue((self.adrs_dir / "adr-0003-baz.md").is_file())
 
@@ -136,7 +181,8 @@ class NewTests(unittest.TestCase):
         """Gap (0001, 0003) → next is 0004 (max + 1, no gap filling)."""
         write_sample_adr(self.adrs_dir / "adr-0001-foo.md", "0001", "foo", "Foo")
         write_sample_adr(self.adrs_dir / "adr-0003-baz.md", "0003", "baz", "Baz")
-        result = run_adr("new", "qux", cwd=Path(self.tmpdir))
+        self._seed()
+        result = run_adr("new", "qux", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertTrue((self.adrs_dir / "adr-0004-qux.md").is_file())
         self.assertFalse((self.adrs_dir / "adr-0002-qux.md").is_file())
@@ -144,35 +190,37 @@ class NewTests(unittest.TestCase):
     def test_boundary_auto_number(self):
         """Last existing ADR 0099 → next is 0100 (per DoD)."""
         write_sample_adr(self.adrs_dir / "adr-0099-old.md", "0099", "old", "Old")
-        result = run_adr("new", "centenary", cwd=Path(self.tmpdir))
+        self._seed()
+        result = run_adr("new", "centenary", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertTrue((self.adrs_dir / "adr-0100-centenary.md").is_file())
 
     def test_slug_collision_refused(self):
         """Existing NNNN-<slug>.md with any number → refuse new <slug> with exit 2."""
         write_sample_adr(self.adrs_dir / "adr-0001-taken.md", "0001", "taken", "Taken")
-        result = run_adr("new", "taken", cwd=Path(self.tmpdir))
+        self._seed()
+        result = run_adr("new", "taken", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 2, f"stdout: {result.stdout} stderr: {result.stderr}")
         self.assertIn("slug", result.stderr.lower())
 
     def test_readme_excluded_from_numbering(self):
         """README.md must NOT be counted as an ADR for numbering."""
         # README already exists from setUp
-        result = run_adr("new", "first", cwd=Path(self.tmpdir))
+        result = run_adr("new", "first", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         # Must be 0001, not numbered by counting README.
         self.assertTrue((self.adrs_dir / "adr-0001-first.md").is_file())
 
     def test_default_title_title_cased_from_slug(self):
         """Slug `my-decision` → default title `My Decision`."""
-        result = run_adr("new", "my-decision", cwd=Path(self.tmpdir))
+        result = run_adr("new", "my-decision", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         content = (self.adrs_dir / "adr-0001-my-decision.md").read_text()
         self.assertIn("# ADR-0001: My Decision", content)
 
     def test_explicit_title_used(self):
         """--title overrides the default title-cased slug."""
-        result = run_adr("new", "thing", "--title", "Custom Title Here",
+        result = run_adr("new", "thing", "--no-push", "--title", "Custom Title Here",
                          cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         content = (self.adrs_dir / "adr-0001-thing.md").read_text()
@@ -180,7 +228,7 @@ class NewTests(unittest.TestCase):
 
     def test_file_has_all_six_sections_in_order(self):
         """All six sections present, in the canonical order."""
-        result = run_adr("new", "ordered", cwd=Path(self.tmpdir))
+        result = run_adr("new", "ordered", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
         content = (self.adrs_dir / "adr-0001-ordered.md").read_text()
         positions = [
@@ -197,14 +245,14 @@ class NewTests(unittest.TestCase):
 
     def test_status_body_is_proposed_today(self):
         """Status body is 'Proposed (YYYY-MM-DD)' with today's date."""
-        result = run_adr("new", "dated", cwd=Path(self.tmpdir))
+        result = run_adr("new", "dated", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
         content = (self.adrs_dir / "adr-0001-dated.md").read_text()
         self.assertIn(f"Proposed ({TODAY})", content)
 
     def test_prints_created_path_to_stdout(self):
         """The created path is printed to stdout. Exit 0."""
-        result = run_adr("new", "printable", cwd=Path(self.tmpdir))
+        result = run_adr("new", "printable", "--no-push", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0)
         self.assertIn("adr-0001-printable.md", result.stdout)
 
@@ -720,6 +768,594 @@ class ExtractDescriptionAbbreviationTests(unittest.TestCase):
         out = self._force_truncate(para)
         self.assertFalse(out.endswith("Dr."), f"out={out!r}")
         self.assertFalse(out.endswith("Mr."), f"out={out!r}")
+
+
+# ---------- ReserveAdrTests (slice 028-01) ----------
+#
+# These tests mirror the shape of skills/spec-workflow/test_workflow.py's
+# ReserveSpecTests class (slice 003-03). The reserve-on-main flow inside
+# adr.py is an inline-mirror of workflow.py's reserve_spec per ADR-0003
+# (two callers; extract when a third caller emerges).
+
+_adr_mod = _import_adr_module()
+
+
+class _SubprocessRecorder:
+    """Captures subprocess.run calls and returns canned results based on
+    a sequence of (matcher, returncode, stdout, stderr) tuples.
+
+    Mirrors the recorder in skills/spec-workflow/test_workflow.py. Each
+    call consumes the first matching tuple (FIFO). Unmatched calls return
+    a benign (rc=0, stdout="", stderr="") proc."""
+
+    def __init__(self):
+        self.calls = []
+        self._responses = []
+
+    def stub(self, matcher, returncode=0, stdout="", stderr=""):
+        self._responses.append((matcher, returncode, stdout, stderr))
+        return self
+
+    def __call__(self, *args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        if isinstance(argv, str):
+            argv_list = argv.split()
+        else:
+            argv_list = list(argv)
+        self.calls.append(argv_list)
+        for i, (matcher, rc, out, err) in enumerate(self._responses):
+            if matcher(argv_list):
+                self._responses.pop(i)
+                return _make_proc(rc, out, err)
+        return _make_proc(0, "", "")
+
+    def argv_log(self):
+        return [" ".join(a) for a in self.calls]
+
+
+def _make_proc(returncode: int, stdout: str = "", stderr: str = ""):
+    from unittest.mock import MagicMock
+    m = MagicMock()
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
+
+
+def _matches(*prefix_tokens):
+    def _m(argv):
+        return tuple(argv[: len(prefix_tokens)]) == tuple(prefix_tokens)
+    return _m
+
+
+class ReserveAdrTests(unittest.TestCase):
+    """Slice 028-01: `adr.py new <slug>` reserves the next free ADR
+    number on origin/main, mirroring `workflow.py new`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-reserve-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        # Scaffold the docs/decisions/ surface — the reserve flow refuses
+        # if it's absent (parity with workflow.py docs/specs/ guard).
+        self.adrs_dir = self.target / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _seed_adr(self, number: str, slug: str, title: str = None) -> None:
+        title = title or _adr_mod._slug_to_title(slug)
+        write_sample_adr(self.adrs_dir / f"adr-{number}-{slug}.md",
+                         number, slug, title)
+
+    def _stub_preflight_ok(self, rec: _SubprocessRecorder,
+                           dirty: bool = False) -> None:
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0,
+                 stdout=("M somefile\n" if dirty else ""))
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
+
+    # AC #1 + AC #3 + AC #5 — happy path with --no-push; verify
+    # stub contents and commit semantics without any remote calls.
+    def test_new_reserves_next_number_and_writes_stub(self):
+        """AC #1: reserves next free NNNN; AC #3: --no-push skips remote."""
+        self._seed_adr("0001", "first")
+        self._seed_adr("0015", "another")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "new-decision", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        adr_path = self.adrs_dir / "adr-0016-new-decision.md"
+        self.assertTrue(adr_path.is_file(), f"missing: {adr_path}")
+        content = adr_path.read_text()
+        # Title-cased default
+        self.assertIn("# ADR-0016: New Decision", content)
+        # Proposed status with today's date
+        self.assertIn(f"Proposed ({TODAY})", content)
+        # Canonical commit message
+        commit_calls = [c for c in rec.calls
+                        if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]
+        self.assertEqual(len(commit_calls), 1)
+        self.assertIn("docs(decisions): reserve adr-0016-new-decision",
+                      " ".join(commit_calls[0]))
+        # --no-push: no fetch / push calls
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git push", flat)
+        self.assertNotIn("git fetch", flat)
+
+    # AC #1 — gap-tolerance: max + 1 across gaps.
+    def test_new_uses_max_plus_one_across_gaps(self):
+        self._seed_adr("0001", "x")
+        self._seed_adr("0015", "y")
+        self._seed_adr("0003", "z")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "newslot", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue((self.adrs_dir / "adr-0016-newslot.md").is_file(),
+                        f"expected 0016-newslot; got: "
+                        f"{sorted(self.adrs_dir.iterdir())}")
+
+    # AC #5 (pattern) — refuse on non-main branch.
+    def test_new_refuses_on_non_main_branch(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/foo\n")
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "myslug", project_dir=self.target,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("main", msg)
+        # No file created
+        self.assertFalse(any(self.adrs_dir.glob("*-myslug.md")))
+
+    # AC #5 (pattern) — refuse on dirty worktree.
+    def test_new_refuses_on_dirty_worktree(self):
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec, dirty=True)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "myslug", project_dir=self.target,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertTrue("dirty" in msg or "uncommitted" in msg or "clean" in msg,
+                        f"unexpected: {ctx.exception!r}")
+        self.assertFalse(any(self.adrs_dir.glob("*-myslug.md")))
+
+    # Bad slug refuses BEFORE any git invocation (parity with workflow.py).
+    # Re-uses the existing adr.py slug regex which accepts a leading digit
+    # (design note: don't tighten to workflow.py's stricter regex).
+    def test_new_refuses_on_bad_slug_before_git(self):
+        # NOTE: adr.py's slug regex (`^[a-z0-9][a-z0-9-]*$`) is
+        # deliberately looser than workflow.py's stricter pattern: it
+        # accepts a leading digit AND a trailing hyphen. Per the slice's
+        # design notes, do NOT tighten — that would silently break any
+        # existing ADR slug. Only test slugs that the existing regex
+        # rejects.
+        bad = ["BadSlug", "", "with space", "UPPER", "-leading"]
+        for slug in bad:
+            with self.subTest(slug=slug):
+                rec = _SubprocessRecorder()
+                from unittest.mock import patch
+                with patch.object(_adr_mod, "subprocess") as sp_mod:
+                    sp_mod.run = rec
+                    with self.assertRaises(_adr_mod.AdrError) as ctx:
+                        _adr_mod.reserve_adr(
+                            slug, project_dir=self.target,
+                            title="", no_push=True, pr_mode=False,
+                        )
+                msg = str(ctx.exception).lower()
+                self.assertIn("slug", msg,
+                              f"slug={slug!r}: error didn't name 'slug': "
+                              f"{ctx.exception!r}")
+                # No git was invoked
+                self.assertEqual(rec.calls, [],
+                                 f"slug={slug!r}: git invoked before slug check")
+
+    def test_new_allows_slug_starting_with_digit(self):
+        """adr.py's slug regex accepts a leading digit (don't tighten to
+        workflow.py's stricter regex — would be a silent break)."""
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "2026-policy", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue((self.adrs_dir / "adr-0001-2026-policy.md").is_file())
+
+    # Refuse when docs/decisions/ absent (parity with workflow.py
+    # missing-specs-dir refusal).
+    def test_new_refuses_when_decisions_dir_absent(self):
+        bare = Path(self.tmpdir) / "bare"
+        bare.mkdir()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "validslug", project_dir=bare,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("docs/decisions", msg)
+
+    # Slug-collision check fires AFTER fetch (so the collision view is
+    # freshest) but BEFORE writing the new file.
+    def test_new_refuses_on_slug_collision_post_fetch(self):
+        self._seed_adr("0007", "taken")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "taken", project_dir=self.target,
+                    title="", no_push=False, pr_mode=False,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("slug", msg)
+        # Fetch happened (proves the check is post-fetch)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git fetch", flat)
+        # But no commit / push (collision short-circuits)
+        self.assertNotIn("git commit", flat)
+        self.assertNotIn("git push", flat)
+        # No new file beyond the seed
+        files = sorted(p.name for p in self.adrs_dir.glob("adr-*.md"))
+        self.assertEqual(files, ["adr-0007-taken.md"])
+
+    # AC #1 — default behavior: direct push to origin/main succeeds.
+    def test_new_direct_push_succeeds(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "newslot", project_dir=self.target,
+                title="", no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # No PR-fallback branches created
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git branch reserve", flat)
+        self.assertNotIn("gh pr create", flat)
+
+    # AC #2 — protected-branch stderr triggers PR fallback.
+    def test_new_falls_back_on_protected_branch(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"),
+                 returncode=1,
+                 stderr="remote: error: GH006: Protected branch update failed.\n")
+        rec.stub(_matches("git", "branch"), returncode=0)
+        rec.stub(_matches("git", "reset", "--hard", "origin/main"),
+                 returncode=0)
+        rec.stub(_matches("git", "checkout"), returncode=0)
+        rec.stub(_matches("git", "push", "-u", "origin"), returncode=0)
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/user/repo/pull/99\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/bin/gh"):
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "newslot", project_dir=self.target,
+                title="", no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git branch", flat)
+        self.assertIn("git reset --hard origin/main", flat)
+        self.assertIn("git checkout", flat)
+        self.assertIn("git push -u origin", flat)
+        self.assertIn("gh pr create", flat)
+        # PR branch name follows the reserve/adr-NNNN-<slug> convention
+        branch_calls = [c for c in rec.calls
+                        if len(c) >= 2 and c[0] == "git" and c[1] == "branch"]
+        self.assertTrue(any("reserve/adr-0002-newslot" in " ".join(c)
+                            for c in branch_calls),
+                        f"branch name: {branch_calls}")
+
+    # AC #4 — non-fast-forward triggers race-detection (NOT PR fallback).
+    def test_new_does_not_fall_back_on_non_fast_forward(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"),
+                 returncode=1,
+                 stderr="! [rejected]  main -> main (non-fast-forward)\n")
+        rec.stub(_matches("git", "reset", "--hard", "HEAD~1"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "newslot", project_dir=self.target,
+                    title="", no_push=False, pr_mode=False,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("race", msg)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git reset --hard HEAD~1", flat)
+        # No fallback branch / gh pr create
+        self.assertNotIn("git branch reserve", flat)
+        self.assertNotIn("gh pr create", flat)
+
+    # Race recovery cleans up the stranded ADR file on disk so the
+    # worktree stays tidy (parity with workflow.py's spec-dir cleanup).
+    def test_new_race_recovery_removes_stranded_file(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "push", "origin", "main"),
+                 returncode=1,
+                 stderr="! [rejected]  main -> main (non-fast-forward)\n")
+        # `git reset --hard HEAD~1` is mocked → worktree files NOT
+        # rolled back; the helper must clean up its own write.
+        rec.stub(_matches("git", "reset", "--hard", "HEAD~1"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError):
+                _adr_mod.reserve_adr(
+                    "newslot", project_dir=self.target,
+                    title="", no_push=False, pr_mode=False,
+                )
+        stranded = self.adrs_dir / "adr-0002-newslot.md"
+        self.assertFalse(
+            stranded.exists(),
+            f"race recovery left stranded ADR on disk: {stranded}",
+        )
+
+    # AC #3 — --pr skips direct push, goes straight to PR fallback.
+    def test_new_pr_mode_skips_direct_push(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        rec.stub(_matches("git", "branch"), returncode=0)
+        rec.stub(_matches("git", "reset", "--hard", "origin/main"),
+                 returncode=0)
+        rec.stub(_matches("git", "checkout"), returncode=0)
+        rec.stub(_matches("git", "push", "-u", "origin"), returncode=0)
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/u/r/pull/7\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/bin/gh"):
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "myslot", project_dir=self.target,
+                title="", no_push=False, pr_mode=True,
+            )
+        self.assertEqual(code, 0)
+        # No direct push to main
+        push_main = [c for c in rec.calls
+                     if tuple(c[:4]) == ("git", "push", "origin", "main")]
+        self.assertEqual(push_main, [],
+                         f"--pr should skip direct push; calls: "
+                         f"{rec.argv_log()}")
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git push -u origin", flat)
+        self.assertIn("gh pr create", flat)
+
+    # AC #2 — PR fallback refuses without `gh` on PATH.
+    def test_new_pr_mode_refuses_without_gh(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value=None):
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "myslot", project_dir=self.target,
+                    title="", no_push=False, pr_mode=True,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("gh", msg)
+
+    # AC #2 — PR fallback refuses when origin isn't on github.com.
+    def test_new_pr_mode_refuses_without_github_remote(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0,
+                 stdout="git@gitlab.example.com:foo/bar.git\n")
+        rec.stub(_matches("git", "fetch"), returncode=0)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/bin/gh"):
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "myslot", project_dir=self.target,
+                    title="", no_push=False, pr_mode=True,
+                )
+        msg = str(ctx.exception).lower()
+        self.assertIn("github.com", msg)
+
+    # AC #3 — --no-push never calls fetch or push.
+    def test_new_no_push_skips_remote_calls(self):
+        self._seed_adr("0001", "existing")
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "soloslot", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git fetch", flat)
+        self.assertNotIn("git push", flat)
+
+    # AC #5 (CLI surface) — --no-push and --pr are mutually exclusive.
+    def test_new_no_push_and_pr_are_mutually_exclusive(self):
+        # argparse usage error → exit 2 from main()
+        result = run_adr("new", "myslot", "--no-push", "--pr",
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2,
+                         f"stdout: {result.stdout} stderr: {result.stderr}")
+
+    # --title override flows through reserve.
+    def test_new_explicit_title_used_in_reserve(self):
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "thing", project_dir=self.target,
+                title="Custom Title Here", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        content = (self.adrs_dir / "adr-0001-thing.md").read_text()
+        self.assertIn("# ADR-0001: Custom Title Here", content)
+
+
+# ---------- ReserveAdrCLITests (CLI surface) ----------
+
+class ReserveAdrCLITests(unittest.TestCase):
+    """CLI surface tests for slice 028-01 — verify `--help` lists the new
+    flags, and that the --no-push CLI path works end-to-end against a
+    real git repo (no mocking)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-reserve-cli-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        _git_init_on_main(Path(self.tmpdir))
+        env = {**os.environ,
+               "GIT_AUTHOR_NAME": "Test",
+               "GIT_AUTHOR_EMAIL": "test@example.invalid",
+               "GIT_COMMITTER_NAME": "Test",
+               "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+        subprocess.run(["git", "-C", self.tmpdir, "add", "-A"],
+                       check=True, capture_output=True, env=env)
+        subprocess.run(["git", "-C", self.tmpdir, "commit", "-q", "-m",
+                        "scaffold"], check=True, capture_output=True,
+                       env=env)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_help_shows_no_push_flag(self):
+        result = run_adr("new", "--help")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("--no-push", result.stdout)
+
+    def test_help_shows_pr_flag(self):
+        result = run_adr("new", "--help")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("--pr", result.stdout)
+
+    def test_help_shows_project_dir_flag(self):
+        result = run_adr("new", "--help")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("--project-dir", result.stdout)
+
+    def test_cli_no_push_creates_file_and_commits(self):
+        """End-to-end: --no-push commits locally, no remote interaction."""
+        env = {**os.environ,
+               "GIT_AUTHOR_NAME": "Test",
+               "GIT_AUTHOR_EMAIL": "test@example.invalid",
+               "GIT_COMMITTER_NAME": "Test",
+               "GIT_COMMITTER_EMAIL": "test@example.invalid",
+               "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+        result = subprocess.run(
+            [sys.executable, str(ADR_PY), "new", "first", "--no-push"],
+            capture_output=True, text=True, env=env, cwd=self.tmpdir,
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"stdout: {result.stdout} stderr: {result.stderr}")
+        adr_path = self.adrs_dir / "adr-0001-first.md"
+        self.assertTrue(adr_path.is_file())
+        # The commit landed on local main with the canonical message.
+        log = subprocess.run(
+            ["git", "-C", self.tmpdir, "log", "-1", "--format=%s"],
+            capture_output=True, text=True, env=env, check=True,
+        )
+        self.assertIn("docs(decisions): reserve adr-0001-first",
+                      log.stdout)
 
 
 if __name__ == "__main__":

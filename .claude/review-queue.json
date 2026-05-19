@@ -1,13 +1,8 @@
 {
-  "spec": "docs/specs/026-context-fill-telemetry/spec.md",
-  "slice": "026-01",
+  "spec": "docs/specs/028-parallel-session-locks/spec.md",
+  "slice": "028-01",
   "files": [
-    "hooks/scripts/lib/context_fill.py",
-    "hooks/scripts/lib/test_context_fill.py",
-    "hooks/scripts/jig-context-check.sh",
-    "hooks/scripts/test_jig_context_check.py",
-    "skills/scaffold-init/scaffold.py",
-    "skills/scaffold-init/test_scaffold_mode.py",
-    "scripts/run_tests.py"
+    "skills/adr-workflow/adr.py",
+    "skills/adr-workflow/test_adr.py"
   ]
 }

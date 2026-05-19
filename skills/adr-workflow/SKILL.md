@@ -38,12 +38,39 @@ Consequences, Open questions).
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" new <slug> \
-  --title "<Title>"
+  [--title "<Title>"] [--project-dir DIR] [--no-push | --pr]
 ```
 
-Run from the project root (the script looks for `./docs/decisions/`). The slug is
+Run from the project root (the script looks for `./docs/decisions/`,
+or use `--project-dir DIR` to target a different root). The slug is
 kebab-case (`my-decision`). `--title` is optional — defaults to the
 title-cased slug.
+
+**Reserve-on-origin/main is the default (slice 028-01).** The helper
+fetches `origin/main`, computes the next free `NNNN` from the
+just-fetched view, scaffolds the file, commits as
+`docs(decisions): reserve adr-NNNN-<slug>`, and pushes to
+`origin/main`. If the push is refused by branch protection /
+permissions, the helper automatically falls back to a
+`reserve/adr-NNNN-<slug>` branch + `gh pr create`. This locks the
+ADR number **team-wide** before any drafting begins, killing the
+parallel-worktree numbering-collision failure mode that motivated
+spec 028. Run it from a clean main.
+
+Flags:
+
+- `--no-push` — commit locally only; skip fetch / push entirely.
+  Preflight still applies: must be on `main`, clean worktree (so
+  the reservation commit always lands on a clean main).
+- `--pr` — skip the direct-push attempt; go straight to branch + PR.
+  Useful when you already know main is protection-locked. Mutually
+  exclusive with `--no-push`.
+
+Race-on-push (someone advanced `origin/main` while you were
+reserving) surfaces as `race-on-push: ...` and drops the stranded
+local commit + the stranded ADR file from your working tree. Re-run
+the same `adr.py new <slug>` to pick the next free number — there
+is no auto-renumber.
 
 Then Claude fills in Context / Options Considered / Recommended Decision /
 Consequences. Keep it tight: one decision per ADR.
@@ -177,6 +204,15 @@ python3 .../adr.py resolve-todo 0003 "scaffold-stable"
 - **Substring matching mirrors `workflow.py`.** `0001-01` does not collide
   with `0001` since ADR numbers are matched as exact 4-digit prefixes,
   not free-form substrings (unlike slice fragments).
+- **`adr.py new` refuses off-main and on a dirty worktree.** Per slice
+  028-01 (parity with `workflow.py new`), the reservation must land
+  on a clean main even under `--no-push`. If you've drafted ADR
+  content on a feature branch and need to retroactively reserve a
+  number, the workaround mirrors the `workflow.py new`-on-feature-
+  branch gap (see [docs/refinement-todo.md](../../docs/refinement-todo.md)
+  for the deferred resolution): `git checkout main`, run `adr.py new
+  <slug>`, then cherry-pick or merge your draft content onto the
+  reservation commit.
 
 ## Reconciliation checklist
 
