@@ -139,6 +139,17 @@ field (new convention, slice 015-01) or the prose `**STATUS: ...**` line
 `docs/specs/README.md`. Use `workflow.py transition` for the spec mutation
 and `workflow.py status-board` to re-sync the board.
 
+**Spec-level `status:` is derived, not authored** (slice 030-01). The
+frontmatter `status:` at the top of each `spec.md` overview file is
+computed by `compute_spec_status(spec_path)` from its slices: `DONE` when
+every non-DEFERRED slice is DONE, `DRAFT` when no slices exist or every
+non-DEFERRED slice is DRAFT (and `DRAFT` when every slice is DEFERRED),
+otherwise `IN_PROGRESS`. The rollup write happens automatically inside
+`workflow.py transition` (after the slice mutation) and inside
+`workflow.py status-board` (during regen). Don't set `spec.md`'s
+`status:` by hand — it'll be overwritten on the next transition or
+regen anyway.
+
 ### DEFERRED state
 
 A slice is `DEFERRED` when scoped but parked — the work is identified but
