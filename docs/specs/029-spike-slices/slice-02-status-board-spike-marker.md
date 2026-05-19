@@ -63,8 +63,9 @@ grep for `kind: spike` or open individual slice files.
 - [x] Implementation review passed.
 - [x] Deviation log produced under this slice heading.
 - [x] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. _(Vacuously satisfied — no
+      decisions were deferred; see deviation log entry 9.)_
 
 ### Close-out (post-DONE)
 
