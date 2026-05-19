@@ -155,9 +155,10 @@ SKILL.md hand-off is the documented gate.
 
 ### After implementation
 
-Slice 031-01 wired a **multi-pass review flow** into the post-implementation
-step. Every slice runs through two passes before the `IN_PROGRESS → REVIEWED`
-transition; a third (architecture) pass fires on demand per slice 031-02.
+Slices 031-01 + 031-02 wired a **multi-pass review flow** into the
+post-implementation step. Every slice runs through two passes before the
+`IN_PROGRESS → REVIEWED` transition; a third (architecture) pass fires on
+demand when the slice's frontmatter declares `arch_review: true`.
 
 The orchestrator runs the passes in this order:
 
@@ -179,11 +180,23 @@ The orchestrator runs the passes in this order:
    RECONCILIATION NOTES` envelope as the compliance pass, with
    SPECIFIC ISSUES entries tagged `[blocker]` / `[nit]` / `[strength]`.
 
-3. (Slice 031-02 adds an on-demand **arch pass** via `arch-review`,
-   gated by `arch_review: true` in slice frontmatter. Out of scope here.)
+3. **Arch pass — `arch-review`** (on-demand). Before running this pass,
+   query the slice's `arch_review:` frontmatter flag via
+   `workflow.py arch-review-needed`. When the helper prints `true`,
+   build the arch-pass prompt with `review.py arch-review` and spawn a
+   third `reviewer`-shaped subagent. The pass produces the four
+   canonical arch buckets (summary / strengths / concerns / open
+   questions) wrapped in the same verdict envelope, routed via the
+   same prose-based dispatch to the most-specific `arch-review`
+   SKILL.md reachable. When the helper prints `false`, skip this
+   pass entirely. Slice authors flip the flag by uncommenting the
+   `arch_review: true` line in the slice template's frontmatter — set
+   it when the slice changes module boundaries, public contracts, or
+   architecture-shaped concerns.
 
-**Block rule for the REVIEWED transition.** Both required passes
-(compliance + craft) must pass before `transition <slice> REVIEWED`:
+**Block rule for the REVIEWED transition.** All required passes
+(compliance + craft, plus arch when `arch_review: true`) must pass
+before `transition <slice> REVIEWED`:
 
 - Any `fail` verdict from any pass blocks the transition.
 - `needs-changes` from the compliance pass blocks (the implementer
@@ -193,11 +206,14 @@ The orchestrator runs the passes in this order:
   implementer captures them in the deviation log during reconciliation).
   Only `[blocker]`-tagged entries from the craft pass block the
   transition.
+- The arch pass follows the same rule as the craft pass:
+  `[blocker]`-tagged entries block; `[nit]`-tagged entries and
+  `needs-changes` become reconciliation-log items.
 
-After both passes pass:
+After all required passes pass:
 
 4. Address any reviewer findings, adding regression tests for any real
-   bugs found by either pass.
+   bugs found.
 5. Transition: `transition <spec.md> <slice> REVIEWED`.
 
 ```bash
@@ -216,6 +232,25 @@ PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
 SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type pr-review)
 # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+
+# Arch pass (only when slice frontmatter has `arch_review: true`)
+# IMPORTANT: capture the helper exit code — a non-zero exit means the
+# slice lookup failed (missing spec / unknown fragment / ambiguous),
+# not "no arch pass needed." Surface the error rather than silently
+# skipping the pass.
+if ! NEED_ARCH=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+    arch-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"); then
+  echo "arch-review-needed failed — aborting" >&2
+  exit 2
+fi
+if [ "$NEED_ARCH" = "true" ]; then
+  PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    arch-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+    "<deliverable-path-1>" ...)
+  SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    subagent-type arch-review)
+  # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+fi
 ```
 
 ### Reconciliation (REVIEWED → RECONCILED)

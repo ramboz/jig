@@ -2669,6 +2669,184 @@ class StatusBoardRollupTests(unittest.TestCase):
                          "spec.md without frontmatter was modified")
 
 
+# ---------------------------------------------------------------------------
+# Slice 031-02 — `slice_needs_arch_review` helper + slice-template hint
+# ---------------------------------------------------------------------------
+
+
+class SliceNeedsArchReviewTests(unittest.TestCase):
+    """Slice 031-02 AC #4 + AC #6: `workflow.py` exposes
+    `slice_needs_arch_review(spec_md, slice_fragment) -> bool` that
+    reads the slice's frontmatter and returns the `arch_review:` value,
+    defaulting to `false` when the field is absent.
+
+    The helper is exposed as a CLI subcommand `arch-review-needed` so
+    SKILL.md's bash recipe can shell out the same way it shells out
+    `subagent-type`.
+
+    Test fixtures use the canonical post-018-03 file-per-slice layout:
+    `spec.md` carries the overview + spec-level frontmatter, and a
+    sibling `slice-NN-<short>.md` carries the slice content + the
+    slice-level frontmatter (where `arch_review:` lives).
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-arch-needed-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.slice_file = self.tmpdir / "slice-02-arch.md"
+        # Minimum spec.md — overview only; slice content lives in sibling.
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, fm_extra: str, slice_name: str = "031-02 alpha") -> None:
+        """Write a synthetic slice FILE (file-per-slice layout) with the
+        given frontmatter extras. `fm_extra` goes between
+        `last_verified:` and the closing `---`."""
+        self.slice_file.write_text(
+            "---\n"
+            "status: IN_PROGRESS\n"
+            "dependencies: []\n"
+            "last_verified:\n"
+            f"{fm_extra}"
+            "---\n\n"
+            f"## Slice {slice_name}\n\n"
+            "**Goal:** placeholder.\n"
+        )
+
+    def _run(self, slice_fragment: str = "031-02"):
+        return run_workflow(
+            "arch-review-needed", str(self.spec), slice_fragment,
+        )
+
+    # AC #4 — defaults to false when field is absent
+    def test_returns_false_when_field_absent(self):
+        self._write_slice(fm_extra="")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "false")
+
+    # AC #4 — reads true when frontmatter sets it
+    def test_returns_true_when_field_is_true(self):
+        self._write_slice(fm_extra="arch_review: true\n")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "true")
+
+    # AC #4 — reads false explicitly
+    def test_returns_false_when_field_is_false(self):
+        self._write_slice(fm_extra="arch_review: false\n")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "false")
+
+    # AC #6 — embedded slice (no per-slice frontmatter) defaults to false
+    def test_returns_false_for_legacy_embedded_slice(self):
+        # Legacy shape: slice embedded in spec.md with no per-slice
+        # frontmatter — the `arch_review:` field can't exist there, so
+        # the helper must default to false.
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n"
+            "## Slice 031-02 alpha\n\n**STATUS: DRAFT**\n\n"
+            "**Goal:** placeholder.\n"
+        )
+        # No slice_file written; spec.md carries the embedded slice.
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "false")
+
+    def test_returns_true_for_embedded_slice_with_post_heading_frontmatter(self):
+        # Legacy 015-01 layout: an embedded slice may carry per-slice
+        # frontmatter inserted AFTER the `## Slice` heading. The helper
+        # must read it via the layout-aware `_slice_frontmatter` path
+        # (consistent with `collect_slices` / `compute_spec_status`).
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n"
+            "## Slice 031-02 alpha\n\n"
+            "---\nstatus: IN_PROGRESS\narch_review: true\n---\n\n"
+            "**Goal:** placeholder.\n"
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.strip(), "true")
+
+    # Edge: case-insensitive truthy values
+    def test_returns_true_for_truthy_variations(self):
+        for truthy in ("true", "True", "TRUE", "yes"):
+            self._write_slice(fm_extra=f"arch_review: {truthy}\n")
+            result = self._run()
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(
+                result.stdout.strip(), "true",
+                f"value {truthy!r} should be treated as true",
+            )
+
+    # Edge: stdout-only (no trailing noise) for shell substitution
+    def test_stdout_only_emits_clean_value(self):
+        self._write_slice(fm_extra="arch_review: true\n")
+        result = self._run()
+        self.assertEqual(result.returncode, 0)
+        # Same hygiene as `subagent-type`: single word + optional newline
+        self.assertIn(result.stdout, ("true\n", "true"))
+
+
+class SliceTemplateArchReviewHintTests(unittest.TestCase):
+    """Slice 031-02 AC #1 + AC #6: the slice template at
+    `templates/docs/specs/slice-template.md` ships the `arch_review:`
+    field commented out with a one-line guide, so authors discover it
+    organically when copying the template for a new slice."""
+
+    def setUp(self):
+        template = (REPO_ROOT / "templates" / "docs" / "specs"
+                    / "slice-template.md")
+        self.template = template
+        self.text = template.read_text()
+
+    def test_template_mentions_arch_review_field(self):
+        # AC #1: the commented-out hint must mention the field
+        self.assertIn(
+            "arch_review:", self.text,
+            "slice template must mention the `arch_review:` "
+            "frontmatter field (031-02 AC #1)",
+        )
+
+    def test_template_has_arch_review_hint_in_frontmatter_block(self):
+        # AC #1: the hint sits inside the leading frontmatter block,
+        # commented out (lines start with `#`).
+        m = re.match(r"---\n(.*?)\n---", self.text, re.DOTALL)
+        self.assertIsNotNone(m, "slice template must start with frontmatter")
+        fm = m.group(1)
+        self.assertIn(
+            "arch_review:", fm,
+            "`arch_review:` hint must be in the leading frontmatter "
+            "block (031-02 AC #1)",
+        )
+        # The hint must be commented out — search for `# arch_review:`
+        self.assertRegex(
+            fm,
+            r"#\s*arch_review:",
+            "the `arch_review:` hint must be commented out (031-02 AC #1: "
+            "existing slices without the field are unaffected)",
+        )
+
+    def test_template_explains_when_to_set_arch_review(self):
+        # AC #1: a one-line guide explains when to flip the flag.
+        # Search for module/boundary/contract/architecture vocab near the hint.
+        m = re.match(r"---\n(.*?)\n---", self.text, re.DOTALL)
+        fm = m.group(1)
+        self.assertRegex(
+            fm,
+            r"(?is)arch_review:.*(?:module|boundar|contract|architect)",
+            "the `arch_review:` hint must explain when to set it "
+            "(031-02 AC #1: module boundaries / public contracts / "
+            "architecture-shaped concerns)",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

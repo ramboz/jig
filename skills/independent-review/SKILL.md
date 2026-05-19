@@ -17,8 +17,8 @@ user-invocable: true
 ## What this skill does
 
 Constructs the standardized reviewer-subagent prompt and tells Claude when /
-how to spawn the Task. The skill has three modes, matching the review passes
-every slice runs:
+how to spawn the Task. The skill has four modes, matching the review passes
+every slice may run:
 
 - **Implementation review** — after the implementer writes the deliverable to
   disk. The reviewer evaluates each acceptance criterion against the actual
@@ -31,6 +31,17 @@ every slice runs:
   compliance pass. SPECIFIC ISSUES entries are tagged `[blocker]` / `[nit]`
   / `[strength]` so the workflow can decide what blocks the REVIEWED
   transition vs. what becomes a reconciliation-log entry.
+- **Arch-review (architecture pass — on-demand)** — slice 031-02. After
+  the craft pass returns, the orchestrator queries the slice's
+  `arch_review:` frontmatter flag via `workflow.py arch-review-needed`;
+  when `true`, it runs an arch pass producing the four-bucket output
+  (summary / strengths / concerns / open questions) the
+  `jig:arch-review` skill emits, in the same verdict envelope. Slice
+  authors set `arch_review: true` in the slice's frontmatter when the
+  slice changes module boundaries, public contracts, or
+  architecture-shaped concerns; the slice template at
+  `templates/docs/specs/slice-template.md` ships the field commented
+  out as a discoverability nudge.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -82,6 +93,48 @@ returns the canonical four output buckets (scope / blockers / nits /
 strengths) wrapped in the same verdict envelope as the compliance
 pass. SPECIFIC ISSUES entries are tagged `[blocker]` / `[nit]` /
 `[strength]`; only `[blocker]` entries block the REVIEWED transition.
+
+### Arch-review (architecture pass — slice 031-02, on-demand)
+
+The arch pass runs only when the slice's frontmatter declares
+`arch_review: true`. Query the flag via `workflow.py arch-review-needed`
+before spawning:
+
+```bash
+# Capture the helper exit code — a non-zero exit means the slice lookup
+# failed, not "no arch pass needed." Surface the error rather than
+# silently skipping the pass.
+if ! NEED_ARCH=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+    arch-review-needed \
+    "docs/specs/NNN-<slug>/spec.md" \
+    "<slice-fragment>"); then
+  echo "arch-review-needed failed — aborting" >&2
+  exit 2
+fi
+if [ "$NEED_ARCH" = "true" ]; then
+  PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    arch-review \
+    "docs/specs/NNN-<slug>/spec.md" \
+    "<slice-fragment>" \
+    "<deliverable-path-1>" "<deliverable-path-2>" ...)
+  SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    subagent-type arch-review)
+fi
+```
+
+When `$NEED_ARCH` is `true`, feed `$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`. The prompt routes via the same
+prose-based dispatch as `pr-review` to the most-specific `arch-review`
+SKILL.md reachable. The pass returns the canonical four arch output
+buckets (summary / strengths / concerns / open questions). Tag and
+block semantics match the craft pass: `[blocker]` entries block the
+REVIEWED transition; `[nit]` entries and `needs-changes` become
+reconciliation-log items.
+
+Slice authors set `arch_review: true` in the slice file's frontmatter
+when the slice changes module boundaries, public contracts, or
+architecture-shaped concerns. The slice template ships the field
+commented out as a discoverability nudge.
 
 ### Reconciliation review
 

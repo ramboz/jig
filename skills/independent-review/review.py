@@ -1,10 +1,12 @@
 """
 jig independent-review helper — slices 004-01 (review-helper) + 011-02
-(subagent-type-fallback-upgrade) + 031-01 (pr-review-pass).
+(subagent-type-fallback-upgrade) + 031-01 (pr-review-pass) + 031-02
+(arch-review-trigger).
 
-Builds the standardized reviewer-subagent prompt for either an implementation
-review, a reconciliation review, or (slice 031-01) a craft pr-review pass.
-The helper does NOT spawn the subagent itself — Claude owns the Task
+Builds the standardized reviewer-subagent prompt for any of: an
+implementation review, a reconciliation review, a craft pr-review pass
+(slice 031-01), or an on-demand arch-review pass (slice 031-02). The
+helper does NOT spawn the subagent itself — Claude owns the Task
 invocation. This script just makes the prompt consistent across 100+
 invocations.
 
@@ -23,11 +25,21 @@ what blocks vs. becomes a reconciliation-log entry. Skill-routing dispatch
 runs via SKILL.md prose — no filesystem detection here (see spec 031-01
 AC #4 and the spec.md Open question on routing dispatch).
 
+Slice 031-02 added the `arch-review` subcommand: a third on-demand pass
+that runs only when a slice's frontmatter declares `arch_review: true`.
+The orchestrator queries that flag via `workflow.py arch-review-needed`
+before spawning the arch pass. The prompt mirrors `pr-review` in shape but
+swaps the bucket names to match `jig:arch-review`'s canonical output
+(summary / strengths / concerns / open questions) and routes to the
+most-specific `arch-review` SKILL.md reachable via the same
+prose-based dispatch.
+
 Usage:
     python3 review.py implementation <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py reconciliation <spec.md> <slice-fragment>
     python3 review.py pr-review     <spec.md> <slice-fragment> <deliverable-path>...
-    python3 review.py subagent-type {implementation|reconciliation|pr-review}
+    python3 review.py arch-review   <spec.md> <slice-fragment> <deliverable-path>...
+    python3 review.py subagent-type {implementation|reconciliation|pr-review|arch-review}
 """
 
 import argparse
@@ -378,6 +390,95 @@ buckets that skill produces are:
 """
 
 
+# -------- arch-review prompt (slice 031-02) --------
+
+
+def build_arch_review_prompt(spec_path: Path, slice_label: str,
+                             deliverables: list) -> str:
+    """Construct the standard arch-review (architecture pass) prompt.
+
+    Slice 031-02: the orchestrator runs this pass AFTER the compliance
+    + craft passes, but ONLY when the slice's frontmatter declares
+    `arch_review: true`. Unlike `pr-review` (which always fires), this
+    pass is on-demand — slices that don't touch module boundaries or
+    public contracts skip it.
+
+    The pass produces the four canonical buckets the `jig:arch-review`
+    skill emits — summary / strengths / concerns / open questions —
+    wrapped in the same verdict envelope as the compliance + craft
+    passes so the workflow can consume one verdict shape across all
+    three passes.
+
+    Same routing pattern as `build_pr_review_prompt`: SKILL.md prose
+    points the reviewer at the most-specific `arch-review` SKILL.md
+    reachable; Claude's skill router resolves user > project >
+    `jig:arch-review` precedence from each skill's description hints.
+    No filesystem detection here.
+
+    NOTE: like `build_pr_review_prompt`, this builder does NOT append
+    `_principles_check_block()`. Constitution-adherence is checked in
+    the compliance + reconciliation passes; the arch pass is scoped to
+    architectural concerns only.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job
+
+You are running the **arch pass** (arch-review) on slice **{slice_label}**.
+The slice declared `arch_review: true` in its frontmatter — meaning it
+touches module boundaries, public contracts, or other
+architecture-shaped concerns. The compliance pass
+(jig:independent-review) and the craft pass (pr-review) have already
+returned — that work is done, and you must NOT re-evaluate either. Your
+job is to evaluate the *architecture*: does the change preserve module
+boundaries, public contracts, and design coherence?
+
+Apply the architectural concerns described in the most-specific
+`arch-review` SKILL.md reachable in the environment (a user-installed
+`arch-review` skill at `~/.claude/skills/arch-review/`, a
+project-installed one at `.claude/skills/arch-review/`, or the bundled
+`jig:arch-review` baseline — whichever Claude's skill router resolves
+to). The four canonical output buckets that skill produces are:
+
+1. **Summary** — what the change does architecturally and your overall
+   assessment.
+2. **Strengths** — specific architectural decisions or trade-offs the
+   change gets right.
+3. **Concerns** — risks, gaps, missing rationale, or unaddressed
+   failure modes specific to this change.
+4. **Open questions** — things you can't decide from the change alone;
+   phrase as questions for the author.
+
+## What to read (in this order)
+
+1. The spec — `{spec_path}`. Read slice **{slice_label}** for context,
+   but do NOT re-evaluate the acceptance criteria — that's the
+   compliance pass's job.
+2. The deliverables:
+{deliverable_lines}
+3. The project's `docs/architecture.md` if present — verify the
+   change is consistent with documented module boundaries and
+   contract surfaces.
+4. Any related files in the repo needed to understand how the change
+   composes with existing architecture (read-only).
+
+{_PROHIBITIONS}
+## Evaluate
+
+- Does the change preserve module boundaries documented in
+  `docs/architecture.md`?
+- If public contracts are touched (HTTP API, event schemas, RPC,
+  GraphQL, internal data shapes), are the corresponding artifacts
+  updated in the same change-set?
+- Are there architectural concerns the implementation doesn't
+  address (failure modes, coupling, layering violations)?
+- What architectural decisions does the change get right?
+
+{_PR_REVIEW_OUTPUT_FORMAT}
+"""
+
+
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     """Construct the standard reconciliation-review prompt.
 
@@ -487,13 +588,22 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pp.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
 
+    # Slice 031-02: arch (arch-review) pass — on-demand, mirrors `pr-review`.
+    pa = sub.add_parser(
+        "arch-review",
+        help="construct an arch-pass (arch-review) prompt",
+    )
+    pa.add_argument("spec", help="path to spec.md")
+    pa.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pa.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+
     pt = sub.add_parser(
         "subagent-type",
         help="print the subagent_type name SKILL.md should pass to Task",
     )
     pt.add_argument(
         "mode",
-        choices=["implementation", "reconciliation", "pr-review"],
+        choices=["implementation", "reconciliation", "pr-review", "arch-review"],
         help=(
             "review mode (currently informational — every mode returns the "
             "same name; the choice exists for forward compatibility)"
@@ -527,6 +637,8 @@ def main(argv: list) -> int:
             prompt = build_implementation_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "pr-review":
             prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "arch-review":
+            prompt = build_arch_review_prompt(spec, slice_label, ns.deliverables)
         else:
             prompt = build_reconciliation_prompt(spec, slice_label)
         sys.stdout.write(prompt)

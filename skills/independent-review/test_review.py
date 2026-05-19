@@ -962,6 +962,177 @@ class PrReviewSubagentTypeTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "general-purpose")
 
 
+# ---------------------------------------------------------------------------
+# Slice 031-02 — arch-review mode (post-implementation arch pass, on-demand)
+# ---------------------------------------------------------------------------
+
+
+class ArchReviewPromptTests(unittest.TestCase):
+    """Slice 031-02 AC #2: `review.py arch-review <spec> <slice> <deliverable>...`
+    builds a self-contained prompt that:
+      - tells the reviewer it's seeing the work for the first time
+      - cites the deliverable file paths verbatim
+      - does NOT re-evaluate ACs (compliance pass's job)
+      - names the four canonical arch-review output buckets (summary /
+        strengths / concerns / open questions) the `jig:arch-review`
+        skill produces
+      - instructs the reviewer to apply arch concerns from the
+        most-specific `arch-review` SKILL.md reachable
+      - wraps output in the same VERDICT/REASONING/SPECIFIC ISSUES/
+        RECONCILIATION NOTES envelope as `pr-review`
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-arr-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "031-02 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self, *extra_args: str):
+        result = run_review(
+            "arch-review", str(self.spec), "031-02",
+            "skills/foo/foo.py", "skills/foo/test_foo.py", *extra_args,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result.stdout
+
+    # AC #2 — standard preamble
+    def test_includes_standard_preamble(self):
+        prompt = self._prompt()
+        self.assertIn("You are an independent reviewer", prompt)
+        self.assertIn("seeing this work for the first time", prompt)
+
+    # AC #2 — cites deliverable paths verbatim
+    def test_lists_deliverable_paths_verbatim(self):
+        prompt = self._prompt()
+        self.assertIn("skills/foo/foo.py", prompt)
+        self.assertIn("skills/foo/test_foo.py", prompt)
+
+    # AC #2 — does NOT re-evaluate ACs
+    def test_does_not_re_evaluate_acceptance_criteria(self):
+        prompt = self._prompt()
+        # The compliance pass owns AC re-evaluation; the arch pass must NOT
+        # tell the reviewer to walk each AC.
+        self.assertNotRegex(
+            prompt,
+            r"(?i)for\s+each\s+acceptance\s+criterion",
+            "arch-review prompt must not re-evaluate ACs — that's the "
+            "compliance pass's job (031-02 AC #2)",
+        )
+
+    # AC #2 — names the four canonical arch output buckets
+    def test_names_four_output_buckets(self):
+        prompt = self._prompt()
+        for bucket in ("Summary", "Strengths", "Concerns", "Open questions"):
+            self.assertIn(
+                bucket, prompt,
+                f"arch-review prompt must name the '{bucket}' output bucket "
+                f"(031-02 AC #2: summary / strengths / concerns / open questions)",
+            )
+
+    # AC #2 — instructs reviewer to apply arch-review skill's concerns
+    def test_instructs_reviewer_to_apply_arch_review_skill(self):
+        prompt = self._prompt()
+        # The prompt must point the reviewer at the `arch-review` SKILL.md
+        # so the most-specific installed one wins.
+        self.assertRegex(
+            prompt,
+            r"(?is)arch-review.*SKILL\.md",
+            "arch-review prompt must instruct reviewer to apply the most-"
+            "specific `arch-review` SKILL.md concerns (031-02 AC #2)",
+        )
+
+    # AC #2 — wraps output in canonical envelope
+    def test_includes_verdict_envelope(self):
+        prompt = self._prompt()
+        for marker in ("VERDICT", "REASONING", "SPECIFIC ISSUES",
+                       "RECONCILIATION NOTES"):
+            self.assertIn(
+                marker, prompt,
+                f"arch-review prompt must wrap output in the canonical "
+                f"envelope; missing marker: {marker} (031-02 AC #2)",
+            )
+        self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    # AC #2 — read-only directive (inherited from preamble + prohibitions)
+    def test_includes_read_only_directive(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)do not\s+(?:write|modify|edit).+files?|read-only",
+        )
+
+    # Spec path appears for context
+    def test_includes_spec_path(self):
+        prompt = self._prompt()
+        self.assertIn(str(self.spec), prompt)
+
+    # Slice label appears for context
+    def test_includes_slice_label(self):
+        prompt = self._prompt()
+        self.assertIn("031-02", prompt)
+
+    # CLI surface — requires at least one deliverable
+    def test_arch_review_requires_at_least_one_deliverable(self):
+        result = run_review("arch-review", str(self.spec), "031-02")
+        self.assertNotEqual(result.returncode, 0)
+
+    # CLI surface — fails cleanly on missing spec
+    def test_arch_review_refuses_missing_spec(self):
+        missing = Path(self.tmpdir) / "nope.md"
+        result = run_review("arch-review", str(missing), "031-02", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    # CLI surface — fails cleanly on unknown slice
+    def test_arch_review_refuses_unknown_slice(self):
+        result = run_review("arch-review", str(self.spec), "999-99", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+
+class ArchReviewSubagentTypeTests(unittest.TestCase):
+    """Slice 031-02 AC #3: `review.py subagent-type arch-review` returns the
+    same precedence the existing `subagent-type` subcommand uses for
+    `jig:reviewer` (plugin) vs. `general-purpose` (running from source)."""
+
+    def _run(self, *args: str, env_overrides=None, drop_plugin_root: bool = False):
+        env = os.environ.copy()
+        if drop_plugin_root:
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+        if env_overrides:
+            env.update(env_overrides)
+        return subprocess.run(
+            [sys.executable, str(REVIEW), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_arch_review_returns_reviewer_when_plugin_root_set(self):
+        result = self._run(
+            "subagent-type", "arch-review",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "reviewer")
+
+    def test_arch_review_returns_general_purpose_when_plugin_root_unset(self):
+        result = self._run("subagent-type", "arch-review", drop_plugin_root=True)
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "general-purpose")
+
+    def test_arch_review_returns_general_purpose_when_reviewer_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            result = self._run(
+                "subagent-type", "arch-review",
+                env_overrides={"CLAUDE_PLUGIN_ROOT": td},
+            )
+            self.assertEqual(result.returncode, 0,
+                             msg=f"stderr: {result.stderr}")
+            self.assertEqual(result.stdout.strip(), "general-purpose")
+
+
 class SpecWorkflowSkillThreePassTests(unittest.TestCase):
     """Slice 031-01 AC #3 + AC #6: `skills/spec-workflow/SKILL.md`
     § "After implementation" documents the three-pass flow:
@@ -1032,6 +1203,36 @@ class SpecWorkflowSkillThreePassTests(unittest.TestCase):
             r"(?is)fail.*block|block.*fail",
             "After implementation must name the block rule "
             "(any `fail` blocks REVIEWED transition) (031-01 AC #3)",
+        )
+
+    # Slice 031-02 AC #5 + AC #6 — conditional arch pass documented
+    def test_after_implementation_documents_conditional_arch_pass(self):
+        section = self._after_implementation_section()
+        section_lower = section.lower()
+        # The arch pass must appear under "After implementation"
+        self.assertIn(
+            "arch-review", section_lower,
+            "After implementation must name the conditional arch pass "
+            "via arch-review (031-02 AC #5)",
+        )
+        # And it must be gated on `arch_review:` frontmatter
+        self.assertIn(
+            "arch_review", section,
+            "After implementation must name the `arch_review:` "
+            "frontmatter flag that gates the arch pass (031-02 AC #5)",
+        )
+
+    def test_arch_pass_appears_after_craft_pass(self):
+        section = self._after_implementation_section()
+        # Order: compliance → craft → arch
+        craft_pos = section.lower().find("pr-review")
+        arch_pos = section.lower().find("arch-review")
+        self.assertGreater(craft_pos, -1)
+        self.assertGreater(arch_pos, -1)
+        self.assertLess(
+            craft_pos, arch_pos,
+            "SKILL.md must document craft → arch order "
+            "(031-02 AC #5: arch pass runs after craft pass)",
         )
 
 

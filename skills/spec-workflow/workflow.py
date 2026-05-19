@@ -183,6 +183,44 @@ def _set_slice_frontmatter_field(section: str, key: str, value) -> str:
     return hdr + new_body
 
 
+# Slice 031-02: tokens treated as truthy in the `arch_review:` frontmatter
+# field. Lowercase comparison; anything else is false. Spec 031-02 AC #1
+# only names `true` explicitly, but we accept the YAML-permissive set
+# (`true | yes | on | 1`) so a slice author's hand-edit isn't punished by
+# token choice. PyYAML is not a jig dependency, so the set is hardcoded.
+_ARCH_REVIEW_TRUTHY = ("true", "yes", "on", "1")
+
+
+def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares `arch_review: true`
+    (or any of the lower-cased truthy tokens in `_ARCH_REVIEW_TRUTHY`:
+    `true` / `yes` / `on` / `1`).
+
+    Slice 031-02 AC #4: this helper drives the orchestrator's decision
+    to spawn the on-demand arch-review pass. Defaults to False when:
+      - the slice's frontmatter is absent entirely
+      - the `arch_review:` field is absent
+      - the value is anything other than a recognized truthy token
+
+    Layout-aware via `_slice_frontmatter`: works for both file-per-slice
+    (frontmatter at top of slice file) and legacy embedded slices
+    (frontmatter inside the `## Slice` section). Consistent with how
+    `collect_slices` / `compute_spec_status` / `_lookup_slice_status`
+    read slice-level frontmatter elsewhere in this module.
+
+    Raises WorkflowError on slice lookup failures (missing spec,
+    unknown slice, ambiguous fragment) — the orchestrator must surface
+    those as gating errors, not silently default to False.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    raw = fields.get("arch_review", "")
+    if isinstance(raw, str):
+        return raw.strip().lower() in _ARCH_REVIEW_TRUTHY
+    # Defensive: list/other YAML shapes never indicate a boolean.
+    return False
+
+
 def _validate_dependencies(deps: list, project_dir: Path,
                            current_spec: Path) -> list:
     """For each dep token, verify it's satisfied. Returns a list of
@@ -1342,6 +1380,17 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="commit locally only; skip fetch / push entirely")
     mx.add_argument("--pr", action="store_true", dest="pr_mode",
                     help="skip direct-push; go straight to branch + PR")
+
+    # Slice 031-02: orchestrator queries whether a slice opted into the
+    # on-demand arch-review pass via its `arch_review:` frontmatter flag.
+    pa = sub.add_parser(
+        "arch-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`arch_review: true`; 'false' otherwise (slice 031-02)",
+    )
+    pa.add_argument("spec", help="path to spec.md")
+    pa.add_argument("slice",
+                    help="slice name or fragment (case-insensitive substring)")
     return p
 
 
@@ -1369,6 +1418,9 @@ def main(argv: list) -> int:
                 no_push=ns.no_push,
                 pr_mode=ns.pr_mode,
             )
+        elif ns.command == "arch-review-needed":
+            needed = slice_needs_arch_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
     except WorkflowError as exc:
         sys.stderr.write(f"{exc}\n")
         return 2

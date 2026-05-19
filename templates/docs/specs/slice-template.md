@@ -2,6 +2,9 @@
 status: DRAFT
 dependencies: []
 last_verified:
+# arch_review: true  # set to true when this slice changes module
+#                    # boundaries, public contracts, or architecture-
+#                    # shaped concerns (triggers arch-review pass).
 ---
 
 ## Slice {{NUMBER}} — {{NAME}}
