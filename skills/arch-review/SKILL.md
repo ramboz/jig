@@ -141,6 +141,39 @@ ask them to either paste the content or upload an export. A richer
 user-installed `arch-review` skill may handle authenticated fetching
 — defer to it if so.
 
+## Readiness pre-check
+
+Before reviewing, scan the proposal for three signals:
+
+1. **Problem statement** — an explicit description of what the design is trying to
+   solve. Not "we need X" but "X is needed because Y."
+2. **Scope boundary** — what the proposal explicitly covers and what it does not.
+3. **Stakeholders** — who decides, who consumes the design, who operates the
+   resulting system.
+
+If any of the three are missing or weak, lead the Summary with a one-sentence
+readiness note ("This proposal is missing an explicit scope boundary — proceeding
+with the review, but treat the missing signal as a Concern in its own right.").
+Default: proceed, but surface the readiness issue. The pre-check catches "review
+an early draft that isn't reviewable yet" without blocking the user.
+
+## Scope discipline
+
+Before writing any finding, apply scope discipline. A finding must be actionable
+inside the proposal's stated boundary. Out-of-scope concerns are noise.
+
+- **Different team's system or upstream platform decision**: not a Concern. The
+  reviewer cannot ask the author to renegotiate a dependency they don't own.
+- **Adjacent design doc that exists separately**: note the dependency, do not
+  relitigate the adjacent design as a Concern here.
+- **"The proposal should also address X"** where X is a separate concern: surface
+  as an Open Question, not a Concern. The author's response will reveal whether
+  X belongs here or in a follow-up.
+
+Prophylactic expansion — demanding the proposal cover every adjacent concern a
+thorough reviewer template admits — is the most common AI-slop failure mode for
+baseline reviews. Resist it.
+
 ## Review structure
 
 For each proposal, emit a markdown report with exactly these four H2
