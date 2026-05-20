@@ -61,6 +61,21 @@ _AUTO_TICK_LABELS = {
 # subsection are post-DONE follow-up and NOT eligible for auto-tick.
 _CLOSE_OUT_RE = re.compile(r"(?im)^###\s+close[- ]?out\b")
 
+# Inbox 2026-05-18 `spec-workflow/transition/status-marker-clobber` —
+# anchor the slice's prose STATUS marker to the START of a line so
+# quoted prose like `` `**STATUS: DRAFT**` `` inside a deviation log
+# (preceded by a backtick or other character) doesn't get matched and
+# rewritten as if it were the slice's own status line. The canonical
+# shape is `**STATUS: VALUE**` starting at column 0, optionally followed
+# by a trailing italic annotation like ` _(deferred — gated on …)_`
+# (many legacy DEFERRED slices use this form, e.g. 005-02, 006-02,
+# 007-04, 012-02, 014-02, 017-04). Only `^**` is anchored — trailing
+# content after the closing `**` is allowed. Hit on slice 030-01
+# (frontmatter-only slice with no real prose marker, where the regex
+# matched the FIRST prose-quoted marker and clobbered it). All five
+# sites in this file share this constant.
+_STATUS_MARKER_RE = re.compile(r"(?m)^(\*\*STATUS:\s*)([A-Z_]+)(\*\*)")
+
 # Slice 029-02: visible marker prepended to a slice's row when the slice's
 # frontmatter carries `kind: spike`. Single emoji (no schema churn — see
 # spec 029 Open question #3 lean), recomputed at render time from each
@@ -302,9 +317,9 @@ def _lookup_slice_status(specs_dir: Path, fragment: str,
             fields, _ = _slice_frontmatter(section)
             if "status" in fields and fields["status"]:
                 return fields["status"]
-            m = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
+            m = _STATUS_MARKER_RE.search(section)
             if m:
-                return m.group(1)
+                return m.group(2)
             return "UNKNOWN"
     return None
 
@@ -357,9 +372,9 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     if has_frontmatter and fm_fields.get("status"):
         current_status = fm_fields["status"]
     else:
-        sm = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
+        sm = _STATUS_MARKER_RE.search(section)
         if sm:
-            current_status = sm.group(1)
+            current_status = sm.group(2)
     if current_status == "DEFERRED" and new_status not in _DEFERRED_ALLOWED_NEXT:
         raise WorkflowError(
             f"invalid transition: DEFERRED → {new_status}. "
@@ -381,8 +396,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
                 + joined
             )
 
-    status_pattern = re.compile(r"(\*\*STATUS:\s*)([A-Z_]+)(\*\*)")
-    m = status_pattern.search(section)
+    m = _STATUS_MARKER_RE.search(section)
     old_status = None
     new_section = section
     if m:
@@ -479,9 +493,9 @@ def compute_spec_status(spec_path: Path) -> str:
         if fm_fields.get("status"):
             statuses.append(fm_fields["status"])
             continue
-        m = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
+        m = _STATUS_MARKER_RE.search(section)
         if m:
-            statuses.append(m.group(1))
+            statuses.append(m.group(2))
 
     # No slices at all → DRAFT
     if not statuses:
@@ -559,9 +573,9 @@ def collect_slices(project_dir: Path) -> list:
             if fm_fields.get("status"):
                 status = fm_fields["status"]
             else:
-                sm = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
+                sm = _STATUS_MARKER_RE.search(section)
                 if sm:
-                    status = sm.group(1)
+                    status = sm.group(2)
             trigger = (_extract_resolution_trigger(section)
                        if status == "DEFERRED" else "")
             # Slice 029-02: read `kind:` from frontmatter (slice 029-01

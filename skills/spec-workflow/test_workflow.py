@@ -124,6 +124,63 @@ class TransitionTests(unittest.TestCase):
         self.assertIn("DRAFT", result.stdout)
         self.assertIn("IN_PROGRESS", result.stdout)
 
+    def test_transition_does_not_clobber_prose_status_marker(self):
+        """Inbox 2026-05-18 `spec-workflow/transition/status-marker-clobber` —
+        the status-rewrite regex `(\\*\\*STATUS:\\s*)([A-Z_]+)(\\*\\*)`
+        matched the FIRST `**STATUS: …**` anywhere in the slice section
+        body, not the slice's own status line.
+
+        Hit on slice 030-01 (a per-file slice that uses frontmatter-only
+        status, no prose `**STATUS:**` line) during REVIEWED → RECONCILED:
+        the deviation log quoted another slice's marker in prose. The
+        regex had nothing canonical to find for THIS slice's own status,
+        so it matched the prose example and rewrote DRAFT → RECONCILED
+        in the quoted text. Frontmatter `status:` still flipped correctly
+        (so lifecycle-wise harmless), but the prose got corrupted.
+
+        Synthetic spec: a per-file-style slice with frontmatter-only
+        status (no prose STATUS line at the top) whose deviation log
+        contains a prose example with `**STATUS: DEFERRED**` markup.
+        After `transition ... IN_PROGRESS`:
+        - The frontmatter `status:` field must read `IN_PROGRESS`.
+        - The prose example must read `**STATUS: DEFERRED**` unchanged.
+        """
+        # Sibling slice file (post-018 layout — frontmatter authoritative,
+        # no prose `**STATUS:**` line at the top).
+        slice_file = self.spec.parent / "slice-01-alpha.md"
+        slice_file.write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified: 2026-05-19\n---\n\n"
+            "## Slice 001-01 — alpha\n\n"
+            "**Goal:** placeholder.\n\n"
+            "**DoD:**\n- [x] placeholder.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "When slice 002-02 was parked, its marker read "
+            "`**STATUS: DEFERRED**` per the convention — that should "
+            "stay unchanged when this slice transitions.\n"
+        )
+        # Parent spec.md pointing at the sibling slice (the parser walks
+        # both inline `## Slice X` sections AND sibling slice-*.md files).
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec X\n\n## Overview\n\nsynthetic.\n"
+        )
+        result = run_workflow("transition", str(self.spec), "001-01",
+                              "IN_PROGRESS")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        slice_text = slice_file.read_text()
+        # Frontmatter status must be flipped.
+        self.assertRegex(slice_text,
+                         r"(?m)^status:\s*IN_PROGRESS\s*$",
+                         "frontmatter status was not updated")
+        # The prose-quoted marker must be untouched.
+        self.assertIn("`**STATUS: DEFERRED**`", slice_text,
+                      "prose-quoted STATUS marker was clobbered")
+        # And no spurious `**STATUS: IN_PROGRESS**` should have been
+        # written into the slice body — frontmatter-only slices stay
+        # frontmatter-only.
+        self.assertNotIn("**STATUS: IN_PROGRESS**", slice_text,
+                         "transition leaked a prose STATUS line into a "
+                         "frontmatter-only slice")
+
 
 class StatusBoardTests(unittest.TestCase):
     """workflow.py status-board <project-dir>."""
