@@ -105,14 +105,23 @@ def write_refinement_todo(path: Path) -> None:
 
 
 # ---------- NewTests (AC #1, #6) ----------
+#
+# Slice 005-01 originally exercised `python adr.py new ...` as a real
+# subprocess against a real temp git repo. Slice 028-01 added `git commit`
+# inside `reserve_adr` — which broke this approach on CI runners with no
+# global git identity. Migrated to the `_SubprocessRecorder` pattern
+# (mirrors `ReserveAdrTests` below and `ReserveSpecTests` in
+# spec-workflow), so no real git is ever invoked. File-shape contracts
+# are still pinned; environmental coupling is gone.
 
 
 def _git_init_on_main(repo_dir: Path) -> None:
     """Initialize a fresh git repo on branch `main` with one empty commit.
 
-    Required because slice 028-01 added preflight checks (must be on main +
-    clean worktree) that fire even for `--no-push`. The existing NewTests
-    use this so their `--no-push` CLI invocations satisfy the preflight."""
+    Only used by `ReserveAdrCLITests` (the end-to-end CLI suite that does
+    NOT mock subprocess). Identity is provided via env vars rather than
+    relying on global `~/.gitconfig` so the helper works on CI runners
+    with no global identity configured."""
     env = os.environ.copy()
     env["GIT_AUTHOR_NAME"] = "Test"
     env["GIT_AUTHOR_EMAIL"] = "test@example.invalid"
@@ -129,107 +138,104 @@ class NewTests(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-new-")
-        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.target = Path(self.tmpdir)
+        self.adrs_dir = self.target / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
-        # Slice 028-01: `--no-push` still runs preflight; need a real git
-        # repo on main with a clean worktree.
-        _git_init_on_main(Path(self.tmpdir))
-        self._git_env = {**os.environ,
-                         "GIT_AUTHOR_NAME": "Test",
-                         "GIT_AUTHOR_EMAIL": "test@example.invalid",
-                         "GIT_COMMITTER_NAME": "Test",
-                         "GIT_COMMITTER_EMAIL": "test@example.invalid"}
-        self._stage_and_commit("scaffold")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _stage_and_commit(self, message: str) -> None:
-        """Stage every change in the tmp repo and commit with `message`.
-        Used by tests that drop seed ADR files into docs/decisions/ via
-        write_sample_adr — the preflight check requires a clean tree.
-        Slice 028-01 design note."""
-        subprocess.run(["git", "-C", self.tmpdir, "add", "-A"],
-                       check=True, capture_output=True, env=self._git_env)
-        subprocess.run(["git", "-C", self.tmpdir, "commit", "-q",
-                        "--allow-empty", "-m", message],
-                       check=True, capture_output=True, env=self._git_env)
+    def _stub_preflight_ok(self, rec: "_SubprocessRecorder") -> None:
+        """Stub the three git calls that `_preflight_branch_and_worktree`
+        + the slug/preflight chain make: branch == main, clean worktree,
+        origin URL on github.com. Mirrors `ReserveAdrTests._stub_preflight_ok`."""
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
 
-    def _seed(self, *paths) -> None:
-        """Stage + commit seed files so the worktree is clean before the
-        helper runs."""
-        self._stage_and_commit("seed")
+    def _reserve(self, slug: str, title: str = "") -> int:
+        """Run `reserve_adr` in-process with all git calls stubbed. Returns
+        the exit code; raises AdrError for refusals (collision, bad slug,
+        preflight failures)."""
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            return _adr_mod.reserve_adr(
+                slug, project_dir=self.target, title=title,
+                no_push=True, pr_mode=False,
+            )
 
     def test_auto_number_starts_at_0001(self):
         """Empty docs/decisions/ → first ADR numbered 0001."""
-        result = run_adr("new", "first-decision", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        adr_path = self.adrs_dir / "adr-0001-first-decision.md"
-        self.assertTrue(adr_path.is_file(), f"expected file not created: {adr_path}")
+        code = self._reserve("first-decision")
+        self.assertEqual(code, 0)
+        self.assertTrue((self.adrs_dir / "adr-0001-first-decision.md").is_file())
 
     def test_auto_number_increments(self):
         """Existing 0001, 0002 → next is 0003."""
         write_sample_adr(self.adrs_dir / "adr-0001-foo.md", "0001", "foo", "Foo")
         write_sample_adr(self.adrs_dir / "adr-0002-bar.md", "0002", "bar", "Bar")
-        self._seed()
-        result = run_adr("new", "baz", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        code = self._reserve("baz")
+        self.assertEqual(code, 0)
         self.assertTrue((self.adrs_dir / "adr-0003-baz.md").is_file())
 
     def test_auto_number_skips_gap_uses_max_plus_one(self):
         """Gap (0001, 0003) → next is 0004 (max + 1, no gap filling)."""
         write_sample_adr(self.adrs_dir / "adr-0001-foo.md", "0001", "foo", "Foo")
         write_sample_adr(self.adrs_dir / "adr-0003-baz.md", "0003", "baz", "Baz")
-        self._seed()
-        result = run_adr("new", "qux", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        code = self._reserve("qux")
+        self.assertEqual(code, 0)
         self.assertTrue((self.adrs_dir / "adr-0004-qux.md").is_file())
         self.assertFalse((self.adrs_dir / "adr-0002-qux.md").is_file())
 
     def test_boundary_auto_number(self):
         """Last existing ADR 0099 → next is 0100 (per DoD)."""
         write_sample_adr(self.adrs_dir / "adr-0099-old.md", "0099", "old", "Old")
-        self._seed()
-        result = run_adr("new", "centenary", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        code = self._reserve("centenary")
+        self.assertEqual(code, 0)
         self.assertTrue((self.adrs_dir / "adr-0100-centenary.md").is_file())
 
     def test_slug_collision_refused(self):
-        """Existing NNNN-<slug>.md with any number → refuse new <slug> with exit 2."""
+        """Existing NNNN-<slug>.md with any number → AdrError (CLI: exit 2)."""
         write_sample_adr(self.adrs_dir / "adr-0001-taken.md", "0001", "taken", "Taken")
-        self._seed()
-        result = run_adr("new", "taken", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout} stderr: {result.stderr}")
-        self.assertIn("slug", result.stderr.lower())
+        with self.assertRaises(_adr_mod.AdrError) as ctx:
+            self._reserve("taken")
+        self.assertIn("slug", str(ctx.exception).lower())
 
     def test_readme_excluded_from_numbering(self):
         """README.md must NOT be counted as an ADR for numbering."""
         # README already exists from setUp
-        result = run_adr("new", "first", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        code = self._reserve("first")
+        self.assertEqual(code, 0)
         # Must be 0001, not numbered by counting README.
         self.assertTrue((self.adrs_dir / "adr-0001-first.md").is_file())
 
     def test_default_title_title_cased_from_slug(self):
         """Slug `my-decision` → default title `My Decision`."""
-        result = run_adr("new", "my-decision", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        code = self._reserve("my-decision")
+        self.assertEqual(code, 0)
         content = (self.adrs_dir / "adr-0001-my-decision.md").read_text()
         self.assertIn("# ADR-0001: My Decision", content)
 
     def test_explicit_title_used(self):
         """--title overrides the default title-cased slug."""
-        result = run_adr("new", "thing", "--no-push", "--title", "Custom Title Here",
-                         cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        code = self._reserve("thing", title="Custom Title Here")
+        self.assertEqual(code, 0)
         content = (self.adrs_dir / "adr-0001-thing.md").read_text()
         self.assertIn("# ADR-0001: Custom Title Here", content)
 
     def test_file_has_all_six_sections_in_order(self):
         """All six sections present, in the canonical order."""
-        result = run_adr("new", "ordered", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0)
+        code = self._reserve("ordered")
+        self.assertEqual(code, 0)
         content = (self.adrs_dir / "adr-0001-ordered.md").read_text()
         positions = [
             content.index("# ADR-0001:"),
@@ -245,16 +251,30 @@ class NewTests(unittest.TestCase):
 
     def test_status_body_is_proposed_today(self):
         """Status body is 'Proposed (YYYY-MM-DD)' with today's date."""
-        result = run_adr("new", "dated", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0)
+        code = self._reserve("dated")
+        self.assertEqual(code, 0)
         content = (self.adrs_dir / "adr-0001-dated.md").read_text()
         self.assertIn(f"Proposed ({TODAY})", content)
 
     def test_prints_created_path_to_stdout(self):
-        """The created path is printed to stdout. Exit 0."""
-        result = run_adr("new", "printable", "--no-push", cwd=Path(self.tmpdir))
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("adr-0001-printable.md", result.stdout)
+        """The created path is printed to stdout."""
+        import contextlib
+        import io
+        rec = _SubprocessRecorder()
+        self._stub_preflight_ok(rec)
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        buf = io.StringIO()
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with contextlib.redirect_stdout(buf):
+                code = _adr_mod.reserve_adr(
+                    "printable", project_dir=self.target, title="",
+                    no_push=True, pr_mode=False,
+                )
+        self.assertEqual(code, 0)
+        self.assertIn("adr-0001-printable.md", buf.getvalue())
 
 
 # ---------- AcceptTests (AC #2) ----------
