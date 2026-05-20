@@ -1,5 +1,5 @@
 ---
-status: DONE
+status: IN_PROGRESS
 skill: adr-workflow
 tier: 1
 ---
@@ -231,18 +231,301 @@ The original spec is preserved above.
 
 ## Slice 005-02 — supersede
 
-**STATUS: DEFERRED** _(deferred; not part of this session)_
+**STATUS: RECONCILED**
 
-**Goal:** `adr.py supersede <old-NNNN> <new-NNNN>` flips the old ADR's
-Status to `Superseded by ADR-NNNN (YYYY-MM-DD)` and inserts a
-`Supersedes ADR-NNNN` line into the new ADR's Status block.
+**Goal:** `adr.py supersede <old-NNNN> <new-NNNN>` appends a
+`Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (YYYY-MM-DD)` line to
+the old ADR's `## Status` block and a `Supersedes ADR-NNNN` line to
+the new ADR's `## Status` block. Both ADRs must already be `Accepted`;
+the existing `Accepted (date)` line on each side is preserved (this
+is the one edit allowed on an immutable ADR per the Nygard
+convention). `_extract_status_and_date` is extended so the index
+bullet for a Superseded ADR shows `(YYYY-MM-DD, Superseded)` rather
+than the bare `(Superseded)` it would emit today.
 
-Deferred because: zero supersedes have happened in jig so far. The
-shape is guessable from the Nygard convention, but waiting for a real
-supersede event keeps us from codifying the wrong thing.
+**Resolution context:** The resolution trigger fired on 2026-05-15
+when [ADR-0005](../../decisions/adr-0005-contracts-as-judgment-skill.md)
+superseded [ADR-0002](../../decisions/adr-0002-contracts-stays-deferred.md).
+The edits were applied by hand, establishing the canonical shape:
 
-**Resolution trigger:** First time a real superseding ADR is needed
-in jig OR in a target project.
+- Old ADR's Status block: `Superseded by [ADR-0005](./adr-0005-contracts-as-judgment-skill.md) (2026-05-15)` appended after the existing `Accepted (2026-05-12)` line.
+- New ADR's Status block: `Supersedes ADR-0002` appended after the existing `Accepted (2026-05-15)` line.
+
+This slice codifies that exact shape into `adr.py supersede`. Slice
+005-01's deviation-log entry #6 (the `_extract_status_and_date`
+Superseded-shape gap) is filed under this slice's DoR.
+
+**DoR:**
+- ✅ Slice 005-01 DONE — `adr.py` exists with `new` / `accept` /
+  `index` / `resolve-todo` subcommands and the shared helpers
+  (`_find_adr_by_number`, `_atomic_write`, `_extract_title`,
+  `_extract_status_and_date`).
+- ✅ Real-world precedent on disk: ADR-0002 (Superseded) and ADR-0005
+  (Supersedes) pin the canonical Status-block shape this slice
+  reproduces.
+- ✅ Slice 005-01 deviation log entry #6 names
+  `_extract_status_and_date` as the parsing extension required by
+  this slice.
+- ✅ Slice 005-01 deviation log entry #7 (dead `if target.exists()`
+  branch in `cmd_new`) is optional cleanup; can be downgraded to
+  `assert` or removed during this slice if convenient.
+
+**Acceptance Criteria:**
+
+1. **`adr.py supersede <old-NNNN> <new-NNNN>`** appends supersession
+   lines to both ADRs:
+   - Old ADR's `## Status` body gains a new line appended after the
+     existing `Accepted (YYYY-MM-DD)` line:
+     `Superseded by [ADR-<new-NNNN>](./adr-<new-NNNN>-<new-slug>.md) (YYYY-MM-DD)` —
+     today's date; relative-path markdown link to the new ADR's
+     file (both ADRs live in `docs/decisions/`).
+   - New ADR's `## Status` body gains a new line appended after the
+     existing `Accepted (YYYY-MM-DD)` line: `Supersedes ADR-<old-NNNN>` —
+     plain text, no date, no link.
+   - Both files are atomically written (`.tmp` + `os.replace`,
+     same pattern as `cmd_accept`).
+   - Prints both modified paths to stdout (one per line). Exit 0.
+   - `<old-NNNN>` and `<new-NNNN>` must be 4-digit zero-padded
+     (same validation as `accept`); otherwise exit 2.
+
+2. **`adr.py supersede` refuses with exit 2 if:**
+   - Either ADR is missing (no `adr-NNNN-*.md` file for that number) —
+     surfaces the same "ADR not found" message as `accept`.
+   - The old ADR's Status is not currently `Accepted`. Distinguishes
+     `Proposed` ("accept the old ADR first") from already-`Superseded`
+     ("old ADR is already Superseded; refusing to double-supersede").
+   - The new ADR's Status is not currently `Accepted`. Distinguishes
+     `Proposed` ("accept the new ADR first") from already-`Superseded`
+     ("new ADR is itself Superseded; pick a different replacement").
+   - `<old-NNNN>` equals `<new-NNNN>` (self-supersession is
+     nonsensical).
+
+3. **`_extract_status_and_date` recognizes the Superseded shape.**
+   When an ADR's Status body's last non-empty line matches
+   `Superseded by [ADR-NNNN](...) (YYYY-MM-DD)`, the parser returns
+   `("Superseded", "YYYY-MM-DD")`. When the Status body has both an
+   `Accepted (date)` line AND a `Superseded by ... (date)` line, the
+   parser returns the **Superseded** tuple (most recent state wins).
+   Backward-compatible: ADRs that are only `Proposed` or `Accepted`
+   still return their respective tuples.
+
+4. **`adr.py index` produces a sensible bullet for a Superseded ADR.**
+   The bullet ends in `(<supersede-date>, Superseded)` — not
+   `(Superseded)` with no date, which is what slice 005-01's reviewer
+   flagged as the latent bug. The bullet still links to the old ADR
+   file (it remains historical record). Idempotent re-runs after
+   `supersede` produce identical bytes.
+
+5. **`skills/adr-workflow/SKILL.md` documents the new subcommand.**
+   - "How to use" gains a section for `supersede` with the bash
+     invocation.
+   - "Immutability rule" section is reworded: the manual recipe is
+     replaced by a reference to `adr.py supersede`, with a note that
+     supersession is the **one** edit allowed on an Accepted ADR.
+   - Description trigger phrase "supersede ADR-NNNN" (already
+     present from slice 005-01) now routes to the active subcommand,
+     not the deferred-slice explanation.
+
+6. **Tests** in `skills/adr-workflow/test_adr.py` add a
+   `SupersedeTests` class covering:
+   - Happy path — both files mutated correctly; old has `Superseded
+     by [ADR-NNNN](./...) (today)`; new has `Supersedes ADR-NNNN`;
+     both `Accepted (date)` lines preserved.
+   - Atomic write — no stray `.tmp` files left behind.
+   - Refusal cases — missing old, missing new, Proposed old,
+     Proposed new, already-Superseded old, already-Superseded new,
+     same-number, malformed NNNN.
+   - Both paths printed to stdout.
+   - `ExtractStatusTests` (or augmented `IndexTests`): parser
+     returns `("Superseded", "<date>")` for the Superseded shape;
+     index bullet includes the supersede date.
+   - Dogfood-shape test: feeds in a fixture that mirrors the
+     ADR-0002/ADR-0005 shape and asserts the produced text matches
+     byte-for-byte (modulo the date, which uses today's).
+
+**DoD:**
+- [x] All ACs pass; full test suite green (no regressions). **29 new
+      tests in `test_adr.py`; 1269 total repo-wide (was 1240); no regressions.**
+- [x] Implementer test coverage exercises each AC with at least one
+      fixture. Edge cases listed in AC #2 (refusal matrix) each have
+      a dedicated test. **9 refusal-matrix tests + 10 happy-path /
+      atomic / printout / dogfood tests + 5 parser tests + 3 index
+      tests + 2 SKILL.md surface tests.**
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
+      `review.py implementation`. **Compliance pass: verdict pass.**
+- [x] Craft pass (`pr-review`) — verdict pass (or only `[nit]`
+      entries surfaced). **Verdict pass; 4 nits + 4 strengths. Two
+      nits fixed inline (dead `or` branch, `\s` consistency); two
+      nits accepted with rationale in deviation log entries #3 + #5.**
+- [x] No arch pass needed — this slice does NOT change module
+      boundaries or public contracts (extends an existing helper
+      with a new subcommand). `arch_review:` stays unset in
+      frontmatter. **`workflow.py arch-review-needed` returned
+      `false`.**
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [ ] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. **N/A — no new decisions
+      deferred. The "no two-phase commit" watch-item is parked in
+      `docs/inbox.md` per the inbox-vs-refinement-todo distinction
+      (decisions go to refinement-todo; watch-items go to inbox).**
+
+### Close-out (post-DONE)
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+      Notes column receives any load-bearing per-slice invariant.
+- [ ] `CLAUDE.md` hygiene per spec 025-01: this slice closes spec
+      005 (005-01 + 005-03 already DONE; 005-02 the last non-DONE).
+      Compress / remove the spec's Active-specs entry; skills-table
+      row for `/jig:adr-workflow` updated to mention `supersede`.
+
+**Anti-horizontal-phasing check:** ✅ End-to-end value in one slice.
+A user with two Accepted ADRs (one replacing the other) can run
+`adr.py supersede <old> <new>` and get both Status blocks updated +
+the index regen showing the supersede date. Every layer is touched
+(CLI, helper, parser extension, SKILL.md, tests) and the user sees
+the result in a single command.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. Implementation notes:
+
+**Reviewer-driven course corrections (applied inline):**
+
+1. **`_classify_status` dead `or` branch removed** (`adr.py:649-650`).
+   First cut wrote `_SUPERSEDED_BY_RE.search(section_body) or any(...)`.
+   The craft pass flagged the leading `.search()` clause as dead — the
+   regex is anchored `^...$` without `(?m)`, so it only matches when
+   the entire body string is a single supersede line (impossible
+   given the surrounding blank lines). Simplified to the per-line
+   `any(...)` form and added a one-line docstring note explaining the
+   anchor + non-multiline interaction. Behavior unchanged; tests
+   still green at 106 in `test_adr.py` (1269 repo-wide).
+
+2. **`_SUPERSEDED_BY_RE` migrated from `\s` to `[ \t]`**
+   (`adr.py:799-802`). Slice 005-01's deviation-log entry #1 named
+   `\s*$` as a known trap pattern in `adr.py` because `\s` matches
+   `\n` — `_STATUS_ACCEPTED_RE` and the Proposed regex at line 655
+   already use `[ \t]*$` as the safer form. First cut of
+   `_SUPERSEDED_BY_RE` used `\s+`/`\s*`. In current usage it's safe
+   (the regex is invoked against pre-stripped lines), but consistency
+   with the rest of the module defuses the watch site. **This is the
+   fourth occurrence in this repo of `\s` getting flagged on a
+   line-terminator-sensitive regex** — the previous three were slice
+   005-01 dev-log #1 + same fix on `cmd_index` + the
+   `_extract_status_and_date` `\s+` locator. Elevation to
+   `learnings.md` deferred until a fifth occurrence (per the
+   "log-once-then-promote" rule).
+
+**Design choices logged:**
+
+3. **`assert` vs. `raise AdrError` convention divergence (accepted).**
+   Slice 005-01's deviation-log entry #7 noted a dead
+   `if target.exists()` branch in `cmd_new` and suggested downgrading
+   to `assert`. That cleanup was applied in this slice (`adr.py:170`,
+   with the inline comment at 166-169 tying the change back to slice
+   005-01's deviation #7 for the next reader). `cmd_supersede` has
+   two analogous "should not happen" branches (`adr.py:747-754` and
+   `adr.py:759-764`) where `_insert_after_accepted` returns unchanged
+   after status classification has pinned that an `Accepted (date)`
+   line exists. The craft pass suggested picking one convention.
+   **Kept `raise AdrError` for the supersede branches** — rationale:
+   `cmd_new` operates on a freshly-rendered template whose shape is
+   under helper control (auto-numbering + slug check make the
+   target-exists postcondition load-bearing); `cmd_supersede`
+   operates on user-edited ADR files whose Status block could be
+   malformed in ways the classification doesn't catch (e.g. a stray
+   line ordering, or a hand-rolled `Accepted` line with unusual
+   whitespace that the regex misses). `assert` can be disabled with
+   `python3 -O`; `raise AdrError` always fires with a clear message.
+   Defensive divergence is a feature here, not a smell. Logged so
+   the next reviewer doesn't re-raise the question.
+
+4. **No two-phase commit across both ADR writes.** AC #1 requires
+   atomic writes "per file" (matching the `cmd_accept` pattern). If
+   `_atomic_write(new_path, ...)` fails after
+   `_atomic_write(old_path, ...)` succeeds, the old ADR ends up with
+   a `Superseded by ...` line while the new ADR has no `Supersedes`
+   line. Same-FS `os.replace` is POSIX-atomic at the rename level,
+   but partial failure between the two writes is theoretically
+   reachable (disk full, permissions revoked between calls). The
+   recovery is manual: re-running `supersede` refuses
+   ("already Superseded"), so the user must hand-edit the new ADR.
+   **Decision: don't add a transactional layer.** A two-phase commit
+   would require either (a) a `*.staging` pattern + rename-on-success
+   sequence, or (b) an in-memory diff buffer with a single bottom
+   atomic flush. Both add surface area for a failure mode that
+   hasn't been observed in practice. Re-evaluate if a real-world
+   partial-write incident surfaces in jig or downstream projects.
+   Filed in `docs/inbox.md` as a watch-item.
+
+5. **`SupersedeTests.test_skill_body_references_all_four_subcommands`
+   left as-is.** Craft pass noted that the existing
+   `SkillSurfaceTests.test_skill_body_references_all_four_subcommands`
+   has an outdated name (5 subcommands now). The new
+   `SupersedeSkillSurfaceTests` already adds the missing
+   `supersede`-mention assertion, so coverage is complete; renaming
+   the older test would be a cosmetic touch that doesn't change
+   behavior. Deferred — captured in this deviation log instead.
+
+6. **SKILL.md "Immutability rule" section verbosity (accepted).** Craft
+   pass noted some redundancy between the prose ("appends a plain-text
+   line / no link, no date") and the numbered bullet list immediately
+   following. The doc-content reads cleanly both ways; trimming would
+   be subjective. Left as-is.
+
+**Forward-leaning additions:**
+
+- `_status_section_body` / `_classify_status` / `_insert_after_accepted`
+  are three small, single-purpose helpers — each independently
+  testable. The craft pass called this out as a strength worth
+  repeating.
+- `test_supersede_dogfood_byte_for_byte_shape` reproduces the canonical
+  ADR-0002 / ADR-0005 supersession shape verbatim (modulo today's
+  date for the supersede event). Catches regex/wording drift across
+  future refactors.
+- The refusal matrix is exhaustive: 9 dedicated tests cover
+  missing-old, missing-new, Proposed-old, Proposed-new,
+  already-Superseded-old, already-Superseded-new, self-supersession,
+  malformed-old-NNNN, malformed-new-NNNN. Plus
+  `test_supersede_refusal_does_not_mutate_either_file` pins the
+  "validate-all-preconditions-before-mutation" invariant against
+  future ordering churn.
+
+**Doc updates from this slice (performed during reconciliation):**
+
+- `skills/adr-workflow/adr.py`: `cmd_supersede` + 3 helpers + extended
+  `_extract_status_and_date` + `_SUPERSEDED_BY_RE` + `_STATUS_ACCEPTED_RE`
+  + argparse wiring + cmd_new dead-branch downgrade. +238 lines.
+- `skills/adr-workflow/test_adr.py`: +4 test classes (29 tests) +
+  3 fixture helpers. +420 lines.
+- `skills/adr-workflow/SKILL.md`: 5-subcommand listing; new
+  "Supersede an Accepted ADR" section; "Immutability rule" reworded.
+- `docs/specs/005-adr-workflow/spec.md`: slice 005-02 fleshed out
+  from stub (Goal + Resolution trigger) to full slice (DoR + 6 AC +
+  DoD + Anti-horizontal-phasing + this deviation log).
+- `docs/inbox.md`: new entry parking the "no two-phase commit across
+  both ADR writes" watch-item (#4 above).
+- `CLAUDE.md`: skills-table row for `/jig:adr-workflow` updated to
+  mention `supersede <old> <new>`. (Active-specs section was already
+  empty pre-slice — verified at `CLAUDE.md:27-29`, so no compression
+  was needed.)
+- No `architecture.md` changes (helper colocated with its skill —
+  same precedent as slice 005-01).
+- No new ADR required.
+- No `learnings.md` entry (the `\s` recurrence is the fourth
+  occurrence; promotion deferred to a fifth per the log-once rule).
+
+**Pending close-out (post-DONE, per slice's Close-out checklist):**
+
+- `docs/specs/README.md`: regenerate via `workflow.py status-board`
+  to flip the 005-02 row from `DEFERRED` to `**DONE**` and migrate the
+  load-bearing per-slice invariant to its Notes column. Candidate
+  invariant: "canonical supersede shape: `Superseded by [ADR-NNNN](./...) (date)`
+  on old + `Supersedes ADR-NNNN` on new; both ADRs must be Accepted;
+  `_extract_status_and_date` returns `("Superseded", date)`."
+  (Per the reconciliation reviewer's recommendation.)
 
 ---
 

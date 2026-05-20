@@ -17,12 +17,16 @@ user-invocable: true
 ## What this skill does
 
 Codifies the ADR lifecycle that ADR-0001 and ADR-0002 were written by hand to
-exercise. Four deterministic operations:
+exercise. Five deterministic operations:
 
 - **`new`** — scaffold `docs/decisions/adr-NNNN-<slug>.md` from the template, with
   auto-numbering and a slug-collision check.
 - **`accept`** — flip Status from `Proposed (YYYY-MM-DD)` to
   `Accepted (YYYY-MM-DD)`. Atomic write.
+- **`supersede`** — append `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (date)`
+  to an Accepted ADR's Status block and `Supersedes ADR-NNNN` to the replacement's
+  Status block. This is the **one** edit allowed on an immutable ADR per the
+  Nygard convention. Atomic write on both files.
 - **`index`** — regenerate the `## Index` section of `docs/decisions/README.md`
   from the actual ADR files present. Idempotent.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
@@ -86,7 +90,32 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" accept <NNNN>
 This flips `Proposed (date)` to `Accepted (date)`. Refuses if the Status is
 already Accepted (ADRs are immutable; supersede instead — see below).
 
-### 3. Regenerate the index
+### 3. Supersede an Accepted ADR
+
+When a previously-Accepted decision is replaced by a newer one, **don't edit
+the old ADR's prose** — write a new ADR (per `new` above), accept it, then run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" \
+  supersede <old-NNNN> <new-NNNN>
+```
+
+Both ADRs must already be Accepted. The helper:
+
+- appends `Superseded by [ADR-<new>](./adr-<new>-<slug>.md) (today)` to the
+  old ADR's `## Status` block,
+- appends `Supersedes ADR-<old>` (plain text, no link, no date) to the new
+  ADR's `## Status` block,
+- preserves both `Accepted (date)` lines (this is the one edit allowed on
+  an immutable ADR per the Nygard convention),
+- writes both files atomically.
+
+Refuses (exit 2) if either ADR is Proposed (accept it first), if either
+ADR is already Superseded, if `<old> == <new>` (self-supersession), or if
+either NNNN is malformed. Re-run `adr.py index docs/decisions` after to
+refresh the index entries.
+
+### 4. Regenerate the index
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" index docs/decisions
@@ -97,7 +126,7 @@ Reads every `adr-NNNN-*.md` (skipping `README.md`) and rewrites only the
 (header, format spec, "When to write" section) is preserved. Re-running on a
 current README is a no-op.
 
-### 4. Resolve a deferred decision
+### 5. Resolve a deferred decision
 
 If the new ADR resolves a `### Decision: ...` entry in
 `docs/refinement-todo.md`:
@@ -123,17 +152,25 @@ through, or the ADR hasn't been Accepted yet.
 
 **Never edit an Accepted ADR.** The Nygard convention treats ADRs as
 historical record — if the decision changes, write a new ADR that supersedes
-the old one. The `supersede` subcommand is deferred to slice 005-02; until
-then, the manual recipe is:
+the old one. The supersession lines (one on each side) are the **only**
+edit allowed on an immutable ADR. Use the `supersede` subcommand
+(section "3. Supersede an Accepted ADR" above) — `adr.py supersede
+<old-NNNN> <new-NNNN>` writes those lines deterministically on both ADRs
+and refuses self-supersession, Proposed-ADR inputs, or double-supersession.
 
-1. `adr.py new <new-slug>` for the new decision.
-2. In the new ADR's Status block, add a line: `Supersedes ADR-NNNN`.
-3. In the old ADR's Status block, change to `Superseded by ADR-NNNN (date)`
-   — this is the **one** edit allowed on an accepted ADR.
+What the helper does (so you can spot-check the result):
 
-If a user asks to "supersede ADR-NNNN", explain that the explicit
-`supersede` subcommand is a future slice (005-02) and walk them through the
-manual recipe above.
+1. Old ADR's `## Status` block gains a line appended after the existing
+   `Accepted (date)` line:
+   `Superseded by [ADR-<new>](./adr-<new>-<slug>.md) (today)`.
+2. New ADR's `## Status` block gains a plain-text line after its
+   `Accepted (date)`: `Supersedes ADR-<old>` (no link, no date).
+3. Both `Accepted (date)` lines are preserved.
+
+If a user asks to "supersede ADR-NNNN", route them to the `supersede`
+subcommand — both ADRs must already be Accepted; if the replacement
+isn't drafted yet, walk them through `new` + `accept` for the new ADR
+first.
 
 ## End-to-end example (full lifecycle)
 

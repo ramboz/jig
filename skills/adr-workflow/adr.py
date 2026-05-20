@@ -1,9 +1,13 @@
 """
-jig adr-workflow helper — slice 005-01 (adr-helper) + 008-03 (ADR-0004 shape)
+jig adr-workflow helper — slice 005-01 (adr-helper) + 005-02 (supersede)
++ 008-03 (ADR-0004 shape).
 
 Deterministic ADR lifecycle helper:
   - `new`          : scaffold a new ADR from the template, auto-numbered.
   - `accept`       : flip Status from Proposed to Accepted (atomic write).
+  - `supersede`    : append Superseded-by / Supersedes lines to two
+                     already-Accepted ADRs (the one edit allowed on an
+                     accepted ADR per the Nygard convention).
   - `index`        : regenerate the `## Index` section of
                      docs/decisions/README.md.
   - `resolve-todo` : strike through a refinement-todo entry and link the
@@ -14,12 +18,14 @@ Mirrors the shape of workflow.py / review.py / memory.py / scaffold.py.
 Usage:
     python3 adr.py new <slug> [--title "<Title>"]
     python3 adr.py accept <NNNN>
+    python3 adr.py supersede <old-NNNN> <new-NNNN>
     python3 adr.py index <decisions-dir>
     python3 adr.py resolve-todo <NNNN> "<heading fragment>"
 
 Run from the project root that contains `docs/decisions/` (for `new`,
-`accept`, `resolve-todo`); `index` takes an explicit `<decisions-dir>`
-argument. Files are named `adr-NNNN-<slug>.md` per ADR-0004.
+`accept`, `supersede`, `resolve-todo`); `index` takes an explicit
+`<decisions-dir>` argument. Files are named `adr-NNNN-<slug>.md` per
+ADR-0004.
 """
 
 import argparse
@@ -157,8 +163,11 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
                                   _today())
 
     target = adrs_dir / f"adr-{number}-{slug}.md"
-    if target.exists():  # Defensive — auto-num should have prevented this.
-        raise AdrError(f"target already exists: {target}")
+    # Slice 005-01 deviation #7 cleanup (005-02): auto-numbering + the
+    # slug-collision refusal above guarantee `target` is fresh. Downgraded
+    # from a raise-AdrError to an assert so the unreachable branch is
+    # explicit about its postcondition status.
+    assert not target.exists(), f"target unexpectedly exists: {target}"
     _atomic_write(target, content)
     return target
 
@@ -607,6 +616,178 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
     return adr_path
 
 
+# ---------- supersede (slice 005-02) ----------
+
+
+# Match an `Accepted (YYYY-MM-DD)` line. Used to locate the insertion point for
+# the supersession lines and to verify the old/new ADRs are in Accepted state.
+_STATUS_ACCEPTED_RE = re.compile(
+    r"(?m)^Accepted[ \t]*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\)[ \t]*$"
+)
+
+
+def _status_section_body(text: str, adr_name: str) -> tuple:
+    """Locate the `## Status` section body in `text`. Returns
+    (status_match_end, section_end, body_text). Raises AdrError if there's
+    no `## Status` heading."""
+    status_match = re.search(r"(?m)^##\s+Status\s*$", text)
+    if not status_match:
+        raise AdrError(f"ADR has no '## Status' section: {adr_name}")
+    rest = text[status_match.end():]
+    next_h2 = re.search(r"(?m)^##\s", rest)
+    section_end = status_match.end() + (next_h2.start() if next_h2 else len(rest))
+    body = text[status_match.end():section_end]
+    return status_match.end(), section_end, body
+
+
+def _classify_status(section_body: str) -> str:
+    """Classify the Status body as 'Proposed' / 'Accepted' / 'Superseded' /
+    'Unknown'. Superseded wins over Accepted when both lines are present.
+
+    `_SUPERSEDED_BY_RE` is anchored on `^...$` without a `(?m)` flag, so we
+    iterate stripped lines rather than a whole-body `.search()`."""
+    if any(_SUPERSEDED_BY_RE.match(line.strip())
+           for line in section_body.splitlines()):
+        return "Superseded"
+    if _STATUS_ACCEPTED_RE.search(section_body):
+        return "Accepted"
+    if re.search(r"(?m)^Proposed[ \t]*\(", section_body):
+        return "Proposed"
+    return "Unknown"
+
+
+def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
+    """Append supersession lines to both ADRs. Returns (old_path, new_path).
+
+    - Old ADR's `## Status` body gains a `Superseded by [ADR-<new>](./adr-<new>-<slug>.md) (TODAY)` line.
+    - New ADR's `## Status` body gains a `Supersedes ADR-<old>` line (plain text).
+    Both Accepted (date) lines are preserved. Atomic writes; refusal-on-precondition
+    happens BEFORE any file mutation (so a failed precondition never leaves either
+    ADR partially modified).
+    """
+    # Self-supersession check happens BEFORE any file reads.
+    if old_number == new_number:
+        raise AdrError(
+            f"refusing self-supersession: <old> and <new> are the same "
+            f"({old_number}). An ADR cannot supersede itself."
+        )
+
+    # NNNN validation — same shape as `_find_adr_by_number` so the error message
+    # is consistent across the helper.
+    if not re.match(r"^\d{4}$", old_number):
+        raise AdrError(f"NNNN must be 4-digit zero-padded: '{old_number}'")
+    if not re.match(r"^\d{4}$", new_number):
+        raise AdrError(f"NNNN must be 4-digit zero-padded: '{new_number}'")
+
+    # Locate both ADR files.
+    old_path = _find_adr_by_number(adrs_dir, old_number)
+    new_path = _find_adr_by_number(adrs_dir, new_number)
+
+    old_text = old_path.read_text()
+    new_text = new_path.read_text()
+
+    # Extract Status section bodies, then classify.
+    old_status_end, old_section_end, old_body = _status_section_body(
+        old_text, old_path.name,
+    )
+    new_status_end, new_section_end, new_body = _status_section_body(
+        new_text, new_path.name,
+    )
+
+    old_status = _classify_status(old_body)
+    new_status = _classify_status(new_body)
+
+    if old_status != "Accepted":
+        if old_status == "Proposed":
+            raise AdrError(
+                f"refusing to supersede: old ADR {old_path.name} is "
+                f"Proposed; accept the old ADR first "
+                f"(`adr.py accept {old_number}`)."
+            )
+        if old_status == "Superseded":
+            raise AdrError(
+                f"refusing to supersede: old ADR {old_path.name} is "
+                f"already Superseded; refusing to double-supersede."
+            )
+        raise AdrError(
+            f"refusing to supersede: old ADR {old_path.name} Status is "
+            f"not Accepted (got {old_status}); only Accepted ADRs can "
+            f"be superseded."
+        )
+
+    if new_status != "Accepted":
+        if new_status == "Proposed":
+            raise AdrError(
+                f"refusing to supersede: new ADR {new_path.name} is "
+                f"Proposed; accept the new ADR first "
+                f"(`adr.py accept {new_number}`)."
+            )
+        if new_status == "Superseded":
+            raise AdrError(
+                f"refusing to supersede: new ADR {new_path.name} is "
+                f"itself Superseded; pick a different replacement ADR."
+            )
+        raise AdrError(
+            f"refusing to supersede: new ADR {new_path.name} Status is "
+            f"not Accepted (got {new_status}); only Accepted ADRs can "
+            f"supersede others."
+        )
+
+    # Build the two new lines.
+    today_iso = _today()
+    new_slug = new_path.stem[9:] if len(new_path.stem) > 9 else new_path.stem
+    superseded_by_line = (
+        f"Superseded by [ADR-{new_number}]"
+        f"(./adr-{new_number}-{new_slug}.md) ({today_iso})"
+    )
+    supersedes_line = f"Supersedes ADR-{old_number}"
+
+    # Insert supersession line into the old ADR's Status body, right after the
+    # Accepted (date) line.
+    new_old_body = _insert_after_accepted(old_body, superseded_by_line)
+    if new_old_body == old_body:
+        # Defensive: should not happen because we already verified
+        # _STATUS_ACCEPTED_RE matches. Raise rather than write a no-op.
+        raise AdrError(
+            f"failed to locate the Accepted line in {old_path.name} "
+            f"Status block; refusing to mutate."
+        )
+    new_old_text = (
+        old_text[:old_status_end] + new_old_body + old_text[old_section_end:]
+    )
+
+    new_new_body = _insert_after_accepted(new_body, supersedes_line)
+    if new_new_body == new_body:
+        raise AdrError(
+            f"failed to locate the Accepted line in {new_path.name} "
+            f"Status block; refusing to mutate."
+        )
+    new_new_text = (
+        new_text[:new_status_end] + new_new_body + new_text[new_section_end:]
+    )
+
+    # Atomic writes — both ADRs.
+    _atomic_write(old_path, new_old_text)
+    _atomic_write(new_path, new_new_text)
+    return old_path, new_path
+
+
+def _insert_after_accepted(section_body: str, new_line: str) -> str:
+    """Insert `new_line` immediately after the existing `Accepted (date)`
+    line in `section_body`. Returns the new body. If no Accepted line is
+    found, returns `section_body` unchanged."""
+    m = _STATUS_ACCEPTED_RE.search(section_body)
+    if not m:
+        return section_body
+    insert_at = m.end()
+    # Ensure there's exactly one `\n` between the existing Accepted line and
+    # the inserted text. If `section_body[insert_at:]` already starts with
+    # `\n`, the inserted line keeps that as its leading separator.
+    return (
+        section_body[:insert_at] + "\n" + new_line + section_body[insert_at:]
+    )
+
+
 # ---------- index ----------
 
 
@@ -615,15 +796,40 @@ def _extract_title(adr_text: str) -> str:
     return m.group(1).strip() if m else "(untitled)"
 
 
+_SUPERSEDED_BY_RE = re.compile(
+    r"^Superseded[ \t]+by[ \t]+\[ADR-\d{4}\]\([^)]+\)[ \t]*"
+    r"\(([0-9]{4}-[0-9]{2}-[0-9]{2})\)[ \t]*$"
+)
+
+
 def _extract_status_and_date(adr_text: str) -> tuple:
-    """Returns (status, date) extracted from the first non-empty line of the
-    `## Status` section. Falls back to ('(unknown)', '') on miss."""
+    """Returns (status, date) extracted from the `## Status` section.
+
+    - If the body contains a `Superseded by [ADR-NNNN](...) (date)` line,
+      returns `("Superseded", "<date>")` — Superseded wins over an earlier
+      `Accepted (date)` line (most-recent-state wins). Slice 005-02 AC #3.
+    - Otherwise returns the (status, date) parsed from the first non-empty
+      line: `Proposed (date)` or `Accepted (date)`.
+    - Falls back to ('(unknown)', '') on miss.
+    """
     m = re.search(r"(?m)^##\s+Status\s*$", adr_text)
     if not m:
         return ("(unknown)", "")
     rest = adr_text[m.end():]
     next_h2 = re.search(r"(?m)^##\s", rest)
     body = rest[: next_h2.start()] if next_h2 else rest
+
+    # First pass: look for a `Superseded by ... (date)` line anywhere in the
+    # Status body. If found, it wins over any earlier Accepted/Proposed line.
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        sm = _SUPERSEDED_BY_RE.match(line)
+        if sm:
+            return ("Superseded", sm.group(1))
+
+    # Second pass: original first-non-empty-line logic for Proposed/Accepted.
     for raw_line in body.splitlines():
         line = raw_line.strip()
         if not line:
@@ -906,7 +1112,10 @@ def _append_to_section(section_body: str, line: str) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="adr.py",
-        description="jig adr-workflow helper (new / accept / index / resolve-todo)",
+        description=(
+            "jig adr-workflow helper "
+            "(new / accept / supersede / index / resolve-todo)"
+        ),
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -931,6 +1140,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pa = sub.add_parser("accept", help="flip an ADR's Status from Proposed → Accepted")
     pa.add_argument("number", help="4-digit ADR number (e.g. 0003)")
+
+    ps = sub.add_parser(
+        "supersede",
+        help="append Superseded-by / Supersedes lines to two Accepted ADRs",
+    )
+    ps.add_argument("old", help="4-digit NNNN of the ADR being superseded")
+    ps.add_argument("new", help="4-digit NNNN of the replacement ADR")
 
     pi = sub.add_parser("index", help="regenerate the Index section of ADR README.md")
     pi.add_argument("adrs_dir", help="path to docs/decisions/")
@@ -963,6 +1179,13 @@ def main(argv: list) -> int:
             target = cmd_accept(adrs_dir, ns.number)
             print(str(target.relative_to(Path.cwd())) if target.is_relative_to(Path.cwd())
                   else str(target))
+        elif ns.cmd == "supersede":
+            adrs_dir = Path.cwd() / "docs" / "decisions"
+            old_path, new_path = cmd_supersede(adrs_dir, ns.old, ns.new)
+            for target in (old_path, new_path):
+                print(str(target.relative_to(Path.cwd()))
+                      if target.is_relative_to(Path.cwd())
+                      else str(target))
         elif ns.cmd == "index":
             adrs_dir = Path(ns.adrs_dir).resolve()
             target = cmd_index(adrs_dir)

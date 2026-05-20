@@ -608,6 +608,426 @@ class ResolveTodoTests(unittest.TestCase):
         self.assertIn("refinement-todo.md", result.stdout)
 
 
+# ---------- SupersedeTests (slice 005-02 AC #1, #2) ----------
+
+
+def _write_accepted_adr(path: Path, number: str, slug: str, title: str,
+                        accepted_date: str = TODAY,
+                        context: str = "Sample context paragraph for the ADR.") -> None:
+    """Write a minimally-valid Accepted-state ADR for use in SupersedeTests.
+    `write_sample_adr` defaults to `status="Accepted"` already, but spelling
+    the intent out makes the test fixtures self-documenting."""
+    path.write_text(
+        f"# ADR-{number}: {title}\n\n"
+        f"## Status\n\nAccepted ({accepted_date})\n\n"
+        f"## Context\n\n{context}\n\n"
+        f"## Decision Options Considered\n\n_TODO_\n\n"
+        f"## Recommended Decision\n\n_TODO_\n\n"
+        f"## Consequences\n\n_TODO_\n\n"
+        f"## Open questions\n\nNone.\n"
+    )
+
+
+def _write_proposed_adr(path: Path, number: str, slug: str, title: str) -> None:
+    """Write a Proposed-state ADR."""
+    write_sample_adr(path, number, slug, title, status="Proposed")
+
+
+def _write_superseded_adr(path: Path, number: str, slug: str, title: str,
+                          new_number: str, new_slug: str,
+                          accepted_date: str = "2026-01-01",
+                          super_date: str = TODAY) -> None:
+    """Write an ADR whose Status block has BOTH `Accepted (date)` and
+    `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (date)` lines."""
+    path.write_text(
+        f"# ADR-{number}: {title}\n\n"
+        f"## Status\n\n"
+        f"Accepted ({accepted_date})\n"
+        f"Superseded by [ADR-{new_number}]"
+        f"(./adr-{new_number}-{new_slug}.md) ({super_date})\n\n"
+        f"## Context\n\nSample context.\n\n"
+        f"## Decision Options Considered\n\n_TODO_\n\n"
+        f"## Recommended Decision\n\n_TODO_\n\n"
+        f"## Consequences\n\n_TODO_\n\n"
+        f"## Open questions\n\nNone.\n"
+    )
+
+
+class SupersedeTests(unittest.TestCase):
+    """Slice 005-02 ACs #1 + #2: append supersession lines to both ADRs."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-supersede-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        # Two Accepted ADRs by default.
+        _write_accepted_adr(self.adrs_dir / "adr-0001-old.md",
+                            "0001", "old", "Old Decision",
+                            accepted_date="2026-01-01")
+        _write_accepted_adr(self.adrs_dir / "adr-0002-new.md",
+                            "0002", "new", "New Decision",
+                            accepted_date=TODAY)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ---- AC #1: happy path ----
+
+    def test_supersede_appends_to_old_status_with_link_and_today_date(self):
+        """Old ADR's Status block gains: `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (TODAY)`."""
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        old = (self.adrs_dir / "adr-0001-old.md").read_text()
+        self.assertIn(
+            f"Superseded by [ADR-0002](./adr-0002-new.md) ({TODAY})",
+            old,
+        )
+
+    def test_supersede_appends_to_new_status_plain_text(self):
+        """New ADR's Status block gains: `Supersedes ADR-NNNN` (no link, no date)."""
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        new = (self.adrs_dir / "adr-0002-new.md").read_text()
+        self.assertIn("Supersedes ADR-0001", new)
+        # The text must NOT be a link or include a date.
+        self.assertNotIn("Supersedes [ADR-0001]", new)
+        self.assertNotIn(f"Supersedes ADR-0001 ({TODAY})", new)
+
+    def test_supersede_preserves_old_accepted_line(self):
+        """Old ADR keeps its `Accepted (date)` line."""
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        old = (self.adrs_dir / "adr-0001-old.md").read_text()
+        self.assertIn("Accepted (2026-01-01)", old)
+
+    def test_supersede_preserves_new_accepted_line(self):
+        """New ADR keeps its `Accepted (date)` line."""
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        new = (self.adrs_dir / "adr-0002-new.md").read_text()
+        self.assertIn(f"Accepted ({TODAY})", new)
+
+    def test_supersede_preserves_section_separator(self):
+        """The blank line between Status and the next H2 must survive.
+        Regression guard mirroring AcceptTests.test_accept_preserves_section_separator."""
+        run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        old = (self.adrs_dir / "adr-0001-old.md").read_text()
+        # Old ADR's Status block must NOT be glued to ## Context.
+        self.assertRegex(
+            old,
+            rf"Superseded by \[ADR-0002\]\(\./adr-0002-new\.md\) \({TODAY}\)\n\n## Context",
+        )
+        new = (self.adrs_dir / "adr-0002-new.md").read_text()
+        self.assertRegex(
+            new,
+            r"Supersedes ADR-0001\n\n## Context",
+        )
+
+    def test_supersede_supersession_line_immediately_after_accepted_line(self):
+        """Old ADR: the Superseded-by line comes right after Accepted (date)."""
+        run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        old = (self.adrs_dir / "adr-0001-old.md").read_text()
+        self.assertRegex(
+            old,
+            rf"Accepted \(2026-01-01\)\nSuperseded by \[ADR-0002\]",
+        )
+
+    def test_supersede_prints_both_paths_to_stdout(self):
+        """Both modified paths are printed to stdout (one per line)."""
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("adr-0001-old.md", result.stdout)
+        self.assertIn("adr-0002-new.md", result.stdout)
+
+    def test_supersede_atomic_write_no_tmp_stragglers(self):
+        """No stray .tmp file behind for either ADR."""
+        run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        stragglers = list(self.adrs_dir.glob("*.tmp"))
+        self.assertEqual(stragglers, [], f"stray tmp files: {stragglers}")
+
+    # ---- AC #1: NNNN validation ----
+
+    def test_supersede_refuses_malformed_old_number(self):
+        """Old NNNN not 4-digit zero-padded → exit 2."""
+        result = run_adr("supersede", "1", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("4-digit", result.stderr.lower())
+
+    def test_supersede_refuses_malformed_new_number(self):
+        """New NNNN not 4-digit zero-padded → exit 2."""
+        result = run_adr("supersede", "0001", "abc", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("4-digit", result.stderr.lower())
+
+    # ---- AC #2: refusal matrix ----
+
+    def test_supersede_refuses_missing_old(self):
+        """No ADR with the old NNNN → exit 2."""
+        result = run_adr("supersede", "9999", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    def test_supersede_refuses_missing_new(self):
+        """No ADR with the new NNNN → exit 2."""
+        result = run_adr("supersede", "0001", "9999", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    def test_supersede_refuses_proposed_old(self):
+        """Old ADR's Status is Proposed → exit 2, distinguishing message."""
+        _write_proposed_adr(self.adrs_dir / "adr-0001-old.md",
+                            "0001", "old", "Old Decision")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        msg = result.stderr.lower()
+        # The message should mention "accept the old" (or proposed).
+        self.assertIn("old", msg)
+        self.assertTrue("accept" in msg or "proposed" in msg,
+                        f"Proposed-old refusal must mention accept/proposed; got: {msg!r}")
+
+    def test_supersede_refuses_proposed_new(self):
+        """New ADR's Status is Proposed → exit 2, distinguishing message."""
+        _write_proposed_adr(self.adrs_dir / "adr-0002-new.md",
+                            "0002", "new", "New Decision")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        msg = result.stderr.lower()
+        self.assertIn("new", msg)
+        self.assertTrue("accept" in msg or "proposed" in msg,
+                        f"Proposed-new refusal must mention accept/proposed; got: {msg!r}")
+
+    def test_supersede_refuses_already_superseded_old(self):
+        """Old ADR is already Superseded → exit 2 with distinguishing message."""
+        # Add a third ADR that will be the prior superseder.
+        _write_accepted_adr(self.adrs_dir / "adr-0003-prior.md",
+                            "0003", "prior", "Prior Replacement",
+                            accepted_date="2026-02-01")
+        # Now mark 0001 as Superseded by 0003.
+        _write_superseded_adr(self.adrs_dir / "adr-0001-old.md",
+                              "0001", "old", "Old Decision",
+                              "0003", "prior",
+                              accepted_date="2026-01-01",
+                              super_date="2026-02-01")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        msg = result.stderr.lower()
+        # Distinguishing wording per AC #2: "double-supersede"
+        self.assertIn("superseded", msg)
+
+    def test_supersede_refuses_already_superseded_new(self):
+        """New ADR is itself Superseded → exit 2 with distinguishing message."""
+        # Add a third ADR that supersedes 0002.
+        _write_accepted_adr(self.adrs_dir / "adr-0003-later.md",
+                            "0003", "later", "Later Decision",
+                            accepted_date="2026-03-01")
+        _write_superseded_adr(self.adrs_dir / "adr-0002-new.md",
+                              "0002", "new", "New Decision",
+                              "0003", "later",
+                              accepted_date=TODAY,
+                              super_date="2026-03-01")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        msg = result.stderr.lower()
+        self.assertIn("superseded", msg)
+
+    def test_supersede_refuses_self_supersession(self):
+        """<old-NNNN> == <new-NNNN> → exit 2 BEFORE any file reads."""
+        result = run_adr("supersede", "0001", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        msg = result.stderr.lower()
+        self.assertTrue("same" in msg or "self" in msg or "identical" in msg,
+                        f"self-supersession refusal must say so; got: {msg!r}")
+
+    def test_supersede_refusal_does_not_mutate_either_file(self):
+        """If supersession refuses, neither ADR is partially-modified."""
+        old_before = (self.adrs_dir / "adr-0001-old.md").read_text()
+        new_before = (self.adrs_dir / "adr-0002-new.md").read_text()
+        # Trigger the Proposed-old refusal
+        _write_proposed_adr(self.adrs_dir / "adr-0001-old.md",
+                            "0001", "old", "Old Decision")
+        proposed_old = (self.adrs_dir / "adr-0001-old.md").read_text()
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2)
+        # New ADR untouched.
+        self.assertEqual((self.adrs_dir / "adr-0002-new.md").read_text(),
+                         new_before)
+        # Old ADR exactly the Proposed version we wrote — no partial mutation.
+        self.assertEqual((self.adrs_dir / "adr-0001-old.md").read_text(),
+                         proposed_old)
+
+    # ---- AC #6: dogfood-shape test ----
+
+    def test_supersede_dogfood_byte_for_byte_shape(self):
+        """Reproduce the ADR-0002 / ADR-0005 canonical shape byte-for-byte
+        (modulo today's date for the supersede event)."""
+        # Re-seed with dates and titles matching the real 0002/0005 fixture.
+        _write_accepted_adr(self.adrs_dir / "adr-0001-old.md",
+                            "0001", "old",
+                            "`contracts` skill stays a deliberate stub",
+                            accepted_date="2026-05-12")
+        _write_accepted_adr(self.adrs_dir / "adr-0002-new.md",
+                            "0002", "new",
+                            "contracts skill is a judgment-skill nudging "
+                            "toward standard external-interface artifacts",
+                            accepted_date="2026-05-15")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+        old = (self.adrs_dir / "adr-0001-old.md").read_text()
+        # Match the canonical old-Status block shape verbatim.
+        self.assertIn(
+            f"## Status\n\n"
+            f"Accepted (2026-05-12)\n"
+            f"Superseded by [ADR-0002](./adr-0002-new.md) ({TODAY})\n",
+            old,
+        )
+
+        new = (self.adrs_dir / "adr-0002-new.md").read_text()
+        self.assertIn(
+            f"## Status\n\n"
+            f"Accepted (2026-05-15)\n"
+            f"Supersedes ADR-0001\n",
+            new,
+        )
+
+
+# ---------- ExtractStatusAndDateTests (slice 005-02 AC #3) ----------
+
+
+class ExtractStatusAndDateTests(unittest.TestCase):
+    """Slice 005-02 AC #3: `_extract_status_and_date` recognizes the
+    Superseded shape and (when both lines are present) prefers the
+    Superseded tuple. Backward-compatible for Proposed / Accepted."""
+
+    def setUp(self):
+        self.adr = _import_adr_module()
+
+    def _adr_with_status(self, status_body: str) -> str:
+        return (
+            "# ADR-0099: Sample\n\n"
+            f"## Status\n\n{status_body}\n\n"
+            "## Context\n\nSample.\n"
+        )
+
+    def test_proposed_returns_proposed_and_date(self):
+        text = self._adr_with_status("Proposed (2026-01-01)")
+        status, date_str = self.adr._extract_status_and_date(text)
+        self.assertEqual(status, "Proposed")
+        self.assertEqual(date_str, "2026-01-01")
+
+    def test_accepted_returns_accepted_and_date(self):
+        text = self._adr_with_status("Accepted (2026-01-15)")
+        status, date_str = self.adr._extract_status_and_date(text)
+        self.assertEqual(status, "Accepted")
+        self.assertEqual(date_str, "2026-01-15")
+
+    def test_superseded_only_returns_superseded_and_date(self):
+        """A `Superseded by ... (date)` line on its own returns the date."""
+        text = self._adr_with_status(
+            "Superseded by [ADR-0099](./adr-0099-replacement.md) (2026-05-15)"
+        )
+        status, date_str = self.adr._extract_status_and_date(text)
+        self.assertEqual(status, "Superseded")
+        self.assertEqual(date_str, "2026-05-15")
+
+    def test_accepted_then_superseded_returns_superseded(self):
+        """Both `Accepted (date)` and `Superseded by ... (date)` present →
+        Superseded wins (most recent state)."""
+        text = self._adr_with_status(
+            "Accepted (2026-01-01)\n"
+            "Superseded by [ADR-0099](./adr-0099-replacement.md) (2026-05-15)"
+        )
+        status, date_str = self.adr._extract_status_and_date(text)
+        self.assertEqual(status, "Superseded")
+        self.assertEqual(date_str, "2026-05-15")
+
+    def test_no_status_block_returns_unknown(self):
+        """ADR text without a `## Status` block → ('(unknown)', '')."""
+        text = "# ADR-0099: Sample\n\n## Context\n\nNo Status here.\n"
+        status, date_str = self.adr._extract_status_and_date(text)
+        self.assertEqual(status, "(unknown)")
+        self.assertEqual(date_str, "")
+
+
+# ---------- IndexTests for Superseded ADRs (slice 005-02 AC #4) ----------
+
+
+class IndexSupersededTests(unittest.TestCase):
+    """Slice 005-02 AC #4: `adr.py index` produces `(<date>, Superseded)`,
+    NOT `(Superseded)` with no date, for a Superseded ADR."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-index-super-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        # Seed: an Accepted ADR (the new one) plus a Superseded one (the old).
+        # Use _write_superseded_adr from SupersedeTests (same module).
+        _write_accepted_adr(self.adrs_dir / "adr-0002-new.md",
+                            "0002", "new", "New Decision",
+                            accepted_date="2026-05-15")
+        _write_superseded_adr(self.adrs_dir / "adr-0001-old.md",
+                              "0001", "old", "Old Decision",
+                              "0002", "new",
+                              accepted_date="2026-01-01",
+                              super_date="2026-05-15")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_index_bullet_for_superseded_carries_date(self):
+        """Superseded bullet ends in `(<supersede-date>, Superseded)`."""
+        result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = (self.adrs_dir / "README.md").read_text()
+        self.assertIn("(2026-05-15, Superseded)", content)
+        # The bare `(Superseded)` with no date is the old buggy shape.
+        self.assertNotRegex(content, r"— [^()]*\(Superseded\)")
+
+    def test_index_idempotent_after_supersede(self):
+        """Re-running `index` after `supersede` produces identical bytes."""
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        first = (self.adrs_dir / "README.md").read_text()
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        second = (self.adrs_dir / "README.md").read_text()
+        self.assertEqual(first, second, "index regen must be idempotent")
+
+    def test_index_bullet_for_superseded_still_links_to_old_file(self):
+        """The Superseded ADR remains historical record; its bullet must
+        still link to the old file."""
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        content = (self.adrs_dir / "README.md").read_text()
+        self.assertIn("(adr-0001-old.md)", content)
+
+
+# ---------- Supersede SKILL.md surface (slice 005-02 AC #5) ----------
+
+
+class SupersedeSkillSurfaceTests(unittest.TestCase):
+    """Slice 005-02 AC #5: SKILL.md documents the new subcommand."""
+
+    def setUp(self):
+        self.skill = SKILL_MD.read_text()
+
+    def test_skill_body_mentions_supersede_subcommand(self):
+        """SKILL.md How-to-use section mentions `supersede`."""
+        self.assertIn("supersede", self.skill.lower())
+
+    def test_skill_documents_supersede_as_the_one_allowed_edit(self):
+        """The immutability rule is reworded — supersede is now the recommended path."""
+        # Some wording like "one edit allowed" or pointing at `adr.py supersede`
+        # should appear in the immutability section.
+        immut = self.skill.lower()
+        self.assertIn("supersede", immut)
+        # The skill must include the `supersede` bash invocation somewhere.
+        self.assertRegex(
+            self.skill,
+            r"adr\.py\s+supersede",
+            "SKILL.md must include the bash invocation `adr.py supersede`",
+        )
+
+
 # ---------- SkillSurfaceTests (AC #5, #6) ----------
 
 class SkillSurfaceTests(unittest.TestCase):

@@ -1,16 +1,9 @@
 {
   "spec": "docs/specs/005-adr-workflow/spec.md",
-  "slice": "005-03",
+  "slice": "005-02",
   "files": [
-    "hooks/scripts/jig-boundary-change-warn.sh",
-    "hooks/hooks.json",
-    "scripts/test_boundary_change_warn.py",
-    "scripts/verify_install.py",
-    "scripts/test_verify_install.py",
-    "skills/scaffold-init/test_scaffold_mode.py",
-    "skills/adr-workflow/SKILL.md",
-    "docs/architecture.md",
-    "docs/memory/glossary.md",
-    "README.md"
+    "skills/adr-workflow/adr.py",
+    "skills/adr-workflow/test_adr.py",
+    "skills/adr-workflow/SKILL.md"
   ]
 }
