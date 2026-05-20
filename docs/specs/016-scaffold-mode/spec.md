@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: scaffold-init
 tier: 0
 ---
@@ -900,7 +900,7 @@ triggers, none of which were present). Cleaned post-verification.
 
 ## Slice 016-04 — update-skill (DEFERRED)
 
-**STATUS: DRAFT**
+**STATUS: DEFERRED**
 
 **Goal (deferred):** Introduce a `/jig:update` skill that, given a
 scaffolded project, compares each in-repo jig file against the matching
@@ -915,13 +915,7 @@ maintaining their scaffolded install across jig releases, or (b) a jig
 release that ships a security-shaped fix to a SKILL.md or hook script
 where stale copies in the wild become a concrete risk.
 
-**Resolution trigger:**
-- ≥1 reported issue: "I scaffolded jig N versions ago and want to update
-  cleanly without overwriting my edits."
-- OR a security-grade fix to a copied artifact (hook script, SKILL.md
-  bash).
-- OR jig adopts per-file metadata headers (audit's Option C) for
-  another reason, making the SHA-compare cheaper.
+**Resolution trigger:** ≥1 reported issue along the lines of "I scaffolded jig N versions ago and want to update cleanly without overwriting my edits", OR a security-grade fix to a copied artifact (hook script, SKILL.md bash), OR jig adopts per-file metadata headers (audit's Option C) for another reason that makes a SHA-compare cheaper.
 
 (No DoR / AC / DoD until promotion.)
 

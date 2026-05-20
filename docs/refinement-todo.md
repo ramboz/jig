@@ -20,8 +20,7 @@
 **Resolution trigger:** Slice 002-03 (auto-detect-hooks) — test both hooks against real sessions.
 
 ### ~~Decision: AI-first onboarding doc separate from CLAUDE.md~~ — RESOLVED 2026-05-18
-~~**Deferred:** Today CLAUDE.md is doing double duty — both the high-frequency hot cache AND the de facto "how to operate this repo as an agent" onboarding doc. Spec 025 slims the hot cache; the open question was whether the onboarding content would survive.~~
-**Resolved by:** [Spec 025-01](specs/025-claude-md-hygiene/spec.md) landed with the onboarding content **preserved in CLAUDE.md**: the "Skills in this repo" table, the "Session workflow" section, and the "Constraints for agents working on this repo" stanza all survived the slim (the table got slimmed per-row but the section stayed; the workflow + constraints sections were untouched). The slimming hit Active-specs + Sprint-focus + ADR stanzas instead — content that wasn't serving as onboarding. **No separate `docs/AI-ONBOARDING.md` needed.** If a future audit re-raises this (e.g., the Constraints section grows past ~10 bullets, or a contributor reports CLAUDE.md as confusing for "how do I author skills" vs "what's in flight"), spin a new spec at that point.
+Resolved by [Spec 025-01](specs/025-claude-md-hygiene/spec.md) — onboarding content preserved in CLAUDE.md; no separate `docs/AI-ONBOARDING.md` needed.
 
 ## Conventions
 
@@ -30,17 +29,10 @@
 **Resolution trigger:** After two weeks of telemetry data. If the log is too sparse to be useful, explore the `SubagentStart` / `InstructionsLoaded` events as alternatives.
 
 ### ~~Decision: `adr.py index` sentence-end detector mishandles abbreviations~~ — RESOLVED 2026-05-15
-~~**Deferred:** The index-description extractor in `adr.py` truncates the first Context paragraph at the first sentence-ending punctuation. It treats the period in `e.g.` / `i.e.` / `cf.` / etc. as a sentence boundary, producing index lines like `... files as NNNN-<slug>.md (e.g.` — cut mid-abbreviation. First hit while writing ADR-0004 (2026-05-12).~~
-**Resolved by:** extending `_extract_description` in `adr.py` with an explicit abbreviation allowlist (`e.g.`, `i.e.`, `etc.`, `cf.`, `vs.`, `viz.`, `al.`, `Mr.`, `Mrs.`, `Ms.`, `Dr.`, `Prof.`, `Sr.`, `Jr.`, `St.`). The new `_is_abbreviation_ending_at(text, period_index)` helper does a case-sensitive look-back at each candidate period and refuses to truncate when one of these endings matches (with a `before_idx < 0 or not isalpha()` boundary check so `mile.` doesn't accidentally match `le.`). 7 new `ExtractDescriptionAbbreviationTests` lock the behavior. Companion ADR: [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md) codifies the lifecycle.
+Resolved by abbreviation allowlist in `_extract_description` (`skills/adr-workflow/adr.py`); pinned by `ExtractDescriptionAbbreviationTests`. Lifecycle companion: [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md).
 
 ### ~~Decision: `adr.py` accept-then-index vs. index-then-accept ordering~~ — RESOLVED 2026-05-15
-~~**Deferred:** The `adr-workflow` SKILL.md's end-to-end example runs `accept` → `index`, but the gotchas section says the fix for a truncated index entry is to edit the ADR's first Context sentence and re-run `adr.py index` — which implicitly requires the ADR to still be editable, i.e. NOT yet accepted. The two pieces of guidance conflict. Hit when accepting ADR-0004 (2026-05-12); the truncated description was only visible *after* `index`, which ran *after* `accept`, putting the ADR in an immutable state with an ugly index entry. Worked around by treating Context cosmetic edits as not-decision-content (and thus not under the immutability rule).~~
-**Resolution trigger:** Spec deciding the canonical lifecycle, OR next time someone hits the same conflict.
-**Open questions:**
-- Is the canonical order `new` → edit → `index` (preview) → `accept` → `index` (final)?
-- Or do we make `accept` automatically run `index` so the two are atomic?
-- Does the immutability rule apply to every character, or only the Recommended Decision / Consequences sections?
-**Resolved by:** [ADR-0006: adr.py accept-then-index ordering](decisions/adr-0006-adr-accept-then-index-ordering.md).
+Resolved by [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md).
 
 ### Decision: Sub-slice topology and naming
 **Deferred:** Real-world projects routinely discover mid-flight that a Ready slice is too big and needs splitting — usually triggered by an ADR. The aso-shallow-validator hit this on slice-18, which decomposed into 18.1–18.5 (skeleton → corpus-AEMCS → corpus-EDS → synthetic-battery → promotion). jig's current helpers (`workflow.py`, `land.py`, `review.py`) assume flat slice IDs and have no concept of a parent-slice / sub-slice relationship.
@@ -63,12 +55,10 @@
 ## Operations
 
 ### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12
-~~**Deferred:** The mechanism to flip docs from `Draft` to `Stable` (after 3-5 reconciled specs) is described but not implemented.~~
-**Resolved by:** [ADR-0001: scaffold-stable trigger](adrs/adr-0001-scaffold-stable.md). Threshold is **3 reconciled slices**; flip mechanism remains manual for now (one-liner sed; a `stabilize.py` helper is a candidate for a future slice if needed).
+Resolved by [ADR-0001](decisions/adr-0001-scaffold-stable.md) — threshold is 3 reconciled slices; flip mechanism stays manual.
 
 ### ~~Decision: Scaffold.json manifest format~~ — RESOLVED 2026-05-18
-~~**Deferred:** The `scaffold.json` install-state manifest is referenced in the design but its schema is undefined.~~
-**Resolved by:** Slice 001-01 (greenfield-scaffold) defined the initial schema (fields: `schema_version`, `installed_skills`, `scaffold_mode`, plus signal-detection results). [ADR-0007](decisions/adr-0007-scaffold-json-installed-skills.md) formalized the `installed_skills` field shape. Schema lives in `skills/scaffold-init/scaffold.py` (`JIG_VERSION` constant + manifest construction in the main flow); `_TIER_SKILLS` is the per-tier source of truth.
+Resolved by [Spec 001-01](specs/001-scaffold-init/spec.md) + [ADR-0007](decisions/adr-0007-scaffold-json-installed-skills.md); schema lives in `skills/scaffold-init/scaffold.py`.
 
 ### Decision: Signal detection time-box and resource bounds
 **Deferred:** Spike 001a calls for a 3-second wall-clock time-box and "no recursion deeper than 2 levels" with skip-dirs. The current `detect_signals()` honors the depth/skip-dir rule implicitly (no rglob in detectors) but does NOT enforce a wall-clock limit. `_read_text_safe()` reads files unboundedly — a multi-GB `requirements.txt` would be fully read into memory.
@@ -119,8 +109,7 @@
 **Mitigation idea:** stash-or-revert the stub-create on push failure (already done in the `non-fast-forward` path). Generalize the cleanup to fire on any push-failure shape, not just race.
 
 ### ~~Decision: race-recovery `git reset --hard HEAD~1` leaves empty spec directory on disk~~ — RESOLVED 2026-05-15
-~~**Deferred:** On `non-fast-forward` push rejection, the helper resets the commit but leaves the empty `docs/specs/NNN-<slug>/` directory. Functionally harmless (`_next_spec_number` still works) but untidy. Surfaced by the reviewer of slice 003-03 (workflow.py:1028-1035 region).~~
-**Resolved by:** the proposed `shutil.rmtree(spec_dir, ignore_errors=True)` after the `git reset --hard HEAD~1` call. Pinned by `test_new_race_recovery_removes_empty_spec_dir` in `ReserveSpecTests` (mocks the reset so the test still detects whether the helper itself cleans up the dir).
+Resolved by `shutil.rmtree(spec_dir, ignore_errors=True)` in `workflow.py` race-recovery path; pinned by `test_new_race_recovery_removes_empty_spec_dir`.
 
 ### Decision: `workflow.py new` / `adr.py new` refuse on non-main branches, defeating reserve-on-main when work originates on a feature branch
 **Deferred:** `workflow.py new` requires the current branch to be `main` because the reservation commit lands on `main`. Caused the spec 021→022 collision-and-renumber on 2026-05-15: a feature-branch session refused to reserve spec 021 up-front ("must switch to main first"), the session continued without reservation, parallel work landed `021-migrate-copy-machinery` on origin/main in the meantime, the feature branch had to rename `docs/specs/021-contracts/ → 022-contracts/` (+ propagate the renumber across slice files, deviation logs, CLAUDE.md, ADR-0005, dogfood report, test labels) at merge-time. The very pain spec 003-03's reserve-on-main flow was built to prevent reproduced because the flow wasn't usable from where work was happening. **Slice 028-01 (2026-05-19) extended the same preflight to `adr.py new`**, so the gap is now symmetric across both reserve-on-main helpers — a future fix should land in both at once.
