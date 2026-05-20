@@ -777,6 +777,135 @@ class PrinciplesCheckBlockTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Engineering-practices check block (SDD process gaps)
+# ---------------------------------------------------------------------------
+
+
+PRACTICES_CHECK_HINT = "Engineering-practices check"
+
+
+class PracticesCheckBlockTests(unittest.TestCase):
+    """The implementation- and reconciliation-prompt builders UNCONDITIONALLY
+    append an `Engineering-practices check` bullet covering four SDD
+    process gaps (task completeness, approach alignment, ADR signal,
+    tech-debt tracking).
+
+    Unlike `_contract_surface_check_block()` (gated on
+    `has_declared_contract_surfaces`), this block has no gate — the
+    reviewer self-gates on "not applicable" cases.
+
+    Tests cover:
+      (a) helper returns a block naming the four sub-checks
+      (b) both prompt builders include the block
+      (c) the block references jig's debt-tracking files
+      (d) the block stays under 900 characters (looser than the
+          500-char principles bound — four sub-bullets need more room)
+      (e) the block appends UNCONDITIONALLY (no gating)
+    """
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_practices", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    # ---- (a) helper names the four sub-checks
+
+    def test_helper_block_names_four_subchecks(self):
+        module = self._import_review_module()
+        block = module._practices_check_block()
+        for marker in (
+            "Task completeness",
+            "Approach alignment",
+            "ADR signal",
+            "Tech-debt tracking",
+        ):
+            self.assertIn(marker, block,
+                          f"helper must name '{marker}' as one of the "
+                          "four sub-checks")
+
+    # ---- (b) both prompt builders include the block
+
+    def _make_minimal_spec(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-pract-"))
+        self._tmpdirs.append(root)
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "architecture.md").write_text(
+            "# Architecture\n\n## Tech stack\n\nPython.\n"
+        )
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def test_impl_prompt_includes_practices_block(self):
+        spec = self._make_minimal_spec()
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(PRACTICES_CHECK_HINT, result.stdout,
+                      "implementation prompt MUST include the "
+                      "engineering-practices check block unconditionally")
+
+    def test_recon_prompt_includes_practices_block(self):
+        spec = self._make_minimal_spec()
+        result = run_review("reconciliation", str(spec), "099-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(PRACTICES_CHECK_HINT, result.stdout,
+                      "reconciliation prompt MUST include the "
+                      "engineering-practices check block unconditionally")
+
+    # ---- (c) the block references jig's debt-tracking files
+
+    def test_helper_block_references_jig_debt_files(self):
+        module = self._import_review_module()
+        block = module._practices_check_block()
+        self.assertIn("docs/inbox.md", block,
+                      "block must cite docs/inbox.md as a tech-debt "
+                      "tracking location")
+        self.assertIn("docs/refinement-todo.md", block,
+                      "block must cite docs/refinement-todo.md as a "
+                      "deferred-decision tracking location")
+
+    # ---- (d) the block stays under 900 characters
+
+    def test_helper_block_under_900_chars(self):
+        module = self._import_review_module()
+        block = module._practices_check_block()
+        self.assertLess(len(block), 900,
+                        f"prompt-size hygiene: block must be < 900 chars "
+                        f"(four sub-bullets need more room than the "
+                        f"500-char principles bound); got {len(block)}.")
+
+    # ---- (e) the block appends UNCONDITIONALLY (no gating)
+
+    def test_block_appears_with_no_arch_md(self):
+        """Even when the project has NO docs/architecture.md (which would
+        silence the contract-surface check), the practices block must
+        still fire — it has no gate."""
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-pract-noarch-"))
+        self._tmpdirs.append(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        result = run_review("implementation", str(spec), "099-01", "x.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(PRACTICES_CHECK_HINT, result.stdout)
+
+
+# ---------------------------------------------------------------------------
 # Slice 031-01 — pr-review mode (post-implementation craft pass)
 # ---------------------------------------------------------------------------
 
