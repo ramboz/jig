@@ -146,6 +146,17 @@ def check_deviation_log(section: str) -> bool:
 
 CLOSE_OUT_RE = re.compile(r"(?im)^###\s+close[- ]?out\b")
 
+# Inbox 2026-05-18 `slice-land/parser/checkboxes-in-code-blocks` —
+# example checkbox lines embedded in fenced ```...``` blocks inside AC
+# text were being counted as real DoD items. Mirrors the
+# `_strip_fenced_blocks` helper used by the judgment-skill surface tests
+# (clarify / contracts / arch-review / analyze / pr-review) for the same
+# parser-ignores-fenced-region invariant. Allows leading whitespace on
+# the fence so indented fenced blocks inside numbered-AC list items also
+# get stripped (the surface-test variant doesn't need this because docs
+# fence at the top level only).
+_FENCED_BLOCK_RE = re.compile(r"(?ms)^[ \t]*```.*?^[ \t]*```[ \t]*$")
+
 
 def check_dod(section: str) -> tuple:
     """Returns (ok, ticked, total) where ok iff total >= 1 AND ticked == total.
@@ -155,9 +166,14 @@ def check_dod(section: str) -> tuple:
     post-DONE follow-up (status-board regen, CLAUDE.md updates) and
     excluded from the count. Heading is case-insensitive and tolerates
     `Close-out` / `Closeout` / `close out` variants; H3 (`###`) is
-    required to avoid accidentally matching H2/H4 headings."""
+    required to avoid accidentally matching H2/H4 headings.
+
+    Fenced ```...``` blocks inside AC text are stripped before scanning
+    so example checkbox lines in documentation don't count as real DoD
+    items."""
     m = CLOSE_OUT_RE.search(section)
     dod_section = section[:m.start()] if m else section
+    dod_section = _FENCED_BLOCK_RE.sub("", dod_section)
     # Find all `- [ ]` and `- [x]` lines in the DoD region.
     boxes = re.findall(r"(?m)^\s*-\s+\[([ xX])\]", dod_section)
     total = len(boxes)

@@ -248,6 +248,56 @@ class PrepareReportTests(unittest.TestCase):
         self.assertNotIn("4/6", out,
                          "close-out boxes leaked into DoD count")
 
+    def test_fenced_checkboxes_in_ac_text_excluded_from_dod_count(self):
+        """Inbox 2026-05-18 `slice-land/parser/checkboxes-in-code-blocks`
+        — example checkbox lines embedded in fenced ```...``` blocks inside
+        AC text are documentation, not real DoD items, and must not count
+        toward the DoD total.
+
+        Hit live on slice 025-01: AC #6 and #7 bodies showed before/after
+        template wording in fenced blocks; check_dod parsed them as real
+        DoD items and reported `7/10` even though all 7 real DoD boxes
+        + both Close-out boxes were checked. Same family as the
+        `judgment-skills/test/code-block-aware-h2-h3` fix already applied
+        to surface tests in clarify/contracts/arch-review/analyze/pr-review.
+
+        Synthetic spec: 3 ticked DoD boxes plus an AC body containing a
+        fenced block with 2 unticked example boxes. Without the fix,
+        check_dod returns (False, 3, 5) → blocker. With the fix, it
+        returns (True, 3, 3) → green."""
+        spec_text = (
+            "---\nstatus: DRAFT\nskill: foo\ntier: 1\n---\n\n"
+            "# Spec X: foo\n\n## Overview\n\nSynthetic.\n\n"
+            "## Slice 025-01 — fenced-checkbox-test\n\n"
+            "**STATUS: DONE**\n\n"
+            "**Goal:** Synthetic goal.\n\n"
+            "**Acceptance Criteria:**\n\n"
+            "1. The template's Close-out section is illustrated as:\n\n"
+            "   ```\n"
+            "   ### Close-out (post-DONE)\n\n"
+            "   - [ ] CLAUDE.md updates: old wording the AC discusses.\n"
+            "   - [ ] CLAUDE.md hygiene: new wording the AC discusses.\n"
+            "   ```\n\n"
+            "   These are illustrative, not real DoD items.\n\n"
+            "**DoD:**\n"
+            "- [x] Item one.\n"
+            "- [x] Item two.\n"
+            "- [x] Item three.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "Synthetic log.\n"
+        )
+        self.spec.write_text(spec_text)
+        result = run_land("prepare", str(self.spec), "025-01",
+                          cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+        out = result.stdout
+        self.assertRegex(out, r"(?m)^- \[x\] DoD: 3/3")
+        self.assertNotIn("3/5", out,
+                         "fenced-block checkboxes leaked into DoD count")
+        self.assertNotIn("5/5", out,
+                         "fenced-block checkboxes were counted as real DoD items")
+
     def test_close_out_heading_is_case_insensitive(self):
         """Spec 009 / slice 009-01 — case variants of the close-out
         heading all delimit the boundary."""
