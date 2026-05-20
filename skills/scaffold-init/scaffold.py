@@ -420,11 +420,15 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
 
 def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
     """Copy `plugin/skills/<name>/` → `target/.claude/skills/jig-<name>/` and
-    `plugin/agents/*.md` → `target/.claude/agents/jig-<name>.md`.
+    `plugin/agents/*.md` → `target/.claude/agents/jig-<name>.md`. Also copies
+    `_`-prefixed private shared modules (e.g. `_common/`) into
+    `target/.claude/skills/<name>/` (no `jig-` prefix) so helpers'
+    `from _common.parsing import ...` resolves at scaffold-mode runtime —
+    helpers do `sys.path.insert(0, parent.parent)` which lands on
+    `.claude/skills/`, making `_common/` a sibling.
 
-    Slice 016-01 (scaffold-mode). Skips:
-      - `skills/_common` and any other `_`-prefixed private skill dir
-        (mirrors the convention in `scripts/run_tests.py`);
+    Slice 016-01 (scaffold-mode); shared-module copy added 2026-05-20.
+    Skips:
       - skill dirs that don't have a `SKILL.md` (not user-facing);
       - `test_*.py` files anywhere under a skill dir (helper-only files
         bloat the user's tree and aren't load-bearing at runtime);
@@ -450,6 +454,9 @@ def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
             if not skill_dir.is_dir():
                 continue
             if skill_dir.name.startswith("_"):
+                # Private shared module — copy unprefixed so the
+                # helpers' `from _<name>.x import ...` resolves.
+                _copy_skill_dir(skill_dir, skills_dst / skill_dir.name)
                 continue
             if not (skill_dir / "SKILL.md").is_file():
                 continue

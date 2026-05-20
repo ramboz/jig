@@ -286,6 +286,37 @@ class WithMachineryTests(unittest.TestCase):
                          "not 'jig-scaffold-init' — the prefix is on the "
                          "directory only.")
 
+    # ----- Shared modules: `_common/` is copied unprefixed -----------------
+    def test_common_module_copied_unprefixed(self):
+        """`_common/` is copied to `.claude/skills/_common/` (no `jig-`
+        prefix) so helpers' `from _common.parsing import ...` resolves.
+        Helpers `sys.path.insert(0, parent.parent)` lands on
+        `.claude/skills/`, making `_common/` a sibling."""
+        common = self.target / ".claude" / "skills" / "_common"
+        self.assertTrue(common.is_dir(), f"missing `_common/`: {common}")
+        self.assertTrue((common / "parsing.py").is_file(),
+                        "`_common/parsing.py` must be copied")
+        self.assertFalse((common / "test_parsing.py").exists(),
+                         "test files must still be excluded from `_common/`")
+
+    def test_scaffolded_helper_imports_common_at_runtime(self):
+        """End-to-end: running a scaffolded helper subprocess must not
+        ModuleNotFoundError on `_common.parsing`. The import happens at
+        module load before argparse, so `--help` is enough to exercise it."""
+        helper = (self.target / ".claude" / "skills" / "jig-spec-workflow"
+                  / "workflow.py")
+        self.assertTrue(helper.is_file(), f"scaffolded helper missing: {helper}")
+        r = subprocess.run(
+            [sys.executable, str(helper), "--help"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"scaffolded helper failed at import-time:\n"
+            f"stderr={r.stderr}\nstdout={r.stdout}",
+        )
+        self.assertNotIn("ModuleNotFoundError", r.stderr)
+
 
 # --------------------------------------------------------------------------
 # AC #9: regression guard — calling scaffold --with-machinery must NOT

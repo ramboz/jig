@@ -15,9 +15,8 @@
 **Resolution trigger:** First time we need to react to subagent start (e.g., reviewer logging, effort-scaling enforcement).
 **Risk:** Event name or behavior may differ from expectations. Test before relying on it.
 
-### Decision: additionalContext format for Stop vs UserPromptSubmit hooks
-**Deferred:** Confirmed `{ "continue": true, "additionalContext": "..." }` for these events, but the plan review flagged this as needing empirical verification.
-**Resolution trigger:** Slice 002-03 (auto-detect-hooks) — test both hooks against real sessions.
+### ~~Decision: additionalContext format for Stop vs UserPromptSubmit hooks~~ — RESOLVED
+Resolved by [Slice 002-03](specs/002-memory-layer/spec.md) — `{ "continue": true, "additionalContext": "..." }` format confirmed in production via `jig-memory-scan` + `jig-task-capture` hooks.
 
 ### ~~Decision: AI-first onboarding doc separate from CLAUDE.md~~ — RESOLVED 2026-05-18
 Resolved by [Spec 025-01](specs/025-claude-md-hygiene/spec.md) — onboarding content preserved in CLAUDE.md; no separate `docs/AI-ONBOARDING.md` needed.
@@ -121,14 +120,8 @@ Resolved by `shutil.rmtree(spec_dir, ignore_errors=True)` in `workflow.py` race-
 - Should the relaxed flow stay opt-in (`--from-feature-branch`) or default?
 **Mitigation idea (interim):** SKILL.md gains a "if you're on a feature branch and can't switch to main, manually `mkdir docs/specs/NNN-<slug>/` and `touch spec.md` so subsequent helpers see the dir; reserve-on-main when you can" workaround — acknowledges the gap without changing the helper.
 
-### Decision: scaffold-mode `--with-machinery` doesn't copy `skills/_common/`, breaking scaffolded helpers
-**Deferred:** `scaffold-init --with-machinery` (default-on per slice 016-03) copies `skills/<name>/` directories into the target's `.claude/skills/jig-<name>/` but does NOT copy `skills/_common/` (the shared parsing / iter-slices module imported by `workflow.py`, `review.py`, `land.py`, etc.). When the target's scaffolded `workflow.py status-board .` runs, it fails with `ModuleNotFoundError: No module named '_common'`. Surfaced 2026-05-15 when regenerating aso-shallow-validator's status board from its scaffolded jig install (had to fall back to invoking jig's source-repo `workflow.py` with the project as an arg). Affects every Python helper that imports from `_common`.
-**Resolution trigger:** Next user reports a scaffolded helper failing with `ModuleNotFoundError`, OR a scaffolded project tries to run any of `workflow.py {transition,status-board,new}` / `review.py {implementation,reconciliation}` / `land.py {prepare,execute}` and hits the import error. Probably bites immediately for any scaffolded project that tries to use its own bundled helpers.
-**Open questions:**
-- Copy `skills/_common/` to `.claude/skills/jig-_common/` (jig-prefixed for consistency)? Then the helpers need their `from _common.parsing import ...` rewritten to `from jig_common.parsing import ...` at copy time (path-rewriter extension to `_rewrite_python_imports` or equivalent).
-- Or copy unprefixed as `.claude/skills/_common/`? Cleaner from the helper's perspective (no import rewrite needed) but breaks the `jig-<name>/` naming convention from slice 016-01.
-- Or vendor `_common/` inside each `.claude/skills/jig-<name>/_common/` (per-skill copy)? Highest disk cost, simplest import semantics.
-**Mitigation idea:** spec 016-04 (`update-skill`, currently DRAFT) is the natural home for this fix — it'd ship as part of the same "scaffold-mode parity tightening" arc that 016-01/02/03 began. Until then, scaffolded projects that need to run jig helpers should invoke jig's source-repo `workflow.py` / `review.py` / etc. with `--project-dir <target>` (where the helper supports it) or by path argument.
+### ~~Decision: scaffold-mode `--with-machinery` doesn't copy `skills/_common/`, breaking scaffolded helpers~~ — RESOLVED 2026-05-20
+Resolved by extending `_copy_skills_and_agents` in `skills/scaffold-init/scaffold.py` to copy `_`-prefixed private shared dirs unprefixed (e.g. `_common/` → `.claude/skills/_common/`); helpers' `sys.path.insert(0, parent.parent)` resolves `from _common.parsing import ...` at scaffold-mode runtime. Pinned by `test_common_module_copied_unprefixed` + `test_scaffolded_helper_imports_common_at_runtime`.
 
 ### Decision: Skill-routing observability
 **Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. Jig now ships 13 active skills (`scaffold-init`, `memory-sync`, `spec-workflow`, `independent-review`, `contracts`, `adr-workflow`, `tdd-loop`, `slice-land`, `migrate`, `pr-review`, `arch-review`, `clarify`, `analyze`). The Claude Code skill router picks one per user intent — but jig has no telemetry on which skills fire when, whether the router picks the *right* skill, or whether the deferral hints (pr-review/arch-review/contracts route to richer user-installed skills) actually fire. `jig-telemetry.sh` logs `Task` tool spawns; it does not log Skill / slash-command invocations.
