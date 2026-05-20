@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -2846,6 +2847,243 @@ class SliceTemplateArchReviewHintTests(unittest.TestCase):
             "(031-02 AC #1: module boundaries / public contracts / "
             "architecture-shaped concerns)",
         )
+
+
+# Slice 028-03: importlib-load workflow.py as a module so tests can
+# monkeypatch `_checksum` directly to inject deterministic mid-regen
+# mutations. Mirrors the loader pattern slice 028-02 added for memory.py.
+def _import_workflow_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_workflow_under_test", WORKFLOW,
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class StatusBoardRaceCheckTests(unittest.TestCase):
+    """Slice 028-03 — checksum-based race-detection guard on
+    `workflow.py status-board`.
+
+    ACs covered:
+      - AC #1: pre-regen checksum captured (verified indirectly via
+        race-detected case: if pre-checksum wasn't captured, the
+        post-checksum compare couldn't detect the mutation).
+      - AC #2: pre-write checksum compared; refuses on mismatch.
+      - AC #3: exact refusal message + exit code 4.
+      - AC #4: `--force` flag bypasses the check (CLI + Python API).
+      - AC #5: tests cover all three branches (no-race / detected-race /
+        forced-overwrite) + the stale-checksum false-positive edge case.
+      - AC #6: regression test on Notes-column preservation.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-board-race-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+        # Drop in a synthetic spec so the regen has something to write.
+        spec1 = self.target / "docs/specs/200-race-check"
+        spec1.mkdir(parents=True)
+        write_synthetic_spec(spec1 / "spec.md", [
+            ("200-01 first", "DONE"),
+            ("200-02 second", "IN_PROGRESS"),
+        ])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # AC #5 branch 1: no-race (default behavior). Existing tests in
+    # StatusBoardTests already cover this thoroughly; one regression-pin
+    # here so a future refactor that breaks the no-race path fails
+    # alongside the slice-028-03 tests.
+    def test_no_race_default_behavior_unchanged(self):
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(
+            result.returncode, 0,
+            f"no-race regen must succeed; stderr: {result.stderr}",
+        )
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertIn("200-01 first", board)
+        self.assertIn("200-02 second", board)
+
+    # AC #2 + AC #3 + AC #5 branch 2: race detected → refusal raised.
+    def test_race_detected_raises_status_board_race_error(self):
+        wf = _import_workflow_module()
+        # Establish baseline so the regen has new content to write
+        # (otherwise the idempotent fast path skips the race check
+        # entirely — that's intentional per Design decision #3).
+        run_workflow("status-board", str(self.target))
+        # Mutate one of the slices so the next regen has real new content.
+        spec_md = self.target / "docs/specs/200-race-check/spec.md"
+        spec_md.write_text(
+            spec_md.read_text().replace("IN_PROGRESS", "REVIEWED")
+        )
+        # Patch _checksum to return different values on the two calls
+        # (pre-regen vs pre-write) — simulates a concurrent writer
+        # mutating the board between the two reads.
+        with unittest.mock.patch.object(
+            wf, "_checksum",
+            side_effect=["sha-pre-regen", "sha-mid-regen-different"],
+        ):
+            with self.assertRaises(wf.StatusBoardRaceError) as cm:
+                wf.regenerate_status_board(self.target)
+        # AC #3: exact refusal message. Match character-for-character so
+        # future auditors can grep for it.
+        self.assertEqual(
+            str(cm.exception),
+            "status board changed during regen — another writer may "
+            "have run. Re-run `workflow.py status-board` to retry.",
+        )
+
+    # AC #3: CLI exits 4 (not 2) when a race is detected.
+    def test_cli_exits_4_on_race(self):
+        wf = _import_workflow_module()
+        # Set up so the regen would write something.
+        run_workflow("status-board", str(self.target))
+        spec_md = self.target / "docs/specs/200-race-check/spec.md"
+        spec_md.write_text(
+            spec_md.read_text().replace("IN_PROGRESS", "REVIEWED")
+        )
+        # Patch checksum on the loaded module via a wrapper subprocess.
+        # Simpler approach: use the Python API directly via the module
+        # path, since the CLI subprocess can't easily share a mock.
+        # Invoke main() directly so the exception → exit-code mapping is
+        # exercised in-process.
+        with unittest.mock.patch.object(
+            wf, "_checksum",
+            side_effect=["sha-pre", "sha-post"],
+        ):
+            rc = wf.main(
+                ["workflow.py", "status-board", str(self.target)],
+            )
+        self.assertEqual(rc, 4,
+                         "race detection must surface as exit code 4")
+
+    # AC #4 + AC #5 branch 3: forced-overwrite bypasses the guard.
+    # Python API path: pass `force=True`.
+    def test_force_python_api_bypasses_race_check(self):
+        wf = _import_workflow_module()
+        run_workflow("status-board", str(self.target))
+        spec_md = self.target / "docs/specs/200-race-check/spec.md"
+        spec_md.write_text(
+            spec_md.read_text().replace("IN_PROGRESS", "REVIEWED")
+        )
+        # Patch _checksum to a divergent side_effect — but with force=True
+        # the guard should be skipped entirely (no checksum call at all,
+        # so the side_effect is irrelevant).
+        with unittest.mock.patch.object(
+            wf, "_checksum",
+            side_effect=["sha-pre-WOULD-be-race", "sha-post-WOULD-be-race"],
+        ):
+            # Should not raise; write proceeds despite checksum mismatch
+            # because force=True turns off the guard.
+            summary = wf.regenerate_status_board(self.target, force=True)
+        self.assertIn("regenerated status board", summary)
+        # Confirm the write actually happened (REVIEWED status landed).
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertIn("REVIEWED", board)
+
+    # AC #4: `--force` CLI flag works (matches Python API).
+    def test_force_cli_flag_bypasses_race_check(self):
+        wf = _import_workflow_module()
+        run_workflow("status-board", str(self.target))
+        spec_md = self.target / "docs/specs/200-race-check/spec.md"
+        spec_md.write_text(
+            spec_md.read_text().replace("IN_PROGRESS", "REVIEWED")
+        )
+        with unittest.mock.patch.object(
+            wf, "_checksum",
+            side_effect=["sha-pre", "sha-post-diverged"],
+        ):
+            rc = wf.main(
+                ["workflow.py", "status-board", str(self.target), "--force"],
+            )
+        self.assertEqual(rc, 0, "force flag must bypass the guard and exit 0")
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertIn("REVIEWED", board)
+
+    # AC #5 edge case: stale-checksum false-positive. If the file is
+    # rewritten with identical content (SHA256 stays the same), the
+    # content-based check correctly treats it as "no race" and the write
+    # proceeds. Documented in deviation log; this test pins the behavior.
+    def test_identical_content_rewrite_does_not_trigger_race(self):
+        wf = _import_workflow_module()
+        run_workflow("status-board", str(self.target))
+        spec_md = self.target / "docs/specs/200-race-check/spec.md"
+        spec_md.write_text(
+            spec_md.read_text().replace("IN_PROGRESS", "REVIEWED")
+        )
+        # Same checksum on both calls — simulates a concurrent writer
+        # rewriting with identical content. Should NOT raise.
+        with unittest.mock.patch.object(
+            wf, "_checksum",
+            side_effect=["sha-same", "sha-same"],
+        ):
+            summary = wf.regenerate_status_board(self.target)
+        self.assertIn("regenerated status board", summary)
+
+    # AC #1 / AC #5 idempotent-fast-path: when the regen produces no new
+    # content (new == existing), the write is skipped and the race check
+    # is unreachable. This pins that no false-positive race is reported
+    # on the idempotent path.
+    def test_idempotent_fast_path_does_not_trigger_race(self):
+        wf = _import_workflow_module()
+        # First regen establishes the baseline.
+        run_workflow("status-board", str(self.target))
+        # Second regen with the same spec state — new_content == existing,
+        # so the function returns "already current" before reaching the
+        # race-check / write code. Patch _checksum with divergent values:
+        # if the race-check code ran on the fast path (it shouldn't), the
+        # divergent side_effect would raise.
+        with unittest.mock.patch.object(
+            wf, "_checksum",
+            side_effect=["sha-pre", "sha-DIVERGENT-would-race"],
+        ):
+            summary = wf.regenerate_status_board(self.target)
+        self.assertEqual(summary, "status board already current; no changes")
+
+    # Craft-pass coverage gap: --force + idempotent state should still
+    # respect the fast path (return "already current") rather than writing
+    # unconditionally. Pins the behavior against a future refactor that
+    # might move the fast-path below the race-check block.
+    def test_force_respects_idempotent_fast_path(self):
+        wf = _import_workflow_module()
+        # First regen establishes the baseline.
+        run_workflow("status-board", str(self.target))
+        # Second regen with `force=True` — no content change, so the
+        # function must still short-circuit on the fast path.
+        summary = wf.regenerate_status_board(self.target, force=True)
+        self.assertEqual(summary, "status board already current; no changes")
+
+    # AC #6: regression — Notes column preservation must still work.
+    def test_notes_column_preserved_across_regen(self):
+        # First regen to establish baseline table
+        run_workflow("status-board", str(self.target))
+        board_path = self.target / "docs/specs/README.md"
+        content = board_path.read_text()
+        # Hand-edit a Note cell for one slice
+        new_content = content.replace(
+            "| 200-01 first | **DONE** |  |",
+            "| 200-01 first | **DONE** | curated note that must survive |",
+        )
+        self.assertNotEqual(new_content, content,
+                            "test setup failed: edit was a no-op")
+        board_path.write_text(new_content)
+        # Mutate a spec so the second regen has new content (so the
+        # actual write path runs, exercising the race check + Notes
+        # preservation together).
+        spec_md = self.target / "docs/specs/200-race-check/spec.md"
+        spec_md.write_text(
+            spec_md.read_text().replace("IN_PROGRESS", "REVIEWED")
+        )
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0,
+                         f"regen failed: {result.stderr}")
+        regenerated = board_path.read_text()
+        self.assertIn("curated note that must survive", regenerated)
 
 
 if __name__ == "__main__":

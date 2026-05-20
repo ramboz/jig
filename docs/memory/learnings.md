@@ -264,3 +264,18 @@ process exit (no PID-reuse window).
 
 Demonstrated in slice 028-02 (`skills/memory-sync/memory.py` —
 `_resolve_lock_dir` + `_file_lock`).
+
+## Python except ordering: first-match-wins, not most-specific
+
+When a subclass exception and its parent appear in adjacent `except`
+blocks, the parent's handler catches the subclass UNLESS the
+subclass is listed first. Example from slice 028-03:
+`class StatusBoardRaceError(WorkflowError)` must be caught via
+`except StatusBoardRaceError` BEFORE `except WorkflowError`,
+otherwise the parent's exit code (2) wins over the subclass's
+intended exit code (4).
+
+This is Python's documented behavior — `except` blocks are evaluated
+in order. Most-specific-first is convention, not language semantics.
+Worth pinning in mental model when designing exception hierarchies
+for CLI exit codes.

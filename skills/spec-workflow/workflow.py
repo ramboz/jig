@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import datetime
+import hashlib
 import os
 import re
 import shutil
@@ -72,6 +73,26 @@ SPIKE_MARKER = "\U0001f52c"  # 🔬
 
 class WorkflowError(RuntimeError):
     """Raised for user-facing workflow errors (CLI exits non-zero)."""
+
+
+class StatusBoardRaceError(WorkflowError):
+    """Slice 028-03: raised when `regenerate_status_board` detects that
+    `docs/specs/README.md` changed on disk between pre-regen checksum
+    and pre-write checksum (another worktree's regen ran in the gap).
+
+    Caught explicitly in `main()` and surfaces as exit code 4 (after the
+    0/1/2/3 conventions; see also `StatusBoardRaceError` reference in
+    SKILL.md). Bypassable via the `--force` flag / `force=True` kwarg.
+    """
+
+
+# Slice 028-03: module-level helper extracted so tests can monkeypatch
+# `_checksum` to inject deterministic mid-regen mutations
+# (`patch.object(_wf, "_checksum", side_effect=[pre, post])`). SHA256 on
+# read bytes (not mtime+size — mtime is coarse on some filesystems;
+# SHA256 on a few-KB README is cheap and bulletproof).
+def _checksum(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_slice(spec_path, slice_fragment: str):
@@ -663,7 +684,7 @@ def render_deferred_table(rows: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-def regenerate_status_board(project_dir: Path) -> str:
+def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     """Regenerate docs/specs/README.md table from spec.md files.
     Preserves preamble before the first `| Spec` line AND Notes column
     content from the existing table. Slice 014-02: appends a separate
@@ -671,12 +692,29 @@ def regenerate_status_board(project_dir: Path) -> str:
     is in `DEFERRED`. Slice 030-01: also writes the spec.md `status:`
     rollup for each walked spec (idempotent — only writes when the
     computed value differs from what's currently in spec.md frontmatter,
-    and skipped for spec.md files without frontmatter). Idempotent."""
+    and skipped for spec.md files without frontmatter). Idempotent.
+
+    Slice 028-03: checksum-based race-detection guard. The helper
+    captures the pre-regen SHA256 of `docs/specs/README.md` and
+    re-checksums immediately before the write. If the two checksums
+    differ, another writer regenerated the board in the gap; the helper
+    raises `StatusBoardRaceError` rather than silently overwriting.
+    Surfaces as exit code 4 via `main()`. The `--force` flag (or
+    `force=True` kwarg) bypasses the check and writes anyway.
+
+    Spec-rollup writes (`_write_spec_rollup`) are NOT under the race
+    check — they touch individual spec.md files (not the README) and
+    happen before the race window opens.
+    """
     board_path = project_dir / "docs" / "specs" / "README.md"
     if not board_path.is_file():
         raise WorkflowError(f"status board not found: {board_path}")
 
     existing = board_path.read_text()
+    # Slice 028-03 AC #1: capture pre-regen checksum so we can detect a
+    # mid-regen mutation by another writer. Skipped when `force=True`
+    # since a forced overwrite intentionally bypasses the guard.
+    pre_checksum = None if force else _checksum(board_path)
     notes_map = parse_existing_notes(existing)
 
     rows = collect_slices(project_dir)
@@ -704,6 +742,21 @@ def regenerate_status_board(project_dir: Path) -> str:
     new_content = preamble + new_table + deferred_section
     if new_content == existing:
         return "status board already current; no changes"
+    # Slice 028-03 AC #2: re-checksum right before the write. If the file
+    # changed between the pre-regen read and now, another writer raced us
+    # — refuse rather than silently overwrite their work. Skipped on
+    # `--force` (the operator explicitly opted in to an overwrite).
+    # Stale-checksum false-positive: if a concurrent writer rewrote the
+    # README with identical content, SHA256 stays the same → no race
+    # detected → write proceeds. Content-based check correctly treats
+    # "same content" as "no race" (documented behavior, not a bug).
+    if not force:
+        post_checksum = _checksum(board_path)
+        if post_checksum != pre_checksum:
+            raise StatusBoardRaceError(
+                "status board changed during regen — another writer may "
+                "have run. Re-run `workflow.py status-board` to retry."
+            )
     board_path.write_text(new_content)
     return (f"regenerated status board: {len(rows)} slice(s) across "
             f"{len({r[0] for r in rows})} spec(s)")
@@ -1355,6 +1408,13 @@ def _build_parser() -> argparse.ArgumentParser:
     pb = sub.add_parser("status-board",
                         help="regenerate docs/specs/README.md from spec.md files")
     pb.add_argument("project", help="project root directory")
+    # Slice 028-03: bypass the checksum-based race-detection guard.
+    # Use when you intentionally want to overwrite a concurrent writer's
+    # output (e.g., after manually resolving a known conflict).
+    pb.add_argument("--force", action="store_true",
+                    help="bypass the race-detection guard and overwrite even "
+                         "if docs/specs/README.md changed mid-regen "
+                         "(slice 028-03)")
 
     ps = sub.add_parser(
         "stale",
@@ -1406,7 +1466,7 @@ def main(argv: list) -> int:
             summary = transition(Path(ns.spec), ns.slice, ns.status)
             print(summary)
         elif ns.command == "status-board":
-            summary = regenerate_status_board(Path(ns.project))
+            summary = regenerate_status_board(Path(ns.project), force=ns.force)
             print(summary)
         elif ns.command == "stale":
             report = stale(Path(ns.project_dir), days=ns.days)
@@ -1421,6 +1481,13 @@ def main(argv: list) -> int:
         elif ns.command == "arch-review-needed":
             needed = slice_needs_arch_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
+    except StatusBoardRaceError as exc:
+        # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
+        # Must be caught before the generic `WorkflowError → 2` handler so
+        # the more specific subclass routes here. 3 is taken by scaffold /
+        # migrate (config-conflict / unmanaged-hooks); 4 is next free.
+        sys.stderr.write(f"{exc}\n")
+        return 4
     except WorkflowError as exc:
         sys.stderr.write(f"{exc}\n")
         return 2

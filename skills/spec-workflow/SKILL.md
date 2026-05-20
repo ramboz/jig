@@ -418,6 +418,15 @@ file, or re-run `transition <slice> RECONCILED` after re-verifying.
   already current. **Notes column** also survives regen (the helper parses existing
   Notes and re-emits them). **Deferred slices** appear in a separate `## Deferred
   slices` table below the active table; only the active table preserves Notes.
+- **`workflow.py status-board` refuses to overwrite on a mid-regen race** (slice
+  028-03). The helper captures a SHA256 of `docs/specs/README.md` at the start of
+  regen and re-checksums right before the write; if another writer mutated the file
+  in the gap, it raises `StatusBoardRaceError` and exits **4** with the message
+  `status board changed during regen — another writer may have run. Re-run
+  workflow.py status-board to retry.`. Pass `--force` to bypass the guard and
+  overwrite anyway (use only when you've manually reconciled the conflict).
+  Identical-content rewrites do NOT trigger a refusal (checksum is content-based,
+  not mtime-based).
 - **`workflow.py` ignores `## Spike` headers.** Spikes are research artifacts, not
   lifecycle-managed work items. They don't have a STATUS marker the helper can
   transition. If you need a spike to be tracked in the status board, model it as a

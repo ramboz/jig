@@ -24,7 +24,9 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 
 ### Active specs
 
-- **028 — parallel-session locks for shared mutable artifacts.** Slices 028-01 (`adr.py new` reserves on origin/main) and 028-02 (`memory.py add-inbox` + `add-refinement-todo` lock-protected via `fcntl.flock` on `<git-common-dir>/jig-locks/<artifact>.lock`) DONE. Slice 028-03 (status-board regen race-check) still DRAFT.
+_(none — see [docs/specs/README.md](docs/specs/README.md) for the
+status board; per-slice load-bearing invariants live in its Notes
+column.)_
 
 ### Deferred decisions
 
