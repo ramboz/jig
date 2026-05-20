@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.7.0](https://github.com/ramboz/jig/compare/v1.6.0...v1.7.0) (2026-05-20)
+
+
+### Features
+
+* 005-02 — supersede (re-closes spec 005) ([1e04883](https://github.com/ramboz/jig/commit/1e04883ba0632638ae7ca049becd7e11be374ba0))
+* 005-03 — boundary-change-detection (closes spec 005) ([1c794ab](https://github.com/ramboz/jig/commit/1c794aba11d0b4b0bcea2d50f7e4ac0848a471b9))
+* **review:** adopt richer skill patterns across reviewing skills ([#23](https://github.com/ramboz/jig/issues/23)) ([4164eb8](https://github.com/ramboz/jig/commit/4164eb86cd57fc1056356b241aaf952ad14d8a4b))
+
+
+### Bug Fixes
+
+* **slice-land:** strip fenced code blocks before counting DoD boxes ([537f041](https://github.com/ramboz/jig/commit/537f0415d4d92244e0d62969c701730b3938a872))
+* **spec-workflow:** anchor STATUS regex to line-start to skip prose markers ([d53c5bd](https://github.com/ramboz/jig/commit/d53c5bdbc2407c1dd19788606ae00000979b7183))
+
+
+### Documentation
+
+* **specs:** 005-02 close-out — status board + close-out checkboxes ([903f1f0](https://github.com/ramboz/jig/commit/903f1f07484e7fcc858cd5d3fe72f064fe0dc124))
+
 ## [1.6.0](https://github.com/ramboz/jig/compare/v1.5.0...v1.6.0) (2026-05-20)
 
 
