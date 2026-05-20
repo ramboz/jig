@@ -239,6 +239,37 @@ def _principles_check_block() -> str:
   renting). Flag violations as findings."""
 
 
+# -------- Engineering-practices check (SDD process gaps) --------
+
+
+def _practices_check_block() -> str:
+    """UNCONDITIONAL evaluation hint covering four SDD process gaps that are
+    easy to miss in AC-focused review. Tailored to jig's spec structure
+    (`## Tasks`, `### Approach`, ADR pointer convention,
+    `docs/inbox.md` / `docs/refinement-todo.md` debt-tracking files).
+
+    Universal — every slice review gets this fragment. The reviewer
+    self-gates on "not applicable" cases (e.g. no `## Tasks` section
+    means the task-completeness check fires silently).
+
+    Stays under ~900 characters per prompt-size hygiene (looser than the
+    500-char principles bound — four sub-bullets need more room than one)."""
+    return """\
+- **Engineering-practices check**: four SDD process gaps to scan:
+  1. **Task completeness** — if a `## Tasks` section exists, are
+     unticked items paired with a deferral rationale (inbox link,
+     follow-up slice)?
+  2. **Approach alignment** — does the implementation follow the spec's
+     stated technical approach, or is the deviation documented in the
+     deviation log?
+  3. **ADR signal** — for architecturally significant changes, is the
+     decision recorded somewhere (existing ADR, new ADR, spec rationale)?
+  4. **Tech-debt tracking** — new `TODO` / `FIXME` comments need a
+     tracking entry (`docs/inbox.md`, `docs/refinement-todo.md`, issue
+     link). Pre-existing debt on unmodified lines: out of scope.
+  Tag findings with confidence (High / Medium); suppress Low."""
+
+
 def build_implementation_prompt(spec_path: Path, slice_label: str,
                                 deliverables: list) -> str:
     """Construct the standard implementation-review prompt.
@@ -262,6 +293,10 @@ def build_implementation_prompt(spec_path: Path, slice_label: str,
     # Slice 024-01: append the principles-check block UNCONDITIONALLY.
     # No gating on project state — principle adherence is universal.
     extra_check += "\n" + _principles_check_block()
+    # Engineering-practices check appended UNCONDITIONALLY — process
+    # gaps (task completeness, approach alignment, ADR signal, tech-debt
+    # tracking) are universal across slices.
+    extra_check += "\n" + _practices_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -498,6 +533,10 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
         extra_check = "\n" + _contract_surface_check_block()
     # Slice 024-01: append the principles-check block UNCONDITIONALLY.
     extra_check += "\n" + _principles_check_block()
+    # Engineering-practices check appended UNCONDITIONALLY — the
+    # reconciliation pass verifies the deviation log didn't paper over
+    # task / approach / ADR / tech-debt gaps.
+    extra_check += "\n" + _practices_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job

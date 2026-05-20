@@ -108,6 +108,23 @@ integration deferred" decision. If the user has only a URL, ask them to
 either open the repo locally or paste the diff. A richer user-installed
 `pr-review` skill may handle URL-only input — defer to it if so.
 
+## Scope discipline
+
+Before writing any finding, apply scope discipline. A finding must be actionable
+inside the PR's stated scope. Out-of-scope concerns are noise.
+
+- **Different repo / system required** (worker, client SDK, infra, upstream spec):
+  drop entirely or mention once in Scope as an "adjacent concern noted" — do NOT
+  promote to Blocker or Nit.
+- **Amendment to a parent spec, ADR, or design doc**: the spec is a contract for
+  this PR, not a checklist to expand. Not a finding here.
+- **"The PR should also document / specify / add X"** where X is a separate
+  concern: separate PR, not a finding here.
+
+Prophylactic expansion — demanding the author address every adjacent concern a
+thorough reviewer template admits — is the most common AI-slop failure mode for
+baseline reviews. Resist it.
+
 ## Review structure
 
 For each PR, emit a markdown report with exactly these four H2 sections:
