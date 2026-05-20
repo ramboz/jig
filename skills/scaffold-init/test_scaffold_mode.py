@@ -328,6 +328,7 @@ class WithMachineryDocsRegressionTests(unittest.TestCase):
 
 
 EXPECTED_HOOK_SCRIPTS = (
+    "jig-boundary-change-warn.sh",
     "jig-context-check.sh",
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",

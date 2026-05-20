@@ -27,7 +27,7 @@ jig/
 
 How a session actually flows in plugin-install mode. The LLM layer (user →
 Claude → skill router → SKILL.md → helper or subagent → on-disk state) is
-non-deterministic; the six hooks form the deterministic spine that fires on
+non-deterministic; the seven hooks form the deterministic spine that fires on
 fixed events and can inject context or block tool calls.
 
 ```mermaid
@@ -49,26 +49,28 @@ flowchart TB
     subs --> specs
     subs --> memory[(CLAUDE.md<br/>+ docs/memory/)]
 
-    subgraph hookspine["Deterministic spine — 6 hooks"]
+    subgraph hookspine["Deterministic spine — 7 hooks"]
         direction TB
         h1["SessionStart<br/>jig-context-check<br/>warn when MCP servers &gt; 8"]
         h2["UserPromptSubmit<br/>jig-memory-scan<br/>surface unknown references"]
         h3["PreToolUse · Task<br/>jig-telemetry<br/>async log, never blocks"]
         h4["PreToolUse · Edit/Write<br/>jig-spec-gate<br/>blocks conventions.md edits"]
         h5["PostToolUse · Edit/Write<br/>jig-post-edit-verify<br/>same-turn edit-landed check"]
-        h6["Stop<br/>jig-task-capture<br/>surface TODOs next turn"]
+        h6["PostToolUse · Edit/Write<br/>jig-boundary-change-warn<br/>nudge ADR on contract-artifact edit"]
+        h7["Stop<br/>jig-task-capture<br/>surface TODOs next turn"]
     end
 
     h2 -. additionalContext .-> claude
     h4 -. exit 2 = blocks Edit .-> claude
     h5 -. additionalContext .-> claude
-    h6 -. next-turn context .-> claude
+    h6 -. additionalContext .-> claude
+    h7 -. next-turn context .-> claude
 ```
 
 - **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
 - **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only. `pr-review` and `arch-review` stay judgment-only as skills, but are *invoked* deterministically from the post-implementation flow via `review.py pr-review` / `review.py arch-review` prompt builders (see [skills/spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) § "After implementation").
 - **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
-- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via six hook scripts. Two read-only (`telemetry`, `context-check`); three inject `additionalContext` (`memory-scan`, `task-capture`, `post-edit-verify`); one can block tool calls with exit-code 2 (`spec-gate`).
+- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via seven hook scripts. Two read-only (`telemetry`, `context-check`); four inject `additionalContext` (`memory-scan`, `task-capture`, `post-edit-verify`, `boundary-change-warn`); one can block tool calls with exit-code 2 (`spec-gate`).
 
 Scaffold-mode wiring is identical in shape — only path strings differ
 (`${CLAUDE_PROJECT_DIR}/.claude/...` instead of `${CLAUDE_PLUGIN_ROOT}/...`).
@@ -95,7 +97,7 @@ runtime machinery (`skills/`, `agents/`, `hooks/scripts/`) into the
 user's `.claude/` directory under `jig-` prefixed names
 (`.claude/skills/jig-<name>/`, `.claude/agents/jig-<name>.md`,
 `.claude/hooks/scripts/jig-*.sh`), and generate/merge
-`.claude/settings.json` to register the six jig hooks against the
+`.claude/settings.json` to register the seven jig hooks against the
 project-local script paths. SKILL.md path strings are rewritten from
 `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` to
 `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`, and hook command

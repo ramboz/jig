@@ -248,14 +248,380 @@ in jig OR in a target project.
 
 ## Slice 005-03 — boundary-change-detection
 
-**STATUS: DEFERRED** _(deferred)_
+**STATUS: DONE**
 
-**Goal:** Hook or helper that surfaces "you changed a module boundary
-without writing an ADR." Pairs with the `contracts` skill once it
-promotes.
+> Reframed 2026-05-20 (post-ADR-0005). The pre-pivot version of this
+> slice was scoped to **internal module-boundary edits** (per ADR-0002's
+> Option A/C framing). ADR-0005 superseded that — `contracts` is now an
+> **external-interface** concern (OpenAPI / JSON Schema / AsyncAPI /
+> `.proto` / GraphQL SDL). This slice mirrors the reframe: detect edits
+> to **external-interface contract-artifact files** and nudge the author
+> toward an ADR if the change is breaking. Internal Python imports
+> remain out of scope per ADR-0005.
 
-Deferred because: blocked on `contracts` promotion (ADR-0002), and
-jig has no module boundaries to enforce today. Listed here so future
-readers see the scope envelope.
+**Goal:** Ship a `PostToolUse` hook
+(`hooks/scripts/jig-boundary-change-warn.sh`) on `Edit|Write|MultiEdit`
+that fires when the touched `file_path` matches a canonical
+external-interface contract-artifact filename and emits a soft
+`additionalContext` nudge pointing the author at `/jig:adr-workflow new`
+and the surface-appropriate breaking-change ecosystem tool. Always
+non-blocking. Mirrors `jig-post-edit-verify.sh`'s soft-warn shape
+(slice 027-01).
 
-**Resolution trigger:** `contracts` skill becomes active.
+**DoR:**
+- ✅ `contracts` skill is active (spec 022 DONE) and the canonical
+  per-surface artifact table is the source for the filename-pattern list
+  ([skills/contracts/SKILL.md](../../../skills/contracts/SKILL.md)
+  "Per-surface artifact recommendations" §).
+- ✅ `adr-workflow` skill is active (slice 005-01 DONE) — the hook's
+  nudge points users at `/jig:adr-workflow new <slug>`.
+- ✅ `PostToolUse` `Edit|Write|MultiEdit` + soft-`additionalContext`
+  pattern proven by `jig-post-edit-verify.sh` (slice 027-01). The new
+  hook adopts the same shape, opt-out env-var convention, and 5s
+  timeout.
+- ✅ Scaffold-mode parity touchpoints are known and finite (per slice
+  027-01's deviation log §4): `scripts/verify_install.py`
+  `_EXPECTED_HOOK_SCRIPTS`, `skills/scaffold-init/test_scaffold_mode.py`
+  `EXPECTED_HOOK_SCRIPTS` + `EXPECTED_HOOK_EVENTS`, plus the
+  hook-count callouts in `docs/architecture.md` (×3), `README.md` (×1),
+  and `docs/memory/glossary.md` (×1).
+
+**Acceptance Criteria:**
+
+1. **`hooks/scripts/jig-boundary-change-warn.sh`** is created (Python 3
+   inline body, same shape as the other six hook scripts) and registered
+   in `hooks/hooks.json` as a `PostToolUse` hook with matcher
+   `Edit|Write|MultiEdit` and `timeout: 5`. Co-located with the existing
+   `jig-post-edit-verify` registration (sibling entry or sibling hook in
+   the same `hooks` array — implementer's choice).
+
+2. **Canonical artifact patterns** (basename match, case-insensitive)
+   trigger the nudge. The list is hard-coded in the script (slice 1; a
+   project-configurable list is a deferred follow-up — see below):
+   - `openapi.yaml`, `openapi.yml`, `openapi.json`
+   - `asyncapi.yaml`, `asyncapi.yml`, `asyncapi.json`
+   - `*.proto`
+   - `*.graphql`, `*.graphqls`
+   - `*.schema.json` (the infix `.schema` is load-bearing —
+     `package.json` must NOT match)
+
+   Patterns are taken verbatim from the
+   [contracts skill's per-surface table](../../../skills/contracts/SKILL.md).
+   If contracts grows the table later, this list grows with it (manual
+   sync; the dependency is intentional and noted in the hook's header
+   comment).
+
+3. **Nudge text** carries four parts, in order:
+   - The artifact basename that was edited.
+   - A pointer at `/jig:adr-workflow new <slug>` for capturing the
+     rationale if this is a breaking change.
+   - A surface-specific pointer at the breaking-change tool from the
+     contracts skill table (`*.proto` → `buf breaking`; OpenAPI →
+     `redocly diff` / OpenAPI breaking-change ruleset for `spectral`;
+     `*.graphql` → `graphql-inspector diff`; `*.schema.json` →
+     JSON-Schema diff against the base ref; AsyncAPI → AsyncAPI parser
+     diff). The mapping is hard-coded alongside the filename patterns.
+   - A reminder that the nudge is informational, not a gate.
+
+   Exact wording is implementer's choice; AC #6 pins the load-bearing
+   substrings each test fixture must observe.
+
+4. **Opt-out via `JIG_BOUNDARY_CHECK=0`.** Same convention as
+   `JIG_POST_EDIT_VERIFY=0` (slice 027-01). When set, hook exits 0
+   immediately with no output.
+
+5. **Non-matching paths exit silently.** Files whose basename does not
+   match any pattern (`README.md`, `src/foo.py`, `package.json`, etc.)
+   produce no output, exit 0. Non-`Edit|Write|MultiEdit` tools likewise
+   produce no output, exit 0. Missing `file_path` produces no output,
+   exit 0 (mirrors slice 027-01 robustness).
+
+6. **Tests** in `scripts/test_boundary_change_warn.py` (parallels
+   `scripts/test_post_edit_verify.py` shape):
+   - **Match matrix:** each of the canonical filenames in AC #2 (at
+     least one per surface row — `openapi.yaml`, `foo.proto`,
+     `schema.graphql`, `event.schema.json`, `asyncapi.yml`) triggers a
+     nudge containing both `/jig:adr-workflow new` AND the
+     surface-specific tool name from AC #3.
+   - **Case-insensitive:** `OpenAPI.YAML` triggers; `FOO.PROTO`
+     triggers.
+   - **Non-matching files:** `README.md`, `src/foo.py`, `package.json`
+     (NOT `*.schema.json`), `pyproject.toml` produce no output, exit 0.
+   - **Non-edit tools:** `Read`, `Bash`, `Glob`, `Task` produce no
+     output, exit 0 even on a matching `file_path`.
+   - **Opt-out:** `JIG_BOUNDARY_CHECK=0` produces no output on a
+     matching file.
+   - **Never blocks:** when a nudge fires, stdout is valid JSON with
+     `continue: true` and no `block` / `permissionDecision` field;
+     exit code is 0.
+   - **Surface-tool routing:** `.proto` mentions `buf breaking`;
+     `*.graphql` mentions `graphql-inspector`; OpenAPI mentions
+     `redocly` or `spectral`; `*.schema.json` mentions a JSON-Schema
+     diff tool. (Pins AC #3's load-bearing substrings.)
+
+7. **Scaffold-mode parity.** The new hook is added to:
+   - `scripts/verify_install.py` `_EXPECTED_HOOK_SCRIPTS`.
+   - `scripts/test_verify_install.py` (whatever fixture-list mirrors
+     `_EXPECTED_HOOK_SCRIPTS`).
+   - `skills/scaffold-init/test_scaffold_mode.py` `EXPECTED_HOOK_SCRIPTS`
+     and `EXPECTED_HOOK_EVENTS` (the latter already includes
+     `PostToolUse`, so the addition is hook-name-only).
+
+8. **Doc + hook-count callouts swept.** The "six hooks" / "six jig
+   hooks" / "6 hooks" callouts at the five sites already enumerated
+   in the DoR are bumped to seven (no other documentation rewrites —
+   per the slice's anti-horizontal-phasing posture):
+   - `docs/architecture.md:30`, `docs/architecture.md:52` (mermaid
+     subgraph title), `docs/architecture.md:71` (hook-spine summary
+     paragraph — also extend the "inject `additionalContext`" list to
+     include `boundary-change-warn`).
+   - `docs/architecture.md:98`, `docs/memory/glossary.md:53`,
+     `README.md:103`.
+
+9. **`skills/adr-workflow/SKILL.md`** gains a short "Boundary-change
+   nudge" subsection (paragraph, not a full how-to) that explains when
+   the hook fires, names the `JIG_BOUNDARY_CHECK=0` opt-out, and points
+   the reader at the `contracts` skill for the surface-tool map. Format
+   mirrors how other skill SKILL.md files document their own hooks
+   (e.g., `spec-workflow/SKILL.md`'s spec-gate section).
+
+**DoD** (same shape as 005-01 / 027-01):
+- [x] All 9 ACs pass; full test suite green (no regressions). **34 new tests; 1240 total; no regressions.**
+- [x] Implementer test coverage exercises each AC with at least one
+      fixture. The pattern-matching matrix in AC #6 is covered
+      exhaustively per surface (at least one fixture per row of the
+      contracts skill table).
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
+      `review.py`. **Compliance pass via `jig:reviewer` + craft pass via
+      `general-purpose` with `review.py pr-review` prompt — both PASS.**
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading. **See below.**
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation (likely candidates: configurable
+      surface list per project, real breaking-change detection vs.
+      filename-matching heuristic, hook chattiness if it false-positives
+      too often). **No new entries — the three likely candidates were
+      already named in the slice's "Follow-up slices" section at DRAFT
+      time, with explicit resolution triggers; none required
+      refinement-todo entries. One new craft-reviewer observation
+      (PATTERNS-table dedup) landed in `docs/inbox.md` instead, since
+      it's a deferred-decision *candidate*, not a deferred decision
+      yet.**
+
+### Close-out (post-DONE)
+
+- [x] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+      Notes column carries the new hook-count + surface tools covered.
+- [x] `CLAUDE.md` hygiene per spec 025-01 rule: this slice does not
+      close spec 005 (005-02 remains DEFERRED with its own resolution
+      trigger), so leave the Active-specs entry shape unchanged. No
+      new Skills-table row is needed — the hook is registered under
+      the existing `adr-workflow` skill row. **Confirmed: CLAUDE.md's
+      Active specs section already read `_(none — see docs/specs/README.md
+      for the status board)_` pre-slice, so no compression action was
+      possible; status-board Notes column carries the load-bearing
+      per-slice invariants per the convention.**
+
+**Anti-horizontal-phasing check:** End-to-end observable value in one
+slice — the next time anyone (in jig itself, or in a scaffold-installed
+project) edits an `openapi.yaml`, a `*.proto`, a `*.schema.json`, a
+`*.graphql`, or an `asyncapi.yaml`, they immediately see an
+`additionalContext` line in the same turn suggesting they consider an
+ADR if the change is breaking, plus the surface-appropriate tool to
+confirm whether it is. No intermediate state; no follow-up slice
+required to make it useful.
+
+### Follow-up slices (deferred — re-open via `workflow.py new` or as 005-04…)
+
+- **Project-configurable surface list.** Read user-declared surfaces
+  from `scaffold.json` (or a dedicated `.jig/boundary-patterns` file)
+  so the hook also fires on non-canonical artifacts (e.g., the bespoke
+  `env-contract.md` triple from aso-shallow-validator). **Resolution
+  trigger:** first project that ships a non-canonical contract artifact
+  and wants the same nudge, OR three concrete "I declared a surface in
+  vision-elicitation Appendix A but the hook doesn't see it" complaints.
+- **Real breaking-change detection.** Subprocess out to `buf breaking`
+  / `graphql-inspector diff` / OpenAPI diff against the base ref so the
+  hook only fires when the change is actually breaking (not on every
+  artifact edit). **Resolution trigger:** first noisy false-positive in
+  jig's own dogfood that demonstrates filename-matching alone is too
+  aggressive, OR a downstream user reports the nudge fatigue.
+- **`adr.py boundary-check` helper.** On-demand audit subcommand
+  surfacing all contract-artifact files touched since a base ref that
+  lack an accompanying ADR. **Resolution trigger:** first slice that
+  needs to audit a git range broader than a single Edit/Write/MultiEdit
+  call (e.g., a multi-day branch, a CI pre-merge check).
+
+### Clarifications
+
+_Pass 1 — 2026-05-20 — `/jig:clarify` against slice 005-03._
+
+#### Q1: How should the new hook reach projects that were scaffolded BEFORE this slice lands? Their `.claude/settings.json` won't include the new hook.
+_(category: Non-functional Requirements)_
+
+Manual opt-in via copy-machinery.
+
+#### Q2: What should the inline Python body do if it crashes on malformed input (broken stdin JSON, unexpected schema, etc.)?
+_(category: Edge Cases & Failure Modes)_
+
+Silent — mirror jig-post-edit-verify (027-01).
+
+#### Q3: Should the hook fire on Write of a NEW artifact file (the project's first OpenAPI / proto / schema), or only on edits to existing ones?
+_(category: Edge Cases & Failure Modes)_
+
+Fire on both new-file Write and Edit.
+
+#### Q4: Jig has no contract artifacts of its own — no `openapi.yaml`, no `*.proto`. How should this slice be dogfooded in jig itself?
+_(category: Scope & Boundaries)_
+
+Accept "first fires in downstream projects".
+
+#### Coverage summary
+
+| Category | Status |
+|---|---|
+| Scope & Boundaries | Resolved |
+| Acceptance Criteria Testability | Clear |
+| Dependencies & Blockers | Clear |
+| Non-functional Requirements | Resolved |
+| Edge Cases & Failure Modes | Resolved |
+| Terminology Consistency | Clear |
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. Implementation notes:
+
+1. **Mermaid diagram restructured beyond the spec's "title bump" wording.**
+   AC #8 enumerated five doc-callout sweeps and named the line-71 paragraph as
+   the spot where the `additionalContext` injector list grows. The mermaid
+   diagram (line 52+) was named only for its **subgraph title** bump
+   ("6 → 7 hooks"). The implementer also added a new `h6` node + arrow for
+   `jig-boundary-change-warn` and promoted the existing Stop hook from `h6`
+   to `h7`, on the rationale that leaving the diagram showing six nodes
+   while the title reads "7 hooks" would have created a worse inconsistency
+   than the small structural extension. The spec's "inject `additionalContext`
+   list now includes boundary-change-warn" instruction only makes sense if
+   the new hook is also visible in the diagram. **Not a blocker; flagged here
+   so a future reader sees the diagram structural change was deliberate, not
+   an over-reach.**
+
+2. **Co-located hook entry in the same `Edit|Write|MultiEdit` matcher.**
+   AC #1 left this as implementer's choice (sibling matcher block vs.
+   co-located inside the existing matcher's `hooks` array). The implementer
+   picked **co-located** to keep the PostToolUse section visually tight and
+   mirror how Claude Code's documented hook registration groups hooks by
+   matcher. The craft reviewer endorsed this choice as "the right call —
+   same matcher pattern, same timeout, two hooks fire in declared order with
+   no duplication of the matcher object."
+
+3. **AC #3 part 4 wording — chose "informational, not a gate."** AC #6's
+   `NeverBlocksTests.test_nudge_mentions_informational_not_gate` was the
+   pinned-substring contract: any of `"informational"`, `"not a gate"`,
+   `"non-blocking"`, or `"nudge"` would satisfy the test. The implementer
+   used "This nudge is informational, not a gate." — covering both
+   `"informational"` AND `"not a gate"` AND `"nudge"`. Future wording
+   changes remain compatible with the contract.
+
+4. **Line-number drift in AC #8.** Spec AC #8 referenced
+   `docs/architecture.md:71` and `docs/architecture.md:98` as sweep sites.
+   The actual landed lines are `:73` and `:100` — a two-line drift caused by
+   the slice's own additions earlier in `architecture.md` (the new `h6` node
+   + arrow). Substantive content is at the correct sites; the drift is a
+   spec-text-vs-actual-file hygiene artifact, not a functional gap.
+   **Compliance reviewer flagged.**
+
+5. **DoD checkbox temporal inconsistency.** Between the IN_PROGRESS → REVIEWED
+   transition (which auto-ticks "Implementation review passed" per slice
+   003-04) and the actual independent-review pass, the "Reviewed by `reviewer`
+   subagent" box was unticked while "Implementation review passed" was
+   ticked. The two boxes refer to the same review; the transition's auto-tick
+   is what created the temporal gap. Both boxes are now ticked (post-review).
+   **Compliance reviewer flagged.** This is a known auto-tick / manual-tick
+   ordering quirk, not a slice defect — same shape every post-003-04 slice
+   inherits. Not worth a separate fix.
+
+6. **Silent-on-crash posture trades observability for non-disruption.**
+   Clarification Q2 pinned `except Exception: pass` (mirroring
+   `jig-post-edit-verify`). A real implementation bug in the hook can go
+   unnoticed in a session — the hook just exits 0 silently. Tests pin
+   `stderr == ""` on malformed input to lock the posture in. This is the
+   chosen design; calling it out so a future operator who hits hook-internal
+   weirdness knows to opt out via `JIG_BOUNDARY_CHECK=0` and re-run with
+   the script body inline for debugging. **Compliance reviewer flagged.**
+
+7. **Forward-leaning negative tests beyond AC #6.** The implementer added
+   `test_arbitrary_json_does_not_trigger` (using `config.json`) to pin the
+   load-bearing `.schema` infix invariant — explicit verification that the
+   pattern `*.schema.json` does not collapse to `*.json`. AC #6 enumerated
+   `package.json` as the canonical negative case; the implementer
+   generalized. The craft reviewer also noted the case-insensitive coverage
+   uses both `OpenAPI.YAML` (mixed) AND `FOO.PROTO` (fully upper), catching
+   both fnmatch and `lower()` bugs. **Compliance reviewer flagged as
+   positive addition.**
+
+8. **Stale "five jig hooks" comment in `skills/scaffold-init/scaffold.py:660`
+   swept in this slice.** The craft reviewer flagged this as out-of-slice
+   but worth a 1-char fix while the slice was already touching the hook
+   count. The DoR's enumerated five sites were the docs (architecture.md,
+   glossary.md, README.md) — the scaffold.py docstring was not on the
+   list. Fixed in this slice (changed to "the jig hooks ... (the set
+   discovered by globbing `plugin/hooks/scripts/jig-*.sh`, not a hard-coded
+   count)") so future hook additions don't recreate the drift. **In-scope
+   janitorial pickup, not a slice scope expansion.**
+
+9. **PATTERNS-table duplication observation deferred.** The craft reviewer
+   pointed out that the PATTERNS table duplicates OpenAPI/AsyncAPI tool-string
+   rows three times each (one per encoding: yaml/yml/json). A dict-of-suffix
+   plus a `openapi.*` / `asyncapi.*` generic pattern would halve the table
+   and make contracts-skill sync easier when a new format lands. The
+   implementer kept the explicit six-row form on the rationale that
+   duplication is honest when the hook's header comment already names the
+   manual contracts-sync as intentional. **Deferred-decision candidate:
+   re-evaluate when AsyncAPI gets a 4th encoding or OpenAPI 3.2 adds a new
+   file extension.** Logged in `docs/inbox.md`.
+
+10. **Nudge string length nit deferred.** The craft reviewer flagged the
+    ~280-char nudge string as "a wall in tool output" and suggested a
+    two-line `basename\nadvice` variant (mirroring `jig-post-edit-verify`'s
+    multi-warning format). Cosmetic; the actual rendering in the agent
+    transcript depends on the consumer's display, and the spec contract is
+    substring-based, not visual. Deferred until a real session shows the
+    one-line form is unreadable.
+
+11. **Test substring tightening nit deferred.**
+    `test_schema_json_triggers_json_schema_diff` asserts lowercased `"schema"`
+    and `"diff"` substrings, which would also pass for a (hypothetical)
+    "OpenAPI schema diff" tool string. The craft reviewer suggested
+    `assertIn("JSON Schema diff", ctx)`. Defer: the surface label in the
+    nudge already disambiguates ("JSON Schema" surface vs. OpenAPI surface
+    in the same nudge text would be a different bug entirely). Test
+    coverage is already exhaustive.
+
+12. **Dogfood deferred to first downstream-project fire.** Per Clarification
+    Q4, jig has no contract artifacts of its own; the static review
+    confirms correctness but cannot confirm the hook fires end-to-end in a
+    real session. First real-world fire (the next time anyone edits an
+    `openapi.yaml` / `*.proto` / `schema.graphql` / `*.schema.json` in a
+    project running jig) is the dogfood signal. **No remediation needed;
+    pinned here so the deviation log captures what's NOT tested at the
+    boundary.**
+
+#### Doc updates from this slice
+
+- `docs/architecture.md` — hook-count "six → seven" at four sites
+  (lines 30, 52, 73, 100); mermaid subgraph extended with `h6`
+  (`jig-boundary-change-warn`) + `additionalContext` arrow; `h7` is now
+  the Stop hook (`jig-task-capture`).
+- `docs/memory/glossary.md` — hook-count "six → seven" at line 53.
+- `README.md` — hook-count "six → seven" at line 103.
+- `skills/adr-workflow/SKILL.md` — new "Boundary-change nudge" subsection
+  (paragraph + opt-out env var + pointer to the contracts SKILL.md per-
+  surface table).
+- `skills/scaffold-init/scaffold.py:660` — stale "five jig hooks" docstring
+  bumped to "the jig hooks ... globbing `jig-*.sh`" (count-free).
+- `docs/refinement-todo.md` — no new entries. All deferred items named in
+  the slice's "Follow-up slices" section were already named at DRAFT time;
+  none of the implementation surprises added new ones.
+- `docs/inbox.md` — one new entry for the PATTERNS-table dedup observation
+  (deviation log #9).

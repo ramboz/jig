@@ -171,6 +171,23 @@ python3 .../adr.py index docs/decisions
 python3 .../adr.py resolve-todo 0003 "scaffold-stable"
 ```
 
+## Boundary-change nudge
+
+A `PostToolUse` hook (`jig-boundary-change-warn`) fires on
+`Edit`/`Write`/`MultiEdit` of a canonical external-interface
+contract-artifact file (OpenAPI `openapi.yaml`/`.yml`/`.json`, AsyncAPI
+`asyncapi.yaml`/`.yml`/`.json`, `*.proto`, `*.graphql`/`*.graphqls`, or
+`*.schema.json`). It emits a soft `additionalContext` nudge pointing
+the author at `/jig:adr-workflow new <slug>` (capture the rationale if
+the change is breaking) plus the surface-appropriate breaking-change
+ecosystem tool (`buf breaking`, `graphql-inspector diff`,
+`redocly diff` / `spectral`, AsyncAPI parser diff, JSON-Schema diff).
+The nudge is informational, never a gate — set
+`JIG_BOUNDARY_CHECK=0` to silence it. The filename + tool list is sourced
+manually from the [contracts skill's per-surface table](../contracts/SKILL.md);
+the `contracts` skill is the source of truth for which artifact governs
+which surface.
+
 ## Gotchas
 
 - **Auto-numbering does not fill gaps.** If `0001` and `0003` exist (no

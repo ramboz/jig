@@ -1,10 +1,16 @@
 {
-  "spec": "docs/specs/028-parallel-session-locks/spec.md",
-  "slice": "028-03",
+  "spec": "docs/specs/005-adr-workflow/spec.md",
+  "slice": "005-03",
   "files": [
-    "skills/spec-workflow/workflow.py",
-    "skills/spec-workflow/test_workflow.py",
-    "skills/spec-workflow/SKILL.md",
-    "docs/specs/028-parallel-session-locks/slice-03-status-board-regen-race-check.md"
+    "hooks/scripts/jig-boundary-change-warn.sh",
+    "hooks/hooks.json",
+    "scripts/test_boundary_change_warn.py",
+    "scripts/verify_install.py",
+    "scripts/test_verify_install.py",
+    "skills/scaffold-init/test_scaffold_mode.py",
+    "skills/adr-workflow/SKILL.md",
+    "docs/architecture.md",
+    "docs/memory/glossary.md",
+    "README.md"
   ]
 }

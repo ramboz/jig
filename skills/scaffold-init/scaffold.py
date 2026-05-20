@@ -657,8 +657,9 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
 
     - Copies every `plugin/hooks/scripts/jig-*.sh` to
       `target/.claude/hooks/scripts/`, preserving the executable bit (0o755).
-    - Generates or merges `target/.claude/settings.json` with the five jig
-      hooks registered against project-relative paths.
+    - Generates or merges `target/.claude/settings.json` with the jig
+      hooks registered against project-relative paths (the set discovered
+      by globbing `plugin/hooks/scripts/jig-*.sh`, not a hard-coded count).
 
     Refuses (`UnmanagedHooksError`) when a pre-existing settings.json has
     hook entries but none carry the jig marker, unless `force=True`. The

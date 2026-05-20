@@ -65,6 +65,7 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
     scripts = claude / "hooks" / "scripts"
     scripts.mkdir(parents=True)
     for name in (
+        "jig-boundary-change-warn.sh",
         "jig-context-check.sh",
         "jig-memory-scan.sh",
         "jig-post-edit-verify.sh",

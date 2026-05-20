@@ -137,6 +137,7 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 
 
 _EXPECTED_HOOK_SCRIPTS = (
+    "jig-boundary-change-warn.sh",
     "jig-context-check.sh",
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",

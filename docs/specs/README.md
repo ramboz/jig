@@ -28,7 +28,7 @@
 | [004-independent-review-promotion](004-independent-review-promotion/spec.md) | 004-01 — review-helper | **DONE** |  |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-01 — adr-helper | **DONE** | 46 tests green; first Tier 1 skill — adr-workflow active |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-02 — supersede | DEFERRED |  |
-| [005-adr-workflow](005-adr-workflow/spec.md) | 005-03 — boundary-change-detection | DEFERRED | Deferred; blocked on contracts |
+| [005-adr-workflow](005-adr-workflow/spec.md) | 005-03 — boundary-change-detection | **DONE** | +34 tests (1206 → 1240 green); `hooks/scripts/jig-boundary-change-warn.sh` fires on PostToolUse `Edit&#124;Write&#124;MultiEdit` and emits a soft `additionalContext` nudge when the touched basename matches a canonical external-interface contract artifact (OpenAPI ×3 / AsyncAPI ×3 / `*.proto` / `*.graphql`/`*.graphqls` / `*.schema.json`). Nudge points at `/jig:adr-workflow new` + the surface-appropriate breaking-change tool from the contracts skill's per-surface table (`buf breaking` / `graphql-inspector diff` / `redocly` / `ajv`). Opt-out via `JIG_BOUNDARY_CHECK=0`; silent `except Exception: pass` mirrors slice 027-01. Co-located in the existing PostToolUse matcher; scaffold-mode parity wired through `_EXPECTED_HOOK_SCRIPTS`. Seven hooks now ("six → seven" sweep at six sites including a forward-leaning `scaffold.py:660` count-free rewrite). Dogfood deferred — jig has no contract artifacts of its own; first real-world fire happens in downstream projects. |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-01 — tdd-helper | **DONE** | 25 tests (23 pass + 2 pytest-skipped); detect + run with normalized exit codes |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-02 — ac-coverage | DEFERRED |  |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-03 — pre-commit-gate | DEFERRED | Deferred; no missing-coverage incident yet |
@@ -102,7 +102,6 @@
 |------|-------|--------------------|
 | [003-spec-workflow-promotion](003-spec-workflow-promotion/spec.md) | 003-02 — anti-horizontal-phasing-check | First slice that ships pure backend changes and slips past review with no UI-layer flag — i.e. when horizontal-phasing risk becomes observed, not theoretical. |
 | [005-adr-workflow](005-adr-workflow/spec.md) | 005-02 — supersede | First time a real superseding ADR is needed |
-| [005-adr-workflow](005-adr-workflow/spec.md) | 005-03 — boundary-change-detection | `contracts` skill becomes active. |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-02 — ac-coverage | A real spec ships with an AC that doesn't map to any test, AND the gap survives review. Until that happens, the AC↔test mapping discipline is being upheld manually. |
 | [006-tdd-loop](006-tdd-loop/spec.md) | 006-03 — pre-commit-gate | First production-grade red-tests-committed incident, OR a sustained run of more than 2 commits-with-red-tests within a single spec. |
 | [007-slice-land](007-slice-land/spec.md) | 007-04 — scaffold-json-integration-flag | User reports the `--mode` flag is genuinely annoying in repeated invocations (≥3 instances), OR the first project using jig that has BOTH a direct-merge skill and a PR-merge skill in the same repo. |

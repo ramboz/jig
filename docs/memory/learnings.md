@@ -279,3 +279,10 @@ This is Python's documented behavior — `except` blocks are evaluated
 in order. Most-specific-first is convention, not language semantics.
 Worth pinning in mental model when designing exception hierarchies
 for CLI exit codes.
+
+## Hook-count callouts in docs drift on hook additions
+When jig's hook count changes (a new hook ships, or one is removed), three docs still carry explicit numeric counts that need sweeping: `docs/architecture.md` (multiple sites — paragraph + mermaid subgraph title), `docs/memory/glossary.md`, and `README.md`. As of slice 005-03 (2026-05-20), `skills/scaffold-init/scaffold.py:660` was deliberately rewritten count-free ("the jig hooks ... globbing `jig-*.sh`") to remove one drift site, but the three docs above still carry explicit counts because they're prose, not code.
+
+**How to apply:** Before landing any slice that adds or removes a hook script (or registration), grep for the current count + "hook" / "jig hooks" across the docs above and bump in lockstep with the slice's other changes. The hook-script set is canonical via `hooks/scripts/jig-*.sh` glob; the doc counts are mirrors that must be kept in sync manually until/unless someone makes those docs derive from the glob (out-of-scope today).
+
+**Provenance:** Reconciliation reviewer's forward-looking note on slice 005-03 boundary-change-detection. The reviewer verified the slice swept all five sites named in AC #8 (six → seven), but flagged the same drift will need a fresh sweep at any future hook-count change.
