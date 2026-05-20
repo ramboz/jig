@@ -405,7 +405,7 @@ def render_next_steps_pr(branch: str, pr_body_path: Path, slice_label: str,
 def render_pr_body(slice_label: str, spec_path: Path, goal: str,
                    ac_items: list, deviation_excerpt: str) -> str:
     """Build the PR body markdown."""
-    ac_block = "\n".join(f"- AC #{n} — {text}" for n, text in ac_items) \
+    ac_block = "\n".join(f"- AC {n} — {text}" for n, text in ac_items) \
         if ac_items else "- (no acceptance criteria parsed)"
     dev_block = deviation_excerpt or "(no deviation log excerpt available)"
     return (

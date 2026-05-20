@@ -86,8 +86,8 @@ Write to `/tmp/jig-slice-<NNN-NN>-pr-body.md`. Content:
 
 ## Acceptance criteria
 
-- AC #1 — <text from numbered AC list, first line only>
-- AC #2 — ...
+- AC 1 — <text from numbered AC list, first line only>
+- AC 2 — ...
 - ...
 
 ## Deviation log
