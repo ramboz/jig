@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.6.0](https://github.com/ramboz/jig/compare/v1.5.0...v1.6.0) (2026-05-20)
+
+
+### Features
+
+* 028-01 — adr-numbering-on-main ([#20](https://github.com/ramboz/jig/issues/20)) ([42a40fc](https://github.com/ramboz/jig/commit/42a40fcc935de590e5079d0ccda724b758f6a294))
+* 028-02 — inbox-and-refinement-todo-append-lock ([d1b4b09](https://github.com/ramboz/jig/commit/d1b4b09a1f7127584c9dbc7a21ff5cd2c189efb0))
+* 028-03 — status-board-regen-race-check (closes spec 028) ([1ec8501](https://github.com/ramboz/jig/commit/1ec85010ce87bbaa141a519d643cee4a49fe2488))
+* **hooks:** byte-based context-fill estimator + soft-warn (026-01) ([b3a72d0](https://github.com/ramboz/jig/commit/b3a72d0d66a67647bc8eded2a71535b8333ede44))
+* **hooks:** post-edit verify hook for Edit/Write/MultiEdit (027-01) ([b63d183](https://github.com/ramboz/jig/commit/b63d1834b858df134f8db6629490a092f83b2013))
+
+
+### Bug Fixes
+
+* **adr-workflow:** migrate NewTests to mocked subprocess ([#21](https://github.com/ramboz/jig/issues/21)) ([23e9eb8](https://github.com/ramboz/jig/commit/23e9eb85f4dbcac29bf170f49d45a0879b454910))
+* **slice-land:** drop `#` prefix from AC labels in PR body ([240e454](https://github.com/ramboz/jig/commit/240e45461f63346d033e6f57ca3bfea0d94e14e1))
+
 ## [1.5.0](https://github.com/ramboz/jig/compare/v1.4.0...v1.5.0) (2026-05-19)
 
 
