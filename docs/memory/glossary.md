@@ -101,3 +101,13 @@ The criterion used by `workflow.py stale` (slice 015-03): an item is stale iff
 BOTH `(today - last_verified) > --days` AND at least one file in `dependencies`
 has been modified since `last_verified`. Pure age alone or pure dep-recency alone
 is not enough.
+
+## git-common-dir
+
+The shared `.git/` directory used across all worktrees of the same
+project, resolved via `git rev-parse --git-common-dir`. For the main
+repo, this equals `.git/`; for secondary worktrees, the secondary's
+`.git` is a file pointing to `.git/worktrees/<name>/` but the
+common-dir is still the main `.git/`. Useful as a cross-worktree
+synchronization surface (e.g. `.git/jig-locks/` for file locks shared
+across parallel sessions; see slice 028-02).

@@ -1,8 +1,10 @@
 {
   "spec": "docs/specs/028-parallel-session-locks/spec.md",
-  "slice": "028-01",
+  "slice": "028-02",
   "files": [
-    "skills/adr-workflow/adr.py",
-    "skills/adr-workflow/test_adr.py"
+    "skills/memory-sync/memory.py",
+    "skills/memory-sync/test_memory.py",
+    "skills/memory-sync/SKILL.md",
+    "docs/specs/028-parallel-session-locks/slice-02-inbox-and-refinement-todo-append-lock.md"
   ]
 }

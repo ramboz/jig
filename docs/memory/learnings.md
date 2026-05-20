@@ -246,3 +246,21 @@ or "skill X auto-triggers on phrase Y." Prefer enumeration-based
 verification over behavioral-self-report verification.
 
 Surfaced: slice 012-01 deviation §9 (post-merge 2026-05-14).
+
+## Lock surface for cross-worktree synchronization: <git-common-dir>/jig-locks/
+
+Multiple git worktrees of the same project share a single `.git/`
+directory (the "common dir"), so `<git-common-dir>` is the only
+filesystem path that serializes writes ACROSS worktrees. A naive
+`<target>/.jig/locks/` path would only serialize within ONE
+worktree — wrong scope for any concurrent-write protection across
+parallel sessions.
+
+Pattern: resolve via `git rev-parse --git-common-dir` from target as
+cwd; resolve relative paths against target; fall back to
+`<target>/.jig/locks/` when not in a git repo. `fcntl.flock` on a
+sentinel file in that dir gives kernel-managed lock release on
+process exit (no PID-reuse window).
+
+Demonstrated in slice 028-02 (`skills/memory-sync/memory.py` —
+`_resolve_lock_dir` + `_file_lock`).

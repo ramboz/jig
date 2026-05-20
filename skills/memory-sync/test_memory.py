@@ -5,12 +5,14 @@ Run from the repo root:
     python3 skills/memory-sync/test_memory.py
 """
 
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -313,6 +315,412 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn(
             "memory-sync", section,
             "memory-sync must be referenced INSIDE the reconciliation section, not just anywhere",
+        )
+
+
+# ---------- Slice 028-02: inbox-and-refinement-todo-append-lock ----------
+# Tests for the file-lock pattern guarding concurrent appends from parallel
+# worktrees. Uses threading.Barrier for deterministic ordering and subprocess
+# for stale-lock-recovery (kernel auto-release on process exit).
+
+
+def _import_memory_module():
+    """Importlib-load memory.py as a module so tests can call helpers
+    directly (for `_file_lock` and configurable-timeout coverage)."""
+    spec = importlib.util.spec_from_file_location("_memory_under_test", MEMORY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class AppendLockTests(unittest.TestCase):
+    """Slice 028-02 — file-lock on inbox + refinement-todo appends.
+
+    ACs covered:
+      - AC #2: `add-inbox` acquires the lock, appends, releases.
+      - AC #3: `add-refinement-todo` mirrors `add-inbox`'s shape + lock.
+      - AC #4: lock timeout surfaces a clear error (no silent hangs).
+      - AC #5: stale-lock recovery via kernel auto-release.
+      - AC #6: contention coverage with deterministic threading.Barrier.
+
+    AC #1 (decision: file-lock over reserve-on-main) is recorded in the
+    slice's deviation log; no test needed.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-locks-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        # Make `target` a git repo so the lock dir resolves to .git/jig-locks/
+        # (the path that serializes across worktrees-of-the-same-project).
+        subprocess.run(
+            ["git", "init", "-q"], cwd=self.target, check=True,
+        )
+        # Self-healing creates inbox.md / refinement-todo.md on first call;
+        # but seed CLAUDE.md + memory/ via scaffold so helpers don't warn.
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # AC #2: inbox helper still works end-to-end (regression-protect old behavior).
+    def test_add_inbox_appends_with_lock(self):
+        result = run_memory(self.target, "add-inbox", "first parallel-locked append")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = (self.target / "docs/inbox.md").read_text()
+        self.assertRegex(
+            content,
+            r"- \[\d{4}-\d{2}-\d{2}\] first parallel-locked append",
+        )
+
+    # AC #3: refinement-todo helper exists and appends raw text + trailing newline.
+    def test_add_refinement_todo_appends_raw_text(self):
+        result = run_memory(
+            self.target, "add-refinement-todo", "first deferred decision",
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        path = self.target / "docs/refinement-todo.md"
+        self.assertTrue(path.exists(),
+                        "refinement-todo.md should self-heal on first call")
+        content = path.read_text()
+        self.assertIn("first deferred decision", content)
+        # Must end with a newline boundary (so the next append doesn't run-on).
+        self.assertTrue(content.endswith("\n"),
+                        "refinement-todo.md must end with a trailing newline")
+
+    def test_add_refinement_todo_ensures_trailing_newline(self):
+        """AC #3: even if the existing file lacks a trailing newline, the
+        helper inserts one before appending. Prevents run-on lines."""
+        path = self.target / "docs" / "refinement-todo.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Refinement Todo\n\nLast line no newline")
+        result = run_memory(
+            self.target, "add-refinement-todo", "next entry",
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = path.read_text()
+        # The previous "no newline" line and the new entry must be on separate
+        # lines (separator inserted by the helper).
+        self.assertNotIn("no newlinenext entry", content)
+        self.assertIn("Last line no newline", content)
+        self.assertIn("next entry", content)
+        self.assertTrue(content.endswith("\n"))
+
+    # AC #2 + AC #6: concurrent inbox appends from two threads — both land.
+    def test_add_inbox_concurrent_two_threads_both_land(self):
+        barrier = threading.Barrier(2)
+        results = [None, None]
+
+        def writer(i, payload):
+            barrier.wait()  # Deterministic simultaneous start — no time.sleep race.
+            results[i] = run_memory(self.target, "add-inbox", payload)
+
+        t1 = threading.Thread(target=writer, args=(0, "alpha-inbox"))
+        t2 = threading.Thread(target=writer, args=(1, "bravo-inbox"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        self.assertEqual(results[0].returncode, 0,
+                         f"thread 0 stderr: {results[0].stderr}")
+        self.assertEqual(results[1].returncode, 0,
+                         f"thread 1 stderr: {results[1].stderr}")
+        content = (self.target / "docs/inbox.md").read_text()
+        self.assertIn("alpha-inbox", content)
+        self.assertIn("bravo-inbox", content)
+        # Both bullet lines must be present and on their own lines.
+        bullets = re.findall(r"^- \[\d{4}-\d{2}-\d{2}\] .+$", content, re.MULTILINE)
+        self.assertGreaterEqual(
+            len([b for b in bullets if "alpha-inbox" in b or "bravo-inbox" in b]),
+            2,
+            f"both bullets must land as distinct lines; got: {bullets}",
+        )
+
+    # AC #6: three concurrent writers; all three lines must appear.
+    def test_add_inbox_three_concurrent_writers_all_land(self):
+        barrier = threading.Barrier(3)
+        results = [None, None, None]
+
+        def writer(i, payload):
+            barrier.wait()
+            results[i] = run_memory(self.target, "add-inbox", payload)
+
+        threads = [
+            threading.Thread(target=writer, args=(i, f"writer-{i}-payload"))
+            for i in range(3)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        for i, r in enumerate(results):
+            self.assertEqual(r.returncode, 0, f"thread {i} stderr: {r.stderr}")
+        content = (self.target / "docs/inbox.md").read_text()
+        for i in range(3):
+            self.assertIn(
+                f"writer-{i}-payload", content,
+                f"thread {i}'s line missing from inbox under contention",
+            )
+
+    # AC #3 + AC #6: concurrent refinement-todo appends — both land.
+    def test_add_refinement_todo_concurrent_serialization(self):
+        barrier = threading.Barrier(2)
+        results = [None, None]
+
+        def writer(i, payload):
+            barrier.wait()
+            results[i] = run_memory(self.target, "add-refinement-todo", payload)
+
+        t1 = threading.Thread(target=writer, args=(0, "refinement-alpha"))
+        t2 = threading.Thread(target=writer, args=(1, "refinement-bravo"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        self.assertEqual(results[0].returncode, 0)
+        self.assertEqual(results[1].returncode, 0)
+        content = (self.target / "docs/refinement-todo.md").read_text()
+        self.assertIn("refinement-alpha", content)
+        self.assertIn("refinement-bravo", content)
+
+    # AC #4: lock timeout — pre-hold the lock; the next caller bails clearly.
+    def test_lock_timeout_surfaces_clear_error(self):
+        """A waiting writer that doesn't acquire within the timeout exits
+        non-zero with an error message naming the lock. The Python helper
+        accepts a configurable timeout (0.2s here) so the test stays fast."""
+        memory = _import_memory_module()
+        # Pre-hold the inbox lock from a background thread so a foreground
+        # caller hits the timeout. The helper exposes _file_lock as a
+        # context manager; we hold it via threading.Event coordination.
+        acquired = threading.Event()
+        release = threading.Event()
+        outcome = {}
+
+        def holder():
+            lock_dir = memory._resolve_lock_dir(self.target)
+            lock_path = lock_dir / "inbox.md.lock"
+            with memory._file_lock(lock_path, timeout=5.0):
+                acquired.set()
+                release.wait(timeout=5.0)
+
+        h = threading.Thread(target=holder)
+        h.start()
+        try:
+            self.assertTrue(acquired.wait(timeout=5.0),
+                            "holder thread never reported lock acquisition")
+            # Now call add_inbox via the Python API with a short timeout.
+            with self.assertRaises(memory.LockTimeoutError) as ctx:
+                memory.add_inbox(self.target, "should-timeout", timeout=0.2)
+            self.assertIn("inbox", str(ctx.exception).lower())
+        finally:
+            release.set()
+            h.join(timeout=5.0)
+
+    def test_lock_timeout_cli_default_5s_is_configurable(self):
+        """The CLI's default timeout is 5s (spec) but the Python API takes
+        a kwarg. Pin both the constant and the kwarg path."""
+        memory = _import_memory_module()
+        # Pin the CLI default — flipping this constant is a user-visible
+        # contract change and should require an explicit test update.
+        self.assertEqual(
+            memory.CLI_DEFAULT_LOCK_TIMEOUT, 5.0,
+            "CLI default lock timeout is the slice 028-02 AC #4 contract",
+        )
+        # And the Python API accepts a smaller value (used by the
+        # contention timeout test) — lock acquired immediately when
+        # no holder is contending.
+        memory.add_inbox(self.target, "fast-path", timeout=0.2)
+        content = (self.target / "docs/inbox.md").read_text()
+        self.assertIn("fast-path", content)
+
+    # AC #5: stale-lock recovery — subprocess acquires + exits; next call works.
+    def test_stale_lock_recovery_after_subprocess_exit(self):
+        """fcntl.flock is released by the kernel on process exit (including
+        SIGKILL). A subprocess that acquires and exits leaves the lock file
+        on disk but unheld; the next call must acquire cleanly."""
+        memory = _import_memory_module()
+        lock_dir = memory._resolve_lock_dir(self.target)
+        lock_path = lock_dir / "inbox.md.lock"
+
+        # Spawn a subprocess that acquires the lock then exits immediately.
+        # We use a one-liner Python that imports the helper, opens the lock,
+        # writes its PID, then exits — kernel auto-releases on exit.
+        helper_src = (
+            "import sys, fcntl, os; "
+            f"sys.path.insert(0, {str(MEMORY.parent)!r}); "
+            f"lock_path = {str(lock_path)!r}; "
+            "os.makedirs(os.path.dirname(lock_path), exist_ok=True); "
+            "fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); "
+            "os.write(fd, str(os.getpid()).encode()); "
+            # Process exits here, kernel releases the lock.
+        )
+        rc = subprocess.run(
+            [sys.executable, "-c", helper_src],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(rc.returncode, 0, f"holder exited non-zero: {rc.stderr}")
+        # The lock file exists on disk; the lock itself is released.
+        self.assertTrue(lock_path.exists(),
+                        "lock file should persist on disk (only the lock releases)")
+        # Subsequent add-inbox call must succeed.
+        result = run_memory(self.target, "add-inbox", "after-stale-lock")
+        self.assertEqual(result.returncode, 0,
+                         f"post-stale call must succeed; stderr: {result.stderr}")
+        self.assertIn(
+            "after-stale-lock",
+            (self.target / "docs/inbox.md").read_text(),
+        )
+
+    def test_lock_dir_resolves_to_git_common_dir(self):
+        """The lock path must live under <git-common-dir>/jig-locks/, so all
+        worktrees of the same project serialize against the SAME directory.
+        (A `.jig/locks/` per-worktree path would only serialize within one
+        worktree — wrong scope.)"""
+        memory = _import_memory_module()
+        lock_dir = memory._resolve_lock_dir(self.target)
+        # Inside a git repo, must resolve under .git/ (the common dir).
+        self.assertIn(
+            ".git", str(lock_dir),
+            f"lock_dir must be under .git/ for parallel-worktree safety; "
+            f"got {lock_dir}",
+        )
+        self.assertTrue(
+            str(lock_dir).endswith("jig-locks"),
+            f"lock dir basename must be 'jig-locks'; got {lock_dir}",
+        )
+
+    def test_lock_dir_falls_back_outside_git_repo(self):
+        """When `git rev-parse --git-common-dir` fails (no git, bare dir),
+        the helper falls back to <target>/.jig/locks/ so the helper still
+        works on un-scaffolded projects."""
+        memory = _import_memory_module()
+        non_git = Path(tempfile.mkdtemp(prefix="jig-nogit-"))
+        try:
+            lock_dir = memory._resolve_lock_dir(non_git)
+            self.assertEqual(
+                lock_dir, non_git / ".jig" / "locks",
+                f"fallback path must be <target>/.jig/locks/; got {lock_dir}",
+            )
+        finally:
+            import shutil
+            shutil.rmtree(non_git, ignore_errors=True)
+
+    def test_lock_file_records_holder_pid(self):
+        """AC #5 (diagnostic): the lock file content is the holder's PID so
+        an inspecting user can see who's blocking. Kernel — not the PID —
+        is the source of truth for held-ness."""
+        memory = _import_memory_module()
+        lock_dir = memory._resolve_lock_dir(self.target)
+        lock_path = lock_dir / "inbox.md.lock"
+        acquired = threading.Event()
+        release = threading.Event()
+        recorded_pid_text = {}
+
+        def holder():
+            with memory._file_lock(lock_path, timeout=5.0):
+                # Read the PID from the file while the lock is held BEFORE
+                # signaling acquired — otherwise the main thread can race
+                # ahead and read recorded_pid_text before it's populated.
+                recorded_pid_text["text"] = lock_path.read_text().strip()
+                acquired.set()
+                release.wait(timeout=5.0)
+
+        h = threading.Thread(target=holder)
+        h.start()
+        try:
+            self.assertTrue(acquired.wait(timeout=5.0))
+            self.assertEqual(
+                recorded_pid_text["text"], str(os.getpid()),
+                "lock file should contain the holder's PID",
+            )
+        finally:
+            release.set()
+            h.join(timeout=5.0)
+
+
+class AppendLockFirstWriteRaceTests(unittest.TestCase):
+    """Slice 028-02 — concurrent first-writes against a non-existent
+    inbox.md/refinement-todo.md must still serialize. The self-heal
+    `_inbox_path` / `_refinement_todo_path` runs inside the lock so the
+    pre-existing TOCTOU in `_ensure_file` (`exists()`/`write_text`)
+    cannot clobber a concurrent append.
+
+    Regression for the compliance-pass reviewer note on
+    `skills/memory-sync/memory.py:246, 269`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-locks-first-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        # Bare git init — do NOT run scaffold(), so inbox.md and
+        # refinement-todo.md don't exist on the first call.
+        subprocess.run(
+            ["git", "init", "-q"], cwd=self.target, check=True,
+        )
+        # Sanity: neither artifact pre-exists.
+        self.assertFalse((self.target / "docs/inbox.md").exists())
+        self.assertFalse((self.target / "docs/refinement-todo.md").exists())
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_concurrent_first_writes_to_inbox_both_land(self):
+        """Two concurrent writers against a non-existent inbox.md — both
+        bullets must land (the self-heal must be inside the lock)."""
+        barrier = threading.Barrier(2)
+        results = [None, None]
+
+        def writer(i, payload):
+            barrier.wait()
+            results[i] = run_memory(self.target, "add-inbox", payload)
+
+        t1 = threading.Thread(target=writer, args=(0, "first-write-alpha"))
+        t2 = threading.Thread(target=writer, args=(1, "first-write-bravo"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        for i, r in enumerate(results):
+            self.assertEqual(r.returncode, 0, f"writer {i} stderr: {r.stderr}")
+        content = (self.target / "docs/inbox.md").read_text()
+        self.assertIn("first-write-alpha", content)
+        self.assertIn("first-write-bravo", content)
+
+    def test_concurrent_first_writes_to_refinement_todo_both_land(self):
+        """Same shape, refinement-todo flavour."""
+        barrier = threading.Barrier(2)
+        results = [None, None]
+
+        def writer(i, payload):
+            barrier.wait()
+            results[i] = run_memory(
+                self.target, "add-refinement-todo", payload,
+            )
+
+        t1 = threading.Thread(target=writer, args=(0, "rt-first-alpha"))
+        t2 = threading.Thread(target=writer, args=(1, "rt-first-bravo"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        for i, r in enumerate(results):
+            self.assertEqual(r.returncode, 0, f"writer {i} stderr: {r.stderr}")
+        content = (self.target / "docs/refinement-todo.md").read_text()
+        self.assertIn("rt-first-alpha", content)
+        self.assertIn("rt-first-bravo", content)
+
+
+class AppendLockSkillDocsTests(unittest.TestCase):
+    """Slice 028-02 — SKILL.md must document the new add-refinement-todo command."""
+
+    def test_skill_md_mentions_add_refinement_todo(self):
+        skill = (REPO_ROOT / "skills" / "memory-sync" / "SKILL.md").read_text()
+        self.assertIn(
+            "add-refinement-todo", skill,
+            "SKILL.md must document the new add-refinement-todo command",
         )
 
 

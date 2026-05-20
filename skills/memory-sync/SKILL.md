@@ -79,8 +79,12 @@ time, then persist now.
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-term "<name>" "<definition>" "<target>"
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-learning "<title>" --body "<text>" "<target>"
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-inbox "<text>" "<target>"
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-refinement-todo "<raw-markdown-chunk>" "<target>"
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" promote "<term>" "<definition>" "<target>"
    ```
+   `add-refinement-todo` appends raw text (caller composes the markdown chunk —
+   H2 category, deferred-/resolution-trigger structure, etc.) to
+   `docs/refinement-todo.md` under the parallel-session file lock (slice 028-02).
    Where `<target>` is the project root (usually `.`).
 4. **Report a summary** at the end:
    ```bash

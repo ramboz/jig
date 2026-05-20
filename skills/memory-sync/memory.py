@@ -13,14 +13,19 @@ Commands:
     add-learning <title> [--body=<text>]   → docs/memory/learnings.md
         (body from --body, or stdin if --body omitted)
     add-inbox <text>                       → docs/inbox.md (dated)
+    add-refinement-todo <text>             → docs/refinement-todo.md (raw append)
     promote <term> <definition>            → CLAUDE.md Hot Cache → Key terms
     summary                                → counts of memory files
 """
 
 import argparse
+import contextlib
+import fcntl
 import os
 import re
+import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -71,9 +76,138 @@ def _inbox_path(target: Path) -> Path:
     return path
 
 
+def _refinement_todo_path(target: Path) -> Path:
+    """Self-healing path for docs/refinement-todo.md (per slice 028-02)."""
+    path = target / "docs" / "refinement-todo.md"
+    _ensure_file(
+        path,
+        "# Refinement Todo\n\n> Status: Draft (self-healed by memory-sync)\n\n",
+    )
+    return path
+
+
 def _claude_md_path(target: Path) -> Path:
     """Returns CLAUDE.md path; does not create. Callers handle absence."""
     return target / "CLAUDE.md"
+
+
+# ---------- Slice 028-02: file-lock for inbox + refinement-todo appends ----------
+# Lock scope: a single .git/jig-locks/ directory shared by every worktree of the
+# same project. fcntl.flock is kernel-released on process exit (including
+# crash / SIGKILL), so stale-lock recovery is trivial — no PID-reuse window.
+# The PID written to the lock file is *diagnostic only*: it lets a user
+# inspect "who's holding it" while the kernel decides what counts as "held."
+#
+# Per ADR-0002's three-callers rule, the helpers are inline in this module
+# (two callers: add-inbox, add-refinement-todo). Extraction defers until
+# slice 028-03 (or any third caller) needs them.
+
+CLI_DEFAULT_LOCK_TIMEOUT = 5.0  # seconds; configurable via the Python API kwarg.
+
+
+class LockTimeoutError(Exception):
+    """Raised when `_file_lock` cannot acquire within its timeout. Surfaces
+    as a non-zero exit + clear stderr error in the CLI path."""
+
+
+def _resolve_lock_dir(target: Path) -> Path:
+    """Resolve the lock directory for this target.
+
+    Inside a git repo, returns `<git-common-dir>/jig-locks/`. Critical: multiple
+    worktrees of the SAME project share a single `.git/` (the "common dir"),
+    so this is the only filesystem location that serializes across worktrees.
+    A `<target>/.jig/locks/` per-worktree path would only serialize within one
+    worktree, which would miss the whole point.
+
+    Outside a git repo (or when git isn't on PATH), falls back to
+    `<target>/.jig/locks/` so the helper still works on bare directories.
+
+    The result is `mkdir -p`'d.
+    """
+    lock_dir = None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, cwd=str(target),
+        )
+        if result.returncode == 0:
+            raw = result.stdout.strip()
+            if raw:
+                p = Path(raw)
+                if not p.is_absolute():
+                    p = (target / p).resolve()
+                lock_dir = p / "jig-locks"
+    except (FileNotFoundError, OSError):
+        # git not on PATH or invocation failed — fall through to the
+        # .jig/locks/ fallback.
+        pass
+    if lock_dir is None:
+        lock_dir = target / ".jig" / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return lock_dir
+
+
+@contextlib.contextmanager
+def _file_lock(lock_path: Path, timeout: float):
+    """Context manager that acquires an exclusive fcntl.flock on `lock_path`.
+
+    Acquires non-blocking in a polled loop with a `time.monotonic()` deadline.
+    Polling cadence is 50ms — that's not a race-manufacturing sleep, it's just
+    how often we ask the kernel "is it free yet?". The total wait is bounded
+    by `timeout`.
+
+    On acquisition, truncates the file and writes the current PID as the
+    body — purely diagnostic, so an inspecting user can see "who's holding
+    this lock right now." The kernel — not the PID — is the source of truth:
+    if the holder dies (crash, SIGKILL, normal exit), the OS releases the
+    flock immediately. This means there is no PID-reuse window: a stale lock
+    file on disk is never "held" once its owner has gone away.
+
+    The lock file itself is left on disk after release. That's intentional —
+    creating-and-removing a lock file races itself ("is this fresh or a
+    leftover?"); leaving the file persistent and using fcntl as the held-bit
+    sidesteps the question entirely.
+
+    Raises `LockTimeoutError` if the deadline elapses without acquisition.
+    """
+    # `_resolve_lock_dir` already created `lock_path.parent`; no second mkdir
+    # is required here.
+    deadline = time.monotonic() + timeout
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise LockTimeoutError(
+                        f"could not acquire lock on {lock_path} within "
+                        f"{timeout}s (another process is holding it; "
+                        f"see PID in {lock_path}). Re-run, or kill the "
+                        f"stale holder if it has crashed."
+                    )
+                time.sleep(0.05)
+        # Lock acquired — record the holder PID for diagnostics.
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.ftruncate(fd, 0)
+            os.write(fd, str(os.getpid()).encode())
+        except OSError:
+            # PID-write is purely advisory; never let it sabotage a successful
+            # acquisition.
+            pass
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        os.close(fd)
+# ---------- end slice 028-02 ----------
 
 
 def _append_section(path: Path, heading: str, body: str) -> bool:
@@ -102,14 +236,60 @@ def add_learning(target: Path, title: str, body: str) -> bool:
     return _append_section(_learnings_path(target), title, body + "\n")
 
 
-def add_inbox(target: Path, item: str) -> bool:
+def add_inbox(target: Path, item: str,
+              timeout: float = CLI_DEFAULT_LOCK_TIMEOUT) -> bool:
     """Append a dated bullet to inbox.md. Always appends (no idempotency check
-    — inbox is a stream, duplicate-ish entries are acceptable)."""
-    path = _inbox_path(target)
+    — inbox is a stream, duplicate-ish entries are acceptable).
+
+    Slice 028-02: acquires an fcntl.flock on
+    `<git-common-dir>/jig-locks/inbox.md.lock` so parallel worktrees never
+    silently overwrite each other on git merge. `timeout` is the bound on
+    how long to wait for the lock; the CLI default is 5s but tests pass
+    smaller values. Raises `LockTimeoutError` on deadline.
+
+    The `_inbox_path` self-heal call is performed *inside* the lock so
+    a concurrent first-write against a non-existent inbox.md doesn't
+    let the two writers race `_ensure_file`'s `exists()`/`write_text`
+    sequence and clobber each other's appended bullet."""
+    lock_path = _resolve_lock_dir(target) / "inbox.md.lock"
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     line = f"- [{date}] {item}\n"
-    with open(path, "a") as f:
-        f.write(line)
+    with _file_lock(lock_path, timeout=timeout):
+        path = _inbox_path(target)
+        with open(path, "a") as f:
+            f.write(line)
+    return True
+
+
+def add_refinement_todo(target: Path, item: str,
+                        timeout: float = CLI_DEFAULT_LOCK_TIMEOUT) -> bool:
+    """Append raw text to docs/refinement-todo.md.
+
+    The caller composes the markdown chunk (H2 categorization, deferred-/
+    resolution-trigger structure, etc.); the helper just appends with a
+    boundary-newline guarantee and the file lock. Mirrors `add_inbox`'s
+    shape (lock surface, semantics) so the helper signature is uniform
+    across the two append-locked artifacts per slice 028-02 AC #3.
+
+    Self-heals the file with a minimal scaffold if absent. The self-heal
+    runs *inside* the lock so concurrent first-writes against a
+    non-existent file don't race `_ensure_file`'s `exists()`/`write_text`
+    sequence and clobber each other. Raises `LockTimeoutError` if the
+    lock cannot be acquired within `timeout`.
+    """
+    lock_path = _resolve_lock_dir(target) / "refinement-todo.md.lock"
+    with _file_lock(lock_path, timeout=timeout):
+        path = _refinement_todo_path(target)
+        # Read existing content under the lock so the trailing-newline
+        # check is consistent with the append.
+        existing = path.read_text() if path.exists() else ""
+        chunk = item
+        if existing and not existing.endswith("\n"):
+            chunk = "\n" + chunk
+        if not chunk.endswith("\n"):
+            chunk = chunk + "\n"
+        with open(path, "a") as f:
+            f.write(chunk)
     return True
 
 
@@ -248,6 +428,10 @@ def _build_parser() -> argparse.ArgumentParser:
     pi.add_argument("item")
     pi.add_argument("target")
 
+    prt = sub.add_parser("add-refinement-todo")
+    prt.add_argument("item")
+    prt.add_argument("target")
+
     pp = sub.add_parser("promote")
     pp.add_argument("term")
     pp.add_argument("definition")
@@ -291,6 +475,9 @@ def main(argv: list) -> int:
         elif ns.command == "add-inbox":
             add_inbox(target, ns.item)
             print(f"inbox: parked '{ns.item}'")
+        elif ns.command == "add-refinement-todo":
+            add_refinement_todo(target, ns.item)
+            print(f"refinement-todo: appended {len(ns.item)} chars")
         elif ns.command == "promote":
             added = promote(target, ns.term, ns.definition)
             print(f"hot cache: {'promoted' if added else 'already present'} '{ns.term}'")
