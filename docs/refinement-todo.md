@@ -79,10 +79,8 @@ Resolved by [Spec 001-01](specs/001-scaffold-init/spec.md) + [ADR-0007](decision
 **Resolution trigger:** First report of a partial-scaffold state in the wild.
 **Mitigation idea:** write everything to a temp dir, then atomically rename, OR write `scaffold.json` FIRST as an in-progress marker and finalize at the end.
 
-### Decision: Atomic writes across all helper scripts
-**Deferred:** `workflow.py transition` and `workflow.py status-board` use `Path.write_text()` directly, like `scaffold.py` and `memory.py`. None are crash-safe — an interrupted run can leave a half-written spec.md or README.md. Probability is low (single-call CLIs that complete in milliseconds) but the impact is "lose state."
-**Resolution trigger:** First report of a torn-write incident, OR before jig ships outside personal-dev use.
-**Mitigation idea:** add a shared `atomic_write_text(path, content)` helper across `scaffold.py`, `memory.py`, `workflow.py`. Write to `<path>.tmp` then `os.replace()` — POSIX-atomic on same-FS rename.
+### ~~Decision: Atomic writes across all helper scripts~~ — RESOLVED 2026-05-20
+Resolved by [Slice 032-01](specs/032-atomic-writes/slice-01-atomic-write-helper.md) — `atomic_write_text` shipped at `skills/_common/atomic_io.py`; 16 callsites swept across 6 helpers (`scaffold.py`, `workflow.py`, `memory.py`, `adr.py`, `land.py`; `review.py` audit-clean); regression-guard test in `_common/test_atomic_io_sweep.py` keeps the surface honest.
 
 ### Decision: `AGENTS.md` as a sibling to `CLAUDE.md` from scaffold-init
 **Deferred:** mysticat-architecture treats `AGENTS.md` as the universal AI-entry-point (recognized by Claude Code, Codex, Cursor, Gemini CLI) and `CLAUDE.md` as the Claude-specific adapter that `@import`s it. jig's vision says "scaffolds AI-native development practices into new projects" — not "Claude-native" — so emitting both files from `scaffold-init` (a slim `AGENTS.md` with 4 sections: project summary / key docs / conventions / session workflow; the existing `CLAUDE.md` template imports it for the Claude-specific bits) would unlock non-Claude users without changing any plugin behavior. The cost is ~50 lines of new template content; the underlying jig tooling (hooks, subagents, `${CLAUDE_PLUGIN_ROOT}` paths, auto-trigger descriptions) stays Claude-only regardless, so the cohesion is partial.

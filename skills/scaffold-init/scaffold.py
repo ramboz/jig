@@ -21,6 +21,9 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.atomic_io import atomic_write_text
+
 
 # Schema version for scaffold.json
 JIG_VERSION = "0.1.0"
@@ -97,7 +100,7 @@ def copy_template(src: Path, dst: Path, substitutions: dict) -> None:
     """Read a `.template` file, render placeholders, write to dst."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     rendered = render(src.read_text(), substitutions)
-    dst.write_text(rendered)
+    atomic_write_text(dst, rendered)
 
 
 class AlreadyScaffoldedError(RuntimeError):
@@ -538,7 +541,7 @@ def _copy_skill_dir(src: Path, dst: Path) -> None:
             text = entry.read_text()
             fm, body = _split_frontmatter(text)
             rewritten = fm + _rewrite_skill_md_paths(body)
-            target_path.write_text(rewritten)
+            atomic_write_text(target_path, rewritten)
         else:
             target_path.write_bytes(entry.read_bytes())
 
@@ -710,7 +713,7 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
     jig_hooks = _build_jig_hook_entries(plugin)
     merged = _merge_settings(existing, jig_hooks)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(merged, indent=2) + "\n")
+    atomic_write_text(settings_path, json.dumps(merged, indent=2) + "\n")
 
 
 def copy_machinery(plugin: Path, target: Path, *,
@@ -847,12 +850,15 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # ${CLAUDE_PLUGIN_ROOT}); "in-repo" is set when --with-machinery was
     # passed (machinery copied into target/.claude/).
     manifest["scaffold_mode"] = "in-repo" if with_machinery else "plugin-only"
-    (target / "scaffold.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    atomic_write_text(
+        target / "scaffold.json",
+        json.dumps(manifest, indent=2) + "\n",
+    )
 
     # 5. brief.md — human-readable summary of detection results
     brief_template = (template_root / "brief.md.template").read_text()
     brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers, subs)
-    (target / "brief.md").write_text(brief)
+    atomic_write_text(target / "brief.md", brief)
 
     # 6. Slice 016-01 + 016-02: copy skills/, agents/, hook scripts, and
     # write/merge .claude/settings.json when --with-machinery is on

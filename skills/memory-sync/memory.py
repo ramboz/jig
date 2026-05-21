@@ -29,6 +29,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.atomic_io import atomic_write_text
+
 
 # Heading marker used to find the Key terms list inside CLAUDE.md Hot Cache.
 HOT_CACHE_KEY_TERMS_HEADING = "### Key terms"
@@ -55,7 +58,7 @@ def _ensure_file(path: Path, default_content: str) -> None:
     if path.exists():
         return
     _ensure_dir(path.parent)
-    path.write_text(default_content)
+    atomic_write_text(path, default_content)
 
 
 def _glossary_path(target: Path) -> Path:
@@ -222,7 +225,7 @@ def _append_section(path: Path, heading: str, body: str) -> bool:
     text += marker + body
     if not text.endswith("\n"):
         text += "\n"
-    path.write_text(text)
+    atomic_write_text(path, text)
     return True
 
 
@@ -331,7 +334,7 @@ def promote(target: Path, term: str, definition: str) -> bool:
         # Insert after the heading line; will become first bullet, others shift.
         new_text = text[: line_end + 1] + entry + "\n" + text[line_end + 1 :]
 
-    claude_md.write_text(new_text)
+    atomic_write_text(claude_md, new_text)
     return True
 
 

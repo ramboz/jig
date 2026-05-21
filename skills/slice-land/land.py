@@ -52,6 +52,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.atomic_io import atomic_write_text
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import parse_frontmatter as _parse_frontmatter
 from _common.parsing import SliceLookupError
@@ -512,7 +513,7 @@ def prepare(spec_path: Path, slice_fragment: str,
             goal = extract_goal_paragraph(section)
             body = render_pr_body(label, spec_path, goal, ac_items,
                                   deviation_excerpt)
-            pr_body_path.write_text(body)
+            atomic_write_text(pr_body_path, body)
             # Spec-level `skill:` frontmatter ALWAYS lives in spec.md,
             # never in a sibling slice file — read from spec_path directly.
             skill = _parse_skill_from_frontmatter(spec_path.read_text())
@@ -782,7 +783,7 @@ def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
     deviation_excerpt = extract_deviation_excerpt(section)
     goal = extract_goal_paragraph(section)
     body = render_pr_body(label, spec_path, goal, ac_items, deviation_excerpt)
-    pr_body_path.write_text(body)
+    atomic_write_text(pr_body_path, body)
 
     # Spec-level frontmatter (the `skill:` field for the PR title prefix)
     # ALWAYS lives in spec.md, never in a slice file — read spec_path

@@ -38,6 +38,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.atomic_io import atomic_write_text
 from _common.parsing import set_frontmatter_field as _set_frontmatter_field
 
 
@@ -60,14 +61,6 @@ TEMPLATE_RELATIVE = (
 
 def _today() -> str:
     return date.today().strftime("%Y-%m-%d")
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    """Write `content` to `path` via a `.tmp` sibling + os.replace.
-    Crash-safe on same-FS rename (POSIX-atomic)."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content)
-    os.replace(tmp, path)
 
 
 def _plugin_root() -> Path:
@@ -168,7 +161,7 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
     # from a raise-AdrError to an assert so the unreachable branch is
     # explicit about its postcondition status.
     assert not target.exists(), f"target unexpectedly exists: {target}"
-    _atomic_write(target, content)
+    atomic_write_text(target, content)
     return target
 
 
@@ -467,7 +460,7 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     target = adrs_dir / f"adr-{number}-{slug}.md"
     if target.exists():  # Defensive — auto-num should have prevented this.
         raise AdrError(f"target already exists: {target}")
-    _atomic_write(target, content)
+    atomic_write_text(target, content)
 
     # Stage + commit locally.
     rel_path = f"docs/decisions/adr-{number}-{slug}.md"
@@ -612,7 +605,7 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
     # at the single point where an ADR becomes decision-of-record. Adds
     # the frontmatter block if absent; updates the field if present.
     new_text = _set_frontmatter_field(new_text, "last_verified", _today())
-    _atomic_write(adr_path, new_text)
+    atomic_write_text(adr_path, new_text)
     return adr_path
 
 
@@ -767,8 +760,8 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     )
 
     # Atomic writes — both ADRs.
-    _atomic_write(old_path, new_old_text)
-    _atomic_write(new_path, new_new_text)
+    atomic_write_text(old_path, new_old_text)
+    atomic_write_text(new_path, new_new_text)
     return old_path, new_path
 
 
@@ -974,7 +967,7 @@ def cmd_index(adrs_dir: Path) -> Path:
     if new_text == text:
         # Idempotent no-op.
         return readme
-    _atomic_write(readme, new_text)
+    atomic_write_text(readme, new_text)
     return readme
 
 
@@ -1065,7 +1058,7 @@ def cmd_resolve_todo(project_dir: Path, number: str, fragment: str) -> Path:
     new_body = _append_to_section(new_body, resolved_line)
 
     new_text = todo_text[:h_start] + new_heading + new_body + todo_text[s_end:]
-    _atomic_write(todo_path, new_text)
+    atomic_write_text(todo_path, new_text)
     return todo_path
 
 

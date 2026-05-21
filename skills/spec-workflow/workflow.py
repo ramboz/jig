@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common.atomic_io import atomic_write_text
 from _common.parsing import iter_slices as _iter_slices_common
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import (
@@ -118,8 +119,8 @@ def load_slice(spec_path, slice_fragment: str):
 
     Slice 018-02 migration: replaced `find_slice_section(text, fragment)`
     + manual `read_text()` with this helper. Write-side callers use
-    `loc.path.write_text(new_text)` to write back to whichever file the
-    slice lives in (slice file or spec.md).
+    `atomic_write_text(loc.path, new_text)` (slice 032-01) to write back
+    to whichever file the slice lives in (slice file or spec.md).
     """
     try:
         return _load_slice_common(spec_path, slice_fragment)
@@ -444,7 +445,9 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     # `loc.path` is the slice file when dual-read picked it, or spec.md
     # otherwise. Same behavior for legacy specs, correct behavior for
     # file-per-slice ones.
-    loc.path.write_text(new_text)
+    # Slice 032-01: atomic via _common.atomic_io to avoid torn writes on
+    # interrupted transitions.
+    atomic_write_text(loc.path, new_text)
 
     # Slice 030-01: roll up spec.md's frontmatter `status:` from the
     # current slice states. Idempotent — no-op when the rollup matches
@@ -542,7 +545,7 @@ def _write_spec_rollup(spec_path: Path) -> bool:
     new_text = set_frontmatter_field(text, "status", computed)
     if new_text == text:
         return False
-    spec_path.write_text(new_text)
+    atomic_write_text(spec_path, new_text)
     return True
 
 
@@ -771,7 +774,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
                 "status board changed during regen — another writer may "
                 "have run. Re-run `workflow.py status-board` to retry."
             )
-    board_path.write_text(new_content)
+    atomic_write_text(board_path, new_content)
     return (f"regenerated status board: {len(rows)} slice(s) across "
             f"{len({r[0] for r in rows})} spec(s)")
 
@@ -1298,9 +1301,9 @@ def reserve_spec(slug: str, project_dir: Path,
     spec_dir.mkdir(parents=True)
     spec_md = spec_dir / "spec.md"
     today_iso = _today()
-    spec_md.write_text(_render_stub_spec(num_str, slug, today_iso))
+    atomic_write_text(spec_md, _render_stub_spec(num_str, slug, today_iso))
     starter_slice = spec_dir / "slice-01-tbd.md"
-    starter_slice.write_text(_render_stub_slice(num_str))
+    atomic_write_text(starter_slice, _render_stub_slice(num_str))
 
     # Stage + commit locally.
     rel_spec = f"docs/specs/{spec_dirname}/spec.md"
