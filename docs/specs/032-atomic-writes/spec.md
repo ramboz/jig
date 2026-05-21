@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 ---
 
 # Spec 032: Atomic writes

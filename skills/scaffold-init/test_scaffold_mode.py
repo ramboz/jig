@@ -878,5 +878,165 @@ class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------
+# Slice 032-02 — scaffold-completion-marker. `scaffold.json` is written
+# last; a crash before that final write leaves a re-runnable partial
+# state. Two new tests:
+#   AC #2 — crash-before-scaffold.json leaves a re-runnable state.
+#   AC #5 — refused scaffold (UnmanagedHooksError) leaves no scaffold.json,
+#           so the next run treats it as un-scaffolded and re-attempts.
+# These tests import scaffold.py directly so we can monkey-patch
+# `atomic_write_text` for the crash-simulation case. The existing
+# subprocess-based tests above remain the canonical end-to-end coverage.
+# --------------------------------------------------------------------------
+
+
+sys.path.insert(0, str(REPO_ROOT / "skills" / "scaffold-init"))
+import scaffold as scaffold_mod  # noqa: E402
+
+
+class ScaffoldCompletionMarkerTests(unittest.TestCase):
+    """Slice 032-02 — `scaffold.json` is the completion sentinel: written
+    last, after every other filesystem mutation, so a crash mid-scaffold
+    leaves a re-runnable partial state without `--force`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-032-02-marker-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_watermark_constant_is_present_in_claude_md_template(self):
+        """Slice 032-02 reconciliation pin — `_is_jig_partial_state` reads
+        `CLAUDE.md` for `_JIG_CLAUDE_MD_WATERMARK`. If the watermark string
+        ever drifts out of `templates/CLAUDE.md.template`, the recovery
+        path for AC #2 silently breaks (the gate returns False and
+        `_looks_already_spec_driven` blocks the re-run). Pin the coupling
+        with a substring check on the template file."""
+        template = REPO_ROOT / "templates" / "CLAUDE.md.template"
+        self.assertTrue(template.is_file(), f"template missing: {template}")
+        self.assertIn(
+            scaffold_mod._JIG_CLAUDE_MD_WATERMARK,
+            template.read_text(),
+            "CLAUDE.md.template lost the jig watermark — "
+            "scaffold partial-state recovery will silently fail.",
+        )
+
+    def test_crash_before_scaffold_json_leaves_rerunnable_state(self):
+        """AC #2 — a simulated crash on the `scaffold.json` write leaves no
+        `scaffold.json` on disk. Re-running scaffold without `--force`
+        succeeds and produces a well-formed final scaffold.
+
+        Strategy: monkey-patch `atomic_write_text` inside the scaffold
+        module so that the call writing `scaffold.json` raises a synthetic
+        IOError. Verify on disk that `scaffold.json` is absent. Then call
+        `scaffold()` again on the same target without `--force` and assert
+        success + a valid `scaffold.json`."""
+        original = scaffold_mod.atomic_write_text
+
+        def patched(path, content, *, encoding="utf-8"):
+            if path.name == "scaffold.json":
+                raise IOError("simulated crash mid-scaffold")
+            return original(path, content, encoding=encoding)
+
+        scaffold_mod.atomic_write_text = patched
+        try:
+            with self.assertRaises(IOError):
+                scaffold_mod.scaffold(
+                    self.target, scaffold_mod.plugin_root(),
+                )
+        finally:
+            scaffold_mod.atomic_write_text = original
+
+        # On-disk invariant: no scaffold.json — the completion sentinel
+        # never landed, so the partial state is re-runnable.
+        self.assertFalse(
+            (self.target / "scaffold.json").exists(),
+            "scaffold.json must be absent after simulated crash mid-write",
+        )
+
+        # Re-run without --force. Must succeed: the "already scaffolded"
+        # check gates on scaffold.json presence, which is absent, so the
+        # re-run proceeds to a normal greenfield scaffold.
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(
+            r.returncode, 0,
+            f"re-run without --force must succeed after crash: stderr={r.stderr}",
+        )
+        # The final scaffold.json is well-formed.
+        manifest_path = self.target / "scaffold.json"
+        self.assertTrue(manifest_path.is_file(),
+                        "scaffold.json must exist after the recovery re-run")
+        manifest = json.loads(manifest_path.read_text())
+        self.assertIn("jig_version", manifest)
+        self.assertIn("installed_tiers", manifest)
+
+    def test_unmanaged_hooks_error_leaves_rerunnable_state(self):
+        """AC #5 — a refused scaffold (`UnmanagedHooksError`) leaves no
+        `scaffold.json` on disk, so the next run treats it as un-scaffolded
+        and re-attempts.
+
+        With `scaffold.json` written last, a refused scaffold leaves the
+        machinery copy but no `scaffold.json` — the next run treats it as
+        un-scaffolded and re-attempts, which is the correct recovery
+        behavior. Spec 016-03 deviation log §7 noted this rough edge;
+        slice 032-02 closes it by making scaffold.json the completion
+        marker."""
+        # Seed an unmanaged settings.json to trigger UnmanagedHooksError.
+        settings = self.target / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Edit",
+                     "hooks": [{"type": "command",
+                                "command": "bash ./user-edit.sh",
+                                "timeout": 5}]}
+                ]
+            }
+        }, indent=2) + "\n")
+
+        # First run: scaffold refuses due to unmanaged hooks. We expect
+        # non-zero exit (rc=3 per the CLI's UnmanagedHooksError branch).
+        r1 = run_scaffold_with_args(self.target)
+        self.assertNotEqual(
+            r1.returncode, 0,
+            "scaffold must refuse when settings.json has unmanaged hooks; "
+            f"stdout={r1.stdout!r} stderr={r1.stderr!r}",
+        )
+
+        # On-disk invariant: scaffold.json absent — the completion marker
+        # never landed because the refusal happened before the final
+        # `atomic_write_text` for scaffold.json.
+        self.assertFalse(
+            (self.target / "scaffold.json").exists(),
+            "scaffold.json must be absent after a refused scaffold; "
+            "the partial state must be re-runnable without --force",
+        )
+
+        # Remove the user's unmanaged settings.json so the second run
+        # doesn't refuse for the same reason. (The point of this test is
+        # the scaffold.json-absence invariant, not whether the user fixed
+        # their settings.json — we just need a clean re-run to confirm
+        # recovery is possible.)
+        settings.unlink()
+
+        # Re-run without --force. Must succeed: scaffold.json was never
+        # written, so the "already scaffolded" check lets the re-run
+        # proceed.
+        r2 = run_scaffold_with_args(self.target)
+        self.assertEqual(
+            r2.returncode, 0,
+            f"re-run without --force must succeed after refusal: stderr={r2.stderr}",
+        )
+        self.assertTrue(
+            (self.target / "scaffold.json").is_file(),
+            "scaffold.json must exist after the recovery re-run",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

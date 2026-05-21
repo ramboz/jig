@@ -1,14 +1,8 @@
 {
   "spec": "docs/specs/032-atomic-writes/spec.md",
-  "slice": "032-01",
+  "slice": "032-02",
   "files": [
-    "skills/_common/atomic_io.py",
-    "skills/_common/test_atomic_io.py",
-    "skills/_common/test_atomic_io_sweep.py",
     "skills/scaffold-init/scaffold.py",
-    "skills/spec-workflow/workflow.py",
-    "skills/memory-sync/memory.py",
-    "skills/adr-workflow/adr.py",
-    "skills/slice-land/land.py"
+    "skills/scaffold-init/test_scaffold_mode.py"
   ]
 }

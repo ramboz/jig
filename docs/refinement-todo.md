@@ -74,10 +74,8 @@ Resolved by [Spec 001-01](specs/001-scaffold-init/spec.md) + [ADR-0007](decision
 - Nested triple-backtick fences leak the middle content (non-greedy `.*?` pairs outermost)
 - `CSS` in COMMON skiplist could mask a frontend project's `CSS Modules` term — harmless today (single capitalized word doesn't match camelCase regex) but worth watching as the skiplist grows
 
-### Decision: Transactional writes in scaffold()
-**Deferred:** `scaffold()` writes CLAUDE.md, docs/*, scaffold.json, brief.md sequentially without a transaction. A crash between steps leaves partial state; the next run (without `--force`) refuses because some files exist. Currently we rely on the `scaffold.json`-present check as the "scaffolded" sentinel; if creation crashes before scaffold.json is written, a re-run succeeds but may overwrite partial files.
-**Resolution trigger:** First report of a partial-scaffold state in the wild.
-**Mitigation idea:** write everything to a temp dir, then atomically rename, OR write `scaffold.json` FIRST as an in-progress marker and finalize at the end.
+### ~~Decision: Transactional writes in scaffold()~~ — RESOLVED 2026-05-20
+Resolved by [Slice 032-02](specs/032-atomic-writes/slice-02-scaffold-completion-marker.md) — `scaffold.json` is now the LAST file written by `scaffold()`, making it the completion sentinel. A crash before that write leaves no `scaffold.json`, so a re-run without `--force` correctly resumes (a small `_is_jig_partial_state` watermark gate skips `_looks_already_spec_driven` when CLAUDE.md carries jig's watermark — see deviation log §3–§4).
 
 ### ~~Decision: Atomic writes across all helper scripts~~ — RESOLVED 2026-05-20
 Resolved by [Slice 032-01](specs/032-atomic-writes/slice-01-atomic-write-helper.md) — `atomic_write_text` shipped at `skills/_common/atomic_io.py`; 16 callsites swept across 6 helpers (`scaffold.py`, `workflow.py`, `memory.py`, `adr.py`, `land.py`; `review.py` audit-clean); regression-guard test in `_common/test_atomic_io_sweep.py` keeps the surface honest.
