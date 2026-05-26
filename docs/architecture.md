@@ -85,6 +85,9 @@ See the **Dual-distribution** decision below for the rewrite details.
 ### Hook scripts: Python 3, never jq
 `jq` is not installed by default on macOS. All hook scripts use inline `python3 -c` for JSON parsing. Python 3 is reliably available.
 
+### Python version: 3.10+
+The codebase uses PEP 604 union syntax (`X | None`) throughout — introduced in Python 3.10. On macOS, the default `/usr/bin/python3` is 3.9; running `python3 scripts/run_tests.py` against that interpreter fails with `TypeError: unsupported operand type(s) for |` during module import. `scripts/run_tests.py` guards against this at startup (exits 2 with a clear message). To run the suite, install Homebrew Python (`brew install python@3.13`) and either set `python3` on `$PATH` to point at it or pin `.jig/test-command` to a specific binary (e.g. `python3.13 scripts/run_tests.py`).
+
 ### Hook command paths: `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/...`
 Plugin `bin/` PATH injection is Bash-tool only, not hook commands. All hook `command` fields use the full `${CLAUDE_PLUGIN_ROOT}` path.
 

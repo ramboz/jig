@@ -7,9 +7,27 @@ Usage:
 This is the command pointed to by .jig/test-command, so:
     python3 skills/tdd-loop/tdd.py run .
 ...runs this script instead of trying to invoke pytest directly.
+
+Requires Python 3.10+ (PEP 604 `X | None` annotations are used across
+the codebase). On macOS the default `/usr/bin/python3` is 3.9 — run
+this script with an explicit `python3.10` / `python3.11` / `python3.13`
+binary, or set `python3` on $PATH to point at one. See
+docs/architecture.md § "Python version" for details.
 """
 
 import sys
+
+if sys.version_info < (3, 10):
+    sys.stderr.write(
+        f"jig requires Python 3.10+ (PEP 604 union syntax). Got "
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} "
+        f"at {sys.executable}.\n"
+        f"On macOS, /usr/bin/python3 is 3.9 — install Homebrew Python "
+        f"(`brew install python@3.13`) or pin .jig/test-command to a "
+        f"specific binary (e.g. `python3.13 scripts/run_tests.py`).\n"
+    )
+    sys.exit(2)
+
 import unittest
 from pathlib import Path
 
