@@ -1,8 +1,10 @@
 {
-  "spec": "docs/specs/032-atomic-writes/spec.md",
-  "slice": "032-02",
+  "spec": "docs/specs/035-fixture-exclusion/spec.md",
+  "slice": "035-01",
   "files": [
     "skills/scaffold-init/scaffold.py",
-    "skills/scaffold-init/test_scaffold_mode.py"
+    "skills/scaffold-init/test_scaffold_mode.py",
+    "scripts/build_release_zip.py",
+    "scripts/test_build_release_zip.py"
   ]
 }

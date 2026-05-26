@@ -58,6 +58,11 @@ _EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
+    # `fixtures/` is reserved as test-data (spec 035): any-depth match
+    # per Q1, no escape hatch per Q4. Future skills needing runtime
+    # sample data must use a different name (`samples/`, `examples/`,
+    # `data/`, etc.).
+    "fixtures",
 })
 
 # File-name patterns to skip (matched against the basename).

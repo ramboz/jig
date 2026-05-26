@@ -1038,5 +1038,78 @@ class ScaffoldCompletionMarkerTests(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------
+# Slice 035-01 — exclude-fixtures-from-installs. `_copy_skill_dir` must
+# treat any directory named `fixtures` (at any depth, matching the
+# `__pycache__` semantics) as test-only and skip it. Test data lives at
+# `skills/migrate/fixtures/` today; the rule generalizes for any future
+# skill that grows a fixtures tree.
+# --------------------------------------------------------------------------
+
+
+class CopySkillDirExcludesFixturesTests(unittest.TestCase):
+    """Slice 035-01 AC #1 + AC #3 — `_copy_skill_dir` skips `fixtures/`
+    directories at any depth under a skill subtree, no `fixtures` path
+    component reaches the destination."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-035-01-scaffold-")
+        self.src = Path(self.tmpdir) / "src-skill"
+        self.dst = Path(self.tmpdir) / "dst-skill"
+        self.src.mkdir()
+
+        # Minimal skill shape — SKILL.md at root + a runtime helper file
+        # so the copy actually does work and we can prove fixtures got
+        # filtered (vs. nothing being copied at all).
+        (self.src / "SKILL.md").write_text(
+            "---\nname: dummy\n---\n# dummy skill body\n"
+        )
+        (self.src / "runtime_helper.py").write_text("# kept\n")
+
+        # AC #1 — root-level fixtures dir under the skill.
+        root_fixtures = self.src / "fixtures"
+        root_fixtures.mkdir()
+        (root_fixtures / "case-a.txt").write_text("test data — must not ship\n")
+        (root_fixtures / "case-b.txt").write_text("more test data\n")
+
+        # AC #3 — nested fixtures dir, deeper than the skill root.
+        nested_fixtures = self.src / "sub" / "deeper" / "fixtures"
+        nested_fixtures.mkdir(parents=True)
+        (nested_fixtures / "nested-case.txt").write_text(
+            "nested test data — must not ship\n"
+        )
+        # A non-fixtures sibling under the nested tree, to prove we only
+        # skip the named dir, not the entire subtree.
+        (self.src / "sub" / "deeper" / "sibling.txt").write_text("kept\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_fixtures_path_component_at_any_depth(self):
+        """AC #1 + AC #3 — after `_copy_skill_dir` runs, no path under the
+        destination contains a `fixtures` component."""
+        scaffold_mod._copy_skill_dir(self.src, self.dst)
+
+        offenders = [
+            p for p in self.dst.rglob("*")
+            if "fixtures" in p.relative_to(self.dst).parts
+        ]
+        self.assertEqual(
+            offenders, [],
+            "scaffold copy must skip every `fixtures/` dir at any depth; "
+            f"found {[str(p.relative_to(self.dst)) for p in offenders]!r}",
+        )
+
+    def test_non_fixtures_siblings_still_copied(self):
+        """Sanity check — the filter targets `fixtures/` specifically and
+        does not accidentally drop the rest of the skill tree."""
+        scaffold_mod._copy_skill_dir(self.src, self.dst)
+
+        self.assertTrue((self.dst / "SKILL.md").is_file())
+        self.assertTrue((self.dst / "runtime_helper.py").is_file())
+        self.assertTrue((self.dst / "sub" / "deeper" / "sibling.txt").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

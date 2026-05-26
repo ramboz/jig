@@ -511,6 +511,9 @@ _PLUGIN_SKILL_PATH_RE = re.compile(
 )
 
 
+_SKILL_DIR_EXCLUDES: frozenset[str] = frozenset({"__pycache__", "fixtures"})
+
+
 def _rewrite_skill_md_paths(body: str) -> str:
     """Replace every `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` with
     `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`.
@@ -550,12 +553,17 @@ def _copy_skill_dir(src: Path, dst: Path) -> None:
     """Copy a single skill directory. SKILL.md gets path-substitution on
     its body; other .py files (excluding test_*.py) are copied verbatim;
     everything else under the skill dir is mirrored verbatim too. Skips
-    `__pycache__` and `test_*.py`."""
+    `__pycache__`, `fixtures/` (test data, never runtime — per spec 035),
+    and `test_*.py`."""
     dst.mkdir(parents=True, exist_ok=True)
     for entry in src.rglob("*"):
         rel = entry.relative_to(src)
-        # Skip __pycache__ trees wholesale
-        if any(part == "__pycache__" for part in rel.parts):
+        # Skip excluded dir trees at any depth. `__pycache__` is build
+        # artifact; `fixtures/` is reserved as test data, never runtime
+        # (spec 035: any-depth match per Q1, no escape hatch per Q4 —
+        # future skills needing runtime sample data must use `samples/`,
+        # `examples/`, `data/`, etc., not `fixtures/`).
+        if any(part in _SKILL_DIR_EXCLUDES for part in rel.parts):
             continue
         if entry.is_dir():
             (dst / rel).mkdir(parents=True, exist_ok=True)

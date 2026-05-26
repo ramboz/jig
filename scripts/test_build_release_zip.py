@@ -341,5 +341,78 @@ class MissingLicenseWarningTests(unittest.TestCase):
             tmp.rmdir()
 
 
+# ---------------------------------------------------------------------------
+# Slice 035-01 — exclude-fixtures-from-installs. `_iter_files` must skip
+# any directory named `fixtures` at any depth under the included roots
+# (matches the `__pycache__` semantics already in place). Test data
+# lives at `skills/migrate/fixtures/` today; the rule generalizes for
+# any future skill that grows a fixtures tree.
+# ---------------------------------------------------------------------------
+
+
+class FixturesExclusionAgainstRealSourceTests(unittest.TestCase):
+    """AC #2 — built zip against the real source tree contains no entry
+    whose path includes a `fixtures` component anywhere under
+    `skills/`. Pins the regression against the live `skills/migrate/
+    fixtures/` test corpus."""
+
+    def test_no_fixtures_entries_in_real_zip(self):
+        zip_path = _build_once()
+        self.addCleanup(zip_path.unlink, missing_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+        offenders = [n for n in names if "fixtures" in Path(n).parts]
+        self.assertEqual(
+            offenders, [],
+            "zip must not contain any `fixtures/` path components under "
+            f"any included root; found {offenders!r}",
+        )
+
+
+class FixturesExclusionAtAnyDepthTests(unittest.TestCase):
+    """AC #3 — `_iter_files` skips `fixtures/` directories nested below
+    the skill root, not just at the top of a skill subtree. Uses a
+    synthesized source tree so the test does not depend on the
+    repo's current skill layout."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-035-01-zip-"))
+        # Minimum surface that `_iter_files` walks: one of the included
+        # roots populated with a skill-shaped subtree. We use `skills/`
+        # since the real bug is on that root.
+        skill = self.tmpdir / "skills" / "demo-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: demo\n---\nbody\n")
+        (skill / "runtime.py").write_text("# kept\n")
+
+        # Root-level fixtures dir under the skill.
+        root_fixtures = skill / "fixtures"
+        root_fixtures.mkdir()
+        (root_fixtures / "case.txt").write_text("must not ship\n")
+
+        # Nested fixtures dir — deeper than the skill root.
+        nested_fixtures = skill / "sub" / "deeper" / "fixtures"
+        nested_fixtures.mkdir(parents=True)
+        (nested_fixtures / "nested.txt").write_text("must not ship\n")
+        # Non-fixtures sibling to prove the filter is selective.
+        (skill / "sub" / "deeper" / "kept.txt").write_text("kept\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_iter_files_skips_fixtures_at_any_depth(self):
+        rels = [p.as_posix() for p in build_release_zip._iter_files(self.tmpdir)]
+        offenders = [r for r in rels if "fixtures" in Path(r).parts]
+        self.assertEqual(
+            offenders, [],
+            "_iter_files must skip every `fixtures/` dir at any depth under "
+            f"the skill subtree; found {offenders!r}",
+        )
+        # Sanity — non-fixtures siblings still flow through.
+        self.assertIn("skills/demo-skill/SKILL.md", rels)
+        self.assertIn("skills/demo-skill/sub/deeper/kept.txt", rels)
+
+
 if __name__ == "__main__":
     unittest.main()

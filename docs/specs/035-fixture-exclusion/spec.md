@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: scaffold-init
 tier: (none — dev infrastructure)
 ---
@@ -116,3 +116,41 @@ unless `/jig:clarify` surfaces a reason to split.
 
 - External review brief: [`brief-02-fixture-exclusion.md`](../../external-review/brief-02-fixture-exclusion.md)
 - Verification 2026-05-26: both deny lists still lack `fixtures`.
+
+## Clarifications
+
+### Q1: Should the exclusion match any dir named `fixtures/` anywhere in the skill subtree, or only at the skill root level?
+_(category: Edge Cases & Failure Modes)_
+
+Anywhere in subtree. Matches existing `__pycache__` semantics — any directory named `fixtures/` at any depth under a skill dir is skipped. Future-proof if a skill grows nested test trees.
+
+### Q2: Single slice (Option A) or split by interface (Option B: one slice per copy surface)?
+_(category: Scope & Boundaries)_
+
+Option A: single slice. One slice `035-01 exclude-fixtures-from-installs`. Add `fixtures` to both deny lists + regression test on each surface. Single commit, single review.
+
+### Q3: Backwards-compat: existing installs already have a stale `fixtures/` tree from prior scaffold-init runs. What should this slice do about them?
+_(category: Non-functional Requirements)_
+
+Fix forward only. New scaffolds + new zip installs are clean. Existing stale `fixtures/` dirs persist until the user re-runs scaffold or reinstalls. Simplest — no cleanup logic needed.
+
+### Q4: What if a future skill legitimately needs a `fixtures/` directory at install time (e.g., as runtime sample data, not test data)?
+_(category: Edge Cases & Failure Modes)_
+
+Cross that bridge later. Treat `fixtures/` as a reserved name meaning "test data, never runtime". If a future skill needs runtime sample data, use a different dir name (`samples/`, `examples/`, `data/`). No escape hatch in this slice.
+
+### Q5: DoR signal (spec's open Q3): should slice 035-01 require an explicit re-verification at pickup that no skill currently needs `fixtures/` at install time, or is the 2026-05-23 audit sufficient?
+_(category: Dependencies & Blockers)_
+
+Re-verify at pickup. DoR includes a 1-command re-check: `find skills -type d -name fixtures` must show only `skills/migrate/fixtures/`. Cheap insurance against drift between audit and pickup.
+
+### Coverage summary
+
+| Category | Status |
+|---|---|
+| Scope & Boundaries | Resolved |
+| Acceptance Criteria Testability | Clear |
+| Dependencies & Blockers | Resolved |
+| Non-functional Requirements | Resolved |
+| Edge Cases & Failure Modes | Resolved |
+| Terminology Consistency | Clear |

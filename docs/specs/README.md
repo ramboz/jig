@@ -112,7 +112,7 @@
 | [034-federation-tier](034-federation-tier/spec.md) | 034-09 — repo-sync-and-drift-hook | DRAFT |  |
 | [034-federation-tier](034-federation-tier/spec.md) | 034-10 — migrate-to-federation | DRAFT |  |
 | [034-federation-tier](034-federation-tier/spec.md) | 034-11 — cross-repo-impact-hook | DRAFT |  |
-| [035-fixture-exclusion](035-fixture-exclusion/spec.md) | 035-01 — tbd | DRAFT | External-review brief 02. Phase 1 loop-validation. SPIDR: I; lean single-slice. No deps. |
+| [035-fixture-exclusion](035-fixture-exclusion/spec.md) | 035-01 — exclude-fixtures-from-installs | **DONE** | `fixtures/` reserved as test-data: excluded at any depth from both scaffold copy + release zip. Runtime sample data must use a different name (`samples/` / `examples/` / `data/`). Fix-forward, no cleanup of stale installs. |
 | [036-closed-spec-drift](036-closed-spec-drift/spec.md) | 036-01 — tbd | DRAFT | External-review brief 04. ADR-first (immutable vs amendment-section). Blocks 038/039/040. Five drifts verified live 2026-05-26. |
 | [037-git-origin-safety](037-git-origin-safety/spec.md) | 037-01 — tbd | DRAFT | External-review brief 03. Four bugs: `_check_ff_viable`/`_execute_direct` (land.py), `_next_spec_number`/preflight (workflow.py). Coupling w/ DEFERRED 007-02. |
 | [038-tier-reconciliation](038-tier-reconciliation/spec.md) | 038-01 — tbd | DRAFT | External-review brief 01. ADR-first (real tier vs informational). `_copy_skills_and_agents` tier-blind. README ↔ vision ↔ `_TIER_SKILLS` mismatched. Serialize w/ 040 (both touch README). |
