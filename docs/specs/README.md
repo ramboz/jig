@@ -101,6 +101,17 @@
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-04 - generated-file-metadata | DRAFT |  |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-05 - codex-scaffold-adapter | DEFERRED |  |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-06 - codex-plugin-packaging | DEFERRED |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-01 — registry-schema-and-host-adapter | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-02 — repo-registry-add-and-list | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-03 — scaffold-init-role-member | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-04 — cross-repo-spec-skill | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-05 — federated-status-aggregator | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-06 — context-pull-skill | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-07 — tier0-1-federation-aware-tweaks | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-08 — repo-registry-remove-update-audit | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-09 — repo-sync-and-drift-hook | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-10 — migrate-to-federation | DRAFT |  |
+| [034-federation-tier](034-federation-tier/spec.md) | 034-11 — cross-repo-impact-hook | DRAFT |  |
 
 ## Deferred slices
 

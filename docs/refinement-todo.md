@@ -15,6 +15,10 @@
 **Resolution trigger:** First time we need to react to subagent start (e.g., reviewer logging, effort-scaling enforcement).
 **Risk:** Event name or behavior may differ from expectations. Test before relying on it.
 
+### Decision: Multi-central federation membership
+**Deferred:** Spec 034 (Federation tier) v1 enforces exactly one central per member with a clear error on second-federation attempt. Real shared libraries belonging to two product orgs (e.g., a UI kit consumed by two product federations) would need `central_repo` to become a list, with declared precedence for conventions / glossary / ADR merges — adding schema and merge-precedence complexity to slice 034-01. Surfaced by `/jig:clarify` on `docs/specs/034-federation-tier/spec.md` Q2 (Scope & Boundaries).
+**Resolution trigger:** First real shared-library user asks for multi-central support. Until then, `repos.yaml` schema design should leave the door open (treat `central_repo` as a scalar in v1 but reserve the option to widen to a list additively, not as a breaking change).
+
 ### ~~Decision: additionalContext format for Stop vs UserPromptSubmit hooks~~ — RESOLVED
 Resolved by [Slice 002-03](specs/002-memory-layer/spec.md) — `{ "continue": true, "additionalContext": "..." }` format confirmed in production via `jig-memory-scan` + `jig-task-capture` hooks.
 
