@@ -8,6 +8,8 @@ Run from the repo root:
     python3 scripts/test_boundary_change_warn.py
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess

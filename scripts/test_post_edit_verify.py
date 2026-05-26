@@ -8,6 +8,8 @@ Run from the repo root:
     python3 scripts/test_post_edit_verify.py
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess

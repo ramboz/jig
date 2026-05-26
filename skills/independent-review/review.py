@@ -42,6 +42,8 @@ Usage:
     python3 review.py subagent-type {implementation|reconciliation|pr-review|arch-review}
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import re
