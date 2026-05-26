@@ -112,6 +112,14 @@
 | [034-federation-tier](034-federation-tier/spec.md) | 034-09 — repo-sync-and-drift-hook | DRAFT |  |
 | [034-federation-tier](034-federation-tier/spec.md) | 034-10 — migrate-to-federation | DRAFT |  |
 | [034-federation-tier](034-federation-tier/spec.md) | 034-11 — cross-repo-impact-hook | DRAFT |  |
+| [035-fixture-exclusion](035-fixture-exclusion/spec.md) | 035-01 — tbd | DRAFT | External-review brief 02. Phase 1 loop-validation. SPIDR: I; lean single-slice. No deps. |
+| [036-closed-spec-drift](036-closed-spec-drift/spec.md) | 036-01 — tbd | DRAFT | External-review brief 04. ADR-first (immutable vs amendment-section). Blocks 038/039/040. Five drifts verified live 2026-05-26. |
+| [037-git-origin-safety](037-git-origin-safety/spec.md) | 037-01 — tbd | DRAFT | External-review brief 03. Four bugs: `_check_ff_viable`/`_execute_direct` (land.py), `_next_spec_number`/preflight (workflow.py). Coupling w/ DEFERRED 007-02. |
+| [038-tier-reconciliation](038-tier-reconciliation/spec.md) | 038-01 — tbd | DRAFT | External-review brief 01. ADR-first (real tier vs informational). `_copy_skills_and_agents` tier-blind. README ↔ vision ↔ `_TIER_SKILLS` mismatched. Serialize w/ 040 (both touch README). |
+| [039-review-queue-cleanup](039-review-queue-cleanup/spec.md) | 039-01 — tbd | DRAFT | External-review brief 07. Drop instruction, `git rm` tracked stale file, add to .gitignore. Decision (drop vs keep) already made 2026-05-26 session. |
+| [040-isolation-honesty](040-isolation-honesty/spec.md) | 040-01 — tbd | DRAFT | External-review brief 06. Doc sweep: README + workflow.md + product-vision.md. Align with SKILL.md caveat (GH #20304). Serialize w/ 038. |
+| [041-routing-observability](041-routing-observability/spec.md) | 041-01 — tbd | DRAFT | External-review brief 05. Extend `jig-telemetry.sh` to UserPromptSubmit + `workflow.py routing-stats`. Closes 2 refinement-todo entries. |
+| [042-spec-gate-model](042-spec-gate-model/spec.md) | 042-01 — tbd | DRAFT | External-review brief 08. ADR-first (speed-bump vs file-marker vs two-step). Env-var gate verified bypassable via Bash. |
 
 ## Deferred slices
 
