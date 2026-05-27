@@ -55,6 +55,11 @@ Resolved by [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md).
 - Granularity: spec/slice references only, or also file paths and symbol names?
 **Mitigation idea:** The cheapest first cut would be a `Stop`-hook regex that flags assistant messages claiming `spec NNN` / `slice NNN-NN` / `ADR-NNNN` and cross-checks against the on-disk inventory. Surface as `additionalContext` next turn.
 
+### Decision: quality.py schema-version handling in review.py
+**Deferred:** Surfaced by `/jig:clarify` on `docs/specs/043-test-quality-wiring/spec.md` Q4 (Non-functional Requirements). quality.py's YAML carries `schema-version: 1`. Slice 043-04's prompt builder ignores the field and embeds the YAML as-is. When a future change bumps the schema (e.g., adds a new signal), the builder will silently embed an unfamiliar shape — reviewers may misinterpret or quietly skip new fields. Pinning to v1 with a "snapshot version mismatch" path would force a coordinated upgrade but adds plumbing the v1-only world doesn't need yet.
+**Resolution trigger:** First PR that bumps quality.py's `SCHEMA_VERSION` constant. Whoever lands the schema change updates `_test_quality_snapshot_block()` in `skills/independent-review/review.py` in the same change-set — either to accept the new shape, or to grow a version-aware branch.
+**Risk:** Currently theoretical — schema v1 is the only version and there's no in-flight proposal to evolve it.
+
 ## Operations
 
 ### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12
