@@ -211,28 +211,44 @@ class SignalTests(unittest.TestCase):
     crossings fire signals as designed."""
 
     def test_assertion_thin_requires_min_tests(self):
-        # 3 tests, 1 assertion each → density 1.0, below 1.5, BUT under
-        # the 20-test minimum so the signal stays quiet.
-        body = "".join(
-            f"+def test_{i}():\n+    assert True\n+\n" for i in range(3)
-        )
+        # 10 tests, 9 assertions → density 0.9, below the 1.0 threshold,
+        # BUT under the 20-test minimum so the signal stays quiet. Picked
+        # to couple to BOTH gates: a future regression that drops the
+        # threshold to 0.5 would still find this test passing only
+        # because of the min-test gate, not because of either-gate-only.
+        chunks = []
+        for i in range(10):
+            chunks.append(f"+def test_{i}():\n")
+            if i < 9:
+                chunks.append("+    assert True\n")
+            else:
+                chunks.append("+    pass\n")
+            chunks.append("+\n")
+        body = "".join(chunks)
         diff = f"""\
 diff --git a/tests/test_thin.py b/tests/test_thin.py
 index 0000..1111 100644
 --- a/tests/test_thin.py
 +++ b/tests/test_thin.py
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,30 @@
 {body}"""
         result = run_quality_with_diff(diff)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("assertion-thin: false", result.stdout)
 
     def test_assertion_thin_fires_at_threshold(self):
-        # 25 tests, 25 assertions → density 1.0, below 1.5; > 20 tests so
-        # the signal fires.
-        body = "".join(
-            f"+def test_{i}():\n+    assert True\n+\n" for i in range(25)
-        )
+        # 25 tests, ~22 assertions → density 0.88, below the 1.0
+        # threshold; > 20 tests so the signal fires. (Three tests have
+        # no assertion — the case the threshold is meant to catch.)
+        chunks = []
+        for i in range(25):
+            chunks.append(f"+def test_{i}():\n")
+            if i < 22:
+                chunks.append("+    assert True\n")
+            else:
+                chunks.append("+    pass\n")
+            chunks.append("+\n")
+        body = "".join(chunks)
         diff = f"""\
 diff --git a/tests/test_thin.py b/tests/test_thin.py
 index 0000..1111 100644
@@ -278,7 +294,7 @@ def _diff_add_code_file(path: str, lines: int = 5) -> str:
 
 class PerFileFloodSignalTests(unittest.TestCase):
     """AC1: per-file-flood fires on >100 tests in one file OR
-    tests-per-new-code-file ratio above 30."""
+    tests-per-new-code-file ratio above 50."""
 
     def test_max_per_file_over_100_fires(self):
         diff = _diff_with_n_test_functions("tests/test_flood.py", 101)
@@ -293,24 +309,24 @@ class PerFileFloodSignalTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("per-file-flood: false", result.stdout)
 
-    def test_ratio_31_over_1_code_fires(self):
-        # 31 tests for 1 new code file → ratio 31 > 30 threshold.
+    def test_ratio_51_over_1_code_fires(self):
+        # 51 tests for 1 new code file → ratio 51 > 50 threshold.
         diff = (
-            _diff_with_n_test_functions("tests/test_ratio.py", 31)
+            _diff_with_n_test_functions("tests/test_ratio.py", 51)
             + _diff_add_code_file("pkg/mod.py", lines=5)
         )
         result = run_quality_with_diff(diff)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("per-file-flood: true", result.stdout)
-        # Disambiguate the branch: max-it-per-file is 31, well below the
+        # Disambiguate the branch: max-it-per-file is 51, well below the
         # 100 max-per-file threshold, so the signal must have fired via
         # the tests-per-new-code-file ratio path.
-        self.assertIn("max-it-per-file: 31", result.stdout)
+        self.assertIn("max-it-per-file: 51", result.stdout)
 
-    def test_ratio_30_over_1_code_quiet(self):
-        # 30 tests for 1 new code file → ratio 30 == threshold (strictly >).
+    def test_ratio_50_over_1_code_quiet(self):
+        # 50 tests for 1 new code file → ratio 50 == threshold (strictly >).
         diff = (
-            _diff_with_n_test_functions("tests/test_ratio.py", 30)
+            _diff_with_n_test_functions("tests/test_ratio.py", 50)
             + _diff_add_code_file("pkg/mod.py", lines=5)
         )
         result = run_quality_with_diff(diff)

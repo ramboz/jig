@@ -27,13 +27,21 @@ import sys
 
 SCHEMA_VERSION = 1
 
-# Threshold constants. Python tests skew smaller-per-function than JS,
-# so per-file-flood is the threshold most likely to want tuning down
-# the road; we keep 100/30 for now so cross-language extension stays
-# trivial.
+# Threshold constants. Calibrated against a 25-commit jig sample in
+# slice 043-02 (threshold-calibration spike). assertion-thin was tuned
+# 1.5 → 1.0 to stop firing on focused-single-concept surface tests,
+# which is jig's normal style and not a defect. per-code-file-flood
+# was tuned 30 → 50 so it catches genuine test dumping, not thoughtful
+# coverage of an enum or body-shape validator. per-file-flood-max
+# (100) and mock-heavy (5.0) saw no fires in the sample but are kept
+# as cross-language backstops.
+#
+# NB: the sample was Python-only. JS/TS and Java diffs may have
+# different natural distributions; slice 043-03 (polyglot extension)
+# should re-calibrate before relying on these values cross-language.
 THR_PER_FILE_FLOOD_MAX = 100
-THR_PER_CODE_FILE_FLOOD = 30
-THR_ASSERTION_THIN = 1.5
+THR_PER_CODE_FILE_FLOOD = 50
+THR_ASSERTION_THIN = 1.0
 THR_ASSERTION_THIN_MIN_TESTS = 20
 THR_MOCK_HEAVY = 5.0
 THR_MOCK_HEAVY_MIN_TESTS = 10

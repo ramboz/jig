@@ -1,7 +1,9 @@
 {
-  "spec": "docs/specs/043-test-quality-wiring/slice-01-quality-test-coverage.md",
-  "slice": "043-01",
+  "spec": "docs/specs/043-test-quality-wiring/slice-02-threshold-calibration.md",
+  "slice": "043-02",
   "files": [
-    "skills/tdd-loop/test_quality.py"
+    "skills/tdd-loop/quality.py",
+    "skills/tdd-loop/test_quality.py",
+    "docs/specs/043-test-quality-wiring/slice-02-threshold-calibration.md"
   ]
 }

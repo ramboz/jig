@@ -121,7 +121,7 @@
 | [041-routing-observability](041-routing-observability/spec.md) | 041-01 — tbd | DRAFT | External-review brief 05. Extend `jig-telemetry.sh` to UserPromptSubmit + `workflow.py routing-stats`. Closes 2 refinement-todo entries. |
 | [042-spec-gate-model](042-spec-gate-model/spec.md) | 042-01 — tbd | DRAFT | External-review brief 08. ADR-first (speed-bump vs file-marker vs two-step). Env-var gate verified bypassable via Bash. |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-01 — quality-test-coverage | **DONE** |  |
-| [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 🔬 043-02 — threshold-calibration (spike) | READY_FOR_REVIEW |  |
+| [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 🔬 043-02 — threshold-calibration (spike) | **DONE** |  |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-03 — polyglot-extension | READY_FOR_REVIEW |  |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-04 — review-prompt-injection | READY_FOR_REVIEW |  |
 
