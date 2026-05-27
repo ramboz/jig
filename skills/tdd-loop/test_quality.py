@@ -442,6 +442,87 @@ class ParametrizeWalkerTests(unittest.TestCase):
         self.assertLessEqual(cases, 200)
 
 
+# -------------------- AC2 (043-03): direct count_each_cases edge cases --------------------
+
+
+class EachWalkerTests(unittest.TestCase):
+    """Direct walker coverage for count_each_cases, mirroring
+    ParametrizeWalkerTests. The polyglot subprocess tests above exercise
+    the happy paths; these pin the four edge cases that the parametrize
+    walker also gets — trailing comma, nested arrays, string-with-comma,
+    80-line lookahead — plus a regression guard for `.each(` appearing
+    inside a string literal in the test name."""
+
+    def setUp(self):
+        self.mod = _load_quality()
+
+    def _count_from_lines(self, source_lines):
+        """Given a list of source lines (no leading +), build the
+        added-lines list the walker expects and call it. The `.each` call
+        is at index 0."""
+        added = ["+" + line for line in source_lines]
+        return self.mod.count_each_cases(added, 0)
+
+    def test_trailing_comma_after_last_case(self):
+        # Trailing comma after last array should NOT inflate the count.
+        lines = [
+            "it.each([",
+            "    [1, 2],",
+            "    [3, 4],",
+            "    [5, 6],",
+            "])(\"pair\", (a, b) => {",
+            "    expect(a + b).toBeGreaterThan(0);",
+            "});",
+        ]
+        self.assertEqual(self._count_from_lines(lines), 3)
+
+    def test_nested_arrays(self):
+        # Nested arrays — inner commas at depth > 1 must not count.
+        lines = [
+            "it.each([",
+            "    [1, [2, 3]],",
+            "    [4, [5, 6]],",
+            "])(\"row\", (a, b) => { expect(a).toBeDefined(); });",
+        ]
+        self.assertEqual(self._count_from_lines(lines), 2)
+
+    def test_string_literal_with_comma(self):
+        # Comma inside a string literal must not count as a separator.
+        lines = [
+            "it.each([",
+            '    ["a,b", 1],',
+            '    ["c", 2],',
+            "])(\"s,n\", (s, n) => { expect(s).toBeDefined(); });",
+        ]
+        self.assertEqual(self._count_from_lines(lines), 2)
+
+    def test_eighty_line_lookahead_boundary(self):
+        # An each-table longer than the 80-line lookahead window should
+        # not crash — the walker returns a sensible value (>= 1). Mirrors
+        # the parametrize walker's eighty-line test.
+        lines = ["it.each(["]
+        for i in range(200):
+            lines.append(f"    [{i}],")
+        lines.append("])(\"x\", (x) => { expect(x).toBeDefined(); });")
+        cases = self._count_from_lines(lines)
+        self.assertGreater(cases, 1)
+        self.assertLessEqual(cases, 200)
+
+    def test_string_literal_containing_dot_each_does_not_misanchor(self):
+        # Regression guard for `.find(".each(")` in count_each_cases. The
+        # structural `.each(` precedes any string-literal `.each(` in the
+        # joined line, so `find` should anchor on the structural form. A
+        # future refactor that uses `rfind` or shifts the anchor logic
+        # would surface here.
+        lines = [
+            'it.each([',
+            '    ["uses .each(arr)", 1],',
+            '    ["plain", 2],',
+            '])(\"name=%s n=%s\", (name, n) => { expect(name).toBeDefined(); });',
+        ]
+        self.assertEqual(self._count_from_lines(lines), 2)
+
+
 # -------------------- AC4: pytest.raises as assertions --------------------
 
 
@@ -730,6 +811,413 @@ class AgainstRefTests(unittest.TestCase):
             self.assertEqual(against_result.stdout, diff_file_result.stdout)
             self.assertIn("applicable: true", against_result.stdout)
             self.assertIn("new-it-blocks: 1", against_result.stdout)
+
+
+# -------------------- Slice 043-03: polyglot (JS/TS) tests --------------------
+
+
+class PolyglotPathClassifierTests(unittest.TestCase):
+    """AC1: path classifier recognizes JS/TS test conventions and source."""
+
+    def setUp(self):
+        self.mod = _load_quality()
+
+    def test_dot_test_ts(self):
+        self.assertEqual(self.mod.classify_path("src/foo.test.ts"), "test")
+
+    def test_dot_test_tsx(self):
+        self.assertEqual(self.mod.classify_path("src/foo.test.tsx"), "test")
+
+    def test_dot_spec_js(self):
+        self.assertEqual(self.mod.classify_path("src/foo.spec.js"), "test")
+
+    def test_dot_spec_jsx(self):
+        self.assertEqual(self.mod.classify_path("src/foo.spec.jsx"), "test")
+
+    def test_dot_test_mjs(self):
+        self.assertEqual(self.mod.classify_path("src/foo.test.mjs"), "test")
+
+    def test_under_double_underscore_tests_dir(self):
+        self.assertEqual(self.mod.classify_path("src/__tests__/foo.ts"), "test")
+
+    def test_plain_ts_source(self):
+        self.assertEqual(self.mod.classify_path("src/feature.ts"), "code")
+
+    def test_plain_tsx_source(self):
+        self.assertEqual(self.mod.classify_path("src/component.tsx"), "code")
+
+    def test_plain_js_source(self):
+        self.assertEqual(self.mod.classify_path("src/feature.js"), "code")
+
+    def test_plain_mjs_source(self):
+        self.assertEqual(self.mod.classify_path("src/feature.mjs"), "code")
+
+    def test_python_paths_still_work(self):
+        # AC6 regression guard: existing Python path rules unchanged.
+        self.assertEqual(self.mod.classify_path("tests/test_foo.py"), "test")
+        self.assertEqual(self.mod.classify_path("pkg/foo.py"), "code")
+
+
+class PolyglotTestBlockCountingTests(unittest.TestCase):
+    """AC2: it()/test()/describe() count toward new-it-blocks; .each
+    table-array expands like @parametrize."""
+
+    def test_counts_it_block(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,4 @@
++it("alpha", () => {
++    expect(1).toBe(1);
++});
++
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("applicable: true", result.stdout)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+
+    def test_counts_test_block(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,3 @@
++test("alpha", () => {
++    expect(1).toBe(1);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+
+    def test_counts_describe_block(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,2 @@
++describe("group", () => {
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+
+    def test_counts_skip_modifier(self):
+        # A skipped test is still authored — counts as 1.
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,3 @@
++test.skip("alpha", () => {
++    expect(1).toBe(1);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+
+    def test_counts_only_modifier(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,3 @@
++it.only("alpha", () => {
++    expect(1).toBe(1);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+
+    def test_counts_each_array_form(self):
+        # it.each([[1,2],[3,4]]) — two cases, expands to 2.
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,4 @@
++it.each([[1, 2], [3, 4]])("pair %s,%s", (a, b) => {
++    expect(a + 1).toBe(b);
++});
++
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-it-blocks: 2", result.stdout)
+
+    def test_counts_each_array_form_multiline(self):
+        # it.each over multiple lines like @parametrize.
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,7 @@
++it.each([
++    [1, 2],
++    [3, 4],
++    [5, 6],
++])("pair", (a, b) => {
++    expect(a + 1).toBe(b);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-it-blocks: 3", result.stdout)
+
+
+class PolyglotAssertionTests(unittest.TestCase):
+    """AC3: expect(), assert.X(), chai.expect() count; plain assert() does not."""
+
+    def test_counts_expect_call(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,4 @@
++it("alpha", () => {
++    expect(1).toBe(1);
++    expect(2).toBe(2);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-assertions: 2", result.stdout)
+
+    def test_counts_node_assert_methods(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,4 @@
++it("alpha", () => {
++    assert.equal(1, 1);
++    assert.deepEqual({a: 1}, {a: 1});
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-assertions: 2", result.stdout)
+
+    def test_counts_chai_expect(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,3 @@
++it("alpha", () => {
++    chai.expect(1).to.equal(1);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-assertions: 1", result.stdout)
+
+    def test_plain_assert_call_does_not_count(self):
+        # AC3 explicitly: plain `assert(...)` is a runtime guard, NOT a test
+        # assertion. Only `assert.X(` counts.
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,3 @@
++it("alpha", () => {
++    assert(x !== null);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-assertions: 0", result.stdout)
+
+
+class PolyglotMockTests(unittest.TestCase):
+    """AC4: vi.* / jest.* mock vocabulary increments new-mocks."""
+
+    def test_counts_vi_mock_and_fn(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,5 @@
++it("alpha", () => {
++    vi.mock("./module");
++    const fn = vi.fn();
++    expect(fn).toBeDefined();
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-mocks: 2", result.stdout)
+
+    def test_counts_vi_spyOn_and_stubGlobal(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,4 @@
++it("alpha", () => {
++    vi.spyOn(obj, "method");
++    vi.stubGlobal("fetch", vi.fn());
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # vi.spyOn, vi.stubGlobal, vi.fn = 3 mocks
+        self.assertIn("new-mocks: 3", result.stdout)
+
+    def test_counts_jest_mock_and_fn_and_spyOn_and_doMock(self):
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,6 @@
++it("alpha", () => {
++    jest.mock("./m");
++    const f = jest.fn();
++    jest.spyOn(o, "x");
++    jest.doMock("./n");
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-mocks: 4", result.stdout)
+
+    def test_mock_in_assignment_anywhere_on_line(self):
+        # Mirror the Python anywhere-on-line shape: assignments count.
+        diff = """\
+diff --git a/src/foo.test.ts b/src/foo.test.ts
+index 0000..1111 100644
+--- a/src/foo.test.ts
++++ b/src/foo.test.ts
+@@ -0,0 +1,3 @@
++const fakeApi = vi.fn();
++const spy = jest.spyOn(obj, "method");
++
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("new-mocks: 2", result.stdout)
+
+
+class PolyglotApplicabilityTests(unittest.TestCase):
+    """AC5: a TS source + TS test diff is now applicable (was not before)."""
+
+    def test_ts_source_plus_ts_test_is_applicable(self):
+        diff = """\
+diff --git a/src/feature.ts b/src/feature.ts
+index 0000..1111 100644
+--- a/src/feature.ts
++++ b/src/feature.ts
+@@ -0,0 +1,3 @@
++export function add(a: number, b: number): number {
++    return a + b;
++}
+diff --git a/src/feature.test.ts b/src/feature.test.ts
+index 0000..1111 100644
+--- a/src/feature.test.ts
++++ b/src/feature.test.ts
+@@ -0,0 +1,4 @@
++import {add} from "./feature";
++it("adds", () => {
++    expect(add(1, 2)).toBe(3);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("applicable: true", result.stdout)
+        self.assertIn("new-test-files: 1", result.stdout)
+        self.assertIn("new-code-files: 1", result.stdout)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+
+
+class PolyglotMixedLanguageTests(unittest.TestCase):
+    """AC7: a mixed Python + TS diff exercises both classifier branches."""
+
+    def test_mixed_python_and_ts_diff(self):
+        diff = """\
+diff --git a/pkg/mod.py b/pkg/mod.py
+index 0000..1111 100644
+--- a/pkg/mod.py
++++ b/pkg/mod.py
+@@ -0,0 +1,2 @@
++def add(a, b):
++    return a + b
+diff --git a/src/feature.ts b/src/feature.ts
+index 0000..1111 100644
+--- a/src/feature.ts
++++ b/src/feature.ts
+@@ -0,0 +1,3 @@
++export function add(a: number, b: number): number {
++    return a + b;
++}
+diff --git a/tests/test_mod.py b/tests/test_mod.py
+index 0000..1111 100644
+--- a/tests/test_mod.py
++++ b/tests/test_mod.py
+@@ -0,0 +1,2 @@
++def test_add():
++    assert True
+diff --git a/src/feature.test.ts b/src/feature.test.ts
+index 0000..1111 100644
+--- a/src/feature.test.ts
++++ b/src/feature.test.ts
+@@ -0,0 +1,3 @@
++it("adds", () => {
++    expect(1).toBe(1);
++});
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("applicable: true", result.stdout)
+        # 2 test files (Python + TS), 2 code files (Python + TS).
+        self.assertIn("new-test-files: 2", result.stdout)
+        self.assertIn("new-code-files: 2", result.stdout)
+        # 2 it-blocks: one Python def test_add + one it("adds").
+        self.assertIn("new-it-blocks: 2", result.stdout)
+        # 2 assertions: assert + expect.
+        self.assertIn("new-assertions: 2", result.stdout)
+
+
+class PolyglotPythonRegressionTests(unittest.TestCase):
+    """AC6 smoke: a representative Python-only diff still snapshots
+    correctly (full regression coverage comes from re-running the
+    pre-existing 35 tests)."""
+
+    def test_python_only_diff_unchanged(self):
+        diff = """\
+diff --git a/tests/test_foo.py b/tests/test_foo.py
+index 0000..1111 100644
+--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -0,0 +1,4 @@
++def test_alpha():
++    m = MagicMock()
++    assert True
+"""
+        result = run_quality_with_diff(diff)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("applicable: true", result.stdout)
+        self.assertIn("new-it-blocks: 1", result.stdout)
+        self.assertIn("new-assertions: 1", result.stdout)
+        self.assertIn("new-mocks: 1", result.stdout)
 
 
 if __name__ == "__main__":

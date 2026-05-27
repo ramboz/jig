@@ -36,9 +36,9 @@ SCHEMA_VERSION = 1
 # (100) and mock-heavy (5.0) saw no fires in the sample but are kept
 # as cross-language backstops.
 #
-# NB: the sample was Python-only. JS/TS and Java diffs may have
-# different natural distributions; slice 043-03 (polyglot extension)
-# should re-calibrate before relying on these values cross-language.
+# NB: the sample was Python-only. JS/TS recognition landed in slice
+# 043-03; cross-language threshold calibration with real adopter data
+# is deferred — see the entry in `docs/refinement-todo.md`.
 THR_PER_FILE_FLOOD_MAX = 100
 THR_PER_CODE_FILE_FLOOD = 50
 THR_ASSERTION_THIN = 1.0
@@ -46,17 +46,26 @@ THR_ASSERTION_THIN_MIN_TESTS = 20
 THR_MOCK_HEAVY = 5.0
 THR_MOCK_HEAVY_MIN_TESTS = 10
 
-# Path classification — Python-flavoured.
+# Path classification — Python + JS/TS (slice 043-03 polyglot extension).
+# JS/TS additions:
+#   - `*.test.{js,jsx,ts,tsx,mjs}` and `*.spec.{js,jsx,ts,tsx,mjs}`
+#   - any path under `__tests__/` (jest convention) or `tests/` (already
+#     covered by the Python rule but it's a JS convention too)
+#   - `*.{js,jsx,ts,tsx,mjs}` as code (mirrors the `.py` rule)
 TEST_PATH_REGEX = re.compile(
     r"(^|/)(test|tests)/|"
     r"(^|/)test_[^/]+\.py$|"
-    r"(^|/)[^/]+_test\.py$"
+    r"(^|/)[^/]+_test\.py$|"
+    r"(^|/)__tests__/|"
+    r"\.(test|spec)\.(js|jsx|ts|tsx|mjs)$"
 )
 DOCS_PATH_REGEX = re.compile(r"\.md$|^docs/")
-# A code path classified as Python source — used as the denominator for
-# test-to-code-ratio. Non-Python source ends up as `other` for now (the
-# ratio is meaningful only when both sides are the same language).
-CODE_PATH_REGEX = re.compile(r"\.py$")
+# A code path classified as Python or JS/TS source — used as the
+# denominator for test-to-code-ratio. The ratio is most meaningful when
+# both sides are the same language; the JS/TS extension keeps the test
+# files and code files in the same currency so the ratio computes on
+# vitest/jest projects too.
+CODE_PATH_REGEX = re.compile(r"\.py$|\.(js|jsx|ts|tsx|mjs)$")
 
 # Line-level regexes. All run only against `+` (added) or `-` (removed)
 # lines of the unified diff. Each is anchored with `^[+-]\s*` so
@@ -70,6 +79,24 @@ TEST_BLOCK_REMOVED = re.compile(
 PARAMETRIZE_ADDED = re.compile(
     r"^\+\s*@(pytest\.mark\.)?parametrize\s*\("
 )
+# JS/TS test-block patterns (slice 043-03). Matches `it(`, `test(`, and
+# `describe(` with optional `.skip` / `.only` / `.each` modifiers. The
+# `.each` form is handled specially (expand to one block per case via
+# count_each_cases) — but the match below counts it as 1 by default; the
+# expansion happens at the call site.
+JS_TEST_BLOCK_ADDED = re.compile(
+    r"^\+\s*(it|test|describe)(\.(skip|only|each))?\s*[\(`]"
+)
+JS_TEST_BLOCK_REMOVED = re.compile(
+    r"^-\s*(it|test|describe)(\.(skip|only|each))?\s*[\(`]"
+)
+# `.each` modifier specifically — used at the call site to decide whether
+# to expand to multiple cases (array form) or fall back to 1
+# (template-literal form, treated as one block in this slice; a future
+# refinement may grow a template-literal counter).
+JS_EACH_ADDED = re.compile(
+    r"^\+\s*(it|test|describe)\.each\s*\("
+)
 # pytest assertion vocabulary. Plain `assert` is the dominant one but
 # unittest-style `self.assertX(` also counts when test classes are used.
 ASSERTION_PATTERNS = [
@@ -77,6 +104,19 @@ ASSERTION_PATTERNS = [
     re.compile(r"^\+\s*self\.assert\w+\s*\("),
     re.compile(r"^\+\s*pytest\.raises\s*\("),
     re.compile(r"^\+\s*with\s+pytest\.raises\s*\("),
+]
+# JS/TS assertion vocabulary (slice 043-03).
+# `expect(` covers vitest/jest. `assert.X(` covers Node's `assert`
+# module — `assert.equal`, `assert.deepEqual`, etc. The plain
+# `assert(...)` form is DELIBERATELY EXCLUDED per AC3 — application code
+# uses `assert` as a runtime guard, and false-positives outweigh the
+# rare `assert(cond)`-style test idiom. Applied only to JS/TS test files
+# (kept separate from ASSERTION_PATTERNS so the Python `assert(` form
+# still counts in `.py` files — AC6 regression guard).
+JS_ASSERTION_PATTERNS = [
+    re.compile(r"^\+\s*expect\s*\("),
+    re.compile(r"^\+\s*assert\.\w+\s*\("),
+    re.compile(r"^\+\s*chai\.expect\s*\("),
 ]
 # Mock/patch vocabulary — both unittest.mock and pytest's monkeypatch.
 # Note: unlike the assertion patterns (which expect the assertion at the
@@ -94,6 +134,18 @@ MOCK_PATTERN = re.compile(
     r"monkeypatch\.\w+|"
     r"mocker\.\w+)\s*\("
 )
+# JS/TS mock vocabulary (slice 043-03). vitest (`vi.*`) + jest (`jest.*`).
+# Anywhere-on-line shape like the Python MOCK_PATTERN — mocks live in
+# assignments (`const m = vi.fn()`), top-level setup, and inline calls.
+# Unlike Python (where assignments rarely chain multiple mock calls on
+# one line), JS idioms like `vi.stubGlobal("fetch", vi.fn())` chain two
+# mock calls in one expression. The pattern is anchor-free so `findall`
+# returns every invocation on a line; the caller pre-strips the leading
+# `+` from added-diff lines before applying.
+JS_MOCK_PATTERN = re.compile(
+    r"\b(vi\.(mock|fn|spyOn|stubGlobal|doMock)|"
+    r"jest\.(mock|fn|spyOn|doMock))\s*\("
+)
 
 
 def classify_path(path: str) -> str:
@@ -105,6 +157,21 @@ def classify_path(path: str) -> str:
     if CODE_PATH_REGEX.search(path):
         return "code"
     return "other"
+
+
+def classify_language(path: str) -> str:
+    """Return 'py' for Python paths, 'js' for JS/TS paths, '' otherwise.
+
+    Used to gate language-specific patterns per file so the Python and
+    JS/TS rules don't cross-contaminate (slice 043-03 AC6 regression
+    guard: Python `assert(x)` should still count in `.py` files even
+    though JS/TS rules deliberately exclude plain `assert(...)`).
+    """
+    if path.endswith(".py"):
+        return "py"
+    if re.search(r"\.(js|jsx|ts|tsx|mjs)$", path):
+        return "js"
+    return ""
 
 
 def parse_diff(diff_text: str):
@@ -263,6 +330,94 @@ def count_parametrize_cases(added_lines, start_idx) -> int:
     return max(cases, 1)
 
 
+def count_each_cases(added_lines, start_idx) -> int:
+    r"""Count top-level entries passed to `it.each(...)` / `test.each(...)`.
+
+    Mirrors `count_parametrize_cases` but the structure is simpler:
+    `it.each([[1,2],[3,4]])` — the first argument IS the array, so we
+    scan from after the opening `(` directly to the first `[` and count
+    depth-1 commas inside it. Falls back to 1 on parse failure (e.g. a
+    template-literal-tagged form `it.each\`a|b\n1|2\``, which is parsed
+    as a single block — see refinement-todo).
+
+    Limitation: as with the parametrize walker, the scan is bounded at
+    80 lines of look-ahead and is not comment-aware. The walker IS
+    quote-aware (single/double/backtick strings with backslash escapes).
+    """
+    joined = added_lines[start_idx][1:]  # strip leading '+'
+    look_ahead = 80
+    end = min(start_idx + 1 + look_ahead, len(added_lines))
+    for j in range(start_idx + 1, end):
+        joined += "\n" + added_lines[j][1:]
+        if added_lines[j].rstrip().endswith(")") or added_lines[j].rstrip().endswith(");"):
+            break
+
+    # Find the opening `(` of `.each(`.
+    paren_idx = joined.find(".each(")
+    if paren_idx < 0:
+        return 1
+    cursor = paren_idx + len(".each(")
+
+    # Skip whitespace, then expect `[`. If we hit a backtick first, this
+    # is the template-literal form — fall back to 1.
+    while cursor < len(joined) and joined[cursor] in (" ", "\t", "\n"):
+        cursor += 1
+    if cursor >= len(joined):
+        return 1
+    if joined[cursor] != "[":
+        # template-literal form (`) or unexpected — treat as single block.
+        return 1
+
+    # Now walk the array, counting depth-1 commas.
+    depth = 0
+    cases = 0
+    in_outer = False
+    last_comma_was_trailing = False
+    in_string = False
+    string_char = ""
+    escape = False
+    while cursor < len(joined):
+        ch = joined[cursor]
+        cursor += 1
+        if escape:
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == string_char:
+                in_string = False
+                string_char = ""
+            continue
+        if ch in ('"', "'", "`"):
+            in_string = True
+            string_char = ch
+            last_comma_was_trailing = False
+            continue
+        if ch in (" ", "\t", "\n"):
+            continue
+        if ch in ("[", "(", "{"):
+            depth += 1
+            if depth == 1 and not in_outer:
+                in_outer = True
+                cases = 1
+            last_comma_was_trailing = False
+        elif ch in ("]", ")", "}"):
+            depth -= 1
+            if depth == 0 and in_outer:
+                if last_comma_was_trailing:
+                    cases -= 1
+                return max(cases, 1)
+            last_comma_was_trailing = False
+        elif ch == "," and in_outer and depth == 1:
+            cases += 1
+            last_comma_was_trailing = True
+        else:
+            last_comma_was_trailing = False
+    return max(cases, 1)
+
+
 def compute_metrics(files):
     test_files = [f for f in files if f["kind"] == "test"]
     code_files = [f for f in files if f["kind"] == "code"]
@@ -280,8 +435,9 @@ def compute_metrics(files):
     for f in test_files:
         file_count = 0
         added = f["added"]
+        lang = classify_language(f["path"])
         for idx, line in enumerate(added):
-            if TEST_BLOCK_ADDED.search(line):
+            if lang == "py" and TEST_BLOCK_ADDED.search(line):
                 # A test function decorated with @parametrize counts once
                 # per case rather than once per def. Look-back is bounded
                 # by `look_back` since the decorator may live a few lines
@@ -293,14 +449,38 @@ def compute_metrics(files):
                         cases = count_parametrize_cases(added, back)
                         break
                 file_count += cases
-            for pat in ASSERTION_PATTERNS:
-                if pat.search(line):
-                    new_assertions += 1
-                    break
-            if MOCK_PATTERN.search(line):
-                new_mocks += 1
+            elif lang == "js" and JS_TEST_BLOCK_ADDED.search(line):
+                # JS/TS test block. `.each` with a literal array argument
+                # expands to one block per case (mirrors @parametrize);
+                # the template-literal tagged form `it.each\`...\`` falls
+                # back to 1 — see count_each_cases + refinement-todo.
+                if JS_EACH_ADDED.search(line):
+                    cases = count_each_cases(added, idx)
+                else:
+                    cases = 1
+                file_count += cases
+            if lang == "py":
+                for pat in ASSERTION_PATTERNS:
+                    if pat.search(line):
+                        new_assertions += 1
+                        break
+                if MOCK_PATTERN.search(line):
+                    new_mocks += 1
+            elif lang == "js":
+                for pat in JS_ASSERTION_PATTERNS:
+                    if pat.search(line):
+                        new_assertions += 1
+                        break
+                # findall counts each mock invocation on the line — JS
+                # idioms like `vi.stubGlobal("fetch", vi.fn())` chain two
+                # calls in one expression. Strip the leading `+` first
+                # so the anchor-free JS_MOCK_PATTERN scans the content.
+                if line.startswith("+"):
+                    new_mocks += len(JS_MOCK_PATTERN.findall(line[1:]))
         for line in f["removed"]:
-            if TEST_BLOCK_REMOVED.search(line):
+            if lang == "py" and TEST_BLOCK_REMOVED.search(line):
+                removed_test_blocks += 1
+            elif lang == "js" and JS_TEST_BLOCK_REMOVED.search(line):
                 removed_test_blocks += 1
         new_test_blocks += file_count
         if file_count > max_per_file:

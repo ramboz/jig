@@ -1,9 +1,10 @@
 {
-  "spec": "docs/specs/043-test-quality-wiring/slice-02-threshold-calibration.md",
-  "slice": "043-02",
+  "spec": "docs/specs/043-test-quality-wiring/slice-03-polyglot-extension.md",
+  "slice": "043-03",
   "files": [
     "skills/tdd-loop/quality.py",
     "skills/tdd-loop/test_quality.py",
-    "docs/specs/043-test-quality-wiring/slice-02-threshold-calibration.md"
+    "docs/refinement-todo.md",
+    "docs/specs/043-test-quality-wiring/slice-03-polyglot-extension.md"
   ]
 }
