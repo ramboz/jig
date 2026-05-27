@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.8.0](https://github.com/ramboz/jig/compare/v1.7.0...v1.8.0) (2026-05-27)
+
+
+### Features
+
+* **_common:** add atomic_write_text helper + sweep 16 callsites (032-01) ([1f2253b](https://github.com/ramboz/jig/commit/1f2253b0aa36388b8ed0a62074672f241b8e5acd))
+* **independent-review:** spec 043-04 — wire quality.py into review prompt ([38c0cbb](https://github.com/ramboz/jig/commit/38c0cbba6270126bfe63303b94bca1f9b8d90b4c))
+* **scaffold-init:** spec 035-01 — exclude fixtures from installs ([7622869](https://github.com/ramboz/jig/commit/7622869e3247ead9ca2f4a44bc5a3999cfb97b06))
+* **scaffold:** scaffold.json is the completion sentinel (032-02) ([d1dd9ec](https://github.com/ramboz/jig/commit/d1dd9ec4841c169b656195727ffb94c1f5793ea3))
+* **tdd-loop:** spec 043-02 — calibrate quality.py thresholds ([14c03a8](https://github.com/ramboz/jig/commit/14c03a862b905fe54ae7d31ed6bce3be617a6839))
+* **tdd-loop:** spec 043-03 — polyglot extension (vitest + jest) ([8c6084a](https://github.com/ramboz/jig/commit/8c6084aadae33098d95d5f6c23905211ecec9620))
+
+
+### Bug Fixes
+
+* **scaffold:** copy skills/_common/ in scaffold-mode so helpers import at runtime ([7c2fd23](https://github.com/ramboz/jig/commit/7c2fd233c6a7f9327e251c1c9879e41a80506a64))
+* **scripts:** require Python 3.10+ explicitly ([896e8bf](https://github.com/ramboz/jig/commit/896e8bfd60caadab30905dd47906b44b8a49f680))
+* support Python 3.9 via __future__.annotations ([bb93747](https://github.com/ramboz/jig/commit/bb93747c3d0a990cf00c0e2f2881118f32cb0da6))
+
+
+### Documentation
+
+* **specs:** add rtk integration spike ([afb0050](https://github.com/ramboz/jig/commit/afb0050f7dfcc6fe1be277b253869005076dc5c6))
+* **specs:** draft 032-atomic-writes — atomic_write_text helper + scaffold marker ([6310cc6](https://github.com/ramboz/jig/commit/6310cc6e559d32762506a81055fcc8a59ee5d927))
+* **specs:** draft 034-federation-tier — Tier 2 federation skills ([aedd537](https://github.com/ramboz/jig/commit/aedd5376162bf039f7f2b25372de85f21669edd0))
+* **specs:** draft 035-042 — external-review cluster bodies ([2bed474](https://github.com/ramboz/jig/commit/2bed474745e655c7f26bf77863e617421d0e4f00))
+* **specs:** draft 043-test-quality-wiring — wire quality.py preflight ([8cbe6ca](https://github.com/ramboz/jig/commit/8cbe6ca6b43c77a1341f9fd07091dd9c574db2f8))
+* **specs:** draft host adapter portability ([e09fbb1](https://github.com/ramboz/jig/commit/e09fbb1140f40b20c0070956e4c667df8ba0292e))
+* **specs:** reserve 032-atomic-writes ([a33c4ed](https://github.com/ramboz/jig/commit/a33c4ed83e6cebea97c76c11eaad940b445342c7))
+* **specs:** reserve 035-fixture-exclusion ([ef2a24b](https://github.com/ramboz/jig/commit/ef2a24b11354927cde3b47fe7c8807e0ecc2c0e8))
+* **specs:** reserve 036-closed-spec-drift ([58af583](https://github.com/ramboz/jig/commit/58af5832fa46bc39b077dad72090906fa3bb832c))
+* **specs:** reserve 037-git-origin-safety ([204757c](https://github.com/ramboz/jig/commit/204757caeb892cfc0ce21ca5d06fbc8d9b26a5d2))
+* **specs:** reserve 038-tier-reconciliation ([5631b67](https://github.com/ramboz/jig/commit/5631b6767895c47cdcde28ff7caab50270d9f07e))
+* **specs:** reserve 039-review-queue-cleanup ([4ee9320](https://github.com/ramboz/jig/commit/4ee9320cead513f36d07f0d94af7e57f875701b0))
+* **specs:** reserve 040-isolation-honesty ([eff30d8](https://github.com/ramboz/jig/commit/eff30d89cd1778f7cfb5d428df9e3a3ccc55925f))
+* **specs:** reserve 041-routing-observability ([4501f7a](https://github.com/ramboz/jig/commit/4501f7abb12541f87912a9004f99f729ffb0c6e4))
+* **specs:** reserve 042-spec-gate-model ([e3e8e3c](https://github.com/ramboz/jig/commit/e3e8e3c2eb87f6058d6111eb4e1c619e86b5e1ed))
+* **specs:** reshape 043 per clarify pass + transition to READY_FOR_REVIEW ([eda7b87](https://github.com/ramboz/jig/commit/eda7b87e624a700f1190b0d8b5f377309ca02638))
+* **specs:** status-board regen + Notes for 035-042 cluster ([6a603b9](https://github.com/ramboz/jig/commit/6a603b942e599dc9ce4929ad37debf5c69bcfd8b))
+
 ## [1.7.0](https://github.com/ramboz/jig/compare/v1.6.0...v1.7.0) (2026-05-20)
 
 
