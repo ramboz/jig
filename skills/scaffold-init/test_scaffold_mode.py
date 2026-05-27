@@ -173,13 +173,72 @@ class WithMachineryTests(unittest.TestCase):
 
     # ----- AC #8 (d) --------------------------------------------------------
     def test_d_test_files_excluded_from_copy(self):
-        """AC #8 (d) — test_*.py files are NOT in .claude/skills/jig-<name>/."""
+        """AC #8 (d) — test_*.py files are NOT in .claude/skills/jig-<name>/,
+        with one exception: spec 043-04 retains
+        `skills/tdd-loop/test_quality.py` (and `test_quality.py` only) so
+        a scaffolded project's review.py can exercise the quality.py
+        snapshot helper end-to-end. See `_RETAINED_TEST_FILES` in
+        scaffold.py."""
         copied_skills = (self.target / ".claude" / "skills").iterdir()
         for d in copied_skills:
             if not d.is_dir():
                 continue
             for entry in d.rglob("test_*.py"):
+                # Allowlist: tdd-loop's test_quality.py is the test
+                # surface for the quality.py snapshot helper that
+                # review.py shells out to. Spec 043-04 AC #7.
+                if (
+                    d.name == "jig-tdd-loop"
+                    and entry.name == "test_quality.py"
+                ):
+                    continue
                 self.fail(f"test file was copied (must be excluded): {entry}")
+
+    # ----- Spec 043-04 AC #7: tdd-loop's quality.py + test_quality.py ------
+    def test_tdd_loop_quality_py_copied(self):
+        """Spec 043-04 AC #7: a fresh scaffold-init has
+        `skills/tdd-loop/quality.py` reachable so review.py's snapshot
+        helper can shell out to it."""
+        qpath = (
+            self.target / ".claude" / "skills"
+            / "jig-tdd-loop" / "quality.py"
+        )
+        self.assertTrue(
+            qpath.is_file(),
+            f"scaffolded project missing quality.py: {qpath}",
+        )
+        # And it should be byte-identical to the source (helper .py copied
+        # verbatim — no substitution).
+        source = (REPO_ROOT / "skills" / "tdd-loop" / "quality.py").read_bytes()
+        self.assertEqual(qpath.read_bytes(), source)
+
+    def test_tdd_loop_test_quality_py_copied(self):
+        """Spec 043-04 AC #7: scaffolded project also carries
+        `test_quality.py` so the snapshot wiring is testable end-to-end
+        in adopter projects (an exception to the general
+        `test_*.py`-excluded rule — see `_RETAINED_TEST_FILES` in
+        scaffold.py)."""
+        tqpath = (
+            self.target / ".claude" / "skills"
+            / "jig-tdd-loop" / "test_quality.py"
+        )
+        self.assertTrue(
+            tqpath.is_file(),
+            f"scaffolded project missing test_quality.py: {tqpath}",
+        )
+        source = (REPO_ROOT / "skills" / "tdd-loop" / "test_quality.py").read_bytes()
+        self.assertEqual(tqpath.read_bytes(), source)
+
+    def test_tdd_loop_other_test_files_still_excluded(self):
+        """Spec 043-04 AC #7: the allow-list is narrow — `test_tdd.py`
+        (the OTHER test file in tdd-loop) must still be excluded."""
+        td = self.target / ".claude" / "skills" / "jig-tdd-loop"
+        self.assertTrue(td.is_dir())
+        self.assertFalse(
+            (td / "test_tdd.py").exists(),
+            "test_tdd.py must remain excluded — only test_quality.py "
+            "is retained per the spec 043-04 allow-list",
+        )
 
     # ----- AC #8 (e) --------------------------------------------------------
     def test_e_agent_file_copied_with_jig_prefix(self):

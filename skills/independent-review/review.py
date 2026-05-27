@@ -47,7 +47,9 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -272,6 +274,125 @@ def _practices_check_block() -> str:
   Tag findings with confidence (High / Medium); suppress Low."""
 
 
+# -------- Test-quality snapshot (slice 043-04) --------
+
+
+# Default base branch for the merge-base computation. Hardcoded to `main`
+# because it's jig's convention and the snapshot is best-effort — a
+# project on a different default branch falls back to the graceful
+# `_Test-quality snapshot unavailable: ..._` line.
+_TEST_QUALITY_BASE_BRANCH = "main"
+
+
+def _test_quality_snapshot_block(spec_path: Path) -> str:
+    """Compute the deterministic test-quality snapshot for the current
+    slice and return a markdown block to embed in the implementation
+    prompt (slice 043-04).
+
+    Mechanics:
+      1. Resolve the project root via `_find_project_root(spec_path)`. If
+         the spec doesn't live in a project (no `docs/architecture.md`
+         ancestor), fall back to `spec_path.parent`.
+      2. Compute `git merge-base main HEAD` from the project root.
+      3. `git diff <merge-base>...HEAD` → write to a tempfile.
+      4. Invoke `quality.py --diff-file <tmp>` and embed the stdout in a
+         markdown fenced YAML block.
+
+    Failure modes (all collapse to a single-line `_Test-quality snapshot
+    unavailable: <reason>._`):
+      - merge-base not found (detached HEAD, no `main` ref, git absent)
+      - empty diff (slice happens to touch nothing diffable)
+      - quality.py exited non-zero
+      - quality.py emitted `applicable: false`
+
+    The block ends with the cite-or-stay-silent sentences (AC #2) so a
+    reviewer reads them in context with the YAML."""
+    try:
+        project_root = _find_project_root(spec_path)
+        if project_root is None:
+            # Best-effort: a spec without `docs/architecture.md` may still
+            # live inside a git repo. Use the spec's parent as the cwd.
+            spec_resolved = Path(spec_path).resolve()
+            cwd = spec_resolved.parent if spec_resolved.parent.exists() else None
+            if cwd is None:
+                return _test_quality_unavailable("merge-base not found")
+        else:
+            cwd = project_root
+
+        # 1. merge-base main HEAD
+        mb = subprocess.run(
+            ["git", "merge-base", _TEST_QUALITY_BASE_BRANCH, "HEAD"],
+            cwd=str(cwd), capture_output=True, text=True, check=False,
+        )
+        if mb.returncode != 0 or not mb.stdout.strip():
+            return _test_quality_unavailable("merge-base not found")
+        merge_base = mb.stdout.strip()
+
+        # 2. diff <merge-base>...HEAD
+        diff = subprocess.run(
+            ["git", "diff", f"{merge_base}...HEAD"],
+            cwd=str(cwd), capture_output=True, text=True, check=False,
+        )
+        if diff.returncode != 0:
+            return _test_quality_unavailable("git diff failed")
+        diff_text = diff.stdout
+        if not diff_text.strip():
+            return _test_quality_unavailable("empty diff")
+
+        # 3. write to tempfile, invoke quality.py
+        quality_py = Path(__file__).resolve().parent.parent / "tdd-loop" / "quality.py"
+        if not quality_py.is_file():
+            return _test_quality_unavailable("quality.py not found")
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".diff", delete=False, encoding="utf-8",
+        ) as tmp:
+            tmp.write(diff_text)
+            tmp_path = tmp.name
+        try:
+            qres = subprocess.run(
+                [sys.executable, str(quality_py), "--diff-file", tmp_path],
+                capture_output=True, text=True, check=False,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        if qres.returncode != 0:
+            return _test_quality_unavailable("quality.py exited non-zero")
+
+        yaml_out = qres.stdout
+        # If the snapshot says applicable: false, surface its reason inline.
+        m = re.search(r"(?m)^\s*applicable:\s*(\w+)", yaml_out)
+        if m and m.group(1).lower() == "false":
+            reason_m = re.search(r"(?m)^\s*reason:\s*\"?([^\"\n]+)\"?", yaml_out)
+            reason = reason_m.group(1).strip() if reason_m else "unknown"
+            return _test_quality_unavailable(f"not applicable ({reason})")
+
+        # 4. wrap in the markdown block (AC #1 + AC #2)
+        return (
+            "## Test-quality snapshot (deterministic)\n"
+            "\n"
+            "```yaml\n"
+            f"{yaml_out.rstrip()}\n"
+            "```\n"
+            "\n"
+            "When raising a test-quality finding, cite the fired signal by name.\n"
+            "When all signals read false, do not invent test-quality concerns —\n"
+            "absence of a signal is evidence of nothing-to-flag."
+        )
+    except Exception as exc:  # noqa: BLE001 — graceful degradation per AC #3
+        return _test_quality_unavailable(f"helper error: {exc.__class__.__name__}")
+
+
+def _test_quality_unavailable(reason: str) -> str:
+    """Fallback single-line per AC #3 — the reviewer is told to proceed
+    on judgment alone when the snapshot can't be built."""
+    return f"_Test-quality snapshot unavailable: {reason}._"
+
+
 def build_implementation_prompt(spec_path: Path, slice_label: str,
                                 deliverables: list) -> str:
     """Construct the standard implementation-review prompt.
@@ -288,17 +409,25 @@ def build_implementation_prompt(spec_path: Path, slice_label: str,
     `docs/product-vision.md` § Design principles.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
-    extra_check = ""
+    # Slice 022-02: contract-surface bullet sits at the tail of the Evaluate
+    # bullet list when the project declared surfaces.
+    pre_snapshot_check = ""
     project_root = _find_project_root(spec_path)
     if project_root and has_declared_contract_surfaces(project_root):
-        extra_check = "\n" + _contract_surface_check_block()
-    # Slice 024-01: append the principles-check block UNCONDITIONALLY.
-    # No gating on project state — principle adherence is universal.
-    extra_check += "\n" + _principles_check_block()
+        pre_snapshot_check = "\n" + _contract_surface_check_block()
+    # Slice 043-04: deterministic test-quality snapshot. Lands BETWEEN
+    # the Evaluate bullets and the principles/practices check blocks, as
+    # its own H2. Append unconditionally — the helper degrades gracefully
+    # (returns a single-line `_unavailable_` fallback) on every error mode.
+    snapshot_block = _test_quality_snapshot_block(spec_path)
+    # Slice 024-01: principles-check block (UNCONDITIONAL). Slice 043-04
+    # repositioned this block to land AFTER the snapshot, per the
+    # "between Evaluate and _principles_check_block" placement rule.
+    post_snapshot_check = "\n" + _principles_check_block()
     # Engineering-practices check appended UNCONDITIONALLY — process
     # gaps (task completeness, approach alignment, ADR signal, tech-debt
     # tracking) are universal across slices.
-    extra_check += "\n" + _practices_check_block()
+    post_snapshot_check += "\n" + _practices_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -321,7 +450,12 @@ For each acceptance criterion in slice {slice_label}, verify:
 - Is it met by the deliverable?
 - Are tests exercising the AC meaningfully (not just superficial assertions)?
 - Are there bugs (correctness, edge cases)?
-- Any security or robustness concerns relevant to this change?{extra_check}
+- Any security or robustness concerns relevant to this change?{pre_snapshot_check}
+
+{snapshot_block}
+
+## Cross-cutting checks
+{post_snapshot_check}
 
 {_OUTPUT_FORMAT}
 """

@@ -101,6 +101,23 @@ test file) while still letting the helper detect which runner to invoke.
 - **Auto-generated code** (codegen output, vendored deps). Test the
   generator, not the generated artifact.
 
+## Sibling helper: `quality.py` (test-quality snapshot)
+
+Alongside `tdd.py` the skill ships `quality.py`, a deterministic
+test-quality preflight. It reads a unified diff (`--diff-file PATH` or
+`--against REF`), classifies test vs. code files (Python + JS/TS — pytest
+/ vitest / jest), and emits a YAML snapshot with three numerical-ratio
+signals (`per-file-flood`, `assertion-thin`, `mock-heavy`) plus the
+underlying metrics. It is judgment fuel, not a gate — no exit-code
+semantics other than 0 on success / non-zero on bad input.
+
+After the red-green-refactor loop, the
+[independent-review](../independent-review/SKILL.md) skill's
+implementation-pass prompt embeds this snapshot verbatim so the reviewer
+sees the same deterministic signals the implementer just looked at.
+The wiring is one-way (review.py shells out to quality.py); there is no
+skill-router dispatch — `quality.py` is a helper, not a SKILL.
+
 ## Relationship to the `implementer` subagent
 
 `agents/implementer.md` enumerates TDD discipline as non-negotiable:

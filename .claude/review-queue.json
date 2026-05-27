@@ -1,10 +1,12 @@
 {
-  "spec": "docs/specs/043-test-quality-wiring/slice-03-polyglot-extension.md",
-  "slice": "043-03",
+  "spec": "docs/specs/043-test-quality-wiring/slice-04-review-prompt-injection.md",
+  "slice": "043-04",
   "files": [
-    "skills/tdd-loop/quality.py",
-    "skills/tdd-loop/test_quality.py",
-    "docs/refinement-todo.md",
-    "docs/specs/043-test-quality-wiring/slice-03-polyglot-extension.md"
+    "skills/independent-review/review.py",
+    "skills/independent-review/test_review.py",
+    "skills/tdd-loop/SKILL.md",
+    "docs/workflow.md",
+    "skills/scaffold-init/scaffold.py",
+    "skills/scaffold-init/test_scaffold_mode.py"
   ]
 }

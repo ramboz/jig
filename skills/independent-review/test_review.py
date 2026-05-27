@@ -1365,5 +1365,354 @@ class SpecWorkflowSkillThreePassTests(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# Slice 043-04 — test-quality snapshot injection into implementation prompt
+# ---------------------------------------------------------------------------
+
+
+TEST_QUALITY_HEADING = "## Test-quality snapshot"
+TEST_QUALITY_UNAVAIL_PREFIX = "_Test-quality snapshot unavailable"
+
+
+def _run_git(cwd, *args):
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd, capture_output=True, text=True, check=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        },
+    )
+
+
+def _make_repo_with_diff(root: Path) -> None:
+    """Initialize a tmp git repo with a `main` branch, an initial commit,
+    a feature branch with an added test file. The test file is committed
+    so `git diff <merge-base>...HEAD` returns the diff."""
+    _run_git(root, "init", "-q", "-b", "main")
+    _run_git(root, "config", "user.email", "test@example.com")
+    _run_git(root, "config", "user.name", "Test")
+    (root / "README.md").write_text("baseline\n")
+    _run_git(root, "add", "README.md")
+    _run_git(root, "commit", "-q", "-m", "init")
+    _run_git(root, "checkout", "-q", "-b", "feature")
+    tests_dir = root / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_alpha.py").write_text(
+        "def test_alpha():\n    assert True\n"
+    )
+    _run_git(root, "add", "tests/test_alpha.py")
+    _run_git(root, "commit", "-q", "-m", "add tests")
+
+
+def _make_repo_no_diff(root: Path) -> None:
+    """Init a repo with a single commit on `main` and HEAD pointed at it
+    — `git diff main...HEAD` is empty."""
+    _run_git(root, "init", "-q", "-b", "main")
+    _run_git(root, "config", "user.email", "test@example.com")
+    _run_git(root, "config", "user.name", "Test")
+    (root / "README.md").write_text("baseline\n")
+    _run_git(root, "add", "README.md")
+    _run_git(root, "commit", "-q", "-m", "init")
+
+
+class TestQualitySnapshotHelperTests(unittest.TestCase):
+    """Slice 043-04 AC #1 + #2 + #3: `_test_quality_snapshot_block(spec_path)`
+    helper.
+
+    - Happy path: tmp git repo with a slice-shaped diff → returns a block
+      with the `## Test-quality snapshot (deterministic)` heading and the
+      cite-or-stay-silent sentences.
+    - Empty-diff path: tmp git repo with no diff against main → returns the
+      `_Test-quality snapshot unavailable: <reason>._` single-line fallback.
+    - Missing-merge-base path: tmp dir with no git → fallback single-line.
+    """
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_043", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_helper_returns_block_when_diff_present(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-"))
+        self._tmpdirs.append(root)
+        _make_repo_with_diff(root)
+        # Place the spec file inside the repo so the helper's CWD resolves.
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._test_quality_snapshot_block(spec)
+        self.assertIn(TEST_QUALITY_HEADING, block)
+        # YAML fence + the schema marker should both appear.
+        self.assertIn("```yaml", block)
+        self.assertIn("test-quality-snapshot:", block)
+        # Cite-or-stay-silent sentences (AC #2)
+        self.assertIn("cite the fired signal", block)
+        self.assertIn(
+            "absence of a signal is evidence of nothing-to-flag", block,
+        )
+
+    def test_helper_fallback_when_empty_diff(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-empty-"))
+        self._tmpdirs.append(root)
+        _make_repo_no_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._test_quality_snapshot_block(spec)
+        self.assertIn(TEST_QUALITY_UNAVAIL_PREFIX, block)
+        # The unavailable-line should NOT have a YAML fence.
+        self.assertNotIn("```yaml", block)
+
+    def test_helper_fallback_when_no_git_repo(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-nogit-"))
+        self._tmpdirs.append(root)
+        # No git init. Just a spec.
+        spec = root / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._test_quality_snapshot_block(spec)
+        self.assertIn(TEST_QUALITY_UNAVAIL_PREFIX, block)
+        self.assertNotIn("```yaml", block)
+
+    def test_helper_never_raises(self):
+        """AC #3: prompt builder must not crash on the snapshot helper.
+        Pass a non-existent path; helper must return a string."""
+        module = self._import_review_module()
+        block = module._test_quality_snapshot_block(
+            Path("/no/such/path/spec.md"),
+        )
+        self.assertIsInstance(block, str)
+        self.assertIn(TEST_QUALITY_UNAVAIL_PREFIX, block)
+
+    def test_helper_fallback_when_applicable_false(self):
+        """AC #3: a docs-only diff drives quality.py to emit
+        `applicable: false` with a docs-only reason. The helper must
+        surface that reason inline in the unavailable line.
+
+        Closes the AC3 coverage gap flagged at review (the
+        `applicable: false` branch was previously untested)."""
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-docs-"))
+        self._tmpdirs.append(root)
+        # Repo with a docs-only diff between main and HEAD.
+        _run_git(root, "init", "-q", "-b", "main")
+        _run_git(root, "config", "user.email", "test@example.com")
+        _run_git(root, "config", "user.name", "Test")
+        (root / "README.md").write_text("baseline\n")
+        _run_git(root, "add", "README.md")
+        _run_git(root, "commit", "-q", "-m", "init")
+        _run_git(root, "checkout", "-q", "-b", "feature")
+        (root / "README.md").write_text("baseline\nupdated docs\n")
+        _run_git(root, "add", "README.md")
+        _run_git(root, "commit", "-q", "-m", "docs tweak")
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._test_quality_snapshot_block(spec)
+        self.assertIn(TEST_QUALITY_UNAVAIL_PREFIX, block)
+        self.assertIn("not applicable", block)
+        # Reason from the YAML snapshot (docs-only-or-no-test-or-code-changes)
+        # is surfaced inline so the reviewer knows why.
+        self.assertIn("docs-only", block.lower())
+        self.assertNotIn("```yaml", block)
+
+    def test_helper_fallback_when_quality_py_exits_nonzero(self):
+        """AC #3: simulate quality.py exiting non-zero. The git plumbing
+        runs normally; only the quality.py subprocess returns rc != 0.
+        Verifies the `quality.py exited non-zero` fallback message.
+
+        Closes the AC3 coverage gap flagged at review."""
+        from unittest import mock
+        from types import SimpleNamespace
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-nzexit-"))
+        self._tmpdirs.append(root)
+        _make_repo_with_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+
+        real_run = module.subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            # Detect the quality.py call (third subprocess.run in the
+            # helper) and return a non-zero exit; pass git calls through.
+            if isinstance(cmd, (list, tuple)) and any(
+                "quality.py" in str(c) for c in cmd
+            ):
+                return SimpleNamespace(returncode=2, stdout="", stderr="boom\n")
+            return real_run(cmd, *args, **kwargs)
+
+        with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+            block = module._test_quality_snapshot_block(spec)
+        self.assertIn(TEST_QUALITY_UNAVAIL_PREFIX, block)
+        self.assertIn("exited non-zero", block)
+        self.assertNotIn("```yaml", block)
+
+
+class TestQualitySnapshotPromptPlacementTests(unittest.TestCase):
+    """Slice 043-04 AC #1 + #4: the snapshot block lands in the
+    implementation prompt only.
+
+    Calls the prompt builders in-process so the helper's git-shell-out
+    happens with the test's cwd (which may or may not be a git repo).
+    The fallback path covers the no-diff / no-git cases — the assertion
+    is on the heading or fallback, not on a fully-populated YAML."""
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_043_p", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _make_repo_with_spec(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-prompt-"))
+        self._tmpdirs.append(root)
+        _make_repo_with_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def test_impl_prompt_includes_snapshot_heading(self):
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_implementation_prompt(spec, "099-01 alpha", ["x.py"])
+        # Either the heading (happy path) OR the fallback line — both are
+        # acceptable evidence the snapshot wiring fired.
+        self.assertTrue(
+            TEST_QUALITY_HEADING in prompt
+            or TEST_QUALITY_UNAVAIL_PREFIX in prompt,
+            "implementation prompt must include the snapshot block "
+            "(heading or fallback line) — AC #1",
+        )
+        # If the heading is present, the YAML fence must be too.
+        if TEST_QUALITY_HEADING in prompt:
+            self.assertIn("```yaml", prompt)
+
+    def test_snapshot_lands_before_principles_check(self):
+        """AC #1: 'between the `## Evaluate` block and the
+        `_principles_check_block`.' The snapshot heading (or fallback)
+        must precede the Principles-check bullet."""
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_implementation_prompt(spec, "099-01 alpha", ["x.py"])
+        principles_pos = prompt.find("Principles check")
+        self.assertGreater(principles_pos, -1, "principles block missing")
+        # Find the snapshot marker — heading or fallback
+        snap_pos = prompt.find(TEST_QUALITY_HEADING)
+        if snap_pos < 0:
+            snap_pos = prompt.find(TEST_QUALITY_UNAVAIL_PREFIX)
+        self.assertGreater(snap_pos, -1, "snapshot marker missing")
+        self.assertLess(
+            snap_pos, principles_pos,
+            "snapshot block must land BEFORE the principles-check "
+            "block (AC #1: between Evaluate and principles)",
+        )
+
+    def test_pr_review_prompt_excludes_snapshot(self):
+        """AC #4: snapshot must NOT appear in the pr-review prompt."""
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_pr_review_prompt(spec, "099-01 alpha", ["x.py"])
+        self.assertNotIn(TEST_QUALITY_HEADING, prompt)
+        self.assertNotIn(TEST_QUALITY_UNAVAIL_PREFIX, prompt)
+
+    def test_arch_review_prompt_excludes_snapshot(self):
+        """AC #4: snapshot must NOT appear in the arch-review prompt."""
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_arch_review_prompt(spec, "099-01 alpha", ["x.py"])
+        self.assertNotIn(TEST_QUALITY_HEADING, prompt)
+        self.assertNotIn(TEST_QUALITY_UNAVAIL_PREFIX, prompt)
+
+    def test_reconciliation_prompt_excludes_snapshot(self):
+        """AC #4: snapshot must NOT appear in the reconciliation prompt."""
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_reconciliation_prompt(spec, "099-01 alpha")
+        self.assertNotIn(TEST_QUALITY_HEADING, prompt)
+        self.assertNotIn(TEST_QUALITY_UNAVAIL_PREFIX, prompt)
+
+
+# ---------------------------------------------------------------------------
+# Slice 043-04 AC #5 + AC #6: SKILL.md + workflow.md mentions
+# ---------------------------------------------------------------------------
+
+
+class TddLoopSkillMentionsQualityTests(unittest.TestCase):
+    """AC #5: `skills/tdd-loop/SKILL.md` mentions quality.py as a sibling
+    helper and points at independent-review for the snapshot wiring."""
+
+    TDD_SKILL_MD = REPO_ROOT / "skills" / "tdd-loop" / "SKILL.md"
+
+    def setUp(self):
+        self.skill = self.TDD_SKILL_MD.read_text()
+
+    def test_mentions_quality_py(self):
+        self.assertIn("quality.py", self.skill,
+                      "tdd-loop SKILL.md must mention `quality.py`")
+
+    def test_points_at_independent_review_for_snapshot(self):
+        self.assertRegex(
+            self.skill,
+            r"(?is)independent-review",
+            "tdd-loop SKILL.md must point at `independent-review` so "
+            "readers can follow the snapshot wiring (AC #5)",
+        )
+
+
+class WorkflowMdMentionsSnapshotTests(unittest.TestCase):
+    """AC #6: `docs/workflow.md` step 4 / post-implementation review
+    section mentions the deterministic test-quality snapshot."""
+
+    WORKFLOW_MD = REPO_ROOT / "docs" / "workflow.md"
+
+    def setUp(self):
+        self.text = self.WORKFLOW_MD.read_text()
+
+    def test_mentions_test_quality_snapshot(self):
+        self.assertRegex(
+            self.text,
+            r"(?i)test-quality\s+snapshot|deterministic\s+test-quality",
+            "workflow.md must mention the deterministic test-quality "
+            "snapshot in the post-implementation review section (AC #6)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

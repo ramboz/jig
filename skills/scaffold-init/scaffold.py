@@ -513,6 +513,22 @@ _PLUGIN_SKILL_PATH_RE = re.compile(
 
 _SKILL_DIR_EXCLUDES: frozenset[str] = frozenset({"__pycache__", "fixtures"})
 
+# Per-skill allow-list of `test_*.py` files to RETAIN despite the general
+# "test files are not shipped to scaffolded projects" rule. Keyed by the
+# source skill directory name (the directory under `skills/`, NOT the
+# `jig-`-prefixed scaffolded destination name).
+#
+# Why retain anything? Spec 043-04 wires `quality.py`'s YAML snapshot
+# into the implementation-review prompt; `test_quality.py` is the test
+# surface for that helper. Scaffolded adopters need it reachable so a
+# fresh-scaffold project can exercise the snapshot wiring end-to-end
+# without having to re-clone the source repo. The allow-list is
+# deliberately narrow — only `test_quality.py` is retained; the rest of
+# the test suite (e.g. `test_tdd.py`) stays excluded.
+_RETAINED_TEST_FILES: dict[str, frozenset[str]] = {
+    "tdd-loop": frozenset({"test_quality.py"}),
+}
+
 
 def _rewrite_skill_md_paths(body: str) -> str:
     """Replace every `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` with
@@ -554,7 +570,10 @@ def _copy_skill_dir(src: Path, dst: Path) -> None:
     its body; other .py files (excluding test_*.py) are copied verbatim;
     everything else under the skill dir is mirrored verbatim too. Skips
     `__pycache__`, `fixtures/` (test data, never runtime — per spec 035),
-    and `test_*.py`."""
+    and `test_*.py` — except for the narrow per-skill allow-list in
+    `_RETAINED_TEST_FILES` (spec 043-04 retains `test_quality.py` so
+    scaffolded projects can exercise the quality.py snapshot wiring)."""
+    retained = _RETAINED_TEST_FILES.get(src.name, frozenset())
     dst.mkdir(parents=True, exist_ok=True)
     for entry in src.rglob("*"):
         rel = entry.relative_to(src)
@@ -568,8 +587,15 @@ def _copy_skill_dir(src: Path, dst: Path) -> None:
         if entry.is_dir():
             (dst / rel).mkdir(parents=True, exist_ok=True)
             continue
-        # Exclude test files anywhere in the tree
-        if entry.name.startswith("test_") and entry.name.endswith(".py"):
+        # Exclude test files anywhere in the tree, unless the per-skill
+        # allow-list explicitly retains this filename. Per spec 043-04:
+        # tdd-loop ships `test_quality.py` to scaffolded projects so the
+        # quality.py snapshot wiring is exercisable end-to-end.
+        if (
+            entry.name.startswith("test_")
+            and entry.name.endswith(".py")
+            and entry.name not in retained
+        ):
             continue
         target_path = dst / rel
         target_path.parent.mkdir(parents=True, exist_ok=True)

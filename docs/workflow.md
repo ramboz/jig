@@ -74,7 +74,11 @@ and REVIEWED.
 
 1. **Compliance pass — `jig:independent-review`** (always). Reviewer
    subagent with fresh context evaluates the deliverable against the
-   slice's acceptance criteria. Verdict envelope: VERDICT / REASONING /
+   slice's acceptance criteria. The prompt embeds a deterministic
+   test-quality snapshot (spec 043-04 — `quality.py` reads the slice's
+   merge-base-to-HEAD diff and reports `per-file-flood` /
+   `assertion-thin` / `mock-heavy` signals) so findings can cite a
+   fired signal by name. Verdict envelope: VERDICT / REASONING /
    SPECIFIC ISSUES / RECONCILIATION NOTES. `fail` or `needs-changes`
    blocks the transition.
 2. **Craft pass — `pr-review`** (always). Routes to the most-specific
