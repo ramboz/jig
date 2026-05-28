@@ -13,6 +13,7 @@
 - [ADR-0006: adr.py accept-then-index ordering](adr-0006-adr-accept-then-index-ordering.md) — `adr.py` ships four subcommands: `new`, `accept`, `index`, `resolve-todo`. (2026-05-15, Accepted)
 - [ADR-0007: scaffold.json gains per-skill install list](adr-0007-scaffold-json-installed-skills.md) — The `scaffold.json` install-state manifest currently tracks granularity at the tier level only. (2026-05-15, Accepted)
 - [ADR-0008: Closed-spec drift policy](adr-0008-closed-spec-drift-policy.md) — jig's process treats ADRs as immutable per ADR-0006 / Nygard. (2026-05-27, Accepted)
+- [ADR-0009: RTK (Rust Token Killer) not adopted for jig](adr-0009-rtk-not-adopted.md) — [RTK](https://github.com/rtk-ai/rtk) is a Rust-based CLI proxy ("Rust Token Killer") that compresses command output before it reaches an LLM's context window. (2026-05-28, Accepted)
 
 ## Format
 

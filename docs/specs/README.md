@@ -125,7 +125,7 @@
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 🔬 043-02 — threshold-calibration (spike) | **DONE** |  |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-03 — polyglot-extension | **DONE** |  |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-04 — review-prompt-injection | **DONE** | `build_implementation_prompt` embeds quality.py's deterministic YAML snapshot between Evaluate and `## Cross-cutting checks`; degrades to `_Test-quality snapshot unavailable: <reason>._` on any of four failure modes. scaffold-mode copies `quality.py` + `test_quality.py` via `_RETAINED_TEST_FILES` allow-list. |
-| [044-rtk-integration-spike](044-rtk-integration-spike/spec.md) | 🔬 044-01 - rtk-e2e-measurement-spike | READY_FOR_IMPLEMENTATION |  |
+| [044-rtk-integration-spike](044-rtk-integration-spike/spec.md) | 🔬 044-01 - rtk-e2e-measurement-spike | **DONE** |  |
 
 ## Deferred slices
 
