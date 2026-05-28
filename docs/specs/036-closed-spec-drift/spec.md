@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 tier: (none — dev infrastructure)
 adr_required: true
@@ -127,3 +127,41 @@ but each is small — resist over-splitting.
 - Verification 2026-05-26: all five drifts confirmed live.
 - Related: ADR-0006 (accept-then-index ordering — ADR-style immutability
   baseline).
+
+## Clarifications
+
+### Q1: Does the closed-spec drift policy apply to RECONCILED specs only, or also to IN_PROGRESS specs whose ACs change mid-flight?
+_(category: Edge Cases & Failure Modes)_
+
+RECONCILED only. IN_PROGRESS specs are still being shaped — in-body edits are normal. The policy only kicks in once a slice has crossed RECONCILED → DONE.
+
+### Q2: Does the policy cover load-bearing skill prose (e.g., drift #2 — pr-review SKILL.md saying "jig does not ship an arch-review skill"), or strictly closed-spec body prose?
+_(category: Scope & Boundaries)_
+
+Both — any load-bearing artifact. The rule covers any artifact whose accuracy is load-bearing for router/process behavior — SKILL.md descriptions, workflow.md routing prose, README claims that drive decisions. Aligned with the drift list as-is.
+
+### Q3: What about specs in non-active terminal states — SUPERSEDED specs, DEFERRED slices, or specs whose entire scope was abandoned? Are they in scope for the drift policy?
+_(category: Edge Cases & Failure Modes)_
+
+In scope for SUPERSEDED, out for DEFERRED. Superseded specs may still be cited; keeping them accurate has value. DEFERRED slices are by definition not-yet-shipped, so there's no behavior to drift from.
+
+### Q4: The decomposition section proposes 036-02 as one slice applying the policy to all four sweep-able drifts + adding the reconciliation-checklist line. Keep as one slice, or split per-artifact along R-axis?
+_(category: Scope & Boundaries)_
+
+One slice. The four sweep edits are mechanically small once the ADR is accepted; the reconciliation-checklist line is a one-liner. Splitting would add review overhead with no clarity benefit.
+
+### Q5: If the ADR picks the `## Amendments` section route, what's the required shape of each amendment entry?
+_(category: Edge Cases & Failure Modes)_
+
+Dated entry + reason + link. Each amendment: `### YYYY-MM-DD — <one-line summary>` heading, body explains what changed and why, links to the slice/ADR/PR that caused the drift. Mirrors deviation-log discipline. Auditable.
+
+### Coverage summary
+
+| Category | Status |
+|---|---|
+| Scope & Boundaries | Resolved |
+| Acceptance Criteria Testability | Partial (slice-level scaffolding still TBD) |
+| Dependencies & Blockers | Clear |
+| Non-functional Requirements | Clear |
+| Edge Cases & Failure Modes | Resolved |
+| Terminology Consistency | Clear |
