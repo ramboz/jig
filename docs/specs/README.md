@@ -126,6 +126,14 @@
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-03 — polyglot-extension | **DONE** |  |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-04 — review-prompt-injection | **DONE** | `build_implementation_prompt` embeds quality.py's deterministic YAML snapshot between Evaluate and `## Cross-cutting checks`; degrades to `_Test-quality snapshot unavailable: <reason>._` on any of four failure modes. scaffold-mode copies `quality.py` + `test_quality.py` via `_RETAINED_TEST_FILES` allow-list. |
 | [044-rtk-integration-spike](044-rtk-integration-spike/spec.md) | 🔬 044-01 - rtk-e2e-measurement-spike | **DONE** |  |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-01 - review-evidence-adr | DRAFT |  |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-02 - review-artifact-recorder | DRAFT |  |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-03 - lifecycle-transition-gates | DRAFT |  |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-04 - workflow-contract-alignment | DRAFT |  |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | DRAFT |  |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | DRAFT |  |
+| [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-01 - plugin-release-contract-validator | DRAFT |  |
+| [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-02 - scaffold-contract-validator | DRAFT |  |
 
 ## Deferred slices
 
