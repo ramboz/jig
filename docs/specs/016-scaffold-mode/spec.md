@@ -939,3 +939,20 @@ where stale copies in the wild become a concrete risk.
 - **Claude Code project-scoped skills docs:** standard `.claude/skills/`
   + `.claude/agents/` discovery (the Claude Code router auto-discovers
   these; jig is a normal client of the existing rules).
+
+## Amendments
+
+### 2026-05-27 — Hook count: five → seven
+
+This spec's prose at lines 72, 412, 445, and 471 refers to "the same
+five jig hooks" / "all five hook scripts". Reality today is **seven**
+hooks: an earlier five → six sweep added `jig-post-edit-verify.sh`
+(slice 027-01), and a subsequent six → seven sweep added
+`jig-boundary-change-warn.sh` (slice 005-03 close-out, boundary-change
+detection). The original prose is preserved in place per
+[ADR-0008](../../decisions/adr-0008-closed-spec-drift-policy.md)
+Option C; this amendment overrides it.
+
+- Link: [slice 005-03 — six → seven sweep](../005-adr-workflow/spec.md)
+- Link: [spec 027 — post-tool edit verification (five → six)](../027-post-tool-edit-verification/spec.md)
+

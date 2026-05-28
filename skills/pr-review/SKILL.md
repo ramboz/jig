@@ -238,3 +238,23 @@ baseline.
 - **`/jig:contracts`** — orthogonal. Deliberate stub today (ADR-0002);
   if and when it activates, it will surface module-boundary violations
   that pr-review could call out as blockers.
+
+## Amendments
+
+### 2026-05-27 — arch-review skill now ships
+
+The SKILL description above (line 14, inside the `Do not use for:`
+list) claims "jig does not ship an arch-review skill today". That
+claim is no longer accurate: spec 014 shipped
+[`/jig:arch-review`](../arch-review/SKILL.md), and it auto-triggers
+via description matching per the routing-via-prose dispatch
+(slices 031-01 / 031-02). This drift is material because the SKILL
+description string is what the router reads when deciding where to
+route arch / design-doc / RFC review — the false claim biases routing
+toward pr-review. Original prose preserved above per
+[ADR-0008](../../docs/decisions/adr-0008-closed-spec-drift-policy.md)
+Option C; this amendment overrides it.
+
+- Link: [arch-review skill](../arch-review/SKILL.md)
+- Link: [spec 014 — arch-review](../../docs/specs/014-arch-review/spec.md)
+

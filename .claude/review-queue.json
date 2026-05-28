@@ -1,12 +1,12 @@
 {
-  "spec": "docs/specs/043-test-quality-wiring/slice-04-review-prompt-injection.md",
-  "slice": "043-04",
+  "spec": "docs/specs/036-closed-spec-drift/slice-02-sweep-and-reconciliation-hook.md",
+  "slice": "036-02",
   "files": [
-    "skills/independent-review/review.py",
-    "skills/independent-review/test_review.py",
-    "skills/tdd-loop/SKILL.md",
+    "docs/specs/016-scaffold-mode/spec.md",
+    "skills/pr-review/SKILL.md",
+    "skills/memory-sync/SKILL.md",
     "docs/workflow.md",
-    "skills/scaffold-init/scaffold.py",
-    "skills/scaffold-init/test_scaffold_mode.py"
+    "skills/spec-workflow/SKILL.md",
+    "scripts/test_closed_spec_drift_sweep.py"
   ]
 }

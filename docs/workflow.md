@@ -116,3 +116,23 @@ After implementation, before marking DONE:
 Skills auto-trigger via description matching. No explicit `/command` required for day-to-day work. Slash commands exist for deliberate bulk operations (`/jig:memory-sync`, `/jig:scaffold-init`).
 
 Skills marked `disable-model-invocation: true` (spec-workflow, independent-review, contracts) are stubs — they appear in the menu but do not auto-trigger until implemented.
+
+## Amendments
+
+### 2026-05-27 — spec-workflow, independent-review, contracts auto-trigger
+
+The "Skill invocation" paragraph above (line 114) claims spec-workflow,
+independent-review, and contracts are stubs carrying
+`disable-model-invocation: true` and do not auto-trigger. That is no
+longer accurate: none of the three carry that flag today; all three
+have `user-invocable: true` in their frontmatter and auto-trigger via
+description matching. The promotions landed as: spec 003 (spec-workflow),
+spec 004 (independent-review), spec 022 (contracts). Original prose
+preserved above per
+[ADR-0008](decisions/adr-0008-closed-spec-drift-policy.md) Option C;
+this amendment overrides it.
+
+- Link: [spec 003 — spec-workflow promotion](specs/003-spec-workflow-promotion/spec.md)
+- Link: [spec 004 — independent-review promotion](specs/004-independent-review-promotion/spec.md)
+- Link: [spec 022 — contracts](specs/022-contracts/spec.md)
+
