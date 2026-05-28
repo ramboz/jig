@@ -137,6 +137,10 @@
 | [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | DRAFT |  |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-01 - plugin-release-contract-validator | DRAFT |  |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-02 - scaffold-contract-validator | DRAFT |  |
+| [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-01 - first-read-status-and-gap-map | DRAFT |  |
+| [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-02 - adoption-readiness-guide | DRAFT |  |
+| [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-03 - scaffolded-onboarding-handoff | DRAFT |  |
+| [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-04 - amendment-effective-state-digest | DRAFT |  |
 
 ## Deferred slices
 
