@@ -111,3 +111,9 @@ repo, this equals `.git/`; for secondary worktrees, the secondary's
 common-dir is still the main `.git/`. Useful as a cross-worktree
 synchronization surface (e.g. `.git/jig-locks/` for file locks shared
 across parallel sessions; see slice 028-02).
+
+## Closed-spec drift
+When a closed (DONE or SUPERSEDED) spec's prose no longer matches reality because the code/process evolved around it. Governed by [ADR-0008](../decisions/adr-0008-closed-spec-drift-policy.md): default to a `## Amendments` section appended to the drifted artifact; escalate to a new ADR (or superseding spec) when the delta is decision content (a contract, interface, or behavior the spec committed to). Scope: DONE and SUPERSEDED specs plus load-bearing skill/router prose. Excludes IN_PROGRESS, REVIEWED, RECONCILED, DEFERRED.
+
+## ## Amendments section
+The dated-entry append-only section ADR-0008 establishes for correcting drift in closed specs and load-bearing skill/router prose. One H2 `## Amendments` block at the end of the drifted artifact; each entry is `### YYYY-MM-DD — <one-line summary>` heading + body explaining what changed and why + a link to the slice/ADR/PR that caused the drift. In-body edits to the original prose remain forbidden. Mirrors deviation-log discipline.

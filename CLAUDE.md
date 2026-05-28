@@ -13,6 +13,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - **jig** = this skill pack repo (the plugin itself)
 
 ### Key terms
+- **Closed-spec drift policy** — [ADR-0008](docs/decisions/adr-0008-closed-spec-drift-policy.md) — when a closed (DONE / SUPERSEDED) spec or load-bearing skill/router prose drifts from reality, default to a `## Amendments` section on the artifact; new ADR (or superseding spec) for decision-content changes. Excludes IN_PROGRESS / REVIEWED / RECONCILED / DEFERRED.
 
 - **SPIDR** = Mike Cohn's five story-splitting techniques (Spike, Path, Interface, Data, Rules)
 - **Tier 0/1/2** = installation tiers for jig skills (see [docs/memory/glossary.md](docs/memory/glossary.md))
