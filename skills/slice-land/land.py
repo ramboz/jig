@@ -554,10 +554,88 @@ def _detect_main_worktree_root() -> Path:
 
 def _check_ff_viable(branch: str) -> tuple:
     """Returns (ok: bool, message: str).
-    Checks that `main` is an ancestor of `branch` (HEAD), meaning
-    a --ff-only merge of `branch` into `main` will succeed.
-    Uses read-only `git merge-base --is-ancestor`.
+
+    Verifies that a --ff-only merge of `branch` into the team-wide
+    `main` (i.e. `origin/main`) will succeed.
+
+    Spec 037-01: this helper reads `origin/main` rather than the
+    local `main` ref, because the local ref may be stale relative
+    to what the eventual `git push origin main` will be checked
+    against. The previous version compared against local `main`
+    and let a stale local-tree user merge into a `main` that the
+    remote had since moved past, producing a non-FF push that left
+    the user on a half-merged local branch with no recovery hint.
+
+    Algorithm (matches the spec 037 clarifications Q2 + Q4):
+
+      1. If there is no `origin` remote configured, fall through
+         silently to the existing local ancestor check. This is the
+         local-only repo contract — not a degraded network case, so
+         no warning is emitted.
+      2. Otherwise, attempt `git fetch origin main`.
+         - If it fails (network, auth, etc.), emit a one-line
+           warning to stderr and fall through to the local check.
+           Mirrors `reserve_spec`'s precedent (workflow.py:1278–1282).
+         - If it succeeds but `git rev-parse --verify origin/main`
+           still fails, fall through silently to the local check.
+      3. With `origin/main` available, run
+         `git merge-base --is-ancestor origin/main <branch>`.
+         Success → ok. Failure → refuse with a message that names
+         both "origin/main" and a "pull or rebase" hint, so callers
+         can pattern-match either string per AC #2.
     """
+    # Step 1 — origin presence check. No `origin` configured → use the
+    # local fallback silently (AC #5: silent on the local-only contract).
+    try:
+        origin_url_check = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        return False, "git not found"
+
+    has_origin = (origin_url_check.returncode == 0
+                  and origin_url_check.stdout.strip())
+
+    if has_origin:
+        # Step 2 — fetch. On failure: warn + fall through (AC #4).
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            capture_output=True, text=True,
+        )
+        if fetch_result.returncode != 0:
+            sys.stderr.write(
+                "warning: git fetch origin main failed: "
+                f"{fetch_result.stderr.strip()}; "
+                "proceeding with local view\n"
+            )
+            # fall through to local check below
+        else:
+            # Step 3 — verify origin/main ref actually exists locally.
+            # If it doesn't, silently fall through (AC #5).
+            verify_origin = subprocess.run(
+                ["git", "rev-parse", "--verify", "origin/main"],
+                capture_output=True,
+            )
+            if verify_origin.returncode == 0:
+                ancestor = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor",
+                     "origin/main", branch],
+                    capture_output=True,
+                )
+                if ancestor.returncode == 0:
+                    return True, ""
+                # AC #2: name origin/main + pull/rebase in the
+                # refusal message.
+                return False, (
+                    "local main is behind origin/main — "
+                    "pull or rebase before merging"
+                )
+            # origin/main verify failed: silent fall-through.
+
+    # Local fallback (preserved verbatim from the pre-037-01 shape):
+    # used when no origin is configured, when fetch failed (with
+    # warning above), or when origin/main is not present locally.
     try:
         result = subprocess.run(
             ["git", "merge-base", "--is-ancestor", "main", branch],
@@ -738,6 +816,22 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
             parts.append("")
             parts.append(f"## Error\n\n`{label}` failed. See output above.\n")
             failed = True
+            # Spec 037-01 AC #6: when the push step is the failing
+            # one, the user is now on a half-merged local main with
+            # no automatic rollback. Append a recovery paragraph
+            # rather than performing destructive cleanup (Q1: print +
+            # refuse; destructive helpers should not silently reset).
+            if args and args[0] == "push":
+                parts.append(
+                    "Local `main` now carries the merge commit but "
+                    "it could not be pushed. Inspect the rejection "
+                    "with `git push origin main`; if the remote "
+                    "moved, run `git fetch origin main` then "
+                    "`git reset --hard origin/main` to drop the "
+                    "local merge, then re-run `land.py execute` "
+                    "after rebasing your feature branch on the new "
+                    "origin.\n"
+                )
             break
         log_lines.append("")
 

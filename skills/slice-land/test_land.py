@@ -1718,5 +1718,366 @@ class NoDeviationLogFlagTests(unittest.TestCase):
         self.assertIn("[?] Deviation log: skipped", report)
 
 
+# ==================== Spec 037-01 — land-ff-against-origin tests ====================
+#
+# AC#1–#5 cover `_check_ff_viable`'s origin-awareness; AC#6 covers
+# `_execute_direct`'s push-failure recovery hint; AC#7 preserves the
+# 3-step git sequence; AC#8 keeps dry-run network-free.
+
+
+def _make_cp(returncode: int = 0, stdout: str = "", stderr: str = ""):
+    """Build a fake CompletedProcess-like object for subprocess.run patches."""
+    from unittest.mock import MagicMock
+    m = MagicMock()
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
+
+
+class CheckFfViableOriginAwareTests(unittest.TestCase):
+    """Spec 037-01 AC #1, #2, #3 — `_check_ff_viable` reads origin/main.
+
+    `_check_ff_viable` calls `subprocess.run` directly (not via the
+    `_run_git_cmd` helper) — so we patch `subprocess.run` on the
+    module's namespace to drive the helper through its branches.
+
+    The patched callable receives `args` (`["git", ...]`) and returns
+    a CompletedProcess-like stub. We dispatch on the second/third
+    positional element of `args` to simulate each git invocation.
+    """
+
+    def _patched_run(self, behavior):
+        """Return a `subprocess.run` replacement that consults `behavior`.
+
+        `behavior` is a dict mapping a tuple key (the command's
+        identifying suffix) to either a `_make_cp(...)` result OR a
+        callable returning one.
+        """
+        def fake_run(args, **kwargs):
+            # Identify the call by the cmd tail. The keys we recognize:
+            #   ("config",)            -> remote.origin.url lookup
+            #   ("fetch",)             -> fetch origin main
+            #   ("verify", "origin/main") -> rev-parse --verify origin/main
+            #   ("ancestor", "origin/main") -> merge-base --is-ancestor origin/main
+            #   ("ancestor", "main")   -> merge-base --is-ancestor main (legacy)
+            #   ("verify", "main")     -> rev-parse --verify main
+            if "config" in args:
+                key = ("config",)
+            elif "fetch" in args:
+                key = ("fetch",)
+            elif "merge-base" in args and "--is-ancestor" in args:
+                # next-to-last positional arg is the "potential ancestor"
+                key = ("ancestor", args[-2])
+            elif "rev-parse" in args and "--verify" in args:
+                key = ("verify", args[-1])
+            else:
+                key = tuple(args[-2:])
+            entry = behavior.get(key)
+            if entry is None:
+                # default success for unrecognized calls
+                return _make_cp(0)
+            # NOTE: MagicMock instances are callable too — only treat
+            # FunctionType / lambdas as dynamic dispatchers.
+            import types
+            if isinstance(entry, (types.FunctionType, types.LambdaType,
+                                  types.MethodType)):
+                return entry(args, **kwargs)
+            return entry
+        return fake_run
+
+    def test_ff_ok_when_origin_main_is_ancestor(self):
+        """AC #1 — origin/main is an ancestor of branch → ok."""
+        from unittest.mock import patch
+        behavior = {
+            ("config",): _make_cp(0, stdout="git@github.com:org/repo.git\n"),
+            ("fetch",): _make_cp(0),
+            ("verify", "origin/main"): _make_cp(0),
+            ("ancestor", "origin/main"): _make_cp(0),  # is-ancestor → yes
+        }
+        with patch.object(_land.subprocess, "run",
+                          side_effect=self._patched_run(behavior)):
+            ok, msg = _land._check_ff_viable("feat/test")
+        self.assertTrue(ok, f"expected ok; got msg={msg!r}")
+        self.assertEqual(msg, "")
+
+    def test_ff_refused_when_local_behind_origin(self):
+        """AC #1, #2 — origin/main not an ancestor → refuse with the
+        origin-named message ('origin/main' and 'pull'|'rebase')."""
+        from unittest.mock import patch
+        behavior = {
+            ("config",): _make_cp(0, stdout="git@github.com:org/repo.git\n"),
+            ("fetch",): _make_cp(0),
+            ("verify", "origin/main"): _make_cp(0),
+            ("ancestor", "origin/main"): _make_cp(1),  # is-ancestor → no
+        }
+        with patch.object(_land.subprocess, "run",
+                          side_effect=self._patched_run(behavior)):
+            ok, msg = _land._check_ff_viable("feat/test")
+        self.assertFalse(ok)
+        self.assertIn("origin/main", msg)
+        self.assertTrue("pull" in msg or "rebase" in msg,
+                        f"expected pull/rebase hint in: {msg!r}")
+
+    def test_ff_refusal_shares_exit_code_with_off_main_refusal(self):
+        """AC #3 — the refusal reaches `execute()`'s exit code path
+        as a plain non-zero (1), same as today's dirty/off-main refusals.
+        """
+        from unittest.mock import patch
+        tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        try:
+            spec = Path(tmpdir) / "spec.md"
+            spec.write_text(_spec_with_slice("037-01 — test", "DONE"))
+            with patch.object(_land, "_detect_branch",
+                              return_value="feat/test"), \
+                 patch.object(_land, "_check_ff_viable",
+                              return_value=(False, "local main is behind "
+                                            "origin/main — pull or rebase "
+                                            "before merging")), \
+                 patch.object(_land, "_detect_main_worktree_root",
+                              return_value=Path(tmpdir)):
+                report, code = _land.execute(
+                    spec, "037-01", target=Path(tmpdir))
+            self.assertEqual(code, 1, f"report: {report}")
+            self.assertIn("origin/main", report)
+            self.assertIn("Refusing", report)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class CheckFfViableFetchFailureTests(unittest.TestCase):
+    """Spec 037-01 AC #4 — fetch failure → warn + local check."""
+
+    def test_fetch_failure_warns_and_falls_back_to_local(self):
+        """AC #4 — `git fetch origin main` non-zero → stderr warning,
+        then existing local-main ancestor check is used."""
+        from unittest.mock import patch
+        import io
+        # Behavior: origin exists, fetch fails, local main is ancestor
+        # of branch (legacy path succeeds).
+        def fake_run(args, **kwargs):
+            if "config" in args:
+                return _make_cp(0, stdout="git@github.com:org/repo.git\n")
+            if "fetch" in args:
+                return _make_cp(1, stderr="fatal: unable to access "
+                                "'https://github.com/': network down")
+            if "merge-base" in args and "--is-ancestor" in args:
+                # local-main ancestor check → success
+                return _make_cp(0)
+            if "rev-parse" in args and "--verify" in args:
+                return _make_cp(0)
+            return _make_cp(0)
+
+        captured = io.StringIO()
+        with patch.object(_land.subprocess, "run", side_effect=fake_run), \
+             patch.object(_land.sys, "stderr", captured):
+            ok, msg = _land._check_ff_viable("feat/test")
+        self.assertTrue(ok, f"expected ok via local fallback; got msg={msg!r}")
+        stderr_text = captured.getvalue()
+        self.assertIn("warning", stderr_text)
+        self.assertIn("git fetch origin main failed", stderr_text)
+        self.assertIn("proceeding with local view", stderr_text)
+
+
+class CheckFfViableNoOriginTests(unittest.TestCase):
+    """Spec 037-01 AC #5 — no `origin` OR no `origin/main` ref →
+    silent fall-through to local check (no warning, no refusal on
+    that count)."""
+
+    def test_no_origin_remote_silently_falls_back(self):
+        """AC #5 — `git config remote.origin.url` fails → silent local."""
+        from unittest.mock import patch
+        import io
+        # Tracker for fetch-being-skipped: if fetch is called we'll
+        # fail the test by counting.
+        fetch_count = {"n": 0}
+
+        def fake_run(args, **kwargs):
+            if "config" in args:
+                # no origin configured
+                return _make_cp(1, stderr="")
+            if "fetch" in args:
+                fetch_count["n"] += 1
+                return _make_cp(0)
+            if "merge-base" in args and "--is-ancestor" in args:
+                return _make_cp(0)
+            if "rev-parse" in args and "--verify" in args:
+                return _make_cp(0)
+            return _make_cp(0)
+
+        captured = io.StringIO()
+        with patch.object(_land.subprocess, "run", side_effect=fake_run), \
+             patch.object(_land.sys, "stderr", captured):
+            ok, msg = _land._check_ff_viable("feat/test")
+        self.assertTrue(ok, f"expected ok; got msg={msg!r}")
+        self.assertEqual(fetch_count["n"], 0,
+                         "must not fetch when no origin configured")
+        # No warning on this code path (distinct from AC #4 case).
+        stderr_text = captured.getvalue()
+        self.assertNotIn("warning", stderr_text,
+                         f"expected silent fall-through; got: {stderr_text!r}")
+
+    def test_no_origin_main_ref_silently_falls_back(self):
+        """AC #5 — origin exists, fetch succeeds, but rev-parse
+        --verify origin/main fails (ref absent locally) → silent
+        local."""
+        from unittest.mock import patch
+        import io
+
+        def fake_run(args, **kwargs):
+            if "config" in args:
+                return _make_cp(0, stdout="git@github.com:org/repo.git\n")
+            if "fetch" in args:
+                return _make_cp(0)
+            if "rev-parse" in args and "--verify" in args:
+                if "origin/main" in args:
+                    return _make_cp(1)  # ref absent
+                return _make_cp(0)  # local main exists
+            if "merge-base" in args and "--is-ancestor" in args:
+                # local fallback succeeds
+                return _make_cp(0)
+            return _make_cp(0)
+
+        captured = io.StringIO()
+        with patch.object(_land.subprocess, "run", side_effect=fake_run), \
+             patch.object(_land.sys, "stderr", captured):
+            ok, msg = _land._check_ff_viable("feat/test")
+        self.assertTrue(ok, f"expected ok; got msg={msg!r}")
+        # No "warning" emission on this code path either.
+        stderr_text = captured.getvalue()
+        self.assertNotIn("warning", stderr_text,
+                         f"expected silent fall-through; got: {stderr_text!r}")
+
+
+class ExecuteDirectPushFailureRecoveryTests(unittest.TestCase):
+    """Spec 037-01 AC #6 — push failure → no auto-rollback, report
+    appends recovery hint."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("037-01 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_push_failure_appends_recovery_hint_no_rollback(self):
+        """AC #6 — push fails → report has 'could not be pushed' AND
+        the `git reset --hard origin/main` hint; no `reset --hard`
+        was actually called."""
+        from unittest.mock import patch
+
+        call_log = []
+
+        def fake_git_cmd(args, cwd, dry_run=False):
+            call_log.append(list(args))
+            if args[0] == "push":
+                return False, ("To github.com:org/repo.git\n"
+                               " ! [rejected] main -> main "
+                               "(fetch first)\nerror: failed to push some refs")
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
+            report, code = _land.execute(self.spec, "037-01",
+                                          target=Path(self.tmpdir))
+
+        self.assertEqual(code, 1, f"report: {report}")
+        # AC #6(b) — recovery hint substrings
+        self.assertIn("could not be pushed", report)
+        self.assertIn("git reset --hard origin/main", report)
+        # AC #6(a) — no automatic rollback: `reset --hard` was NOT
+        # invoked.
+        for args in call_log:
+            self.assertFalse(
+                args[0] == "reset" and "--hard" in args,
+                f"automatic rollback executed: {args}"
+            )
+
+
+class ExecuteDirectThreeStepSequencePreservedTests(unittest.TestCase):
+    """Spec 037-01 AC #7 — the live git sequence stays at three
+    steps (checkout main → merge --ff-only → push origin main).
+    No new "verify push will succeed" middle step is added."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("037-01 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_live_runs_exactly_three_git_steps(self):
+        from unittest.mock import patch
+        call_log = []
+
+        def fake_git_cmd(args, cwd, dry_run=False):
+            call_log.append(list(args))
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
+            _land.execute(self.spec, "037-01", target=Path(self.tmpdir))
+
+        # Exactly three steps; first arg is the subcommand.
+        subcmds = [args[0] for args in call_log]
+        self.assertEqual(subcmds, ["checkout", "merge", "push"],
+                         f"unexpected step sequence: {subcmds}")
+
+
+class ExecuteDirectDryRunNoFetchTests(unittest.TestCase):
+    """Spec 037-01 AC #8 — `--dry-run` does not call `git fetch` (no
+    network calls in dry-run)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("037-01 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_dry_run_does_not_fetch(self):
+        """Dry-run path skips `_check_ff_viable` AND must not invoke
+        `git fetch` through any other shim."""
+        from unittest.mock import patch
+
+        # Track every subprocess.run invocation; fail if any of them
+        # is `git fetch ...`.
+        fetch_seen = {"n": 0}
+        real_run = _land.subprocess.run
+
+        def tracker(args, *a, **kw):
+            if isinstance(args, list) and len(args) >= 2 \
+                    and args[0] == "git" and args[1] == "fetch":
+                fetch_seen["n"] += 1
+            return real_run(args, *a, **kw)
+
+        with patch.object(_land, "_detect_branch", return_value="feat/test"), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=Path(self.tmpdir)), \
+             patch.object(_land.subprocess, "run", side_effect=tracker):
+            report, code = _land.execute(
+                self.spec, "037-01", mode="direct",
+                dry_run=True, target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, f"report: {report}")
+        self.assertEqual(fetch_seen["n"], 0,
+                         "dry-run must not call `git fetch`")
+
+
 if __name__ == "__main__":
     unittest.main()
