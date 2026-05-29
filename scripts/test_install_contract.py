@@ -93,7 +93,14 @@ class ReleaseFileSetTests(unittest.TestCase):
         the runtime `scripts/*.py` allowlist as module-level data."""
         self.assertEqual(
             install_contract.RELEASE_INCLUDE_ROOTS,
-            (".claude-plugin", "agents", "skills", "hooks", "templates"),
+            (
+                ".claude-plugin",
+                ".codex-plugin",
+                "agents",
+                "skills",
+                "hooks",
+                "templates",
+            ),
         )
         self.assertEqual(
             install_contract.RELEASE_INCLUDE_FILES,
@@ -242,6 +249,68 @@ class PluginManifestValidationTests(unittest.TestCase):
 
     def test_non_object_rejected(self):
         self.assertTrue(install_contract.validate_plugin_manifest(["not", "obj"]))
+
+
+# ---------------------------------------------------------------------------
+# AC #1 / slice 033-06 — .codex-plugin/plugin.json manifest requirements
+# ---------------------------------------------------------------------------
+
+
+class CodexPluginManifestValidationTests(unittest.TestCase):
+    def _valid(self) -> dict:
+        return {
+            "name": "jig",
+            "version": "1.0.0",
+            "description": "d",
+            "author": {"name": "ramboz"},
+            "skills": "./skills/",
+            "interface": {
+                "displayName": "jig",
+                "shortDescription": "d",
+                "longDescription": "d",
+                "developerName": "ramboz",
+                "category": "Engineering",
+                "capabilities": ["Interactive", "Read", "Write"],
+                "defaultPrompt": ["Set up this project"],
+            },
+        }
+
+    def test_full_manifest_valid(self):
+        self.assertEqual(
+            install_contract.validate_codex_plugin_manifest(self._valid()), []
+        )
+
+    def test_missing_interface_field_flagged_with_codex_path(self):
+        data = self._valid()
+        del data["interface"]["shortDescription"]
+        problems = install_contract.validate_codex_plugin_manifest(data)
+        self.assertTrue(problems)
+        joined = " ".join(problems)
+        self.assertIn(".codex-plugin/plugin.json", joined)
+        self.assertIn("shortDescription", joined)
+
+    def test_bad_skills_pointer_rejected(self):
+        data = self._valid()
+        data["skills"] = "./codex-skills/"
+        problems = install_contract.validate_codex_plugin_manifest(data)
+        self.assertTrue(any("./skills/" in p for p in problems), problems)
+
+    def test_missing_author_name_flagged(self):
+        data = self._valid()
+        data["author"] = {}
+        problems = install_contract.validate_codex_plugin_manifest(data)
+        self.assertTrue(any("author.name" in p for p in problems), problems)
+
+    def test_default_prompt_is_capped_at_three(self):
+        data = self._valid()
+        data["interface"]["defaultPrompt"] = ["a", "b", "c", "d"]
+        problems = install_contract.validate_codex_plugin_manifest(data)
+        self.assertTrue(any("at most 3" in p for p in problems), problems)
+
+    def test_non_object_rejected(self):
+        self.assertTrue(
+            install_contract.validate_codex_plugin_manifest(["not", "obj"])
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +607,14 @@ class RealRepoContractTests(unittest.TestCase):
             (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text()
         )
         self.assertEqual(install_contract.validate_plugin_manifest(data), [])
+
+    def test_real_codex_plugin_manifest_valid(self):
+        data = json.loads(
+            (REPO_ROOT / ".codex-plugin" / "plugin.json").read_text()
+        )
+        self.assertEqual(
+            install_contract.validate_codex_plugin_manifest(data), []
+        )
 
     def test_real_marketplace_manifest_valid(self):
         data = json.loads(

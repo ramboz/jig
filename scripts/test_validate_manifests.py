@@ -4,8 +4,9 @@ Tests for scripts/validate_manifests.py — slice 013-01 (ci-baseline).
 Covers AC #7: (a) all-valid exits 0; (b) plugin.json missing `name` exits
 non-zero with a clear message naming the missing field; (c) marketplace.json
 missing `name` exits non-zero; (d) malformed JSON in any file exits non-zero
-with the offending file path in the error message. Also a smoke test that
-the real checked-in manifests in this repo pass validation.
+with the offending file path in the error message. Slice 033-06 extends the
+same CI preflight to Codex's `.codex-plugin/plugin.json`. Also a smoke test
+that the real checked-in manifests in this repo pass validation.
 """
 
 import io
@@ -30,6 +31,23 @@ _VALID_PLUGIN_JSON = {
     "description": "test",
 }
 
+_VALID_CODEX_PLUGIN_JSON = {
+    "name": "jig",
+    "version": "0.1.0",
+    "description": "test",
+    "author": {"name": "ramboz"},
+    "skills": "./skills/",
+    "interface": {
+        "displayName": "jig",
+        "shortDescription": "test",
+        "longDescription": "test",
+        "developerName": "ramboz",
+        "category": "Engineering",
+        "capabilities": ["Interactive", "Read", "Write"],
+        "defaultPrompt": ["test"],
+    },
+}
+
 _VALID_MARKETPLACE_JSON = {
     "name": "jig",
     "owner": {"name": "ramboz"},
@@ -50,6 +68,10 @@ def _seed_valid_repo(root: Path) -> None:
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "plugin.json").write_text(
         json.dumps(_VALID_PLUGIN_JSON)
+    )
+    (root / ".codex-plugin").mkdir()
+    (root / ".codex-plugin" / "plugin.json").write_text(
+        json.dumps(_VALID_CODEX_PLUGIN_JSON)
     )
     (root / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps(_VALID_MARKETPLACE_JSON)
@@ -80,6 +102,7 @@ class AllValidTests(unittest.TestCase):
             validate_manifests.run(root, out=out)
             text = out.getvalue()
             self.assertIn("plugin.json", text)
+            self.assertIn(".codex-plugin/plugin.json", text)
             self.assertIn("marketplace.json", text)
             self.assertIn("hooks.json", text)
 
@@ -113,6 +136,78 @@ class PluginJsonMissingNameTests(unittest.TestCase):
             text = out.getvalue()
             self.assertIn("name", text)
             self.assertIn("plugin.json", text)
+
+
+# ---------------------------------------------------------------------------
+# Slice 033-06 — Codex plugin.json missing `name` exits non-zero
+# ---------------------------------------------------------------------------
+
+
+class CodexPluginJsonMissingNameTests(unittest.TestCase):
+    def test_missing_name_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = dict(_VALID_CODEX_PLUGIN_JSON)
+            broken.pop("name")
+            (root / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+
+    def test_missing_name_message_names_codex_plugin_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = dict(_VALID_CODEX_PLUGIN_JSON)
+            broken.pop("name")
+            (root / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            validate_manifests.run(root, out=out)
+            text = out.getvalue()
+            self.assertIn("name", text)
+            self.assertIn(".codex-plugin/plugin.json", text)
+
+
+# ---------------------------------------------------------------------------
+# Slice 033-06 + 047-01 — Codex plugin.json full contract
+# ---------------------------------------------------------------------------
+
+
+class CodexPluginManifestContractTests(unittest.TestCase):
+    def test_missing_interface_field_fails_and_names_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = json.loads(json.dumps(_VALID_CODEX_PLUGIN_JSON))
+            del broken["interface"]["longDescription"]
+            (root / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            text = out.getvalue()
+            self.assertIn(".codex-plugin/plugin.json", text)
+            self.assertIn("longDescription", text)
+
+    def test_bad_skills_pointer_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = dict(_VALID_CODEX_PLUGIN_JSON)
+            broken["skills"] = "./codex-skills/"
+            (root / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            self.assertIn("./skills/", out.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +480,7 @@ class GeneratorIterableTests(unittest.TestCase):
             gen = (m for m in validate_manifests._MANIFESTS)
             code = validate_manifests.run(root, out=out, manifests=gen)
             self.assertEqual(code, 0)
-            self.assertIn("3/3", out.getvalue())
+            self.assertIn("4/4", out.getvalue())
 
 
 class CliTests(unittest.TestCase):

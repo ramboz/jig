@@ -49,6 +49,8 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 
 The host surfaces every jig skill **with its description each session** — this primer does not re-list them (EngTip #23 / spec 076). Each skill's contract is its `skills/<name>/SKILL.md`; the per-tier roster is `scaffold._TIER_SKILLS` (mirrored in the glossary's **Tier 0/1/2** entry). Skills with a `.py` helper: `spec-workflow` (`workflow.py`), `independent-review` (`review.py`), `adr-workflow` (`adr.py`), `tdd-loop` (`tdd.py`), `slice-land` (`land.py`), `migrate` (`migrate.py`), `memory-sync` (`memory.py`), `code-health` (`health.py`); the rest are judgment-only. Explain any skill, term, or artifact with `/jig:explain`.
 
+Host packaging details live in [docs/architecture.md](docs/architecture.md); Codex plugin packaging is built by `scripts/build_codex_plugin.py`.
+
 ## Session workflow
 
 1. Check [docs/specs/README.md](docs/specs/README.md); pick up the next `READY_FOR_IMPLEMENTATION` slice.
