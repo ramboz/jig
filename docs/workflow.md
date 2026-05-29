@@ -110,7 +110,13 @@ After implementation, before marking DONE:
 - Update specs with deviation log annotations (original ACs preserved).
 - Update `architecture.md` ONLY if module boundaries or contracts changed (signal: write an ADR).
 - ADRs are immutable after acceptance — new decisions supersede, never edit.
-- `docs/conventions.md` changes require explicit human approval.
+- `docs/conventions.md` changes require explicit human approval. The
+  `jig-spec-gate` hook backstops this rule — but it is a *deliberateness*
+  gate that catches accidental side-effect edits, not a hard human-only
+  guarantee (the env var is satisfiable by any shell, including the agent's).
+  Where a team needs mechanical human-only enforcement, use an out-of-band
+  channel — `CODEOWNERS` on the file, a CI check on the PR diff, or branch
+  protection. See [ADR-0011](decisions/adr-0011-spec-gate-model.md).
 - A second reviewer pass runs on the reconciliation itself.
 
 ## Hook strictness profiles

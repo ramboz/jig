@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: (none — hook + docs)
 tier: (none — dev infrastructure)
 adr_required: true

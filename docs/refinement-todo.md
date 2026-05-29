@@ -46,6 +46,10 @@ Resolved by [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md).
 - Does the parent slice stay open as an index, or close when all children are Done?
 - How does `land.py prepare` aggregate sub-slice readiness — all children Done, or each child landed independently?
 
+### Decision: `JIG_GATED_FILES` — configurable spec-gate path set
+**Deferred:** [ADR-0011](decisions/adr-0011-spec-gate-model.md) (spec 042) kept the `jig-spec-gate` hook matching `docs/conventions.md` literally — it is jig-layout-specific. A project with a differently-named constitution (e.g. root `CONVENTIONS.md`) gets no gate. A configurable gated set (`JIG_GATED_FILES`, or a per-project constitution pointer) is named in ADR-0011 Scope as a deferred enhancement; no slice is reserved.
+**Resolution trigger:** A real downstream / migrate-mode project with a differently-named constitution file asks for the gate to cover it. Until then the literal `docs/conventions.md` match is acceptable and the path-flexibility work stays unbuilt.
+
 ### Decision: Memory-recall verification (claims-from-memory linter)
 **Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. The user-global CLAUDE.md has a "Before recommending from memory, verify" stanza, but enforcement is convention-only. When the agent says "spec NNN has slice X" or "function Y exists at file Z", no tool fact-checks the claim before action. The reviewer subagent catches some of this at the slice boundary, but mid-session hallucinations against the memory layer remain unflagged.
 **Resolution trigger:** First observable mid-session hallucination where the agent acted on a stale memory claim AND the resulting bug survived past reconciliation (i.e., the reviewer didn't catch it). Until that happens, the convention-only stance is upheld manually. ALSO: revisit if/when spec 025-02 (the deferred `workflow.py audit-claude-md` helper) ships — it covers the doc-to-reality direction; this entry covers the agent-claim-to-reality direction.

@@ -15,6 +15,8 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 ### Key terms
 - **Closed-spec drift policy** — [ADR-0008](docs/decisions/adr-0008-closed-spec-drift-policy.md) — when a closed (DONE / SUPERSEDED) spec or load-bearing skill/router prose drifts from reality, default to a `## Amendments` section on the artifact; new ADR (or superseding spec) for decision-content changes. Excludes IN_PROGRESS / REVIEWED / RECONCILED / DEFERRED.
 
+- **Spec-gate model** — [ADR-0011](docs/decisions/adr-0011-spec-gate-model.md) — `hooks/scripts/jig-spec-gate.sh` is a *deliberateness* gate that blocks accidental side-effect edits to `docs/conventions.md`, **not** human-only enforcement (the `JIG_CONVENTIONS_APPROVED=1` env var is satisfiable by any shell, incl. the agent via Bash). Real human-only control is out-of-band (`CODEOWNERS` / CI / branch-protection). The *policy* "human approval to change conventions.md" stays; only the claim that the *hook enforces* it was the honesty gap. Gate is jig-layout-specific (`docs/conventions.md` only; `JIG_GATED_FILES` deferred).
+
 - **SPIDR** = Mike Cohn's five story-splitting techniques (Spike, Path, Interface, Data, Rules)
 - **Tier 0/1/2** = installation tiers for jig skills (see [docs/memory/glossary.md](docs/memory/glossary.md))
 - **Hot Cache** = the structured CLAUDE.md section for high-frequency terms
