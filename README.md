@@ -32,10 +32,10 @@ jig installs a focused, opinionated workflow layer into your project:
 
 > Intuitive automated triggering at the right moments, over explicit command surfaces.
 
-- 5 Tier 0 skills (not 100+)
+- 7 Tier 0 skills installed by default (not 100+)
 - 3 subagents (not 48 like ECC)
 - Hooks are the spine; skills are the LLM layer
-- 8-12 skills total when complete
+- 14 skills total across two tiers (Tier 1 adds on a test/workflow signal)
 
 See [docs/product-vision.md](docs/product-vision.md) for the full vision (target users, competitive landscape, design principles) and [docs/architecture.md](docs/architecture.md) for the technical mechanics.
 

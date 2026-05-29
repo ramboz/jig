@@ -1496,6 +1496,49 @@ class TierSkillSetTests(unittest.TestCase):
             f"tier-2 set drift: expected {self.EXPECTED_TIER_2}, got {actual}",
         )
 
+    # ----- Slice 038-03: doc <-> _TIER_SKILLS consistency -----------------
+    # These pin the positioning docs to the pinned tier inventory. The gap
+    # they close is the one spec 038 was filed for: `vision-elicitation`
+    # was in `_TIER_SKILLS["tier-0"]` but absent from product-vision.md's
+    # numbered list, and README claimed "5 Tier 0 skills" — both survived
+    # for months because nothing asserted doc↔code tier consistency.
+    def test_product_vision_names_every_tier_skill(self):
+        vision = (REPO_ROOT / "docs" / "product-vision.md").read_text()
+        missing = [
+            s for s in (self.EXPECTED_TIER_0 + self.EXPECTED_TIER_1)
+            if f"`{s}`" not in vision
+        ]
+        self.assertEqual(
+            missing, [],
+            f"docs/product-vision.md does not name every tier skill; "
+            f"missing: {missing}. Add them to the tier inventory or fix "
+            f"the _TIER_SKILLS table.",
+        )
+
+    def test_readme_states_correct_tier0_count(self):
+        readme = (REPO_ROOT / "README.md").read_text()
+        self.assertIn(
+            f"{len(self.EXPECTED_TIER_0)} Tier 0 skills", readme,
+            f"README must state the Tier-0 floor count "
+            f"({len(self.EXPECTED_TIER_0)} skills) to match _TIER_SKILLS",
+        )
+
+    def test_vision_elicitation_worked_example_tier_line_in_sync(self):
+        """The vision-elicitation worked example is hand-seeded to mirror
+        product-vision.md's "Where jig fits" line; its tier counts must
+        track `_TIER_SKILLS`. (Slice 038-03 compliance review caught this
+        shipped Tier-0 resource carrying the stale "5 Tier 0 + ~5 Tier 1"
+        line — a `skills/` path the original `docs/`-scoped grep missed.)"""
+        example = (
+            REPO_ROOT / "skills" / "vision-elicitation" / "worked-example-jig.md"
+        ).read_text()
+        n0, n1 = len(self.EXPECTED_TIER_0), len(self.EXPECTED_TIER_1)
+        self.assertIn(
+            f"{n0} Tier 0 + {n1} Tier 1", example,
+            f"worked-example-jig.md tier-count line must match _TIER_SKILLS "
+            f"({n0} Tier 0 + {n1} Tier 1)",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -77,7 +77,7 @@ stanzas.
 | **claude-code-templates-style boilerplate** | Solves day-1 layout | Static — no living workflow, no reviewer subagent, no spec lifecycle |
 
 **Where jig fits:** between "atomic skills" and "maximalist packs" —
-a fixed-size opinionated workflow layer (5 Tier 0 + ~5 Tier 1
+a fixed-size opinionated workflow layer (7 Tier 0 + 7 Tier 1
 skills, 3 subagents) that ships with the templates, hooks, and helpers
 to enforce it, and that defers to richer user-installed skills where
 they exist.
@@ -90,27 +90,28 @@ for tier definitions.
 
 ### Tier 0 — always installs (the floor)
 
-The minimum coherent workflow. Nothing useful without all five.
+The minimum coherent workflow. Nothing useful without all seven.
 
 1. **`scaffold-init`** — generate docs/, hot-cache CLAUDE.md, settings.json
 2. **`memory-sync`** — cross-session continuity; hot cache + deep storage + inbox
 3. **`spec-workflow`** — SPIDR-split slices; DRAFT → DONE state machine; status board
 4. **`independent-review`** — reviewer subagent with a fresh prompt and read-only tools. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
 5. **`migrate`** — sibling entry path for projects that already have specs
+6. **`vision-elicitation`** — lightweight wizard that fills the elicitation slots in this document and `architecture.md` after `scaffold-init`; re-runnable with hash-based edit detection (per-section refresh / skip / diff)
+7. **`contracts`** — judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL); defers to richer user skills. Deliberate stub per [ADR-0002](decisions/adr-0002-contracts-stays-deferred.md), still installed at Tier 0.
 
 ### Tier 1 — default-on (the working surface)
 
 Enabled by default; can be disabled per install. These are the daily
 drivers once Tier 0 is in place.
 
-6. **`adr-workflow`** — capture decisions; resolve refinement-todo entries
-7. **`tdd-loop`** — auto-detected test runner; normalized exit codes (0/1/2)
-8. **`slice-land`** — readiness check + landing checklist (direct merge or PR)
-9. **`pr-review`** — slim baseline four-section review; defers to richer user skills. `spec-workflow` invokes it automatically as the **craft pass** of the post-implementation review (always runs).
-10. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern. `spec-workflow` invokes it automatically as the **arch pass** of the post-implementation review, **on-demand** when the slice's frontmatter declares `arch_review: true`.
-11. **`contracts`** — judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL); defers to richer user skills
-12. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications` (per spec 023, **no** deferral hint to spec-kit per explicit user direction 2026-05-18)
-13. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate (per spec 024 AC #6 — `_principles_check_block()` appended unconditionally to every reviewer prompt). Same no-deferral-hint stance as clarify
+8. **`adr-workflow`** — capture decisions; resolve refinement-todo entries
+9. **`tdd-loop`** — auto-detected test runner; normalized exit codes (0/1/2)
+10. **`slice-land`** — readiness check + landing checklist (direct merge or PR)
+11. **`pr-review`** — slim baseline four-section review; defers to richer user skills. `spec-workflow` invokes it automatically as the **craft pass** of the post-implementation review (always runs).
+12. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern. `spec-workflow` invokes it automatically as the **arch pass** of the post-implementation review, **on-demand** when the slice's frontmatter declares `arch_review: true`.
+13. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications` (per spec 023, **no** deferral hint to spec-kit per explicit user direction 2026-05-18)
+14. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate (per spec 024 AC #6 — `_principles_check_block()` appended unconditionally to every reviewer prompt). Same no-deferral-hint stance as clarify
 
 ### Tier 2 — opt-in by signal (deferred until pain reported)
 
