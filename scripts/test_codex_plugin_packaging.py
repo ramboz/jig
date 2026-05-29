@@ -8,8 +8,10 @@ skills/hooks/agents source tree that scaffold mode already renders from.
 
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -140,6 +142,39 @@ class CodexPluginBuilderTests(unittest.TestCase):
         ):
             self.assertTrue((self.plugin_dir / rel).is_file(), rel)
 
+    def test_builder_renders_codex_agent_toml_templates(self):
+        agent = self.plugin_dir / "agents" / "jig-reviewer.toml"
+        self.assertTrue(agent.is_file())
+        data = tomllib.loads(agent.read_text())
+        self.assertEqual(data["name"], "jig-reviewer")
+        self.assertEqual(data["sandbox_mode"], "read-only")
+        self.assertIn("developer_instructions", data)
+        self.assertIn("You are an independent reviewer", data["developer_instructions"])
+
+    def test_generated_plugin_helper_installs_codex_agent_templates(self):
+        agents_dir = self.plugin_dir.parent / "global-codex-agents"
+        helper = self.plugin_dir / "skills" / "scaffold-init" / "scaffold.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                "--install-codex-agents",
+                "--codex-agents-dir",
+                str(agents_dir),
+            ],
+            cwd=self.plugin_dir,
+            capture_output=True,
+            text=True,
+            env={},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("installed 3 Codex agent(s)", result.stdout)
+        agent = agents_dir / "jig-reviewer.toml"
+        data = tomllib.loads(agent.read_text())
+        self.assertEqual(data["name"], "jig-reviewer")
+        self.assertEqual(data["sandbox_mode"], "read-only")
+
     def test_builder_writes_codex_marketplace_descriptor(self):
         marketplace = self.plugin_dir.parent / ".agents" / "plugins" / "marketplace.json"
         data = json.loads(marketplace.read_text())
@@ -193,11 +228,11 @@ class CodexPluginDocsTests(unittest.TestCase):
             / "slice-06-codex-plugin-packaging.md"
         ).read_text()
         self.assertIn("Codex custom-agent discovery uses TOML", readme)
-        self.assertIn("does not add an unsupported `agents` field", architecture)
-        self.assertIn("non-discoverable prompt source", architecture)
-        self.assertIn("Markdown prompts are discoverable Codex agents", refinement)
+        self.assertIn("explicit post-install step", readme)
+        self.assertIn("unsupported `agents` field", architecture)
+        self.assertIn("TOML custom-agent templates", architecture)
+        self.assertIn("plugin-level custom-agent discovery", refinement)
         self.assertIn("AC #3 deviation: custom-agent discovery", slice_doc)
-        self.assertIn("non-discoverable prompt source", slice_doc)
 
 
 if __name__ == "__main__":

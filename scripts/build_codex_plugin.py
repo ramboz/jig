@@ -138,6 +138,22 @@ def _copy_skills(source_root: Path, output_dir: Path) -> None:
                 dst.write_bytes(entry.read_bytes())
 
 
+def _render_codex_agent_templates(source_root: Path, output_dir: Path) -> None:
+    agents_src = source_root / "agents"
+    agents_dst = output_dir / "agents"
+    if not agents_src.is_dir():
+        return
+    agents_dst.mkdir(parents=True, exist_ok=True)
+    for agent in sorted(agents_src.glob("*.md")):
+        dst = agents_dst / scaffold_mod.CodexScaffoldRenderer.codex_agent_file_name(
+            agent.name
+        )
+        dst.write_text(
+            scaffold_mod.CodexScaffoldRenderer.render_codex_agent_toml(agent),
+            encoding="utf-8",
+        )
+
+
 def _marketplace_root_for(output_dir: Path) -> Path:
     if output_dir.parent.name == "plugins":
         return output_dir.parent.parent
@@ -234,6 +250,7 @@ def build(source_root: Path, output_dir: Path) -> int:
             _copy_tree(src, output_dir / root_name)
 
     _copy_skills(source_root, output_dir)
+    _render_codex_agent_templates(source_root, output_dir)
 
     for file_name in _ROOT_FILES:
         src = source_root / file_name

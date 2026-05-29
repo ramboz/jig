@@ -40,6 +40,21 @@ is offered (not auto-installed) when LLM/agent signals are present.
 5. Read the wizard's stdout summary and report back to the user. List the files
    that were created and the immediate next steps.
 
+## Codex custom-agent install
+
+Codex scaffold mode (`--host codex`) writes project-local custom agents as
+TOML under `.codex/agents/`. For Codex plugin users who want jig's role agents
+globally available, run the explicit post-install helper:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" --install-codex-agents
+```
+
+The default destination is `~/.codex/agents`. Use
+`--codex-agents-dir <dir>` to target a different Codex agents directory.
+The helper refuses to overwrite user-owned `jig-*.toml` files unless
+`--force` is passed.
+
 ## Q&A flow (slice 001-05)
 
 Ask each question in order. **Each question is independently skippable** — if the
