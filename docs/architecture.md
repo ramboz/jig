@@ -14,6 +14,7 @@
 ```
 jig/
 ├── .claude-plugin/plugin.json     # Manifest
+├── .codex-plugin/plugin.json      # Codex plugin manifest
 ├── skills/                        # Claude Code skills (auto-trigger + /menu)
 ├── agents/                        # Subagent definitions (implementer, reviewer, architect)
 ├── hooks/                         # Deterministic enforcement layer
@@ -23,12 +24,72 @@ jig/
 └── docs/                          # Dev docs for building jig itself (dogfooded)
 ```
 
-## Runtime wiring
+This is still the canonical source tree. Claude plugin mode reads these
+files directly from the installed plugin; Claude and Codex scaffold modes
+materialize host-native copies into the target project. Codex plugin mode
+materializes a plugin package from the same source via
+`scripts/build_codex_plugin.py`, rewriting only the staged skill copies.
+Future host adapters should render from the same source rather than fork
+the workflow model.
 
-How a session actually flows in plugin-install mode. The LLM layer (user →
-Claude → skill router → SKILL.md → helper or subagent → on-disk state) is
-non-deterministic; the nine hooks form the deterministic spine that fires on
-fixed events and can inject context or block tool calls.
+## Host support matrix
+
+| Host | Distribution | Status | Notes |
+|---|---|---|---|
+| Claude Code | Plugin | v1 supported | Existing `.claude-plugin` package remains valid. |
+| Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output remains the default ownership model. |
+| Codex | Scaffold | 033-05 implemented | Project-local output lives under `AGENTS.md` and `.codex/`. |
+| Codex | Plugin | v2 supported | `.codex-plugin/plugin.json` plus rendered Codex skills, root `hooks/hooks.json`, templates, and canonical agent prompts are produced by `scripts/build_codex_plugin.py`. |
+| Other harnesses | Any | out of scope | Future adapters need their own real user signal and spec slices. |
+
+## Host adapter boundary
+
+The architecture boundary is between jig's **logical workflow model**
+and a host's **materialized runtime files**. Jig keeps one source for
+skills, agent instructions, hook scripts, docs templates, and helper
+code; each host adapter renders the files that a specific harness knows
+how to load.
+
+Every adapter must account for the same logical operations:
+
+1. **Primer rendering.** Produce the project primer files the host reads
+   at session start. New scaffolded projects use `AGENTS.md` as the
+   canonical primer; Claude v1 keeps `CLAUDE.md` as the Claude Code adapter.
+2. **Skill installation.** Copy or render jig skills into the host's
+   project-scoped skill directory, rewriting helper paths only inside
+   the adapter.
+3. **Agent installation.** Render `implementer`, `reviewer`, and
+   `architect` into the host's custom-agent format while preserving the
+   intended capability shape.
+4. **Hook installation.** Register the seven logical jig hooks against
+   host-native lifecycle events.
+5. **Hook protocol translation.** Convert jig-level results into the
+   host protocol. The logical outcomes are `continue`,
+   warning context, and blocking reasons; exit codes and JSON shapes are
+   host-specific.
+6. **Path/environment binding.** Bind project root and jig runtime root
+   through host-neutral `JIG_*` conventions or self-location, with tiny
+   host adapters translating from host-specific environment variables
+   such as `CLAUDE_PLUGIN_ROOT`.
+7. **Managed-file metadata.** Mark or manifest generated files so future
+   update tooling can distinguish untouched jig-managed files from
+   user-edited copies.
+8. **Verification fixtures.** Provide stable generated-tree and hook
+   protocol fixtures so adapter behavior can be tested without opening
+   an interactive host session.
+
+The implementation keeps Claude behavior in place while defining this
+boundary. Codex scaffold generation writes `.codex/` project-local
+runtime files. Codex plugin packaging uses the same source tree and a
+build-time renderer so plugin users get Codex-shaped skill prose without
+checking in a second skill tree.
+
+## Claude runtime wiring
+
+How a session actually flows in Claude plugin-install mode. The LLM layer
+(user → Claude → skill router → SKILL.md → helper or subagent → on-disk
+state) is non-deterministic; the nine hooks form the deterministic spine
+that fires on fixed events and can inject context or block tool calls.
 
 ```mermaid
 flowchart TB
@@ -123,6 +184,30 @@ paths. Only the scaffold path rewrites. Coexistence between scaffolded
 and plugin installs falls under Claude Code's normal
 project-scoped-wins precedence; jig introduces no new arbiter.
 
+### Codex plugin packaging
+*Principle:* same workflow model, host-native materialization.
+
+Codex plugin mode uses `.codex-plugin/plugin.json` and the same root
+`hooks/hooks.json` default path that Codex documents for plugins. Codex
+sets `PLUGIN_ROOT` for plugin hooks and keeps `CLAUDE_PLUGIN_ROOT`
+compatible, so the canonical hook registrations remain unchanged for
+Claude plugin mode and continue to work in Codex plugin mode.
+
+`scripts/build_codex_plugin.py` produces the installable Codex plugin
+directory plus a generated `.agents/plugins/marketplace.json` beside it.
+It copies `.codex-plugin/`, `hooks/`, `templates/`, and `agents/` from
+the shared source, then renders `skills/**/SKILL.md` into Codex wording
+and plugin-root helper paths in the staged copy only. The checked-in
+`skills/` tree stays the canonical source for Claude plugin, Claude
+scaffold, Codex scaffold, and Codex plugin packaging.
+
+Codex's current custom-agent discovery uses TOML files under project-local
+or user-local `.codex/agents/`. Plugin packaging therefore bundles the
+canonical `agents/*.md` files only as non-discoverable prompt source, and
+does not add an unsupported `agents` field to `.codex-plugin/plugin.json`.
+Rendering TOML agents from the canonical prompts is deferred until the next
+host-adapter slice that claims Codex custom-agent discovery.
+
 ### Context economy (the "dumb zone")
 *Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#2).
 *Mechanics:* the `jig-context-check` hook warns at session start when fill approaches the ~40% threshold, and nudges again on in-session growth as context crosses configurable bands (40/60/80%, plus a higher active-compaction band per spec 057-02). Skills use progressive disclosure — body loads only on trigger; supporting files load only when referenced.
@@ -151,11 +236,65 @@ Six top-level concerns, named in [product-vision.md § Core features](product-vi
 - `skills/` — auto-triggering LLM behaviors (one `SKILL.md` + supporting files per skill)
 - `agents/` — three subagent definitions (`implementer` / `reviewer` / `architect`)
 - `hooks/` — deterministic spine (`hooks.json` + Python 3 scripts under `hooks/scripts/`)
-- `templates/` — source templates that `scaffold-init` copies into new projects (CLAUDE.md, docs/, brief)
-- `scripts/` — Python helpers invoked by skills, one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py`, `land.py`, `migrate.py`, `scaffold.py`, plus `usage.py` (per-spec token/cost reporting, spec 056)
-- `.claude-plugin/` — plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
+- `templates/` — source templates that `scaffold-init` copies into new projects (`AGENTS.md`, `CLAUDE.md`, docs/, brief)
+- `scripts/` — Python helpers invoked by skills, one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py`, `land.py`, `migrate.py`, `scaffold.py`, plus `usage.py` (per-spec token/cost reporting, spec 056) and `build_codex_plugin.py`
+- `.claude-plugin/` — Claude plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
+- `.codex-plugin/` — Codex plugin manifest (`plugin.json`)
+- `scripts/build_codex_plugin.py` — produces Codex plugin package output plus its generated marketplace descriptor
 
-Interface contracts between these modules are deliberately deferred — today's coupling is read-only and one-directional (skills read templates; helpers read specs; hooks read events; nothing writes across the module boundary). Will tighten when the first bidirectional case appears.
+The host adapter boundary sits inside the scaffold/runtime-rendering
+concern: shared helper logic stays source-centralized, while host
+renderers own path rewrites, primer choice, agent format, hook
+registration, and hook protocol translation.
+`skills/scaffold-init/scaffold.py` currently exposes this boundary as a
+host-neutral `HostRenderer` interface plus concrete renderers for Claude
+(`ClaudeScaffoldRenderer`) and Codex (`CodexScaffoldRenderer`). Claude
+scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
+`.claude/agents/`, `.claude/hooks/scripts/`, and `.claude/settings.json`.
+Codex scaffold mode writes `AGENTS.md`, `.codex/skills/`,
+`.codex/agents/*.md`, `.codex/hooks/scripts/`, `.codex/templates/`, and
+`.codex/hooks.json` without producing Claude-only files. The templates copy
+is runtime support for scaffolded helpers whose source fallback resolves
+template paths relative to the materialized jig runtime. Codex also installs
+non-discoverable unprefixed helper aliases under `.codex/skills/<name>/`
+without `SKILL.md`; these preserve existing peer-helper imports such as
+`skills/scaffold-init/scaffold.py` without registering duplicate skills.
+Current Codex agent files are Markdown prompts with an explicit capability
+note because Codex cannot enforce the same per-agent tool isolation encoded
+in Claude frontmatter; current Codex custom-agent discovery expects TOML
+agent files, so these Markdown prompts are not claimed as discoverable
+Codex custom agents.
+
+## Managed-File Metadata Policy
+
+Scaffolded files are tracked with a **manifest-only** default: `scaffold.json`
+records each managed file's relative path, source template/path, jig version,
+host renderer, and `sha256` content hash. This keeps large prompt/prose files
+such as `AGENTS.md`, `CLAUDE.md`, `docs/**`, skill `SKILL.md` bodies, and
+agent prompts readable for LLMs instead of adding noisy per-file metadata
+banners.
+
+Inline markers are reserved for native host merge safety when the host file is
+itself a structured merge surface. Today that means Claude hook entries inside
+`.claude/settings.json` carry `metadata: {managed_by_jig: true}` so jig can
+replace its own hook registrations without clobbering user-owned hooks. The
+file-level source/hash record for `.claude/settings.json` still lives in
+`scaffold.json`. Codex hook registration is generated as a whole
+`.codex/hooks.json` file with top-level `metadata: {managed_by_jig: true}`;
+scaffold refuses to overwrite an existing unmarked Codex hook config unless
+the user passes `--force`.
+
+On a force re-run, scaffold checks manifest hashes before writing. Untouched
+managed files may be regenerated; edited managed files cause a clear refusal
+so the user can move or merge their change first. Missing managed files may be
+regenerated. `scaffold.json` is the completion sentinel and manifest root, so
+it is not self-hashed.
+
+Interface contracts between the other modules are deliberately deferred
+— today's coupling is read-only and one-directional (skills read
+templates; helpers read specs; hooks read events; nothing writes across
+the module boundary). Will tighten when the first bidirectional case
+appears.
 
 ## Data model
 

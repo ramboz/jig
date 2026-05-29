@@ -12,8 +12,9 @@ Usage:
     python3 scripts/build_release_zip.py --smoke-test <path-to-zip>
 
 The zip is produced flat at the root (no wrapping `jig/` directory), so it
-is directly drag-and-droppable into Claude Code Desktop's `/plugin` UI and
-loadable via `claude --plugin-dir <zip>`.
+is directly drag-and-droppable into Claude Code Desktop's `/plugin` UI,
+loadable via `claude --plugin-dir <zip>`, and usable as the source payload
+for Codex plugin packaging.
 
 Exit codes:
     0  zip built successfully and validates / smoke-test passed
@@ -79,21 +80,24 @@ def _validate_output(zip_path: Path, expected_version: str, out) -> int:
     """
     with zipfile.ZipFile(zip_path) as zf:
         names = set(zf.namelist())
-        plugin_json_path = ".claude-plugin/plugin.json"
-        if plugin_json_path not in names:
-            out.write(f"FAIL: zip is missing {plugin_json_path} at root\n")
-            return 1
-        with zf.open(plugin_json_path) as f:
-            data = json.loads(f.read())
+        for plugin_json_path in (
+            ".claude-plugin/plugin.json",
+            ".codex-plugin/plugin.json",
+        ):
+            if plugin_json_path not in names:
+                out.write(f"FAIL: zip is missing {plugin_json_path} at root\n")
+                return 1
+            with zf.open(plugin_json_path) as f:
+                data = json.loads(f.read())
 
-    actual_version = data.get("version")
-    if actual_version != expected_version:
-        out.write(
-            f"FAIL: version mismatch — requested {expected_version!r} "
-            f"but source plugin.json declares {actual_version!r}. "
-            "Refusing to produce a mislabeled artifact.\n"
-        )
-        return 2
+            actual_version = data.get("version")
+            if actual_version != expected_version:
+                out.write(
+                    f"FAIL: version mismatch — requested {expected_version!r} "
+                    f"but {plugin_json_path} declares {actual_version!r}. "
+                    "Refusing to produce a mislabeled artifact.\n"
+                )
+                return 2
 
     return 0
 
@@ -114,18 +118,21 @@ def build(
     # Pre-check the source plugin.json version so we fail fast before any
     # I/O, rather than producing a mislabeled zip and detecting the
     # mismatch after the fact.
-    plugin_json_src = source_root / ".claude-plugin" / "plugin.json"
-    if not plugin_json_src.is_file():
-        out.write(f"FAIL: source plugin.json missing at {plugin_json_src}\n")
-        return 1
-    src_data = json.loads(plugin_json_src.read_text())
-    if src_data.get("version") != version:
-        out.write(
-            f"FAIL: version mismatch — requested {version!r} "
-            f"but source plugin.json declares {src_data.get('version')!r}. "
-            "Refusing to produce a mislabeled artifact.\n"
-        )
-        return 2
+    for plugin_json_src in (
+        source_root / ".claude-plugin" / "plugin.json",
+        source_root / ".codex-plugin" / "plugin.json",
+    ):
+        if not plugin_json_src.is_file():
+            out.write(f"FAIL: source plugin.json missing at {plugin_json_src}\n")
+            return 1
+        src_data = json.loads(plugin_json_src.read_text())
+        if src_data.get("version") != version:
+            out.write(
+                f"FAIL: version mismatch — requested {version!r} "
+                f"but {plugin_json_src} declares {src_data.get('version')!r}. "
+                "Refusing to produce a mislabeled artifact.\n"
+            )
+            return 2
 
     _warn_missing_optional_files(source_root, out)
 

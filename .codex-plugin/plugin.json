@@ -1,0 +1,38 @@
+{
+  "name": "jig",
+  "version": "1.10.0",
+  "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for Codex",
+  "author": {
+    "name": "ramboz"
+  },
+  "homepage": "https://github.com/ramboz/jig",
+  "repository": "https://github.com/ramboz/jig",
+  "keywords": [
+    "codex",
+    "workflow",
+    "spec-driven",
+    "review",
+    "hooks",
+    "scaffold"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "jig",
+    "shortDescription": "Spec-driven, review-gated workflow for Codex",
+    "longDescription": "jig packages spec workflow, review prompts, deterministic hooks, and scaffold helpers for Codex. Install as a plugin for centralized skills and hooks, or run scaffold-init with --host codex to copy editable project-local Codex files.",
+    "developerName": "ramboz",
+    "category": "Engineering",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Set up this project for AI-native development",
+      "Start the next jig spec slice",
+      "Run jig review passes for this slice"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}
