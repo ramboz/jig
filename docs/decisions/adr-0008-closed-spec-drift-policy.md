@@ -9,6 +9,8 @@ last_verified: 2026-05-27
 
 Accepted (2026-05-27)
 
+Superseded by [ADR-0010](./adr-0010-amendment-scope-records-vs-live-prose.md) (2026-05-29)
+
 ## Context
 
 jig's process treats ADRs as immutable per ADR-0006 / Nygard. Closed
