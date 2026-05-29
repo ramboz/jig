@@ -146,6 +146,9 @@
 | [049-slice-claim-on-in-progress](049-slice-claim-on-in-progress/spec.md) | 049-02 — status-board-claim-rendering | DRAFT |  |
 | [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-01 — memory-sync-team-recheck | DRAFT |  |
 | [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-02 — stale-audit-team-signal | DRAFT |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-01 — worktree-aware spec reservation | DRAFT |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-02 — worktree-aware ADR reservation | DRAFT |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | DRAFT |  |
 
 ## Deferred slices
 
