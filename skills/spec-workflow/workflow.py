@@ -974,10 +974,72 @@ def _title_case_slug(slug: str) -> str:
     return joined[0].upper() + joined[1:]
 
 
-def _next_spec_number(specs_dir: Path) -> int:
-    """Scan `specs_dir` for `NNN-*/` entries; return max(NNN) + 1.
+def _next_spec_number(specs_dir: Path,
+                      project_dir: Path = None,
+                      use_origin: bool = False) -> int:
+    """Scan for `NNN-*/` entries; return max(NNN) + 1.
+
+    Spec 037-02: in push mode (`use_origin=True`), the listing source
+    is `origin/main` (via `git ls-tree --name-only origin/main
+    docs/specs/`) so the reservation honors the team-wide contract
+    instead of the local working tree. The `--no-push` path keeps
+    using the working tree (no remote contract to honor — AC #2).
+
+    Algorithm (matches the spec 037 clarifications Q1, Q4, Q5; mirrors
+    `_check_ff_viable`'s fall-through shape at `land.py:555-655`):
+
+      1. If `use_origin=False` (i.e. `--no-push`), scan
+         `specs_dir.iterdir()` as before. AC #2 contract.
+      2. Otherwise:
+         a. If `git config --get remote.origin.url` fails, fall
+            through SILENTLY to the working-tree scan (AC #3, Q4 —
+            local-only-repo contract, no warning).
+         b. If `git rev-parse --verify origin/main` returns non-zero
+            OR empty stdout (ref absent or fetch failed earlier per
+            AC #6), fall through SILENTLY to the working-tree scan
+            (AC #3, AC #6).
+         c. Otherwise run `git ls-tree --name-only origin/main
+            docs/specs/` and apply the same `NNN-*` regex as the
+            working-tree path (AC #1). Non-spec entries ignored.
+
     Ignores non-spec entries (README.md, files, dirs that don't start
     with three digits + hyphen). Returns 1 when the directory is empty."""
+    if use_origin and project_dir is not None:
+        # Step 2a — origin presence
+        url_rc, url_out, _url_err = _run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=project_dir,
+        )
+        if url_rc == 0 and url_out.strip():
+            # Step 2b — origin/main ref existence (post-fetch)
+            verify_rc, verify_out, _verify_err = _run(
+                ["git", "rev-parse", "--verify", "origin/main"],
+                cwd=project_dir,
+            )
+            if verify_rc == 0 and verify_out.strip():
+                # Step 2c — enumerate against origin/main
+                ls_rc, ls_out, _ls_err = _run(
+                    ["git", "ls-tree", "--name-only",
+                     "origin/main", "docs/specs/"],
+                    cwd=project_dir,
+                )
+                if ls_rc == 0:
+                    max_n = 0
+                    for line in ls_out.splitlines():
+                        # ls-tree may emit `docs/specs/NNN-slug` or
+                        # `NNN-slug` depending on pathspec form; both
+                        # are handled by extracting the basename.
+                        name = line.strip().rstrip("/").rsplit("/", 1)[-1]
+                        m = re.match(r"^(\d{3})-", name)
+                        if m:
+                            n = int(m.group(1))
+                            if n > max_n:
+                                max_n = n
+                    return max_n + 1
+            # rev-parse failed OR ls-tree failed: silent fall-through
+        # No origin or origin/main ref: silent fall-through (AC #3)
+
+    # Working-tree scan (AC #2 path, and AC #3 fall-back).
     max_n = 0
     if not specs_dir.is_dir():
         return 1
@@ -990,6 +1052,60 @@ def _next_spec_number(specs_dir: Path) -> int:
             if n > max_n:
                 max_n = n
     return max_n + 1
+
+
+def _preflight_diverged_main(project_dir: Path) -> None:
+    """Spec 037-02 AC #4: refuse if local `main` is strictly behind
+    `origin/main`.
+
+    Algorithm (mirrors `_check_ff_viable` at `land.py:555-655`, the
+    sibling slice's precedent):
+
+      1. If `git rev-parse --verify origin/main` fails OR returns
+         empty SHA, fall through silently (no origin/main to compare
+         against — AC #3 / AC #6).
+      2. Read the local `main` SHA via `git rev-parse main`. If that
+         fails, fall through silently.
+      3. If the two SHAs are equal, local is in sync — no refusal.
+      4. Otherwise run `git merge-base --is-ancestor main
+         origin/main`:
+         - rc == 0 AND SHAs differ → local is STRICTLY behind →
+           raise `WorkflowError`. AC #4: message MUST contain
+           "origin/main" and "pull or rebase" (substrings are
+           fixture-stable).
+         - rc != 0 → local is ahead-or-diverged; the push step's
+           race classifier (AC #7) handles any actual conflict.
+
+    AC #5: raises `WorkflowError`, which `main()` already maps to
+    exit 2 — no new exit code is introduced.
+    """
+    rc, out, _err = _run(
+        ["git", "rev-parse", "--verify", "origin/main"], cwd=project_dir,
+    )
+    if rc != 0 or not out.strip():
+        return  # no origin/main ref → silent fall-through
+    origin_sha = out.strip()
+
+    rc, out, _err = _run(
+        ["git", "rev-parse", "main"], cwd=project_dir,
+    )
+    if rc != 0 or not out.strip():
+        return  # no local main SHA → can't compare; let later steps fail
+    local_sha = out.strip()
+
+    if local_sha == origin_sha:
+        return  # in sync
+
+    anc_rc, _anc_out, _anc_err = _run(
+        ["git", "merge-base", "--is-ancestor", "main", "origin/main"],
+        cwd=project_dir,
+    )
+    if anc_rc == 0:
+        # main is a strict ancestor of origin/main → local is behind.
+        raise WorkflowError(
+            "refusing: local main is behind origin/main — "
+            "pull or rebase before reserving"
+        )
 
 
 def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
@@ -1266,24 +1382,34 @@ def reserve_spec(slug: str, project_dir: Path,
     # so the reservation commit always lands on a clean main.
     _preflight_branch_and_worktree(project_dir)
 
-    # Fetch origin/main first (AC #1) so the next-number scan reflects
-    # the freshest state. Skipped for --no-push (no remote contract).
+    # Fetch origin/main first; both the next-number scan and the
+    # divergence preflight read from it (spec 037-02 AC #1 + AC #4 +
+    # AC #8). Skipped for --no-push (no remote contract).
     if not no_push:
         rc, _out, err = _run(
             ["git", "fetch", "origin", "main"], cwd=project_dir,
         )
         # A failed fetch isn't fatal — we still proceed with the local
-        # view. The push step will catch any out-of-date condition via
-        # the race-on-push classifier (AC #6).
+        # view (spec 037-02 AC #6 preserves this verbatim). The push
+        # step will catch any out-of-date condition via the race-on-
+        # push classifier (003-03 AC #6 / 037-02 AC #7).
         if rc != 0:
             sys.stderr.write(
                 f"warning: `git fetch origin main` failed: "
                 f"{err.strip()}; proceeding with local view\n"
             )
+        # Spec 037-02 AC #4: refuse if local main is strictly behind
+        # origin/main. Internally guarded so a failed fetch (no
+        # origin/main ref) silently falls through — preserving AC #6.
+        _preflight_diverged_main(project_dir)
 
     # Compute the next number AFTER the fetch so we pick up any specs
-    # that landed in the gap.
-    next_n = _next_spec_number(specs_dir)
+    # that landed in the gap. Spec 037-02 AC #1: push-mode reads from
+    # `origin/main` via `git ls-tree`; `--no-push` keeps the working-
+    # tree scan (AC #2).
+    next_n = _next_spec_number(
+        specs_dir, project_dir=project_dir, use_origin=not no_push,
+    )
     num_str = f"{next_n:03d}"
     spec_dirname = f"{num_str}-{slug}"
     spec_dir = specs_dir / spec_dirname
