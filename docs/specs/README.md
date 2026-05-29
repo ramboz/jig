@@ -183,6 +183,12 @@
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-04 — review integration: bug-review + craft + conditional security | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-05 — escalation seam + close/learning gate + origin/main reservation | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-06 — `jig:bug-fix` skill + plugin wiring + workflow.md routing | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-01 - host-aware-migrate-machinery | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-02 - codex-hook-trust-onboarding | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-03 - codex-install-contract-smoke | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-04 - codex-skill-override-deferral | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-05 - codex-role-capability-dogfood | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 🔬 059-06 - codex-plugin-agent-discovery-spike | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-01 — Python lint, detect-and-drive | **DONE** | `jig:code-health` + `health.py` (tier-1); detect→drive ruff→normalize 0/1/2→tight summary→degrade. Resolves `.jig/lint-command`→ruff-on-PATH→`uvx ruff`→`pipx run ruff` (installs nothing). `check` captures+summarizes (count+top codes), NOT stream (vs `tdd.py`) — feeds the 060-05 reviewer pass per spec 057. Inline-mirrors `tdd.py` (ADR-0002 2nd caller; extract on 3rd). |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-02 — Dogfood onto jig: CI Ruff floor | **DONE** | jig now follows the practice it ships: root `ruff.toml` (config-only, `line-length=100`, `select=F/E/W/I/B`, `ignore=E402`) + CI step `health.py check .` + committed `.jig/lint-command` pinning `ruff==0.15.16` via ephemeral `pipx run` (one command for CI+local, installs nothing). Adoption cleared 130 findings (101 auto, 29 hand). Redundant per-line `# noqa: E402` + `RUF100` parked in refinement-todo. |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-03 — Broaden ecosystems + complexity dimension | DRAFT |  |
