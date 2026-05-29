@@ -142,6 +142,10 @@
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-02 - adoption-readiness-guide | DRAFT |  |
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-03 - scaffolded-onboarding-handoff | DRAFT |  |
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-04 - amendment-effective-state-digest | DRAFT |  |
+| [049-slice-claim-on-in-progress](049-slice-claim-on-in-progress/spec.md) | 049-01 — claim-and-release-on-transition | DRAFT |  |
+| [049-slice-claim-on-in-progress](049-slice-claim-on-in-progress/spec.md) | 049-02 — status-board-claim-rendering | DRAFT |  |
+| [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-01 — memory-sync-team-recheck | DRAFT |  |
+| [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-02 — stale-audit-team-signal | DRAFT |  |
 
 ## Deferred slices
 
