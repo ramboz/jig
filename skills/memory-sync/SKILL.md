@@ -2,7 +2,7 @@
 name: memory-sync
 description: >
   Persist new context, terms, learnings, and project knowledge to the memory layer
-  (AGENTS.md hot cache, docs/memory/, docs/inbox.md). Use when the user says remember
+  (CLAUDE.md hot cache, docs/memory/, docs/inbox.md). Use when the user says remember
   this, save this for later, add to glossary, note this down, or at the end of a
   session to consolidate what was learned. Also auto-fires at session end to surface
   capture-worthy items. Do not use for updating specs, ADRs, or code comments —
@@ -71,7 +71,7 @@ time, then persist now.
    - Niche/domain term → glossary
    - Failed approach / gotcha → learnings
    - Unresolved/unfinished thought → inbox
-   - High-frequency term → hot cache (in AGENTS.md)
+   - High-frequency term → hot cache (in CLAUDE.md)
 3. **Invoke `memory.py` once per item** with the right command. **Always quote
    the term/definition/body arguments** — terms may contain spaces, definitions
    often contain punctuation:
@@ -106,10 +106,9 @@ time, then persist now.
 ## Self-healing
 
 If `docs/memory/` or `docs/inbox.md` don't exist (pre-scaffold-init project),
-the helper creates them. If `AGENTS.md` and legacy `CLAUDE.md` are both absent,
-`promote` falls back to `add-term` (writes to glossary) and warns on stderr.
-The skill works on unscaffolded projects, though scaffold-init is the
-recommended setup.
+the helper creates them. If `CLAUDE.md` is absent, `promote` falls back to
+`add-term` (writes to glossary) and warns on stderr. The skill works on
+unscaffolded projects, though scaffold-init is the recommended setup.
 
 ## Gotchas
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fires on UserPromptSubmit. Scans the user's prompt for capitalized references
-# (proper nouns, acronyms) not found in the hot cache (AGENTS.md/CLAUDE.md)
-# or docs/memory/glossary.md. Surfaces unknowns as additionalContext so Claude
+# (proper nouns, acronyms) not found in the hot cache (CLAUDE.md) or
+# docs/memory/glossary.md. Surfaces unknowns as additionalContext so Claude
 # can ask about them naturally in the current response.
 #
 # Heuristic refinements (slice 002-03):
@@ -27,7 +27,7 @@ try:
     prompt = re.sub(r'(?<!\w)/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+', ' ', prompt)
 
     known = set()
-    for path in ['AGENTS.md', 'CLAUDE.md', 'docs/memory/glossary.md']:
+    for path in ['CLAUDE.md', 'docs/memory/glossary.md']:
         full = os.path.join(project_dir, path)
         if os.path.exists(full):
             with open(full) as f:
@@ -52,7 +52,7 @@ try:
         msg = (
             f'Unrecognized references in prompt: {refs}. '
             'If these are project-specific terms, ask the user once and persist the answer to '
-            'AGENTS.md (if high-frequency) or docs/memory/glossary.md (if niche).'
+            'CLAUDE.md (if high-frequency) or docs/memory/glossary.md (if niche).'
         )
         print(json.dumps({'continue': True, 'additionalContext': msg}))
 except Exception:

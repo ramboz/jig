@@ -17,7 +17,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 
 - **SPIDR** = Mike Cohn's five story-splitting techniques (Spike, Path, Interface, Data, Rules)
 - **Tier 0/1/2** = installation tiers for jig skills (see [docs/memory/glossary.md](docs/memory/glossary.md))
-- **Hot Cache** = the structured project-primer section for high-frequency terms (`AGENTS.md` in newly scaffolded projects; this repo still uses `CLAUDE.md` until migrated)
+- **Hot Cache** = the structured CLAUDE.md section for high-frequency terms
 - **Dumb zone** = >40% context fill; above this, model recall degrades (Horthy)
 - **Vertical slice** = a spec slice that crosses all layers and delivers end-to-end value
 - **Reconciliation** = post-implementation phase: deviation log, doc updates, second review pass
@@ -52,9 +52,9 @@ column.)_
 
 | Skill | Purpose | Invocable |
 |---|---|---|
-| `/jig:scaffold-init` | Initialize jig in a fresh project. Claude scaffold mode copies skills + agents + hooks + settings.json into `.claude/` by default; `--host codex` renders `AGENTS.md` plus `.codex/skills`, `.codex/agents`, and `.codex/hooks.json`; `--plugin-only` opts out of machinery. Refuses on spec-driven layouts without `scaffold.json` (routes to `/jig:migrate`). | Yes (explicit) |
+| `/jig:scaffold-init` | Initialize jig in a fresh project. Copies skills + agents + hooks + settings.json into the target's `.claude/` by default; `--plugin-only` opts out. Refuses on spec-driven layouts without `scaffold.json` (routes to `/jig:migrate`). | Yes (explicit) |
 | `/jig:vision-elicitation` | Lightweight wizard that fills the elicitation slots in `docs/product-vision.md` and `docs/architecture.md` after scaffold-init. Re-runnable with hash-based edit detection (per-section refresh / skip / diff). Judgment-only, no `.py` helper. | Yes (auto + explicit) |
-| `/jig:memory-sync` | Persist domain terms, learnings, and project knowledge to the AGENTS.md hot cache (or legacy CLAUDE.md fallback) + `docs/memory/` + `docs/inbox.md`. | Yes (explicit) |
+| `/jig:memory-sync` | Persist domain terms, learnings, and project knowledge to the CLAUDE.md hot cache + `docs/memory/` + `docs/inbox.md`. | Yes (explicit) |
 | `/jig:spec-workflow` | `workflow.py` for spec lifecycle: `new <slug>` reserves a spec number on `origin/main` (PR-fallback when push refused); `transition` (auto-ticks the two review-passed boxes); `status-board` regen (preserves Notes column; renders a 🔬 prefix on `kind: spike` rows in both active + deferred tables); `stale` audits `last_verified`. Recognizes `kind: spike` slices (per spec 029) with a four-block body shape (Question / Time-box / Findings / Outcome) — see [docs/spec-workflow/spidr-primer.md](docs/spec-workflow/spidr-primer.md). | Yes (auto + explicit) |
 | `/jig:independent-review` | `review.py` builds standardized prompts for implementation + reconciliation review. `subagent-type` picks `reviewer` (plugin install) or `general-purpose` (fallback). Reviewer prompts conditionally check declared contract surfaces and unconditionally check design-principle adherence. | Yes (auto + explicit) |
 | `/jig:contracts` | Judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL). Defers to richer user-installed `~/.claude/skills/contracts/`. | Yes (auto + explicit) |
@@ -81,9 +81,9 @@ column.)_
 
 - Do not modify [docs/conventions.md](docs/conventions.md) without explicit human approval.
 - Reviewer subagent has read-only tools (Read, Glob, Grep). It cannot write to memory.
-- [templates/AGENTS.md.template](templates/AGENTS.md.template) is the canonical scaffold primer template, and [templates/CLAUDE.md.template](templates/CLAUDE.md.template) is the Claude Code adapter. Do not confuse either template with this repo's local primer files.
+- [templates/CLAUDE.md.template](templates/CLAUDE.md.template) is the source template for scaffold-init. Do not confuse it with this file.
 - Hook commands use `bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/...` — never bare names.
 - All hook scripts use Python 3 for JSON parsing — never jq.
 - ADRs live at `docs/decisions/adr-NNNN-<slug>.md` (per ADR-0004). `adr.py` writes new ADRs there.
 - Spec slices live in sibling files: `docs/specs/NNN-<slug>/slice-NN-<short>.md` (per spec 018). The `spec.md` is the overview; each slice is its own file.
-- When a slice closes a spec, **compress** the spec's "Active specs" entry above per the rule in the slice template's `### Close-out (post-DONE)` section (per spec 025-01). Load-bearing per-slice invariants migrate to the status board Notes column, not to the hot cache.
+- When a slice closes a spec, **compress** the spec's "Active specs" entry above per the rule in the slice template's `### Close-out (post-DONE)` section (per spec 025-01). Load-bearing per-slice invariants migrate to the status board Notes column, not to CLAUDE.md.

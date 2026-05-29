@@ -14,7 +14,7 @@ Commands:
         (body from --body, or stdin if --body omitted)
     add-inbox <text>                       → docs/inbox.md (dated)
     add-refinement-todo <text>             → docs/refinement-todo.md (raw append)
-    promote <term> <definition>            → AGENTS.md Hot Cache → Key terms
+    promote <term> <definition>            → CLAUDE.md Hot Cache → Key terms
     summary                                → counts of memory files
 """
 
@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
 
 
-# Heading marker used to find the Key terms list inside the primer Hot Cache.
+# Heading marker used to find the Key terms list inside CLAUDE.md Hot Cache.
 HOT_CACHE_KEY_TERMS_HEADING = "### Key terms"
 
 # Placeholder line inserted by scaffold-init under Key terms; replaced on first promote.
@@ -89,18 +89,9 @@ def _refinement_todo_path(target: Path) -> Path:
     return path
 
 
-def _hot_cache_paths(target: Path) -> list:
-    """Primer hot-cache search order. AGENTS.md is canonical; CLAUDE.md is
-    kept as a legacy fallback for projects scaffolded before slice 033-02."""
-    return [target / "AGENTS.md", target / "CLAUDE.md"]
-
-
-def _primer_path(target: Path) -> Path:
-    """Return the primer file to mutate for hot-cache writes."""
-    for path in _hot_cache_paths(target):
-        if path.exists():
-            return path
-    return target / "AGENTS.md"
+def _claude_md_path(target: Path) -> Path:
+    """Returns CLAUDE.md path; does not create. Callers handle absence."""
+    return target / "CLAUDE.md"
 
 
 # ---------- Slice 028-02: file-lock for inbox + refinement-todo appends ----------
@@ -306,21 +297,21 @@ def add_refinement_todo(target: Path, item: str,
 
 
 def promote(target: Path, term: str, definition: str) -> bool:
-    """Add a term to the primer Hot Cache → Key terms.
-    If AGENTS.md/CLAUDE.md are absent (pre-scaffold-init project), fall back to glossary
+    """Add a term to CLAUDE.md Hot Cache → Key terms.
+    If CLAUDE.md is absent (pre-scaffold-init project), fall back to glossary
     and warn on stderr. Idempotent on exact `- **<term>**` presence."""
-    primer = _primer_path(target)
-    if not primer.exists():
+    claude_md = _claude_md_path(target)
+    if not claude_md.exists():
         sys.stderr.write(
-            "warning: AGENTS.md not found at target root; "
+            "warning: CLAUDE.md not found at target root; "
             "falling back to glossary.md for term '%s'\n" % term
         )
         return add_term(target, term, definition)
 
-    text = primer.read_text()
+    text = claude_md.read_text()
     if HOT_CACHE_KEY_TERMS_HEADING not in text:
         sys.stderr.write(
-            f"warning: {primer.name} missing Key terms section; "
+            "warning: CLAUDE.md missing Key terms section; "
             "falling back to glossary.md for term '%s'\n" % term
         )
         return add_term(target, term, definition)
@@ -343,32 +334,30 @@ def promote(target: Path, term: str, definition: str) -> bool:
         # Insert after the heading line; will become first bullet, others shift.
         new_text = text[: line_end + 1] + entry + "\n" + text[line_end + 1 :]
 
-    atomic_write_text(primer, new_text)
+    atomic_write_text(claude_md, new_text)
     return True
 
 
 def _find_in_hot_cache(target: Path, term: str) -> str:
-    """Search primer Hot Cache → Key terms section for `term`.
+    """Search CLAUDE.md Hot Cache → Key terms section for `term`.
     Case-insensitive. Returns the matching bullet's definition (after the em-dash
     or first hyphen separator), or '' if not found."""
-    for primer in _hot_cache_paths(target):
-        if not primer.exists():
-            continue
-        text = primer.read_text()
-        if HOT_CACHE_KEY_TERMS_HEADING not in text:
-            continue
-        # Scope the search to the Key terms section
-        heading_idx = text.index(HOT_CACHE_KEY_TERMS_HEADING)
-        section = text[heading_idx:]
-        # Next H3 or H2 bounds the section
-        nxt = re.search(r"(?m)^(?:##|###)\s", section[len(HOT_CACHE_KEY_TERMS_HEADING):])
-        section_body = section[: len(HOT_CACHE_KEY_TERMS_HEADING) + nxt.start()] if nxt else section
-        # Line-anchored case-insensitive match: `- **<term>** — <definition>`
-        pattern = rf"(?im)^- \*\*{re.escape(term)}\*\*\s*[—\-:]?\s*(.+?)\s*$"
-        m = re.search(pattern, section_body)
-        if m:
-            return m.group(1).strip()
-    return ""
+    claude_md = _claude_md_path(target)
+    if not claude_md.exists():
+        return ""
+    text = claude_md.read_text()
+    if HOT_CACHE_KEY_TERMS_HEADING not in text:
+        return ""
+    # Scope the search to the Key terms section
+    heading_idx = text.index(HOT_CACHE_KEY_TERMS_HEADING)
+    section = text[heading_idx:]
+    # Next H3 or H2 bounds the section
+    nxt = re.search(r"(?m)^(?:##|###)\s", section[len(HOT_CACHE_KEY_TERMS_HEADING):])
+    section_body = section[: len(HOT_CACHE_KEY_TERMS_HEADING) + nxt.start()] if nxt else section
+    # Line-anchored case-insensitive match: `- **<term>** — <definition>`
+    pattern = rf"(?im)^- \*\*{re.escape(term)}\*\*\s*[—\-:]?\s*(.+?)\s*$"
+    m = re.search(pattern, section_body)
+    return m.group(1).strip() if m else ""
 
 
 def _find_in_glossary(target: Path, term: str) -> str:

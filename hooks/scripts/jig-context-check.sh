@@ -7,10 +7,9 @@
 #   1. MCP-server count (legacy proxy). Warns above 8 servers — tool-
 #      description overhead pushes Claude toward the dumb zone (>40%
 #      context fill, Horthy).
-#   2. Context-fill estimate (slice 026-01). Sums primer files
-#      (AGENTS.md / CLAUDE.md) + every docs/memory/*.md in the project
-#      and warns once the byte total crosses a configured threshold of
-#      the model's context window.
+#   2. Context-fill estimate (slice 026-01). Sums CLAUDE.md + every
+#      docs/memory/*.md in the project and warns once the byte total
+#      crosses a configured threshold of the model's context window.
 #
 # Environment variables (both read by lib/context_fill.py):
 #   JIG_CONTEXT_WINDOW_BYTES  — context window size in bytes. Default

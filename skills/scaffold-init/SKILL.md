@@ -67,8 +67,7 @@ answers when the user is unsure.
 ## Output
 
 After running, the target directory contains:
-- `AGENTS.md` (canonical Hot Cache and project primer, project name substituted)
-- `CLAUDE.md` (Claude Code adapter that imports `AGENTS.md`)
+- `CLAUDE.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
 - `.claude/hooks/` (empty — project-specific gates can go here)
 - `scaffold.json` (install-state manifest)
@@ -79,7 +78,7 @@ Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 ## Immediate next steps to surface to the user
 
 After scaffolding succeeds, tell the user:
-1. Open `AGENTS.md` and fill in the Hot Cache section with project-specific terms.
+1. Open `CLAUDE.md` and fill in the Hot Cache section with project-specific terms.
 2. Open `docs/refinement-todo.md` to see what was deferred.
 3. The first spec to write is in `docs/specs/` — use `/jig:spec-workflow` (when implemented)
    or write `docs/specs/001-<feature>/spec.md` by hand.
@@ -89,7 +88,7 @@ After scaffolding succeeds, tell the user:
 ## Constraints
 
 - Do not invoke this skill in a directory that is already scaffolded (has `scaffold.json`).
-- Do not overwrite an existing `AGENTS.md` or `CLAUDE.md` without explicit user confirmation.
+- Do not overwrite an existing `CLAUDE.md` without explicit user confirmation.
 - The wizard is deterministic — do not edit the generated files yourself before
   reporting back. The user should see exactly what `scaffold.py` produced.
 
@@ -97,9 +96,8 @@ After scaffolding succeeds, tell the user:
 
 - The spec-gate hook for `docs/conventions.md` activates AFTER scaffold-init completes.
   It cannot gate its own creation (bootstrap paradox — documented and intentional).
-- `templates/AGENTS.md.template` is the canonical primer template, and
-  `templates/CLAUDE.md.template` is the Claude adapter. Do NOT use the jig
-  repo's own `AGENTS.md` or `CLAUDE.md` as a template — they diverge over time.
+- `templates/CLAUDE.md.template` is the source template; do NOT use the jig repo's own
+  `CLAUDE.md` as a template — the two diverge over time.
 - `${CLAUDE_PLUGIN_ROOT}` is the right env var inside the plugin. Don't confuse it with
   `$CLAUDE_PROJECT_DIR` (which is the target project's root after install).
 - Signal detection (existing CI, LLM/agent files, team size) is deferred to slice 001-03.

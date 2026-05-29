@@ -21,10 +21,8 @@ Installation tiers for jig skills:
 
 ## Hot Cache
 
-The structured project-primer section for frequently-referenced project terms, people,
-codenames, and active specs. Newly scaffolded projects use `AGENTS.md`; legacy
-Claude-only projects, including jig until it migrates itself, use `CLAUDE.md`.
-Loaded at every session start.
+The structured section of `CLAUDE.md` for frequently-referenced project terms, people,
+codenames, and active specs. Loaded at every session start.
 
 ## Dumb zone
 

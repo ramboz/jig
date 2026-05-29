@@ -73,7 +73,7 @@ def _spec_with_slice(slice_label: str, status: str,
             f"{extra_dev_text or 'Body text describing what changed and why.'}\n\n"
             "**Doc updates from this slice:**\n\n"
             "- `skills/foo/SKILL.md`: net-new file.\n"
-            "- `AGENTS.md` / `CLAUDE.md`: hot-cache hygiene applied.\n"
+            "- `CLAUDE.md`: hot-cache updated.\n"
         )
 
     return (
@@ -209,7 +209,7 @@ class PrepareReportTests(unittest.TestCase):
     def test_close_out_boxes_excluded_from_dod_count(self):
         """Spec 009 / slice 009-01 — `### Close-out` subsection's
         checkboxes do NOT count toward the DoD. Without this, slices that
-        include post-DONE items (status-board regen, primer updates)
+        include post-DONE items (status-board regen, CLAUDE.md updates)
         can never satisfy DoD before slice-land blesses them.
 
         Synthetic spec: 4 ticked DoD boxes, then a `### Close-out
@@ -230,7 +230,7 @@ class PrepareReportTests(unittest.TestCase):
             "- [x] Item four.\n\n"
             "### Close-out (post-DONE)\n\n"
             "- [ ] Status-board regenerated AFTER DONE.\n"
-            "- [ ] AGENTS.md / CLAUDE.md updates AFTER DONE.\n\n"
+            "- [ ] CLAUDE.md updates AFTER DONE.\n\n"
             "### Deviation log (after reconciliation)\n\n"
             "Synthetic log.\n"
         )
@@ -275,8 +275,8 @@ class PrepareReportTests(unittest.TestCase):
             "1. The template's Close-out section is illustrated as:\n\n"
             "   ```\n"
             "   ### Close-out (post-DONE)\n\n"
-            "   - [ ] AGENTS.md / CLAUDE.md updates: example wording.\n"
-            "   - [ ] AGENTS.md / CLAUDE.md hygiene: example wording.\n"
+            "   - [ ] CLAUDE.md updates: old wording the AC discusses.\n"
+            "   - [ ] CLAUDE.md hygiene: new wording the AC discusses.\n"
             "   ```\n\n"
             "   These are illustrative, not real DoD items.\n\n"
             "**DoD:**\n"
