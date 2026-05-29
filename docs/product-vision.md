@@ -2,25 +2,28 @@
 >
 > This document captures *why* jig exists, *for whom*, and *with what
 > principles*. Architectural mechanics live in [architecture.md](architecture.md).
-> Update via reconciliation, or via `/jig:vision-elicit` once spec 017 lands.
+> Update via reconciliation, or via `/jig:vision-elicitation`.
 
 # Vision: jig
 
 ## Vision statement
 
-A small, opinionated Claude Code plugin that scaffolds AI-native
-development practices — spec-driven slices, independent review, memory
-continuity, deterministic gates — into a project on day 1, and gets
-out of the way after.
+A small, opinionated AI-native workflow scaffold that installs
+spec-driven slices, independent review, memory continuity, and
+deterministic gates into a project on day 1, then gets out of the way.
+Claude Code is the v1 supported host, through plugin and scaffold modes;
+the workflow model is being separated from that host wiring so future
+adapters can materialize the same practices for other harnesses without
+changing jig's core workflow.
 
 > *jig (noun): a tool that guides other tools to work accurately and
 > consistently.*
 
 ## Target users
 
-- **Devs starting a new AI-native project on Claude Code** who want a
-  structured workflow on day 1 instead of inventing one over the first
-  three sprints.
+- **Devs starting a new AI-native project on a supported coding
+  harness** — Claude Code in v1 — who want a structured workflow on day
+  1 instead of inventing one over the first three sprints.
 - **Devs adopting AI-native practices on an existing project** —
   served by the sibling `/jig:migrate` skill rather than `scaffold-init`.
 - **Teams who want a thin, opinionated baseline** they can extend with
@@ -30,12 +33,16 @@ out of the way after.
   100-skill mega-pack that fills the context window.
 
 **Not for:** devs who want a maximalist skill marketplace; devs who
-want their tooling to make architectural decisions for them.
+want their tooling to make architectural decisions for them; devs who
+need unsupported host integrations to work before a matching adapter
+has shipped.
 
 ## The core problem
 
-Claude Code is powerful but deliberately unopinionated about *project
-workflow*. Teams adopting it tend to land in one of three places:
+AI coding harnesses are powerful but deliberately unopinionated about
+*project workflow*. Claude Code is the first supported jig host, and the
+same adoption pattern shows up around other harnesses too: teams tend
+to land in one of three places:
 
 1. **Build the workflow yourself, slowly.** Each project re-invents
    spec discipline, review gates, memory conventions, and
@@ -45,8 +52,10 @@ workflow*. Teams adopting it tend to land in one of three places:
    skill marketplaces). The toolset works, but ~40% context fill is
    the practical ceiling for model recall (the "dumb zone"), and a
    mega-pack blows through it before the dev's actual work loads.
-3. **Hand-roll team conventions in CLAUDE.md.** Common; expensive;
-   non-portable; no enforcement.
+3. **Hand-roll team conventions in the host primer.** Common;
+   expensive; non-portable; no enforcement. In Claude Code this is
+   usually `CLAUDE.md`; in cross-agent projects it is often `AGENTS.md`
+   or another host-specific entry point.
 
 There's a gap in the middle: **a focused, opinionated, *extensible*
 workflow layer that respects context economy and dogfoods its own
@@ -92,7 +101,8 @@ for tier definitions.
 
 The minimum coherent workflow. Nothing useful without all five.
 
-1. **`scaffold-init`** — generate docs/, hot-cache CLAUDE.md, settings.json
+1. **`scaffold-init`** — generate docs/, hot-cache host primer, and
+   host settings (`CLAUDE.md` + `.claude/settings.json` in Claude v1)
 2. **`memory-sync`** — cross-session continuity; hot cache + deep storage + inbox
 3. **`spec-workflow`** — SPIDR-split slices; DRAFT → DONE state machine; status board
 4. **`independent-review`** — reviewer subagent with fresh context. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
@@ -131,8 +141,10 @@ See [docs/specs/README.md](specs/README.md) for the status board.
   `/jig:spec-workflow` + `implementer` subagent.
 - **Polyglot test runner support beyond pytest/vitest/jest.** Add
   others when a real project hits the gap.
-- **A web UI, dashboard, or external service.** Jig is a Claude Code
-  plugin and a directory of files. That's the whole product.
+- **A web UI, dashboard, or external service.** Jig is a local workflow
+  scaffold. Today that means a Claude Code plugin and/or project-local
+  `.claude/` machinery; future hosts must keep the same local-file
+  posture rather than introduce a hosted control plane.
 
 ## Design principles
 
@@ -176,10 +188,11 @@ reconciliation.
    the migration cost once instead.
 7. **Owning the scaffolding beats renting the plugin.** Default install
    mode after [spec 016](specs/016-scaffold-mode/spec.md) puts the
-   machinery (`skills/`, `agents/`, `hooks/`) in the dev's `.claude/`
-   directory where it can be read, modified, and extended. Plugin mode
-   stays available for users who want it; scaffolded mode is the
-   default because positioning matters.
+   machinery (`skills/`, `agents/`, `hooks/`) in the dev's
+   project-local host directory (`.claude/` in Claude v1) where it can
+   be read, modified, and extended. Plugin mode stays available for
+   users who want it; scaffolded mode is the default because positioning
+   matters. Future host adapters should preserve that ownership model.
 
 ## How new work enters jig
 
@@ -207,6 +220,10 @@ Track in [docs/specs/README.md](specs/README.md) and
 
 - **Spec 017 (this spec) ships** → scaffold-init produces a real
   vision + architecture seed at install time.
+- **Spec 033 host-adapter portability** → Claude plugin and Claude
+  scaffold stay the v1 supported modes; Codex scaffold and Codex plugin
+  remain deferred v2 targets until their slices' resolution triggers
+  and prerequisites are satisfied.
 - **Tier 2 stays empty** until `local-dev-parity` (or another
   candidate) gets a real user signal.
 - **`contracts` skill stays a deliberate stub** ([ADR-0002](decisions/adr-0002-contracts-stays-deferred.md))

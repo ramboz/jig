@@ -33,7 +33,7 @@ class EstimateBasicsTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_empty_repo_zero_bytes(self):
-        """AC #6 edge case: empty repo (no CLAUDE.md, no docs/memory) →
+        """AC #6 edge case: empty repo (no primer files, no docs/memory) →
         bytes == 0, ratio == 0, no threshold crossing."""
         result = estimate(self.root)
         self.assertEqual(result["bytes"], 0)
@@ -42,49 +42,61 @@ class EstimateBasicsTests(unittest.TestCase):
         self.assertEqual(result["breakdown"], {})
         self.assertLess(result["ratio"], result["threshold"])
 
-    def test_claudemd_only(self):
-        """AC #6: CLAUDE.md only → bytes equals len(CLAUDE.md content)."""
+    def test_agentsmd_only(self):
+        """AC #6: AGENTS.md only → bytes equals len(AGENTS.md content)."""
         body = "Hello jig.\n" * 50  # 550 bytes
-        (self.root / "CLAUDE.md").write_text(body)
+        (self.root / "AGENTS.md").write_text(body)
         result = estimate(self.root)
         self.assertEqual(result["bytes"], len(body.encode("utf-8")))
         self.assertEqual(result["est_tokens"], result["bytes"] // RATIO)
-        self.assertIn("CLAUDE.md", result["breakdown"])
-        self.assertEqual(result["breakdown"]["CLAUDE.md"], len(body.encode("utf-8")))
+        self.assertIn("AGENTS.md", result["breakdown"])
+        self.assertEqual(result["breakdown"]["AGENTS.md"], len(body.encode("utf-8")))
+
+    def test_claudemd_only_legacy_fallback(self):
+        """Legacy Claude-only projects still count CLAUDE.md."""
+        body = "Hello Claude.\n" * 10
+        (self.root / "CLAUDE.md").write_text(body)
+        result = estimate(self.root)
+        self.assertEqual(result["bytes"], len(body.encode("utf-8")))
+        self.assertEqual(list(result["breakdown"].keys()), ["CLAUDE.md"])
 
     def test_mixed_files_aggregate(self):
-        """AC #6: CLAUDE.md + 2 memory files → bytes is the sum."""
+        """AC #6: AGENTS.md + CLAUDE.md + 2 memory files → bytes is the sum."""
         primer = "PRIMER\n" * 10
+        claude_adapter = "ADAPTER\n" * 2
         glossary = "GLOSSARY\n" * 20
         learnings = "LEARNINGS\n" * 30
-        (self.root / "CLAUDE.md").write_text(primer)
+        (self.root / "AGENTS.md").write_text(primer)
+        (self.root / "CLAUDE.md").write_text(claude_adapter)
         memory = self.root / "docs" / "memory"
         memory.mkdir(parents=True)
         (memory / "glossary.md").write_text(glossary)
         (memory / "learnings.md").write_text(learnings)
         result = estimate(self.root)
         expected = (len(primer.encode("utf-8"))
+                    + len(claude_adapter.encode("utf-8"))
                     + len(glossary.encode("utf-8"))
                     + len(learnings.encode("utf-8")))
         self.assertEqual(result["bytes"], expected)
+        self.assertIn("AGENTS.md", result["breakdown"])
         self.assertIn("CLAUDE.md", result["breakdown"])
         self.assertIn("docs/memory/glossary.md", result["breakdown"])
         self.assertIn("docs/memory/learnings.md", result["breakdown"])
 
     def test_missing_docs_memory_no_error(self):
         """AC #6 DoD edge case: missing docs/memory/ → no error, just no
-        contribution. Same shape as the CLAUDE.md-only case."""
+        contribution. Same shape as the AGENTS.md-only case."""
         body = "x" * 100
-        (self.root / "CLAUDE.md").write_text(body)
+        (self.root / "AGENTS.md").write_text(body)
         # No docs/memory/ dir at all.
         result = estimate(self.root)
         self.assertEqual(result["bytes"], 100)
-        # Only CLAUDE.md in the breakdown.
-        self.assertEqual(list(result["breakdown"].keys()), ["CLAUDE.md"])
+        # Only AGENTS.md in the breakdown.
+        self.assertEqual(list(result["breakdown"].keys()), ["AGENTS.md"])
 
     def test_empty_docs_memory_dir(self):
         """DoD edge case: empty docs/memory/ → no contribution, no error."""
-        (self.root / "CLAUDE.md").write_text("a" * 50)
+        (self.root / "AGENTS.md").write_text("a" * 50)
         (self.root / "docs" / "memory").mkdir(parents=True)
         result = estimate(self.root)
         self.assertEqual(result["bytes"], 50)
@@ -95,7 +107,7 @@ class EstimateBasicsTests(unittest.TestCase):
     def test_docs_memory_skips_non_md(self):
         """docs/memory/ contribution is .md only — sibling .txt / .json
         files are not always-loaded primer content."""
-        (self.root / "CLAUDE.md").write_text("primer\n")
+        (self.root / "AGENTS.md").write_text("primer\n")
         memory = self.root / "docs" / "memory"
         memory.mkdir(parents=True)
         (memory / "glossary.md").write_text("md-content\n")
@@ -125,7 +137,7 @@ class EstimateDefaultsTests(unittest.TestCase):
         self.assertEqual(DEFAULT_WINDOW_BYTES, 800_000)
 
     def test_default_threshold_is_30_percent(self):
-        """The 30% pin — pre-dumb-zone (40% per CLAUDE.md hot cache)."""
+        """The 30% pin — pre-dumb-zone (40% per primer hot cache)."""
         self.assertEqual(DEFAULT_THRESHOLD, 0.30)
 
     def test_default_ratio_is_4_bytes_per_token(self):
@@ -135,7 +147,7 @@ class EstimateDefaultsTests(unittest.TestCase):
     def test_ratio_uses_default_window(self):
         """ratio = bytes / DEFAULT_WINDOW_BYTES when no env override."""
         body = "x" * 80_000  # 10% of the 800_000 default
-        (self.root / "CLAUDE.md").write_text(body)
+        (self.root / "AGENTS.md").write_text(body)
         result = estimate(self.root)
         self.assertEqual(result["window_bytes"], DEFAULT_WINDOW_BYTES)
         self.assertAlmostEqual(result["ratio"], 0.10, places=4)
@@ -163,7 +175,7 @@ class EstimateEnvOverrideTests(unittest.TestCase):
 
     def test_window_bytes_env_override(self):
         """AC #2: JIG_CONTEXT_WINDOW_BYTES=1000 + bytes=400 → ratio=0.4."""
-        (self.root / "CLAUDE.md").write_text("x" * 400)
+        (self.root / "AGENTS.md").write_text("x" * 400)
         os.environ["JIG_CONTEXT_WINDOW_BYTES"] = "1000"
         result = estimate(self.root)
         self.assertEqual(result["window_bytes"], 1000)
@@ -182,7 +194,7 @@ class EstimateEnvOverrideTests(unittest.TestCase):
         is `ratio >= threshold` — pin it here so a regression is caught."""
         # 100 bytes vs 1000-byte window → ratio == 0.1. Threshold == 0.1
         # is exactly the boundary.
-        (self.root / "CLAUDE.md").write_text("x" * 100)
+        (self.root / "AGENTS.md").write_text("x" * 100)
         os.environ["JIG_CONTEXT_WINDOW_BYTES"] = "1000"
         os.environ["JIG_CONTEXT_SOFT_WARN_PCT"] = "0.1"
         result = estimate(self.root)
@@ -222,7 +234,7 @@ class EstimatePurityTests(unittest.TestCase):
         """estimate() must not print to stdout/stderr — caller controls I/O."""
         import io
         import contextlib
-        (self.root / "CLAUDE.md").write_text("payload")
+        (self.root / "AGENTS.md").write_text("payload")
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -233,7 +245,7 @@ class EstimatePurityTests(unittest.TestCase):
     def test_return_keys_present(self):
         """Spec 026 goal #6: stable interface. The contract is the dict
         keys; servo will subprocess-invoke for the same shape."""
-        (self.root / "CLAUDE.md").write_text("payload")
+        (self.root / "AGENTS.md").write_text("payload")
         result = estimate(self.root)
         for key in ("bytes", "est_tokens", "ratio", "threshold",
                     "breakdown", "window_bytes"):

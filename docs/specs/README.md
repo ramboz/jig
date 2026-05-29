@@ -95,11 +95,11 @@
 | [031-multi-perspective-review](031-multi-perspective-review/spec.md) | 031-02 — arch-review-trigger | **DONE** | +27 tests (1083 → 1110 green); `review.py arch-review` mode + `subagent-type arch-review`; `workflow.py arch-review-needed` CLI + `slice_needs_arch_review` helper (layout-aware via `_slice_frontmatter`; truthy tokens `true`/`yes`/`on`/`1`); slice template ships commented `arch_review:` hint; spec-workflow SKILL.md three-pass flow extended with conditional arch pass; first-ever post-impl arch-pass dogfood (verdict pass) — slice declared `arch_review: true` on itself; bash recipe wraps `arch-review-needed` in `if ! NEED_ARCH=$(...); then exit 2; fi` so slice-lookup failures surface; `_principles_check_block()` deliberately NOT on arch pass (documented in `build_arch_review_prompt` docstring) |
 | [032-atomic-writes](032-atomic-writes/spec.md) | 032-01 — atomic-write-helper | **DONE** |  |
 | [032-atomic-writes](032-atomic-writes/spec.md) | 032-02 — scaffold-completion-marker | **DONE** |  |
-| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-01 - support-matrix-and-adapter-contract | DRAFT |  |
-| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-02 - agents-md-canonical-primer | DRAFT |  |
-| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-03 - scaffold-host-renderer-boundary | DRAFT |  |
-| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-04 - generated-file-metadata | DRAFT |  |
-| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-05 - codex-scaffold-adapter | DEFERRED |  |
+| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-01 - support-matrix-and-adapter-contract | **DONE** |  |
+| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-02 - agents-md-canonical-primer | **DONE** |  |
+| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-03 - scaffold-host-renderer-boundary | **DONE** |  |
+| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-04 - generated-file-metadata | **DONE** |  |
+| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-05 - codex-scaffold-adapter | **DONE** | `--host codex` renders `AGENTS.md` + `.codex/skills`, `.codex/agents`, `.codex/hooks.json`; migrate `copy-machinery` remains Claude-only (tracked in refinement-todo) |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-06 - codex-plugin-packaging | DEFERRED |  |
 | [034-federation-tier](034-federation-tier/spec.md) | 034-01 — registry-schema-and-host-adapter | DRAFT |  |
 | [034-federation-tier](034-federation-tier/spec.md) | 034-02 — repo-registry-add-and-list | DRAFT |  |
@@ -163,5 +163,4 @@
 | [014-arch-review](014-arch-review/spec.md) | 014-04 — security-lens-integration | Resolution of the `security_lens` parent decision (same trigger as 012-03 — both slices plug into whichever shape that decision takes). |
 | [016-scaffold-mode](016-scaffold-mode/spec.md) | 016-04 — update-skill (DEFERRED) | ≥1 reported issue along the lines of "I scaffolded jig N versions ago and want to update cleanly without overwriting my edits", OR a security-grade fix to a copied artifact (hook script, SKILL.md bash), OR jig adopts per-file metadata headers (audit's Option C) for another reason that makes a SHA-compare cheaper. |
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-04 — seed-ADR-pass | First 5 real `/jig:vision-elicit` runs after 017-02 lands. If >25% of those runs name an explicit locked-in decision during Section 6 (Stack) elicitation that the user would have wanted auto-scaffolded as an ADR, promote 017-04 to DRAFT. If <25%, deferral becomes permanent — the elicitation output already names decisions inline and ADR seeding can stay manual. |
-| [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-05 - codex-scaffold-adapter | A real user asks to use jig from Codex, or a dogfood comparison shows Codex support is needed for an active project. |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-06 - codex-plugin-packaging | Codex scaffold mode has at least one successful real-project use, and a user asks for install-and-forget Codex plugin distribution. |

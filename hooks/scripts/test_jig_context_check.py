@@ -89,6 +89,18 @@ class HookContextFillWarningTests(unittest.TestCase):
         self.assertIn("/jig:memory-sync", ctx)
         self.assertIn("/compact", ctx)
 
+    def test_threshold_crossed_with_agents_md_emits_warning(self):
+        """AC #3 + 033-02: shell hook counts canonical AGENTS.md primers."""
+        (self.target / "AGENTS.md").write_text("x" * 400)
+        result = run_hook(self.target, env_overrides={
+            "JIG_CONTEXT_WINDOW_BYTES": "1000",
+            "JIG_CONTEXT_SOFT_WARN_PCT": "0.3",
+        })
+        self.assertEqual(result.returncode, 0)
+        out = parse_or_none(result)
+        self.assertIsNotNone(out, f"expected warning; stdout: {result.stdout}")
+        self.assertIn("400", out["additionalContext"])
+
     def test_threshold_warning_includes_ratio_for_calibration(self):
         """Goal #3 (spec 026): the warning surfaces the bytes→tokens
         conversion ratio so the user can calibrate (= the RATIO=4 constant

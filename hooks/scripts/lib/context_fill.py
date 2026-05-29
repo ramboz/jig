@@ -2,7 +2,7 @@
 
 Spec 026 (slice 026-01): factor out a byte/token estimator that
 
-  - measures the always-loaded primer footprint (CLAUDE.md +
+  - measures the always-loaded primer footprint (AGENTS.md / CLAUDE.md +
     docs/memory/*.md);
   - returns a stable dict shape so servo (spec 003 hard-gate) can
     subprocess-invoke this module without re-implementing the math;
@@ -31,7 +31,7 @@ Default threshold
 -----------------
 
 ``DEFAULT_THRESHOLD = 0.30`` — 30% of the window. Pre-dumb-zone: the
-CLAUDE.md hot cache cites Horthy's 40% degradation knee, so a 30%
+primer hot cache cites Horthy's 40% degradation knee, so a 30%
 warning gives the user time to act (run ``/jig:memory-sync`` and
 ``/compact``) before recall actually starts slipping. Override via
 ``JIG_CONTEXT_SOFT_WARN_PCT`` — **set as a fraction (e.g. 0.30), not
@@ -120,16 +120,17 @@ def estimate(project_root: Path) -> Dict[str, object]:
 
     The function is pure: it reads files via ``Path.stat()`` and never
     prints, mutates the environment, or raises on missing inputs. A
-    missing ``CLAUDE.md`` or absent ``docs/memory/`` simply contributes
+    missing primer files or absent ``docs/memory/`` simply contributes
     zero bytes to the total — the hook surface stays unconditional.
     """
     project_root = Path(project_root)
     breakdown: Dict[str, int] = {}
 
-    primer = project_root / "CLAUDE.md"
-    primer_bytes = _measure(primer)
-    if primer_bytes > 0:
-        breakdown["CLAUDE.md"] = primer_bytes
+    for primer_name in ("AGENTS.md", "CLAUDE.md"):
+        primer = project_root / primer_name
+        primer_bytes = _measure(primer)
+        if primer_bytes > 0:
+            breakdown[primer_name] = primer_bytes
 
     memory_dir = project_root / "docs" / "memory"
     if memory_dir.is_dir():

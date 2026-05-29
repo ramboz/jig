@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 ---
 
 # Spec 033: Host adapter portability
@@ -13,9 +13,10 @@ step is to separate jig's workflow model from any one host's wiring.
 
 This spec introduces a host-adapter architecture: jig keeps one
 canonical source tree, but scaffolds materialized, host-native files for
-each supported LLM harness. For v1 of this work, the supported outputs
-remain Claude plugin mode and Claude scaffold mode. A later v2 can add
-Codex support when there is real user demand.
+each supported LLM harness. The initial v1 work preserved Claude plugin
+mode and Claude scaffold mode; after the Codex trigger fired, slice
+033-05 added Codex scaffold mode. Codex plugin packaging remains
+deferred.
 
 The guiding rule is: **copy prose, share code**. Skills, primers, and
 agent instructions are rendered into local host-native files so each
@@ -69,15 +70,16 @@ universal runtime import layer is introduced in v1.
    needs (`writes`, `read-only fresh review`, `architecture judgment`)
    and define fallback behavior when a host cannot enforce the exact
    capability.
-9. **Future Codex path captured but deferred.** Codex scaffold and
-   Codex plugin support are documented as deferred v2 slices with a
-   concrete resolution trigger.
+9. **Codex path staged by demand.** Codex scaffold support is
+   implemented only after the direct trigger fired; Codex plugin support
+   remains a deferred v2 slice with a concrete resolution trigger.
 
 ## Non-goals
 
-- **Implementing Codex support in v1.** The v1 work creates the adapter
-  boundary and preserves Claude behavior. Codex implementation stays
-  deferred until there is an actual request to port.
+- **Implementing Codex support before a real trigger.** The initial v1 work
+  created the adapter boundary and preserved Claude behavior. Slice 033-05
+  implements Codex scaffold output only after the direct user request fired
+  the deferred trigger; Codex plugin packaging remains deferred to 033-06.
 - **Universal runtime embedding.** No shared instruction file that every
   host must import at runtime. Generated files should be boring,
   local, and host-native.
@@ -98,7 +100,7 @@ universal runtime import layer is introduced in v1.
 |---|---|---|---|
 | Claude Code | Plugin | v1 supported | Existing `.claude-plugin` package remains valid. |
 | Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output preserved, with `AGENTS.md` added as canonical primer. |
-| Codex | Scaffold | v2 deferred | Target shape: `AGENTS.md`, `.agents/skills/`, `.codex/hooks.json`, `.codex/agents/*.toml`. |
+| Codex | Scaffold | 033-05 implemented | Target shape verified against local Codex 0.133: `AGENTS.md`, `.codex/skills/`, `.codex/hooks.json`, `.codex/agents/*.md`, plus `.codex/templates/` and non-discoverable helper aliases for copied runtime support. |
 | Codex | Plugin | v2 deferred | Target shape: `.codex-plugin/plugin.json` plus bundled skills/hooks/agents. |
 | Other harnesses | Any | out of scope | Future adapters may be added after real user signal. |
 
@@ -144,10 +146,11 @@ Each host adapter should implement the same conceptual operations:
 - **Claude plugin mode is still Claude-specific.** `.claude-plugin`,
   `CLAUDE_PLUGIN_ROOT`, Claude hook event names, and Claude subagent
   type resolution remain valid in the Claude adapter.
-- **Codex support may drift before v2 starts.** Codex surfaces are
-  current as of May 2026, but the deferred Codex slices must verify the
-  exact hook, skill, agent, and plugin contracts before implementation.
-- **`AGENTS.md` is already present in this repo.** Scaffold changes must
+- **Codex support can still drift.** Codex scaffold surfaces were verified
+  locally against Codex 0.133 for slice 033-05. Future Codex plugin packaging
+  and any scaffold update work must re-check the exact hook, skill, agent,
+  and plugin contracts before changing generated files.
+- **`AGENTS.md` may already be present in target repos.** Scaffold changes must
   avoid clobbering user-owned or pre-existing `AGENTS.md` content.
 - **Generated-file headers consume tokens.** Metadata should be compact
   and machine-readable, preferably centralized in a manifest when a

@@ -60,7 +60,7 @@ federation-aware read-through behaviors that activate only when
 - [ ] `docs/specs/README.md` regenerated.
 - [ ] `docs/architecture.md` updated to name the read-through
       precedence rules.
-- [ ] CLAUDE.md hot cache updated only if a new term entered the
+- [ ] `AGENTS.md` / `CLAUDE.md` hot cache updated only if a new term entered the
       glossary.
 
 **Anti-horizontal-phasing check:** After this slice lands, an

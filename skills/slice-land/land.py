@@ -164,7 +164,7 @@ def check_dod(section: str) -> tuple:
 
     Spec 009 / slice 009-01: a `### Close-out` subsection inside the slice
     terminates the DoD count — checkboxes inside it are treated as
-    post-DONE follow-up (status-board regen, CLAUDE.md updates) and
+    post-DONE follow-up (status-board regen, primer updates) and
     excluded from the count. Heading is case-insensitive and tolerates
     `Close-out` / `Closeout` / `close out` variants; H3 (`###`) is
     required to avoid accidentally matching H2/H4 headings.

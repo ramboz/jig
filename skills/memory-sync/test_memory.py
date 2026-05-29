@@ -63,6 +63,9 @@ class MemoryHelperTests(unittest.TestCase):
     def _inbox(self) -> str:
         return (self.target / "docs/inbox.md").read_text()
 
+    def _agents(self) -> str:
+        return (self.target / "AGENTS.md").read_text()
+
     def _claude(self) -> str:
         return (self.target / "CLAUDE.md").read_text()
 
@@ -122,7 +125,7 @@ class MemoryHelperTests(unittest.TestCase):
         result = run_memory(self.target, "promote", "jig",
                             "the AI-native dev scaffold plugin")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-        content = self._claude()
+        content = self._agents()
         # Locate the Key terms section under Hot Cache
         idx = content.find("### Key terms")
         self.assertGreater(idx, 0, "missing Key terms section")
@@ -134,8 +137,13 @@ class MemoryHelperTests(unittest.TestCase):
         run_memory(self.target, "promote", "ABC", "alpha bravo charlie")
         run_memory(self.target, "promote", "ABC", "alpha bravo charlie")
         # Only one entry
-        c = self._claude()
+        c = self._agents()
         self.assertEqual(c.count("alpha bravo charlie"), 1)
+        self.assertEqual(
+            self._claude().count("alpha bravo charlie"),
+            0,
+            "CLAUDE.md adapter must not become a stale duplicate hot cache",
+        )
 
     def test_promote_not_fooled_by_prose_mention(self):
         """Regression (reviewer-flagged): if an existing entry's prose mentions
@@ -149,7 +157,7 @@ class MemoryHelperTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("promoted", result.stdout.lower())
         # And the actual FOO entry should be in the file
-        self.assertIn("the foo system", self._claude())
+        self.assertIn("the foo system", self._agents())
 
     # AC #1: summary command lists what's in memory
     def test_summary_lists_counts(self):
@@ -271,15 +279,15 @@ class SelfHealingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertTrue((self.target / "docs/inbox.md").exists())
 
-    def test_promote_warns_when_no_claude_md(self):
+    def test_promote_warns_when_no_primer_md(self):
         result = run_memory(self.target, "promote", "X", "y")
         # Should still succeed (writing X to glossary as fallback)
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         # Stderr should mention the fallback
         combined = result.stderr.lower() + result.stdout.lower()
         self.assertTrue(
-            "claude.md" in combined or "fallback" in combined,
-            "expected a warning about missing CLAUDE.md",
+            "agents.md" in combined or "fallback" in combined,
+            "expected a warning about missing AGENTS.md",
         )
 
 
