@@ -80,6 +80,9 @@ class InclusionTests(unittest.TestCase):
     def test_plugin_json_at_root(self):
         self.assertIn(".claude-plugin/plugin.json", self.names)
 
+    def test_codex_plugin_json_at_root(self):
+        self.assertIn(".codex-plugin/plugin.json", self.names)
+
     def test_marketplace_json_at_root(self):
         self.assertIn(".claude-plugin/marketplace.json", self.names)
 
@@ -321,6 +324,25 @@ class ManifestContentTests(unittest.TestCase):
                 data = json.loads(f.read())
         self.assertEqual(data["version"], _PLUGIN_VERSION)
         self.assertEqual(data["name"], "jig")
+
+    def test_codex_plugin_json_version_matches_requested(self):
+        zip_path = _build_once()
+        self.addCleanup(zip_path.unlink, missing_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            with zf.open(".codex-plugin/plugin.json") as f:
+                data = json.loads(f.read())
+        self.assertEqual(data["version"], _PLUGIN_VERSION)
+        self.assertEqual(data["name"], "jig")
+
+    def test_codex_plugin_manifest_uses_shared_runtime_roots(self):
+        zip_path = _build_once()
+        self.addCleanup(zip_path.unlink, missing_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            with zf.open(".codex-plugin/plugin.json") as f:
+                data = json.loads(f.read())
+        self.assertEqual(data["skills"], "./skills/")
+        self.assertNotIn("codexSkills", data)
+        self.assertNotIn("agents", data)
 
 
 # ---------------------------------------------------------------------------

@@ -13,9 +13,10 @@ step is to separate jig's workflow model from any one host's wiring.
 
 This spec introduces a host-adapter architecture: jig keeps one
 canonical source tree, but scaffolds materialized, host-native files for
-each supported LLM harness. For v1 of this work, the supported outputs
-remain Claude plugin mode and Claude scaffold mode. A later v2 can add
-Codex support when there is real user demand.
+each supported LLM harness. The initial v1 work preserved Claude plugin
+mode and Claude scaffold mode; after the Codex trigger fired, slice
+033-05 added Codex scaffold mode. Slice 033-06 adds Codex plugin
+packaging through a generated Codex-native plugin package.
 
 The guiding rule is: **copy prose, share code**. Skills, primers, and
 agent instructions are rendered into local host-native files so each
@@ -27,9 +28,9 @@ universal runtime import layer is introduced in v1.
 
 - **A concrete portability question surfaced.** The AGENTS.md sibling
   decision in `docs/refinement-todo.md` named Codex interest as the
-  trigger for revisiting cross-harness support. That signal has now
-  arrived as a design question, even if implementation remains future
-  work.
+  trigger for revisiting cross-harness support. That signal arrived first
+  as a design question, then as direct implementation requests for Codex
+  scaffold and plugin packaging.
 - **Codex now has compatible primitives.** Codex supports repo
   `AGENTS.md`, skills, custom agents, hooks, and plugin packaging. That
   means the future port can be a real adapter, not just a docs-only
@@ -44,8 +45,8 @@ universal runtime import layer is introduced in v1.
 ## Goals
 
 1. **Support matrix is explicit.** Document that v1 supports Claude
-   plugin and Claude scaffold modes; v2 may add Codex scaffold and
-   Codex plugin modes when the deferred trigger fires.
+   plugin and Claude scaffold modes, and that v2 adds Codex scaffold
+   and Codex plugin packaging after their deferred triggers fired.
 2. **Logical adapter contract.** Define the host-neutral operations jig
    expects every adapter to provide: render project primer, install
    skills, install agents, install hooks, rewrite helper paths, translate
@@ -69,15 +70,16 @@ universal runtime import layer is introduced in v1.
    needs (`writes`, `read-only fresh review`, `architecture judgment`)
    and define fallback behavior when a host cannot enforce the exact
    capability.
-9. **Future Codex path captured but deferred.** Codex scaffold and
-   Codex plugin support are documented as deferred v2 slices with a
-   concrete resolution trigger.
+9. **Codex path staged by demand.** Codex scaffold support was
+   implemented only after the direct trigger fired; Codex plugin support
+   follows after a real install-and-forget distribution ask.
 
 ## Non-goals
 
-- **Implementing Codex support in v1.** The v1 work creates the adapter
-  boundary and preserves Claude behavior. Codex implementation stays
-  deferred until there is an actual request to port.
+- **Implementing Codex support before a real trigger.** The initial v1 work
+  created the adapter boundary and preserved Claude behavior. Slices 033-05
+  and 033-06 implement Codex scaffold and plugin packaging only after direct
+  user requests fired their deferred triggers.
 - **Universal runtime embedding.** No shared instruction file that every
   host must import at runtime. Generated files should be boring,
   local, and host-native.
@@ -98,8 +100,8 @@ universal runtime import layer is introduced in v1.
 |---|---|---|---|
 | Claude Code | Plugin | v1 supported | Existing `.claude-plugin` package remains valid. |
 | Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output preserved, with `AGENTS.md` added as canonical primer. |
-| Codex | Scaffold | v2 deferred | Target shape: `AGENTS.md`, `.agents/skills/`, `.codex/hooks.json`, `.codex/agents/*.toml`. |
-| Codex | Plugin | v2 deferred | Target shape: `.codex-plugin/plugin.json` plus bundled skills/hooks/agents. |
+| Codex | Scaffold | 033-05 implemented | Target shape verified against local Codex 0.133: `AGENTS.md`, `.codex/skills/`, `.codex/hooks.json`, `.codex/agents/*.md`, plus `.codex/templates/` and non-discoverable helper aliases for copied runtime support. |
+| Codex | Plugin | 033-06 implemented | `.codex-plugin/plugin.json`; generated package with rendered Codex skills, `hooks/hooks.json`, templates, and bundled canonical agent prompts. |
 | Other harnesses | Any | out of scope | Future adapters may be added after real user signal. |
 
 ## Logical adapter contract
@@ -144,10 +146,17 @@ Each host adapter should implement the same conceptual operations:
 - **Claude plugin mode is still Claude-specific.** `.claude-plugin`,
   `CLAUDE_PLUGIN_ROOT`, Claude hook event names, and Claude subagent
   type resolution remain valid in the Claude adapter.
-- **Codex support may drift before v2 starts.** Codex surfaces are
-  current as of May 2026, but the deferred Codex slices must verify the
-  exact hook, skill, agent, and plugin contracts before implementation.
-- **`AGENTS.md` is already present in this repo.** Scaffold changes must
+- **Codex support can still drift.** Codex scaffold surfaces were verified
+  locally against Codex 0.133 for slice 033-05. Codex plugin packaging was
+  re-checked against the current official plugin docs for slice 033-06. Future
+  scaffold or plugin changes must re-check the exact hook, skill, agent, and
+  plugin contracts before changing generated files.
+- **Codex custom agents need a follow-up adapter.** Slice 033-05 materialized
+  Markdown role prompts under `.codex/agents/`; current Codex custom-agent docs
+  define discoverable custom agents as TOML files. Slice 033-06 bundles the
+  canonical Markdown prompts as non-discoverable package source and tracks TOML
+  rendering in `docs/refinement-todo.md`.
+- **`AGENTS.md` may already be present in target repos.** Scaffold changes must
   avoid clobbering user-owned or pre-existing `AGENTS.md` content.
 - **Generated-file headers consume tokens.** Metadata should be compact
   and machine-readable, preferably centralized in a manifest when a

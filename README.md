@@ -1,6 +1,6 @@
 # jig
 
-> A Claude Code plugin that scaffolds AI-native development practices into new projects.
+> A Claude Code and Codex workflow layer that scaffolds AI-native development practices into new projects.
 
 **jig** (noun): a tool that guides other tools to work accurately and consistently.
 
@@ -136,11 +136,38 @@ configuration. jig stays opinionated about *workflow* and out of the way of
 the *judgment skills you've already invested in*. Detail:
 [product-vision § Design principles](docs/product-vision.md#design-principles).
 
+## Codex Distribution
+
+jig now supports four distribution modes from the same source tree:
+**Claude scaffold**, **Claude plugin**, **Codex scaffold**, and **Codex plugin**.
+For editable Codex project-local machinery, run:
+
+```bash
+python3 skills/scaffold-init/scaffold.py --host codex <your-project>
+```
+
+For install-and-forget Codex packaging, build the generated plugin tree:
+
+```bash
+python3 scripts/build_codex_plugin.py --output-dir dist/codex-plugin/plugins/jig
+```
+
+The builder writes `dist/codex-plugin/.agents/plugins/marketplace.json`
+next to the plugin directory. Install that generated marketplace with
+`codex plugin marketplace add dist/codex-plugin`, then `codex plugin add
+jig@jig`. The Codex plugin package includes `.codex-plugin/plugin.json`,
+rendered Codex skill copies, `hooks/hooks.json`, hook scripts, templates,
+and the canonical agent prompts. Current Codex custom-agent discovery uses
+TOML agent files under project-local or user-local `.codex/agents/`; jig's
+bundled `agents/*.md` files are non-discoverable prompt source until a TOML
+agent adapter lands.
+
 ## Repository structure (for contributors)
 
 ```
-.claude-plugin/plugin.json       # Plugin manifest
-.claude-plugin/marketplace.json  # Local dev marketplace descriptor
+.claude-plugin/plugin.json       # Claude plugin manifest
+.claude-plugin/marketplace.json  # Claude local dev marketplace descriptor
+.codex-plugin/plugin.json        # Codex plugin manifest
 skills/                          # Skill definitions (SKILL.md per skill)
 agents/                          # Subagent definitions
 hooks/                           # Hook configuration + Python scripts
@@ -171,7 +198,7 @@ Tier 0 and Tier 1 are complete — all 15 skills, 3 subagents, and the jig hooks
 ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
 state, see the **[status board](docs/specs/README.md)**.
 
-**Supported today:** Claude Code in all install shapes above (own-it scaffold
-default, central machinery, or plugin-only). **Planned:** Codex scaffold +
-plugin packaging, on user signal
-([spec 033](docs/specs/033-host-adapter-portability/spec.md)).
+**Supported today:** Claude Code and Codex in scaffold and plugin shapes from
+the shared source tree. Codex role prompts are bundled as prompt source; TOML
+custom-agent discovery remains a tracked follow-up in
+[spec 033](docs/specs/033-host-adapter-portability/spec.md).

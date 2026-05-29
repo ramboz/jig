@@ -5,7 +5,7 @@ Covers AC #9: (a) config parses as JSON; (b) contains `packages."."`;
 (c) `release-type: "simple"`; (d) `extra-files` points at plugin.json with
 `jsonpath: "$.version"`; (e) manifest parses + declares a version for ".".
 
-Plus additional integrity checks: plugin.json + manifest agree on the
+Plus additional integrity checks: plugin manifests + manifest agree on the
 checked-in version (so a contributor can't desync by editing one and not
 the other), and `release-as` is consistent with the user-locked v1.0.0
 decision until removed post-release.
@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".github" / "release-please-config.json"
 MANIFEST_PATH = REPO_ROOT / ".github" / ".release-please-manifest.json"
 PLUGIN_JSON_PATH = REPO_ROOT / ".claude-plugin" / "plugin.json"
+CODEX_PLUGIN_JSON_PATH = REPO_ROOT / ".codex-plugin" / "plugin.json"
 CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
 
 
@@ -54,21 +55,21 @@ class ReleasePleaseConfigTests(unittest.TestCase):
             f"release-type must be 'simple' (got {self.config.get('release-type')!r})",
         )
 
-    def test_extra_files_points_at_plugin_json(self):
+    def test_extra_files_points_at_plugin_jsons(self):
         pkg = self.config["packages"]["."]
         extra = pkg.get("extra-files", [])
-        matching = [
-            e for e in extra
+        paths = {
+            e.get("path")
+            for e in extra
             if isinstance(e, dict)
-            and e.get("path") == ".claude-plugin/plugin.json"
-        ]
+            and e.get("type") == "json"
+            and e.get("jsonpath") == "$.version"
+        }
         self.assertEqual(
-            len(matching), 1,
-            f"expected exactly one extra-files entry for plugin.json, got {extra!r}",
+            paths,
+            {".claude-plugin/plugin.json", ".codex-plugin/plugin.json"},
+            f"expected release-please to version both plugin manifests, got {extra!r}",
         )
-        entry = matching[0]
-        self.assertEqual(entry.get("type"), "json")
-        self.assertEqual(entry.get("jsonpath"), "$.version")
 
 
 # ---------------------------------------------------------------------------
@@ -134,15 +135,11 @@ class ReleasePleaseManifestTests(unittest.TestCase):
 
 
 class VersionLockstepTests(unittest.TestCase):
-    """plugin.json's version must match what release-please will publish."""
+    """Plugin manifest versions must match what release-please will publish."""
 
-    def test_plugin_json_version_matches_release_as_or_manifest(self):
+    def test_plugin_json_versions_match_release_as_or_manifest(self):
         config = json.loads(CONFIG_PATH.read_text())
         manifest = json.loads(MANIFEST_PATH.read_text())
-        plugin = json.loads(PLUGIN_JSON_PATH.read_text())
-
-        plugin_version = plugin.get("version")
-        self.assertIsNotNone(plugin_version, "plugin.json must declare a version")
 
         pkg = config.get("packages", {}).get(".", {})
         release_as = pkg.get("release-as")
@@ -152,12 +149,19 @@ class VersionLockstepTests(unittest.TestCase):
         #   - the `release-as` pin (during the v1.0.0 bootstrap window), OR
         #   - the manifest version (after release-as is removed)
         expected = release_as if release_as else manifest_version
-        self.assertEqual(
-            plugin_version, expected,
-            f"plugin.json version {plugin_version!r} must match "
-            f"{'release-as' if release_as else 'manifest'} ({expected!r}) "
-            "— release-please will otherwise produce a desync on its next run",
-        )
+        for path in (PLUGIN_JSON_PATH, CODEX_PLUGIN_JSON_PATH):
+            plugin = json.loads(path.read_text())
+            plugin_version = plugin.get("version")
+            self.assertIsNotNone(
+                plugin_version,
+                f"{path.relative_to(REPO_ROOT)} must declare a version",
+            )
+            self.assertEqual(
+                plugin_version, expected,
+                f"{path.relative_to(REPO_ROOT)} version {plugin_version!r} must match "
+                f"{'release-as' if release_as else 'manifest'} ({expected!r}) "
+                "or release-please will produce a desync on its next run",
+            )
 
 
 # ---------------------------------------------------------------------------

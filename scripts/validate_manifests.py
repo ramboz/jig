@@ -7,9 +7,11 @@ well-formed, and satisfy the install contract. Designed to run in CI before
 release-please or zip packaging touches them, so a malformed manifest is
 caught at PR review time instead of breaking the release pipeline.
 
-Files checked (slice 047-01 routes the first two through `install_contract`
-so the manifest contract lives in one place):
+Files checked (slice 047-01 routes the real manifest schemas through
+`install_contract` so the manifest contract lives in one place):
     .claude-plugin/plugin.json       — name + version + description
+    .codex-plugin/plugin.json        — Codex package metadata, shared skills
+                                       pointer, and interface metadata
     .claude-plugin/marketplace.json  — name, owner.name, non-empty plugins[]
                                        (each name/source/description with a
                                        relative source path)
@@ -56,6 +58,10 @@ _MANIFESTS: tuple[ManifestSpec, ...] = (
         validator=install_contract.validate_plugin_manifest,
     ),
     ManifestSpec(
+        ".codex-plugin/plugin.json",
+        validator=install_contract.validate_codex_plugin_manifest,
+    ),
+    ManifestSpec(
         ".claude-plugin/marketplace.json",
         validator=install_contract.validate_marketplace_manifest,
     ),
@@ -66,7 +72,7 @@ _MANIFESTS: tuple[ManifestSpec, ...] = (
 def _check_one(root: Path, spec: ManifestSpec) -> tuple[bool, str]:
     """Return (passed, message) for a single manifest."""
     path = root / spec.relative_path
-    name = Path(spec.relative_path).name
+    name = spec.relative_path
     if not path.is_file():
         return False, f"FAIL {name}: missing at {path}"
     try:
