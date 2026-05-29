@@ -449,7 +449,9 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
     })
 
 
-def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
+def _copy_skills_and_agents(
+    plugin: Path, target: Path, installed_tiers: "list | None" = None,
+) -> None:
     """Copy `plugin/skills/<name>/` → `target/.claude/skills/jig-<name>/` and
     `plugin/agents/*.md` → `target/.claude/agents/jig-<name>.md`. Also copies
     `_`-prefixed private shared modules (e.g. `_common/`) into
@@ -459,7 +461,24 @@ def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
     `.claude/skills/`, making `_common/` a sibling.
 
     Slice 016-01 (scaffold-mode); shared-module copy added 2026-05-20.
-    Skips:
+
+    Slice 038-02 (tier gating, ADR-0010): `installed_tiers` filters which
+    user-facing skills are copied so the on-disk set matches the
+    `scaffold.json` manifest (whose `installed_skills` is derived from the
+    same tiers per ADR-0007). A skill is copied only when its tier (per
+    `_TIER_SKILLS`) is in `installed_tiers`. When `installed_tiers is None`
+    every tier is copied — the back-compat / interim default for callers
+    that have not resolved tiers yet (notably `migrate.py copy-machinery`,
+    until slice 038-04 sources tiers from the target manifest). A skill dir
+    with no `_TIER_SKILLS` entry has no tier to gate on; under gating it is
+    skipped with a diagnostic (silently shipping it would reopen the
+    manifest↔disk gap), but it is still copied under the copy-all default.
+
+    Infrastructure is never gated: `_`-prefixed private shared modules and
+    `agents/*.md` are always copied (they are runtime plumbing, not
+    tier-scoped skills).
+
+    Skips (regardless of tier):
       - skill dirs that don't have a `SKILL.md` (not user-facing);
       - `test_*.py` files anywhere under a skill dir (helper-only files
         bloat the user's tree and aren't load-bearing at runtime);
@@ -479,6 +498,14 @@ def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
     skills_dst = target / ".claude" / "skills"
     agents_dst = target / ".claude" / "agents"
 
+    # Reverse map skill-name → tier for gating. None means "copy all tiers".
+    gate = set(installed_tiers) if installed_tiers is not None else None
+    skill_tier = {
+        skill: tier
+        for tier, skills in _TIER_SKILLS.items()
+        for skill in skills
+    }
+
     if skills_src.is_dir():
         skills_dst.mkdir(parents=True, exist_ok=True)
         for skill_dir in sorted(skills_src.iterdir()):
@@ -487,10 +514,23 @@ def _copy_skills_and_agents(plugin: Path, target: Path) -> None:
             if skill_dir.name.startswith("_"):
                 # Private shared module — copy unprefixed so the
                 # helpers' `from _<name>.x import ...` resolves.
+                # Never tier-gated (infrastructure, not a skill).
                 _copy_skill_dir(skill_dir, skills_dst / skill_dir.name)
                 continue
             if not (skill_dir / "SKILL.md").is_file():
                 continue
+            if gate is not None:
+                tier = skill_tier.get(skill_dir.name)
+                if tier is None:
+                    # No tier to gate on — skip rather than silently ship.
+                    print(
+                        f"jig scaffold: skipping skill '{skill_dir.name}' "
+                        f"— not in _TIER_SKILLS, cannot tier-gate",
+                        file=sys.stderr,
+                    )
+                    continue
+                if tier not in gate:
+                    continue
             dst_dir = skills_dst / f"jig-{skill_dir.name}"
             _copy_skill_dir(skill_dir, dst_dir)
 
@@ -779,7 +819,8 @@ def _copy_hooks_and_register(plugin: Path, target: Path, *,
 
 
 def copy_machinery(plugin: Path, target: Path, *,
-                   force: bool = False) -> None:
+                   force: bool = False,
+                   installed_tiers: "list | None" = None) -> None:
     """Copy jig's runtime machinery (skills + agents + hooks + settings.json)
     from `plugin` into `target/.claude/`.
 
@@ -791,10 +832,18 @@ def copy_machinery(plugin: Path, target: Path, *,
          check (inbox 2026-05-15): ensures we refuse BEFORE any filesystem
          mutation when settings.json is unmanaged. Closes the partial-
          state-on-refuse gap noted in spec 016-03 deviation §7.
-      2. `_copy_skills_and_agents(plugin, target)` — slice 016-01.
+      2. `_copy_skills_and_agents(plugin, target, installed_tiers)` —
+         slice 016-01; tier-gated since slice 038-02.
       3. `_copy_hooks_and_register(plugin, target, force=force)` — slice
          016-02; the safety check inside this call is now redundant but
          kept so the function still works correctly when called directly.
+
+    `installed_tiers` (slice 038-02) is forwarded to
+    `_copy_skills_and_agents` to gate which skills are copied. `None`
+    (the default) copies every tier — the interim contract for the
+    `migrate.py copy-machinery` caller until slice 038-04 sources tiers
+    from the target's existing `scaffold.json`. The greenfield
+    `scaffold()` caller always passes its `_select_tiers` result.
 
     Safety guarantees:
     - Executable bit pinned to 0o755 on copied hook scripts.
@@ -804,7 +853,7 @@ def copy_machinery(plugin: Path, target: Path, *,
       refused call leaves no partial state — including no copied
       skills/agents (this is the gap inbox 2026-05-15 closes)."""
     _check_hooks_safety(target, force=force)
-    _copy_skills_and_agents(plugin, target)
+    _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
 
 
@@ -914,7 +963,11 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # next run treats the directory as un-scaffolded and re-attempts
     # without `--force`.
     if with_machinery:
-        copy_machinery(plugin, target, force=force)
+        # Slice 038-02: gate the on-disk skill set to the same tiers the
+        # manifest records (installed_skills is derived from these per
+        # ADR-0007), so disk == manifest.
+        copy_machinery(plugin, target, force=force,
+                       installed_tiers=installed_tiers)
 
     # 6. scaffold.json install-state manifest — the COMPLETION SENTINEL
     # (slice 032-02). Written LAST so a crash before this point leaves

@@ -92,7 +92,13 @@ class WithMachineryTests(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-016-machinery-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
-        r = run_scaffold_with_args(self.target, "--with-machinery")
+        # `--has-tests` forces tier-1 into installed_tiers so the FULL
+        # 14-skill set is copied. Slice 038-02 made the copy tier-gated;
+        # these tests verify copy *mechanics* (path rewrite, test-file
+        # exclusion, jig- prefixing, quality.py retention) on tier-1
+        # skills like `tdd-loop`, so they need the full set present.
+        # Tier-gating itself is covered by TierGatedCopyTests.
+        r = run_scaffold_with_args(self.target, "--with-machinery", "--has-tests")
         self.assertEqual(
             r.returncode, 0,
             f"scaffold --with-machinery failed: stderr={r.stderr}\nstdout={r.stdout}",
@@ -1168,6 +1174,147 @@ class CopySkillDirExcludesFixturesTests(unittest.TestCase):
         self.assertTrue((self.dst / "SKILL.md").is_file())
         self.assertTrue((self.dst / "runtime_helper.py").is_file())
         self.assertTrue((self.dst / "sub" / "deeper" / "sibling.txt").is_file())
+
+
+class TierGatedCopyTests(unittest.TestCase):
+    """Slice 038-02 — `_copy_skills_and_agents` gates by `installed_tiers`
+    so the on-disk skill set matches the `scaffold.json` manifest
+    (ADR-0010; ADR-0007's derivation invariant now holds on BOTH sides).
+
+    Floor install (no test signal) = Tier-0 only; `--has-tests` adds
+    Tier-1. Infrastructure (`_<name>` private modules, `agents/`) is never
+    gated. Both callers (`scaffold()` and the `copy_machinery()` façade)
+    thread tiers through; the param's `None` default copies all tiers —
+    the interim default for `migrate.py copy-machinery` until slice 038-04
+    sources tiers from the target manifest.
+    """
+
+    TIER0 = set(scaffold_mod._TIER_SKILLS["tier-0"])
+    TIER1 = set(scaffold_mod._TIER_SKILLS["tier-1"])
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-038-02-")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ---- helpers ----------------------------------------------------------
+    def _scaffold(self, *args):
+        target = Path(self.tmpdir) / f"proj-{len(args)}-{'-'.join(a.strip('-') for a in args)}"
+        target.mkdir()
+        r = run_scaffold_with_args(target, "--with-machinery", *args)
+        self.assertEqual(r.returncode, 0, f"scaffold failed: stderr={r.stderr}")
+        return target
+
+    def _on_disk_skills(self, target):
+        """Set of skill names (jig- prefix stripped) actually copied, i.e.
+        directories carrying a SKILL.md — mirrors the copy's own unit."""
+        skills_dir = target / ".claude" / "skills"
+        return {
+            d.name[len("jig-"):]
+            for d in skills_dir.iterdir()
+            if d.is_dir() and d.name.startswith("jig-") and (d / "SKILL.md").is_file()
+        }
+
+    def _manifest_skills(self, target):
+        manifest = json.loads((target / "scaffold.json").read_text())
+        # installed_skills entries are "<tier>/<skill>" per ADR-0007.
+        return {s.split("/", 1)[1] for s in manifest["installed_skills"]}
+
+    # ---- AC #1: floor install is gated ------------------------------------
+    def test_floor_install_copies_only_tier0(self):
+        target = self._scaffold("--no-tests")
+        on_disk = self._on_disk_skills(target)
+        self.assertEqual(
+            on_disk, self.TIER0,
+            f"floor install should copy exactly the Tier-0 skills; got {on_disk}",
+        )
+        self.assertEqual(
+            on_disk & self.TIER1, set(),
+            "no Tier-1 skill should be copied under a no-tests floor install",
+        )
+
+    # ---- AC #2: tier-1 lands when its tier is installed -------------------
+    def test_has_tests_copies_all_tiers(self):
+        target = self._scaffold("--has-tests")
+        self.assertEqual(self._on_disk_skills(target), self.TIER0 | self.TIER1)
+
+    # ---- AC #3: manifest <-> on-disk consistency (regression) -------------
+    def test_manifest_matches_on_disk_floor(self):
+        target = self._scaffold("--no-tests")
+        self.assertEqual(
+            self._on_disk_skills(target), self._manifest_skills(target),
+            "scaffold.json installed_skills must equal the on-disk skill set "
+            "(the gap slice 038-02 closes)",
+        )
+
+    def test_manifest_matches_on_disk_full(self):
+        target = self._scaffold("--has-tests")
+        self.assertEqual(self._on_disk_skills(target), self._manifest_skills(target))
+
+    # ---- AC #4: infrastructure is never gated -----------------------------
+    def test_infra_ungated_in_floor(self):
+        target = self._scaffold("--no-tests")
+        skills_dir = target / ".claude" / "skills"
+        self.assertTrue(
+            (skills_dir / "_common").is_dir(),
+            "private `_common/` module must be copied regardless of tier",
+        )
+        agents = list((target / ".claude" / "agents").glob("jig-*.md"))
+        self.assertTrue(agents, "agents must be copied regardless of tier")
+
+    # ---- AC #5: param threading + both callers ----------------------------
+    def test_copy_helper_none_copies_all_tiers(self):
+        """Interim default: `installed_tiers=None` copies every tier —
+        preserves behavior for callers that haven't resolved tiers yet
+        (migrate's copy-machinery until slice 038-04)."""
+        target = Path(self.tmpdir) / "u-none"
+        scaffold_mod._copy_skills_and_agents(scaffold_mod.plugin_root(), target, None)
+        self.assertEqual(self._on_disk_skills(target), self.TIER0 | self.TIER1)
+
+    def test_copy_helper_gates_to_given_tiers(self):
+        target = Path(self.tmpdir) / "u-t0"
+        scaffold_mod._copy_skills_and_agents(
+            scaffold_mod.plugin_root(), target, ["tier-0"],
+        )
+        self.assertEqual(self._on_disk_skills(target), self.TIER0)
+
+    def test_copy_machinery_threads_tiers(self):
+        """The `copy_machinery()` façade (used by `migrate.py
+        copy-machinery`) accepts and applies `installed_tiers`."""
+        target = Path(self.tmpdir) / "u-cm"
+        target.mkdir()
+        scaffold_mod.copy_machinery(
+            scaffold_mod.plugin_root(), target, installed_tiers=["tier-0"],
+        )
+        self.assertEqual(self._on_disk_skills(target), self.TIER0)
+
+    # ---- edge case: unmapped skill is skipped when gating -----------------
+    def test_unmapped_skill_skipped_when_gated(self):
+        """A skill dir with no entry in `_TIER_SKILLS` has no tier to gate
+        on; under gating it is skipped (not silently shipped, which would
+        reopen the manifest<->disk gap). Under the copy-all default it is
+        still copied."""
+        plugin = Path(self.tmpdir) / "fakeplugin"
+        mapped = plugin / "skills" / "spec-workflow"   # real Tier-0 name
+        unmapped = plugin / "skills" / "totally-unmapped"
+        for d in (mapped, unmapped):
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text("---\nname: x\n---\n# body\n")
+
+        gated = Path(self.tmpdir) / "u-gated"
+        scaffold_mod._copy_skills_and_agents(plugin, gated, ["tier-0"])
+        on_disk_gated = self._on_disk_skills(gated)
+        self.assertIn("spec-workflow", on_disk_gated)
+        self.assertNotIn(
+            "totally-unmapped", on_disk_gated,
+            "unmapped skill must be skipped under tier gating",
+        )
+
+        copy_all = Path(self.tmpdir) / "u-all"
+        scaffold_mod._copy_skills_and_agents(plugin, copy_all, None)
+        self.assertIn("totally-unmapped", self._on_disk_skills(copy_all))
 
 
 if __name__ == "__main__":
