@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -1051,6 +1052,201 @@ class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
 
 sys.path.insert(0, str(REPO_ROOT / "skills" / "scaffold-init"))
 import scaffold as scaffold_mod  # noqa: E402
+
+
+class CodexScaffoldAdapterTests(unittest.TestCase):
+    """Slice 033-05/07 — Codex scaffold output is host-native."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-033-codex-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run_codex_scaffold(self) -> subprocess.CompletedProcess:
+        return run_scaffold_with_args(self.target, "--host", "codex")
+
+    def test_codex_scaffold_tree_has_no_claude_only_files(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
+
+        for rel in (
+            "AGENTS.md",
+            "scaffold.json",
+            ".codex/hooks.json",
+            ".codex/skills/jig-scaffold-init/SKILL.md",
+            ".codex/agents/jig-reviewer.toml",
+            ".codex/hooks/scripts/jig-context-check.sh",
+        ):
+            self.assertTrue(
+                (self.target / rel).is_file(),
+                f"missing Codex scaffold file: {rel}",
+            )
+
+        for rel in ("CLAUDE.md", ".claude", ".agents", ".codex-plugin"):
+            self.assertFalse(
+                (self.target / rel).exists(),
+                f"Codex scaffold should not create Claude-only path: {rel}",
+            )
+
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertEqual(manifest.get("host_renderer"), "codex")
+        self.assertEqual(manifest.get("scaffold_mode"), "in-repo")
+
+    def test_codex_skills_are_rewritten_to_project_runtime_paths(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        copied = (
+            self.target / ".codex" / "skills" / "jig-scaffold-init"
+            / "SKILL.md"
+        ).read_text()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", copied)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", copied)
+        self.assertNotIn("CLAUDE.md", copied)
+        self.assertNotIn(".claude/", copied)
+        self.assertIn(
+            "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-scaffold-init/",
+            copied,
+        )
+        self.assertIn(
+            "${CODEX_PROJECT_DIR:-$PWD}/.codex/templates/",
+            copied,
+        )
+        self.assertIn("--host codex", copied)
+
+        common = self.target / ".codex" / "skills" / "_common"
+        self.assertTrue((common / "parsing.py").is_file())
+        self.assertFalse((common / "test_parsing.py").exists())
+
+    def test_codex_agents_materialize_as_toml(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        expected_sandbox = {
+            "architect": "read-only",
+            "implementer": "workspace-write",
+            "reviewer": "read-only",
+        }
+        for role, sandbox in expected_sandbox.items():
+            agent = self.target / ".codex" / "agents" / f"jig-{role}.toml"
+            self.assertTrue(agent.is_file(), f"missing Codex agent: {agent}")
+            data = tomllib.loads(agent.read_text())
+            self.assertEqual(data["name"], f"jig-{role}")
+            self.assertEqual(data["sandbox_mode"], sandbox)
+            self.assertIn("Codex adapter note", data["developer_instructions"])
+            self.assertNotIn(".claude", data["developer_instructions"])
+            self.assertNotIn("CLAUDE.md", data["developer_instructions"])
+
+    def test_codex_agent_installer_writes_toml_to_requested_dir(self):
+        agents_dir = Path(self.tmpdir) / "global-codex-agents"
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(SCAFFOLD),
+                "--install-codex-agents",
+                "--codex-agents-dir",
+                str(agents_dir),
+            ],
+            cwd=self.target,
+            capture_output=True,
+            text=True,
+            env={},
+        )
+
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("installed 3 Codex agent(s)", r.stdout)
+        data = tomllib.loads((agents_dir / "jig-reviewer.toml").read_text())
+        self.assertEqual(data["name"], "jig-reviewer")
+        self.assertEqual(data["sandbox_mode"], "read-only")
+
+    def test_codex_agent_renderer_requires_explicit_sandbox_mapping(self):
+        agent = Path(self.tmpdir) / "triager.md"
+        agent.write_text(
+            "---\n"
+            "description: Triage incoming implementation work.\n"
+            "---\n"
+            "You triage incoming implementation work.\n"
+        )
+
+        with self.assertRaisesRegex(
+            scaffold_mod.CodexAgentRoleError,
+            "No Codex sandbox mapping configured",
+        ):
+            scaffold_mod.CodexScaffoldRenderer.render_codex_agent_toml(agent)
+
+    def test_codex_agent_installer_refuses_user_owned_file(self):
+        agents_dir = Path(self.tmpdir) / "global-codex-agents"
+        agents_dir.mkdir()
+        user_owned = agents_dir / "jig-reviewer.toml"
+        user_owned.write_text("name = 'my-reviewer'\n")
+
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(SCAFFOLD),
+                "--install-codex-agents",
+                "--codex-agents-dir",
+                str(agents_dir),
+            ],
+            cwd=self.target,
+            capture_output=True,
+            text=True,
+            env={},
+        )
+
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("--force", r.stderr)
+        self.assertEqual(user_owned.read_text(), "name = 'my-reviewer'\n")
+        self.assertFalse((agents_dir / "jig-architect.toml").exists())
+        self.assertFalse((agents_dir / "jig-implementer.toml").exists())
+
+    def test_codex_hooks_json_registers_all_logical_hooks(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        hooks_path = self.target / ".codex" / "hooks.json"
+        payload = json.loads(hooks_path.read_text())
+        self.assertTrue(payload.get("metadata", {}).get("managed_by_jig"))
+        self.assertEqual(sorted(payload["hooks"].keys()), sorted(EXPECTED_HOOK_EVENTS))
+
+        text = hooks_path.read_text()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", text)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", text)
+        for script in EXPECTED_HOOK_SCRIPTS:
+            self.assertIn(
+                f"${{CODEX_PROJECT_DIR:-$PWD}}/.codex/hooks/scripts/{script}",
+                text,
+            )
+            path = self.target / ".codex" / "hooks" / "scripts" / script
+            self.assertTrue(path.is_file(), f"missing hook script: {path}")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+
+    def test_codex_refuses_existing_unmanaged_hooks_before_runtime_copy(self):
+        hooks_path = self.target / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        hooks_path.write_text(json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Read",
+                        "hooks": [{"type": "command", "command": "./user.sh"}],
+                    }
+                ]
+            }
+        }, indent=2) + "\n")
+
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("--force", r.stderr)
+        self.assertFalse((self.target / ".codex" / "skills").exists())
+        self.assertEqual(
+            list((self.target / ".codex").glob("hooks/scripts/jig-*.sh")),
+            [],
+        )
 
 
 class ScaffoldCompletionMarkerTests(unittest.TestCase):

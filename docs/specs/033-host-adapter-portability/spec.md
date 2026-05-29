@@ -16,7 +16,8 @@ canonical source tree, but scaffolds materialized, host-native files for
 each supported LLM harness. The initial v1 work preserved Claude plugin
 mode and Claude scaffold mode; after the Codex trigger fired, slice
 033-05 added Codex scaffold mode. Slice 033-06 adds Codex plugin
-packaging through a generated Codex-native plugin package.
+packaging through a generated Codex-native plugin package, and slice
+033-07 added the Codex TOML custom-agent adapter.
 
 The guiding rule is: **copy prose, share code**. Skills, primers, and
 agent instructions are rendered into local host-native files so each
@@ -100,8 +101,8 @@ universal runtime import layer is introduced in v1.
 |---|---|---|---|
 | Claude Code | Plugin | v1 supported | Existing `.claude-plugin` package remains valid. |
 | Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output preserved, with `AGENTS.md` added as canonical primer. |
-| Codex | Scaffold | 033-05 implemented | Target shape verified against local Codex 0.133: `AGENTS.md`, `.codex/skills/`, `.codex/hooks.json`, `.codex/agents/*.md`, plus `.codex/templates/` and non-discoverable helper aliases for copied runtime support. |
-| Codex | Plugin | 033-06 implemented | `.codex-plugin/plugin.json`; generated package with rendered Codex skills, `hooks/hooks.json`, templates, and bundled canonical agent prompts. |
+| Codex | Scaffold | v2 supported | Target shape verified against local Codex 0.133: `AGENTS.md`, `.codex/skills/`, `.codex/hooks.json`, `.codex/agents/*.toml`, plus `.codex/templates/` and non-discoverable helper aliases for copied runtime support. |
+| Codex | Plugin | v2 supported | `.codex-plugin/plugin.json`; generated package with rendered Codex skills, `hooks/hooks.json`, templates, bundled canonical agent prompts, and generated TOML custom-agent templates for explicit install. |
 | Other harnesses | Any | out of scope | Future adapters may be added after real user signal. |
 
 ## Logical adapter contract
@@ -151,11 +152,11 @@ Each host adapter should implement the same conceptual operations:
   re-checked against the current official plugin docs for slice 033-06. Future
   scaffold or plugin changes must re-check the exact hook, skill, agent, and
   plugin contracts before changing generated files.
-- **Codex custom agents need a follow-up adapter.** Slice 033-05 materialized
-  Markdown role prompts under `.codex/agents/`; current Codex custom-agent docs
-  define discoverable custom agents as TOML files. Slice 033-06 bundles the
-  canonical Markdown prompts as non-discoverable package source and tracks TOML
-  rendering in `docs/refinement-todo.md`.
+- **Codex custom agents need TOML files.** Slice 033-05 originally
+  materialized Markdown role prompts under `.codex/agents/`; current Codex
+  custom-agent docs define discoverable custom agents as TOML files. Slice
+  033-07 renders TOML from the canonical Markdown prompts for scaffold mode
+  and adds an explicit plugin helper for global Codex agent installation.
 - **`AGENTS.md` may already be present in target repos.** Scaffold changes must
   avoid clobbering user-owned or pre-existing `AGENTS.md` content.
 - **Generated-file headers consume tokens.** Metadata should be compact
@@ -189,3 +190,4 @@ Each host adapter should implement the same conceptual operations:
 - [033-04 - generated-file-metadata](slice-04-generated-file-metadata.md)
 - [033-05 - codex-scaffold-adapter](slice-05-codex-scaffold-adapter.md)
 - [033-06 - codex-plugin-packaging](slice-06-codex-plugin-packaging.md)
+- [033-07 - codex-custom-agent-toml-adapter](slice-07-codex-custom-agent-toml-adapter.md)
