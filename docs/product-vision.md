@@ -95,7 +95,7 @@ The minimum coherent workflow. Nothing useful without all five.
 1. **`scaffold-init`** — generate docs/, hot-cache CLAUDE.md, settings.json
 2. **`memory-sync`** — cross-session continuity; hot cache + deep storage + inbox
 3. **`spec-workflow`** — SPIDR-split slices; DRAFT → DONE state machine; status board
-4. **`independent-review`** — reviewer subagent with fresh context. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
+4. **`independent-review`** — reviewer subagent with a fresh prompt and read-only tools. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
 5. **`migrate`** — sibling entry path for projects that already have specs
 
 ### Tier 1 — default-on (the working surface)
@@ -148,9 +148,13 @@ reconciliation.
    disclosure: body loads only on trigger; supporting files load only
    when referenced. `jig-context-check` warns at session start.
 3. **Three subagents, no more — defined by isolation, not job title.**
-   `implementer` (TDD, writes), `reviewer` (read-only, fresh context),
-   `architect` (rare, ADR-style output). New subagent shapes require
-   a new isolation argument, not a new role description.
+   `implementer` (TDD, writes), `reviewer` (read-only tools, fresh
+   prompt), `architect` (rare, ADR-style output). New subagent shapes
+   require a new isolation argument, not a new role description.
+   ("Isolation" here is permission- and prompt-scope — read-only tools
+   are a real, enforced boundary; the fresh prompt is not a hard
+   context sandbox. See `skills/independent-review/SKILL.md` § Context
+   isolation pattern.)
 4. **Dogfood the workflow we build.** Every jig feature is built using
    jig's own spec lifecycle. The repo's `docs/` is the worked example
    of what `scaffold-init` produces — including this vision document

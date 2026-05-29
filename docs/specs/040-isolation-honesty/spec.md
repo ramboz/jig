@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: (none — doc sweep)
 tier: (none — dev infrastructure)
 ---
@@ -52,9 +52,12 @@ doesn't meet. `docs/workflow.md` does the same when it describes
 2. **`docs/workflow.md`.** Same alignment in the "Post-implementation
    review" section: fresh-prompt + read-only-tools shape, with the
    parent-context caveat acknowledged briefly.
-3. **`docs/product-vision.md`.** § The core problem keeps the
-   "implementers grade their own homework" framing as a real
-   problem — but the *solution* wording matches the SKILL.md.
+3. **`docs/product-vision.md`.** The reviewer-isolation wording lives
+   in **Design principle #3** (and the Tier-0 skills list) — corrected
+   during 040-01 reconciliation; the original draft mis-pointed this at
+   "§ The core problem," which carries no isolation framing. The
+   *solution* wording is tightened to match the SKILL.md while the
+   "defined by isolation" organizing principle is retained.
 
 ## Non-goals
 
@@ -79,9 +82,11 @@ doesn't meet. `docs/workflow.md` does the same when it describes
   caveat naming GitHub issue #20304.
 - `agents/reviewer.md` — tools = `Read, Glob, Grep` (read-only;
   enforcement that's real).
-- `docs/product-vision.md` — § The core problem frames implementer
-  self-grading as a real concern; solution wording carries an
-  implicit isolation promise.
+- `docs/product-vision.md` — **Design principle #3** (`reviewer
+  (read-only, fresh context)`) and the Tier-0 skills list both carry
+  an implicit isolation promise. _(Draft originally attributed this to
+  "§ The core problem"; corrected during 040-01 reconciliation — that
+  section has no isolation framing.)_
 
 ## Decomposition
 

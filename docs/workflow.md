@@ -72,9 +72,10 @@ All specs are SPIDR-split before implementation begins:
 Every slice goes through up to three review passes between IN_PROGRESS
 and REVIEWED.
 
-1. **Compliance pass — `jig:independent-review`** (always). Reviewer
-   subagent with fresh context evaluates the deliverable against the
-   slice's acceptance criteria. The prompt embeds a deterministic
+1. **Compliance pass — `jig:independent-review`** (always). A reviewer
+   subagent with a fresh, self-contained prompt and read-only tools
+   evaluates the deliverable against the slice's acceptance criteria.
+   The prompt embeds a deterministic
    test-quality snapshot (spec 043-04 — `quality.py` reads the slice's
    merge-base-to-HEAD diff and reports `per-file-flood` /
    `assertion-thin` / `mock-heavy` signals) so findings can cite a
@@ -96,6 +97,11 @@ and REVIEWED.
 
 Order: compliance → craft → (arch if flagged). All required passes
 must `pass` for the IN_PROGRESS → REVIEWED transition.
+
+The reviewer's isolation is prompt- and tool-scoped — a self-contained
+prompt plus read-only tools — not a hard sandbox (parent context is
+technically reachable; see `skills/independent-review/SKILL.md`
+§ Context isolation pattern). It works reliably when the prompt is sharp.
 
 ## Reconciliation rules
 
