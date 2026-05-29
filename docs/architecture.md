@@ -199,16 +199,16 @@ Claude plugin mode and continue to work in Codex plugin mode.
 directory plus a generated `.agents/plugins/marketplace.json` beside it.
 It copies `.codex-plugin/`, `hooks/`, `templates/`, and `agents/` from
 the shared source, then renders `skills/**/SKILL.md` into Codex wording
-and plugin-root helper paths in the staged copy only. The checked-in
-`skills/` tree stays the canonical source for Claude plugin, Claude
-scaffold, Codex scaffold, and Codex plugin packaging.
+and plugin-root helper paths in the staged copy only. It also renders
+TOML custom-agent templates from the canonical Markdown prompts. The
+checked-in `skills/` and `agents/` trees stay the canonical source for
+Claude plugin, Claude scaffold, Codex scaffold, and Codex plugin packaging.
 
 Codex's current custom-agent discovery uses TOML files under project-local
-or user-local `.codex/agents/`. Plugin packaging therefore bundles the
-canonical `agents/*.md` files only as non-discoverable prompt source, and
-does not add an unsupported `agents` field to `.codex-plugin/plugin.json`.
-Rendering TOML agents from the canonical prompts is deferred until the next
-host-adapter slice that claims Codex custom-agent discovery.
+or user-local `.codex/agents/`. Plugin packaging therefore does not add an
+unsupported `agents` field to `.codex-plugin/plugin.json`; plugin users run
+an explicit post-install helper to copy the generated `jig-*.toml` files into
+their chosen Codex agents directory.
 
 ### Context economy (the "dumb zone")
 *Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#2).
@@ -267,18 +267,16 @@ host-neutral `HostRenderer` interface plus concrete renderers for Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 `.claude/agents/`, `.claude/hooks/scripts/`, and `.claude/settings.json`.
 Codex scaffold mode writes `AGENTS.md`, `.codex/skills/`,
-`.codex/agents/*.md`, `.codex/hooks/scripts/`, `.codex/templates/`, and
+`.codex/agents/*.toml`, `.codex/hooks/scripts/`, `.codex/templates/`, and
 `.codex/hooks.json` without producing Claude-only files. The templates copy
 is runtime support for scaffolded helpers whose source fallback resolves
 template paths relative to the materialized jig runtime. Codex also installs
 non-discoverable unprefixed helper aliases under `.codex/skills/<name>/`
 without `SKILL.md`; these preserve existing peer-helper imports such as
 `skills/scaffold-init/scaffold.py` without registering duplicate skills.
-Current Codex agent files are Markdown prompts with an explicit capability
-note because Codex cannot enforce the same per-agent tool isolation encoded
-in Claude frontmatter; current Codex custom-agent discovery expects TOML
-agent files, so these Markdown prompts are not claimed as discoverable
-Codex custom agents.
+Codex agent files are generated TOML custom-agent definitions with the
+closest supported `sandbox_mode` for each role; the canonical source prompts
+remain the Markdown files in `agents/`.
 
 ## Managed-File Metadata Policy
 

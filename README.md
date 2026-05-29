@@ -154,21 +154,58 @@ For editable Codex project-local machinery, run:
 python3 skills/scaffold-init/scaffold.py --host codex <your-project>
 ```
 
-For install-and-forget Codex packaging, build the generated plugin tree:
+This produces `<your-project>/AGENTS.md`, `.codex/skills/jig-*/`,
+`.codex/agents/jig-*.toml`, `.codex/hooks/scripts/jig-*.sh`, and
+`.codex/hooks.json`. This is the Codex mode to use when you want the
+workflow machinery editable in the project itself.
+
+### Codex plugin (install-and-forget)
+
+Build the Codex-native plugin package from the shared source tree:
 
 ```bash
 python3 scripts/build_codex_plugin.py --output-dir dist/codex-plugin/plugins/jig
 ```
 
 The builder writes `dist/codex-plugin/.agents/plugins/marketplace.json`
-next to the plugin directory. Install that generated marketplace with
-`codex plugin marketplace add dist/codex-plugin`, then `codex plugin add
-jig@jig`. The Codex plugin package includes `.codex-plugin/plugin.json`,
-rendered Codex skill copies, `hooks/hooks.json`, hook scripts, templates,
-and the canonical agent prompts. Current Codex custom-agent discovery uses
-TOML agent files under project-local or user-local `.codex/agents/`; jig's
-bundled `agents/*.md` files are non-discoverable prompt source until a TOML
-agent adapter lands.
+next to the plugin directory. Install that generated marketplace:
+
+```bash
+codex plugin marketplace add dist/codex-plugin
+codex plugin add jig@jig
+```
+
+The Codex plugin package includes `.codex-plugin/plugin.json`, rendered
+Codex skill copies, `hooks/hooks.json`, hook scripts, templates, and the
+canonical agent prompts plus generated TOML custom-agent templates.
+Codex custom-agent discovery uses TOML agent files under
+project-local or user-local `.codex/agents/`; plugin-level custom-agent
+discovery is not documented today. After installing the plugin, run the
+explicit post-install step to copy jig's custom agents into the global
+Codex agents directory. From the installed Codex plugin context, the helper
+is addressed through the plugin root:
+
+```bash
+python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" --install-codex-agents
+```
+
+For a locally built package, the equivalent source-tree path is
+`dist/codex-plugin/plugins/jig/skills/scaffold-init/scaffold.py`. The command
+defaults to `~/.codex/agents`. Use `--codex-agents-dir <dir>` to target
+another Codex agents directory, and `--force` only when replacing existing
+user-owned `jig-*.toml` files is intentional.
+
+### From source (contributors)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
+workflow used during development.
+
+## Getting started
+
+Once installed, open a new project directory in Claude Code and say:
+> "Set up this project for AI-native development"
+
+The `scaffold-init` skill will run and produce the docs/ scaffolding.
 
 ## Repository structure (for contributors)
 
