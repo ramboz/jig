@@ -68,6 +68,18 @@ _TIER_SKILLS = {
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }
 
+# Reverse lookup skill-name → tier, derived once from the single
+# source-of-truth table above. `_enumerate_skills` walks `_TIER_SKILLS`
+# forward (tier → skills); the tier-gated copy needs the inverse
+# (skill → tier). Built at module load so the two traversals can't drift
+# (slice 038-04 reconciliation — replaces an inline rebuild in
+# `_copy_skills_and_agents`).
+_SKILL_TO_TIER = {
+    skill: tier
+    for tier, skills in _TIER_SKILLS.items()
+    for skill in skills
+}
+
 
 def plugin_root() -> Path:
     """Locate the jig plugin root via CLAUDE_PLUGIN_ROOT, falling back to this script's parents."""
@@ -403,6 +415,74 @@ def _enumerate_skills(installed_tiers: list) -> list:
     return out
 
 
+# ---------- Slice 038-04: post-scaffold tier upgrade (ADR-0010) ----------
+# These let `migrate.py copy-machinery` resolve and raise the installed
+# tier of an already-scaffolded project from its `scaffold.json`, so a
+# Tier-0 floor install can additively gain Tier 1 without re-scaffolding.
+
+def read_installed_tiers(target: Path) -> "list | None":
+    """Return `installed_tiers` from `target/scaffold.json`, or None when no
+    manifest exists / is unreadable / lacks the field. None signals "tiers
+    unknown" — callers treat it as copy-all (the spec-021 migrate default
+    for a project that was never scaffold-init'd)."""
+    manifest = target / "scaffold.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    tiers = data.get("installed_tiers")
+    return tiers if isinstance(tiers, list) else None
+
+
+def plan_installed_tiers(target: Path, add_tiers: list) -> tuple:
+    """Validate `add_tiers` against the target's `scaffold.json` and compute
+    the post-upgrade tier set — **without writing anything**. Returns
+    `(old_tiers, new_tiers, newly_added)`, where `new_tiers` is the union in
+    canonical `_TIER_SKILLS` order and `newly_added` is the delta (empty when
+    every requested tier is already installed).
+
+    Compute-only so the caller can copy the delta skills BEFORE committing
+    the manifest (`write_installed_tiers`) — a copy failure then leaves the
+    manifest untouched rather than claiming tiers whose skills never landed.
+
+    Raises `FileNotFoundError` if there is no `scaffold.json` (the project
+    was never scaffolded — no tier baseline to raise), and `ValueError` if
+    any requested tier is not a known `_TIER_SKILLS` key."""
+    manifest_path = target / "scaffold.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"no scaffold.json at {target} — run scaffold-init first to "
+            f"establish a tier baseline before upgrading"
+        )
+    unknown = [t for t in add_tiers if t not in _TIER_SKILLS]
+    if unknown:
+        raise ValueError(
+            f"unknown tier(s): {', '.join(unknown)} "
+            f"(valid: {', '.join(_TIER_SKILLS)})"
+        )
+    data = json.loads(manifest_path.read_text())
+    old = list(data.get("installed_tiers", []))
+    union = set(old) | set(add_tiers)
+    # Re-order by the canonical tier sequence so diffs stay minimal.
+    new = [t for t in _TIER_SKILLS if t in union]
+    added = [t for t in new if t not in old]
+    return old, new, added
+
+
+def write_installed_tiers(target: Path, new_tiers: list) -> None:
+    """Commit `new_tiers` to `target/scaffold.json`: rewrite `installed_tiers`
+    and re-derive `installed_skills` (ADR-0007), preserving all other manifest
+    fields. Atomic. Call AFTER the corresponding skills have been copied, so a
+    copy failure never leaves the manifest ahead of disk."""
+    manifest_path = target / "scaffold.json"
+    data = json.loads(manifest_path.read_text())
+    data["installed_tiers"] = list(new_tiers)
+    data["installed_skills"] = _enumerate_skills(new_tiers)
+    atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
+
+
 def _hook_profile(signals: Signals) -> str:
     """CI present → strict; otherwise standard. Inert until dispatch ships."""
     return "strict" if signals.has_ci else "standard"
@@ -467,12 +547,13 @@ def _copy_skills_and_agents(
     `scaffold.json` manifest (whose `installed_skills` is derived from the
     same tiers per ADR-0007). A skill is copied only when its tier (per
     `_TIER_SKILLS`) is in `installed_tiers`. When `installed_tiers is None`
-    every tier is copied — the back-compat / interim default for callers
-    that have not resolved tiers yet (notably `migrate.py copy-machinery`,
-    until slice 038-04 sources tiers from the target manifest). A skill dir
-    with no `_TIER_SKILLS` entry has no tier to gate on; under gating it is
-    skipped with a diagnostic (silently shipping it would reopen the
-    manifest↔disk gap), but it is still copied under the copy-all default.
+    every tier is copied — the standing "tiers unknown → copy-all" contract
+    for callers that cannot resolve a tier set (e.g. `migrate.py
+    copy-machinery` against a project with no `scaffold.json`; slice 038-04
+    sources tiers from the manifest when one exists). A skill dir with no
+    `_TIER_SKILLS` entry has no tier to gate on; under gating it is skipped
+    with a diagnostic (silently shipping it would reopen the manifest↔disk
+    gap), but it is still copied under the copy-all default.
 
     Infrastructure is never gated: `_`-prefixed private shared modules and
     `agents/*.md` are always copied (they are runtime plumbing, not
@@ -498,13 +579,9 @@ def _copy_skills_and_agents(
     skills_dst = target / ".claude" / "skills"
     agents_dst = target / ".claude" / "agents"
 
-    # Reverse map skill-name → tier for gating. None means "copy all tiers".
+    # Gate set; None means "copy all tiers". Skill→tier map is the shared
+    # module-level `_SKILL_TO_TIER` (single source of truth, no inline rebuild).
     gate = set(installed_tiers) if installed_tiers is not None else None
-    skill_tier = {
-        skill: tier
-        for tier, skills in _TIER_SKILLS.items()
-        for skill in skills
-    }
 
     if skills_src.is_dir():
         skills_dst.mkdir(parents=True, exist_ok=True)
@@ -520,7 +597,7 @@ def _copy_skills_and_agents(
             if not (skill_dir / "SKILL.md").is_file():
                 continue
             if gate is not None:
-                tier = skill_tier.get(skill_dir.name)
+                tier = _SKILL_TO_TIER.get(skill_dir.name)
                 if tier is None:
                     # No tier to gate on — skip rather than silently ship.
                     print(
@@ -840,10 +917,11 @@ def copy_machinery(plugin: Path, target: Path, *,
 
     `installed_tiers` (slice 038-02) is forwarded to
     `_copy_skills_and_agents` to gate which skills are copied. `None`
-    (the default) copies every tier — the interim contract for the
-    `migrate.py copy-machinery` caller until slice 038-04 sources tiers
-    from the target's existing `scaffold.json`. The greenfield
-    `scaffold()` caller always passes its `_select_tiers` result.
+    copies every tier — the standing "tiers unknown → copy-all" contract
+    (e.g. a `migrate.py copy-machinery` run against a project with no
+    `scaffold.json`). The greenfield `scaffold()` caller passes its
+    `_select_tiers` result; `migrate.py copy-machinery` passes the tiers it
+    resolves from / raises in the target manifest (slice 038-04).
 
     Safety guarantees:
     - Executable bit pinned to 0o755 on copied hook scripts.

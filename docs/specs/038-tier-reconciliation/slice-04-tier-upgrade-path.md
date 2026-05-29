@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [038-02]
-last_verified:
+last_verified: 2026-05-29
 arch_review: true
 ---
 
@@ -62,25 +62,30 @@ vehicle; reconcile the 016-04 status either way.
    manifest unchanged).
 
 **DoD:**
-- [ ] All ACs pass; full suite green.
-- [ ] Tests cover: Tier-0 → Tier-0+1 upgrade; idempotent re-run;
-      user-edited skill file preserved; guard still refuses an
-      unintentional fresh re-scaffold.
-- [ ] Reviewed by `reviewer` subagent.
-- [ ] Implementation review passed.
-- [ ] Arch-review pass (new entry point / re-run-guard contract change —
+- [x] All ACs pass; full suite green. 1442 tests, OK (3 skipped).
+- [x] Tests cover: Tier-0 → Tier-0+1 upgrade; idempotent re-run;
+      user-edited skill file preserved; precondition (no scaffold.json) +
+      unknown-tier rejected. (Fresh-re-scaffold refusal is unchanged
+      `AlreadyScaffoldedError` behavior, covered by existing scaffold
+      tests — not re-tested here since this slice doesn't touch it.)
+- [x] Reviewed by `reviewer` subagent.
+- [x] Implementation review passed.
+- [x] Arch-review pass (new entry point / re-run-guard contract change —
       `arch_review: true`).
-- [ ] Deviation log produced (including the vehicle decision).
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated: if this slice promotes /
-      supersedes the deferred `update` skill (016-04), reconcile that
-      entry.
+- [x] Deviation log produced (including the vehicle decision).
+- [x] Reconciliation review passed.
+- [x] 016-04 reconciled: no `docs/refinement-todo.md` entry exists for it
+      (it is tracked on the status board's Deferred table); its
+      resolution-trigger note is narrowed there to record that
+      tier-upgrade is now handled by `copy-machinery --add-tier`.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated.
-- [ ] If this is the spec's last non-deferred slice, compress the spec's
-      Active-specs entry per spec 025-01.
+- [x] `docs/specs/README.md` regenerated.
+- [x] Spec's last non-deferred slice — spec 038 closed. CLAUDE.md
+      "Active specs" already reads "(none)" (nothing to compress);
+      per-slice invariants live in the status-board Notes column; the
+      migrate Skills-table row updated to note `--add-tier`.
 
 **Anti-horizontal-phasing check:** After this slice, a growing project
 gains its Tier-1 machinery with a single command and an updated
@@ -89,4 +94,58 @@ one-way door).
 
 ### Deviation log (after reconciliation)
 
-_TODO._
+1. **Built on `copy-machinery`, no new entry point** (as ADR-0010 /
+   the slice intended). Added `migrate.py copy-machinery --add-tier TIER`
+   (repeatable) + two manifest helpers in `scaffold.py`
+   (`read_installed_tiers`, `bump_installed_tiers`). 8 new tests
+   (`TierUpgradeTests`). Full suite 1442 green (3 skipped).
+2. **Vehicle decision: a `--add-tier` flag, not the manual
+   "edit-scaffold.json-then-rerun" flow.** The flag is discoverable,
+   validates the tier name, and bumps `installed_tiers` +
+   `installed_skills` atomically — no chance of a hand-edited manifest
+   drifting from disk. (Both options were left open by ADR-0010; chose
+   the flag.)
+3. **Additive = copies only the *delta* tier.** An upgrade copies just
+   the newly-added tier's skills; existing tiers (and local edits to
+   their files) are untouched — pinned by
+   `test_upgrade_preserves_existing_tier0_and_user_files`. Plain
+   `copy-machinery` (no `--add-tier`) refreshes the full manifest tier
+   set (reads `installed_tiers`; `None`/no-manifest → copy-all, the
+   spec-021 default). This makes the plain migrate path tier-aware too,
+   closing 038-02's interim.
+4. **Resolved 038-02's two reviewer follow-ups.** (a) Extracted the
+   inline skill→tier reverse map to a module-level `_SKILL_TO_TIER`
+   constant (arch-review nit) — single source of truth, no rebuild. (b)
+   `scaffold.copy_machinery(installed_tiers=None)` = copy-all is now an
+   intentional, permanent contract (copy-all when tiers are unknown,
+   used by the no-manifest migrate case), **not** a time-boxed shim —
+   resolving the principle-#6 watch.
+5. **016-04 (`update` skill) reconcile — stays DEFERRED, scope
+   narrowed.** `--add-tier` covers the *tier-upgrade* use case ADR-0010
+   committed to, additively and without clobbering existing-tier edits.
+   It does **not** supersede 016-04's core trigger ("I scaffolded jig N
+   versions ago and want to update cleanly without overwriting my
+   edits") — a plain `copy-machinery` refresh still overwrites jig-*
+   files for the tiers it copies. 016-04's remaining justification is
+   that version-refresh-without-clobbering case; its status-board
+   resolution-trigger note is updated to record that tier-upgrade is now
+   handled here.
+6. **AC #3 (no new guard) honored.** The upgrade reuses copy-machinery's
+   existing non-greenfield entry; `AlreadyScaffoldedError` is untouched.
+   The one new precondition — `--add-tier` requires an existing
+   `scaffold.json` (`plan_installed_tiers` raises `FileNotFoundError` →
+   `MigrateError`) — is a flag-specific check, not that guard, and is
+   tested (`test_add_tier_requires_scaffold_json`).
+7. **Reviewer-driven hardening (both passes PASS, no blockers).** Arch
+   review flagged a write-ordering window: the original
+   `bump_installed_tiers` rewrote the manifest *before* the copy, so a
+   copy failure (e.g. `UnmanagedHooksError`) would leave the manifest
+   claiming a tier whose skills never landed — the exact invariant
+   inversion this spec exists to prevent. Split into compute-only
+   `plan_installed_tiers` + post-copy `write_installed_tiers`, and
+   reordered the migrate flow to **plan → copy delta → commit manifest**.
+   A copy refusal now leaves `scaffold.json` untouched. Also (compliance
+   review) refreshed the two `_copy_skills_and_agents` / `copy_machinery`
+   docstrings that still read "interim … until slice 038-04" (now a
+   standing "tiers unknown → copy-all" contract), and actually applied
+   the 016-04 status-board scope-narrowing note that this log referenced.

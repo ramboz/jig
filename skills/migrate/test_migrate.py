@@ -2090,5 +2090,127 @@ class ContractSurfaceCodeIsReadOnly(unittest.TestCase):
             )
 
 
+_SCAFFOLD_PY = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
+
+
+def run_scaffold(*args: str) -> subprocess.CompletedProcess:
+    """Invoke scaffold.py as a subprocess (to build a real tier-0 base)."""
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    return subprocess.run(
+        [sys.executable, str(_SCAFFOLD_PY), *args],
+        capture_output=True, text=True, env=env,
+    )
+
+
+class TierUpgradeTests(unittest.TestCase):
+    """Slice 038-04 — `migrate.py copy-machinery --add-tier <tier>` upgrades
+    an already-scaffolded project to a higher tier *additively* (copies only
+    the newly-added tier's skills; leaves existing tiers untouched), without
+    re-scaffolding. Plain `copy-machinery` resolves tiers from the target
+    `scaffold.json` (no manifest → copy-all, preserving the spec-021
+    migrate behavior)."""
+
+    TIER0 = [
+        "scaffold-init", "memory-sync", "spec-workflow", "independent-review",
+        "migrate", "vision-elicitation", "contracts",
+    ]
+    TIER1 = [
+        "adr-workflow", "tdd-loop", "slice-land", "pr-review", "arch-review",
+        "clarify", "analyze",
+    ]
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-038-04-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold("--no-tests", str(self.target))  # real tier-0 base
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _on_disk(self):
+        d = self.target / ".claude" / "skills"
+        return {
+            p.name[len("jig-"):]
+            for p in d.iterdir()
+            if p.is_dir() and p.name.startswith("jig-") and (p / "SKILL.md").is_file()
+        }
+
+    def _manifest(self):
+        return _json.loads((self.target / "scaffold.json").read_text())
+
+    def _manifest_skills(self):
+        return {s.split("/", 1)[1] for s in self._manifest()["installed_skills"]}
+
+    def test_baseline_is_tier0(self):
+        self.assertEqual(self._on_disk(), set(self.TIER0))
+        self.assertEqual(self._manifest()["installed_tiers"], ["tier-0"])
+
+    def test_upgrade_adds_tier1(self):  # AC #1
+        r = run_migrate("copy-machinery", str(self.target), "--add-tier", "tier-1")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        on_disk = self._on_disk()
+        self.assertTrue(
+            set(self.TIER1) <= on_disk, f"tier-1 skills not added: {sorted(on_disk)}",
+        )
+        self.assertEqual(on_disk, set(self.TIER0) | set(self.TIER1))
+
+    def test_upgrade_updates_manifest_and_holds_invariant(self):  # AC #2
+        run_migrate("copy-machinery", str(self.target), "--add-tier", "tier-1")
+        self.assertEqual(self._manifest()["installed_tiers"], ["tier-0", "tier-1"])
+        self.assertEqual(
+            self._on_disk(), self._manifest_skills(),
+            "manifest installed_skills must equal on-disk skill set after upgrade",
+        )
+
+    def test_upgrade_preserves_existing_tier0_and_user_files(self):  # AC #1
+        # Additive: the upgrade copies only the tier-1 delta, so an edit to a
+        # tier-0 jig skill file and a user doc both survive.
+        edited = (
+            self.target / ".claude" / "skills" / "jig-spec-workflow" / "SKILL.md"
+        )
+        edited.write_text("USER EDIT — must survive upgrade\n")
+        notes = self.target / "docs" / "my-notes.md"
+        notes.write_text("keep me\n")
+        run_migrate("copy-machinery", str(self.target), "--add-tier", "tier-1")
+        self.assertEqual(
+            edited.read_text(), "USER EDIT — must survive upgrade\n",
+            "tier-0 skill file was re-copied — upgrade must touch only the delta tier",
+        )
+        self.assertEqual(notes.read_text(), "keep me\n")
+
+    def test_upgrade_idempotent(self):  # AC #4
+        run_migrate("copy-machinery", str(self.target), "--add-tier", "tier-1")
+        manifest_after_first = self._manifest()
+        disk_after_first = self._on_disk()
+        r = run_migrate("copy-machinery", str(self.target), "--add-tier", "tier-1")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(
+            self._manifest(), manifest_after_first,
+            "manifest changed on idempotent re-add of an already-installed tier",
+        )
+        self.assertEqual(self._on_disk(), disk_after_first)
+
+    def test_plain_copy_machinery_respects_manifest_tiers(self):  # AC #2
+        # No --add-tier on a tier-0 project: reads the manifest and copies
+        # only tier-0 (7), NOT all 14 — proving it is no longer copy-all.
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(self._on_disk(), set(self.TIER0))
+
+    def test_add_tier_requires_scaffold_json(self):  # precondition (not AlreadyScaffoldedError)
+        bare = self.tmpdir / "bare"
+        bare.mkdir()
+        r = run_migrate("copy-machinery", str(bare), "--add-tier", "tier-1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("scaffold.json", (r.stderr + r.stdout).lower())
+
+    def test_add_tier_rejects_unknown_tier(self):
+        r = run_migrate("copy-machinery", str(self.target), "--add-tier", "tier-9")
+        self.assertNotEqual(r.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

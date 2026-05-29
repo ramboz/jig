@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: scaffold-init
 tier: (none — dev infrastructure)
 adr_required: true

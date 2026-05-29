@@ -1551,19 +1551,35 @@ def _resolve_plugin_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def copy_machinery(project_dir: Path, *, force: bool = False) -> tuple:
+def copy_machinery(
+    project_dir: Path, *, force: bool = False, add_tiers: list = None,
+) -> tuple:
     """Top-level entry for the `copy-machinery` subcommand.
 
     Returns `(summary_text, exit_code)`. Raises `MigrateError` on user
-    error (missing dir, not a directory). `UnmanagedHooksError` bubbles
-    out to `main()` where it is converted to exit code 3 (matching
-    `LooksAlreadySpecDrivenError` precedent from 008-05).
+    error (missing dir, not a directory, or an `--add-tier` precondition
+    failure). `UnmanagedHooksError` bubbles out to `main()` where it is
+    converted to exit code 3 (matching `LooksAlreadySpecDrivenError`
+    precedent from 008-05).
 
     Delegates the work to `scaffold.copy_machinery()` — slice 021-01's
     public façade over `_copy_skills_and_agents` +
     `_copy_hooks_and_register`. The two helpers each carry their own
     safety guarantees (executable-bit pinning, marker-based merge, refuse
-    before mutation)."""
+    before mutation).
+
+    Tier resolution (slice 038-04, ADR-0010):
+    - **Plain run** (`add_tiers` falsy): the on-disk skill set is gated to
+      the tiers recorded in the target's `scaffold.json`. A project never
+      scaffold-init'd has no manifest → tiers unknown → copy-all (the
+      spec-021 migrate default, unchanged).
+    - **`--add-tier` run**: additively *upgrade* an already-scaffolded
+      project. The manifest's `installed_tiers`/`installed_skills` are
+      raised to include the new tier(s); only the **newly-added** tier's
+      skills are copied, so existing tiers (and any local edits to their
+      files) are untouched. Idempotent. Reuses copy-machinery's existing
+      non-greenfield entry — the `AlreadyScaffoldedError` guard is neither
+      re-implemented nor tripped."""
     if not project_dir.exists():
         raise MigrateError(f"project directory not found: {project_dir}")
     if not project_dir.is_dir():
@@ -1579,17 +1595,52 @@ def copy_machinery(project_dir: Path, *, force: bool = False) -> tuple:
     # modes work uniformly.
     plugin = _resolve_plugin_root()
     scaffold_mod = _load_scaffold_module(plugin)
+
+    upgrade_note = ""
+    commit_tiers = None  # set on the --add-tier path; written AFTER the copy
+    if add_tiers:
+        # Upgrade path: plan the new tier set (validate, no write), copy only
+        # the delta, then commit the manifest — so a copy failure never
+        # leaves scaffold.json claiming tiers whose skills never landed.
+        try:
+            old, new, added = scaffold_mod.plan_installed_tiers(
+                project_dir, add_tiers,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise MigrateError(str(exc)) from exc
+        copy_tiers = added  # [] when already installed → copies no new skills
+        if added:
+            commit_tiers = new
+            upgrade_note = (
+                f"upgraded tiers {old} -> {new} (added: {', '.join(added)})\n"
+            )
+        else:
+            upgrade_note = (
+                f"tiers already at {old}; nothing to add (idempotent)\n"
+            )
+    else:
+        # Plain refresh: gate to the tiers the manifest already records;
+        # None (no manifest) means copy-all.
+        copy_tiers = scaffold_mod.read_installed_tiers(project_dir)
+
     try:
-        scaffold_mod.copy_machinery(plugin, project_dir, force=force)
+        scaffold_mod.copy_machinery(
+            plugin, project_dir, force=force, installed_tiers=copy_tiers,
+        )
     except scaffold_mod.UnmanagedHooksError as exc:
         # Re-raise as a migrate-side typed exception so main()'s
         # exception chain can route to exit 3 via isinstance, not a
         # class-name string match (reviewer-flagged at slice 021-01
-        # implementation review).
+        # implementation review). The manifest is NOT yet committed on the
+        # upgrade path, so a refusal here leaves scaffold.json unchanged.
         raise MigrateMachineryRefusalError(str(exc)) from exc
 
+    # Commit the raised tier set only after the delta skills copied cleanly.
+    if commit_tiers is not None:
+        scaffold_mod.write_installed_tiers(project_dir, commit_tiers)
+
     return (
-        f"copied machinery into {project_dir / '.claude'}\n",
+        f"{upgrade_note}copied machinery into {project_dir / '.claude'}\n",
         0,
     )
 
@@ -1647,6 +1698,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "jig-managed marker (same escape hatch as scaffold-init's "
              "--force)",
     )
+    cm.add_argument(
+        "--add-tier", dest="add_tier", action="append", metavar="TIER",
+        help="additively upgrade an already-scaffolded project to include "
+             "TIER (e.g. tier-1): raises scaffold.json's installed_tiers and "
+             "copies only the newly-added tier's skills, leaving existing "
+             "tiers untouched (repeatable; slice 038-04)",
+    )
     return p
 
 
@@ -1676,7 +1734,7 @@ def main(argv: list) -> int:
             return code
         if ns.cmd == "copy-machinery":
             text, code = copy_machinery(
-                Path(ns.project_dir), force=ns.force,
+                Path(ns.project_dir), force=ns.force, add_tiers=ns.add_tier,
             )
             sys.stdout.write(text)
             return code
