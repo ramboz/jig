@@ -15,7 +15,7 @@ For organizations running ~40 repositories across 40–60 engineers —
 with a central code-and-docs entry-point repo, varying degrees of
 repo coupling, shared ownership, and multi-host GitHub setups
 (public + private + GHEC behind SSO with different users per host) —
-the single-repo assumption breaks in five ways:
+the single-repo assumption breaks in six ways:
 
 1. **Cross-repo specs have no home.** A feature that touches N repos
    gets either duplicated into N specs or pinned in one repo with
@@ -32,6 +32,9 @@ the single-repo assumption breaks in five ways:
    status-board regeneration assume one repo; an engineer onboarding
    to the org can't see "what's in flight where" without manually
    walking 40 trees.
+6. **Parallel spec collision is discovered too late.** Two engineers
+   can start unrelated-looking specs that touch the same files or
+   contract surfaces and only discover the overlap at merge time.
 
 This spec introduces a **Federation tier (Tier 2)** — a
 conditionally-scaffolded skill bundle plus federation-aware tweaks
@@ -64,9 +67,10 @@ enters jig" for the bar.
    via `.jig/scaffold.json`. Existing standalone users see no
    behavioral change.
 2. **Tier 2 skill bundle** (`repo-registry`, `cross-repo-spec`,
-   `federated-status`, `context-pull`, `repo-sync`) installable
-   conditionally, with skills no-op-ing based on role rather than
-   tier 2 being split into per-role sub-bundles.
+   `federated-status`, `context-pull`, `repo-sync`,
+   `collision-radar`) installable conditionally, with skills no-op-ing
+   based on role rather than tier 2 being split into per-role
+   sub-bundles.
 3. **`repos.yaml` registry schema** covering hosts, repos, roles,
    and declared contract surfaces. Sits in the central repo's
    `docs/`.
@@ -86,6 +90,11 @@ enters jig" for the bar.
    central conventions or jig version drift past local cache.
 8. **Migration path** from existing standalone installs into
    federation, idempotent and re-runnable.
+9. **Collision radar for parallel specs.** Specs can declare an
+   advisory `touches:` list in frontmatter; new/resumed work scans
+   unfinished specs visible on `origin/main` and the federation
+   registry/cache to warn about likely file or contract-surface
+   conflicts before branches drift.
 
 ## Non-goals
 
@@ -111,14 +120,17 @@ enters jig" for the bar.
 - **Replacing existing ticket systems.** Jira / Linear / GitHub
   Issues remain the ticket layer; jig specs are the engineering
   artifact, as in single-repo mode.
+- **General code ownership or mandatory locks.** Collision radar is
+  an early-warning surface, not a codeowner replacement and not a
+  default hard block on parallel implementation.
 
 ## Role model
 
 | Role | Where used | Tier 2 skills installed | Role-active subset |
 |---|---|---|---|
 | `standalone` | Today's default | None | — |
-| `central` | One repo per org | All Tier 2 | `repo-registry`, `cross-repo-spec`, `federated-status`, `context-pull` |
-| `member` | The other ~39 repos | All Tier 2 | `cross-repo-spec`, `context-pull`, `repo-sync` |
+| `central` | One repo per org | All Tier 2 | `repo-registry`, `cross-repo-spec`, `federated-status`, `context-pull`, `collision-radar` |
+| `member` | The other ~39 repos | All Tier 2 | `cross-repo-spec`, `context-pull`, `repo-sync`, `collision-radar` |
 
 Tier 2 *installs* uniformly when `role != standalone`; individual
 skills refuse with a clear message when invoked in the wrong role
@@ -129,10 +141,10 @@ skills refuse with a clear message when invoked in the wrong role
 | Technique | Question | Decision |
 |---|---|---|
 | **S** - Spike | Is research needed before designing? | **No.** Every component is concrete: registry shape, gh auth scoping, scaffold-init extension, frontmatter contract. Codex-style v1/v2 deferral does not apply. |
-| **P** - Path | One big landing or phased? | **Phased.** Slices 1–6 are MVP federation (registry + adapter, add/list, scaffold-init extension, cross-repo-spec, status, context-pull). Slice 7 hardens Tier 0/1 tweaks. Slices 8–11 are lifecycle + migration + the contract-surface hook. |
+| **P** - Path | One big landing or phased? | **Phased.** Slices 1–6 are MVP federation (registry + adapter, add/list, scaffold-init extension, cross-repo-spec, status, context-pull). Slice 7 hardens Tier 0/1 tweaks. Slices 8–11 are lifecycle + migration + the contract-surface hook. Slices 12–14 add advisory collision radar: declared touchsets, federated warnings, and close-out drift checks. |
 | **I** - Interface | Where is the federation boundary? | **`repos.yaml` + host adapter.** Schema sits in central; helpers consult it; nothing else mediates between central and members. |
-| **D** - Data | What data shape is foundational? | **Registry schema (`hosts:` + `repos:`) + scaffold.json fields (`role`, `central_repo`).** Slice 1. |
-| **R** - Rules | What rules govern lifecycle? | **Archive-don't-delete on remove; pull-based drift detection; never mutate `gh` global state; central conventions win on conflict; standalone behavior unchanged.** |
+| **D** - Data | What data shape is foundational? | **Registry schema (`hosts:` + `repos:`) + scaffold.json fields (`role`, `central_repo`) + spec/slice `touches:` string-list metadata.** Slice 1 establishes federation config; slice 12 establishes touchsets. |
+| **R** - Rules | What rules govern lifecycle? | **Archive-don't-delete on remove; pull-based drift detection; never mutate `gh` global state; central conventions win on conflict; collision radar warns by default; standalone behavior unchanged.** |
 
 ## Known constraints
 
@@ -164,6 +176,19 @@ skills refuse with a clear message when invoked in the wrong role
   must never auto-load more than the local repo's hot cache + the
   central primer. Additional repos load via `context-pull`
   explicitly.
+- **Touchset metadata is advisory and intentionally small.** `touches:`
+  is a YAML-lite list of repo-relative paths or globs. Cross-repo
+  entries use `repo-name:path/to/file` strings. No nested YAML objects
+  in v1, because jig's shared frontmatter parser supports scalars and
+  string lists only.
+- **Main is the coordination surface, not a live lock service.** A
+  spec stub on `origin/main` advertises likely touch intent. Routine
+  scope changes do not auto-push on every edit; users update touchsets
+  deliberately when scope materially changes.
+- **Collision radar is soft by default.** Exact file overlaps,
+  overlapping globs, and declared contract-surface edits produce
+  warnings. Only paths explicitly marked by project convention as
+  exclusive may become a refusal in a later spec or local policy.
 
 ## Slices
 
@@ -178,6 +203,9 @@ skills refuse with a clear message when invoked in the wrong role
 - [034-09 — repo-sync-and-drift-hook](slice-09-repo-sync-and-drift-hook.md)
 - [034-10 — migrate-to-federation](slice-10-migrate-to-federation.md)
 - [034-11 — cross-repo-impact-hook](slice-11-cross-repo-impact-hook.md)
+- [034-12 — touchset-frontmatter-and-preflight](slice-12-touchset-frontmatter-and-preflight.md)
+- [034-13 — federated-collision-radar](slice-13-federated-collision-radar.md)
+- [034-14 — touchset-closeout-drift-check](slice-14-touchset-closeout-drift-check.md)
 
 ## Clarifications
 
@@ -211,6 +239,14 @@ _(category: Terminology Consistency)_
 Collapse to one field — `role`. Drop `federation_mode`; keep only
 `role` (one of `standalone` / `central` / `member`). Shorter, clearer,
 no semantic loss. Update slice 034-01 ACs accordingly.
+
+### Q5: Should collision radar block a second engineer from starting overlapping work?
+_(category: Scope & Boundaries)_
+
+No by default. It warns and names the potentially conflicting specs,
+owners, branches, and touched paths. Blocking is reserved for future
+project-specific policy on explicitly exclusive paths, because
+parallel work often overlaps safely after human coordination.
 
 ### Coverage summary
 
