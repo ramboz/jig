@@ -192,6 +192,28 @@ def validate_hooks(hooks_data: dict, scripts_dir: Path) -> list[str]:
 # human-readable description (AC #1).
 PLUGIN_REQUIRED_FIELDS: tuple[str, ...] = ("name", "version", "description")
 
+# .codex-plugin/plugin.json — the Codex package manifest. This is a sibling
+# install contract, not a forked source tree: the manifest must point at the
+# shared `skills/` root and carry the interface metadata Codex surfaces in its
+# plugin UI.
+CODEX_PLUGIN_REQUIRED_FIELDS: tuple[str, ...] = (
+    "name",
+    "version",
+    "description",
+    "author",
+    "skills",
+    "interface",
+)
+CODEX_INTERFACE_REQUIRED_FIELDS: tuple[str, ...] = (
+    "displayName",
+    "shortDescription",
+    "longDescription",
+    "developerName",
+    "category",
+    "capabilities",
+    "defaultPrompt",
+)
+
 # marketplace.json — the marketplace descriptor. Requires a name, an owner
 # with a name, and a non-empty plugins[] whose entries each carry
 # name/source/description with a relative source path (AC #1).
@@ -214,6 +236,79 @@ def validate_plugin_manifest(data: dict) -> list[str]:
             problems.append(
                 f"plugin.json: missing/empty required field {field!r}"
             )
+    return problems
+
+
+def validate_codex_plugin_manifest(data: dict) -> list[str]:
+    """Validate a parsed .codex-plugin/plugin.json.
+
+    Requires the Codex plugin metadata used by install/discovery plus a
+    host-specific `interface` object. Diagnostics name the Codex manifest
+    path because this repo now carries both Claude and Codex `plugin.json`
+    files."""
+    if not isinstance(data, dict):
+        return [".codex-plugin/plugin.json: top-level value must be a JSON object"]
+
+    problems: list[str] = []
+    where = ".codex-plugin/plugin.json"
+    for field in CODEX_PLUGIN_REQUIRED_FIELDS:
+        value = data.get(field)
+        if field not in data or value is None or value == "":
+            problems.append(
+                f"{where}: missing/empty required field {field!r}"
+            )
+
+    author = data.get("author")
+    if not isinstance(author, dict) or author.get("name") in (None, ""):
+        problems.append(
+            f"{where}: 'author.name' is required and must be non-empty"
+        )
+
+    skills = data.get("skills")
+    if skills != "./skills/":
+        problems.append(
+            f"{where}: 'skills' must be './skills/' so the Codex package "
+            "uses the shared rendered skill tree"
+        )
+
+    interface = data.get("interface")
+    if not isinstance(interface, dict):
+        problems.append(
+            f"{where}: 'interface' is required and must be a JSON object"
+        )
+        return problems
+
+    for field in CODEX_INTERFACE_REQUIRED_FIELDS:
+        value = interface.get(field)
+        if field not in interface or value is None or value == "":
+            problems.append(
+                f"{where}: interface.{field!r} is required and must be non-empty"
+            )
+
+    capabilities = interface.get("capabilities")
+    if not isinstance(capabilities, list) or not capabilities:
+        problems.append(
+            f"{where}: interface.capabilities must be a non-empty array"
+        )
+    elif any(not isinstance(value, str) or value == "" for value in capabilities):
+        problems.append(
+            f"{where}: interface.capabilities entries must be non-empty strings"
+        )
+
+    default_prompt = interface.get("defaultPrompt")
+    if not isinstance(default_prompt, list) or not default_prompt:
+        problems.append(
+            f"{where}: interface.defaultPrompt must be a non-empty array"
+        )
+    elif len(default_prompt) > 3:
+        problems.append(
+            f"{where}: interface.defaultPrompt must contain at most 3 prompts"
+        )
+    elif any(not isinstance(value, str) or value == "" for value in default_prompt):
+        problems.append(
+            f"{where}: interface.defaultPrompt entries must be non-empty strings"
+        )
+
     return problems
 
 
