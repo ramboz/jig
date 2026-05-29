@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: (none — agent definition cleanup)
 tier: (none — dev infrastructure)
 ---

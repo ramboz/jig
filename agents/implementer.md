@@ -29,10 +29,8 @@ You are an implementer agent. Your job is to implement a single spec slice.
 
 ## When done
 
-1. Write the deliverable paths to `.claude/review-queue.json`:
-   ```json
-   {"spec": "docs/specs/NNN-name/spec.md", "files": ["src/...", "tests/..."]}
-   ```
+1. Report the deliverable paths in your completion output: the spec or
+   slice path, plus every implementation, test, and documentation file changed.
 2. Update spec status to `REVIEWED` (the independent-review skill handles the actual review trigger).
 3. Do not clean up TODO comments in files you didn't touch.
 

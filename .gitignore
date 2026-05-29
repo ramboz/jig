@@ -1,4 +1,5 @@
 .claude/skill-usage.jsonl
+.claude/review-queue.json
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .DS_Store
