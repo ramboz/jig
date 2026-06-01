@@ -274,7 +274,12 @@ architecture-review skill, not the baseline.
   is **category-based**: a user skill named anything that claims that
   surface area will win. If the router consistently picks jig's
   baseline over such a skill, jig's description is too greedy — open
-  an issue.
+  an issue. **This router-based deferral applies to _interactive_ use
+  only.** The spec-workflow **arch pass** spawns a read-only `reviewer`
+  subagent with no `Skill` tool, so it cannot use the router at all —
+  there `review.py` does explicit file-read dispatch (detects
+  `~/.claude/skills/arch-review/` and points the reviewer at it). See
+  [docs/workflow.md](../../docs/workflow.md) § Post-implementation review.
 - **Lightweight is a feature, not a limitation.** The baseline does
   not ship a seven-perspective matrix. It does not ship
   domain-specific reference files (distributed systems, API design,

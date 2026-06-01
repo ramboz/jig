@@ -82,18 +82,23 @@ and REVIEWED.
    fired signal by name. Verdict envelope: VERDICT / REASONING /
    SPECIFIC ISSUES / RECONCILIATION NOTES. `fail` or `needs-changes`
    blocks the transition.
-2. **Craft pass — `pr-review`** (always). Routes to the most-specific
-   installed `pr-review` skill (user > project > `jig:pr-review`) via
-   the Claude Code skill router. Output: scope / blockers / nits /
-   strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES
-   entries tagged `[blocker]` / `[nit]` / `[strength]`. Only
-   `[blocker]`-tagged entries block; `[nit]` and `needs-changes`
-   become reconciliation-log items.
+2. **Craft pass — `pr-review`** (always). The reviewer subagent is
+   read-only (Read/Glob/Grep, **no `Skill` tool**), so it cannot route to
+   a skill via Claude's skill router. Instead `review.py` detects a
+   user-installed `pr-review` skill on disk (`~/.claude/skills/pr-review/`)
+   and points the reviewer at that concrete path to read-and-apply; absent
+   one, it inlines jig's baseline buckets. (File-read dispatch — spec 031
+   Open-question-#1 option (b); the original prose-router dispatch was inert
+   on the no-Skill-tool subagent path.) Output: scope / blockers / nits /
+   strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES entries
+   tagged `[blocker]` / `[nit]` / `[strength]`. Only `[blocker]`-tagged
+   entries block; `[nit]` and `needs-changes` become reconciliation-log
+   items.
 3. **Arch pass — `arch-review`** (on-demand). Runs only when the
-   slice's frontmatter declares `arch_review: true`. Routes to the
-   most-specific installed `arch-review` skill (user > project >
-   `jig:arch-review`). Output: summary / strengths / concerns / open
-   questions. Same block rule as the craft pass.
+   slice's frontmatter declares `arch_review: true`. Same file-read
+   dispatch (`~/.claude/skills/arch-review/`, else jig's baseline).
+   Output: summary / strengths / concerns / open questions. Same block
+   rule as the craft pass.
 
 Order: compliance → craft → (arch if flagged). All required passes
 must `pass` for the IN_PROGRESS → REVIEWED transition.

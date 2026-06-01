@@ -1714,5 +1714,111 @@ class WorkflowMdMentionsSnapshotTests(unittest.TestCase):
         )
 
 
+class RicherSkillFileReadDispatchTests(unittest.TestCase):
+    """Richer-skill file-read dispatch (craft + arch passes).
+
+    The craft/arch reviewer subagent has read-only tools (Read/Glob/Grep) and
+    NO `Skill` tool — a live probe confirmed it cannot route to a user skill
+    via Claude's skill router, but CAN `Read` files under `~/.claude/`. So
+    `review.py` detects a USER-scope installed skill on disk and hands the
+    reviewer its concrete path to read-and-apply; otherwise it inlines jig's
+    baseline buckets.
+
+    User-scope only by design: a project-scope `.claude/skills/<name>/` may be
+    jig's own `scaffold-init` baseline copy, indistinguishable by path from a
+    richer project skill — so it must NOT trigger the richer branch.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="jig-rev-richer-")
+        self.home = Path(self.tmp) / "home"
+        self.home.mkdir(parents=True)
+        self.spec = Path(self.tmp) / "spec.md"
+        write_synthetic_spec(self.spec, "031-01 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make_user_skill(self, name: str) -> Path:
+        d = self.home / ".claude" / "skills" / name
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "SKILL.md"
+        path.write_text(f"---\nname: {name}\n---\n# Richer {name}\n")
+        return path
+
+    def _prompt(self, mode: str, *, home: Path, cwd: str = None,
+                extra_env: dict = None) -> str:
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        env["HOME"] = str(home)  # Path.home() honors $HOME → hermetic
+        env.pop("CLAUDE_PROJECT_DIR", None)  # no inherited leakage
+        if extra_env:
+            env.update(extra_env)
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), mode, str(self.spec), "031-01",
+             "skills/foo/foo.py"],
+            capture_output=True, text=True, env=env, cwd=cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        return result.stdout
+
+    # ---- pr-review ----
+    def test_pr_review_richer_detected_points_at_user_path(self):
+        skill = self._make_user_skill("pr-review")
+        prompt = self._prompt("pr-review", home=self.home)
+        self.assertIn(str(skill), prompt,
+                      "richer branch must name the concrete user-skill path")
+        self.assertRegex(prompt, r"(?i)read that SKILL\.md in full")
+        self.assertRegex(prompt, r"(?i)supersedes the baseline")
+        # Still tells the reviewer to normalize into the workflow envelope.
+        self.assertRegex(prompt, r"(?i)normalize your findings into the required")
+
+    def test_pr_review_baseline_when_no_user_skill(self):
+        prompt = self._prompt("pr-review", home=self.home)  # empty home
+        self.assertNotIn(str(self.home / ".claude"), prompt)
+        self.assertNotRegex(prompt, r"(?i)read that SKILL\.md in full")
+        self.assertRegex(prompt, r"(?i)jig's bundled `pr-review` SKILL\.md baseline")
+
+    def test_pr_review_envelope_preserved_in_richer_branch(self):
+        self._make_user_skill("pr-review")
+        prompt = self._prompt("pr-review", home=self.home)
+        for marker in ("VERDICT", "REASONING", "SPECIFIC ISSUES",
+                       "[blocker]", "[nit]", "[strength]"):
+            self.assertIn(marker, prompt,
+                          f"workflow envelope must survive richer branch: {marker}")
+
+    # ---- arch-review ----
+    def test_arch_review_richer_detected_points_at_user_path(self):
+        skill = self._make_user_skill("arch-review")
+        prompt = self._prompt("arch-review", home=self.home)
+        self.assertIn(str(skill), prompt)
+        self.assertRegex(prompt, r"(?i)read that SKILL\.md in full")
+
+    def test_arch_review_baseline_when_no_user_skill(self):
+        prompt = self._prompt("arch-review", home=self.home)
+        self.assertNotRegex(prompt, r"(?i)read that SKILL\.md in full")
+        self.assertRegex(prompt,
+                         r"(?i)jig's bundled `arch-review` SKILL\.md baseline")
+
+    # ---- user-scope only: project-scope copy must NOT trigger richer branch ----
+    def test_project_scope_skill_does_not_trigger_richer_branch(self):
+        proj = Path(self.tmp) / "proj"
+        d = proj / ".claude" / "skills" / "pr-review"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: pr-review\n---\n# scaffolded copy\n")
+        # Empty HOME (no user skill). Guard BOTH likely project-detection
+        # vectors a future change might wrongly add: cwd-relative AND
+        # CLAUDE_PROJECT_DIR-relative. Detection is user-scope only, so the
+        # baseline branch must hold despite the project-scope copy being present.
+        prompt = self._prompt("pr-review", home=self.home, cwd=str(proj),
+                              extra_env={"CLAUDE_PROJECT_DIR": str(proj)})
+        self.assertNotRegex(
+            prompt, r"(?i)read that SKILL\.md in full",
+            "a project-scope `.claude/skills` copy (possibly jig's own "
+            "scaffolded baseline) must NOT be treated as a richer skill",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
