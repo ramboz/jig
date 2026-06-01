@@ -31,6 +31,13 @@ The work here is the connective layer: make jig's public story current,
 show users how to evaluate/adopt it, expose the gap response roadmap, and
 reduce the reading cost of closed-spec amendments.
 
+> **Re-review (2026-06-01).** A second pass over the full guidelines corpus
+> (EDD excluded — owned by servo) confirmed the May framing and refined the
+> gap map. It surfaced one gap the May comparison missed: jig scaffolds
+> **no security/secrets floor**. The refreshed, routed gap inventory lives
+> in the "Re-review update (2026-06-01)" section below; the machinery gaps
+> it found are routed OUT of this spec per the Non-goals.
+
 ## Goals
 
 1. **Make first-read docs current and honest.** `README.md` and the
@@ -91,6 +98,98 @@ reduce the reading cost of closed-spec amendments.
 - Several closed artifacts now carry `## Amendments` sections per
   ADR-0008, which is correct for auditability but increases reader cost.
 
+## Re-review update (2026-06-01)
+
+A second comparison pass read the full guidelines corpus (EDD excluded —
+owned by servo). It confirmed the May framing ("Mysticat is the stronger
+playbook; jig is the stronger machine") and changed the picture in three
+ways.
+
+**Several delegated gaps have since landed.** As of 2026-06-01: spec 038
+(tier truth), 040 (isolation honesty), 042 (spec-gate model), and 036
+(closed-spec drift) are **DONE**; 016 (scaffold-mode) and 026 (context-fill
+telemetry) are **DONE**.
+
+**The product/docs gaps this spec owns are still unbuilt.** All four 048
+slices remain DRAFT, and the cross-tool route (033) is DRAFT with its Codex
+slices DEFERRED — so the gaps the May pass *identified* are still open in
+practice.
+
+**Net-new finding (not in the May comparison): jig scaffolds no
+security/secrets floor.** The guidelines' single largest MUST cluster
+(`05-guardrails/must-rules.md`, `04-configuration/env-secrets.md`,
+`permissions.md`, `05-guardrails/mechanical-enforcement.md`) has *zero*
+mechanical enforcement in a scaffolded jig project: the
+[CLAUDE.md template](../../../templates/CLAUDE.md.template) has no rules
+block, [conventions.md](../../conventions.md) is authoring-only, there is
+no scaffolded `.gitignore`, the scaffolded `settings.json` carries no
+`permissions` deny-rules, and none of the seven hooks is a secret-scan.
+This is the sharpest divergence in the comparison, because jig's founding
+principle is "everything that MUST happen is a hook" — yet the biggest MUST
+set is unenforced.
+
+Verification (2026-06-01): `python3 scripts/spec_lint.py --all` passes (no
+cross-spec contradictions) after this update.
+
+### Gap inventory (routed)
+
+Where jig *meets or exceeds* the guidelines — mechanical-enforcement-first
+hooks, progressive disclosure / tiers, context-fill telemetry,
+multi-session / worktree / parallel-locks, the spec-driven lifecycle, and
+memory continuity — is omitted here; this table is the gap surface only.
+
+**A. Owned by this spec (product / docs / adoption).**
+
+| Gap | Guideline source | Owner |
+|---|---|---|
+| Stale first-read status | `06-adoption` | 048-01 |
+| Cross-tool expectation-setting (state "Claude-only today") | `04-configuration/cross-tool-setup.md` | 048-01 (doc) |
+| Adoption / readiness guide | `06-adoption/ai-readiness-checklist.md` | 048-02 |
+| Scaffolded onboarding handoff | `06-adoption/onboarding-guide.md` | 048-03 |
+| Amendment-readability digest | jig-specific (ADR-0008) | 048-04 |
+
+**B. Delegated to existing specs (status as of 2026-06-01).**
+
+| Gap | Owner | Status |
+|---|---|---|
+| Cross-tool / `AGENTS.md` implementation | [033](../033-host-adapter-portability/spec.md) | DRAFT (Codex DEFERRED) |
+| Tier truth | [038](../038-tier-reconciliation/spec.md) | **DONE** |
+| Isolation honesty | [040](../040-isolation-honesty/spec.md) | **DONE** |
+| Scaffold artifact fidelity | [046](../046-scaffold-artifact-fidelity/spec.md) | DRAFT |
+| Install contract verification | [047](../047-install-contract-verification/spec.md) | DRAFT |
+
+**C. Net-new (2026-06-01) — routed OUT of this spec.** 048 stays
+product/docs-scoped (see Non-goals); these are recorded for the gap map and
+routed to their proper home. None is fixed by 048.
+
+| Gap | Guideline source | Severity | Proposed home |
+|---|---|---|---|
+| **Security/secrets floor** — MUST rules + `.gitignore` secret patterns + secret-scan hook + a `security-review` depth baseline | `must-rules.md`, `env-secrets.md`, `mechanical-enforcement.md` | P1 | **[Spec 052](../052-security-scaffold/spec.md)** (052-02 mechanical floor + 052-05 slim `security-review` baseline that orchestrates installed scanners and defers to any richer installed skill — not vendor-specific) |
+| **Permission deny-rules** in scaffolded `settings.json` (force-push / hard-reset / `rm -rf`) | `04-configuration/permissions.md` | P1 | **[Spec 052](../052-security-scaffold/spec.md)** (052-03) |
+| **AI-usage disclosure** block in the generated PR body | `03-templates/pull-request-template.md` | P1 | slice on the `slice-land` PR-body renderer, or new spec |
+| **Baseline-alignment** depth — bidirectional (directional + volume) + diagonal impl-vs-spec check | `02-lifecycle/baseline-alignment.md` | P2 | enhancement to `independent-review` / `analyze` |
+| **Operating-mode + substrate framing** + director-mode prerequisites | `01-foundations/operating-modes.md`, `substrate-model.md` | P2 | docs slice (here or a foundations doc) |
+| **Model-routing / token playbook** (Sonnet default, effort, `/compact`, MCP audit) | `04-configuration/token-efficiency.md` | P2 | small `docs/workflow.md` addition |
+| **Config-evolution discipline** (Three-Times rule, promote/demote, quarterly review) | `02-lifecycle/06-config-evolution.md` | P2 | `memory-sync` enhancement |
+| **ADR-template parity** (Integrity Challenge; Positive/Negative/Neutral consequences) | `03-templates/decision-record.md` | P3 | `adr-workflow` template tweak |
+
+**D. Deliberate divergence / out of jig scope (no action).**
+
+- **Component contracts / TFD+DBC** — guidelines prescribe a
+  component-contract altitude + tests-from-contract; jig goes spec → slice
+  → TDD with no contract layer by decision
+  ([ADR-0002](../../decisions/adr-0002-contracts-stays-deferred.md),
+  [ADR-0005](../../decisions/adr-0005-contracts-as-judgment-skill.md)).
+- **Migration-plan template, 5-layer validation / staging / observability
+  / rollback, workspace bootstrap (`init.sh`, `mani.yaml`), MkDocs site,
+  leadership / leveling curricula** — project-specific or excluded by
+  [product-vision](../../product-vision.md) ("No MkDocs site or leadership
+  curriculum"); the workspace-level ambition is tracked by
+  [034 federation-tier](../034-federation-tier/spec.md) (DRAFT).
+- **Eval-driven development family** (eval datasets, LLM-as-judge,
+  dual-tracing, tool-replay, self-improving / auto-improve agents, an
+  `evals/` dir per skill) → **servo**.
+
 ## Decomposition
 
 **Suggested SPIDR axis: Interface.** The gaps are about the interface a
@@ -141,9 +240,17 @@ first-run guidance, and current-state summaries.
   on-demand verification skill is explicitly deferred until signal.
 - If a slice needs to change `docs/conventions.md`, stop and ask for
   explicit human approval before implementation.
+- The 2026-06-01 net-new gaps (Gap inventory C) are routed OUT of this
+  spec by its Non-goals; standing up their specs is follow-up work, not a
+  048 dependency. The security/secrets floor (P1) is the recommended first
+  new spec.
 
 ## References
 
+- [adobe/mysticat-ai-native-guidelines](https://github.com/adobe/mysticat-ai-native-guidelines)
+  — comparison baseline (2026-05-28 and 2026-06-01 passes).
+- servo owns the eval-driven-development surface deliberately excluded from
+  this comparison.
 - [README.md](../../../README.md)
 - [docs/product-vision.md](../../../docs/product-vision.md)
 - [docs/workflow.md](../../../docs/workflow.md)
