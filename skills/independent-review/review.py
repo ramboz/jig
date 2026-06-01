@@ -55,6 +55,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import SliceLookupError
+from _common import review_evidence as _evidence
+from _common.atomic_io import atomic_write_text
 
 
 class ReviewError(RuntimeError):
@@ -734,6 +736,130 @@ def detect_subagent_type() -> str:
     return "general-purpose"
 
 
+# -------- Review-evidence CLI (slice 045-02) --------
+#
+# `record-review` writes a durable verdict file; `check-reviews` validates
+# the evidence set for a slice. The schema, path resolution, vocabularies,
+# and the gate predicate all live in `_common/review_evidence.py` (ADR-0014
+# §7) so `workflow.py transition` (slice 045-03) shares the same validator
+# rather than reimplementing it.
+#
+# Stale-but-passing detection (a `pass` artifact predating a later
+# deliverable change) is DEFERRED per ADR-0014 Scope / docs/refinement-todo.md
+# — neither subcommand compares deliverable mtime against `reviewed_at`. The
+# superseded-only case (a `fail`/`needs-changes` not yet overwritten) IS
+# caught: it reduces to `verdict != pass`, which `check-reviews` already
+# reports via the shared validator.
+
+
+def _now_iso8601() -> str:
+    """UTC timestamp in ISO-8601 with a trailing `Z` (provenance field).
+    `reviewed_at` records when the verdict was written, per ADR-0014 §2."""
+    import datetime
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+
+
+def _read_summary(args) -> str:
+    """Resolve the freeform verdict body from --summary-file or stdin.
+
+    A verdict file's body mirrors the existing VERDICT/REASONING/SPECIFIC
+    ISSUES/RECONCILIATION NOTES envelope (ADR-0014 §2). The recorder does
+    not impose that shape — it stores whatever the reviewer flow produced
+    — so the body is accepted verbatim from a file or stdin.
+    """
+    if args.summary_file:
+        p = Path(args.summary_file)
+        if not p.is_file():
+            raise ReviewError(f"summary file not found: {p}")
+        return p.read_text(encoding="utf-8")
+    # Fall back to stdin. An empty body is allowed (the frontmatter carries
+    # the machine-checkable verdict); the body is human context.
+    if not sys.stdin.isatty():
+        return sys.stdin.read()
+    return ""
+
+
+def record_review(args) -> int:
+    """Write a verdict file for a (slice, pass). Overwrites in place on
+    re-record (ADR-0014 §4 — git history is the audit trail, no append)."""
+    spec = Path(args.spec)
+    if not spec.is_file():
+        sys.stderr.write(f"spec not found: {spec}\n")
+        return 2
+
+    if args.pass_name not in _evidence.PASSES:
+        sys.stderr.write(
+            f"unknown pass '{args.pass_name}'; expected one of "
+            f"{', '.join(_evidence.PASSES)}\n"
+        )
+        return 2
+    if args.verdict not in _evidence.VERDICTS:
+        sys.stderr.write(
+            f"unknown verdict '{args.verdict}'; expected one of "
+            f"{', '.join(_evidence.VERDICTS)}\n"
+        )
+        return 2
+
+    try:
+        # Resolve the canonical path + the full slice label. evidence_path
+        # also re-validates the slice target and pass name.
+        out_path = _evidence.evidence_path(spec, args.slice, args.pass_name)
+        slice_label = find_slice_label(spec, args.slice)
+        body = _read_summary(args)
+    except (ReviewError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    # Frontmatter in canonical field order (ADR-0014 §2). The `slice` field
+    # records the full label so the artifact is self-describing.
+    frontmatter = (
+        "---\n"
+        f"slice: {slice_label}\n"
+        f"pass: {args.pass_name}\n"
+        f"verdict: {args.verdict}\n"
+        f"reviewer: {args.reviewer}\n"
+        f"reviewed_at: {_now_iso8601()}\n"
+        f"prompt_source: {args.prompt_source}\n"
+        "---\n"
+    )
+    content = frontmatter + "\n" + body
+    if not content.endswith("\n"):
+        content += "\n"
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(out_path, content)
+    sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    return 0
+
+
+def check_reviews(args) -> int:
+    """Validate the evidence set for a slice at a transition stage. Exits 2
+    with actionable diagnostics when the set does not clear (AC2); exits 0
+    when clean."""
+    spec = Path(args.spec)
+    if not spec.is_file():
+        sys.stderr.write(f"spec not found: {spec}\n")
+        return 2
+
+    diagnostics = _evidence.validate_evidence(spec, args.slice, args.stage)
+    if diagnostics:
+        sys.stderr.write(
+            f"review evidence does not clear {args.stage} for slice "
+            f"'{args.slice}':\n"
+        )
+        for d in diagnostics:
+            sys.stderr.write(f"  - {d}\n")
+        return 2
+    sys.stdout.write(
+        f"review evidence clears {args.stage} for slice '{args.slice}'\n"
+    )
+    return 0
+
+
 # -------- CLI plumbing --------
 
 
@@ -772,6 +898,65 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pa.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
 
+    # Slice 045-02: record a durable verdict file for a (slice, pass).
+    prec = sub.add_parser(
+        "record-review",
+        help="record a review verdict as durable slice evidence",
+        description=(
+            "Write a verdict file at "
+            "docs/specs/NNN-slug/reviews/slice-NN-<pass>.md (ADR-0014 §1). "
+            "Re-recording the same (slice, pass) overwrites in place — git "
+            "history is the audit trail (ADR-0014 §4). The freeform summary "
+            "body is read from --summary-file or stdin."
+        ),
+    )
+    prec.add_argument("spec", help="path to spec.md")
+    prec.add_argument("slice",
+                      help="slice name or fragment (case-insensitive substring)")
+    prec.add_argument(
+        "--pass", dest="pass_name", required=True,
+        choices=list(_evidence.PASSES),
+        help="review pass type",
+    )
+    prec.add_argument(
+        "--verdict", required=True, choices=list(_evidence.VERDICTS),
+        help="declared verdict",
+    )
+    prec.add_argument(
+        "--reviewer", required=True,
+        help="reviewer source (e.g. jig:reviewer / general-purpose / "
+             "pr-review / arch-review) — provenance, freeform",
+    )
+    prec.add_argument(
+        "--prompt-source", required=True, dest="prompt_source",
+        help="the command that built the reviewer prompt (reproducibility)",
+    )
+    prec.add_argument(
+        "--summary-file", dest="summary_file", default=None,
+        help="path to the freeform verdict body (default: read stdin)",
+    )
+
+    # Slice 045-02: validate the evidence set for a slice at a stage.
+    pchk = sub.add_parser(
+        "check-reviews",
+        help="validate the review-evidence set for a slice; exit 2 on gaps",
+        description=(
+            "Validate the verdict files required to enter a transition "
+            "stage (ADR-0014 §5). Exits 0 when the set clears, or 2 with "
+            "actionable diagnostics for missing files, malformed "
+            "frontmatter, unknown pass/verdict values, non-clearing "
+            "(superseded-only) verdicts, and invalid slice targets."
+        ),
+    )
+    pchk.add_argument("spec", help="path to spec.md")
+    pchk.add_argument("slice",
+                      help="slice name or fragment (case-insensitive substring)")
+    pchk.add_argument(
+        "--stage", default="REVIEWED", choices=["REVIEWED", "RECONCILED"],
+        help="transition stage whose required passes to validate "
+             "(default: REVIEWED)",
+    )
+
     pt = sub.add_parser(
         "subagent-type",
         help="print the subagent_type name SKILL.md should pass to Task",
@@ -800,6 +985,28 @@ def main(argv: list) -> int:
     if ns.command == "subagent-type":
         sys.stdout.write(detect_subagent_type() + "\n")
         return 0
+
+    # Slice 045-02 evidence subcommands own their spec-not-found check and
+    # their own exit codes (mirrors the prompt-builders' `return 2` on user
+    # error / `return 1` on unexpected).
+    if ns.command == "record-review":
+        try:
+            return record_review(ns)
+        except ReviewError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"review.py failed: {exc}\n")
+            return 1
+    if ns.command == "check-reviews":
+        try:
+            return check_reviews(ns)
+        except ReviewError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"review.py failed: {exc}\n")
+            return 1
 
     spec = Path(ns.spec)
     if not spec.is_file():

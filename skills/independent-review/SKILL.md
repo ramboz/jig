@@ -154,6 +154,56 @@ Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
 explicitly tells the reviewer NOT to re-evaluate against ACs — it only
 verifies the deviation log matches reality.
 
+### Recording and checking review evidence (slice 045-02)
+
+A review pass is durable evidence, not ephemeral chat. After a pass
+returns a verdict, record it as a file beside the slice it grades, at
+`docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md` (ADR-0014 §1). The
+schema (`pass ∈ {compliance, craft, arch, reconciliation}`,
+`verdict ∈ {pass, fail, needs-changes}`, plus `reviewer`, `reviewed_at`,
+`prompt_source`) lives in `skills/_common/review_evidence.py` so the
+slice 045-03 transition gate validates the same shape.
+
+Record a verdict (the freeform body comes from `--summary-file` or stdin):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  record-review \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  --pass compliance \
+  --verdict pass \
+  --reviewer jig:reviewer \
+  --prompt-source "review.py implementation ..." \
+  --summary-file verdict.md
+```
+
+Re-recording the same `(slice, pass)` **overwrites in place** — git
+history is the audit trail, there is no append (ADR-0014 §4). A
+`fail`/`needs-changes` that has not been overwritten by a later `pass`
+therefore still blocks the gate, which is exactly the "superseded
+without a later pass" case.
+
+Validate the evidence set for a slice at a transition stage:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  check-reviews \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  --stage REVIEWED   # or RECONCILED
+```
+
+`check-reviews` exits `0` when the required passes for the stage all
+clear (`REVIEWED` → compliance + craft, plus arch iff the slice declares
+`arch_review: true`; `RECONCILED` → reconciliation), or `2` with
+actionable diagnostics for missing files, malformed frontmatter, unknown
+pass/verdict values, non-clearing (superseded-only) verdicts, and invalid
+slice targets. The gate rule is uniform: a pass clears iff `verdict: pass`
+(ADR-0014 §3). **Code-staleness** (a `pass` artifact predating a later
+deliverable change) is deliberately NOT checked — it is a deferred
+enhancement (ADR-0014 Scope).
+
 ### What gets put in the prompt automatically
 
 - Standard preamble ("You are seeing this work for the first time")
