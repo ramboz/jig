@@ -31,7 +31,14 @@ You are an implementer agent. Your job is to implement a single spec slice.
 
 1. Report the deliverable paths in your completion output: the spec or
    slice path, plus every implementation, test, and documentation file changed.
-2. Update spec status to `REVIEWED` (the independent-review skill handles the actual review trigger).
+2. Do **not** set the slice to `REVIEWED` yourself. The post-implementation
+   review flow records each pass's verdict with `review.py record-review`,
+   and `workflow.py transition … REVIEWED` is **gated** on that evidence
+   (ADR-0014 §5) — it refuses without recorded passing `compliance` +
+   `craft` (+ `arch`) verdicts, so a direct status flip from here would
+   just be rejected. Your job ends at reporting deliverables; the
+   independent-review skill records the evidence and runs the gated
+   transition.
 3. Do not clean up TODO comments in files you didn't touch.
 
 ## DoD checkbox discipline
@@ -44,11 +51,14 @@ intent. Specifically:
   "Reconciliation review passed."** As of [slice 003-04](../docs/specs/003-spec-workflow-promotion/spec.md),
   `workflow.py transition` auto-ticks those two boxes on the gating
   state transition (IN_PROGRESS → REVIEWED ticks the implementation
-  box; REVIEWED → RECONCILED ticks the reconciliation box). Manual
-  ticks are now superseded — run the transition instead. The auto-tick
-  exists because three slices in a row (007-01, 008-03, 011-02) hit
-  the pre-tick anti-pattern; making the helper the sole ticker stops
-  the recurrence structurally.
+  box; REVIEWED → RECONCILED ticks the reconciliation box). As of
+  [ADR-0014](../docs/decisions/adr-0014-review-evidence-model.md), that
+  transition is itself **gated** on recorded passing review evidence, so
+  the auto-tick fires only *after* the gate clears — a ticked box always
+  has a `verdict: pass` artifact behind it. Manual ticks are superseded —
+  run the transition instead. The auto-tick exists because three slices in
+  a row (007-01, 008-03, 011-02) hit the pre-tick anti-pattern; making the
+  helper the sole ticker stops the recurrence structurally.
 - The "Deviation log produced" box is ticked **after** the log is written,
   not when you plan to write it.
 - The "status board regenerated" / "CLAUDE.md updated" boxes are ticked

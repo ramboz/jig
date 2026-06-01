@@ -204,6 +204,19 @@ slice targets. The gate rule is uniform: a pass clears iff `verdict: pass`
 deliverable change) is deliberately NOT checked — it is a deferred
 enhancement (ADR-0014 Scope).
 
+**The full enforced flow.** build prompt (`review.py implementation` /
+`pr-review` / `arch-review`) → spawn reviewer → `record-review` the
+verdict → `check-reviews` (optional preflight) → `workflow.py transition
+… REVIEWED` (or `RECONCILED` / `DONE`). The transition imports the same
+validator `check-reviews` uses, so the gate and this skill agree by
+construction. A refused transition names the missing/invalid artifact and
+the `record-review` command to produce it; a deliberate out-of-band flow
+bypasses the gate with `JIG_REVIEW_EVIDENCE_GATE=0`. **Recovering from a
+failed review:** address the findings, re-run the pass, `record-review`
+again (overwrites the earlier file for that `(slice, pass)` in place — git
+history is the audit trail), then re-run the transition; with every
+required pass now `pass`, the gate clears.
+
 ### What gets put in the prompt automatically
 
 - Standard preamble ("You are seeing this work for the first time")

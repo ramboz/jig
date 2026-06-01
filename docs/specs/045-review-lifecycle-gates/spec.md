@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: spec-workflow, independent-review
 tier: dev infrastructure
 adr_required: true

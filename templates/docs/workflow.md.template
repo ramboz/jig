@@ -47,6 +47,43 @@ Every slice runs up to three review passes between IN_PROGRESS and REVIEWED:
 
 Order: compliance → craft → (arch if flagged). All required passes must `pass` for REVIEWED.
 
+### Review evidence gates the transition
+
+Each pass produces a durable verdict artifact — these gates are mechanical,
+not honour-system prose, and no `Stop` hook is involved:
+
+1. Build the prompt (`review.py implementation` / `pr-review` / `arch-review`)
+   and spawn the reviewer.
+2. Record the verdict:
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py \
+     record-review docs/specs/NNN-slug/spec.md "<slice>" \
+     --pass compliance --verdict pass --reviewer jig:reviewer \
+     --prompt-source "review.py implementation ..." --summary-file verdict.md
+   ```
+
+   This writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
+   (`<pass>` ∈ compliance / craft / arch / reconciliation).
+3. Run the gated transition:
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py \
+     transition docs/specs/NNN-slug/spec.md "<slice>" REVIEWED
+   ```
+
+`workflow.py transition` **refuses** REVIEWED / RECONCILED / DONE unless the
+required verdicts exist and carry `verdict: pass` (RECONCILED also needs a
+`### Deviation log` subsection; DONE re-validates the full set plus
+`dependencies:`). A refusal names the missing artifact and the
+`record-review` command. The gate enforces evidence consistency, not human
+sign-off — it lives in the agent's trust boundary, so a deliberate
+out-of-band flow can bypass it with `JIG_REVIEW_EVIDENCE_GATE=0`.
+
+**Recovering from a failed review:** address findings, re-run the pass,
+`record-review` again (overwrites the earlier file for that `(slice, pass)`
+in place — git history keeps the prior verdict), then re-run the transition.
+
 ## Stocktake
 
 After every few reconciled slices, review what was deferred during scaffolding to see if any items now have signal:
