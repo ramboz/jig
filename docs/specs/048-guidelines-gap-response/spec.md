@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: scaffold-init, spec-workflow, analyze
 tier: product/docs
 adr_required: false

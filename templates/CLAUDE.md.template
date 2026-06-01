@@ -36,6 +36,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 | [docs/refinement-todo.md](docs/refinement-todo.md) | Deferred decisions | When hitting an undefined case |
 | [docs/memory/glossary.md](docs/memory/glossary.md) | Domain terms | When encountering unknown terms |
 | [docs/inbox.md](docs/inbox.md) | Parked ideas | During reconciliation |
+| [docs/adoption-readiness.md](docs/adoption-readiness.md) | Getting started with jig here — first 30 min + readiness check | Right after scaffolding |
 
 ## Current sprint focus
 

@@ -110,6 +110,11 @@ After implementation, before marking DONE:
 - Update specs with deviation log annotations (original ACs preserved).
 - Update `architecture.md` ONLY if module boundaries or contracts changed (signal: write an ADR).
 - ADRs are immutable after acceptance — new decisions supersede, never edit.
+- Closed records (DONE / SUPERSEDED specs and slices) preserve drift via a
+  `## Amendments` section ([ADR-0010](decisions/adr-0010-amendment-scope-records-vs-live-prose.md));
+  run `python3 skills/spec-workflow/workflow.py amendments` for a read-only
+  digest of the current overrides so you don't have to reread each
+  historical block to find effective state.
 - `docs/conventions.md` changes require explicit human approval. The
   `jig-spec-gate` hook backstops this rule — but it is a *deliberateness*
   gate that catches accidental side-effect edits, not a hard human-only

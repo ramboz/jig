@@ -3759,5 +3759,107 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
         )
 
 
+class AmendmentDigestTests(unittest.TestCase):
+    """workflow.py amendments — read-only digest of the `## Amendments`
+    overrides on closed records (slice 048-04). Indexes current truth so a
+    reader needn't reread historical drift; never modifies any artifact."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-amd-")
+        self.proj = Path(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write(self, rel: str, text: str) -> None:
+        p = self.proj / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    # AC #1 / #2 — lists amendment-bearing artifacts (path + date + title),
+    # sorted; AC #5 — an artifact without amendments is not listed.
+    def test_lists_amendment_bearing_artifacts_sorted(self):
+        self._write(
+            "docs/specs/016-scaffold-mode/spec.md",
+            "---\nstatus: DONE\n---\n\n# Spec 016\n\nbody\n\n"
+            "## Amendments\n\n### 2026-05-27 — Hook count: five → seven\n"
+            "prose.\n",
+        )
+        self._write(
+            "docs/decisions/adr-0008-closed-spec-drift-policy.md",
+            "# ADR-0008\n\nbody\n\n## Amendments\n\n"
+            "### 2026-05-27 — Hook count: five → seven\nprose.\n",
+        )
+        self._write(
+            "docs/specs/099-no-amendments/spec.md",
+            "---\nstatus: DONE\n---\n\n# Spec 099\n\nno amendments here.\n",
+        )
+        result = run_workflow("amendments", "--project-dir", str(self.proj))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        out = result.stdout
+        self.assertIn("docs/decisions/adr-0008-closed-spec-drift-policy.md", out)
+        self.assertIn("docs/specs/016-scaffold-mode/spec.md", out)
+        self.assertIn("2026-05-27 — Hook count: five → seven", out)
+        self.assertNotIn("099-no-amendments", out)
+        # Stable, sorted by path: decisions/ precedes specs/.
+        self.assertLess(
+            out.index("docs/decisions/adr-0008"),
+            out.index("docs/specs/016-scaffold-mode"),
+            "digest must be sorted by artifact path",
+        )
+
+    # AC #5 — absence case: clear message, exit 0.
+    def test_handles_no_amendments(self):
+        self._write(
+            "docs/specs/099-no-amendments/spec.md",
+            "---\nstatus: DONE\n---\n\n# Spec 099\n\nno amendments.\n",
+        )
+        self._write("docs/decisions/adr-0001-foo.md", "# ADR-0001\n\nbody.\n")
+        result = run_workflow("amendments", "--project-dir", str(self.proj))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("No amendment-bearing artifacts", result.stdout)
+
+    # Edge: a `## Amendments` heading with no dated entries is not a real
+    # override — skip it (don't crash or emit an empty artifact block).
+    def test_ignores_empty_amendments_section(self):
+        self._write(
+            "docs/specs/016-scaffold-mode/spec.md",
+            "# Spec 016\n\nbody\n\n## Amendments\n\n(none yet)\n",
+        )
+        result = run_workflow("amendments", "--project-dir", str(self.proj))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("No amendment-bearing artifacts", result.stdout)
+
+    # Edge: a `## Amendments` heading INSIDE a ```-fenced code block is an
+    # illustrative example (this is exactly ADR-0008's shape — it documents
+    # the amendment *format* in a fence), NOT a live amendment. It must be
+    # ignored, or the digest reports a false override.
+    def test_ignores_fenced_amendments_example(self):
+        self._write(
+            "docs/decisions/adr-0008-closed-spec-drift-policy.md",
+            "# ADR-0008\n\nThe amendment shape:\n\n"
+            "```markdown\n## Amendments\n\n"
+            "### 2026-05-27 — Hook count: five → seven\nillustrative prose.\n"
+            "```\n\n(the above is just an example of the format.)\n",
+        )
+        result = run_workflow("amendments", "--project-dir", str(self.proj))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("No amendment-bearing artifacts", result.stdout)
+        self.assertNotIn("adr-0008", result.stdout)
+
+    # AC #1 — amendments can live in slice files, not only spec.md / ADRs.
+    def test_finds_amendments_in_slice_files(self):
+        self._write(
+            "docs/specs/016-scaffold-mode/slice-01-foo.md",
+            "---\nstatus: DONE\n---\n\n## Slice 016-01\n\nbody\n\n"
+            "## Amendments\n\n### 2026-06-01 — Renamed widget → gadget\nprose.\n",
+        )
+        result = run_workflow("amendments", "--project-dir", str(self.proj))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("slice-01-foo.md", result.stdout)
+        self.assertIn("2026-06-01 — Renamed widget → gadget", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
