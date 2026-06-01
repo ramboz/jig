@@ -101,3 +101,18 @@ The original spec is preserved above. Implementation notes:
 - **Tests:** full suite 1461 green (was 1457; +4 here); `spec_lint --all`
   clean across 50 specs. No decisions deferred → no `refinement-todo`
   entry.
+- **Post-landing reconciliation (2026-06-01, vs. main #26):** after this
+  slice's PR opened, `#26` landed on main and **extended AC #2** — the gap
+  map must also reflect the 2026-06-01 re-review's net-new gaps, each routed
+  to an owner, and may summarize + link spec 048's full routed inventory
+  rather than reproduce every row. Merged main into the branch (clean) and
+  reconciled the README gap map: added a **Security & secrets floor → spec
+  052** row (the headline P1 net-new finding, now with a real owner) + a
+  summary sentence linking the routed
+  [gap inventory](spec.md#gap-inventory-routed) for the remaining net-new
+  gaps (AI-usage disclosure, baseline-alignment, operating-mode framing,
+  model-routing, config-evolution, ADR-template parity). Regression test
+  extended: `052-security-scaffold` added to the owner-spec pins +
+  `test_links_to_routed_gap_inventory`. Full suite 1476 green; `spec_lint`
+  clean across 51 specs. Slice stays DONE (this is reconciliation of an
+  AC extended after landing, not new scope).

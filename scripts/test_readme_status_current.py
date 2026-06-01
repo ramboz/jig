@@ -40,6 +40,9 @@ OWNER_SPECS = (
     "045-review-lifecycle-gates",
     "046-scaffold-artifact-fidelity",
     "047-install-contract-verification",
+    # Net-new security/secrets floor finding from the 2026-06-01 re-review,
+    # routed to spec 052 (extended AC #2, landed via #26).
+    "052-security-scaffold",
 )
 
 GAP_TABLE_HEADER_RE = re.compile(r"^\|\s*Gap\s*\|", re.MULTILINE)
@@ -114,6 +117,17 @@ class ReadmeHasGapResponseMap(unittest.TestCase):
                     f"gap-response map must link owner spec {owner} inside the "
                     f"table region, not merely somewhere in the README (AC #4)",
                 )
+
+    def test_links_to_routed_gap_inventory(self) -> None:
+        # Extended AC #2 (landed via #26): net-new gaps may be summarized
+        # and linked to the spec's full routed inventory rather than
+        # reproduced row-by-row. Pin that link so the route stays reachable.
+        self.assertIn(
+            "048-guidelines-gap-response/spec.md#gap-inventory-routed",
+            self.table,
+            "the gap map must link spec 048's full routed inventory so the "
+            "net-new gaps stay discoverable (spec 048-01 extended AC #2)",
+        )
 
 
 if __name__ == "__main__":

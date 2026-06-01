@@ -207,10 +207,10 @@ prompt + read-only tools), **not** a hard sandbox — see
 
 ### Gap-response map
 
-A 2026-05 comparison against other AI-native playbooks surfaced a set of
-gaps. Each is either addressed in the current docs/machinery or delegated
-to an owner spec. This table is the triage, so future readers don't have
-to rediscover it:
+A 2026-05 comparison against other AI-native playbooks — refreshed by a
+2026-06-01 re-review — surfaced a set of gaps. Each is either addressed in
+the current docs/machinery or delegated to an owner spec. This table is the
+triage, so future readers don't have to rediscover it:
 
 | Gap | Status | Owner |
 |---|---|---|
@@ -219,6 +219,7 @@ to rediscover it:
 | Amendment readability | This spec | [slice 048-04](docs/specs/048-guidelines-gap-response/slice-04-amendment-effective-state-digest.md) |
 | Tier truth (real copy gates) | Landed | [spec 038](docs/specs/038-tier-reconciliation/spec.md) |
 | Reviewer-isolation honesty | Landed | [spec 040](docs/specs/040-isolation-honesty/spec.md) |
+| Security & secrets floor (MUST-rules / `.gitignore` / secret-scan / permission deny-rules) | Planned | [spec 052](docs/specs/052-security-scaffold/spec.md) |
 | Cross-tool portability (Codex / `AGENTS.md`) | Planned | [spec 033](docs/specs/033-host-adapter-portability/spec.md) |
 | Scaffold artifact fidelity | Planned | [spec 046](docs/specs/046-scaffold-artifact-fidelity/spec.md) |
 | Install-contract verification | Planned | [spec 047](docs/specs/047-install-contract-verification/spec.md) |
@@ -229,3 +230,10 @@ Legend: **Landed** = already in `main`; **This spec** = delivered by spec
 [status board](docs/specs/README.md) for which of its slices have landed
 vs. are still in flight); **Planned** = a separate spec that moves on user
 signal.
+
+The 2026-06-01 re-review surfaced further net-new gaps routed out of this
+spec — AI-usage disclosure in PR bodies, baseline-alignment depth,
+operating-mode framing, model-routing guidance, config-evolution discipline,
+and ADR-template parity. To keep this first-read surface lean they aren't
+all listed above; each is routed to an owner in spec 048's full
+[gap inventory](docs/specs/048-guidelines-gap-response/spec.md#gap-inventory-routed).
