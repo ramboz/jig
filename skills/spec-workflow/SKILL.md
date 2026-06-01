@@ -367,11 +367,14 @@ status flip is allowed. Each item is a gate.
       memory-worthy items for persistence. The reviewer subagent reads from
       memory but never writes to it (see `agents/reviewer.md`).
 - [ ] **Closed-spec drift** — if reconciliation surfaces a prior
-      closed-spec inaccuracy (a `DONE` / `SUPERSEDED` spec or load-bearing
-      skill/router prose that no longer matches reality), follow the
-      policy in [ADR-0008](../../docs/decisions/adr-0008-closed-spec-drift-policy.md).
-      Default: append a dated `## Amendments` entry to the drifted artifact.
-      New ADR (or superseding spec) only for decision-content changes.
+      closed-spec inaccuracy (a `DONE` / `SUPERSEDED` spec/slice, or
+      load-bearing skill/router/workflow prose that no longer matches
+      reality), follow the policy in [ADR-0010](../../docs/decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
+      (supersedes ADR-0008). **Records** (closed specs/slices): append a
+      dated `## Amendments` entry preserving the original. **Live prose**
+      (SKILL.md / workflow.md / README): fix it **inline** — git history
+      is the audit trail. New ADR (or superseding spec) only for
+      decision-content changes.
 - [ ] **Reconciliation review** — spawn a second reviewer subagent with a
       reconciliation-review prompt: are the doc changes faithful? Is the
       deviation log honest? Is scope appropriate (no scope creep in docs)?

@@ -10,8 +10,10 @@ description: >
 user-invocable: true
 ---
 
-> Slices 002-01 (explicit-sync) and 002-02 (lookup-pattern) are implemented.
-> Slices 002-03 (auto-detect-hooks) and 002-04 (reconciliation-integration) are pending.
+> Spec 002 (memory layer) is fully closed — all four slices DONE: 002-01
+> (explicit-sync), 002-02 (lookup-pattern), 002-03 (auto-detect-hooks),
+> 002-04 (reconciliation-integration). 002-04's reconciliation integration
+> is now the Memory-sync gate in the spec-workflow reconciliation checklist.
 
 ## What this skill does
 
@@ -126,21 +128,3 @@ unscaffolded projects, though scaffold-init is the recommended setup.
   chronological order is preferred later, this is a design point worth revisiting.
 - Definitions are stored as-is; markdown is allowed but be conservative — these
   files are scanned by humans more often than parsed.
-
-## Amendments
-
-### 2026-05-27 — Slices 002-03 and 002-04 are DONE
-
-The blockquote at the top of this file (lines 13–14) claims slices
-002-03 (auto-detect-hooks) and 002-04 (reconciliation-integration)
-are pending. Both are **DONE** per the status board: 002-03 shipped
-the 19 auto-detect hook tests and 002-04 wired the reconciliation
-integration. Spec 002 is fully closed. The reconciliation-integration
-piece in particular is now a named gate in the spec-workflow skill's
-reconciliation checklist (see the Memory-sync gate). Original prose
-preserved above per
-[ADR-0008](../../docs/decisions/adr-0008-closed-spec-drift-policy.md)
-Option C; this amendment overrides it.
-
-- Link: [spec 002 — memory layer](../../docs/specs/002-memory-layer/spec.md)
-
