@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: scaffold-init, migrate
 tier: scaffold machinery
 adr_required: true

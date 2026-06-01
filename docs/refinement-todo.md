@@ -23,6 +23,18 @@
 **Deferred:** Slice 048-06 wired the scaffold-completion verification into `scaffold-init`'s closing report (reusing `verify_install.py`'s scaffold-mode checks + the 048-05 seed check). A user-facing "check whether my project is still correctly wired" command — re-runnable any time after install to detect drift — is explicitly out of scope: the install-time signal is enough until a user actually hits the drift case. The plumbing already exists (`verify_install.py --mode scaffold headless` and `run_completion_summary`), so exposing it as a `/jig:` command is mostly surfacing, not new logic.
 **Resolution trigger:** A user reports drift / asks "is my project still wired?" (i.e. the install-time verdict is no longer sufficient because the tree changed after scaffold).
 
+### Decision: Secret-pattern ruleset source for the secret-scan hook
+**Deferred:** [ADR-0013](decisions/adr-0013-security-floor-policy.md) (spec 052) ships an agent-time secret-scan `PreToolUse` hook but leaves its detection ruleset open: a curated minimal set of high-confidence patterns (AWS access keys, PEM private-key blocks, `.env` assignments with a real value) maintained in-tree, vs. shelling out to a mature detector (`detect-secrets` / `gitleaks`) when one is on `PATH`. Slice 052-02 ships the curated-minimal set — no bundled dependency, per the no-vendoring constraint — and the detect-and-wrap-if-present path is the deferred enhancement.
+**Resolution trigger:** First false-negative report (a real secret the curated set misses), OR a user asks the hook to honor their existing `detect-secrets` / `gitleaks` config. Until then the curated minimal set is the floor; wrap-if-present stays unbuilt.
+
+### Decision: Scanner set + detection order for the `jig:security-review` baseline
+**Deferred:** [ADR-0013](decisions/adr-0013-security-floor-policy.md) (spec 052) fixes that the `jig:security-review` baseline *orchestrates installed scanners, never bundles them*, but does not freeze which scanners it probes for or in what order. Candidate set: `semgrep`, `bandit` (Python), `gosec` (Go), `npm audit` / `osv-scanner` (dependency/CVE). Slice 052-05 ships an initial detect-on-`PATH` set; the precise roster, ordering, and per-language routing stay tunable.
+**Resolution trigger:** First adopter whose stack needs a scanner outside the initial set, OR a reported ordering issue (e.g. a slow scanner should run last). Grow the roster additively in `skills/security-review/SKILL.md`.
+
+### Decision: Promote the `security_review: true` post-implementation review-flow pass
+**Deferred:** [ADR-0013](decisions/adr-0013-security-floor-policy.md) (spec 052) ships `jig:security-review` as an auto-triggered / on-demand skill but **defers wiring it into the post-implementation review flow** as a fourth pass parallel to `arch_review` (a `security_review: true` slice-frontmatter flag gating a dedicated reviewer pass). Adding it now would grow every slice's review surface before there's evidence the floor needs a standing gate.
+**Resolution trigger:** First slice where a security-relevant regression slips past the compliance + craft passes that a dedicated security pass would have caught, OR a maintainer decides security review should be a standing gate for a class of slices. Mirror the `arch_review` wiring (spec 031 / `workflow.py arch-review-needed` + `review.py arch-review`) when promoting.
+
 ### ~~Decision: additionalContext format for Stop vs UserPromptSubmit hooks~~ — RESOLVED
 Resolved by [Slice 002-03](specs/002-memory-layer/spec.md) — `{ "continue": true, "additionalContext": "..." }` format confirmed in production via `jig-memory-scan` + `jig-task-capture` hooks.
 
