@@ -135,9 +135,16 @@ class GreenfieldScaffoldTests(unittest.TestCase):
     # AC #3: Draft markers — applies to ALL scaffolded .md files
     def test_draft_markers(self):
         marker = "Status: Draft (wizard-generated)"
-        # CLAUDE.md + every .md under docs/
+        # CLAUDE.md + every .md under docs/, EXCEPT the seeded reference
+        # spec (slice 048-05). The seed's 001-adopt-jig is real, permanent
+        # project history at status: DONE, and its 002-first-spec stub is a
+        # status: DRAFT spec — neither carries the "wizard-generated" doc
+        # marker by design (the honesty pin in 048-05 AC #2 forbids dressing
+        # the DONE worked example up as a draft).
+        seed_dirs = {"001-adopt-jig", "002-first-spec"}
         md_files = [self.target / "CLAUDE.md"] + sorted(
-            (self.target / "docs").rglob("*.md")
+            p for p in (self.target / "docs").rglob("*.md")
+            if not (seed_dirs & set(p.relative_to(self.target).parts))
         )
         self.assertGreaterEqual(len(md_files), 9, "expected at least 9 scaffolded .md files")
         for path in md_files:
@@ -1538,6 +1545,225 @@ class TierSkillSetTests(unittest.TestCase):
             f"worked-example-jig.md tier-count line must match _TIER_SKILLS "
             f"({n0} Tier 0 + {n1} Tier 1)",
         )
+
+
+class SeedReferenceSpecTests(unittest.TestCase):
+    """Slice 048-05 — scaffold-init seeds a complete DONE worked-example
+    spec (001-adopt-jig) plus a DRAFT hand-off stub (002-first-spec) and a
+    populated status board, honest-by-construction."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-seed-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        result = run_scaffold(self.target)
+        self.assertEqual(
+            result.returncode, 0,
+            f"scaffold.py failed: stderr={result.stderr}\nstdout={result.stdout}",
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read(self, rel: str) -> str:
+        return (self.target / rel).read_text()
+
+    # AC #1 — the worked-example spec is emitted, slice at status: DONE.
+    def test_seed_001_files_exist_with_done_slice(self):
+        spec = self.target / "docs/specs/001-adopt-jig/spec.md"
+        slice_file = self.target / "docs/specs/001-adopt-jig/slice-01-bootstrap.md"
+        self.assertTrue(spec.is_file(), "001-adopt-jig/spec.md missing")
+        self.assertTrue(slice_file.is_file(), "slice-01-bootstrap.md missing")
+        # Slice frontmatter is status: DONE.
+        self.assertRegex(
+            slice_file.read_text(), r"(?m)^status:\s*DONE\s*$",
+            "bootstrap slice must be status: DONE",
+        )
+        self.assertIn("## Slice 001-01 — bootstrap", slice_file.read_text())
+
+    # AC #2 — honesty pin: review line references the deterministic check,
+    # and there is NO fabricated subagent verdict string.
+    def test_seed_review_line_is_honest(self):
+        body = self._read("docs/specs/001-adopt-jig/slice-01-bootstrap.md")
+        self.assertIn("scaffold-completion check", body,
+                      "review boxes must be annotated as verified by the "
+                      "deterministic scaffold-completion check")
+        lowered = body.lower()
+        for forbidden in (
+            "reviewer subagent verdict: pass",
+            "reviewer subagent: pass",
+            "subagent verdict: pass",
+            "verdict: pass",
+        ):
+            self.assertNotIn(
+                forbidden, lowered,
+                f"seed must not fabricate a subagent verdict ({forbidden!r})",
+            )
+
+    # AC #5 — the 002 hand-off stub exists at status: DRAFT (not READY).
+    def test_seed_002_stub_is_draft(self):
+        stub = self.target / "docs/specs/002-first-spec/spec.md"
+        self.assertTrue(stub.is_file(), "002-first-spec/spec.md missing")
+        text = stub.read_text()
+        self.assertRegex(text, r"(?m)^status:\s*DRAFT\s*$",
+                         "002 stub must be status: DRAFT")
+        self.assertNotRegex(
+            text, r"(?m)^status:\s*READY_FOR_IMPLEMENTATION\s*$",
+            "002 stub status must NOT be READY_FOR_IMPLEMENTATION",
+        )
+
+    # AC #4 — the status board has a real, populated 001-01 DONE row.
+    def test_status_board_has_done_row(self):
+        board = self._read("docs/specs/README.md")
+        self.assertIn("001-01 — bootstrap", board)
+        self.assertIn("001-adopt-jig", board)
+        # The bootstrap row is DONE.
+        self.assertRegex(
+            board, r"001-01 — bootstrap.*\*\*DONE\*\*",
+            "status board must mark 001-01 — bootstrap DONE",
+        )
+
+    # AC #6 — no plugin-root / source-checkout leakage in the seed.
+    def test_seed_has_no_path_leakage(self):
+        for rel in (
+            "docs/specs/001-adopt-jig/spec.md",
+            "docs/specs/001-adopt-jig/slice-01-bootstrap.md",
+            "docs/specs/002-first-spec/spec.md",
+            "docs/specs/README.md",
+        ):
+            text = self._read(rel)
+            self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text, f"{rel} leaks plugin root")
+            self.assertNotIn(str(REPO_ROOT), text, f"{rel} leaks source-checkout path")
+            self.assertNotIn("{{", text, f"{rel} has an unrendered placeholder")
+
+    # AC #3 — the freshly scaffolded tree passes spec_lint.py --all.
+    def test_seed_lints_clean(self):
+        result = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "spec_lint.py"), "--all"],
+            capture_output=True, text=True, cwd=str(self.target),
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"spec_lint --all failed on seed:\n{result.stdout}\n{result.stderr}",
+        )
+
+
+class SeedGreenfieldGuardTests(unittest.TestCase):
+    """Slice 048-05 / Clarification Q1 — the seed is greenfield-only: it is
+    emitted only when docs/specs/ is otherwise empty, and is skipped
+    silently (never overwriting) when any spec already exists."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-seed-guard-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_seed_skipped_when_specs_already_present(self):
+        # Pre-create a user spec under docs/specs/.
+        existing = self.target / "docs/specs/007-my-spec"
+        existing.mkdir(parents=True)
+        marker = "# my own spec — do not touch\n"
+        (existing / "spec.md").write_text(marker)
+        result = run_scaffold_with_args(self.target, "--force")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        # The seed must NOT have been emitted.
+        self.assertFalse(
+            (self.target / "docs/specs/001-adopt-jig").exists(),
+            "seed must be skipped when docs/specs/ already has content",
+        )
+        # The user's spec is untouched.
+        self.assertEqual((existing / "spec.md").read_text(), marker)
+
+    def test_seed_emitted_into_empty_specs_dir(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertTrue(
+            (self.target / "docs/specs/001-adopt-jig/spec.md").is_file(),
+            "seed must be emitted into a greenfield docs/specs/",
+        )
+
+
+class CompletionVerificationTests(unittest.TestCase):
+    """Slice 048-06 — the wizard runs verification and reports a verdict.
+
+    These exercise the wired-in run end-to-end (AC #1/#3/#4/#6):
+    a good scaffold prints the completion summary and exits 0; a scaffold
+    with a required artifact removed reports failure loudly (non-zero exit);
+    a plugin-only scaffold does not false-fail on absent .claude machinery.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-complete-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # AC #1 — verification runs at scaffold end with a summary + verdict.
+    def test_in_repo_scaffold_emits_completion_summary(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("Scaffold verification", result.stdout)
+        self.assertIn("in-repo", result.stdout)
+        # AC #3 — the seed is in the verified set.
+        self.assertIn("seed", result.stdout)
+        self.assertIn("verified", result.stdout.lower())
+
+    # AC #3 — a good plugin-only scaffold verifies the seed without
+    # false-failing on the .claude machinery that lives in the plugin.
+    def test_plugin_only_scaffold_verifies_seed_without_false_fail(self):
+        result = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("plugin-only", result.stdout)
+        self.assertIn("seed", result.stdout)
+        self.assertIn("verified", result.stdout.lower())
+        self.assertNotIn("FAILED", result.stdout)
+
+    # AC #4 — removing a required artifact makes the verdict loud + non-zero.
+    def test_missing_seed_file_makes_verification_fail_loudly(self):
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        # Drop a seed file, then re-run verification via the headless surface
+        # of the wizard helper (scaffold itself refuses re-scaffold). We assert
+        # on the completion summary directly through verify_install.
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        import verify_install  # noqa: E402
+        import io
+
+        (self.target / "docs/specs/001-adopt-jig/spec.md").unlink()
+        buf = io.StringIO()
+        rc = verify_install.run_completion_summary(
+            self.target, with_machinery=True, seed_expected=True, out=buf,
+        )
+        self.assertEqual(rc, 1, msg=buf.getvalue())
+        self.assertIn("FAILED", buf.getvalue())
+        self.assertIn("seed", buf.getvalue())
+
+    # AC #4 — a missing machinery artifact in an in-repo scaffold fails too.
+    def test_missing_machinery_artifact_makes_verification_fail(self):
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        import verify_install  # noqa: E402
+        import io
+
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        # Remove a scaffolded agent file.
+        agent = self.target / ".claude/agents/jig-reviewer.md"
+        if agent.exists():
+            agent.unlink()
+        buf = io.StringIO()
+        rc = verify_install.run_completion_summary(
+            self.target, with_machinery=True, seed_expected=True, out=buf,
+        )
+        self.assertEqual(rc, 1, msg=buf.getvalue())
+        self.assertIn("FAILED", buf.getvalue())
 
 
 if __name__ == "__main__":

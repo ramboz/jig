@@ -19,7 +19,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - (populated as the project grows — see docs/memory/glossary.md for full glossary)
 
 ### Active specs
-- (populated by scaffold-init — check docs/specs/README.md for status board)
+- [001-adopt-jig](docs/specs/001-adopt-jig/spec.md) — DONE worked example to imitate; see docs/specs/README.md for the status board.
 
 ### Deferred decisions
 → See docs/refinement-todo.md

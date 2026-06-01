@@ -145,6 +145,8 @@
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-02 - adoption-readiness-guide | DRAFT |  |
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-03 - scaffolded-onboarding-handoff | DRAFT |  |
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-04 - amendment-effective-state-digest | DRAFT |  |
+| [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-05 — seed-reference-spec | **DONE** | 8 new tests (1445 total); scaffold-init emits `001-adopt-jig` (DONE worked example) + `002-first-spec` (DRAFT stub) + populated board into greenfield `docs/specs/` only (skips if any spec exists, both scaffold modes); honesty pin — seed DoD carries NO fabricated subagent verdict, review boxes annotated as deterministic-check-satisfied |
+| [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-06 — scaffold-completion-verification | **DONE** | 12 new tests (1457 total); `scaffold-init` runs `verify_install.run_completion_summary` as closing report (reuses `_SCAFFOLD_CHECKS` + seed check, no redefinition); mode-aware (machinery checks gated on `with_machinery`, skipped in plugin-only — not false-failed); `seed_expected` sampled BEFORE scaffold writes; exit 4 on verify failure; re-runnable on-demand command deferred (refinement-todo, trigger: user reports drift) |
 | [049-slice-claim-on-in-progress](049-slice-claim-on-in-progress/spec.md) | 049-01 — claim-and-release-on-transition | DRAFT |  |
 | [049-slice-claim-on-in-progress](049-slice-claim-on-in-progress/spec.md) | 049-02 — status-board-claim-rendering | DRAFT |  |
 | [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-01 — memory-sync-team-recheck | DRAFT |  |

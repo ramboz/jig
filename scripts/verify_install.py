@@ -242,6 +242,123 @@ def _looks_unscaffolded(project_root: Path) -> bool:
     return not (project_root / ".claude").exists()
 
 
+# ----------------------------------------------------------------------------
+# Scaffold seed-presence check (slice 048-06 AC #3)
+# ----------------------------------------------------------------------------
+#
+# The worked-example reference spec (slice 048-05) is emitted into a
+# greenfield `docs/specs/` — `001-adopt-jig/` (spec + bootstrap slice),
+# `002-first-spec/` (DRAFT stub), and a populated status board. The
+# completion summary confirms the seed is present so a scaffold that
+# dropped the worked example is reported as a failure (AC #3 / AC #4).
+#
+# The seed ships in BOTH `--with-machinery` and `--plugin-only` modes
+# (docs are emitted in both), so this check is mode-independent. It is,
+# however, greenfield-only: when `docs/specs/` already had user content
+# the seed is deliberately skipped, and the caller must NOT run this check
+# in that case (skipping a seed is not a failure — see `run_completion_summary`).
+
+
+_EXPECTED_SEED_FILES = (
+    "docs/specs/001-adopt-jig/spec.md",
+    "docs/specs/001-adopt-jig/slice-01-bootstrap.md",
+    "docs/specs/002-first-spec/spec.md",
+    "docs/specs/README.md",
+)
+
+
+def check_scaffold_seed_present(project_root: Path) -> CheckResult:
+    """The slice 048-05 worked-example seed is present under
+    `docs/specs/`. A populated status board (`README.md`) plus the
+    `001-adopt-jig` spec/slice and the `002-first-spec` stub must all
+    exist; a scaffold missing any of them dropped the worked example."""
+    missing = [
+        rel for rel in _EXPECTED_SEED_FILES
+        if not (project_root / rel).is_file()
+    ]
+    if missing:
+        return False, (
+            f"missing seed reference spec file(s): {', '.join(missing)}"
+        )
+    return True, (
+        f"worked-example seed present "
+        f"({len(_EXPECTED_SEED_FILES)} files under docs/specs/)"
+    )
+
+
+def run_completion_summary(
+    project_root: Path,
+    *,
+    with_machinery: bool,
+    seed_expected: bool,
+    out=None,
+) -> int:
+    """Run the scaffold-completion verification and print a compact,
+    human-readable summary (per-check PASS/FAIL + overall verdict) for
+    the `scaffold-init` wizard's closing report (slice 048-06).
+
+    Mode-awareness (the correctness nuance): the four machinery checks
+    (`skills` / `agents` / `hooks` / `settings`) validate `.claude/`
+    artifacts that exist ONLY in `--with-machinery` (in-repo) mode. In
+    `--plugin-only` mode that machinery lives in the installed plugin,
+    not the target, so running those checks would false-fail a perfectly
+    good plugin-only scaffold. They are therefore included only when
+    `with_machinery=True`. The seed/docs presence check (AC #3) runs in
+    BOTH modes — but only when `seed_expected=True`; a non-greenfield
+    scaffold legitimately skipped the seed and must not report it missing.
+
+    Returns 0 when every applicable check passed, 1 otherwise — so a
+    failed check is loud and actionable (AC #4), never a silent partial
+    scaffold."""
+    if out is None:
+        out = sys.stdout
+
+    mode_label = "in-repo (machinery)" if with_machinery else "plugin-only"
+
+    checks: list[tuple[str, Check]] = []
+    if with_machinery:
+        checks.extend(_SCAFFOLD_CHECKS)
+    if seed_expected:
+        checks.append(("seed", check_scaffold_seed_present))
+
+    out.write(f"\nScaffold verification — mode: {mode_label}\n")
+
+    if not checks:
+        # plugin-only + seed skipped (non-greenfield): nothing machinery-
+        # specific to verify here. Still emit an explicit, non-silent line.
+        out.write(
+            "  (no scaffold-mode checks apply in this mode; machinery "
+            "lives in the installed plugin)\n"
+        )
+        out.write("Scaffold complete and verified — 0/0 checks passed.\n")
+        return 0
+
+    failed = []
+    for name, check in checks:
+        passed, msg = check(project_root)
+        marker = "PASS" if passed else "FAIL"
+        out.write(f"  [{marker}] {name}: {msg}\n")
+        if not passed:
+            failed.append((name, msg))
+
+    total = len(checks)
+    passed_count = total - len(failed)
+    if failed:
+        out.write(
+            f"SCAFFOLD VERIFICATION FAILED — {passed_count}/{total} checks "
+            f"passed. Missing/broken:\n"
+        )
+        for name, msg in failed:
+            out.write(f"  - {name}: {msg}\n")
+        return 1
+
+    out.write(
+        f"Scaffold complete and verified — {passed_count}/{total} "
+        "checks passed.\n"
+    )
+    return 0
+
+
 def run_headless_scaffold(project_root: Path, out=None) -> int:
     """Run all scaffold-mode static checks; write one line per check +
     summary. Mirrors `run_headless`'s exit-code convention: 0 (all
