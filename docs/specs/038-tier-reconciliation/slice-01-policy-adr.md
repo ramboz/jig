@@ -21,7 +21,7 @@ of re-litigating "real vs. informational tiers" mid-build.
 
 **Acceptance Criteria:**
 
-1. **ADR file exists** at `docs/decisions/adr-0010-scaffold-tier-gated-install.md`
+1. **ADR file exists** at `docs/decisions/adr-0012-scaffold-tier-gated-install.md`
    with all house-style sections: Status, Decision Options Considered
    (≥2 options with pros/cons), Recommended Decision, Consequences,
    Scope, Relationship to other decisions, Open questions.
@@ -66,7 +66,7 @@ against a fixed contract rather than an open question.
    No deviation from the *decision content*.
 2. **Upgrade-vehicle framing revised mid-draft.** Maintainer flagged
    that `migrate.py copy-machinery` (spec 021) already provides additive
-   machinery-copy into a set-up project. ADR-0010's Recommended Decision /
+   machinery-copy into a set-up project. ADR-0012's Recommended Decision /
    Consequences / Relationships were updated to name copy-machinery as
    the leading upgrade vehicle (vs. a net-new entry point) before
    acceptance. This also surfaced that `_copy_skills_and_agents` has two

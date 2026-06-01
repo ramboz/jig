@@ -3,7 +3,7 @@ dependencies: []
 last_verified: 2026-05-29
 ---
 
-# ADR-0010: Scaffold-init tiers gate which skills install
+# ADR-0012: Scaffold-init tiers gate which skills install
 
 ## Status
 

@@ -13,7 +13,7 @@ matches the `scaffold.json` manifest and the wizard's `--has-tests`
 answer actually gates Tier 1 (today it copies all 14 regardless).
 
 **DoR:**
-- ✅ ADR-0010 accepted (slice 038-01) — gated-copy policy fixed.
+- ✅ ADR-0012 accepted (slice 038-01) — gated-copy policy fixed.
 - ✅ Wiring confirmed: `_select_tiers` maps `has_tests → tier-1` and
   `_enumerate_skills(installed_tiers)` already yields the gated
   `<tier>/<skill>` list used for the manifest (ADR-0007). The copy
@@ -101,7 +101,7 @@ manifest" in one slice.
    `scaffold.copy_machinery` without `installed_tiers`, so it defaults to
    `None` = copy-all — today's behavior, no regression. Real gating on the
    migrate path requires sourcing `installed_tiers` from the target's
-   `scaffold.json`, which ADR-0010 and slice 038-04 own. Recorded so a
+   `scaffold.json`, which ADR-0012 and slice 038-04 own. Recorded so a
    future reader does not mistake the un-threaded migrate caller for a
    missed call site. (Both reviewers flagged this as the deferred concern,
    not a defect.)

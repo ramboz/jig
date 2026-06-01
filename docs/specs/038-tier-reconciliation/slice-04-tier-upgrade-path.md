@@ -10,7 +10,7 @@ arch_review: true
 **Goal:** Make the **existing** `migrate.py copy-machinery` path
 (spec 021) tier-aware so a project that scaffolded the Tier-0 floor can
 later add Tier 1 (when tests / workflow appear) without re-scaffolding
-or hand-copying. This is the capability ADR-0010 commits to — "Tier 0
+or hand-copying. This is the capability ADR-0012 commits to — "Tier 0
 is a starting point, not a ceiling" — and it builds on the path that
 already copies machinery additively into a set-up project rather than
 inventing a new entry point.
@@ -18,7 +18,7 @@ inventing a new entry point.
 **DoR:**
 - ✅ Slice 038-02 landed — `_copy_skills_and_agents` (and its
   `copy_machinery()` caller) is tier-aware and threads `installed_tiers`.
-- ✅ ADR-0010 requires the upgrade *capability* and that it be
+- ✅ ADR-0012 requires the upgrade *capability* and that it be
   *additive*; `copy-machinery` already bypasses the fresh-scaffold
   `AlreadyScaffoldedError` guard and copies additively, so the guard
   problem is already solved — this slice does not re-solve it.
@@ -94,7 +94,7 @@ one-way door).
 
 ### Deviation log (after reconciliation)
 
-1. **Built on `copy-machinery`, no new entry point** (as ADR-0010 /
+1. **Built on `copy-machinery`, no new entry point** (as ADR-0012 /
    the slice intended). Added `migrate.py copy-machinery --add-tier TIER`
    (repeatable) + two manifest helpers in `scaffold.py`
    (`read_installed_tiers`, `bump_installed_tiers`). 8 new tests
@@ -103,7 +103,7 @@ one-way door).
    "edit-scaffold.json-then-rerun" flow.** The flag is discoverable,
    validates the tier name, and bumps `installed_tiers` +
    `installed_skills` atomically — no chance of a hand-edited manifest
-   drifting from disk. (Both options were left open by ADR-0010; chose
+   drifting from disk. (Both options were left open by ADR-0012; chose
    the flag.)
 3. **Additive = copies only the *delta* tier.** An upgrade copies just
    the newly-added tier's skills; existing tiers (and local edits to
@@ -121,7 +121,7 @@ one-way door).
    used by the no-manifest migrate case), **not** a time-boxed shim —
    resolving the principle-#6 watch.
 5. **016-04 (`update` skill) reconcile — stays DEFERRED, scope
-   narrowed.** `--add-tier` covers the *tier-upgrade* use case ADR-0010
+   narrowed.** `--add-tier` covers the *tier-upgrade* use case ADR-0012
    committed to, additively and without clobbering existing-tier edits.
    It does **not** supersede 016-04's core trigger ("I scaffolded jig N
    versions ago and want to update cleanly without overwriting my

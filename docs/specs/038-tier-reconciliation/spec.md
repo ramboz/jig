@@ -117,9 +117,9 @@ This is a **positioning decision**. ADR-first.
 implementation paths).
 
 ### Slices (finalized 2026-05-29 — policy decided: option (a) real
-gated tiers + first-class upgradeability; see ADR-0010)
+gated tiers + first-class upgradeability; see ADR-0012)
 
-1. **`038-01 policy-adr`** — ADR-0010 records the decision (real
+1. **`038-01 policy-adr`** — ADR-0012 records the decision (real
    gated tiers vs. informational; recommendation; consequences;
    source-of-truth rule). Accept before slice 2.
 2. **`038-02 gate-copy-by-installed-tiers`** —
@@ -134,13 +134,13 @@ gated tiers + first-class upgradeability; see ADR-0010)
    "install matches manifest" in one slice.
 3. **`038-03 reconcile-doc-inconsistencies`** — vision numbered list +
    README counts reconciled to `_TIER_SKILLS` (the source of truth per
-   ADR-0010): `vision-elicitation` added to the Tier 0 list,
+   ADR-0012): `vision-elicitation` added to the Tier 0 list,
    `contracts` placed at Tier 0, README "5 Tier 0 / 8-12 total" → 7 /
    14. Closed-spec or router-load-bearing edits follow ADR-0008's
    `## Amendments` rule (resolves ADR-0008's deferred drift #5).
 4. **`038-04 tier-upgrade-path`** — additive post-scaffold upgrade so a
    Tier-0 project can add Tier 1 later without re-scaffolding (the
-   capability ADR-0010 commits to). Builds on the **existing**
+   capability ADR-0012 commits to). Builds on the **existing**
    `migrate.py copy-machinery` path (spec 021), which already copies
    machinery additively into a set-up project and bypasses the
    fresh-scaffold guard — the work is making `copy_machinery` read
@@ -179,7 +179,7 @@ Q2 context-cost measurement. Retained for audit trail._
   (gating saves ≈ 1,218 ≈ 0.6% of a 200K window; bodies load only on
   invocation). Option (a) was chosen on promise-integrity, wizard-
   correctness, and routing-surface grounds — not token budget. See
-  ADR-0010 "What the numbers say about the dumb-zone rationale."
+  ADR-0012 "What the numbers say about the dumb-zone rationale."
 - **Q3 — RESOLVED.** Anti-horizontal-phasing confirmed defensible: the
   gating slice (038-02) crosses manifest + copy-logic but delivers one
   end-to-end "install matches manifest" outcome. The `verify_install`
@@ -203,8 +203,8 @@ Q2 context-cost measurement. Retained for audit trail._
 
 ## References
 
-- Policy decision: [ADR-0010 — Scaffold-init tiers gate which skills
-  install](../../decisions/adr-0010-scaffold-tier-gated-install.md)
+- Policy decision: [ADR-0012 — Scaffold-init tiers gate which skills
+  install](../../decisions/adr-0012-scaffold-tier-gated-install.md)
 - External review brief: [`brief-01-tier-reconciliation.md`](../../external-review/brief-01-tier-reconciliation.md)
 - Verification 2026-05-26 (re-confirmed 2026-05-29 at HEAD `b7117c5`):
   `_copy_skills_and_agents` confirmed tier-blind; `verify_install`

@@ -1568,7 +1568,7 @@ def copy_machinery(
     safety guarantees (executable-bit pinning, marker-based merge, refuse
     before mutation).
 
-    Tier resolution (slice 038-04, ADR-0010):
+    Tier resolution (slice 038-04, ADR-0012):
     - **Plain run** (`add_tiers` falsy): the on-disk skill set is gated to
       the tiers recorded in the target's `scaffold.json`. A project never
       scaffold-init'd has no manifest → tiers unknown → copy-all (the

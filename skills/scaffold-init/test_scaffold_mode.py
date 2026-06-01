@@ -1179,7 +1179,7 @@ class CopySkillDirExcludesFixturesTests(unittest.TestCase):
 class TierGatedCopyTests(unittest.TestCase):
     """Slice 038-02 — `_copy_skills_and_agents` gates by `installed_tiers`
     so the on-disk skill set matches the `scaffold.json` manifest
-    (ADR-0010; ADR-0007's derivation invariant now holds on BOTH sides).
+    (ADR-0012; ADR-0007's derivation invariant now holds on BOTH sides).
 
     Floor install (no test signal) = Tier-0 only; `--has-tests` adds
     Tier-1. Infrastructure (`_<name>` private modules, `agents/`) is never

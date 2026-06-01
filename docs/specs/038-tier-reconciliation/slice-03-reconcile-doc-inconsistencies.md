@@ -13,7 +13,7 @@ three secondary inconsistencies that have been latent for months.
 **DoR:**
 - ✅ Slice 038-02 landed — the gated install is the new reality the
   docs must describe (7 default-installed Tier-0 / 14 available).
-- ✅ ADR-0010's source-of-truth rule fixed: `_TIER_SKILLS` is
+- ✅ ADR-0012's source-of-truth rule fixed: `_TIER_SKILLS` is
   authoritative; docs reconcile *to it*, not the reverse.
 
 **Acceptance Criteria:**
@@ -70,7 +70,7 @@ verifiable, not aspirational.
    7 Tier 1". `README.md`: "5 Tier 0 skills" → "7 Tier 0 skills installed
    by default"; "8-12 skills total when complete" → "14 skills total
    across two tiers (Tier 1 adds on a test/workflow signal)". All
-   reconciled *to* `_TIER_SKILLS` per ADR-0010's source-of-truth rule
+   reconciled *to* `_TIER_SKILLS` per ADR-0012's source-of-truth rule
    (no tier reassignment — `contracts`/`vision-elicitation` keep their
    existing code-side tier).
 2. **Scope decision — only live positioning docs edited; historical
@@ -78,7 +78,7 @@ verifiable, not aspirational.
    five` surfaced hits in `docs/inbox.md` (the 035–042 cluster plan),
    `docs/research/*` (dated analysis citing the then-target "8-12
    skills"), `docs/specs/036-*` (the drift-tracking table that *records*
-   this very drift), and `ADR-0008` / `ADR-0010` (which *quote* the old
+   this very drift), and `ADR-0008` / `ADR-0012` (which *quote* the old
    README text as decision-time context). None are live claims a user
    reads to evaluate jig; the spec/ADR/research hits are accurate records
    of their time, and ADRs are immutable (Nygard). No ADR-0008
@@ -113,6 +113,6 @@ verifiable, not aspirational.
    `skills/vision-elicitation/worked-example-jig.md`. Deliberately left
    frozen (accurate historical records / immutable): `docs/inbox.md`
    (cluster plan), `docs/research/*` (dated analysis), `docs/specs/036-*`
-   (drift-tracking table), and `ADR-0008`/`ADR-0010` (which quote the old
+   (drift-tracking table), and `ADR-0008`/`ADR-0012` (which quote the old
    text as decision-time context). No ADR-0008 `## Amendments` block
    needed — no closed-spec in-body prose was edited.

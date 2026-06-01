@@ -415,7 +415,7 @@ def _enumerate_skills(installed_tiers: list) -> list:
     return out
 
 
-# ---------- Slice 038-04: post-scaffold tier upgrade (ADR-0010) ----------
+# ---------- Slice 038-04: post-scaffold tier upgrade (ADR-0012) ----------
 # These let `migrate.py copy-machinery` resolve and raise the installed
 # tier of an already-scaffolded project from its `scaffold.json`, so a
 # Tier-0 floor install can additively gain Tier 1 without re-scaffolding.
@@ -542,7 +542,7 @@ def _copy_skills_and_agents(
 
     Slice 016-01 (scaffold-mode); shared-module copy added 2026-05-20.
 
-    Slice 038-02 (tier gating, ADR-0010): `installed_tiers` filters which
+    Slice 038-02 (tier gating, ADR-0012): `installed_tiers` filters which
     user-facing skills are copied so the on-disk set matches the
     `scaffold.json` manifest (whose `installed_skills` is derived from the
     same tiers per ADR-0007). A skill is copied only when its tier (per

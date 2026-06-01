@@ -915,7 +915,7 @@ maintaining their scaffolded install across jig releases, or (b) a jig
 release that ships a security-shaped fix to a SKILL.md or hook script
 where stale copies in the wild become a concrete risk.
 
-**Resolution trigger:** Scope narrowed by spec 038-04 (2026-05-29) — the *tier-upgrade* part of this skill's job (additively adding a higher tier to an already-scaffolded project without overwriting existing-tier edits) is now handled by `migrate copy-machinery --add-tier` (ADR-0010); the remaining justification is the *version-refresh* case, which `copy-machinery`'s plain refresh still overwrites. So: ≥1 reported issue along the lines of "I scaffolded jig N versions ago and want to update cleanly without overwriting my edits", OR a security-grade fix to a copied artifact (hook script, SKILL.md bash), OR jig adopts per-file metadata headers (audit's Option C) for another reason that makes a SHA-compare cheaper.
+**Resolution trigger:** Scope narrowed by spec 038-04 (2026-05-29) — the *tier-upgrade* part of this skill's job (additively adding a higher tier to an already-scaffolded project without overwriting existing-tier edits) is now handled by `migrate copy-machinery --add-tier` (ADR-0012); the remaining justification is the *version-refresh* case, which `copy-machinery`'s plain refresh still overwrites. So: ≥1 reported issue along the lines of "I scaffolded jig N versions ago and want to update cleanly without overwriting my edits", OR a security-grade fix to a copied artifact (hook script, SKILL.md bash), OR jig adopts per-file metadata headers (audit's Option C) for another reason that makes a SHA-compare cheaper.
 
 (No DoR / AC / DoD until promotion.)
 
