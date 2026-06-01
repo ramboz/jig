@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: scaffold-init, spec-workflow, analyze
 tier: product/docs
 adr_required: false
@@ -25,6 +25,7 @@ without duplicating the deeper mechanical specs already open:
 - Spec 040 owns isolation-honesty wording.
 - Spec 046 owns scaffold artifact fidelity.
 - Spec 047 owns install contract verification.
+- Spec 045 owns review lifecycle evidence and transition gates.
 
 The work here is the connective layer: make jig's public story current,
 show users how to evaluate/adopt it, expose the gap response roadmap, and
@@ -56,6 +57,14 @@ reduce the reading cost of closed-spec amendments.
 5. **Keep the machine tight.** This spec should not turn jig into a
    broad organizational handbook. It adds just enough playbook surface to
    make the existing machinery legible.
+6. **Close the cold-start cliff.** A freshly scaffolded project should
+   open with a complete `DONE` worked-example spec and a deterministic
+   "scaffold complete and verified" signal. jig enforces little via hooks,
+   so a blank scaffold gives the model neither enforcement nor a pattern
+   to imitate — and it skips the workflow. A seeded reference spec plus a
+   completion check supply the missing pattern and assurance. Lifecycle
+   *enforcement* itself is delegated to spec 045 (review lifecycle gates),
+   not decided here.
 
 ## Non-goals
 
@@ -201,6 +210,17 @@ first-run guidance, and current-state summaries.
 4. **`048-04 amendment-effective-state-digest`** - Add a generated or
    scriptable digest of amendment-bearing artifacts so readers can find
    current truth without rereading historical drift blocks.
+5. **`048-05 seed-reference-spec`** - Emit a complete `DONE` worked-example
+   spec (`001-adopt-jig`) plus a `DRAFT` `002-first-spec` hand-off stub and
+   a populated status board, so a cold-start project has a faithful pattern
+   to imitate. Honest-by-construction: review boxes are satisfied by the
+   deterministic completion check (048-06), never a rubber-stamp subagent
+   verdict.
+6. **`048-06 scaffold-completion-verification`** - Run the existing
+   `verify_install.py` scaffold checks at the end of `scaffold-init` and
+   surface a pass/fail summary, so the user gets a deterministic "complete
+   and wired" signal. Reuses existing/047 checks; defines no new contract
+   and no new skill.
 
 ## Dependencies / coordination
 
@@ -211,6 +231,13 @@ first-run guidance, and current-state summaries.
   scaffolded documentation and first-run commands.
 - Slice 048-04 depends on ADR-0008 / spec 036 and must preserve the
   closed-spec drift policy rather than replacing it.
+- Slice 048-05 should coordinate with spec 046 (scaffold output must not
+  leak plugin-root/source paths) and emits a real spec that must pass
+  `spec_lint.py` like any other.
+- Slice 048-06 depends on 048-05 (the verifier's expected set includes the
+  seed) and coordinates with spec 047, which owns the contract surface —
+  048-06 *calls* the verifier, it does not redefine it. The re-runnable
+  on-demand verification skill is explicitly deferred until signal.
 - If a slice needs to change `docs/conventions.md`, stop and ask for
   explicit human approval before implementation.
 - The 2026-06-01 net-new gaps (Gap inventory C) are routed OUT of this
@@ -232,4 +259,5 @@ first-run guidance, and current-state summaries.
 - [docs/specs/040-isolation-honesty/spec.md](../040-isolation-honesty/spec.md)
 - [docs/specs/046-scaffold-artifact-fidelity/spec.md](../046-scaffold-artifact-fidelity/spec.md)
 - [docs/specs/047-install-contract-verification/spec.md](../047-install-contract-verification/spec.md)
+- [docs/specs/045-review-lifecycle-gates/spec.md](../045-review-lifecycle-gates/spec.md)
 - [ADR-0008: Closed-spec drift policy](../../decisions/adr-0008-closed-spec-drift-policy.md)

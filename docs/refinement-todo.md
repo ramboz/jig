@@ -19,6 +19,10 @@
 **Deferred:** Spec 034 (Federation tier) v1 enforces exactly one central per member with a clear error on second-federation attempt. Real shared libraries belonging to two product orgs (e.g., a UI kit consumed by two product federations) would need `central_repo` to become a list, with declared precedence for conventions / glossary / ADR merges — adding schema and merge-precedence complexity to slice 034-01. Surfaced by `/jig:clarify` on `docs/specs/034-federation-tier/spec.md` Q2 (Scope & Boundaries).
 **Resolution trigger:** First real shared-library user asks for multi-central support. Until then, `repos.yaml` schema design should leave the door open (treat `central_repo` as a scalar in v1 but reserve the option to widen to a list additively, not as a breaking change).
 
+### Decision: Re-runnable on-demand scaffold-verification command
+**Deferred:** Slice 048-06 wired the scaffold-completion verification into `scaffold-init`'s closing report (reusing `verify_install.py`'s scaffold-mode checks + the 048-05 seed check). A user-facing "check whether my project is still correctly wired" command — re-runnable any time after install to detect drift — is explicitly out of scope: the install-time signal is enough until a user actually hits the drift case. The plumbing already exists (`verify_install.py --mode scaffold headless` and `run_completion_summary`), so exposing it as a `/jig:` command is mostly surfacing, not new logic.
+**Resolution trigger:** A user reports drift / asks "is my project still wired?" (i.e. the install-time verdict is no longer sufficient because the tree changed after scaffold).
+
 ### ~~Decision: additionalContext format for Stop vs UserPromptSubmit hooks~~ — RESOLVED
 Resolved by [Slice 002-03](specs/002-memory-layer/spec.md) — `{ "continue": true, "additionalContext": "..." }` format confirmed in production via `jig-memory-scan` + `jig-task-capture` hooks.
 

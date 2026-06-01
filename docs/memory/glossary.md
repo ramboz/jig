@@ -117,3 +117,6 @@ When a closed (DONE or SUPERSEDED) spec's prose no longer matches reality becaus
 
 ## ## Amendments section
 The dated-entry append-only section ADR-0008 establishes for correcting drift in closed specs and load-bearing skill/router prose. One H2 `## Amendments` block at the end of the drifted artifact; each entry is `### YYYY-MM-DD — <one-line summary>` heading + body explaining what changed and why + a link to the slice/ADR/PR that caused the drift. In-body edits to the original prose remain forbidden. Mirrors deviation-log discipline.
+
+## Cold-start cliff
+The failure mode where a freshly scaffolded jig project skips the spec-driven workflow and review gates. jig enforces almost nothing via hooks (only the conventions.md spec-gate blocks); adherence relies on advisory skill/doc prose PLUS the gravitational pull of existing spec artifacts as a few-shot pattern. A blank scaffold has neither enforcement nor examples, so the model just codes. Mature repos (e.g. servo) follow the workflow because their populated docs/specs act as a worked example. Addressed by spec 048-05 (seed reference spec) + 048-06 (scaffold-completion verification).

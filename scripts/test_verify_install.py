@@ -393,6 +393,145 @@ class ScaffoldModeChecksTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
+# Slice 048-06 — scaffold-completion verification (seed check + summary)
+# --------------------------------------------------------------------------
+
+
+def _add_seed(project_root: Path) -> Path:
+    """Drop the slice 048-05 worked-example seed files under docs/specs/."""
+    specs = project_root / "docs" / "specs"
+    (specs / "001-adopt-jig").mkdir(parents=True, exist_ok=True)
+    (specs / "002-first-spec").mkdir(parents=True, exist_ok=True)
+    (specs / "001-adopt-jig" / "spec.md").write_text("# adopt jig\n")
+    (specs / "001-adopt-jig" / "slice-01-bootstrap.md").write_text("# bootstrap\n")
+    (specs / "002-first-spec" / "spec.md").write_text("# first spec\n")
+    (specs / "README.md").write_text("# status board\n")
+    return project_root
+
+
+class SeedPresenceCheckTests(unittest.TestCase):
+    """AC #3 — the worked-example seed is in the expected set."""
+
+    def test_seed_check_passes_when_all_files_present(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _add_seed(Path(td))
+            passed, msg = verify_install.check_scaffold_seed_present(project)
+            self.assertTrue(passed, msg)
+
+    def test_seed_check_fails_when_a_file_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _add_seed(Path(td))
+            (project / "docs/specs/001-adopt-jig/slice-01-bootstrap.md").unlink()
+            passed, msg = verify_install.check_scaffold_seed_present(project)
+            self.assertFalse(passed)
+            self.assertIn("slice-01-bootstrap.md", msg)
+
+    def test_seed_check_fails_when_status_board_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _add_seed(Path(td))
+            (project / "docs/specs/README.md").unlink()
+            passed, msg = verify_install.check_scaffold_seed_present(project)
+            self.assertFalse(passed)
+            self.assertIn("README.md", msg)
+
+
+class CompletionSummaryTests(unittest.TestCase):
+    """AC #1 / #2 / #4 + mode-awareness for run_completion_summary."""
+
+    def test_in_repo_good_scaffold_passes_including_seed(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            _add_seed(project)
+            buf = io.StringIO()
+            rc = verify_install.run_completion_summary(
+                project, with_machinery=True, seed_expected=True, out=buf,
+            )
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, msg=out)
+            self.assertIn("in-repo", out)
+            self.assertIn("seed", out)
+            self.assertIn("verified", out.lower())
+
+    def test_plugin_only_good_scaffold_passes_without_machinery_false_fail(self):
+        """A plugin-only scaffold has no .claude/ machinery — the machinery
+        checks must be skipped, not false-failed; the seed still verifies."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            # NB: no _make_fake_scaffold_root — there is no .claude/ tree.
+            project = _add_seed(Path(td))
+            buf = io.StringIO()
+            rc = verify_install.run_completion_summary(
+                project, with_machinery=False, seed_expected=True, out=buf,
+            )
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, msg=out)
+            self.assertIn("plugin-only", out)
+            # Machinery checks must NOT appear in plugin-only mode.
+            self.assertNotIn("[FAIL]", out)
+            self.assertNotIn("skills:", out)
+            self.assertIn("seed", out)
+
+    def test_missing_machinery_artifact_fails_loudly(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            _add_seed(project)
+            # Remove a required agent file.
+            (project / ".claude/agents/jig-reviewer.md").unlink()
+            buf = io.StringIO()
+            rc = verify_install.run_completion_summary(
+                project, with_machinery=True, seed_expected=True, out=buf,
+            )
+            out = buf.getvalue()
+            self.assertEqual(rc, 1, msg=out)
+            self.assertIn("FAILED", out)
+            self.assertIn("agents", out)
+
+    def test_missing_seed_file_fails_loudly(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            _add_seed(project)
+            (project / "docs/specs/001-adopt-jig/spec.md").unlink()
+            buf = io.StringIO()
+            rc = verify_install.run_completion_summary(
+                project, with_machinery=True, seed_expected=True, out=buf,
+            )
+            out = buf.getvalue()
+            self.assertEqual(rc, 1, msg=out)
+            self.assertIn("FAILED", out)
+            self.assertIn("seed", out)
+
+    def test_non_greenfield_skipped_seed_is_not_a_failure(self):
+        """When seed_expected=False (non-greenfield scaffold legitimately
+        skipped the seed), its absence must NOT be reported as a failure."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            # No seed files at all.
+            buf = io.StringIO()
+            rc = verify_install.run_completion_summary(
+                project, with_machinery=True, seed_expected=False, out=buf,
+            )
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, msg=out)
+            self.assertNotIn("seed", out)
+            self.assertIn("verified", out.lower())
+
+
+# --------------------------------------------------------------------------
 # Live-mode probe prompts (AC #4 live mode, AC #7 architect coverage)
 # --------------------------------------------------------------------------
 

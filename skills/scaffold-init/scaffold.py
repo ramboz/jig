@@ -935,6 +935,54 @@ def copy_machinery(plugin: Path, target: Path, *,
     _copy_hooks_and_register(plugin, target, force=force)
 
 
+def _specs_dir_has_content(target: Path) -> bool:
+    """Greenfield guard for the seed reference spec (slice 048-05,
+    Clarification Q1). True iff `target/docs/specs/` already contains a
+    user spec — i.e. any `*/spec.md` under it.
+
+    The empty status board (`docs/specs/README.md`) that the generic doc
+    copy emits is NOT spec content, so its presence does not block the
+    seed. Only a `<spec-dir>/spec.md` counts. Erring toward "has content"
+    is the safe side: a false positive merely skips the (optional) seed,
+    while a false negative would overwrite a real user spec."""
+    specs_dir = target / "docs" / "specs"
+    if not specs_dir.is_dir():
+        return False
+    for child in specs_dir.iterdir():
+        if child.is_dir() and (child / "spec.md").is_file():
+            return True
+    return False
+
+
+def _emit_seed_spec(template_root: Path, target: Path, subs: dict) -> None:
+    """Emit the worked-example reference spec (slice 048-05) into a
+    greenfield `docs/specs/`:
+
+      - `001-adopt-jig/spec.md` + `slice-01-bootstrap.md` (status: DONE),
+      - `002-first-spec/spec.md` (status: DRAFT hand-off stub),
+      - a populated `docs/specs/README.md` status board.
+
+    Greenfield-only (Clarification Q1): if `docs/specs/` already has spec
+    content, the seed is skipped silently and never overwrites the user's
+    work. The seed templates carry only the `{{PROJECT_NAME}}` substitution
+    and never leak `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths — they
+    read correctly inside the target tree (coordinated with spec 046)."""
+    if _specs_dir_has_content(target):
+        return
+    seed_root = template_root / "docs" / "specs" / "seed"
+    if not seed_root.is_dir():
+        return
+    specs_dst = target / "docs" / "specs"
+    for src in sorted(seed_root.rglob("*.md.template")):
+        rel = src.relative_to(seed_root)
+        dst_name = rel.with_suffix("")  # strip .template, leaves .md
+        # The seed's README.md.template overwrites the empty status board
+        # emitted by the generic doc copy (step 2); the spec/slice files
+        # land in their 001-adopt-jig / 002-first-spec subdirs.
+        dst = specs_dst / dst_name
+        copy_template(src, dst, subs)
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides = None,
              with_machinery: bool = True) -> None:
@@ -1010,14 +1058,27 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     # 2. docs/ structure from templates/docs/*.md.template (recursive).
     # people.md is conditional — generated only when team is detected.
+    # The seed reference spec (templates/docs/specs/seed/, slice 048-05) is
+    # excluded here and emitted separately by `_emit_seed_spec` so the
+    # greenfield-only guard (Clarification Q1) can gate it.
     docs_template_root = template_root / "docs"
+    seed_root = docs_template_root / "specs" / "seed"
     for src in docs_template_root.rglob("*.md.template"):
+        if seed_root in src.parents:
+            continue
         rel = src.relative_to(docs_template_root)
         dst_name = rel.with_suffix("")  # strip .template, leaves .md
         if dst_name.name == "people.md" and not signals.is_team:
             continue
         dst = target / "docs" / dst_name
         copy_template(src, dst, subs)
+
+    # 2b. Slice 048-05: emit the seed reference spec (001-adopt-jig +
+    # 002-first-spec stub + populated status board) into a greenfield
+    # docs/specs/. Greenfield-only (Clarification Q1): skipped silently
+    # when any spec already exists, so a migrate path / --force re-scaffold
+    # never overwrites the user's work.
+    _emit_seed_spec(template_root, target, subs)
 
     # 3. Directories that should exist (even if empty for now)
     (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
@@ -1157,6 +1218,15 @@ def main(argv: list[str]) -> int:
         runtime=ns.runtime,
     )
 
+    # Slice 048-06: capture seed-eligibility BEFORE scaffold() writes the
+    # seed. The worked-example seed (slice 048-05) is greenfield-only — it
+    # is emitted only when docs/specs/ had no prior spec content. We sample
+    # that condition now so the post-scaffold completion verification can
+    # tell "seed missing because the scaffold dropped it" (a failure) apart
+    # from "seed legitimately skipped because the project wasn't greenfield"
+    # (not a failure).
+    seed_expected = not _specs_dir_has_content(target)
+
     try:
         scaffold(target, plugin_root(), force=ns.force, overrides=overrides,
                  with_machinery=ns.with_machinery)
@@ -1174,6 +1244,22 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(f"scaffolded {target.name} → {target}")
+
+    # Slice 048-06: run the scaffold-completion verification as the closing
+    # report. Reuses verify_install.py's scaffold-mode checks (AC #2) — no
+    # second definition of "a complete scaffold". A failed check makes the
+    # exit status unmistakable (AC #4): we surface a non-zero exit so the
+    # wizard never reports a silent partial scaffold as success.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    import verify_install  # noqa: E402
+
+    verdict = verify_install.run_completion_summary(
+        target,
+        with_machinery=ns.with_machinery,
+        seed_expected=seed_expected,
+    )
+    if verdict != 0:
+        return 4
     return 0
 
 
