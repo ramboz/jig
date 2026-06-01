@@ -137,8 +137,8 @@
 | [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-02 - review-artifact-recorder | DRAFT |  |
 | [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-03 - lifecycle-transition-gates | DRAFT |  |
 | [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-04 - workflow-contract-alignment | DRAFT |  |
-| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | **DONE** |  |
-| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | DRAFT |  |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | **DONE** | Scaffold-mode docs rewritten via `copy_template(post_render=_rewrite_skill_md_paths)` gated on `with_machinery`; `--plugin-only` keeps `${CLAUDE_PLUGIN_ROOT}` paths |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | **DONE** | `scaffold.json.jig_version` + `brief.md` derived from `.claude-plugin/plugin.json` (no hardcoded version constant); `PluginManifestError` on absent/malformed/version-less manifest |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-01 - plugin-release-contract-validator | DRAFT |  |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-02 - scaffold-contract-validator | DRAFT |  |
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-01 - first-read-status-and-gap-map | **DONE** | README `## Status & roadmap` replaces the stale draft-status block + a 9-row gap-response map with three honest states (Landed / This spec / Planned) + a legend. Regression test `scripts/test_readme_status_current.py` pins stale-wording removal (AC#5) and the gap-table presence + owner-spec links (scoped to the table region). Craft blocker resolved: original "Fixed here" overstated the still-DRAFT 048-02/03/04 rows → relabeled "This spec". |

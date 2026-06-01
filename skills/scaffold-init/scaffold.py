@@ -25,9 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
 
 
-# Schema version for scaffold.json
-JIG_VERSION = "0.1.0"
-
 # Tier 0 always installs. Tier 1 is gated on test signals (per Spike 001a:
 # "default for most projects" = "most projects have tests, so most install tier-1").
 # Tier 2 is offered, never auto-installed.
@@ -88,6 +85,46 @@ def plugin_root() -> Path:
         return Path(env_root).resolve()
     # Fallback: scaffold.py lives at <plugin-root>/skills/scaffold-init/scaffold.py
     return Path(__file__).resolve().parents[2]
+
+
+class PluginManifestError(RuntimeError):
+    """Raised when `.claude-plugin/plugin.json` cannot yield a release version
+    (absent, malformed JSON, or missing/empty `version`). Slice 046-02 reads
+    the scaffold's recorded `jig_version` from this manifest — the single
+    source of truth — so a bad manifest must fail loudly rather than let
+    scaffold output record an invented version."""
+
+
+def _read_plugin_version(plugin: Path) -> str:
+    """Return the release version from `plugin/.claude-plugin/plugin.json`.
+
+    This is the canonical source for `scaffold.json.jig_version` (spec 046,
+    AC #1) — no production code hard-codes the release version. Raises
+    `PluginManifestError`, naming the manifest path and the problem, when the
+    manifest is absent, is malformed JSON, or lacks a non-empty `version`.
+    Callers read this before the first scaffold file write so a bad manifest
+    fails fast and leaves no partial scaffold (AC #3)."""
+    manifest_path = plugin / ".claude-plugin" / "plugin.json"
+    try:
+        raw = manifest_path.read_text()
+    except FileNotFoundError as exc:
+        raise PluginManifestError(
+            f"plugin manifest not found: {manifest_path} — cannot derive the "
+            "jig version for scaffold metadata."
+        ) from exc
+    try:
+        manifest = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise PluginManifestError(
+            f"plugin manifest {manifest_path} is not valid JSON: {exc}"
+        ) from exc
+    version = manifest.get("version")
+    if not version:
+        raise PluginManifestError(
+            f"plugin manifest {manifest_path} has no non-empty 'version' "
+            "field — cannot derive the jig version for scaffold metadata."
+        )
+    return version
 
 
 class UnrenderedPlaceholderError(RuntimeError):
@@ -1060,9 +1097,13 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     project_name = target.name
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Slice 046-02: derive the version from the plugin manifest (single
+    # source of truth) here — before the first file write below — so a
+    # missing/malformed manifest fails fast and leaves no partial scaffold.
+    jig_version = _read_plugin_version(plugin)
     subs = {
         "PROJECT_NAME": project_name,
-        "JIG_VERSION": JIG_VERSION,
+        "JIG_VERSION": jig_version,
         "TIMESTAMP": timestamp,
     }
 
