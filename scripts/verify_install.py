@@ -141,6 +141,7 @@ _EXPECTED_HOOK_SCRIPTS = (
     "jig-context-check.sh",
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
+    "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
     "jig-spec-gate.sh",
     "jig-task-capture.sh",
     "jig-telemetry.sh",
