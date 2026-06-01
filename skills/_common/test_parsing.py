@@ -9,8 +9,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from parsing import (
+    FRONTMATTER_TRUTHY,
+    check_deviation_log,
     find_slice_file,
     find_slice_section,
+    frontmatter_flag_truthy,
     iter_slices,
     load_slice,
     parse_frontmatter,
@@ -554,6 +557,51 @@ class KindFrontmatterTests(unittest.TestCase):
         fields, _ = parse_frontmatter(new)
         self.assertEqual(fields["kind"], "spike")
         self.assertEqual(fields["status"], "DRAFT")
+
+
+class FrontmatterFlagTruthyTests(unittest.TestCase):
+    """Slice 045-03 (must-do d): the single shared truthy predicate that
+    `workflow.slice_needs_arch_review` and `review_evidence._arch_review_flag`
+    both consume so they cannot drift."""
+
+    def test_constant_value(self):
+        self.assertEqual(FRONTMATTER_TRUTHY, ("true", "yes", "on", "1"))
+
+    def test_truthy_tokens(self):
+        for tok in ("true", "yes", "on", "1", "TRUE", "Yes", "ON", " on "):
+            self.assertTrue(frontmatter_flag_truthy(tok), f"{tok!r}")
+
+    def test_falsey_tokens(self):
+        for tok in ("false", "no", "off", "0", "maybe", "", "  "):
+            self.assertFalse(frontmatter_flag_truthy(tok), f"{tok!r}")
+
+    def test_non_string_is_false(self):
+        # Defensive: list / None / other YAML shapes never indicate truthy.
+        for val in (None, [], ["true"], 1, True):
+            self.assertFalse(frontmatter_flag_truthy(val), f"{val!r}")
+
+
+class CheckDeviationLogTests(unittest.TestCase):
+    """Slice 045-03: `check_deviation_log` lifted from land.py so the
+    transition gate (ADR-0014 §5) reuses the same heading predicate."""
+
+    def test_plain_heading_present(self):
+        self.assertTrue(check_deviation_log("## Slice\n\n### Deviation log\n\nx\n"))
+
+    def test_after_reconciliation_variant_present(self):
+        self.assertTrue(check_deviation_log(
+            "### Deviation log (after reconciliation)\n\nx\n"
+        ))
+
+    def test_case_insensitive(self):
+        self.assertTrue(check_deviation_log("### DEVIATION LOG\n"))
+
+    def test_absent(self):
+        self.assertFalse(check_deviation_log("## Slice\n\n**Goal:** x.\n"))
+
+    def test_requires_h3_not_h2(self):
+        # An H2 `## Deviation log` is not the slice's deviation-log subsection.
+        self.assertFalse(check_deviation_log("## Deviation log\n\nx\n"))
 
 
 if __name__ == "__main__":

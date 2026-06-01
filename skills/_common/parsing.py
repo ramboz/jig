@@ -44,6 +44,46 @@ from collections import namedtuple
 from pathlib import Path
 
 
+# Tokens treated as truthy in a YAML-lite frontmatter boolean-ish field
+# (e.g. a slice's `arch_review:`). The YAML-permissive set so a hand-edit
+# isn't punished by token choice; PyYAML is not a jig dependency, so the
+# set is hardcoded. Slice 045-03 lifts this here from the two prior copies
+# (`workflow.py:_ARCH_REVIEW_TRUTHY` + `review_evidence._ARCH_REVIEW_TRUTHY`)
+# so the orchestrator that *spawns* the arch pass and the gate that
+# *requires* its evidence read one source and cannot drift. It lives in
+# `parsing.py` — not `review_evidence.py` — because reading a truthy
+# frontmatter flag is a generic parsing concern, and `workflow.py` already
+# imports `parsing` (so it need not depend on a review-specific module just
+# for a truthiness tuple).
+FRONTMATTER_TRUTHY = ("true", "yes", "on", "1")
+
+
+def frontmatter_flag_truthy(value) -> bool:
+    """Return True iff `value` is a recognized truthy frontmatter token
+    (`true`/`yes`/`on`/`1`, case-insensitive). Conservative: any non-string
+    (list/None/other YAML shape) or unrecognized token is False."""
+    if not isinstance(value, str):
+        return False
+    return value.strip().lower() in FRONTMATTER_TRUTHY
+
+
+# Slice 007-01 introduced this `### Deviation log` heading-presence check in
+# `land.py`; slice 045-03 lifted it here so the transition gate can reuse the
+# SAME predicate (ADR-0014 §5: "045-03 should share that predicate … a
+# `_common` move is a reasonable refactor") without a cross-skill import or a
+# second copy of the regex. `land.py` re-exports it for its callers.
+_DEVIATION_LOG_RE = re.compile(r"(?im)^###\s+deviation\s+log\b")
+
+
+def check_deviation_log(section: str) -> bool:
+    """Look for a `### Deviation log` (case-insensitive prefix) within the
+    slice section. `### Deviation log` and `### Deviation log (after
+    reconciliation)` both count. Heading-presence ONLY — whether the log is
+    real prose vs. the template's `_TODO.` stub is attested by the
+    reconciliation reviewer's verdict, not re-derived here (ADR-0014 §5)."""
+    return bool(_DEVIATION_LOG_RE.search(section))
+
+
 class SliceLookupError(RuntimeError):
     """Raised when a slice fragment can't be uniquely resolved in a spec."""
 

@@ -210,6 +210,23 @@ before `transition <slice> REVIEWED`:
   `[blocker]`-tagged entries block; `[nit]`-tagged entries and
   `needs-changes` become reconciliation-log items.
 
+**The gate is mechanical, not advisory (slice 045-03 / [ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md) §5).**
+`workflow.py transition` now *refuses* the `REVIEWED` / `RECONCILED` /
+`DONE` moves unless the required review evidence — recorded with
+`review.py record-review` as `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md`
+— exists and clears (`verdict: pass`). `REVIEWED` requires
+`compliance` + `craft` (+ `arch` when the slice declares
+`arch_review: true`); `RECONCILED` requires the `reconciliation` verdict
+**and** a `### Deviation log` subsection; `DONE` re-validates the whole
+set (in addition to the existing `dependencies:` check). A refusal names
+the missing/invalid artifact and the `record-review` command to produce
+it. The gate enforces *evidence consistency*, not human sign-off (it
+lives in the agent's trust boundary per [ADR-0011](../../docs/decisions/adr-0011-spec-gate-model.md)).
+Bypass it for a deliberate out-of-band flow by setting
+`JIG_REVIEW_EVIDENCE_GATE=0` (also `false`/`off`/`no`) — the status still
+transitions and the `DONE` dependency check still runs; only the evidence
+check is skipped.
+
 After all required passes pass:
 
 4. Address any reviewer findings, adding regression tests for any real

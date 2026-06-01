@@ -35,7 +35,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from _common.parsing import (
+    FRONTMATTER_TRUTHY,
     SliceLookupError,
+    frontmatter_flag_truthy,
     load_slice,
     parse_frontmatter,
 )
@@ -254,14 +256,14 @@ def parse_verdict_file(path) -> VerdictRecord:
     return VerdictRecord(path, fields, problems, clears)
 
 
-# Must match `workflow.py`'s `_ARCH_REVIEW_TRUTHY` exactly: the orchestrator
-# (`slice_needs_arch_review`) spawns the arch pass on any of these tokens, so
-# the evidence gate must require arch evidence for the same set — otherwise a
-# slice authored `arch_review: yes`/`on`/`1` triggers an arch pass yet clears
-# REVIEWED without arch evidence. Slice 045-03 should unify both readers behind
-# a single shared predicate (e.g. lift this into `_common`) so they cannot
-# drift; until the gate is wired, keeping the two tuples identical suffices.
-_ARCH_REVIEW_TRUTHY = ("true", "yes", "on", "1")
+# Slice 045-03 (must-do d): the arch-review truthy set is now owned by
+# `_common.parsing.FRONTMATTER_TRUTHY` and shared with
+# `workflow.slice_needs_arch_review` so the orchestrator that *spawns* the
+# arch pass and this gate that *requires* its evidence cannot drift (the
+# 045-02 reviewer's Medium finding). The module-level name is kept as an
+# alias to that single source — pinned to be the SAME object by
+# `ArchReviewTruthyUnificationTests`.
+_ARCH_REVIEW_TRUTHY = FRONTMATTER_TRUTHY
 
 
 def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
@@ -269,7 +271,8 @@ def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
 
     Returns True iff the slice declares a truthy `arch_review` token
     (`true`/`yes`/`on`/`1`, case-insensitive — same set as
-    `workflow.py:slice_needs_arch_review`). Conservative: any miss (no
+    `workflow.py:slice_needs_arch_review`, now via the shared
+    `frontmatter_flag_truthy` predicate). Conservative: any miss (no
     frontmatter, field absent, unrecognized value) returns False. Raises
     `EvidenceError` only when the slice itself can't be resolved (the caller
     wants that surfaced as an invalid-target diagnostic).
@@ -281,7 +284,7 @@ def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
         raise EvidenceError(str(exc)) from exc
     body = loc.text[loc.start:loc.end]
     fields, _ = parse_frontmatter(body)
-    return str(fields.get("arch_review", "")).strip().lower() in _ARCH_REVIEW_TRUTHY
+    return frontmatter_flag_truthy(fields.get("arch_review", ""))
 
 
 def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
