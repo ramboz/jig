@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: scaffold-init
 tier: scaffold mode
 adr_required: false

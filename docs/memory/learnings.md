@@ -323,3 +323,20 @@ Surfaced in slice 048-04 (amendment digest). A scanner that greps `docs/` for a 
 **Why the compliance pass caught it and craft didn't:** the compliance reviewer ran the digest against the *real repo* and read ADR-0008; the craft reviewer validated the parsing logic in isolation against synthetic fixtures. Running new read-only tooling against the live tree (not just fixtures) is a cheap, high-signal review step for any scanner/report.
 
 Provenance: slice 048-04 compliance review (jig:reviewer), 2026-06-01.
+
+## Scaffold doc templates render into two install shapes — `${CLAUDE_PLUGIN_ROOT}` paths break in scaffold mode
+The `templates/docs/*.md.template` + `CLAUDE.md.template` files render for BOTH
+install shapes: `--plugin-only` (machinery stays under the plugin root) and the
+default in-repo scaffold (machinery copied to `.claude/skills/jig-*`). A
+`${CLAUDE_PLUGIN_ROOT}/skills/<name>/...` command path in a doc template is correct
+for plugin-only but **silently broken in a scaffolded project** — the env var is
+unset there and the helper actually lives at `.claude/skills/jig-<name>/...`. A real
+scaffold verification (2026-05-27) found the documented stocktake command failing for
+exactly this reason; slice 046-01 was the fix. **Fix pattern:** don't hard-code either
+shape into the template — render normally, then in scaffold mode apply the SAME
+`_rewrite_skill_md_paths` transform SKILL.md bodies already get, gated on
+`with_machinery` (`copy_template(..., post_render=...)`); plugin-only passes `None`
+and keeps the plugin-root path. **Generalizable lesson:** any new `${CLAUDE_PLUGIN_ROOT}`
+reference added to an adopter-facing doc template must survive the scaffold-mode rewrite
+(or be install-shape-aware), and generated docs should be tested by *running* the commands
+they document inside a temp scaffold, not just asserting on strings.

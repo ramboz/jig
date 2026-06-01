@@ -137,7 +137,7 @@
 | [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-02 - review-artifact-recorder | DRAFT |  |
 | [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-03 - lifecycle-transition-gates | DRAFT |  |
 | [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-04 - workflow-contract-alignment | DRAFT |  |
-| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | DRAFT |  |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | **DONE** |  |
 | [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | DRAFT |  |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-01 - plugin-release-contract-validator | DRAFT |  |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-02 - scaffold-contract-validator | DRAFT |  |
