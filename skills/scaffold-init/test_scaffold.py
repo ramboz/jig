@@ -1766,5 +1766,84 @@ class CompletionVerificationTests(unittest.TestCase):
         self.assertIn("FAILED", buf.getvalue())
 
 
+class AdoptionHandoffTests(unittest.TestCase):
+    """Slice 048-03 — a freshly scaffolded project exposes the adoption /
+    readiness guidance: docs/adoption-readiness.md is copied into the
+    target so links resolve locally, CLAUDE.md carries a short pointer to
+    it (not the body), and nothing leaks a plugin-root or source path."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adopt-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        result = run_scaffold(self.target)
+        self.assertEqual(
+            result.returncode, 0,
+            f"scaffold.py failed: stderr={result.stderr}\nstdout={result.stdout}",
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read(self, rel: str) -> str:
+        return (self.target / rel).read_text()
+
+    # AC #3 — the guide is copied into the scaffolded tree.
+    def test_guide_copied_into_target(self):
+        self.assertTrue(
+            (self.target / "docs/adoption-readiness.md").is_file(),
+            "docs/adoption-readiness.md must be copied into the scaffolded "
+            "project so its links resolve locally (AC #3)",
+        )
+
+    # AC #1 / AC #2 — CLAUDE.md carries a short pointer, not the guide body.
+    def test_claude_md_points_but_does_not_inline(self):
+        claude = self._read("CLAUDE.md")
+        self.assertIn(
+            "docs/adoption-readiness.md", claude,
+            "CLAUDE.md must point at the adoption guide (AC #1)",
+        )
+        # The guide's distinctive section content must NOT be inlined into
+        # the always-loaded CLAUDE.md (AC #2 — a pointer, not the body).
+        self.assertNotIn(
+            "Your first 30 minutes", claude,
+            "CLAUDE.md must carry a short pointer, not the guide body (AC #2)",
+        )
+
+    # {{PROJECT_NAME}} substituted; no unrendered placeholder.
+    def test_project_name_substituted(self):
+        guide = self._read("docs/adoption-readiness.md")
+        self.assertIn("demo-project", guide,
+                      "the guide must substitute {{PROJECT_NAME}}")
+        self.assertNotIn("{{", guide, "the guide has an unrendered placeholder")
+
+    # AC #5 — no plugin-root / source-checkout leakage in the handoff.
+    def test_handoff_has_no_path_leakage(self):
+        for rel in ("docs/adoption-readiness.md", "CLAUDE.md"):
+            text = self._read(rel)
+            self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text,
+                             f"{rel} leaks plugin root (AC #5)")
+            self.assertNotIn(str(REPO_ROOT), text,
+                             f"{rel} leaks source-checkout path (AC #5)")
+
+    # AC #3 — every relative link in the guide resolves inside the target.
+    def test_guide_links_resolve_in_target(self):
+        guide_path = self.target / "docs/adoption-readiness.md"
+        link_re = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+        unresolved = []
+        for href in link_re.findall(guide_path.read_text()):
+            href = href.split("#", 1)[0].strip()
+            if not href or href.startswith(("http://", "https://", "mailto:")):
+                continue
+            if not (guide_path.parent / href).resolve().exists():
+                unresolved.append(href)
+        self.assertEqual(
+            unresolved, [],
+            f"adoption guide has links that don't resolve in the scaffolded "
+            f"tree (AC #3): {unresolved}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

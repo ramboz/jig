@@ -924,6 +924,111 @@ def stale(project_dir: Path, days: int = 90) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------- Slice 048-04: amendment-effective-state digest ----------
+
+# A closed record's "current truth" lives under a `## Amendments` section
+# (per ADR-0010): the original prose is preserved in place and a dated
+# entry overrides it. This digest indexes those overrides so a reader finds
+# current state without rereading every historical drift block. The regexes
+# mirror the ones proven in scripts/test_closed_spec_drift_sweep.py. Em-dash,
+# en-dash, or hyphen is accepted as the date↔title separator.
+_AMENDMENTS_HEADING_RE = re.compile(r"^## Amendments\s*$", re.MULTILINE)
+_AMENDMENT_ENTRY_RE = re.compile(
+    r"^###\s+(\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.+?)\s*$", re.MULTILINE,
+)
+# ```-fenced regions: an illustrative `## Amendments` example shown as
+# documentation (e.g. ADR-0008, which documents the amendment *format* in a
+# fenced block) is NOT a real amendment and must not enter the digest.
+_CODE_FENCE_RE = re.compile(r"(?ms)^[ \t]*```.*?^[ \t]*```[ \t]*$")
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove ```-fenced code blocks so a `## Amendments` heading shown
+    *inside* a fence (an illustrative example, not a live amendment) is not
+    mistaken for a real one."""
+    return _CODE_FENCE_RE.sub("", text)
+
+
+def _amendments_section(text: str) -> str:
+    """Return the body after a `## Amendments` heading up to the next `## `
+    heading (or EOF), or '' if the artifact has no amendments section.
+    Fenced code blocks are stripped first so documented examples don't
+    register as amendments."""
+    text = _strip_code_fences(text)
+    m = _AMENDMENTS_HEADING_RE.search(text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    nxt = re.search(r"^## ", rest, re.MULTILINE)
+    return rest if nxt is None else rest[: nxt.start()]
+
+
+def find_amendment_artifacts(project_dir: Path):
+    """Scan amendment-bearing artifacts under `docs/specs/` (spec.md +
+    slice files) and `docs/decisions/` (ADRs). Return a list of
+    (relative_posix_path, [(date, title), ...]) for every artifact that
+    carries a `## Amendments` section with at least one dated entry.
+    Sorted by path; entries within each artifact sorted by date. Read-only
+    — never modifies any artifact (ADR-0010: history is preserved)."""
+    docs = project_dir / "docs"
+    candidates = []
+    specs_dir = docs / "specs"
+    if specs_dir.is_dir():
+        candidates.extend(specs_dir.rglob("*.md"))
+    decisions_dir = docs / "decisions"
+    if decisions_dir.is_dir():
+        candidates.extend(decisions_dir.glob("*.md"))
+
+    results = []
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        body = _amendments_section(text)
+        if not body:
+            continue
+        entries = sorted(
+            (m.group(1), m.group(2).strip())
+            for m in _AMENDMENT_ENTRY_RE.finditer(body)
+        )
+        if not entries:
+            continue
+        results.append((path.relative_to(project_dir).as_posix(), entries))
+    results.sort(key=lambda r: r[0])
+    return results
+
+
+def amendment_digest(project_dir: Path) -> str:
+    """Render the amendment digest to a string. Read-only and never gating
+    (always exits 0). Indexes the `## Amendments` overrides on closed
+    records (ADR-0010) so a reader sees current truth without rereading the
+    preserved historical prose."""
+    artifacts = find_amendment_artifacts(project_dir)
+    lines = ["# Amendment digest", ""]
+    if not artifacts:
+        lines.append(
+            "No amendment-bearing artifacts found under docs/specs/ or "
+            "docs/decisions/."
+        )
+        return "\n".join(lines) + "\n"
+    n_entries = sum(len(entries) for _, entries in artifacts)
+    lines.append(
+        f"Effective overrides recorded under `## Amendments` in closed "
+        f"records (ADR-0010); the original prose is preserved in place. "
+        f"{n_entries} amendment(s) across {len(artifacts)} artifact(s)."
+    )
+    lines.append("")
+    for rel, entries in artifacts:
+        # Heading is a markdown link so the path is both visible (CLI) and
+        # click-navigable back to the source if the digest is rendered.
+        lines.append(f"## [{rel}]({rel})")
+        for date, title in entries:
+            lines.append(f"- {date} — {title}")
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 # ---------- Slice 003-03: reserve-spec-on-main ----------
 
 # Valid slug shape: starts with lowercase letter; lowercase letters,
@@ -1594,6 +1699,16 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("spec", help="path to spec.md")
     pa.add_argument("slice",
                     help="slice name or fragment (case-insensitive substring)")
+
+    # Slice 048-04: read-only digest of the `## Amendments` overrides on
+    # closed records (ADR-0010) — current truth without rereading drift.
+    pam = sub.add_parser(
+        "amendments",
+        help="digest the `## Amendments` overrides on closed records "
+             "under docs/specs/ and docs/decisions/ (slice 048-04)",
+    )
+    pam.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
     return p
 
 
@@ -1624,6 +1739,8 @@ def main(argv: list) -> int:
         elif ns.command == "arch-review-needed":
             needed = slice_needs_arch_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "amendments":
+            sys.stdout.write(amendment_digest(Path(ns.project_dir)))
     except StatusBoardRaceError as exc:
         # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
         # Must be caught before the generic `WorkflowError → 2` handler so

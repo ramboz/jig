@@ -32,6 +32,10 @@ out of the way after.
 **Not for:** devs who want a maximalist skill marketplace; devs who
 want their tooling to make architectural decisions for them.
 
+> **Deciding whether to adopt jig?** See the
+> [adoption & readiness guide](adoption-readiness.md) — who it's for, who
+> should wait, prerequisites, and a readiness checklist.
+
 ## The core problem
 
 Claude Code is powerful but deliberately unopinionated about *project
