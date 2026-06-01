@@ -11,9 +11,11 @@ product state and show where each known comparison gap is being handled.
 
 **DoR:**
 - The Mysticat-vs-jig comparison findings are available in the spec
-  overview.
+  overview, including the 2026-06-01 re-review Gap inventory (the canonical
+  source list for the gap-response table).
 - Specs 033, 038, 040, 046, and 047 remain the source of truth for their
-  mechanical decisions.
+  mechanical decisions (038 and 040 have since landed; 033/046/047 remain
+  DRAFT).
 - No concurrent README edit is in flight for specs 038 or 040.
 
 **Acceptance Criteria:**
@@ -26,7 +28,14 @@ product state and show where each known comparison gap is being handled.
    contains a compact gap-response table covering at least: cross-tool
    portability, adoption/readiness docs, stale first-read status,
    amendment readability, tier truth, isolation honesty, scaffold
-   fidelity, and install contract verification.
+   fidelity, and install contract verification. It also reflects the
+   net-new gaps from the spec overview's 2026-06-01 Gap inventory
+   (security/secrets floor, permission deny-rules, AI-usage disclosure,
+   baseline-alignment depth, operating-mode/substrate framing,
+   model-routing guidance, config-evolution discipline, ADR-template
+   parity), each routed to its owner; to keep the first-read surface lean,
+   the README table may summarize these and link to the spec's full routed
+   inventory rather than reproduce every row.
 3. **Promises are scoped.** The public docs distinguish "supported
    today" from "planned/deferred" for Claude scaffold/plugin mode,
    future Codex support, strict reviewer isolation, and tier gating.
