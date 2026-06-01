@@ -149,3 +149,15 @@ Resolved by extending `_copy_skills_and_agents` in `skills/scaffold-init/scaffol
 - Or: add a `workflow.py routing-stats` subcommand that reads `.claude/skill-usage.jsonl` and surfaces the routing histogram?
 - Or: defer entirely to a future `SubagentStart` event (per the existing SubagentStart deferred entry above)?
 **Mitigation idea:** Cheapest first cut: extend `jig-telemetry.sh` to also fire on `UserPromptSubmit` and log the prompt prefix + detected slash command — gives a coarse "what skills did this session try to invoke" record. Pair with a manual review pass after 2 weeks (same cadence as the existing "Skill telemetry granularity" entry).
+
+### Decision: Code-staleness hard-gating for review evidence
+**Deferred:** [ADR-0014](decisions/adr-0014-review-evidence-model.md) (spec 045) makes the review-evidence gate check existence + frontmatter parse + `verdict: pass`. It does NOT detect *stale-but-passing* evidence — a `pass` artifact whose `reviewed_at` predates a later change to the slice's deliverable. The supersession case (a `fail`/`needs-changes` not yet overwritten by a later `pass`) IS enforced — it reduces to `verdict != pass`, which the gate already blocks; only the deliverable-changed-after-pass case is deferred. Hard-blocking it would reuse the `workflow.py stale` git-log/mtime machinery (slice 015-03) to compare the deliverable's last change against `reviewed_at`.
+**Resolution trigger:** First incident where stale-but-passing evidence lets a materially-changed slice transition to `REVIEWED`/`DONE` without re-review. Until then, staleness is at most a `check-reviews` warning, not a gate.
+
+### Decision: Soft `Stop`-hook reconciliation nudge
+**Deferred:** [ADR-0014](decisions/adr-0014-review-evidence-model.md) §6 puts the hard reconciliation enforcement in `workflow.py transition` (the gate) and — per [ADR-0011](decisions/adr-0011-spec-gate-model.md) — keeps hooks soft (deliberateness signals, not hard gates). A *soft* `Stop`-hook that emits `additionalContext` like "slice NNN-NN is `REVIEWED` but not `RECONCILED` — don't forget to reconcile" (mirroring `jig-boundary-change-warn` / `jig-task-capture`) is named as a deferred enhancement; no slice reserved.
+**Resolution trigger:** Observed forgotten-reconciliation cases in real sessions (a slice sits `REVIEWED`-but-not-`RECONCILED` and is mistakenly treated as done). Until then the transition gate is sufficient and the nudge is noise.
+
+### Decision: CI consumption of `check-reviews`
+**Deferred:** Spec 045 keeps local workflow helpers as the source of truth (explicit non-goal: no CI-only enforcement). [ADR-0014](decisions/adr-0014-review-evidence-model.md) makes the evidence validator runnable, so CI *could* later assert the evidence set on a PR — but no CI wiring is built.
+**Resolution trigger:** A CI redesign that wants to enforce review evidence on PRs (e.g., a team that does not trust local-only gating). The helper surface is already CI-ready; this is wiring, not new logic.
