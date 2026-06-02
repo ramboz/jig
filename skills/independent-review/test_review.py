@@ -1714,6 +1714,410 @@ class WorkflowMdMentionsSnapshotTests(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# Slice 045-02 — review-artifact-recorder CLI (record-review / check-reviews)
+# ---------------------------------------------------------------------------
+
+
+def _make_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
+                          *, arch_review: bool = False) -> Path:
+    """Create `spec_dir/spec.md` + a sibling `slice-NN-<slug>.md` file in
+    a temp dir (NOT the real docs/specs/ tree). Returns the spec.md path."""
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    spec = spec_dir / "spec.md"
+    spec.write_text(
+        "---\nstatus: IN_PROGRESS\n---\n\n# Spec\n\n## Overview\n\nStuff.\n"
+    )
+    fm = "---\nstatus: IN_PROGRESS\ndependencies: []\n"
+    if arch_review:
+        fm += "arch_review: true\n"
+    fm += "---\n"
+    (spec_dir / f"slice-{slice_no}-{slug}.md").write_text(
+        f"{fm}\n## Slice 0XX-{slice_no} — {slug}\n\n**Goal:** placeholder.\n"
+    )
+    return spec
+
+
+class RecordReviewTests(unittest.TestCase):
+    """Slice 045-02 AC #1: `review.py record-review` writes a verdict file
+    for a (slice, pass) with all ADR-required frontmatter fields, plus the
+    freeform summary body."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-rec-"))
+        self.spec = _make_spec_with_slice(self.tmp / "045-x", "02", "foo")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, *args, summary="## VERDICT\npass\n\n## REASONING\nok.\n"):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review", *args],
+            input=summary, capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def _evidence_file(self, pass_name: str) -> Path:
+        return self.spec.parent / "reviews" / f"slice-02-{pass_name}.md"
+
+    def test_writes_evidence_file_at_canonical_path(self):
+        r = self._record(str(self.spec), "0XX-02",
+                         "--pass", "compliance",
+                         "--verdict", "pass",
+                         "--reviewer", "jig:reviewer",
+                         "--prompt-source", "review.py implementation x")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        f = self._evidence_file("compliance")
+        self.assertTrue(f.is_file(), f"missing evidence file: {f}")
+
+    def test_evidence_has_required_frontmatter_fields(self):
+        self._record(str(self.spec), "0XX-02",
+                     "--pass", "compliance",
+                     "--verdict", "pass",
+                     "--reviewer", "jig:reviewer",
+                     "--prompt-source", "review.py implementation x")
+        text = self._evidence_file("compliance").read_text()
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(text)
+        for key in ("slice", "pass", "verdict", "reviewer",
+                    "reviewed_at", "prompt_source"):
+            self.assertIn(key, fields,
+                          f"frontmatter must carry '{key}' (ADR §2)")
+        self.assertEqual(fields["pass"], "compliance")
+        self.assertEqual(fields["verdict"], "pass")
+        self.assertEqual(fields["reviewer"], "jig:reviewer")
+
+    def test_reviewed_at_is_iso8601(self):
+        self._record(str(self.spec), "0XX-02",
+                     "--pass", "craft", "--verdict", "pass",
+                     "--reviewer", "pr-review",
+                     "--prompt-source", "review.py pr-review x")
+        text = self._evidence_file("craft").read_text()
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(text)
+        # ISO-8601 UTC: YYYY-MM-DDTHH:MM:SS(.ffffff)?Z or +00:00
+        self.assertRegex(
+            fields["reviewed_at"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}",
+            f"reviewed_at must be ISO-8601; got {fields['reviewed_at']!r}",
+        )
+
+    def test_summary_body_is_preserved(self):
+        self._record(str(self.spec), "0XX-02",
+                     "--pass", "compliance", "--verdict", "pass",
+                     "--reviewer", "jig:reviewer",
+                     "--prompt-source", "x",
+                     summary="## VERDICT\npass\n\n## REASONING\nclean impl.\n")
+        text = self._evidence_file("compliance").read_text()
+        self.assertIn("clean impl.", text)
+        self.assertIn("## REASONING", text)
+
+    def test_accepts_summary_from_file(self):
+        summary_file = self.tmp / "summary.md"
+        summary_file.write_text("## VERDICT\nfail\n\n## REASONING\nbug.\n")
+        r = subprocess.run(
+            [sys.executable, str(REVIEW), "record-review",
+             str(self.spec), "0XX-02",
+             "--pass", "compliance", "--verdict", "fail",
+             "--reviewer", "jig:reviewer", "--prompt-source", "x",
+             "--summary-file", str(summary_file)],
+            capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        text = self._evidence_file("compliance").read_text()
+        self.assertIn("bug.", text)
+
+    def test_re_record_overwrites_in_place(self):
+        """ADR §4: re-recording the same (slice, pass) overwrites in place
+        (git history is the audit trail; no append). The file must contain
+        ONLY the latest verdict."""
+        self._record(str(self.spec), "0XX-02",
+                     "--pass", "compliance", "--verdict", "needs-changes",
+                     "--reviewer", "jig:reviewer", "--prompt-source", "x",
+                     summary="## VERDICT\nneeds-changes\n")
+        self._record(str(self.spec), "0XX-02",
+                     "--pass", "compliance", "--verdict", "pass",
+                     "--reviewer", "jig:reviewer", "--prompt-source", "x",
+                     summary="## VERDICT\npass\n")
+        text = self._evidence_file("compliance").read_text()
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(text)
+        self.assertEqual(fields["verdict"], "pass",
+                         "latest verdict must win on overwrite")
+        # The superseded verdict must NOT be appended/duplicated.
+        self.assertEqual(text.count("---\n"), 2,
+                         "exactly one frontmatter block (no append)")
+        self.assertNotIn("needs-changes", text,
+                         "prior verdict must not survive (overwrite, "
+                         "not append — ADR §4)")
+
+    def test_re_record_is_stable_round_trip(self):
+        """AC #3 stability: recording the same inputs twice produces
+        byte-identical files modulo the timestamp. We strip reviewed_at
+        and compare the rest."""
+        def normalized():
+            self._record(str(self.spec), "0XX-02",
+                         "--pass", "craft", "--verdict", "pass",
+                         "--reviewer", "pr-review", "--prompt-source", "p",
+                         summary="## VERDICT\npass\n")
+            text = self._evidence_file("craft").read_text()
+            return re.sub(r"reviewed_at: .*\n", "", text)
+        first = normalized()
+        second = normalized()
+        self.assertEqual(first, second,
+                         "record→record must be stable modulo timestamp")
+
+    def test_rejects_unknown_pass(self):
+        r = self._record(str(self.spec), "0XX-02",
+                         "--pass", "smoke", "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "x")
+        self.assertEqual(r.returncode, 2,
+                         f"unknown pass must exit 2; stderr={r.stderr}")
+
+    def test_rejects_unknown_verdict(self):
+        r = self._record(str(self.spec), "0XX-02",
+                         "--pass", "compliance", "--verdict", "approved",
+                         "--reviewer", "x", "--prompt-source", "x")
+        self.assertEqual(r.returncode, 2,
+                         f"unknown verdict must exit 2; stderr={r.stderr}")
+
+    def test_rejects_invalid_slice_target(self):
+        r = self._record(str(self.spec), "999-99",
+                         "--pass", "compliance", "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "x")
+        self.assertEqual(r.returncode, 2,
+                         f"invalid slice must exit 2; stderr={r.stderr}")
+
+    def test_rejects_missing_spec(self):
+        missing = self.tmp / "nope" / "spec.md"
+        r = self._record(str(missing), "0XX-02",
+                         "--pass", "compliance", "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "x")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not found", r.stderr.lower())
+
+
+class CheckReviewsTests(unittest.TestCase):
+    """Slice 045-02 AC #2: `review.py check-reviews` validates the evidence
+    set for a target slice and exits non-zero with actionable diagnostics
+    for every edge case. Exit 0 when the required set clears."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-chk-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _spec(self, slug, slice_no, *, arch_review=False):
+        return _make_spec_with_slice(self.tmp / slug, slice_no, "foo",
+                                     arch_review=arch_review)
+
+    def _record(self, spec, slice_frag, pass_name, verdict,
+                summary="## VERDICT\nx\n"):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review",
+             str(spec), slice_frag, "--pass", pass_name,
+             "--verdict", verdict, "--reviewer", "jig:reviewer",
+             "--prompt-source", "x"],
+            input=summary, capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def _check(self, spec, slice_frag, stage="REVIEWED"):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "check-reviews",
+             str(spec), slice_frag, "--stage", stage],
+            capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    # ---- clean case ----
+
+    def test_clears_when_compliance_and_craft_pass(self):
+        spec = self._spec("045-a", "02")
+        self._record(spec, "0XX-02", "compliance", "pass")
+        self._record(spec, "0XX-02", "craft", "pass")
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 0,
+                         f"expected clean exit 0; stderr={r.stderr}\n"
+                         f"stdout={r.stdout}")
+
+    # ---- missing file ----
+
+    def test_missing_file_exits_nonzero_with_diag(self):
+        spec = self._spec("045-b", "02")
+        self._record(spec, "0XX-02", "compliance", "pass")
+        # craft missing
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        out = (r.stdout + r.stderr).lower()
+        self.assertIn("craft", out, "diagnostic must name the missing pass")
+
+    # ---- malformed frontmatter ----
+
+    def test_malformed_frontmatter_exits_nonzero(self):
+        spec = self._spec("045-c", "02")
+        self._record(spec, "0XX-02", "compliance", "pass")
+        self._record(spec, "0XX-02", "craft", "pass")
+        # Corrupt the compliance file's frontmatter.
+        f = spec.parent / "reviews" / "slice-02-compliance.md"
+        f.write_text("not even close to frontmatter\n")
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+
+    # ---- unknown pass name ----
+
+    def test_unknown_pass_name_in_file_exits_nonzero(self):
+        spec = self._spec("045-d", "02")
+        self._record(spec, "0XX-02", "compliance", "pass")
+        self._record(spec, "0XX-02", "craft", "pass")
+        f = spec.parent / "reviews" / "slice-02-compliance.md"
+        f.write_text(f.read_text().replace("pass: compliance",
+                                           "pass: smoke-test"))
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("pass", (r.stdout + r.stderr).lower())
+
+    # ---- unknown verdict ----
+
+    def test_unknown_verdict_in_file_exits_nonzero(self):
+        spec = self._spec("045-e", "02")
+        self._record(spec, "0XX-02", "compliance", "pass")
+        self._record(spec, "0XX-02", "craft", "pass")
+        f = spec.parent / "reviews" / "slice-02-compliance.md"
+        f.write_text(f.read_text().replace("verdict: pass",
+                                           "verdict: approved"))
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("verdict", (r.stdout + r.stderr).lower())
+
+    # ---- superseded-only / non-clearing verdict ----
+
+    def test_superseded_only_fail_verdict_exits_nonzero(self):
+        """A `fail` not overwritten by a later `pass` blocks (ADR §3/§4 —
+        the superseded-only half of AC2's 'stale/superseded-only')."""
+        spec = self._spec("045-f", "02")
+        self._record(spec, "0XX-02", "compliance", "fail")
+        self._record(spec, "0XX-02", "craft", "pass")
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        out = (r.stdout + r.stderr).lower()
+        self.assertIn("compliance", out)
+        self.assertIn("fail", out)
+
+    def test_needs_changes_only_verdict_exits_nonzero(self):
+        spec = self._spec("045-g", "02")
+        self._record(spec, "0XX-02", "compliance", "needs-changes")
+        self._record(spec, "0XX-02", "craft", "pass")
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("needs-changes", (r.stdout + r.stderr).lower())
+
+    # ---- invalid slice target ----
+
+    def test_invalid_slice_target_exits_nonzero(self):
+        spec = self._spec("045-h", "02")
+        r = self._check(spec, "999-99")
+        self.assertEqual(r.returncode, 2)
+
+    def test_missing_spec_exits_nonzero(self):
+        r = self._check(self.tmp / "nope" / "spec.md", "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not found", r.stderr.lower())
+
+    # ---- arch-gated behavior ----
+
+    def test_arch_required_but_missing_exits_nonzero(self):
+        spec = self._spec("045-i", "02", arch_review=True)
+        self._record(spec, "0XX-02", "compliance", "pass")
+        self._record(spec, "0XX-02", "craft", "pass")
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("arch", (r.stdout + r.stderr).lower())
+
+    def test_arch_present_when_flagged_clears(self):
+        spec = self._spec("045-j", "02", arch_review=True)
+        self._record(spec, "0XX-02", "compliance", "pass")
+        self._record(spec, "0XX-02", "craft", "pass")
+        self._record(spec, "0XX-02", "arch", "pass")
+        r = self._check(spec, "0XX-02")
+        self.assertEqual(r.returncode, 0,
+                         f"stderr={r.stderr}\nstdout={r.stdout}")
+
+    # ---- reconciliation stage ----
+
+    def test_reconciled_stage_requires_reconciliation_pass(self):
+        spec = self._spec("045-k", "02")
+        r = self._check(spec, "0XX-02", stage="RECONCILED")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("reconciliation", (r.stdout + r.stderr).lower())
+
+    def test_reconciled_stage_clears_with_reconciliation_pass(self):
+        spec = self._spec("045-l", "02")
+        self._record(spec, "0XX-02", "reconciliation", "pass")
+        r = self._check(spec, "0XX-02", stage="RECONCILED")
+        self.assertEqual(r.returncode, 0,
+                         f"stderr={r.stderr}\nstdout={r.stdout}")
+
+
+class ReviewEvidenceSkillDocTests(unittest.TestCase):
+    """Slice 045-02 AC #1/#2: the new subcommands are documented in
+    `skills/independent-review/SKILL.md` ('a documented command')."""
+
+    def setUp(self):
+        self.skill = SKILL_MD.read_text()
+
+    def test_skill_documents_record_review(self):
+        self.assertIn("record-review", self.skill,
+                      "SKILL.md must document the record-review subcommand")
+
+    def test_skill_documents_check_reviews(self):
+        self.assertIn("check-reviews", self.skill,
+                      "SKILL.md must document the check-reviews subcommand")
+
+
+class ReviewEvidenceScaffoldParityTests(unittest.TestCase):
+    """Slice 045-02 AC #4: a scaffolded project receives the recorder/
+    validator path. The shared schema module rides `_common/`, which
+    `scaffold.py`'s `_copy_skills_and_agents` copies unprefixed. Verify
+    the module is included in the scaffold-copied set rather than adding
+    new copy plumbing (per the slice brief)."""
+
+    def test_review_evidence_module_exists_in_common(self):
+        mod = REPO_ROOT / "skills" / "_common" / "review_evidence.py"
+        self.assertTrue(mod.is_file(),
+                        "review_evidence.py must live in skills/_common/ so "
+                        "it rides the existing scaffold copy of _common/")
+
+    def test_scaffold_copies_review_evidence_module(self):
+        """End-to-end: scaffold into a temp dir, assert review_evidence.py
+        lands at .claude/skills/_common/ (the path the unprefixed-copy
+        logic produces) and its test file is excluded."""
+        import importlib.util
+        scaffold_py = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
+        spec = importlib.util.spec_from_file_location("scaffold_045", scaffold_py)
+        scaffold = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(scaffold_py.parent))
+        spec.loader.exec_module(scaffold)
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "proj"
+            target.mkdir()
+            scaffold._copy_skills_and_agents(REPO_ROOT, target, None)
+            copied = target / ".claude" / "skills" / "_common" / "review_evidence.py"
+            self.assertTrue(
+                copied.is_file(),
+                f"scaffold must copy review_evidence.py to {copied}",
+            )
+            self.assertFalse(
+                (target / ".claude" / "skills" / "_common"
+                 / "test_review_evidence.py").exists(),
+                "test files must be excluded from the scaffold copy",
+            )
+
+
 class RicherSkillFileReadDispatchTests(unittest.TestCase):
     """Richer-skill file-read dispatch (craft + arch passes).
 
