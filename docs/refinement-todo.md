@@ -103,15 +103,10 @@ Resolved by [Spec 001-01](specs/001-scaffold-init/spec.md) + [ADR-0007](decision
 **Resolution trigger:** First time a user reports a slow or hung scaffold-init on a real project, OR when adding network-touching detectors.
 **Risk:** Currently theoretical — local-only scaffolder on user-owned dirs.
 
-### Decision: jig-memory-scan + jig-task-capture firing-rate measurement
-**Deferred:** Slice 002-03 tuned the heuristics deterministically (strip code blocks / URLs / absolute paths; common-acronym skiplist) but did not measure actual firing rate against real session traffic. AC #5 calls for 10–40% as the healthy band; we have no telemetry yet.
-**Status as of 2026-05-18:** Original 2-week trigger window has elapsed without anyone reporting hook-firing noise or unknown-reference spam. Treating as "never bites in practice" without formally resolving — re-open if (a) a session reports excessive firing, OR (b) a contributor decides to implement the `.claude/hook-firing.jsonl` mitigation to actually measure.
-**Resolution trigger (revised):** First user-reported noise complaint OR explicit ask for telemetry. Default treatment: no action.
-**Mitigation idea:** add a `.claude/hook-firing.jsonl` write at the bottom of each hook (one line per fire) — cheap, gitignored, easy to grep.
-**Watch-list (reviewer-flagged low-priority items):**
-- Schemeless URLs like `example.com/FooBar` leak `FooBar` (the strip regex requires `http(s)://`)
-- Nested triple-backtick fences leak the middle content (non-greedy `.*?` pairs outermost)
-- `CSS` in COMMON skiplist could mask a frontend project's `CSS Modules` term — harmless today (single capitalized word doesn't match camelCase regex) but worth watching as the skiplist grows
+### ~~Decision: jig-memory-scan + jig-task-capture firing-rate measurement~~ — CLOSED (won't-measure) 2026-06-01
+**Closed without action.** Slice 002-03 tuned the heuristics deterministically (strip code blocks / URLs / absolute paths; common-acronym skiplist) but never measured firing rate against real session traffic (AC #5's 10–40% healthy band). The original 2-week trigger window (2026-05-18) and the weeks since have elapsed with zero hook-noise / unknown-reference-spam reports across all jig dogfooding — so the measurement is retired as "never bit in practice."
+**Re-open trigger:** first user-reported noise complaint OR explicit ask for telemetry. Mitigation if anyone needs to actually measure: a gitignored `.claude/hook-firing.jsonl` one-line-per-fire write at the bottom of each hook — cheap, easy to grep.
+**Note:** the three latent-heuristic watch-items that rode along on this entry (schemeless-URL leak / nested-fence leak / `CSS` skiplist collision) are **not** closed — relocated to [`docs/inbox.md`](inbox.md) (2026-06-01) as a parked low-priority watch.
 
 ### ~~Decision: Transactional writes in scaffold()~~ — RESOLVED 2026-05-20
 Resolved by [Slice 032-02](specs/032-atomic-writes/slice-02-scaffold-completion-marker.md) — `scaffold.json` is now the LAST file written by `scaffold()`, making it the completion sentinel. A crash before that write leaves no `scaffold.json`, so a re-run without `--force` correctly resumes (a small `_is_jig_partial_state` watermark gate skips `_looks_already_spec_driven` when CLAUDE.md carries jig's watermark — see deviation log §3–§4).
@@ -126,6 +121,7 @@ Resolved by [Slice 032-01](specs/032-atomic-writes/slice-01-atomic-write-helper.
 - Does `AGENTS.md` repeat the CLAUDE.md hot cache, or does CLAUDE.md `@import` AGENTS.md (mysticat's pattern)? The latter is cleaner but assumes `@import` semantics that non-Claude tools may not respect.
 - Should `scaffold-init` emit both unconditionally, or behind a `--multi-agent` flag?
 **Comparison source:** See conversation 2026-05-15 (mysticat-architecture vs jig comparison) for the pattern's full context. This was item #4 in the "what to adopt from mysticat" set; items #1–#3 became spec 014.
+**Update 2026-06-01:** Trigger fired and the decision was promoted to a spec — [spec 033 (host-adapter-portability)](specs/033-host-adapter-portability/spec.md) (**DRAFT**), whose slice **033-02 (`agents-md-canonical-primer`)** is the direct home for the `AGENTS.md` sibling work; spec 033's "Why now" names this entry as its origin. **Not yet RESOLVED** — 033 is DRAFT (nothing shipped), the Codex *implementation* slices (033-05/06) stay DEFERRED, and a first land attempt was reverted (2026-05-28). Track the `AGENTS.md` decision through spec 033; do not strike this RESOLVED until 033-02 lands.
 
 ### Decision: `workflow.py new --from-branch` to migrate already-drafted feature branches into a reservation
 **Deferred:** Today `workflow.py new <slug>` only works as a clean-room reservation from `main`. If a user already drafted slice content on a feature branch (the common case before adopting `new`), there's no path to retroactively reserve the number on origin/main while keeping the drafted body. Surfaced as a "likely candidate" in slice 003-03's DoD.

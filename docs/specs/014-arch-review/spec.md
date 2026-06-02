@@ -686,16 +686,27 @@ own skill."
 
 ## Slice 014-04 — security-lens-integration
 
-**STATUS: DEFERRED** _(deferred — gated on `security_lens` decision)_
+**STATUS: DEFERRED** _(OBSOLETE — superseded by spec 052 / ADR-0013)_
 
-**Resolution trigger:** Resolution of the `security_lens` parent decision (same trigger as 012-03 — both slices plug into whichever shape that decision takes).
+**Resolution trigger:** OBSOLETE (2026-06-01) — superseded by spec 052 / ADR-0013. Security review shipped as a standalone `jig:security-review` skill, NOT a `security_lens` field consulted by `arch-review`, so this slice's plug-in surface was never built. Will not be built as specified; the remaining lever (a `security_review: true` review pass) is tracked in docs/refinement-todo.md.
 
-**Goal:** `arch-review` consults the `security_lens` field in
-`scaffold.json` (when present) and either appends an
-`adobe-security-suite` hand-off block to its review prompt or embeds
-a builtin "security-shaped concerns" checklist (data trust boundaries,
+**Original goal (not pursued):** `arch-review` consults the `security_lens`
+field in `scaffold.json` (when present) and either appends an
+`adobe-security-suite` hand-off block to its review prompt or embeds a
+builtin "security-shaped concerns" checklist (data trust boundaries,
 secrets handling, authn/authz on new external surfaces).
 
-Deferred because: `security_lens` itself is not yet specced (parked in
-inbox 2026-05-12). When that spec lands, this slice plugs in — same
-shape as 012-03 for pr-review. Until then, the slim baseline applies.
+**Obsolete because:** identical to slice 012-03 — the `security_lens`
+parent decision (inbox 2026-05-12) was resolved on 2026-06-01 in a
+**different shape** than this slice assumed. [Spec
+052](../052-security-scaffold/spec.md) /
+[ADR-0013](../../decisions/adr-0013-security-floor-policy.md) shipped
+security review as a **standalone `jig:security-review` skill** (slice
+052-05) with description-based deferral to any richer installed security
+skill — **not** a `security_lens` field in `scaffold.json` read by
+`review.py`. The surface this slice would have plugged into (`arch-review`
+consulting a `security_lens` flag) was never built and will not be. The
+remaining open lever — a `security_review: true` post-implementation
+review pass parallel to `arch_review` — is tracked in
+[`docs/refinement-todo.md`](../../refinement-todo.md) ("Promote the
+`security_review: true` post-implementation review-flow pass"), not here.

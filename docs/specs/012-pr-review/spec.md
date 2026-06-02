@@ -699,17 +699,29 @@ file, miscounted lines changed, etc.).
 
 ## Slice 012-03 — security-lens-integration
 
-**STATUS: DEFERRED** _(deferred — gated on `security_lens` decision)_
+**STATUS: DEFERRED** _(OBSOLETE — superseded by spec 052 / ADR-0013)_
 
-**Resolution trigger:** Resolution of the `security_lens` parent decision (see [inbox 2026-05-12 entry](../../inbox.md) on graceful-degradation with `adobe-security-suite`). 012-03 plugs into whichever shape that decision takes.
+**Resolution trigger:** OBSOLETE (2026-06-01) — superseded by spec 052 / ADR-0013. Security review shipped as a standalone `jig:security-review` skill, NOT a `security_lens` field consulted by `pr-review`, so this slice's plug-in surface was never built. Will not be built as specified; the remaining lever (a `security_review: true` review pass) is tracked in docs/refinement-todo.md.
 
-**Goal:** `pr-review` consults the `security_lens` field in `scaffold.json`
-(when present) and either appends an `adobe-security-suite` hand-off block
-to its review prompt or embeds the builtin ~10-rule checklist.
+**Original goal (not pursued):** `pr-review` consults the `security_lens`
+field in `scaffold.json` (when present) and either appends an
+`adobe-security-suite` hand-off block to its review prompt or embeds the
+builtin ~10-rule checklist.
 
-Deferred because: `security_lens` itself is not yet specced (parked in
-inbox 2026-05-12). When that spec lands, this slice plugs in. Until then,
-the slim baseline applies.
+**Obsolete because:** the `security_lens` parent decision (inbox
+2026-05-12) was resolved on 2026-06-01 — but in a **different shape** than
+this slice assumed. [Spec 052](../052-security-scaffold/spec.md) /
+[ADR-0013](../../decisions/adr-0013-security-floor-policy.md) shipped
+security review as a **standalone `jig:security-review` skill** (slice
+052-05) that defers to any richer installed security skill via
+description-based routing — **not** a `security_lens` field in
+`scaffold.json` read by `review.py`, and **not** Adobe-specific. The
+surface this slice was designed to plug into (`pr-review` consulting a
+`security_lens` flag) was therefore never built and will not be. The one
+remaining open lever — wiring a `security_review: true` post-implementation
+review pass parallel to `arch_review` — is tracked separately in
+[`docs/refinement-todo.md`](../../refinement-todo.md) ("Promote the
+`security_review: true` post-implementation review-flow pass"), not here.
 
 ---
 
