@@ -154,11 +154,11 @@
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-01 — worktree-aware spec reservation | DRAFT |  |
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-02 — worktree-aware ADR reservation | DRAFT |  |
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | DRAFT |  |
-| [052-security-scaffold](052-security-scaffold/spec.md) | 052-01 — security-floor-policy-adr | DRAFT |  |
-| [052-security-scaffold](052-security-scaffold/spec.md) | 052-02 — secret-prevention-floor | DRAFT |  |
-| [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | DRAFT |  |
-| [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | DRAFT |  |
-| [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | DRAFT |  |
+| [052-security-scaffold](052-security-scaffold/spec.md) | 052-01 — security-floor-policy-adr | **DONE** |  |
+| [052-security-scaffold](052-security-scaffold/spec.md) | 052-02 — secret-prevention-floor | **DONE** |  |
+| [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | **DONE** |  |
+| [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | **DONE** |  |
+| [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | **DONE** |  |
 | [053-craft-pass-skill-dispatch](053-craft-pass-skill-dispatch/spec.md) | 053-01 — file-read-dispatch | **DONE** | Craft/arch reviewer subagent has NO `Skill` tool → can't use the skill router; `review.py detect_richer_skill()` (USER-scope only, `~/.claude/skills/<name>/`) hands it the path to read-and-apply, else inlines baseline. Promotes spec 031 OQ#1 option (b). Retroactive record of landed commit 734e424; project-scope detection deferred. |
 | [054-docs-front-door](054-docs-front-door/spec.md) | 054-01 — philosophy-doc | **DONE** |  |
 | [054-docs-front-door](054-docs-front-door/spec.md) | 054-02 — prompt-cookbook | **DONE** |  |

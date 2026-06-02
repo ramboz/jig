@@ -428,6 +428,7 @@ EXPECTED_HOOK_SCRIPTS = (
     "jig-context-check.sh",
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
+    "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
     "jig-skill-trace.sh",
     "jig-spec-gate.sh",
     "jig-task-capture.sh",
@@ -650,7 +651,14 @@ class MergeExistingSettingsTests(unittest.TestCase):
     # ----- AC #6 (j) --------------------------------------------------------
     def test_j_existing_non_hook_field_preserved(self):
         """AC #6 (j) — merge into existing settings.json: a non-hook
-        top-level field (e.g. 'permissions') is preserved after the merge."""
+        top-level field (e.g. 'env') is preserved after the merge.
+
+        Note (slice 052-03): `permissions.deny` is now jig-managed (the
+        destructive-command guardrail), so `permissions` is no longer an
+        untouched pass-through field — its `deny` array gains jig's defaults
+        while `allow` (and any other key) is preserved verbatim. `env` is
+        the pure untouched-field assertion here; the full permissions-merge
+        contract lives in test_scaffold.py::PermissionsDenyTests."""
         self._seed_settings({
             "permissions": {"allow": ["Bash(ls)"]},
             "env": {"FOO": "bar"},
@@ -660,9 +668,13 @@ class MergeExistingSettingsTests(unittest.TestCase):
         merged = json.loads(
             (self.target / ".claude" / "settings.json").read_text()
         )
-        # Non-hook fields survive.
-        self.assertEqual(merged.get("permissions"), {"allow": ["Bash(ls)"]})
+        # A genuine non-hook, non-permissions field survives untouched.
         self.assertEqual(merged.get("env"), {"FOO": "bar"})
+        # permissions.allow is preserved verbatim; permissions.deny gains
+        # jig's destructive-command defaults (slice 052-03).
+        self.assertEqual(merged.get("permissions", {}).get("allow"), ["Bash(ls)"])
+        self.assertIn("Bash(git push --force*)",
+                      merged.get("permissions", {}).get("deny", []))
         # jig hooks were appended.
         self.assertIn("hooks", merged)
         for event in EXPECTED_HOOK_EVENTS:
@@ -961,7 +973,10 @@ class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
 
     def test_verify_install_scaffold_mode_all_checks_pass(self):
         """AC #6 — `verify_install.py --mode scaffold --project-root <target>`
-        runs four PASS checks against the freshly-scaffolded tree."""
+        runs all scaffold-mode checks PASS against the freshly-scaffolded
+        tree. Slice 052-04 grew the set from 4 to 7 (the security-floor
+        checks); the count is asserted against `_SCAFFOLD_CHECKS` so it
+        tracks the source of truth rather than a hard-coded number."""
         verify = REPO_ROOT / "scripts" / "verify_install.py"
         r = subprocess.run(
             [
@@ -976,12 +991,15 @@ class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
             f"verify_install --mode scaffold failed: rc={r.returncode}\n"
             f"stdout={r.stdout}\nstderr={r.stderr}",
         )
-        # Four PASS lines + 1 summary line.
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        import verify_install  # noqa: E402
+        expected = len(verify_install._SCAFFOLD_CHECKS)
         lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
         pass_lines = [ln for ln in lines if ln.startswith("PASS")]
         self.assertEqual(
-            len(pass_lines), 4,
-            f"expected 4 PASS lines; got {len(pass_lines)}: {r.stdout!r}",
+            len(pass_lines), expected,
+            f"expected {expected} PASS lines; got {len(pass_lines)}: "
+            f"{r.stdout!r}",
         )
 
 

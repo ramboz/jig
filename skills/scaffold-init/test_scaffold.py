@@ -1444,6 +1444,7 @@ class TierSkillSetTests(unittest.TestCase):
         "arch-review",
         "clarify",
         "analyze",
+        "security-review",
     ]
 
     # tier-2 is empty in scaffold.py today; this assertion turns a future
@@ -1843,6 +1844,430 @@ class AdoptionHandoffTests(unittest.TestCase):
             f"adoption guide has links that don't resolve in the scaffolded "
             f"tree (AC #3): {unresolved}",
         )
+
+
+class SecurityFloorTests(unittest.TestCase):
+    """Slice 052-02 — secret-prevention-floor.
+
+    A fresh scaffold ships (AC #1) secret-ignore `.gitignore` patterns,
+    (AC #2) the agent-time secret-scan hook registered in the scaffolded
+    settings.json + copied to .claude/hooks/scripts/, and (AC #4) a lean
+    `## Security (MUST)` block in CLAUDE.md. Plus the `.gitignore` merge is
+    idempotent and never clobbers pre-existing lines.
+    """
+
+    SECRET_BLOCK_PATTERNS = (".env", ".env.*", "*.pem", "*.key",
+                             "secrets/", "credentials/")
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-052-02-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ---- AC #1: secret-ignore .gitignore patterns ----
+    def test_gitignore_written_with_secret_patterns(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        gi = self.target / ".gitignore"
+        self.assertTrue(gi.is_file(), ".gitignore must be scaffolded")
+        text = gi.read_text()
+        for pat in self.SECRET_BLOCK_PATTERNS:
+            self.assertIn(pat, text, f".gitignore missing secret pattern: {pat}")
+
+    def test_gitignore_block_is_marker_delimited(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig secret-ignore >>>", text)
+        self.assertIn("<<< jig secret-ignore <<<", text)
+
+    def test_gitignore_written_in_plugin_only_mode(self):
+        """Slice 052-04 — the `.gitignore` floor must still land in
+        `--plugin-only` mode (the floor write must not be gated behind
+        `--with-machinery`)."""
+        result = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig secret-ignore >>>", text)
+        self.assertIn(".env", text)
+
+    def test_gitignore_reincludes_env_placeholder_templates(self):
+        """`.env.*` would otherwise ignore `.env.example` — but the
+        secret-scan hook tells users to "commit a placeholder in a *.example
+        file" and skips those suffixes when scanning, so the floor must
+        re-include them via git negations that follow the `.env.*` line.
+        (Reconciliation fix, 052-02 — keeps the floor internally consistent.)
+        """
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        lines = (self.target / ".gitignore").read_text().splitlines()
+        self.assertIn(".env.*", lines)
+        for neg in ("!.env.example", "!.env.sample",
+                    "!.env.template", "!.env.dist"):
+            self.assertIn(neg, lines, f".gitignore missing re-include: {neg}")
+        # A git negation only takes effect AFTER the matching ignore line.
+        self.assertLess(
+            lines.index(".env.*"), lines.index("!.env.example"),
+            "!.env.example must follow .env.* to re-include it",
+        )
+
+    # ---- AC #1: append-not-clobber + idempotent ----
+    def test_gitignore_preserves_preexisting_lines(self):
+        gi = self.target / ".gitignore"
+        gi.write_text("# my project\nnode_modules/\ndist/\n")
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = gi.read_text()
+        # Pre-existing lines survive.
+        self.assertIn("node_modules/", text)
+        self.assertIn("dist/", text)
+        self.assertIn("# my project", text)
+        # And the jig block was appended.
+        self.assertIn(".env", text)
+        self.assertIn(">>> jig secret-ignore >>>", text)
+
+    def test_gitignore_block_is_idempotent_across_reruns(self):
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        # --force re-scaffold (scaffold refuses a bare re-run).
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        second = subprocess.run(
+            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        # Exactly one jig block — no duplicate markers.
+        self.assertEqual(text.count(">>> jig secret-ignore >>>"), 1,
+                         "re-scaffold duplicated the jig secret-ignore block")
+        self.assertEqual(text.count("<<< jig secret-ignore <<<"), 1)
+
+    def test_gitignore_merge_function_is_idempotent_unit(self):
+        """Unit-level: calling the merge twice on the same file is a no-op
+        after the first, and a third distinct content does not stack."""
+        mod = _load_scaffold_module()
+        gi = self.target / ".gitignore"
+        gi.write_text("existing-line\n")
+        mod._write_gitignore_secret_block(self.target)
+        once = gi.read_text()
+        mod._write_gitignore_secret_block(self.target)
+        twice = gi.read_text()
+        self.assertEqual(once, twice, "second merge must be a no-op")
+        self.assertIn("existing-line", twice)
+        self.assertEqual(twice.count(">>> jig secret-ignore >>>"), 1)
+
+    # ---- AC #2: secret-scan hook copied + registered ----
+    def test_secret_scan_hook_copied_to_project(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
+        self.assertTrue(hook.is_file(),
+                        "jig-secret-scan.sh must be copied to the scaffolded tree")
+        # Executable bit pinned (mirrors other scaffolded hooks).
+        self.assertTrue(os.access(hook, os.X_OK), "hook must be executable")
+
+    def test_secret_scan_hook_registered_in_settings(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        settings = json.loads(
+            (self.target / ".claude/settings.json").read_text()
+        )
+        pre = settings.get("hooks", {}).get("PreToolUse", [])
+        # Find a jig-managed Edit|Write|MultiEdit group that references the
+        # secret-scan hook (project-relative path).
+        found = False
+        for entry in pre:
+            if entry.get("matcher") != "Edit|Write|MultiEdit":
+                continue
+            if not (entry.get("metadata") or {}).get("managed_by_jig"):
+                continue
+            for h in entry.get("hooks", []):
+                if "jig-secret-scan.sh" in (h.get("command") or ""):
+                    self.assertIn(
+                        "${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/",
+                        h["command"],
+                        "scaffolded hook command must use the project path",
+                    )
+                    found = True
+        self.assertTrue(
+            found,
+            "secret-scan hook not registered in the scaffolded "
+            "PreToolUse Edit|Write|MultiEdit group with the jig marker",
+        )
+
+    def test_secret_scan_hook_works_after_scaffold(self):
+        """End-to-end: the copied hook blocks a real secret in the scaffolded
+        project tree (AC #2 'observable end-to-end')."""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
+        # Assemble the secret at runtime so this source file never holds one.
+        secret = "AKIA" + "JKL4MNOP5QRS6TUV"
+        payload = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(self.target / "config.py"),
+                "content": "key = '" + secret + "'\n",
+            },
+        })
+        env = os.environ.copy()
+        env.pop("JIG_SECRET_SCAN_APPROVED", None)
+        r = subprocess.run(["bash", str(hook)], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 2,
+                         f"scaffolded hook should block a real secret; "
+                         f"stderr={r.stderr!r}")
+
+    # ---- AC #4: lean `## Security (MUST)` block in CLAUDE.md ----
+    def test_security_block_present_in_claude_md(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        claude_md = (self.target / "CLAUDE.md").read_text()
+        idx = claude_md.find("## Security (MUST)")
+        self.assertGreater(idx, 0, "CLAUDE.md missing `## Security (MUST)` block")
+        # Section bounds: from heading to the next H2 (or EOF).
+        next_h2 = re.search(r"(?m)^##\s+", claude_md[idx + 1:])
+        section = claude_md[idx:(idx + 1 + next_h2.start()) if next_h2 else len(claude_md)]
+        low = section.lower()
+        # No-secrets MUST rule + env-var / secret-manager guidance.
+        self.assertIn("secret", low)
+        self.assertTrue("env" in low or "secret manager" in low,
+                        "Security block should point to env vars / secret managers")
+        # Honesty note: defense-in-depth, not a guarantee.
+        self.assertIn("defense-in-depth", low)
+        # Pointer to richer security depth.
+        self.assertTrue(
+            "security-review" in low or "adobe-security" in low,
+            "Security block should point to a richer security skill for depth",
+        )
+
+    def test_security_block_is_lean(self):
+        """AC #4 — the block stays within the ≈≤ 12-line lean budget
+        (design principle #2)."""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        claude_md = (self.target / "CLAUDE.md").read_text()
+        idx = claude_md.find("## Security (MUST)")
+        self.assertGreater(idx, 0)
+        next_h2 = re.search(r"(?m)^##\s+", claude_md[idx + 1:])
+        section = claude_md[idx:(idx + 1 + next_h2.start()) if next_h2 else len(claude_md)]
+        # Count non-blank lines including the heading.
+        lines = [ln for ln in section.strip().splitlines() if ln.strip()]
+        self.assertLessEqual(
+            len(lines), 12,
+            f"Security block must be ≤ 12 non-blank lines; got {len(lines)}",
+        )
+
+
+class PermissionsDenyTests(unittest.TestCase):
+    """Slice 052-03 — destructive-command-guardrail.
+
+    A fresh scaffold's `.claude/settings.json` carries conservative
+    `permissions.deny` defaults (force-push / hard-reset / `rm -rf`, AC #1).
+    The merge is non-destructive + idempotent (AC #2): jig-ownership of a
+    deny entry is identified by membership in `_PERMISSIONS_DENY_DEFAULTS`
+    (set-membership marker — a string array can't carry a per-entry
+    `metadata` marker), so user-added `allow` / `ask` / custom `deny`
+    entries survive and jig's globs are never duplicated.
+    """
+
+    # The three guardrails AC #1 names explicitly, in canonical
+    # `Bash(<pattern>)` rule shape.
+    FORCE_PUSH_GLOB = "Bash(git push --force*)"
+    HARD_RESET_GLOB = "Bash(git reset --hard*)"
+    RM_RF_GLOB = "Bash(rm -rf*)"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-052-03-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read_settings(self) -> dict:
+        return json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+
+    def _seed_settings(self, payload: dict) -> None:
+        settings = self.target / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps(payload, indent=2) + "\n")
+
+    def _rescaffold_force(self) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        return subprocess.run(
+            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+
+    # ---- AC #1: conservative deny defaults are scaffolded ----
+    def test_fresh_scaffold_has_destructive_deny_globs(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        deny = self._read_settings().get("permissions", {}).get("deny", [])
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertIn(
+                glob, deny,
+                f"scaffolded permissions.deny missing guardrail: {glob}",
+            )
+
+    def test_fresh_scaffold_deny_matches_constant(self):
+        """The scaffolded deny array is exactly jig's source-of-truth set
+        (no manual count drift)."""
+        mod = _load_scaffold_module()
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        deny = self._read_settings().get("permissions", {}).get("deny", [])
+        self.assertEqual(
+            set(deny), set(mod._PERMISSIONS_DENY_DEFAULTS),
+            "fresh scaffold deny array must equal _PERMISSIONS_DENY_DEFAULTS",
+        )
+
+    # ---- AC #2: non-destructive merge into a pre-existing settings.json ----
+    def test_merge_preserves_user_permissions_entries(self):
+        """A pre-existing settings.json with user allow + ask + a custom
+        deny entry: all survive AND jig's deny globs are added, with no
+        duplicates."""
+        custom_deny = "Bash(curl*evil.example.com*)"
+        self._seed_settings({
+            "permissions": {
+                "allow": ["Bash(ls*)", "Bash(git status*)"],
+                "ask": ["Bash(git commit*)"],
+                "deny": [custom_deny],
+            },
+        })
+        # --force is the documented escape hatch; the seed has no hooks so
+        # the unmanaged-hooks refusal does not apply, but a re-run over an
+        # existing tree still needs --force (scaffold.json sentinel).
+        r = self._rescaffold_force()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        perms = self._read_settings().get("permissions", {})
+        # User allow + ask survive untouched.
+        self.assertEqual(perms.get("allow"), ["Bash(ls*)", "Bash(git status*)"])
+        self.assertEqual(perms.get("ask"), ["Bash(git commit*)"])
+        # User's custom deny survives.
+        deny = perms.get("deny", [])
+        self.assertIn(custom_deny, deny)
+        # jig's guardrails were added.
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertIn(glob, deny)
+        # No duplicates anywhere in the deny array.
+        self.assertEqual(
+            len(deny), len(set(deny)),
+            f"permissions.deny has duplicate entries: {deny}",
+        )
+        # The custom deny appears exactly once.
+        self.assertEqual(deny.count(custom_deny), 1)
+
+    def test_merge_into_settings_without_permissions_key(self):
+        """If a pre-existing settings.json has no `permissions` key at all,
+        the merge creates `{"deny": [...]}` with jig's globs."""
+        self._seed_settings({"env": {"FOO": "bar"}})
+        r = self._rescaffold_force()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        settings = self._read_settings()
+        self.assertEqual(settings.get("env"), {"FOO": "bar"})
+        deny = settings.get("permissions", {}).get("deny", [])
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertIn(glob, deny)
+
+    # ---- AC #2: idempotent re-run ----
+    def test_deny_globs_idempotent_across_reruns(self):
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        second = self._rescaffold_force()
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        deny = self._read_settings().get("permissions", {}).get("deny", [])
+        # Each jig glob appears exactly once after a re-scaffold.
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertEqual(
+                deny.count(glob), 1,
+                f"re-scaffold duplicated deny glob {glob}: {deny}",
+            )
+        self.assertEqual(
+            len(deny), len(set(deny)),
+            f"permissions.deny has duplicates after re-run: {deny}",
+        )
+
+    # ---- AC #2: unit-level merge logic (preserve + idempotent + no-clobber) ----
+    def test_merge_settings_permissions_unit(self):
+        """Unit: `_merge_settings` preserves user allow/ask/custom-deny,
+        appends jig's deny set exactly once, leaves non-`deny` permission
+        keys untouched, and is idempotent when called twice."""
+        mod = _load_scaffold_module()
+        existing = {
+            "permissions": {
+                "allow": ["Bash(ls*)"],
+                "ask": ["Bash(git commit*)"],
+                "deny": ["Bash(curl*evil*)"],
+            },
+        }
+        merged = mod._merge_settings(existing, {})
+        perms = merged["permissions"]
+        # Non-deny keys untouched.
+        self.assertEqual(perms["allow"], ["Bash(ls*)"])
+        self.assertEqual(perms["ask"], ["Bash(git commit*)"])
+        # User deny preserved + jig set appended, no duplicates.
+        self.assertIn("Bash(curl*evil*)", perms["deny"])
+        for glob in mod._PERMISSIONS_DENY_DEFAULTS:
+            self.assertIn(glob, perms["deny"])
+        self.assertEqual(len(perms["deny"]), len(set(perms["deny"])))
+        # Idempotent: a second merge over the result yields the same deny set.
+        merged2 = mod._merge_settings(merged, {})
+        self.assertEqual(merged2["permissions"]["deny"], perms["deny"])
+        # Does not mutate the input.
+        self.assertEqual(existing["permissions"]["deny"], ["Bash(curl*evil*)"])
+
+    def test_merge_dedups_user_supplied_jig_exact_glob_unit(self):
+        """Unit: if a user's deny array already contains one of jig's exact
+        globs, the merge must not duplicate it. Set-membership identifies the
+        entry as jig-owned, so it is filtered out of the user set then
+        re-appended exactly once (the dedup-and-relocate the docstring
+        promises). Pins the behavior directly rather than only via the
+        re-scaffold idempotency path."""
+        mod = _load_scaffold_module()
+        jig_glob = mod._PERMISSIONS_DENY_DEFAULTS[0]
+        existing = {
+            "permissions": {"deny": [jig_glob, "Bash(curl*evil*)"]},
+        }
+        merged = mod._merge_settings(existing, {})
+        deny = merged["permissions"]["deny"]
+        self.assertEqual(
+            deny.count(jig_glob), 1,
+            f"user-supplied jig-exact glob {jig_glob} was duplicated: {deny}",
+        )
+        # The genuinely-custom (non-jig) deny still survives exactly once.
+        self.assertEqual(deny.count("Bash(curl*evil*)"), 1)
+        self.assertEqual(len(deny), len(set(deny)))
+
+    def test_merge_settings_creates_permissions_when_absent_unit(self):
+        """Unit: `_merge_settings` on a dict with no `permissions` key
+        creates `permissions.deny` = jig's set."""
+        mod = _load_scaffold_module()
+        merged = mod._merge_settings({}, {})
+        self.assertEqual(
+            set(merged["permissions"]["deny"]),
+            set(mod._PERMISSIONS_DENY_DEFAULTS),
+        )
+
+
+def _load_scaffold_module():
+    """Import scaffold.py as a module for direct symbol access (used by the
+    unit-level idempotency test)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("scaffold_for_052", SCAFFOLD)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class VersionProvenanceTests(unittest.TestCase):

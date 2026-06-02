@@ -61,6 +61,7 @@ _TIER_SKILLS = {
         "arch-review",
         "clarify",
         "analyze",
+        "security-review",
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }
@@ -787,6 +788,34 @@ _JIG_HOOK_MARKER = {"managed_by_jig": True}
 _PLUGIN_HOOK_SCRIPT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
 _PROJECT_HOOK_SCRIPT_PREFIX = "${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/"
 
+# Slice 052-03 — conservative `permissions.deny` defaults scaffolded into
+# `.claude/settings.json` (the security floor's destructive-command guardrail,
+# ADR-0013 part 3). Canonical Claude Code permission-rule shape is
+# `Bash(<pattern with * wildcards>)`. The set covers the documented dangerous
+# forms — force-push, hard-reset, recursive-force `rm` — plus their common
+# flag permutations (`-f`, `* --force`, `--force-with-lease`, `rm -fr`,
+# `rm -r -f`) so the prefix globs catch the usual orderings.
+#
+# HONEST FRAMING (AC #3, per ADR-0013): these deny-globs are
+# DEFENSE-IN-DEPTH, NOT A FIREWALL. Glob prefixes inherently miss flag
+# permutations — e.g. `git push origin main --force` is NOT matched by the
+# `Bash(git push --force*)` prefix, which is why the `Bash(git push * --force*)`
+# wildcard form is also listed — but coverage is still not exhaustive, and a
+# permission rule lives inside the agent's own trust boundary (it can be
+# relaxed). The PRIMARY control therefore stays behavioral + out-of-band: CI,
+# server-side git hooks, and branch protection. "Deny rules are
+# defense-in-depth, not a firewall." (guidelines `04-configuration/permissions.md`).
+_PERMISSIONS_DENY_DEFAULTS = (
+    "Bash(git push --force*)",
+    "Bash(git push -f *)",
+    "Bash(git push * --force*)",
+    "Bash(git push *--force-with-lease*)",
+    "Bash(git reset --hard*)",
+    "Bash(rm -rf*)",
+    "Bash(rm -fr*)",
+    "Bash(rm -r -f*)",
+)
+
 
 def _is_jig_managed(entry: dict) -> bool:
     """An entry counts as jig-managed iff its `metadata.managed_by_jig` is
@@ -831,6 +860,31 @@ def _build_jig_hook_entries(plugin: Path) -> dict:
     return out
 
 
+def _merge_permissions_deny(existing_perms: dict) -> dict:
+    """Slice 052-03 — merge jig's conservative `permissions.deny` defaults
+    into a (possibly pre-existing) `permissions` block.
+
+    Marker = SET-MEMBERSHIP. `permissions.deny` is a plain array of strings,
+    so it cannot carry a per-entry `metadata.managed_by_jig` marker the way
+    hook entries do. jig-ownership of a deny entry is therefore identified by
+    membership in `_PERMISSIONS_DENY_DEFAULTS` — the faithful adaptation of
+    the hooks block's metadata-marker mechanism for a string array (AC #2:
+    "same jig-managed marker mechanism").
+
+    Strategy: keep every existing deny entry that is NOT in jig's set (so
+    user-added denies survive verbatim and in order), then append jig's full
+    set. This is idempotent (re-running yields the same set, no duplicates)
+    and never drops user entries. `allow`, `ask`, and any other
+    `permissions.*` keys are preserved untouched — only `deny` is
+    jig-managed. Returns a new dict; does not mutate `existing_perms`."""
+    perms: dict = dict(existing_perms) if existing_perms else {}
+    current_deny = list(perms.get("deny") or [])
+    jig_set = set(_PERMISSIONS_DENY_DEFAULTS)
+    user_deny = [d for d in current_deny if d not in jig_set]
+    perms["deny"] = user_deny + list(_PERMISSIONS_DENY_DEFAULTS)
+    return perms
+
+
 def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     """Merge jig's hook registration into a (possibly pre-existing) settings
     dict. Strategy: append-with-marker.
@@ -838,6 +892,11 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     - Non-hook top-level fields pass through untouched.
     - Per event: keep all non-jig-managed entries verbatim; replace any
       jig-managed entries with the fresh set (idempotent re-run).
+    - `permissions.deny` gains jig's conservative destructive-command
+      defaults via `_merge_permissions_deny` (slice 052-03); `permissions`'s
+      other keys (`allow` / `ask` / …) are preserved untouched. Because this
+      function is on the shared copy path, BOTH greenfield `scaffold()` and
+      `migrate copy-machinery` emit the deny defaults.
     - Returns a new dict; does not mutate `existing`."""
     merged: dict = dict(existing) if existing else {}
     hooks = dict(merged.get("hooks") or {})
@@ -846,6 +905,7 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
         survivors = [e for e in current if not _is_jig_managed(e)]
         hooks[event] = survivors + fresh_entries
     merged["hooks"] = hooks
+    merged["permissions"] = _merge_permissions_deny(merged.get("permissions"))
     return merged
 
 
@@ -979,10 +1039,20 @@ def copy_machinery(plugin: Path, target: Path, *,
       `metadata.managed_by_jig`, non-jig entries survive).
     - UnmanagedHooksError fires BEFORE any filesystem mutation, so a
       refused call leaves no partial state — including no copied
-      skills/agents (this is the gap inbox 2026-05-15 closes)."""
+      skills/agents (this is the gap inbox 2026-05-15 closes).
+
+    Slice 052-04 (ADR-0013): the security floor's `.gitignore` secret block
+    is written here too, so `migrate copy-machinery` brings it to an
+    existing jig project (the secret-scan hook + `permissions.deny` defaults
+    already flow through `_copy_hooks_and_register` / `_merge_settings`).
+    The write is ungated infra — never tier-scoped (AC2) — and idempotent,
+    so the greenfield `scaffold()` caller can rely on it for the
+    `--with-machinery` path and only writes the floor itself on the
+    `--plugin-only` branch (where `copy_machinery` is not called)."""
     _check_hooks_safety(target, force=force)
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
+    _write_gitignore_secret_block(target)
 
 
 def _specs_dir_has_content(target: Path) -> bool:
@@ -1031,6 +1101,102 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict) -> None:
         # land in their 001-adopt-jig / 002-first-spec subdirs.
         dst = specs_dst / dst_name
         copy_template(src, dst, subs)
+
+
+# ---------- Slice 052-02: secret-ignore .gitignore floor (ADR-0013) ----------
+# Marker-delimited block so a re-run REPLACES the block in place (idempotent,
+# no duplicates) while any pre-existing user content is preserved. Kept a
+# standalone function because slice 052-04 reuses it for `migrate
+# copy-machinery`.
+_GITIGNORE_BLOCK_BEGIN = "# >>> jig secret-ignore >>>"
+_GITIGNORE_BLOCK_END = "# <<< jig secret-ignore <<<"
+
+# Conservative high-confidence secret-file patterns (ADR-0013 part 1). These
+# git-ignore the files that most often carry secrets so an accidental `git add`
+# can't stage them. Not exhaustive by design — the floor, not the ceiling.
+_GITIGNORE_SECRET_PATTERNS = (
+    ".env",
+    ".env.*",
+    # Re-include the placeholder templates the floor *wants* committed: the
+    # secret-scan hook tells users to "commit a placeholder in a *.example
+    # file" and skips these suffixes when scanning, so `.env.*` above must
+    # not ignore them. Git negations only take effect after the matching
+    # ignore line, so these must follow `.env.*`.
+    "!.env.example",
+    "!.env.sample",
+    "!.env.template",
+    "!.env.dist",
+    "*.pem",
+    "*.key",
+    "secrets/",
+    "credentials/",
+)
+
+
+def _render_gitignore_block() -> str:
+    """The marker-delimited jig secret-ignore block, including a one-line
+    honesty/intent comment. Trailing newline included."""
+    lines = [
+        _GITIGNORE_BLOCK_BEGIN,
+        "# jig secret-prevention floor (ADR-0013) — git-ignore common secret",
+        "# files so they can't be staged by accident. Edit above/below the",
+        "# markers; this block is regenerated by jig and re-runs are idempotent.",
+        *_GITIGNORE_SECRET_PATTERNS,
+        _GITIGNORE_BLOCK_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _write_gitignore_secret_block(target: Path) -> None:
+    """Write or merge the marker-delimited jig secret-ignore block into
+    `target/.gitignore` (slice 052-02, AC #1).
+
+    - No existing `.gitignore` → create it with just the jig block.
+    - Existing `.gitignore` without the markers → APPEND the block (a blank
+      line first if the file doesn't already end on one), preserving every
+      pre-existing line verbatim.
+    - Existing `.gitignore` WITH the markers → REPLACE the delimited region in
+      place, leaving content before/after the markers untouched. This makes
+      re-runs idempotent (no duplicate blocks).
+
+    Atomic write via `atomic_write_text`, consistent with the other scaffold
+    writes."""
+    gitignore = target / ".gitignore"
+    block = _render_gitignore_block()
+
+    if not gitignore.exists():
+        atomic_write_text(gitignore, block)
+        return
+
+    existing = gitignore.read_text()
+    begin = existing.find(_GITIGNORE_BLOCK_BEGIN)
+    if begin != -1:
+        end_marker = existing.find(_GITIGNORE_BLOCK_END, begin)
+        if end_marker != -1:
+            # Replace from the begin marker through the end-marker's line
+            # (including its trailing newline, if present).
+            after = end_marker + len(_GITIGNORE_BLOCK_END)
+            if after < len(existing) and existing[after] == "\n":
+                after += 1
+            merged = existing[:begin] + block + existing[after:]
+            if merged != existing:
+                atomic_write_text(gitignore, merged)
+            return
+        # Begin marker without a matching end marker — fall through and append
+        # a fresh, well-formed block rather than corrupt the half-block.
+
+    # Append, ensuring exactly one blank line separates prior content from
+    # the jig block. Three cases for the existing file's tail:
+    #   ends with "\n\n" → already blank-terminated, add nothing;
+    #   ends with "\n"    → one newline short of a blank line, add "\n";
+    #   no trailing "\n"  → mid-line, add "\n\n" for the blank separator.
+    if existing.endswith("\n\n"):
+        sep = ""
+    elif existing.endswith("\n"):
+        sep = "\n"
+    else:
+        sep = "\n\n"
+    atomic_write_text(gitignore, existing + sep + block)
 
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
@@ -1169,8 +1335,21 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # Slice 038-02: gate the on-disk skill set to the same tiers the
         # manifest records (installed_skills is derived from these per
         # ADR-0007), so disk == manifest.
+        #
+        # Slice 052-04: copy_machinery now also writes the secret-ignore
+        # .gitignore floor (so `migrate copy-machinery` brings it too), which
+        # covers the --with-machinery path here. The --plugin-only branch
+        # below writes it directly since copy_machinery is not called there.
         copy_machinery(plugin, target, force=force,
                        installed_tiers=installed_tiers)
+    else:
+        # 5b. Slice 052-02 (ADR-0013): write/merge the secret-ignore
+        # .gitignore floor on the --plugin-only path (with-machinery gets it
+        # via copy_machinery above — slice 052-04). Runs BEFORE the
+        # scaffold.json completion sentinel so a crash before the manifest
+        # leaves a re-runnable partial state. Idempotent + append-not-clobber,
+        # so --force re-scaffold and a pre-existing user .gitignore are safe.
+        _write_gitignore_secret_block(target)
 
     # 6. scaffold.json install-state manifest — the COMPLETION SENTINEL
     # (slice 032-02). Written LAST so a crash before this point leaves
