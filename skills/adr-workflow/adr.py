@@ -34,6 +34,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -242,24 +243,14 @@ def _validate_slug(slug: str) -> None:
         )
 
 
-def _preflight_branch_and_worktree(project_dir: Path) -> None:
-    """Refuse if current branch != main, or worktree is dirty. Both
-    checks happen BEFORE any file mutation. Applies even to --no-push
-    (parity with workflow.py 003-03)."""
-    rc, stdout, stderr = _run(
-        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
-    )
-    if rc != 0:
-        raise AdrError(
-            f"could not determine current branch (git: {stderr.strip()})"
-        )
-    branch = stdout.strip()
-    if branch != "main":
-        raise AdrError(
-            f"refusing: current branch is {branch!r}, must be 'main' "
-            f"(reservation lands on main; switch with `git checkout main`)"
-        )
+def _refuse_if_dirty(project_dir: Path) -> None:
+    """Refuse if the worktree has uncommitted changes. The on-main
+    reservation path commits on local `main`, so it must start clean.
 
+    The branch==main check that used to live here moved to the
+    `_current_branch` dispatch in `reserve_adr` (see the worktree-aware
+    reservation block) so off-main callers route to the detached-worktree
+    path instead of being refused. Mirrors workflow.py."""
     rc, stdout, _stderr = _run(
         ["git", "status", "--porcelain"], cwd=project_dir,
     )
@@ -393,6 +384,234 @@ def _do_pr_fallback(project_dir: Path, branch_name: str,
         print(pr_url)
 
 
+# ---------- Worktree-aware reservation (prototype) ----------
+#
+# Inline-mirror of workflow.py's worktree-aware reservation (per ADR-0002's
+# two-caller rule). The flow above commits on local `main` then pushes
+# `origin main`, which requires BEING on `main` — impossible from a linked
+# worktree (it can't check out `main`; the primary worktree holds it). The
+# helpers below build the reservation commit in an EPHEMERAL DETACHED
+# worktree checked out at origin/main, then push `HEAD:main`, so reservation
+# works from any branch or worktree without touching the caller's checkout.
+
+
+def _current_branch(project_dir: Path):
+    """Return the current branch name, or None if detached / undeterminable."""
+    rc, out, _err = _run(
+        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        return None
+    return out.strip() or None
+
+
+def _print_draft_hint(number: str, slug: str) -> None:
+    """The reservation lands on origin/main, not in the caller's branch.
+    Tell them how to pull it in (stderr — keeps the stdout contract clean)."""
+    sys.stderr.write(
+        f"note: reservation adr-{number}-{slug} lives on origin/main, not in "
+        f"your current branch. To draft it here:\n"
+        f"    git fetch origin main && git merge origin/main\n"
+        f"then edit docs/decisions/adr-{number}-{slug}.md\n"
+    )
+
+
+def _reserve_local_on_current_branch(slug: str, project_dir: Path,
+                                     adrs_dir: Path, title: str) -> int:
+    """`--no-push` from off-main: commit a provisional reservation stub to
+    the CURRENT branch. The number is computed from the local working tree,
+    so it is PROVISIONAL — use the default (push) mode to claim it for real
+    on origin/main."""
+    existing = _adr_files(adrs_dir)
+    _check_slug_collision(existing, slug)
+    next_n = (max(_parse_adr_number(p.name) for p in existing) + 1
+              if existing else 1)
+    number = f"{next_n:04d}"
+    if not title:
+        title = _slug_to_title(slug)
+    template = _template_path()
+    if not template.is_file():
+        raise AdrError(f"template not found: {template}")
+    content = _render_adr_content(template.read_text(), number, title,
+                                  _today())
+    target = adrs_dir / f"adr-{number}-{slug}.md"
+    if target.exists():
+        raise AdrError(f"target already exists: {target}")
+    atomic_write_text(target, content)
+    rel_path = f"docs/decisions/adr-{number}-{slug}.md"
+    rc, _out, err = _run(["git", "add", rel_path], cwd=project_dir)
+    if rc != 0:
+        raise AdrError(
+            f"`git add {rel_path}` failed: {err.strip()}. "
+            f"The stub ADR file is on disk; stage and commit manually."
+        )
+    # Pathspec-limited commit so unrelated staged work can't leak in.
+    rc, _out, err = _run(
+        ["git", "commit", "-m",
+         f"docs(decisions): reserve adr-{number}-{slug}", "--", rel_path],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"`git commit` failed: {err.strip()}. "
+            f"The stub ADR file is staged; commit manually."
+        )
+    print(f"reserved adr-{number}-{slug} (local provisional — not yet on "
+          f"origin/main)")
+    print(str(target.resolve()))
+    return 0
+
+
+def _pr_fallback_from_worktree(wt: Path, project_dir: Path,
+                               reserve_branch: str, number: str,
+                               slug: str, pr_body: str) -> None:
+    """Protected-branch fallback for the detached-worktree path: push the
+    detached reservation commit straight to a new remote branch and open the
+    PR (no local `main` to un-strand). Mirrors workflow.py."""
+    _check_gh_and_remote(project_dir)
+    rc, _out, err = _run(
+        ["git", "push", "origin", f"HEAD:refs/heads/{reserve_branch}"],
+        cwd=wt,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback push to {reserve_branch!r} failed: {err.strip()}. "
+            f"The reservation commit exists only in the reservation "
+            f"worktree; re-run to retry."
+        )
+    title = f"docs(decisions): reserve adr-{number}-{slug}"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body,
+         "--head", reserve_branch, "--base", "main"],
+        cwd=wt,
+    )
+    if rc != 0:
+        raise AdrError(
+            f"PR-fallback `gh pr create` failed: {err.strip()}. "
+            f"Branch origin/{reserve_branch} is pushed; open the PR "
+            f"manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def _reserve_via_detached_worktree(slug: str, project_dir: Path,
+                                   title: str, pr_mode: bool = False) -> int:
+    """Push-mode ADR reservation that works from ANY branch or worktree.
+    Claims the next free ADR number on origin/main by building the
+    reservation commit in an ephemeral detached worktree checked out at
+    origin/main, then pushing `HEAD:main`. Mirrors workflow.py."""
+    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    if rc != 0:
+        sys.stderr.write(
+            f"warning: `git fetch origin main` failed: {err.strip()}; "
+            f"proceeding with the local origin/main view\n"
+        )
+
+    wt = Path(tempfile.mkdtemp(prefix="jig-reserve-adr-"))
+    try:
+        rc, _out, err = _run(
+            ["git", "worktree", "add", "--detach", str(wt), "origin/main"],
+            cwd=project_dir,
+        )
+        if rc != 0:
+            raise AdrError(
+                f"could not create the ephemeral reservation worktree at "
+                f"origin/main ({err.strip()}). Most likely there is no "
+                f"origin/main to reserve against — use `--no-push` for a "
+                f"local provisional reservation, or run from a clone with "
+                f"an 'origin' remote."
+            )
+
+        adrs_dir = wt / "docs" / "decisions"
+        existing = _adr_files(adrs_dir)
+        _check_slug_collision(existing, slug)
+        next_n = (max(_parse_adr_number(p.name) for p in existing) + 1
+                  if existing else 1)
+        number = f"{next_n:04d}"
+        if not title:
+            title = _slug_to_title(slug)
+        template = _template_path()
+        if not template.is_file():
+            raise AdrError(f"template not found: {template}")
+        content = _render_adr_content(template.read_text(), number, title,
+                                      _today())
+        target = adrs_dir / f"adr-{number}-{slug}.md"
+        if target.exists():
+            raise AdrError(
+                f"refusing: adr-{number}-{slug} already exists on origin/main."
+            )
+        # origin/main may not have docs/decisions/ yet (reserving the very
+        # first ADR); the stub lands directly in it, so ensure it exists.
+        adrs_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(target, content)
+        rel_path = f"docs/decisions/adr-{number}-{slug}.md"
+        rc, _out, err = _run(["git", "add", rel_path], cwd=wt)
+        if rc != 0:
+            raise AdrError(
+                f"`git add` in the reservation worktree failed: {err.strip()}."
+            )
+        rc, _out, err = _run(
+            ["git", "commit", "-m",
+             f"docs(decisions): reserve adr-{number}-{slug}"],
+            cwd=wt,
+        )
+        if rc != 0:
+            raise AdrError(
+                f"`git commit` in the reservation worktree failed: "
+                f"{err.strip()}."
+            )
+        print(f"reserved adr-{number}-{slug}")
+
+        pr_body = _build_pr_body(number, slug)
+        reserve_branch = f"reserve/adr-{number}-{slug}"
+
+        if pr_mode:
+            _pr_fallback_from_worktree(
+                wt, project_dir, reserve_branch, number, slug, pr_body,
+            )
+            _print_draft_hint(number, slug)
+            return 0
+
+        rc, _out, err = _run(["git", "push", "origin", "HEAD:main"], cwd=wt)
+        if rc == 0:
+            print(f"reserved adr-{number}-{slug} on origin/main")
+            _print_draft_hint(number, slug)
+            return 0
+
+        kind = _classify_push_failure(err)
+        if kind == "race":
+            # No `reset --hard HEAD~1` needed: the stranded commit lives
+            # only in the worktree the `finally` removes.
+            sys.stderr.write(
+                f"race detected: origin/main advanced during reservation. "
+                f"Re-run 'adr.py new {slug}' to pick the next free number.\n"
+            )
+            raise AdrError(f"race-on-push: {err.strip()}")
+
+        if kind == "protection":
+            sys.stderr.write(
+                f"direct push refused ({err.strip()}); falling back to "
+                f"PR mode...\n"
+            )
+            _pr_fallback_from_worktree(
+                wt, project_dir, reserve_branch, number, slug, pr_body,
+            )
+            _print_draft_hint(number, slug)
+            return 0
+
+        raise AdrError(
+            f"`git push origin HEAD:main` failed: {err.strip()} "
+            f"(the reservation commit lived only in the reservation "
+            f"worktree, which has been removed; inspect and re-run)."
+        )
+    finally:
+        _run(["git", "worktree", "remove", "--force", str(wt)],
+             cwd=project_dir)
+        shutil.rmtree(wt, ignore_errors=True)
+
+
 def reserve_adr(slug: str, project_dir: Path, title: str = "",
                 no_push: bool = False, pr_mode: bool = False) -> int:
     """Slice 028-01 entry point. Reserve the next free ADR number by
@@ -416,9 +635,23 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
             f"(not inside a scaffolded jig project)"
         )
 
-    # Preflight (not-on-main, dirty-worktree) applies even to --no-push
-    # so the reservation commit always lands on a clean main.
-    _preflight_branch_and_worktree(project_dir)
+    # Worktree-aware routing (prototype): the original flow below REQUIRES
+    # being on `main`. A linked worktree can't check out `main`, so route
+    # off-main callers to the detached-worktree path (push) or a
+    # current-branch commit (`--no-push`). On `main`, the existing 028-01
+    # flow runs unchanged. Mirrors workflow.py.
+    if _current_branch(project_dir) != "main":
+        if no_push:
+            return _reserve_local_on_current_branch(
+                slug, project_dir, adrs_dir, title,
+            )
+        return _reserve_via_detached_worktree(
+            slug, project_dir, title, pr_mode=pr_mode,
+        )
+
+    # On `main`: enforce a clean tree (the commit lands on local main).
+    # The branch check already happened at the dispatch above.
+    _refuse_if_dirty(project_dir)
 
     # Fetch origin/main so the next-number scan + slug-collision check
     # reflect the freshest state. Skipped for --no-push.

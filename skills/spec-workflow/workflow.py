@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -1549,23 +1550,15 @@ def _validate_slug(slug: str) -> None:
         )
 
 
-def _preflight_branch_and_worktree(project_dir: Path) -> None:
-    """AC #5: refuse if current branch != main, or worktree is dirty.
-    Both checks happen before any file mutation."""
-    rc, stdout, stderr = _run(
-        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
-    )
-    if rc != 0:
-        raise WorkflowError(
-            f"could not determine current branch (git: {stderr.strip()})"
-        )
-    branch = stdout.strip()
-    if branch != "main":
-        raise WorkflowError(
-            f"refusing: current branch is {branch!r}, must be 'main' "
-            f"(reservation lands on main; switch with `git checkout main`)"
-        )
+def _refuse_if_dirty(project_dir: Path) -> None:
+    """Refuse if the worktree has uncommitted changes. The on-main
+    reservation path commits on local `main`, so it must start clean.
 
+    The branch==main check that used to live here moved to the
+    `_current_branch` dispatch in `reserve_spec` (see the worktree-aware
+    reservation block) so off-main callers route to the detached-worktree
+    path instead of being refused — keeping the single `git symbolic-ref`
+    call the on-main path already made."""
     rc, stdout, _stderr = _run(
         ["git", "status", "--porcelain"], cwd=project_dir,
     )
@@ -1684,6 +1677,250 @@ def _do_pr_fallback(project_dir: Path, branch_name: str,
         print(pr_url)
 
 
+# ---------- Worktree-aware reservation (prototype) ----------
+#
+# The 003-03 flow above commits on local `main`, then pushes `origin main`.
+# That requires the caller to BE on `main` — but a linked git worktree can
+# never check out `main` (it is held by the primary worktree; `git checkout
+# main` there fails with "'main' is already used by worktree at ..."). So
+# the branch==main guard was structurally unsatisfiable from exactly the
+# place jig's own worktree-based workflow puts you. The helpers below make
+# reservation work from any branch or worktree by building the reservation
+# commit in an EPHEMERAL DETACHED worktree checked out at origin/main —
+# detached, so it sidesteps the one-checkout-per-branch rule — then pushing
+# `HEAD:main`. The caller's cwd, branch, and branch tip are never touched.
+
+
+def _current_branch(project_dir: Path):
+    """Return the current branch name, or None if detached / undeterminable.
+
+    A linked worktree reports its own branch here (never `main`, which the
+    primary worktree holds), which is what routes reservation onto the
+    worktree-aware path."""
+    rc, out, _err = _run(
+        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        return None
+    return out.strip() or None
+
+
+def _print_draft_hint(spec_dirname: str) -> None:
+    """The reservation lands on origin/main, not in the caller's branch.
+    Tell them how to pull it in to start drafting. Written to stderr so the
+    stdout contract (reserved-line + path) stays clean for scripts."""
+    sys.stderr.write(
+        f"note: reservation {spec_dirname} lives on origin/main, not in "
+        f"your current branch. To draft it here:\n"
+        f"    git fetch origin main && git merge origin/main\n"
+        f"then edit docs/specs/{spec_dirname}/spec.md\n"
+    )
+
+
+def _reserve_local_on_current_branch(slug: str, project_dir: Path,
+                                     specs_dir: Path) -> int:
+    """`--no-push` from off-main: commit a provisional reservation stub to
+    the CURRENT branch. The number is computed from the local working tree,
+    so it is PROVISIONAL — it may collide at merge time. Use the default
+    (push) mode to claim a number for real on origin/main."""
+    next_n = _next_spec_number(specs_dir)
+    num_str = f"{next_n:03d}"
+    spec_dirname = f"{num_str}-{slug}"
+    spec_dir = specs_dir / spec_dirname
+    if spec_dir.exists():
+        raise WorkflowError(
+            f"refusing: {spec_dir} already exists. Re-run after "
+            f"resolving the conflict."
+        )
+    spec_dir.mkdir(parents=True)
+    today_iso = _today()
+    atomic_write_text(spec_dir / "spec.md",
+                      _render_stub_spec(num_str, slug, today_iso))
+    atomic_write_text(spec_dir / "slice-01-tbd.md",
+                      _render_stub_slice(num_str))
+    rel_spec = f"docs/specs/{spec_dirname}/spec.md"
+    rel_slice = f"docs/specs/{spec_dirname}/slice-01-tbd.md"
+    rc, _out, err = _run(["git", "add", rel_spec, rel_slice], cwd=project_dir)
+    if rc != 0:
+        raise WorkflowError(
+            f"`git add {rel_spec} {rel_slice}` failed: {err.strip()}. "
+            f"The stub files are on disk; stage and commit manually."
+        )
+    # Pathspec-limited commit: only the stub lands, even if the caller had
+    # unrelated work already staged. Off-main reservation deliberately does
+    # NOT require a clean tree (worktree sessions are usually mid-edit), so
+    # we must not sweep that staged work into the reservation commit.
+    commit_msg = f"docs(specs): reserve {spec_dirname}"
+    rc, _out, err = _run(
+        ["git", "commit", "-m", commit_msg, "--", rel_spec, rel_slice],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"`git commit` failed: {err.strip()}. "
+            f"The stub spec.md is staged; commit manually."
+        )
+    print(f"reserved {spec_dirname} (local provisional — not yet on origin/main)")
+    print(str((spec_dir / "spec.md").resolve()))
+    return 0
+
+
+def _pr_fallback_from_worktree(wt: Path, project_dir: Path,
+                               reserve_branch: str, num_str: str,
+                               slug: str, pr_body: str) -> None:
+    """Protected-branch fallback for the detached-worktree path. Simpler
+    than the on-main `_do_pr_fallback` (there is no local `main` to
+    un-strand): push the detached reservation commit straight to a new
+    remote branch and open the PR. `gh`/remote guards mirror 003-03."""
+    _check_gh_and_remote(project_dir)
+    rc, _out, err = _run(
+        ["git", "push", "origin", f"HEAD:refs/heads/{reserve_branch}"],
+        cwd=wt,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback push to {reserve_branch!r} failed: {err.strip()}. "
+            f"The reservation commit exists only in the reservation "
+            f"worktree; re-run to retry."
+        )
+    title = f"docs(specs): reserve {num_str}-{slug}"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body,
+         "--head", reserve_branch, "--base", "main"],
+        cwd=wt,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback `gh pr create` failed: {err.strip()}. "
+            f"Branch origin/{reserve_branch} is pushed; open the PR "
+            f"manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def _reserve_via_detached_worktree(slug: str, project_dir: Path,
+                                   pr_mode: bool = False) -> int:
+    """Push-mode reservation that works from ANY branch or worktree.
+
+    Claims the next free spec number on origin/main by building the
+    reservation commit inside an ephemeral, detached worktree checked out
+    at origin/main, then pushing `HEAD:main`. The caller's working tree,
+    branch, and branch tip are never touched. Race + protection handling
+    mirror the on-main 003-03 flow; race recovery is trivial here (the
+    stranded commit lives only in the worktree we remove in `finally`)."""
+    # Fresh origin/main so the number scan + commit parent are current.
+    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    if rc != 0:
+        sys.stderr.write(
+            f"warning: `git fetch origin main` failed: {err.strip()}; "
+            f"proceeding with the local origin/main view\n"
+        )
+
+    wt = Path(tempfile.mkdtemp(prefix="jig-reserve-spec-"))
+    try:
+        # Detached checkout of origin/main: no branch is checked out, so
+        # this never collides with `main` being held by another worktree.
+        rc, _out, err = _run(
+            ["git", "worktree", "add", "--detach", str(wt), "origin/main"],
+            cwd=project_dir,
+        )
+        if rc != 0:
+            raise WorkflowError(
+                f"could not create the ephemeral reservation worktree at "
+                f"origin/main ({err.strip()}). Most likely there is no "
+                f"origin/main to reserve against — use `--no-push` for a "
+                f"local provisional reservation, or run from a clone with "
+                f"an 'origin' remote."
+            )
+
+        # Number scan reads the freshly checked-out origin/main tree.
+        next_n = _next_spec_number(wt / "docs" / "specs")
+        num_str = f"{next_n:03d}"
+        spec_dirname = f"{num_str}-{slug}"
+        spec_dir = wt / "docs" / "specs" / spec_dirname
+        if spec_dir.exists():
+            raise WorkflowError(
+                f"refusing: {spec_dirname} already exists on origin/main."
+            )
+
+        spec_dir.mkdir(parents=True)
+        today_iso = _today()
+        atomic_write_text(spec_dir / "spec.md",
+                          _render_stub_spec(num_str, slug, today_iso))
+        atomic_write_text(spec_dir / "slice-01-tbd.md",
+                          _render_stub_slice(num_str))
+        rel_spec = f"docs/specs/{spec_dirname}/spec.md"
+        rel_slice = f"docs/specs/{spec_dirname}/slice-01-tbd.md"
+        rc, _out, err = _run(["git", "add", rel_spec, rel_slice], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git add` in the reservation worktree failed: "
+                f"{err.strip()}."
+            )
+        commit_msg = f"docs(specs): reserve {spec_dirname}"
+        rc, _out, err = _run(["git", "commit", "-m", commit_msg], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git commit` in the reservation worktree failed: "
+                f"{err.strip()}."
+            )
+        print(f"reserved {spec_dirname}")
+
+        pr_body = _build_pr_body(num_str, slug, project_dir)
+        reserve_branch = f"reserve/{spec_dirname}"
+
+        if pr_mode:
+            _pr_fallback_from_worktree(
+                wt, project_dir, reserve_branch, num_str, slug, pr_body,
+            )
+            _print_draft_hint(spec_dirname)
+            return 0
+
+        # Direct push of the detached reservation commit onto main.
+        rc, _out, err = _run(["git", "push", "origin", "HEAD:main"], cwd=wt)
+        if rc == 0:
+            print(f"reserved {spec_dirname} on origin/main")
+            _print_draft_hint(spec_dirname)
+            return 0
+
+        kind = _classify_push_failure(err)
+        if kind == "race":
+            # No `reset --hard HEAD~1` needed: the stranded commit lives
+            # only in the worktree the `finally` removes.
+            sys.stderr.write(
+                f"race detected: origin/main advanced during reservation. "
+                f"Re-run 'workflow.py new {slug}' to pick the next free "
+                f"number.\n"
+            )
+            raise WorkflowError(f"race-on-push: {err.strip()}")
+
+        if kind == "protection":
+            sys.stderr.write(
+                f"direct push refused ({err.strip()}); falling back to "
+                f"PR mode...\n"
+            )
+            _pr_fallback_from_worktree(
+                wt, project_dir, reserve_branch, num_str, slug, pr_body,
+            )
+            _print_draft_hint(spec_dirname)
+            return 0
+
+        raise WorkflowError(
+            f"`git push origin HEAD:main` failed: {err.strip()} "
+            f"(the reservation commit lived only in the reservation "
+            f"worktree, which has been removed; inspect and re-run)."
+        )
+    finally:
+        # Always tear down the ephemeral worktree. --force because git sees
+        # it as carrying a checkout; ignore errors so cleanup never masks
+        # the real outcome.
+        _run(["git", "worktree", "remove", "--force", str(wt)],
+             cwd=project_dir)
+        shutil.rmtree(wt, ignore_errors=True)
+
+
 def reserve_spec(slug: str, project_dir: Path,
                  no_push: bool = False, pr_mode: bool = False) -> int:
     """Slice 003-03 entry point. Reserve the next free spec number by
@@ -1705,9 +1942,24 @@ def reserve_spec(slug: str, project_dir: Path,
             f"(not inside a scaffolded jig project)"
         )
 
-    # AC #5 (not-on-main, dirty-worktree) — applies even to `--no-push`
-    # so the reservation commit always lands on a clean main.
-    _preflight_branch_and_worktree(project_dir)
+    # Worktree-aware routing (prototype): the original flow below REQUIRES
+    # being on `main` (it commits on local main, then pushes `origin main`).
+    # A linked worktree can't check out `main`, so route off-main callers to
+    # the detached-worktree path (push) or a current-branch commit
+    # (`--no-push`) instead of refusing. On `main`, the proven 003-03 +
+    # 037-02 flow runs unchanged.
+    if _current_branch(project_dir) != "main":
+        if no_push:
+            return _reserve_local_on_current_branch(
+                slug, project_dir, specs_dir,
+            )
+        return _reserve_via_detached_worktree(
+            slug, project_dir, pr_mode=pr_mode,
+        )
+
+    # On `main`: enforce a clean tree (the commit lands on local main).
+    # The branch check already happened at the dispatch above.
+    _refuse_if_dirty(project_dir)
 
     # Fetch origin/main first; both the next-number scan and the
     # divergence preflight read from it (spec 037-02 AC #1 + AC #4 +

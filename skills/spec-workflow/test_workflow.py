@@ -1313,23 +1313,125 @@ class ReserveSpecTests(unittest.TestCase):
                         f"{sorted((self.target / 'docs/specs').iterdir())}")
 
     # AC #5 — refuse on non-main branch.
-    def test_new_refuses_on_non_main_branch(self):
+    # Worktree-aware reservation (prototype): off-main no longer refuses.
+    # With --no-push it commits a provisional reservation to the CURRENT
+    # branch (the push path is exercised by the detached-worktree tests).
+    def test_new_off_main_no_push_reserves_on_current_branch(self):
         self._mkspec("001-existing")
         rec = _SubprocessRecorder()
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
                  returncode=0, stdout="feature/something\n")
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "myslug", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # Provisional stub created locally (002 = max(001) + 1).
+        self.assertTrue((self.target / "docs/specs/002-myslug/spec.md").is_file())
+        # Committed with a pathspec-limited commit so unrelated staged work
+        # can't leak into the reservation commit.
+        commit_calls = [c for c in rec.calls
+                        if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]
+        self.assertEqual(len(commit_calls), 1)
+        self.assertIn("--", commit_calls[0])
+        # No push / fetch — --no-push is purely local.
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git push", flat)
+        self.assertNotIn("git fetch", flat)
+
+    # Worktree-aware reservation — default (push) from off-main claims the
+    # number on origin/main via an EPHEMERAL DETACHED worktree, never
+    # touching the caller's branch.
+    def test_new_off_main_push_uses_detached_worktree(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/x\n")
+        # fetch / worktree add / add / commit / push HEAD:main / worktree
+        # remove all default to rc=0 in the recorder.
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "fromtree", project_dir=self.target,
+                no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        # Detached checkout of origin/main — NOT a checkout of `main`
+        # (which a linked worktree can't do).
+        self.assertIn("git worktree add --detach", flat)
+        self.assertIn("origin/main", flat)
+        # Pushes the detached HEAD onto main — NOT `git push origin main`.
+        self.assertIn("git push origin HEAD:main", flat)
+        # The ephemeral worktree is always torn down.
+        self.assertIn("git worktree remove --force", flat)
+        # The caller's branch is never checked out or reset.
+        self.assertNotIn("git checkout main", flat)
+        self.assertNotIn("git reset --hard", flat)
+
+    # Worktree path race recovery: the stranded commit lives only in the
+    # ephemeral worktree, so recovery is just the teardown — no on-main-style
+    # `git reset --hard HEAD~1`.
+    def test_new_off_main_race_cleans_up_worktree(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/x\n")
+        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+                 returncode=1,
+                 stderr="! [rejected] HEAD -> main (non-fast-forward)\n")
         from unittest.mock import patch
         with patch.object(_workflow, "subprocess") as sp_mod:
             sp_mod.run = rec
             with self.assertRaises(_workflow.WorkflowError) as ctx:
                 _workflow.reserve_spec(
-                    "myslug", project_dir=self.target,
-                    no_push=True, pr_mode=False,
+                    "raced", project_dir=self.target,
+                    no_push=False, pr_mode=False,
                 )
-        msg = str(ctx.exception)
-        self.assertIn("main", msg.lower())
-        # Refused BEFORE any mutation: spec dir not created
-        self.assertFalse(any((self.target / "docs/specs").glob("*-myslug")))
+        self.assertIn("race", str(ctx.exception).lower())
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git worktree remove --force", flat)
+        self.assertNotIn("git reset --hard HEAD~1", flat)
+
+    # Worktree path protected-branch fallback: push the detached commit to
+    # a reserve/ branch and open a PR (no local-main to un-strand).
+    def test_new_off_main_protected_falls_back_to_pr(self):
+        self._mkspec("001-existing")
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/x\n")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
+        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+                 returncode=1,
+                 stderr="remote: error: GH006: Protected branch update failed.\n")
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/user/repo/pull/7\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/local/bin/gh"):
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "protd", project_dir=self.target,
+                no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        # Reservation commit pushed straight to a reserve/ branch...
+        self.assertIn("git push origin HEAD:refs/heads/reserve/", flat)
+        # ...and a PR opened with explicit head/base.
+        self.assertIn("gh pr create", flat)
+        self.assertIn("--head", flat)
+        self.assertIn("--base", flat)
+        # Ephemeral worktree still torn down.
+        self.assertIn("git worktree remove --force", flat)
 
     # AC #5 — refuse on dirty worktree.
     def test_new_refuses_on_dirty_worktree(self):
@@ -4469,6 +4571,93 @@ class AmendmentDigestTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertIn("slice-01-foo.md", result.stdout)
         self.assertIn("2026-06-01 — Renamed widget → gadget", result.stdout)
+
+
+class ReserveSpecFromLinkedWorktreeE2E(unittest.TestCase):
+    """Real-git end-to-end proof of the worktree-aware reservation fix.
+
+    Reproduces the exact friction that motivated it: a linked worktree on a
+    feature branch with `main` checked out in the primary worktree (so the
+    linked worktree CANNOT `git checkout main`). The reservation must still
+    land on origin/main, clean up its ephemeral worktree, and leave the
+    caller's branch and working tree untouched.
+
+    Unlike the recorder-based tests above, this class drives REAL `git` (no
+    subprocess patching) — the bug was about git's one-checkout-per-branch
+    worktree semantics, which only real git exercises."""
+
+    def _git(self, *args, cwd):
+        return subprocess.run(
+            ["git", *args], cwd=str(cwd), capture_output=True, text=True,
+        )
+
+    def setUp(self):
+        import shutil
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-wf-wt-e2e-"))
+        # Build `work` on `main` directly (robust across git versions —
+        # avoids empty-clone default-branch quirks), seed two specs, then
+        # push to a bare `origin`.
+        self.work = self.tmp / "work"
+        self._git("init", str(self.work), cwd=self.tmp)
+        self._git("symbolic-ref", "HEAD", "refs/heads/main", cwd=self.work)
+        for k, v in (("user.email", "t@e.x"), ("user.name", "T"),
+                     ("commit.gpgsign", "false")):
+            self._git("config", k, v, cwd=self.work)
+        for name in ("001-alpha", "002-beta"):
+            d = self.work / "docs" / "specs" / name
+            d.mkdir(parents=True)
+            (d / "spec.md").write_text(f"# Spec {name}\n")
+        self._git("add", "-A", cwd=self.work)
+        self._git("commit", "-m", "seed specs", cwd=self.work)
+        self.origin = self.tmp / "origin.git"
+        self._git("init", "--bare", str(self.origin), cwd=self.tmp)
+        self._git("remote", "add", "origin", str(self.origin), cwd=self.work)
+        push = self._git("push", "-u", "origin", "main", cwd=self.work)
+        self.assertEqual(push.returncode, 0, f"seed push failed: {push.stderr}")
+        # Linked worktree on a feature branch — `main` stays held by `work`.
+        self.feat = self.tmp / "feat"
+        add = self._git("worktree", "add", "-b", "feature", str(self.feat),
+                        cwd=self.work)
+        self.assertEqual(add.returncode, 0, f"worktree add failed: {add.stderr}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_reserve_from_linked_worktree_lands_on_origin_main(self):
+        # Precondition the whole fix rests on: the linked worktree genuinely
+        # cannot check out `main` (it's held by `work`).
+        co = self._git("checkout", "main", cwd=self.feat)
+        self.assertNotEqual(co.returncode, 0)
+        self.assertIn("already used by worktree", co.stderr)
+
+        feat_head_before = self._git(
+            "rev-parse", "HEAD", cwd=self.feat).stdout.strip()
+
+        # Reserve from the linked worktree — REAL git, no mocking.
+        code = _workflow.reserve_spec(
+            "gamma", project_dir=self.feat, no_push=False, pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        # The reservation landed on origin/main as 003-gamma (max + 1).
+        ls = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.origin)
+        self.assertIn("docs/specs/003-gamma/spec.md", ls.stdout)
+
+        # The ephemeral reservation worktree was cleaned up — only `work`
+        # and `feat` remain registered.
+        wl = self._git("worktree", "list", cwd=self.work).stdout
+        self.assertNotIn("jig-reserve-spec", wl)
+        self.assertEqual(len(wl.strip().splitlines()), 2, wl)
+
+        # The caller's branch tip and working tree are untouched: identical
+        # HEAD, and the stub does NOT appear in the feature worktree.
+        feat_head_after = self._git(
+            "rev-parse", "HEAD", cwd=self.feat).stdout.strip()
+        self.assertEqual(feat_head_before, feat_head_after)
+        self.assertFalse((self.feat / "docs/specs/003-gamma").exists())
 
 
 if __name__ == "__main__":

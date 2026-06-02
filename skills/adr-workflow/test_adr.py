@@ -1357,23 +1357,106 @@ class ReserveAdrTests(unittest.TestCase):
                         f"expected 0016-newslot; got: "
                         f"{sorted(self.adrs_dir.iterdir())}")
 
-    # AC #5 (pattern) — refuse on non-main branch.
-    def test_new_refuses_on_non_main_branch(self):
+    # Worktree-aware reservation (prototype): off-main no longer refuses.
+    # With --no-push it commits a provisional reservation to the CURRENT
+    # branch (the push path is exercised by the detached-worktree tests).
+    def test_new_off_main_no_push_reserves_on_current_branch(self):
+        self._seed_adr("0001", "first")
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/foo\n")
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "myslug", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # Provisional stub created locally (0002 = max(0001) + 1).
+        self.assertTrue((self.adrs_dir / "adr-0002-myslug.md").is_file())
+        # Pathspec-limited commit so unrelated staged work can't leak in.
+        commit_calls = [c for c in rec.calls
+                        if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]
+        self.assertEqual(len(commit_calls), 1)
+        self.assertIn("--", commit_calls[0])
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git push", flat)
+        self.assertNotIn("git fetch", flat)
+
+    # Worktree-aware reservation — default (push) from off-main claims the
+    # number on origin/main via an ephemeral DETACHED worktree.
+    def test_new_off_main_push_uses_detached_worktree(self):
         rec = _SubprocessRecorder()
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
                  returncode=0, stdout="feature/foo\n")
         from unittest.mock import patch
         with patch.object(_adr_mod, "subprocess") as sp_mod:
             sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "fromtree", project_dir=self.target,
+                title="", no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git worktree add --detach", flat)
+        self.assertIn("origin/main", flat)
+        self.assertIn("git push origin HEAD:main", flat)
+        self.assertIn("git worktree remove --force", flat)
+        self.assertNotIn("git checkout main", flat)
+        self.assertNotIn("git reset --hard", flat)
+
+    # Worktree path race recovery: teardown only, no `git reset --hard HEAD~1`.
+    def test_new_off_main_race_cleans_up_worktree(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/foo\n")
+        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+                 returncode=1,
+                 stderr="! [rejected] HEAD -> main (non-fast-forward)\n")
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
             with self.assertRaises(_adr_mod.AdrError) as ctx:
                 _adr_mod.reserve_adr(
-                    "myslug", project_dir=self.target,
-                    title="", no_push=True, pr_mode=False,
+                    "raced", project_dir=self.target,
+                    title="", no_push=False, pr_mode=False,
                 )
-        msg = str(ctx.exception).lower()
-        self.assertIn("main", msg)
-        # No file created
-        self.assertFalse(any(self.adrs_dir.glob("*-myslug.md")))
+        self.assertIn("race", str(ctx.exception).lower())
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git worktree remove --force", flat)
+        self.assertNotIn("git reset --hard HEAD~1", flat)
+
+    # Worktree path protected-branch fallback: push to a reserve/ branch + PR.
+    def test_new_off_main_protected_falls_back_to_pr(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="feature/foo\n")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
+        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+                 returncode=1,
+                 stderr="remote: error: GH006: Protected branch update failed.\n")
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/user/repo/pull/7\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod, \
+             patch.object(_shutil, "which", return_value="/usr/local/bin/gh"):
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "protd", project_dir=self.target,
+                title="", no_push=False, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git push origin HEAD:refs/heads/reserve/adr-", flat)
+        self.assertIn("gh pr create", flat)
+        self.assertIn("--head", flat)
+        self.assertIn("--base", flat)
+        self.assertIn("git worktree remove --force", flat)
 
     # AC #5 (pattern) — refuse on dirty worktree.
     def test_new_refuses_on_dirty_worktree(self):
@@ -1796,6 +1879,77 @@ class ReserveAdrCLITests(unittest.TestCase):
         )
         self.assertIn("docs(decisions): reserve adr-0001-first",
                       log.stdout)
+
+
+class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
+    """Real-git end-to-end proof of the worktree-aware ADR reservation fix.
+    Reserves from a linked worktree (where `git checkout main` is impossible)
+    and asserts it lands on origin/main with the feature branch untouched.
+    Mirrors ReserveSpecFromLinkedWorktreeE2E in test_workflow.py."""
+
+    def _git(self, *args, cwd):
+        return subprocess.run(
+            ["git", *args], cwd=str(cwd), capture_output=True, text=True,
+        )
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-adr-wt-e2e-"))
+        self.work = self.tmp / "work"
+        self._git("init", str(self.work), cwd=self.tmp)
+        self._git("symbolic-ref", "HEAD", "refs/heads/main", cwd=self.work)
+        for k, v in (("user.email", "t@e.x"), ("user.name", "T"),
+                     ("commit.gpgsign", "false")):
+            self._git("config", k, v, cwd=self.work)
+        dec = self.work / "docs" / "decisions"
+        dec.mkdir(parents=True)
+        for name in ("adr-0001-alpha.md", "adr-0002-beta.md"):
+            (dec / name).write_text(f"# {name}\n")
+        self._git("add", "-A", cwd=self.work)
+        self._git("commit", "-m", "seed adrs", cwd=self.work)
+        self.origin = self.tmp / "origin.git"
+        self._git("init", "--bare", str(self.origin), cwd=self.tmp)
+        self._git("remote", "add", "origin", str(self.origin), cwd=self.work)
+        push = self._git("push", "-u", "origin", "main", cwd=self.work)
+        self.assertEqual(push.returncode, 0, f"seed push failed: {push.stderr}")
+        self.feat = self.tmp / "feat"
+        add = self._git("worktree", "add", "-b", "feature", str(self.feat),
+                        cwd=self.work)
+        self.assertEqual(add.returncode, 0, f"worktree add failed: {add.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_reserve_from_linked_worktree_lands_on_origin_main(self):
+        co = self._git("checkout", "main", cwd=self.feat)
+        self.assertNotEqual(co.returncode, 0)
+        self.assertIn("already used by worktree", co.stderr)
+
+        feat_head_before = self._git(
+            "rev-parse", "HEAD", cwd=self.feat).stdout.strip()
+
+        code = _adr_mod.reserve_adr(
+            "gamma", project_dir=self.feat, title="", no_push=False,
+            pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        # Landed on origin/main as adr-0003-gamma (max + 1).
+        ls = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.origin)
+        self.assertIn("docs/decisions/adr-0003-gamma.md", ls.stdout)
+
+        # Ephemeral reservation worktree cleaned up — only work + feat remain.
+        wl = self._git("worktree", "list", cwd=self.work).stdout
+        self.assertNotIn("jig-reserve-adr", wl)
+        self.assertEqual(len(wl.strip().splitlines()), 2, wl)
+
+        # Caller's branch tip and working tree untouched.
+        feat_head_after = self._git(
+            "rev-parse", "HEAD", cwd=self.feat).stdout.strip()
+        self.assertEqual(feat_head_before, feat_head_after)
+        self.assertFalse(
+            (self.feat / "docs/decisions/adr-0003-gamma.md").exists())
 
 
 if __name__ == "__main__":
