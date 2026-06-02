@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.9.0](https://github.com/ramboz/jig/compare/v1.8.0...v1.9.0) (2026-06-02)
+
+
+### Features
+
+* **045:** review-evidence lifecycle gates (slices 01-04) ([#28](https://github.com/ramboz/jig/issues/28)) ([ddb8f35](https://github.com/ramboz/jig/commit/ddb8f35ff90b915a8c36cf9d628a60ea6cb5be0b))
+* **048:** close guidelines-gap-response slices 1-4 ([#27](https://github.com/ramboz/jig/issues/27)) ([13b5202](https://github.com/ramboz/jig/commit/13b5202a10f8736ff19b87a81a076ae6849cf89a))
+* **052:** security-scaffold floor — secret-scan + permissions.deny + security-review baseline ([#30](https://github.com/ramboz/jig/issues/30)) ([716cf5f](https://github.com/ramboz/jig/commit/716cf5fd6a7bb77c1e2954229b0c1aa6d6aa8494))
+* **055:** context-cost discipline — delegate-reads guidance (055-01 DONE) ([e0b6f71](https://github.com/ramboz/jig/commit/e0b6f71dfd9761bfd7fe41b6a153cecc818437cc))
+* **055:** in-session context-growth nudge (055-02 DONE) ([4a3679f](https://github.com/ramboz/jig/commit/4a3679f1ffca7e6ac6613909db24c2ff57166fb2))
+* **055:** read-once / read-lean discipline (055-03 DONE) ([51c8644](https://github.com/ramboz/jig/commit/51c864407d9518f85a165ac3a7475c7b3633fc81))
+* **adr:** spec 036-01 — closed-spec drift policy (ADR-0008) ([9dc3d1c](https://github.com/ramboz/jig/commit/9dc3d1c4378ee10f388c9ce13f395b190b40e5d7))
+* **migrate:** spec 038-04 — additive tier upgrade via copy-machinery ([d566f1b](https://github.com/ramboz/jig/commit/d566f1b95241b51be3e81f16cc755b0c569fb3ae))
+* **scaffold-init:** spec 038-02 — gate skill copy by installed_tiers ([5cc7afd](https://github.com/ramboz/jig/commit/5cc7afd85fe2b5c1fc8955f8fbdfdb62016e4a76))
+* **scaffold:** seed reference spec + scaffold-completion verification (048-05, 048-06) ([325f9ba](https://github.com/ramboz/jig/commit/325f9ba7e9afa3b1e27c58cd0363a10c7a560f62))
+* **slice-land:** spec 037-01 — origin-aware FF check + push-fail recovery hint ([d7bc373](https://github.com/ramboz/jig/commit/d7bc373238558584020f963ce4943c7a41df1430))
+* **spec-workflow:** spec 036-02 — closed-spec drift sweep + reconciliation hook ([2d2a8d0](https://github.com/ramboz/jig/commit/2d2a8d06d4aa58329d4c8b595fcf6c9a557730a5))
+* **spec-workflow:** spec 037-02 — origin-aware reservation + diverged-main preflight ([cdc4ee0](https://github.com/ramboz/jig/commit/cdc4ee0416d1f5a119ce60e847e703c19278f336))
+
+
+### Bug Fixes
+
+* **agents:** drop dead review queue contract (039-01) ([68e7a33](https://github.com/ramboz/jig/commit/68e7a337bd31c63cd47b1b41eeb0260d48c95447))
+* **decisions:** renumber ADR-0010 -&gt; ADR-0012 (collision with landed main ADR-0010) ([7a5d2db](https://github.com/ramboz/jig/commit/7a5d2db33aa7fe6daaed4c260d0b2c80cd150f69))
+* **review:** route craft/arch pass to richer user skill via file-read dispatch ([734e424](https://github.com/ramboz/jig/commit/734e4249278dae209aacad17b1ea8ed0187525cc))
+* **scaffold:** derive jig_version from plugin manifest (046-02) ([b246f8e](https://github.com/ramboz/jig/commit/b246f8e4fa44f6c9f15abe9c62b75f7229614d1c))
+* **scaffold:** render install-shape-aware docs in scaffold mode (046-01) ([cb6bd3f](https://github.com/ramboz/jig/commit/cb6bd3f3f3d39231be2d499a471694c0308f0e00))
+
+
+### Documentation
+
+* apply ADR-0010 — fold live-prose amendments inline ([cc6e74f](https://github.com/ramboz/jig/commit/cc6e74f631f1cfba58230a0fdb332cb2c3c28e8a))
+* **decisions:** land ADR-0010 — amendment scope (records vs. live prose) ([6224f14](https://github.com/ramboz/jig/commit/6224f143de41457cc8e3bb4e36857624193f71c3))
+* **front-door:** clarify install shapes (acquire vs scaffold mode) ([5dae981](https://github.com/ramboz/jig/commit/5dae98160d3c6998ad30557bf1d49b1faf294658))
+* **front-door:** restructure public docs into a routing hub (spec 054) ([#29](https://github.com/ramboz/jig/issues/29)) ([71053a0](https://github.com/ramboz/jig/commit/71053a0855331de8e5f32e59b90a8a8e2771e1c8))
+* **memory:** capture cold-start cliff diagnosis + stale-plugin-install gotcha ([c4dd901](https://github.com/ramboz/jig/commit/c4dd9015768dcd847ac3e2c4a3eafaaf7fbd5846))
+* **memory:** capture reserve-numbers-on-origin/main learning ([88096c5](https://github.com/ramboz/jig/commit/88096c568ef42dd81df5a189be62c5362a6a958c))
+* **memory:** close-out after spec 036-02 — sweep patterns + status board ([3f64bb6](https://github.com/ramboz/jig/commit/3f64bb681796e790b30b177a14a6651e0c32b288))
+* **memory:** memory-sync after spec 036-01 lands ([4b8b1a1](https://github.com/ramboz/jig/commit/4b8b1a107331d68a205ad3f8308037ab56829d88))
+* security-scaffold spec 052 + ADR-0013; refresh 048 gap inventory ([#26](https://github.com/ramboz/jig/issues/26)) ([84bee7b](https://github.com/ramboz/jig/commit/84bee7b2263196bf4fc7370c34961ee5a73a5524))
+* spec 040-01 — align reviewer-isolation claims with SKILL.md caveat ([b7117c5](https://github.com/ramboz/jig/commit/b7117c516668438159e9c2b9d9ae58902fd56fe2))
+* **spec-gate:** spec 042-01 — deliberateness-gate framing (ADR-0011) ([fa5bd3d](https://github.com/ramboz/jig/commit/fa5bd3df9c94eb90f1d2642d52a246d69efc791e))
+* **specs:** add federation collision radar slices ([de88ba8](https://github.com/ramboz/jig/commit/de88ba81a222374f3b4594a767de14457e180e0d))
+* **specs:** add spec 051 — worktree-aware number reservation ([e9282b7](https://github.com/ramboz/jig/commit/e9282b77a0f79d1989bf630bba6c933795cee534))
+* **specs:** add spec 055 context-cost-discipline (READY_FOR_REVIEW) ([1559985](https://github.com/ramboz/jig/commit/155998546a490a48880e7b8b5a7f32e31076c226))
+* **specs:** draft spec 048 guidelines gap response ([45d47ea](https://github.com/ramboz/jig/commit/45d47ea1a76f2a8cab3769f092ca804623ced12b))
+* **specs:** draft specs 045-047 (review/scaffold/install) ([c7ad0b0](https://github.com/ramboz/jig/commit/c7ad0b0457420da1859aa83d0c21accce281c16d))
+* **specs:** rescue specs 049/050 from silly-kilby worktree ([5ce2026](https://github.com/ramboz/jig/commit/5ce20267b898e1a474bf4014d9822820203dbbba))
+* **specs:** retroactive spec 053 for craft/arch-pass file-read dispatch ([66bec76](https://github.com/ramboz/jig/commit/66bec769b208e4f1bb86300b9b94f59377a28f3b))
+* **specs:** spec 038 — ADR-0010 tier-gating decision + slice reshape ([e36b312](https://github.com/ramboz/jig/commit/e36b312f3d6473e6c15109f18299992bcff827b6))
+* **specs:** spec 044 — RTK integration spike DONE (ADR-0009) ([1df03a5](https://github.com/ramboz/jig/commit/1df03a5802094348a8231b28dcf05a8679fa82c5))
+* **vision:** spec 038-03 — reconcile tier docs to _TIER_SKILLS ([7210f00](https://github.com/ramboz/jig/commit/7210f0079622462081afe817f8c0d866eda3407d))
+
 ## [1.8.0](https://github.com/ramboz/jig/compare/v1.7.0...v1.8.0) (2026-05-27)
 
 
