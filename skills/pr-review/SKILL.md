@@ -205,7 +205,12 @@ baseline.
   category-based: a user skill named anything that claims the PR/code
   review surface area will win. If the router consistently picks jig's
   baseline over such a skill, jig's description is too greedy — open an
-  issue.
+  issue. **This router-based deferral applies to _interactive_ use only.**
+  The spec-workflow **craft pass** spawns a read-only `reviewer` subagent
+  with no `Skill` tool, so it cannot use the router at all — there
+  `review.py` does explicit file-read dispatch (detects
+  `~/.claude/skills/pr-review/` and points the reviewer at it). See
+  [docs/workflow.md](../../docs/workflow.md) § Post-implementation review.
 - **The bundled `review` skill is explicitly excluded from the deferral.**
   Jig's description says it does **not** defer to `review`. That's the
   one carve-out; everything else in the PR/code review category wins

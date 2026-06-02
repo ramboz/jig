@@ -339,3 +339,22 @@ Adding `security-review` to Tier 1 (slice 052-05) required updating **three** ha
 **Generalizable rule:** when adding a Tier-1 skill, the checklist is `_TIER_SKILLS` + `EXPECTED_TIER_1` + `TierUpgradeTests.TIER1` + product-vision (count + list) + worked-example-jig (count + 2 lists) + README (counts) + the CLAUDE.md Skills table row. Run the full suite — the consistency tests name the location you missed. (Related but narrower: "Hook-count callouts in docs drift on hook additions" above.)
 
 Provenance: slice 052-05 implementation + reconciliation, 2026-06-01.
+## Scaffold doc templates render into two install shapes — `${CLAUDE_PLUGIN_ROOT}` paths break in scaffold mode
+The `templates/docs/*.md.template` + `CLAUDE.md.template` files render for BOTH
+install shapes: `--plugin-only` (machinery stays under the plugin root) and the
+default in-repo scaffold (machinery copied to `.claude/skills/jig-*`). A
+`${CLAUDE_PLUGIN_ROOT}/skills/<name>/...` command path in a doc template is correct
+for plugin-only but **silently broken in a scaffolded project** — the env var is
+unset there and the helper actually lives at `.claude/skills/jig-<name>/...`. A real
+scaffold verification (2026-05-27) found the documented stocktake command failing for
+exactly this reason; slice 046-01 was the fix. **Fix pattern:** don't hard-code either
+shape into the template — render normally, then in scaffold mode apply the SAME
+`_rewrite_skill_md_paths` transform SKILL.md bodies already get, gated on
+`with_machinery` (`copy_template(..., post_render=...)`); plugin-only passes `None`
+and keeps the plugin-root path. **Generalizable lesson:** any new `${CLAUDE_PLUGIN_ROOT}`
+reference added to an adopter-facing doc template must survive the scaffold-mode rewrite
+(or be install-shape-aware), and generated docs should be tested by *running* the commands
+they document inside a temp scaffold, not just asserting on strings.
+
+## Don't cite assistant-memory files (or any out-of-repo path) in checked-in docs
+Slice 055 (spec authoring, 2026-06-01) cited a `token-cost-findings.md` "memory file" as the spec's evidence source — but that file lives in the assistant's private memory (`~/.claude/projects/.../memory/`), NOT in the repo. Both review passes (independent reviewers, no prior context) flagged it as a dangling/unverifiable citation: a teammate reading the spec cannot open it. **Rule:** a checked-in doc must be self-contained against the repo — state findings inline, or cite an in-repo artifact (a research doc, an ADR, `docs/memory/`). Never reference assistant-memory or other out-of-repo paths from a spec/ADR/doc. Fix: reworded the citation to inline provenance. Provenance: slice 055-01 compliance + craft review, 2026-06-01.

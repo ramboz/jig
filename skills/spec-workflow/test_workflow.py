@@ -19,9 +19,25 @@ WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
 
 
-def run_workflow(*args: str) -> subprocess.CompletedProcess:
+def run_workflow(*args: str, gate: bool = False) -> subprocess.CompletedProcess:
+    """Invoke workflow.py as a subprocess.
+
+    Slice 045-03: the review-evidence gate (`transition → REVIEWED/
+    RECONCILED/DONE`) is ON by default in production. The pre-045-03 test
+    suite transitions to those gated states WITHOUT recording evidence,
+    so this helper sets the documented bypass `JIG_REVIEW_EVIDENCE_GATE=0`
+    by default — tests that aren't *about* the gate keep their old
+    behavior. Gate-specific tests pass `gate=True` to exercise the real
+    enforcement (or set the env var explicitly).
+    """
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    if not gate:
+        env["JIG_REVIEW_EVIDENCE_GATE"] = "0"
+    else:
+        # Ensure an inherited bypass from the parent shell can't mask a
+        # gate-on test.
+        env.pop("JIG_REVIEW_EVIDENCE_GATE", None)
     return subprocess.run(
         [sys.executable, str(WORKFLOW), *args],
         capture_output=True, text=True, env=env,
@@ -3758,6 +3774,448 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
             "alongside the next-number scan",
         )
 
+
+# ===========================================================================
+# Slice 045-03: lifecycle-transition-gates.
+#
+# `workflow.py transition` refuses REVIEWED / RECONCILED / DONE moves
+# unless the review evidence required by ADR-0014 §5 exists and clears.
+# These tests run the gate ON (gate=True → JIG_REVIEW_EVIDENCE_GATE unset)
+# and build evidence fixtures as `reviews/slice-NN-<pass>.md` files in a
+# temp spec dir, mirroring the 045-02 recorder layout.
+# ===========================================================================
+
+
+class _GateFixture(unittest.TestCase):
+    """Builds a temp spec dir with one slice file and (optionally) review
+    evidence + a deviation log, then drives gated transitions with the
+    gate enabled."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-gate-"))
+        # docs/specs/NNN-slug/ layout so evidence_path resolves a sibling
+        # reviews/ dir under the spec.
+        self.spec_dir = self.tmpdir / "docs" / "specs" / "045-gate-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec_md = self.spec_dir / "spec.md"
+        self.spec_md.write_text(
+            "---\nstatus: IN_PROGRESS\n---\n\n# Spec\n\n## Overview\n\nx.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def write_slice(self, status: str, *, slice_no: str = "01",
+                    slug: str = "thing", arch_review: bool = False,
+                    deviation_log: bool = False,
+                    dod_lines: list = None,
+                    label: str = None) -> None:
+        """Write `slice-NN-<slug>.md` with the given status. The `## Slice`
+        label defaults to `045-NN — <slug>` so the fragment `045-NN`
+        resolves it."""
+        label = label or f"045-{slice_no} — {slug}"
+        fm = ["---", f"status: {status}", "dependencies: []", "last_verified:"]
+        if arch_review:
+            fm.append("arch_review: true")
+        fm.append("---")
+        body = ["", f"## Slice {label}", "", "**Goal:** placeholder.", ""]
+        if dod_lines:
+            body.extend(["**Definition of Done:**", ""])
+            body.extend(dod_lines)
+            body.append("")
+        if deviation_log:
+            body.extend(["### Deviation log (after reconciliation)", "",
+                         "Real reconciliation prose here.", ""])
+        (self.spec_dir / f"slice-{slice_no}-{slug}.md").write_text(
+            "\n".join(fm) + "\n" + "\n".join(body) + "\n"
+        )
+
+    def write_evidence(self, pass_name: str, *, slice_no: str = "01",
+                       verdict: str = "pass",
+                       reviewer: str = "jig:reviewer",
+                       reviewed_at: str = "2026-06-02T14:30:00Z",
+                       prompt_source: str = "review.py x",
+                       slice_field: str = None,
+                       omit: tuple = (),
+                       raw: str = None) -> Path:
+        """Write `reviews/slice-NN-<pass>.md` verdict file (ADR-0014 §1/§2).
+        `omit` drops named frontmatter fields (malformed-input fixtures);
+        `raw` overrides the entire file content verbatim."""
+        slice_field = slice_field or f"045-{slice_no}"
+        reviews = self.spec_dir / "reviews"
+        reviews.mkdir(exist_ok=True)
+        path = reviews / f"slice-{slice_no}-{pass_name}.md"
+        if raw is not None:
+            path.write_text(raw)
+            return path
+        fields = {
+            "slice": slice_field,
+            "pass": pass_name,
+            "verdict": verdict,
+            "reviewer": reviewer,
+            "reviewed_at": reviewed_at,
+            "prompt_source": prompt_source,
+        }
+        lines = ["---"]
+        for k, v in fields.items():
+            if k in omit:
+                continue
+            lines.append(f"{k}: {v}")
+        lines.append("---")
+        lines.append("")
+        lines.append("## VERDICT")
+        lines.append(verdict)
+        path.write_text("\n".join(lines) + "\n")
+        return path
+
+    def _status_in_slice(self, slice_no: str = "01",
+                         slug: str = "thing") -> str:
+        text = (self.spec_dir / f"slice-{slice_no}-{slug}.md").read_text()
+        m = re.search(r"^status:\s*(\w+)", text, re.MULTILINE)
+        return m.group(1) if m else "?"
+
+
+class TransitionReviewedGateTests(_GateFixture):
+    """AC1: REVIEWED is gated on compliance + craft (+ arch when flagged)."""
+
+    # --- clears ---
+    def test_reviewed_clears_with_compliance_and_craft_pass(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected REVIEWED to clear; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "REVIEWED")
+
+    # --- missing ---
+    def test_reviewed_blocked_when_compliance_missing(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("craft")  # compliance absent
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("compliance", r.stderr.lower())
+        # Status not advanced.
+        self.assertEqual(self._status_in_slice(), "IN_PROGRESS")
+
+    def test_reviewed_blocked_when_craft_missing(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")  # craft absent
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("craft", r.stderr.lower())
+
+    # --- malformed ---
+    def test_reviewed_blocked_when_evidence_malformed(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        # craft file with no frontmatter block at all.
+        self.write_evidence("craft", raw="no frontmatter here\n")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("craft", r.stderr.lower())
+
+    def test_reviewed_blocked_when_required_field_missing(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft", omit=("verdict",))
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("verdict", r.stderr.lower())
+
+    # --- fail / needs-changes (superseded-only) ---
+    def test_reviewed_blocked_when_compliance_fail(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance", verdict="fail")
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("compliance", r.stderr.lower())
+
+    def test_reviewed_blocked_when_craft_needs_changes(self):
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft", verdict="needs-changes")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("craft", r.stderr.lower())
+
+    # --- arch: required only when flagged ---
+    def test_reviewed_blocked_when_arch_flagged_but_missing(self):
+        self.write_slice("IN_PROGRESS", arch_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        # arch evidence absent though the slice declares arch_review: true
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("arch", r.stderr.lower())
+
+    def test_reviewed_clears_when_arch_flagged_and_present(self):
+        self.write_slice("IN_PROGRESS", arch_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        self.write_evidence("arch")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected REVIEWED to clear; stderr={r.stderr}")
+
+    def test_reviewed_ignores_arch_when_not_flagged(self):
+        # No arch_review flag → arch evidence not required even if absent.
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"arch should not be required; stderr={r.stderr}")
+
+
+class TransitionReconciledGateTests(_GateFixture):
+    """AC2: RECONCILED needs the reconciliation verdict AND a deviation log."""
+
+    def test_reconciled_clears_with_verdict_and_devlog(self):
+        self.write_slice("REVIEWED", deviation_log=True)
+        self.write_evidence("reconciliation")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "RECONCILED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected RECONCILED to clear; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "RECONCILED")
+
+    def test_reconciled_blocked_when_reconciliation_evidence_missing(self):
+        self.write_slice("REVIEWED", deviation_log=True)
+        # no reconciliation verdict file
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "RECONCILED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reconciliation", r.stderr.lower())
+
+    def test_reconciled_blocked_when_deviation_log_missing(self):
+        self.write_slice("REVIEWED", deviation_log=False)
+        self.write_evidence("reconciliation")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "RECONCILED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("deviation log", r.stderr.lower())
+
+    def test_reconciled_blocked_when_reconciliation_fail(self):
+        self.write_slice("REVIEWED", deviation_log=True)
+        self.write_evidence("reconciliation", verdict="fail")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "RECONCILED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reconciliation", r.stderr.lower())
+
+
+class TransitionDoneGateTests(_GateFixture):
+    """AC2: DONE re-validates the full set AND keeps the dependency check."""
+
+    def _write_full_evidence(self):
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        self.write_evidence("reconciliation")
+
+    def test_done_clears_with_full_evidence(self):
+        self.write_slice("RECONCILED", deviation_log=True)
+        self._write_full_evidence()
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DONE", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected DONE to clear; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "DONE")
+
+    def test_done_blocked_when_reviewed_evidence_missing(self):
+        # Reconciliation present but compliance/craft absent — the DONE
+        # re-validation must catch a hand-edited status that skipped REVIEWED.
+        self.write_slice("RECONCILED", deviation_log=True)
+        self.write_evidence("reconciliation")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DONE", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("compliance", r.stderr.lower())
+
+    def test_done_blocked_when_reconciliation_missing(self):
+        self.write_slice("RECONCILED", deviation_log=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DONE", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reconciliation", r.stderr.lower())
+
+    def test_done_still_enforces_dependency_check(self):
+        # Full evidence present, but a dependency is unsatisfied — the
+        # existing dependency gate must still fire (belt-and-suspenders).
+        # Add an unsatisfied dep to the slice frontmatter.
+        (self.spec_dir / "slice-01-thing.md").write_text(
+            "---\nstatus: RECONCILED\ndependencies: [099-99]\n"
+            "last_verified:\n---\n\n## Slice 045-01 — thing\n\n"
+            "**Goal:** x.\n\n### Deviation log\n\nprose.\n"
+        )
+        self._write_full_evidence()
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DONE", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("dependen", r.stderr.lower())
+
+
+class TransitionGateDiagnosticsTests(_GateFixture):
+    """AC3: refusals name the missing/invalid artifact AND the command."""
+
+    def test_diagnostic_names_artifact_and_command(self):
+        self.write_slice("IN_PROGRESS")
+        # compliance missing entirely
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        err = r.stderr.lower()
+        # Names the pass.
+        self.assertIn("compliance", err)
+        # Names the recorder command a contributor runs next.
+        self.assertIn("record-review", err)
+
+
+class TransitionUngatedStatesTests(_GateFixture):
+    """AC4: ungated transitions + the two review back-edges still work
+    with the gate ON and no evidence present."""
+
+    def test_draft_to_ready_for_review_ungated(self):
+        self.write_slice("DRAFT")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_REVIEW", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_ready_for_review_to_ready_for_implementation_ungated(self):
+        self.write_slice("READY_FOR_REVIEW")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_IMPLEMENTATION", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_ready_for_implementation_to_in_progress_ungated(self):
+        self.write_slice("READY_FOR_IMPLEMENTATION")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_any_to_deferred_ungated(self):
+        self.write_slice("IN_PROGRESS")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DEFERRED", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_deferred_to_draft_reopen_ungated(self):
+        self.write_slice("DEFERRED")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DRAFT", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_reviewed_to_in_progress_back_edge_ungated(self):
+        # needs-changes back-edge relaxes status → nothing to gate, even
+        # with no evidence on disk.
+        self.write_slice("REVIEWED")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_reconciled_to_in_progress_back_edge_ungated(self):
+        # reconciliation-fails back-edge relaxes status → ungated.
+        self.write_slice("RECONCILED")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+
+class TransitionGateBypassTests(_GateFixture):
+    """Bypass: JIG_REVIEW_EVIDENCE_GATE in the falsey set skips the
+    evidence check (a deliberate-actor escape hatch, ADR-0011 stance)."""
+
+    def _run_with_gate_env(self, value, *args):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        env["JIG_REVIEW_EVIDENCE_GATE"] = value
+        return subprocess.run(
+            [sys.executable, str(WORKFLOW), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_bypass_zero_lets_reviewed_through_without_evidence(self):
+        self.write_slice("IN_PROGRESS")
+        r = self._run_with_gate_env(
+            "0", "transition", str(self.spec_md), "045-01", "REVIEWED",
+        )
+        self.assertEqual(r.returncode, 0,
+                         f"bypass=0 should skip the gate; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "REVIEWED")
+
+    def test_bypass_accepts_false_off_no(self):
+        for value in ("false", "off", "no", "FALSE", "Off"):
+            with self.subTest(value=value):
+                self.write_slice("IN_PROGRESS")
+                r = self._run_with_gate_env(
+                    value, "transition", str(self.spec_md), "045-01",
+                    "RECONCILED",
+                )
+                self.assertEqual(
+                    r.returncode, 0,
+                    f"bypass={value!r} should skip the gate; stderr={r.stderr}",
+                )
+
+    def test_bypass_still_enforces_dependency_check_on_done(self):
+        # The bypass only skips the *evidence* check; the DONE dependency
+        # check must still run (per the slice brief).
+        (self.spec_dir / "slice-01-thing.md").write_text(
+            "---\nstatus: RECONCILED\ndependencies: [099-99]\n"
+            "last_verified:\n---\n\n## Slice 045-01 — thing\n\n**Goal:** x.\n"
+        )
+        r = self._run_with_gate_env(
+            "0", "transition", str(self.spec_md), "045-01", "DONE",
+        )
+        self.assertNotEqual(r.returncode, 0,
+                            "dependency check must still fire under bypass")
+        self.assertIn("dependen", r.stderr.lower())
+
+
+class ArchReviewTruthyUnificationTests(unittest.TestCase):
+    """045-03 must-do (d): a SINGLE shared truthy predicate backs both
+    `workflow.slice_needs_arch_review` and
+    `review_evidence._arch_review_flag` so they cannot drift."""
+
+    def test_workflow_and_evidence_share_one_truthy_source(self):
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
+        sys.path.insert(0, str(REPO_ROOT / "skills" / "spec-workflow"))
+        import importlib
+        parsing = importlib.import_module("_common.parsing")
+        review_evidence = importlib.import_module("_common.review_evidence")
+        workflow = importlib.import_module("workflow")
+        # The shared constant exists in the common module.
+        self.assertTrue(hasattr(parsing, "FRONTMATTER_TRUTHY"))
+        shared = parsing.FRONTMATTER_TRUTHY
+        # Both callers' truthy tuples are the SAME object as the shared one
+        # (identity, not just equality — that's what "cannot drift" means).
+        self.assertIs(workflow._ARCH_REVIEW_TRUTHY, shared)
+        self.assertIs(review_evidence._ARCH_REVIEW_TRUTHY, shared)
+
+    def test_shared_predicate_accepts_permissive_truthy_set(self):
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
+        import importlib
+        parsing = importlib.import_module("_common.parsing")
+        for tok in ("true", "yes", "on", "1", "YES", "On", "TRUE"):
+            self.assertTrue(parsing.frontmatter_flag_truthy(tok),
+                            f"{tok!r} should be truthy")
+        for tok in ("false", "no", "0", "maybe", "", None):
+            self.assertFalse(parsing.frontmatter_flag_truthy(tok),
+                             f"{tok!r} should not be truthy")
 
 class AmendmentDigestTests(unittest.TestCase):
     """workflow.py amendments — read-only digest of the `## Amendments`

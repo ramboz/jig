@@ -18,6 +18,7 @@
 - [ADR-0011: Spec-gate model — deliberateness signal, not human-only approval](adr-0011-spec-gate-model.md) — `hooks/scripts/jig-spec-gate.sh` blocks `Edit`/`Write`/`MultiEdit` to `docs/conventions.md` unless `JIG_CONVENTIONS_APPROVED=1` is set in the environment (PreToolUse, exit 2 to block). (2026-05-29, Accepted)
 - [ADR-0012: Scaffold-init tiers gate which skills install](adr-0012-scaffold-tier-gated-install.md) — jig's positioning rests on "tier-gated installs": the README and product-vision docs present Tier 0 as a small, opinionated floor and Tier 1 as an opt-in default. (2026-05-29, Accepted)
 - [ADR-0013: Security-scaffold floor policy](adr-0013-security-floor-policy.md) — jig's founding design principle is *"everything that MUST happen is a hook"* — deterministic enforcement over human vigilance. (2026-06-01, Accepted)
+- [ADR-0014: Review-evidence model — durable verdict artifacts gate the lifecycle](adr-0014-review-evidence-model.md) — jig's workflow documentation presents post-implementation review and reconciliation as load-bearing gates. (2026-06-01, Accepted)
 
 ## Format
 

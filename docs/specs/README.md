@@ -133,12 +133,12 @@
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-03 — polyglot-extension | **DONE** |  |
 | [043-test-quality-wiring](043-test-quality-wiring/spec.md) | 043-04 — review-prompt-injection | **DONE** | `build_implementation_prompt` embeds quality.py's deterministic YAML snapshot between Evaluate and `## Cross-cutting checks`; degrades to `_Test-quality snapshot unavailable: <reason>._` on any of four failure modes. scaffold-mode copies `quality.py` + `test_quality.py` via `_RETAINED_TEST_FILES` allow-list. |
 | [044-rtk-integration-spike](044-rtk-integration-spike/spec.md) | 🔬 044-01 - rtk-e2e-measurement-spike | **DONE** |  |
-| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-01 - review-evidence-adr | DRAFT |  |
-| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-02 - review-artifact-recorder | DRAFT |  |
-| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-03 - lifecycle-transition-gates | DRAFT |  |
-| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-04 - workflow-contract-alignment | DRAFT |  |
-| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | DRAFT |  |
-| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | DRAFT |  |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-01 - review-evidence-adr | **DONE** | [ADR-0014](../decisions/adr-0014-review-evidence-model.md) sets the evidence model: per-spec `reviews/slice-NN-<pass>.md`, verdict frontmatter (gate clears iff `verdict: pass`); REVIEWED needs compliance+craft (+arch if flagged), RECONCILED needs devlog+reconciliation, DONE re-validates. Shared schema → `_common/review_evidence.py` (045-02 builds, 045-03 gates). Supersede = overwrite + git history (ADR-0010). |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-02 - review-artifact-recorder | **DONE** |  |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-03 - lifecycle-transition-gates | **DONE** | Gate live in `workflow.py transition` (`_gate_evidence` → `review_evidence.validate_evidence`): REVIEWED=compliance+craft(+arch), RECONCILED=reconciliation+deviation-log (`check_deviation_log` lifted to `_common/parsing`), DONE re-validates + keeps dep-check. Ungated: DRAFT/READY*/IN_PROGRESS/DEFERRED + back-edges. Bypass `JIG_REVIEW_EVIDENCE_GATE` (ADR-0011-style, SKILL.md; ADR-0014 not edited). `_ARCH_REVIEW_TRUTHY` unified → `parsing.FRONTMATTER_TRUTHY` (assertIs-pinned). Self-hosting: 045-03's own transitions gated ON. +40 tests. |
+| [045-review-lifecycle-gates](045-review-lifecycle-gates/spec.md) | 045-04 - workflow-contract-alignment | **DONE** | Docs/agent/scaffold prose aligned with the enforced gate: `docs/workflow.md` Stop-hook claim corrected (no Stop hook gates — the `transition` gate does, ADR-0014 §5), `implementer.md` no longer flips REVIEWED directly, both SKILLs + `CLAUDE.md` + `templates/docs/workflow.md.template` describe record→gated-transition→recover + the `JIG_REVIEW_EVIDENCE_GATE` bypass. New `scripts/test_workflow_contract.py` (11 guard tests) pins the honesty fix. **Spec 045 COMPLETE** (all 4 DONE). |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-01 - scaffold-doc-command-rendering | **DONE** | Scaffold-mode docs rewritten via `copy_template(post_render=_rewrite_skill_md_paths)` gated on `with_machinery`; `--plugin-only` keeps `${CLAUDE_PLUGIN_ROOT}` paths |
+| [046-scaffold-artifact-fidelity](046-scaffold-artifact-fidelity/spec.md) | 046-02 - scaffold-version-provenance | **DONE** | `scaffold.json.jig_version` + `brief.md` derived from `.claude-plugin/plugin.json` (no hardcoded version constant); `PluginManifestError` on absent/malformed/version-less manifest |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-01 - plugin-release-contract-validator | DRAFT |  |
 | [047-install-contract-verification](047-install-contract-verification/spec.md) | 047-02 - scaffold-contract-validator | DRAFT |  |
 | [048-guidelines-gap-response](048-guidelines-gap-response/spec.md) | 048-01 - first-read-status-and-gap-map | **DONE** | README `## Status & roadmap` replaces the stale draft-status block + a 9-row gap-response map with three honest states (Landed / This spec / Planned) + a legend. Regression test `scripts/test_readme_status_current.py` pins stale-wording removal (AC#5) and the gap-table presence + owner-spec links (scoped to the table region). Craft blocker resolved: original "Fixed here" overstated the still-DRAFT 048-02/03/04 rows → relabeled "This spec". |
@@ -159,6 +159,11 @@
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | **DONE** |  |
+| [053-craft-pass-skill-dispatch](053-craft-pass-skill-dispatch/spec.md) | 053-01 — file-read-dispatch | **DONE** | Craft/arch reviewer subagent has NO `Skill` tool → can't use the skill router; `review.py detect_richer_skill()` (USER-scope only, `~/.claude/skills/<name>/`) hands it the path to read-and-apply, else inlines baseline. Promotes spec 031 OQ#1 option (b). Retroactive record of landed commit 734e424; project-scope detection deferred. |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-01 — Delegate file-heavy reading to isolated subagents | **DONE** |  |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-02 — In-session context-growth nudge | READY_FOR_REVIEW |  |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-03 — Read-once / read-lean discipline | READY_FOR_REVIEW |  |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-04 — Keep verbose command output out of the orchestrator | READY_FOR_REVIEW |  |
 
 ## Deferred slices
 

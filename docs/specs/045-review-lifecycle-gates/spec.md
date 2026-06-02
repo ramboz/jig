@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow, independent-review
 tier: dev infrastructure
 adr_required: true
@@ -92,6 +92,12 @@ are straightforward validator and transition work.
    enforced lifecycle.
 
 ## Open questions for implementation
+
+> **Resolved** by [ADR-0014](../../decisions/adr-0014-review-evidence-model.md)
+> (slice 045-01) — see its Recommended Decision §1–§6. Retained below for
+> provenance: per-spec `reviews/` dir; `REVIEWED` = compliance + craft
+> (+ arch if flagged); reconciliation verdict is separate from the
+> deviation log; a failed verdict blocks (latest-pass supersedes).
 
 - Should review evidence live beside the slice as
   `reviews/<pass>.md`, in a single `review.md`, or in a generated

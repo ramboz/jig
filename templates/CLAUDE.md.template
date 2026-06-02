@@ -5,7 +5,7 @@
 
 ## What this project does
 
-> See [docs/product-vision.md](docs/product-vision.md) for the project's vision, target users, and design principles. Until that's filled in (by hand or via `/jig:vision-elicit` once spec 017-02 ships), the vision doc carries `<!-- elicited: PENDING / status: unfilled -->` markers as slots waiting for content.
+> See [docs/product-vision.md](docs/product-vision.md) for the project's vision, target users, and design principles. Until that's filled in (by hand or via `/jig:vision-elicitation`), the vision doc carries `<!-- elicited: PENDING / status: unfilled -->` markers as slots waiting for content.
 
 ## Hot Cache
 
@@ -16,6 +16,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - **{{PROJECT_NAME}}** — (describe what this project is once the first spec lands)
 
 ### Key terms
+- **Context-cost discipline** — the orchestrator's context is the most expensive real estate (re-read every turn); delegate file-heavy reading to a read-only `Explore` / `general-purpose` subagent and keep only the summary. See [docs/workflow.md](docs/workflow.md#context-cost-discipline).
 - (populated as the project grows — see docs/memory/glossary.md for full glossary)
 
 ### Active specs

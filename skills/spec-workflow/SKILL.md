@@ -170,13 +170,16 @@ The orchestrator runs the passes in this order:
 
 2. **Craft pass — `pr-review`** (always). After the compliance pass
    returns, build the craft-pass prompt with `review.py pr-review` and
-   spawn a second `reviewer`-shaped subagent. The prompt instructs the
-   reviewer to apply the four-bucket craft concerns (scope / blockers /
-   nits / strengths) from the most-specific `pr-review` SKILL.md
-   reachable in the environment — Claude's skill router resolves
-   user > project > `jig:pr-review` precedence via the skill description
-   hints, so the orchestrator does NOT do filesystem detection. The
-   pass returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
+   spawn a second `reviewer`-shaped subagent. The reviewer is read-only
+   (Read/Glob/Grep, **no `Skill` tool**), so it cannot route to a skill
+   via Claude's skill router; instead `review.py` detects a user-installed
+   `pr-review` skill on disk (`~/.claude/skills/pr-review/`) and the prompt
+   points the reviewer at that concrete path to read-and-apply, falling
+   back to jig's inlined baseline buckets (scope / blockers / nits /
+   strengths) when none is installed. (File-read dispatch — spec 031
+   Open-question-#1 option (b); a live probe showed the original
+   prose-router dispatch was inert on the no-Skill-tool subagent path.)
+   The pass returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
    RECONCILIATION NOTES` envelope as the compliance pass, with
    SPECIFIC ISSUES entries tagged `[blocker]` / `[nit]` / `[strength]`.
 
@@ -186,9 +189,9 @@ The orchestrator runs the passes in this order:
    build the arch-pass prompt with `review.py arch-review` and spawn a
    third `reviewer`-shaped subagent. The pass produces the four
    canonical arch buckets (summary / strengths / concerns / open
-   questions) wrapped in the same verdict envelope, routed via the
-   same prose-based dispatch to the most-specific `arch-review`
-   SKILL.md reachable. When the helper prints `false`, skip this
+   questions) wrapped in the same verdict envelope, using the same
+   file-read dispatch (`review.py` detects `~/.claude/skills/arch-review/`,
+   else inlines jig's baseline buckets). When the helper prints `false`, skip this
    pass entirely. Slice authors flip the flag by uncommenting the
    `arch_review: true` line in the slice template's frontmatter — set
    it when the slice changes module boundaries, public contracts, or
@@ -210,11 +213,46 @@ before `transition <slice> REVIEWED`:
   `[blocker]`-tagged entries block; `[nit]`-tagged entries and
   `needs-changes` become reconciliation-log items.
 
+**The gate is mechanical, not advisory (slice 045-03 / [ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md) §5).**
+`workflow.py transition` now *refuses* the `REVIEWED` / `RECONCILED` /
+`DONE` moves unless the required review evidence — recorded with
+`review.py record-review` as `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md`
+— exists and clears (`verdict: pass`). `REVIEWED` requires
+`compliance` + `craft` (+ `arch` when the slice declares
+`arch_review: true`); `RECONCILED` requires the `reconciliation` verdict
+**and** a `### Deviation log` subsection; `DONE` re-validates the whole
+set (in addition to the existing `dependencies:` check). A refusal names
+the missing/invalid artifact and the `record-review` command to produce
+it. The gate enforces *evidence consistency*, not human sign-off (it
+lives in the agent's trust boundary per [ADR-0011](../../docs/decisions/adr-0011-spec-gate-model.md)).
+Bypass it for a deliberate out-of-band flow by setting
+`JIG_REVIEW_EVIDENCE_GATE=0` (also `false`/`off`/`no`) — the status still
+transitions and the `DONE` dependency check still runs; only the evidence
+check is skipped.
+
 After all required passes pass:
 
 4. Address any reviewer findings, adding regression tests for any real
    bugs found.
-5. Transition: `transition <spec.md> <slice> REVIEWED`.
+5. **Record each pass's verdict** as durable evidence with
+   `review.py record-review` (writes
+   `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md` — see the
+   independent-review SKILL.md § "Recording and checking review
+   evidence"). The `REVIEWED` transition is gated on this evidence, so it
+   is not optional.
+6. Transition: `transition <spec.md> <slice> REVIEWED`. The gate
+   re-validates the recorded `compliance` + `craft` (+ `arch`) verdicts
+   before the status flips (and before the 003-04 auto-tick).
+
+**Recovering from a failed review.** A `fail`/`needs-changes` verdict — or
+a `[blocker]`-tagged craft/arch finding, which is recorded as a non-`pass`
+verdict — blocks the `REVIEWED` transition. To recover: address the
+findings, re-run the pass against the updated deliverable, `record-review`
+the new verdict (it **overwrites in place** the earlier file for that
+`(slice, pass)`; git history keeps the prior one), then re-run
+`transition … REVIEWED`. With every required pass now `pass`, the gate
+clears. A non-`pass` artifact never overwritten by a later `pass` keeps
+blocking — the "superseded without a later pass" case (ADR-0014 §4).
 
 ```bash
 # Compliance pass (always)
@@ -259,10 +297,15 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
 
 ### Closing the slice
 
-1. After reconciliation review passes:
-   `transition <spec.md> <slice> RECONCILED`
+1. After the reconciliation review passes, **record its verdict** with
+   `review.py record-review … --pass reconciliation`, then
+   `transition <spec.md> <slice> RECONCILED`. That move is gated on the
+   recorded `reconciliation` verdict (`pass`) **and** a `### Deviation log`
+   subsection under the slice heading (ADR-0014 §5).
 2. Commit the work.
-3. After commit: `transition <spec.md> <slice> DONE`
+3. After commit: `transition <spec.md> <slice> DONE`. `DONE` re-validates
+   the whole evidence set — `compliance` + `craft` (+ `arch`) +
+   `reconciliation` — on top of the existing `dependencies:` check.
 4. Regenerate the board: `workflow.py status-board <project-dir>`.
 5. Run `/jig:memory-sync` (or `memory.py`) to consolidate any new learnings.
 

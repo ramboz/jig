@@ -25,10 +25,14 @@ from _common.atomic_io import atomic_write_text
 from _common.parsing import iter_slices as _iter_slices_common
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import (
+    FRONTMATTER_TRUTHY,
     SliceLookupError,
+    check_deviation_log,
+    frontmatter_flag_truthy,
     parse_frontmatter,
     set_frontmatter_field,
 )
+from _common.review_evidence import validate_evidence
 
 
 VALID_STATUSES = (
@@ -221,11 +225,14 @@ def _set_slice_frontmatter_field(section: str, key: str, value) -> str:
 
 
 # Slice 031-02: tokens treated as truthy in the `arch_review:` frontmatter
-# field. Lowercase comparison; anything else is false. Spec 031-02 AC #1
-# only names `true` explicitly, but we accept the YAML-permissive set
-# (`true | yes | on | 1`) so a slice author's hand-edit isn't punished by
-# token choice. PyYAML is not a jig dependency, so the set is hardcoded.
-_ARCH_REVIEW_TRUTHY = ("true", "yes", "on", "1")
+# field. Slice 045-03 (must-do d) lifted the tuple + the truthiness test
+# into `_common.parsing` so this orchestrator reader and
+# `review_evidence._arch_review_flag` (the gate's reader) share ONE source
+# and cannot drift. The module-level name is kept as an alias to the shared
+# constant — pinned to be the SAME object by
+# `ArchReviewTruthyUnificationTests` — so prior in-module references stay
+# valid while the source of truth is single.
+_ARCH_REVIEW_TRUTHY = FRONTMATTER_TRUTHY
 
 
 def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
@@ -248,14 +255,14 @@ def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
     Raises WorkflowError on slice lookup failures (missing spec,
     unknown slice, ambiguous fragment) — the orchestrator must surface
     those as gating errors, not silently default to False.
+
+    Slice 045-03: truthiness now delegates to
+    `_common.parsing.frontmatter_flag_truthy` (handles the non-string /
+    defensive cases too) so this and the gate share one predicate.
     """
     loc = load_slice(spec_path, slice_fragment)
     fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
-    raw = fields.get("arch_review", "")
-    if isinstance(raw, str):
-        return raw.strip().lower() in _ARCH_REVIEW_TRUTHY
-    # Defensive: list/other YAML shapes never indicate a boolean.
-    return False
+    return frontmatter_flag_truthy(fields.get("arch_review", ""))
 
 
 def _validate_dependencies(deps: list, project_dir: Path,
@@ -345,6 +352,85 @@ def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
     return False, f"{candidates[0].name} is not Accepted"
 
 
+# ---------- Slice 045-03: review-evidence transition gate (ADR-0014 §5) ----------
+
+# The states whose transitions are gated on review evidence (ADR-0014 §5).
+# REVIEWED → compliance+craft(+arch); RECONCILED → reconciliation + deviation
+# log; DONE → the full set re-validated (plus the existing dependency check).
+# Every OTHER target — DRAFT / READY_FOR_REVIEW / READY_FOR_IMPLEMENTATION /
+# IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT re-open, and the two review
+# back-edges (REVIEWED→IN_PROGRESS, RECONCILED→IN_PROGRESS) — relaxes or
+# advances status with nothing to gate and is left untouched (AC4).
+_EVIDENCE_GATED_STATES = ("REVIEWED", "RECONCILED", "DONE")
+
+# Falsey tokens that disable the gate via `JIG_REVIEW_EVIDENCE_GATE`. The
+# gate is ON by default; this is the documented bypass for a deliberate
+# actor / automation. Per ADR-0011 (cited by ADR-0014 §6), an in-process
+# gate sits inside the agent's trust boundary — it is a *deliberateness*
+# signal, not human-only enforcement — so an env-var escape hatch is
+# consistent with the model (cf. `JIG_CONVENTIONS_APPROVED`). The
+# dependency check on DONE is NOT part of the evidence gate and still runs
+# under the bypass.
+_GATE_DISABLE_VALUES = ("0", "false", "off", "no")
+
+
+def _evidence_gate_enabled() -> bool:
+    """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
+    is set to one of the falsey tokens (case-insensitive)."""
+    raw = os.environ.get("JIG_REVIEW_EVIDENCE_GATE")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _GATE_DISABLE_VALUES
+
+
+def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
+                   new_status: str) -> None:
+    """Enforce the ADR-0014 §5 evidence requirements for a gated transition.
+
+    Raises `WorkflowError` (the user-facing type → CLI exit 2) with a
+    diagnostic that names the missing/invalid artifact and the command to
+    produce it (AC3). No-op for ungated states or when the gate is disabled.
+
+    Delegates shape/verdict validation to
+    `review_evidence.validate_evidence` (the 045-02 validator — single
+    source of truth) and the deviation-log presence check to the shared
+    `_common.parsing.check_deviation_log` (the 007-01 heading predicate,
+    lifted to `_common` by this slice so `land.py` and the gate share it).
+    """
+    if new_status not in _EVIDENCE_GATED_STATES:
+        return
+    if not _evidence_gate_enabled():
+        return
+
+    diagnostics: list = []
+    # REVIEWED-stage evidence is required for REVIEWED and re-validated for
+    # DONE (ADR-0014 §5: DONE re-runs REVIEWED + RECONCILED).
+    if new_status in ("REVIEWED", "DONE"):
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "REVIEWED")
+        )
+    # RECONCILED-stage: the reconciliation verdict AND the deviation log,
+    # required for RECONCILED and re-validated for DONE.
+    if new_status in ("RECONCILED", "DONE"):
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "RECONCILED")
+        )
+        if not check_deviation_log(section):
+            diagnostics.append(
+                "[reconciliation] deviation log missing — add a "
+                "`### Deviation log` subsection under the slice heading "
+                "before reconciling (the reconciliation reviewer attests "
+                "its content; the gate only checks presence)"
+            )
+
+    if diagnostics:
+        joined = "\n  - ".join(diagnostics)
+        raise WorkflowError(
+            f"cannot transition to {new_status} — review evidence is "
+            f"incomplete (ADR-0014 §5):\n  - " + joined
+        )
+
+
 def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     """Transition the named slice's STATUS to `new_status`. Auto-ticks
     "Implementation review passed" on REVIEWED, and "Reconciliation
@@ -352,7 +438,13 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     frontmatter block (slice 014-01), the `status:` field is updated
     too, and `last_verified: <today>` is written on the RECONCILED
     transition. DONE transitions refuse if any `dependencies:` entry
-    is unsatisfied. Returns a summary string."""
+    is unsatisfied.
+
+    Slice 045-03: REVIEWED / RECONCILED / DONE are gated on review
+    evidence (ADR-0014 §5) — the move is refused unless the required
+    verdict artifacts exist and clear (and, for RECONCILED/DONE, the
+    deviation log is present). The gate is ON by default; bypass with
+    `JIG_REVIEW_EVIDENCE_GATE=0`. Returns a summary string."""
     if new_status not in VALID_STATUSES:
         raise WorkflowError(
             f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
@@ -396,6 +488,13 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
                 "cannot transition to DONE — unsatisfied dependencies:\n  - "
                 + joined
             )
+
+    # Slice 045-03: gate REVIEWED / RECONCILED / DONE on review evidence
+    # (ADR-0014 §5). Runs AFTER the DONE dependency check so a missing
+    # dependency surfaces on its own; raises WorkflowError before any status
+    # write. No-op for ungated targets, the review back-edges, and when the
+    # gate is bypassed via JIG_REVIEW_EVIDENCE_GATE.
+    _gate_evidence(spec_md, slice_fragment, section, new_status)
 
     m = _STATUS_MARKER_RE.search(section)
     old_status = None

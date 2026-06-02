@@ -35,6 +35,29 @@ Two refinement-todo entries already capture this gap:
 This spec replaces the unobservable trigger with a measurable one by
 adding the trace.
 
+## Reconciliation note (2026-06-01 — partial, ahead of formal slicing)
+
+A `PreToolUse`/`Skill` observability hook shipped ahead of this spec's
+formal slice transitions. Deviations from the drafted plan, recorded here
+because spec 041 is still DRAFT (inline correction per ADR-0010):
+
+- **Approach (Goal 1):** the routing trace shipped as a **new**
+  `hooks/scripts/jig-skill-trace.sh` on `PreToolUse`/`Skill`, NOT as an
+  extension of `jig-telemetry.sh` on `UserPromptSubmit` — crossing the
+  "No new hook events" non-goal. Rationale: `PreToolUse`/`Skill` carries
+  `tool_input.skill_name` and captures *implicit* (auto-triggered) routing
+  — the actual question — which `UserPromptSubmit` cannot (this spec's own
+  Q1, now verified). The hook shares `.claude/skill-usage.jsonl`; readers
+  must filter `event == 'skill_invoked'` (Task-spawn entries lack
+  `skill_name`).
+- **Scope boundary:** the file-read dispatch added to `review.py`
+  (`detect_richer_skill()`) belongs to the *separate* craft-pass dispatch
+  fix, NOT this spec. 041's "No filesystem detection in review.py" non-goal
+  was about detection-for-observability and still holds for 041's scope.
+- **Still open:** Goal 2 (`workflow.py routing-stats` histogram, ~041-02)
+  is NOT done — do not close this spec until it lands. Verification recipe
+  shipped as `docs/skill-routing-verification.md` (~041-03).
+
 ## Why now
 
 - **The trigger is unobservable today.** Both refinement-todo entries
