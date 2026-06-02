@@ -13,6 +13,7 @@ Usage:
 import argparse
 import datetime
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -1023,6 +1024,128 @@ def stale(project_dir: Path, days: int = 90) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------- Slice 041-02: skill-routing histogram ----------
+#
+# Read surface for the routing observability the PreToolUse/Skill hook
+# (hooks/scripts/jig-skill-trace.sh) captures. Renders a category-split
+# histogram from the shared .claude/skill-usage.jsonl trace: per category
+# (the invoked skill's name with any leading `jig:` plugin scope stripped),
+# how many invocations were jig's baseline (`jig:<name>`) vs. a non-jig
+# ("other", typically a richer user-installed) skill. That split is what
+# answers "did the deferral route away from jig's baseline?" (spec 031 /
+# the two refinement-todo entries this spec closes).
+#
+# Two event sources share the file. Only `event == "skill_invoked"` rows
+# carry a skill name; the Task-spawn rows written by jig-telemetry.sh do
+# not, so they are filtered out (load-bearing invariant — see the verifier
+# in docs/skill-routing-verification.md). Stdout-only; never writes, never
+# raises for normal empty states (mirrors `stale`, which is informational).
+
+
+def _parse_iso_utc(ts: str):
+    """Parse an ISO-8601 timestamp to an aware UTC datetime, or None when
+    unparseable. Tolerates a trailing 'Z' and naive (offset-less) stamps
+    (assumed UTC). The hook writes `datetime.now(timezone.utc).isoformat()`
+    (offset `+00:00`); this stays tolerant in case that format drifts."""
+    if not ts:
+        return None
+    raw = ts.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
+
+
+def routing_stats(project_dir: Path, days: int = 30) -> str:
+    """Render the skill-routing histogram to a string. Always informational
+    (the caller exits 0); never gates. Reads .claude/skill-usage.jsonl,
+    filters to `skill_invoked` events within the last `days`, and buckets
+    each by category (jig baseline vs. other)."""
+    log_path = project_dir / ".claude" / "skill-usage.jsonl"
+    if not log_path.is_file():
+        return (
+            f"no routing data — {log_path} not found.\n"
+            "the PreToolUse/Skill trace (hooks/scripts/jig-skill-trace.sh) "
+            "writes it as skills fire.\n"
+        )
+
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(days=days))
+    counts: dict = {}  # category -> [jig_count, other_count]
+    total = 0
+    outside_window = 0
+
+    # errors="replace": a non-UTF-8 byte in the trace must not raise — it
+    # would escape the per-line try below and break the "always exits 0"
+    # contract (AC #5). A corrupted line decodes to replacement chars and is
+    # then dropped by the json.loads guard, same as any other malformed line.
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (ValueError, TypeError):
+            continue  # malformed line — skip, never crash
+        if not isinstance(entry, dict) or entry.get("event") != "skill_invoked":
+            continue  # Task-spawn rows (no event/skill_name) and noise
+        name = str(entry.get("skill_name") or "").strip()
+        if not name:
+            continue
+        dt = _parse_iso_utc(str(entry.get("timestamp") or ""))
+        if dt is None:
+            continue  # can't window an unparseable timestamp
+        if dt < cutoff:
+            outside_window += 1
+            continue
+        is_jig = name.startswith("jig:")
+        category = name[len("jig:"):] if is_jig else name
+        bucket = counts.setdefault(category, [0, 0])
+        bucket[0 if is_jig else 1] += 1
+        total += 1
+
+    if total == 0:
+        plural = "y" if outside_window == 1 else "ies"
+        return (
+            f"no skill invocations in the last {days} days "
+            f"({outside_window} older entr{plural} outside the window).\n"
+        )
+
+    # Sort by total desc, then category asc for a stable, scannable order.
+    rows = sorted(
+        ((cat, jig, other) for cat, (jig, other) in counts.items()),
+        key=lambda r: (-(r[1] + r[2]), r[0]),
+    )
+
+    cat_w = max(len("category"), max(len(r[0]) for r in rows))
+    cat_plural = "y" if len(rows) == 1 else "ies"
+    header = f"  {'category':<{cat_w}}  {'jig':>4}  {'other':>5}  {'total':>5}"
+    sep = f"  {'-' * cat_w}  {'-' * 4}  {'-' * 5}  {'-' * 5}"
+    lines = [
+        f"skill-routing stats (last {days} days) — {log_path}",
+        f"  {total} skill invocation(s) across {len(rows)} categor{cat_plural}; "
+        f"{outside_window} outside window; Task-spawn rows excluded.",
+        "",
+        header,
+        sep,
+    ]
+    for cat, jig, other in rows:
+        lines.append(f"  {cat:<{cat_w}}  {jig:>4}  {other:>5}  {jig + other:>5}")
+    lines.append("")
+    lines.append(
+        "legend: 'jig' = jig baseline (jig:<name>) fired; 'other' = a non-jig\n"
+        "(typically a richer user-installed) skill in that category fired. "
+        "Where jig\nships a deferring baseline, 'other' > 0 with 'jig' = 0 means "
+        "routing chose\nthe richer skill over jig's."
+    )
+    return "\n".join(lines) + "\n"
+
+
 # ---------- Slice 048-04: amendment-effective-state digest ----------
 
 # A closed record's "current truth" lives under a `## Amendments` section
@@ -1773,6 +1896,19 @@ def _build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--days", type=int, default=90,
                     help="staleness threshold in days (default: 90)")
 
+    # Slice 041-02: read-only histogram of skill-routing observations from
+    # .claude/skill-usage.jsonl — jig baseline vs. richer/"other" per
+    # category. Surfaces whether deferral routed away from jig's baseline.
+    prs = sub.add_parser(
+        "routing-stats",
+        help="histogram of which skills fired (jig baseline vs. richer/"
+             "other) from .claude/skill-usage.jsonl (slice 041-02)",
+    )
+    prs.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+    prs.add_argument("--days", type=int, default=30,
+                     help="window in days (default: 30)")
+
     pn = sub.add_parser(
         "new",
         help="reserve the next free spec number on origin/main (slice 003-03)",
@@ -1828,6 +1964,10 @@ def main(argv: list) -> int:
         elif ns.command == "stale":
             report = stale(Path(ns.project_dir), days=ns.days)
             sys.stdout.write(report)
+        elif ns.command == "routing-stats":
+            sys.stdout.write(
+                routing_stats(Path(ns.project_dir), days=ns.days)
+            )
         elif ns.command == "new":
             return reserve_spec(
                 ns.slug,
