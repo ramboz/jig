@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
 ---
@@ -35,11 +35,12 @@ Two refinement-todo entries already capture this gap:
 This spec replaces the unobservable trigger with a measurable one by
 adding the trace.
 
-## Reconciliation note (2026-06-01 — partial, ahead of formal slicing)
+## Reconciliation note (2026-06-01 partial → 2026-06-02 completed)
 
 A `PreToolUse`/`Skill` observability hook shipped ahead of this spec's
 formal slice transitions. Deviations from the drafted plan, recorded here
-because spec 041 is still DRAFT (inline correction per ADR-0010):
+because spec 041 was still DRAFT when they shipped (inline correction per
+ADR-0010):
 
 - **Approach (Goal 1):** the routing trace shipped as a **new**
   `hooks/scripts/jig-skill-trace.sh` on `PreToolUse`/`Skill`, NOT as an
@@ -54,9 +55,20 @@ because spec 041 is still DRAFT (inline correction per ADR-0010):
   (`detect_richer_skill()`) belongs to the *separate* craft-pass dispatch
   fix, NOT this spec. 041's "No filesystem detection in review.py" non-goal
   was about detection-for-observability and still holds for 041's scope.
-- **Still open:** Goal 2 (`workflow.py routing-stats` histogram, ~041-02)
-  is NOT done — do not close this spec until it lands. Verification recipe
-  shipped as `docs/skill-routing-verification.md` (~041-03).
+- **Closed (2026-06-02):** Goal 2 landed as slice 041-02 —
+  `workflow.py routing-stats [--days N]`, a category-split histogram
+  (jig baseline vs. richer/"other" per category) read from
+  `.claude/skill-usage.jsonl`; reviewed (compliance + craft both `pass`)
+  and reconciled. The three deliverables that shipped ahead of slicing are
+  now formalized as `slice-01-routing-trace-hook` (the hook),
+  `slice-02-routing-stats-helper` (the histogram), and
+  `slice-03-deferral-verification-doc` (the verification recipe at
+  `docs/skill-routing-verification.md`), all DONE. Both refinement-todo
+  entries ("Skill telemetry granularity" + "Skill-routing observability")
+  are struck. The three open questions are resolved: **Q1** → implicit
+  routing needs `PreToolUse`/`Skill` (not `UserPromptSubmit`); **Q2** →
+  category-split including the non-jig "other" column (deferral is invisible
+  otherwise); **Q3** → both refinement-todo entries folded together.
 
 ## Why now
 

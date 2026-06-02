@@ -48,9 +48,15 @@ Resolved by [Spec 025-01](specs/025-claude-md-hygiene/spec.md) — onboarding co
 
 ## Conventions
 
-### Decision: Skill telemetry granularity
-**Deferred:** `jig-telemetry.sh` logs Task tool spawns as a proxy for skill invocations. This is imprecise — skills can trigger without spawning a Task.
-**Resolution trigger:** After two weeks of telemetry data. If the log is too sparse to be useful, explore the `SubagentStart` / `InstructionsLoaded` events as alternatives.
+### ~~Decision: Skill telemetry granularity~~ — RESOLVED 2026-06-02
+Resolved by [spec 041](specs/041-routing-observability/spec.md). Telemetry is
+no longer a Task-spawn *proxy*: the `PreToolUse`/`Skill` hook `jig-skill-trace.sh`
+(slice 041-01) logs precise per-skill invocations (`event: "skill_invoked"` +
+verbatim `skill_name`) to `.claude/skill-usage.jsonl`, and `workflow.py
+routing-stats` (slice 041-02) surfaces the granular histogram. The
+"two-weeks-of-data" trigger is moot — the measurement is precise by
+construction. Closed together with "Skill-routing observability" below (they
+shared one mechanism — this spec's Q3).
 
 ### ~~Decision: `adr.py index` sentence-end detector mishandles abbreviations~~ — RESOLVED 2026-05-15
 Resolved by abbreviation allowlist in `_extract_description` (`skills/adr-workflow/adr.py`); pinned by `ExtractDescriptionAbbreviationTests`. Lifecycle companion: [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md).
@@ -154,16 +160,27 @@ Resolved by `shutil.rmtree(spec_dir, ignore_errors=True)` in `workflow.py` race-
 ### ~~Decision: scaffold-mode `--with-machinery` doesn't copy `skills/_common/`, breaking scaffolded helpers~~ — RESOLVED 2026-05-20
 Resolved by extending `_copy_skills_and_agents` in `skills/scaffold-init/scaffold.py` to copy `_`-prefixed private shared dirs unprefixed (e.g. `_common/` → `.claude/skills/_common/`); helpers' `sys.path.insert(0, parent.parent)` resolves `from _common.parsing import ...` at scaffold-mode runtime. Pinned by `test_common_module_copied_unprefixed` + `test_scaffolded_helper_imports_common_at_runtime`.
 
-### Decision: Skill-routing observability
-**Deferred:** Surfaced by the 2026-05-18 AI-native review of jig. Jig now ships 13 active skills (`scaffold-init`, `memory-sync`, `spec-workflow`, `independent-review`, `contracts`, `adr-workflow`, `tdd-loop`, `slice-land`, `migrate`, `pr-review`, `arch-review`, `clarify`, `analyze`). The Claude Code skill router picks one per user intent — but jig has no telemetry on which skills fire when, whether the router picks the *right* skill, or whether the deferral hints (pr-review/arch-review/contracts route to richer user-installed skills) actually fire. `jig-telemetry.sh` logs `Task` tool spawns; it does not log Skill / slash-command invocations.
-**Resolution trigger:** First observable routing mismatch (user invokes intent X, wrong skill fires) that surfaces in a deviation log or post-mortem. ALSO: revisit if/when a new judgment-skill (eighth+) ships and the routing surface grows further. Probably not bites in practice today — the 13 skills are well-differentiated by description — but the lack of observability means we can't tell.
-**Open questions:**
-- Extend `jig-telemetry.sh` to log Skill events as well as Task events? (Requires the Skill event being routable to a hook, which may not be supported by the Claude Code hook surface — verify before specifying.)
-- Or: add a `workflow.py routing-stats` subcommand that reads `.claude/skill-usage.jsonl` and surfaces the routing histogram?
-- Or: defer entirely to a future `SubagentStart` event (per the existing SubagentStart deferred entry above)?
-**Mitigation idea:** Cheapest first cut: extend `jig-telemetry.sh` to also fire on `UserPromptSubmit` and log the prompt prefix + detected slash command — gives a coarse "what skills did this session try to invoke" record. Pair with a manual review pass after 2 weeks (same cadence as the existing "Skill telemetry granularity" entry).
+### ~~Decision: Skill-routing observability~~ — RESOLVED 2026-06-02
+Resolved by [spec 041](specs/041-routing-observability/spec.md). Routing is now
+observable on **both** delegation paths:
+- **Path A (interactive skill-router)** — the `PreToolUse`/`Skill` trace
+  (`hooks/scripts/jig-skill-trace.sh`, slice 041-01) records each Skill
+  invocation verbatim to `.claude/skill-usage.jsonl`, read back by
+  `workflow.py routing-stats` (slice 041-02) as a jig-baseline-vs-richer
+  histogram per category.
+- **Path B (spec-workflow craft/arch pass)** — `review.py`'s deterministic
+  file-read dispatch, documented alongside Path A in
+  [`docs/skill-routing-verification.md`](skill-routing-verification.md) (slice 041-03).
 
-**Update 2026-06-01 (partial):** Open question #1 is **verified** — `PreToolUse`/`Skill` events ARE routable to a hook, and `tool_input.skill_name` carries the chosen name (incl. plugin-scoped `jig:*`). Shipped `hooks/scripts/jig-skill-trace.sh` (registered under `PreToolUse`/`Skill`); it logs auto-triggered Skill invocations to `.claude/skill-usage.jsonl`, so interactive routing (Path A) is now observable. Verification recipe: [`docs/skill-routing-verification.md`](skill-routing-verification.md). **Still open:** the `workflow.py routing-stats` histogram (spec 041-02). Do NOT mark RESOLVED until the histogram lands.
+The original "first observable routing mismatch" trigger was *unobservable by
+construction* (you can't see a mismatch without seeing which skill fired); spec
+041 replaced it with a measurable one. Open questions resolved: **Q1** (is
+`UserPromptSubmit` rich enough for *implicit* routing?) → no — `PreToolUse`/`Skill`
+is the routable surface that carries `skill_name`; **Q2** (jig-only vs. include
+richer?) → category-split, including the non-jig "other" column (deferral is
+invisible otherwise); **Q3** (fold both refinement-todo entries?) → yes (closed
+with "Skill telemetry granularity" above). The deferred `SubagentStart` event
+stays deferred (it was a non-goal — see its own entry).
 
 ### Decision: Code-staleness hard-gating for review evidence
 **Deferred:** [ADR-0014](decisions/adr-0014-review-evidence-model.md) (spec 045) makes the review-evidence gate check existence + frontmatter parse + `verdict: pass`. It does NOT detect *stale-but-passing* evidence — a `pass` artifact whose `reviewed_at` predates a later change to the slice's deliverable. The supersession case (a `fail`/`needs-changes` not yet overwritten by a later `pass`) IS enforced — it reduces to `verdict != pass`, which the gate already blocks; only the deliverable-changed-after-pass case is deferred. Hard-blocking it would reuse the `workflow.py stale` git-log/mtime machinery (slice 015-03) to compare the deliverable's last change against `reviewed_at`.

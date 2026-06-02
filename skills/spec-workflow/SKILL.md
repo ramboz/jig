@@ -26,6 +26,9 @@ user-invocable: true
 - Coordinates implementer + reviewer subagent invocations at the right points.
 - Enforces the reconciliation checklist before a slice goes DONE.
 - Consults `docs/memory/glossary.md` when drafting ACs to surface unknown domain terms.
+- Surfaces skill-routing observability via `workflow.py routing-stats [--days N]` —
+  a read-only histogram of which skills fired (jig baseline vs. richer/"other"
+  skill per category) from `.claude/skill-usage.jsonl` (slice 041-02).
 
 ## SPIDR splitting
 

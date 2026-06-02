@@ -809,6 +809,158 @@ class StaleCheckTests(unittest.TestCase):
         self.assertIn("951-01", r2.stdout)
 
 
+class RoutingStatsTests(unittest.TestCase):
+    """Slice 041-02: `workflow.py routing-stats` renders a category-split
+    histogram (jig baseline vs. richer/other) from the shared
+    `.claude/skill-usage.jsonl` trace written by jig-skill-trace.sh."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-routing-")
+        self.project = Path(self.tmpdir) / "proj"
+        (self.project / ".claude").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _iso_days_ago(self, days: int) -> str:
+        import datetime as _dt
+        return (_dt.datetime.now(_dt.timezone.utc)
+                - _dt.timedelta(days=days)).isoformat()
+
+    def _write_log(self, entries: list) -> None:
+        """entries: list of dicts → JSONL. A dict carrying key '__raw__'
+        injects a verbatim line (for malformed-input tests)."""
+        import json as _json
+        log = self.project / ".claude" / "skill-usage.jsonl"
+        lines = []
+        for e in entries:
+            lines.append(e["__raw__"] if "__raw__" in e else _json.dumps(e))
+        log.write_text("\n".join(lines) + "\n")
+
+    def _skill(self, name, *, days_ago=0):
+        return {
+            "timestamp": self._iso_days_ago(days_ago),
+            "session_id": "s",
+            "event": "skill_invoked",
+            "tool_name": "Skill",
+            "skill_name": name,
+        }
+
+    def _task(self, *, days_ago=0):
+        # A jig-telemetry.sh Task-spawn row — no event / skill_name.
+        return {
+            "timestamp": self._iso_days_ago(days_ago),
+            "session_id": "s",
+            "tool_name": "Task",
+            "prompt_snippet": "spawn something",
+        }
+
+    def _run(self, *extra):
+        return run_workflow("routing-stats", "--project-dir",
+                            str(self.project), *extra)
+
+    def _row(self, stdout: str, category: str) -> str:
+        return next(l for l in stdout.splitlines()
+                    if l.strip().startswith(category + " ")
+                    or l.strip() == category)
+
+    def test_missing_log_friendly_message(self):
+        # No skill-usage.jsonl written at all → friendly, no crash.
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("no routing data", r.stdout)
+
+    def test_empty_log_friendly_message(self):
+        (self.project / ".claude" / "skill-usage.jsonl").write_text("")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("no skill invocations", r.stdout)
+
+    def test_counts_jig_vs_other_per_category(self):
+        entries = [self._skill("jig:pr-review") for _ in range(3)]
+        entries += [self._skill("pr-review") for _ in range(7)]
+        self._write_log(entries)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        # category pr-review: jig=3, other=7, total=10
+        self.assertRegex(self._row(r.stdout, "pr-review"),
+                         r"\bpr-review\b.*\b3\b.*\b7\b.*\b10\b")
+
+    def test_excludes_task_spawn_rows(self):
+        # Load-bearing shared-file invariant: Task-spawn rows (no 'event'/
+        # 'skill_name') must NOT count as skill invocations.
+        self._write_log([self._task(), self._task(),
+                         self._skill("jig:analyze")])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        # exactly 1 invocation; the two Task rows excluded
+        self.assertRegex(self._row(r.stdout, "analyze"),
+                         r"\banalyze\b.*\b1\b.*\b0\b.*\b1\b")
+
+    def test_days_window_excludes_old_entries(self):
+        self._write_log([
+            self._skill("jig:contracts", days_ago=60),
+            self._skill("jig:contracts", days_ago=0),
+        ])
+        r = self._run("--days", "30")
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        # only the in-window invocation counted
+        self.assertRegex(self._row(r.stdout, "contracts"),
+                         r"\bcontracts\b.*\b1\b.*\b0\b.*\b1\b")
+        self.assertIn("1 outside window", r.stdout)
+
+    def test_malformed_line_skipped(self):
+        self._write_log([
+            {"__raw__": "{ not valid json"},
+            self._skill("jig:tdd-loop"),
+            {"__raw__": "12345"},  # valid JSON but not a dict
+        ])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "tdd-loop"),
+                         r"\btdd-loop\b.*\b1\b.*\b0\b.*\b1\b")
+
+    def test_non_utf8_bytes_do_not_crash(self):
+        # A corrupted (non-UTF-8) trace must not break the "always exits 0"
+        # contract: bad bytes decode to replacement chars and drop out via
+        # the json.loads guard, while valid lines still count.
+        import json as _json
+        log = self.project / ".claude" / "skill-usage.jsonl"
+        good = _json.dumps(self._skill("jig:analyze")).encode("utf-8")
+        log.write_bytes(b"\xff\xfe not utf-8 at all\n" + good + b"\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "analyze"),
+                         r"\banalyze\b.*\b1\b.*\b0\b.*\b1\b")
+
+    def test_jig_only_category_zero_other(self):
+        self._write_log([self._skill("jig:spec-workflow"),
+                         self._skill("jig:spec-workflow")])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "spec-workflow"),
+                         r"\bspec-workflow\b.*\b2\b.*\b0\b.*\b2\b")
+
+    def test_sorted_by_total_descending(self):
+        entries = [self._skill("jig:spec-workflow") for _ in range(5)]
+        entries += [self._skill("jig:clarify")]
+        self._write_log(entries)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertLess(r.stdout.index("spec-workflow"),
+                        r.stdout.index("clarify"),
+                        "higher-total category should sort first")
+
+    def test_legend_explains_jig_vs_other(self):
+        self._write_log([self._skill("pr-review")])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("legend", r.stdout.lower())
+        self.assertIn("jig", r.stdout)
+        self.assertIn("other", r.stdout)
+
+
 class SliceTemplateTests(unittest.TestCase):
     """Slice 014-01: a new slice template exists with the right frontmatter."""
 
