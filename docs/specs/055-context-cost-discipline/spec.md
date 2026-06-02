@@ -37,7 +37,9 @@ jig already has cost machinery, but it targets the **baseline** only
 warning). This spec owns the **growth-control gap**: the in-session best
 practices a developer experiences during a jig session.
 
-Full findings: memory file `token-cost-findings.md`.
+These figures come from a token-cost analysis of jig's own 37-day
+development history (2026-06-01); the load-bearing numbers are summarized
+above.
 
 ## Goals
 

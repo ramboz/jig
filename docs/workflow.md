@@ -195,6 +195,60 @@ After implementation, before marking DONE:
   of the existing `dependencies:` check, so a hand-edited status can't walk
   past a gate an earlier transition enforced.
 
+## Context-cost discipline
+
+**The orchestrator's context is the most expensive real estate in the
+system.** It is re-read on every turn for the whole session, so its cost is
+roughly *context-size × number-of-turns*. Measured on jig's own development:
+~90% of cost is the orchestrator (subagents ~8%), ~97% of token *volume* is
+`cache_read` — the main session re-reading its accumulated context — and the
+always-loaded primer (CLAUDE.md + `docs/memory/*`) is only ~4% of a heavy
+session's reads. The lesson: the baseline is cheap; **in-session growth** is
+the cost. Keep the orchestrator lean — every token that enters it is paid for
+again on every subsequent turn.
+
+This is a *cost* argument that lands on the same place as the "dumb zone"
+*quality* argument (>40% context fill degrades recall): both say keep the
+orchestrator lean.
+
+### Delegate file-heavy reading
+
+**Rule:** when a step will read more than a couple of files, or scan a
+large/unknown area, delegate it to a read-only subagent and keep only the
+returned summary in the orchestrator. The subagent reads, searches, and
+analyzes in its own bounded, disposable context; that bulk never enters — and
+is never re-read by — the main session.
+
+- **Target:** the built-in `Explore` / `general-purpose` agents (via the
+  `Task` tool). These run read-only in an isolated context. This is context
+  isolation, *not* parallelism.
+- **Return shape:** the subagent returns a **compact structured summary** —
+  the findings, the relevant paths, the load-bearing snippets — and
+  **never raw file contents**. The orchestrator keeps the summary, not the
+  files.
+
+**Reuse decision (recorded inline):** jig deliberately **reuses** the built-in
+`Explore` / `general-purpose` agents rather than shipping its own
+explorer/analyst agent. Rationale: the built-ins are read-only and capable;
+adding a jig agent would only duplicate a capable built-in. Revisit only if
+their return contract proves insufficient for jig's summary needs. (No ADR —
+the choice is low-stakes and reversible; no `agents/*.md` file is added.)
+
+### Worked example: the "$540 session"
+
+A codebase-gap review run *entirely in the orchestrator* (spec 008's
+`quizzical-moore` worktree) read and reasoned over the whole codebase in the
+main session: **985 turns**, only one context reset, context climbing to
+~840K tokens — **≈$540** for a single session, because every file read stayed
+in context and was re-read on every one of those turns.
+
+- **DON'T:** run a codebase-gap review (or any read-heavy survey) turn after
+  turn in the orchestrator, accumulating file contents it will re-read every
+  turn.
+- **DO:** delegate the reading/analysis to `Explore` and keep only its
+  returned summary. The bulk reading happens once, in a disposable context;
+  the orchestrator pays for the summary, not the corpus.
+
 ## Hook strictness profiles
 
 > **Deferred** — see `docs/refinement-todo.md`. Plan: `minimal | standard | strict`, controlled via `SCAFFOLD_HOOK_PROFILE` env var. Not yet implemented.

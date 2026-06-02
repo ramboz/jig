@@ -160,7 +160,7 @@
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | DRAFT |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | DRAFT |  |
 | [053-craft-pass-skill-dispatch](053-craft-pass-skill-dispatch/spec.md) | 053-01 — file-read-dispatch | **DONE** | Craft/arch reviewer subagent has NO `Skill` tool → can't use the skill router; `review.py detect_richer_skill()` (USER-scope only, `~/.claude/skills/<name>/`) hands it the path to read-and-apply, else inlines baseline. Promotes spec 031 OQ#1 option (b). Retroactive record of landed commit 734e424; project-scope detection deferred. |
-| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-01 — Delegate file-heavy reading to isolated subagents | READY_FOR_REVIEW |  |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-01 — Delegate file-heavy reading to isolated subagents | **DONE** |  |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-02 — In-session context-growth nudge | READY_FOR_REVIEW |  |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-03 — Read-once / read-lean discipline | READY_FOR_REVIEW |  |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-04 — Keep verbose command output out of the orchestrator | READY_FOR_REVIEW |  |

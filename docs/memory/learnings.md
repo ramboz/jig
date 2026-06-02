@@ -340,3 +340,6 @@ and keeps the plugin-root path. **Generalizable lesson:** any new `${CLAUDE_PLUG
 reference added to an adopter-facing doc template must survive the scaffold-mode rewrite
 (or be install-shape-aware), and generated docs should be tested by *running* the commands
 they document inside a temp scaffold, not just asserting on strings.
+
+## Don't cite assistant-memory files (or any out-of-repo path) in checked-in docs
+Slice 055 (spec authoring, 2026-06-01) cited a `token-cost-findings.md` "memory file" as the spec's evidence source — but that file lives in the assistant's private memory (`~/.claude/projects/.../memory/`), NOT in the repo. Both review passes (independent reviewers, no prior context) flagged it as a dangling/unverifiable citation: a teammate reading the spec cannot open it. **Rule:** a checked-in doc must be self-contained against the repo — state findings inline, or cite an in-repo artifact (a research doc, an ADR, `docs/memory/`). Never reference assistant-memory or other out-of-repo paths from a spec/ADR/doc. Fix: reworded the citation to inline provenance. Provenance: slice 055-01 compliance + craft review, 2026-06-01.
