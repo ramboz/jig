@@ -26,6 +26,9 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import install_contract  # noqa: E402  — the plugin/release install contract
+
 class VerifyError(RuntimeError):
     """Raised when verify_install is called with an unknown agent type."""
 
@@ -68,7 +71,11 @@ def check_plugin_manifest(plugin_root: Path) -> CheckResult:
     return True, "plugin.json present and well-formed"
 
 
-_REQUIRED_AGENTS = ("implementer", "reviewer", "architect")
+# The three subagent role definitions the plugin ships. Mirrored by
+# install_contract.REQUIRED_AGENTS (pinned equal by the contract's
+# consistency test) — kept defined here too because the probe CLI and the
+# scaffold-mode checks reference it directly.
+_REQUIRED_AGENTS = install_contract.REQUIRED_AGENTS
 
 
 def check_agents_present(plugin_root: Path) -> CheckResult:
@@ -86,14 +93,48 @@ def check_agents_present(plugin_root: Path) -> CheckResult:
 
 
 def check_active_skills_present(plugin_root: Path) -> CheckResult:
-    """At least one skill with a SKILL.md exists under skills/."""
+    """Every skill in the install contract has a SKILL.md under skills/.
+
+    Slice 047-01 (AC #3): tightened from "at least one skill" to the full
+    declared set (`install_contract.EXPECTED_SKILLS`). Any missing skill is
+    named with the expected rule (AC #4)."""
     skills_dir = plugin_root / "skills"
     if not skills_dir.is_dir():
         return False, f"skills/ dir missing at {skills_dir}"
-    skill_mds = list(skills_dir.glob("*/SKILL.md"))
-    if not skill_mds:
-        return False, f"no skill SKILL.md files found under {skills_dir}"
-    return True, f"{len(skill_mds)} skill SKILL.md file(s) reachable"
+    missing = install_contract.missing_skills(plugin_root)
+    if missing:
+        return False, "; ".join(missing)
+    return True, (
+        f"all {len(install_contract.EXPECTED_SKILLS)} contract skills present"
+    )
+
+
+def check_hook_contract(plugin_root: Path) -> CheckResult:
+    """`hooks/hooks.json` exists, parses, and every hook command follows the
+    jig convention (`bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/<name>`) and
+    points at a script that exists under `hooks/scripts/`.
+
+    Slice 047-01 (AC #2): plugin mode validated NO hooks before this slice.
+    Routes through `install_contract.validate_hooks` so the registration
+    source of truth (hooks.json) is checked against the on-disk scripts.
+    Each failure names the offending entry and the expected rule (AC #4)."""
+    hooks_json = plugin_root / "hooks" / "hooks.json"
+    if not hooks_json.is_file():
+        return False, f"hooks.json missing at {hooks_json}"
+    try:
+        data = json.loads(hooks_json.read_text())
+    except json.JSONDecodeError as exc:
+        return False, f"hooks.json is not valid JSON: {exc}"
+    problems = install_contract.validate_hooks(
+        data, plugin_root / "hooks" / "scripts"
+    )
+    if problems:
+        return False, "; ".join(problems)
+    referenced = install_contract.parse_hook_script_names(data)
+    return True, (
+        f"hooks.json registers {len(referenced)} hook script(s), all "
+        "well-formed and present"
+    )
 
 
 _CHECKS: list[tuple[str, Check]] = [
@@ -101,6 +142,8 @@ _CHECKS: list[tuple[str, Check]] = [
     ("manifest", check_plugin_manifest),
     ("agents", check_agents_present),
     ("skills", check_active_skills_present),
+    # Slice 047-01 (AC #2) — hooks.json command shape + script existence.
+    ("hooks", check_hook_contract),
 ]
 
 
@@ -136,12 +179,18 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 # registration), but against the project tree.
 
 
+# Source of truth: hooks/hooks.json (the registration manifest). This
+# restated tuple is pinned equal to the hooks.json-derived set by
+# test_verify_install.py::HookScriptDriftConsistencyTests so it cannot drift
+# (slice 047-01 item 5 caught it missing `jig-skill-trace.sh` — the Skill
+# PreToolUse trace hook — which hooks.json has registered since spec 030).
 _EXPECTED_HOOK_SCRIPTS = (
     "jig-boundary-change-warn.sh",
     "jig-context-check.sh",
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
     "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
+    "jig-skill-trace.sh",  # Skill PreToolUse trace hook (registered in hooks.json)
     "jig-spec-gate.sh",
     "jig-task-capture.sh",
     "jig-telemetry.sh",

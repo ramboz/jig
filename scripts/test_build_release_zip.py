@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_release_zip  # noqa: E402
+import install_contract  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -91,11 +92,18 @@ class InclusionTests(unittest.TestCase):
     def test_architect_agent_present(self):
         self.assertIn("agents/architect.md", self.names)
 
-    def test_skill_md_present(self):
-        skill_mds = [n for n in self.names if n.startswith("skills/") and n.endswith("/SKILL.md")]
-        self.assertGreater(
-            len(skill_mds), 0,
-            f"expected at least one skill SKILL.md under skills/; got {sorted(self.names)[:20]!r}...",
+    def test_every_expected_skill_present(self):
+        """Slice 047-01 (AC #3): the zip carries EVERY skill in the install
+        contract — not just 'at least one'. A skill dropped from the build
+        is named explicitly (AC #4)."""
+        missing = [
+            skill
+            for skill in install_contract.EXPECTED_SKILLS
+            if f"skills/{skill}/SKILL.md" not in self.names
+        ]
+        self.assertEqual(
+            missing, [],
+            f"release zip is missing SKILL.md for expected skill(s): {missing!r}",
         )
 
     def test_templates_directory_present(self):
@@ -105,22 +113,26 @@ class InclusionTests(unittest.TestCase):
     def test_hooks_json_present(self):
         self.assertIn("hooks/hooks.json", self.names)
 
-    def test_hook_scripts_present(self):
-        """Regression: `hooks/scripts/*.sh` must be in the zip.
-
-        `hooks/hooks.json` invokes `bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-*.sh`
-        at runtime — excluding them silently breaks every hook event.
-        Bug from first 013-03 build: a too-broad `scripts` directory
-        exclusion swallowed these files.
-        """
-        hook_scripts = [
-            n for n in self.names
-            if n.startswith("hooks/scripts/") and n.endswith(".sh")
+    def test_every_registered_hook_script_present(self):
+        """Slice 047-01 (AC #3): every script hooks.json registers is in the
+        zip. `hooks/hooks.json` invokes
+        `bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-*.sh` at runtime, so a
+        missing script silently breaks that hook event (the original 013-03
+        build regression). Derived from the zip's own hooks.json so the test
+        tracks the registration source of truth (AC #4 names any missing
+        script)."""
+        with zipfile.ZipFile(self.zip_path) as zf:
+            hooks_data = json.loads(zf.read("hooks/hooks.json"))
+        registered = install_contract.parse_hook_script_names(hooks_data)
+        self.assertTrue(registered, "hooks.json registered no scripts")
+        missing = [
+            name
+            for name in registered
+            if f"hooks/scripts/{name}" not in self.names
         ]
-        self.assertGreater(
-            len(hook_scripts), 0,
-            f"expected at least one hooks/scripts/*.sh in zip; got "
-            f"{sorted(n for n in self.names if n.startswith('hooks/'))!r}",
+        self.assertEqual(
+            missing, [],
+            f"release zip is missing registered hook script(s): {missing!r}",
         )
 
     def test_readme_present(self):
@@ -181,6 +193,74 @@ class ExclusionTests(unittest.TestCase):
         self.assertEqual(
             wrapped, [],
             f"zip must not nest contents in a 'jig/' wrapping dir; found {wrapped!r}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Slice 047-01 (AC #3 / AC #4) — explicit release-zip contract inventory.
+# The smoke test verifies the FULL declared install surface against a built
+# zip (every expected skill + all three agents + every registered hook
+# script + both manifests) and scans for any excluded test-only path that
+# leaked in, rather than asserting only "at least one" artifact exists.
+# ---------------------------------------------------------------------------
+
+
+class ReleaseZipContractInventoryTests(unittest.TestCase):
+    def setUp(self):
+        self.zip_path = _build_once()
+        self.addCleanup(self.zip_path.unlink, missing_ok=True)
+        with zipfile.ZipFile(self.zip_path) as zf:
+            self.names = set(zf.namelist())
+
+    def test_all_three_agents_present(self):
+        missing = [
+            agent
+            for agent in install_contract.REQUIRED_AGENTS
+            if f"agents/{agent}.md" not in self.names
+        ]
+        self.assertEqual(
+            missing, [], f"release zip missing agent file(s): {missing!r}"
+        )
+
+    def test_both_manifests_present(self):
+        for manifest in (
+            ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
+        ):
+            self.assertIn(
+                manifest, self.names,
+                f"release zip missing manifest {manifest!r}",
+            )
+
+    def test_no_excluded_path_leaked(self):
+        """No path the release contract excludes (fixtures/, test_*.py,
+        __pycache__, *.pyc, .DS_Store) leaked into the built zip. Uses the
+        contract's own predicate, so the build's exclusion rules and the
+        check agree (AC #3 / AC #4 names the leaked path)."""
+        leaked = sorted(
+            n for n in self.names if install_contract.is_excluded_release_path(n)
+        )
+        self.assertEqual(
+            leaked, [],
+            f"release zip contains excluded test-only/junk path(s): {leaked!r}",
+        )
+
+    def test_no_fixtures_directory_leaked(self):
+        offenders = sorted(n for n in self.names if "fixtures" in Path(n).parts)
+        self.assertEqual(
+            offenders, [],
+            f"release zip must exclude all fixtures/ paths; found {offenders!r}",
+        )
+
+    def test_no_test_py_leaked(self):
+        offenders = sorted(
+            n
+            for n in self.names
+            if Path(n).name.startswith("test_") and n.endswith(".py")
+        )
+        self.assertEqual(
+            offenders, [],
+            f"release zip must exclude test_*.py; found {offenders!r}",
         )
 
 

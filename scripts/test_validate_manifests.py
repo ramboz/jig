@@ -34,7 +34,10 @@ _VALID_PLUGIN_JSON = {
 _VALID_MARKETPLACE_JSON = {
     "name": "jig",
     "owner": {"name": "ramboz"},
-    "plugins": [{"name": "jig", "source": ".."}],
+    # Slice 047-01: marketplace plugins[] entries now require name/source/
+    # description with a relative source path. A bare "." string is relative
+    # and valid.
+    "plugins": [{"name": "jig", "source": ".", "description": "test"}],
 }
 
 _VALID_HOOKS_JSON = {
@@ -210,6 +213,128 @@ class MissingFileTests(unittest.TestCase):
             code = validate_manifests.run(root, out=out)
             self.assertNotEqual(code, 0)
             self.assertIn("hooks.json", out.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# Slice 047-01 — full manifest contract (AC #1 / AC #4)
+# ---------------------------------------------------------------------------
+
+
+class PluginManifestContractTests(unittest.TestCase):
+    """AC #1 — plugin.json must carry name + version + description."""
+
+    def test_missing_version_fails_and_names_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            (root / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "jig", "description": "d"})
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            text = out.getvalue()
+            self.assertIn("version", text)
+            self.assertIn("plugin.json", text)
+
+    def test_missing_description_fails_and_names_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            (root / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "jig", "version": "0.1.0"})
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            self.assertIn("description", out.getvalue())
+
+
+class MarketplaceManifestContractTests(unittest.TestCase):
+    """AC #1 / AC #4 — marketplace.json owner, plugins[], and relative
+    source-path enforcement, each with a path-specific diagnostic."""
+
+    def test_missing_owner_name_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = dict(_VALID_MARKETPLACE_JSON)
+            broken["owner"] = {}
+            (root / ".claude-plugin" / "marketplace.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            self.assertIn("owner.name", out.getvalue())
+
+    def test_empty_plugins_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = dict(_VALID_MARKETPLACE_JSON)
+            broken["plugins"] = []
+            (root / ".claude-plugin" / "marketplace.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            self.assertIn("plugins", out.getvalue())
+
+    def test_plugin_entry_missing_description_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = json.loads(json.dumps(_VALID_MARKETPLACE_JSON))
+            del broken["plugins"][0]["description"]
+            (root / ".claude-plugin" / "marketplace.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            text = out.getvalue()
+            self.assertIn("description", text)
+            self.assertIn("plugins[0]", text)
+
+    def test_absolute_source_path_fails_with_path_diagnostic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = json.loads(json.dumps(_VALID_MARKETPLACE_JSON))
+            broken["plugins"][0]["source"] = {
+                "source": "git-subdir",
+                "url": "u",
+                "path": "/abs",
+            }
+            (root / ".claude-plugin" / "marketplace.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            text = out.getvalue()
+            self.assertIn("not relative", text)
+            self.assertIn("plugins[0]", text)
+
+    def test_dotdot_source_path_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            broken = json.loads(json.dumps(_VALID_MARKETPLACE_JSON))
+            broken["plugins"][0]["source"] = {
+                "source": "git-subdir",
+                "url": "u",
+                "path": "../escape",
+            }
+            (root / ".claude-plugin" / "marketplace.json").write_text(
+                json.dumps(broken)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertNotEqual(code, 0)
+            self.assertIn("escapes", out.getvalue())
 
 
 # ---------------------------------------------------------------------------

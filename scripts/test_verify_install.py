@@ -15,7 +15,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import install_contract  # noqa: E402
 import verify_install  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # --------------------------------------------------------------------------
@@ -24,26 +27,67 @@ import verify_install  # noqa: E402
 
 
 def _make_fake_plugin_root(tmpdir: Path) -> Path:
-    """Build a minimum-shape plugin root that passes every headless check."""
+    """Build a full-contract plugin root that passes every plugin-mode check.
+
+    Updated for slice 047-01: the plugin-mode checks now assert the *full*
+    install contract (every expected skill, the hooks.json command shape +
+    script existence, full manifest fields), so the shared fixture builder
+    must produce a complete, contract-compliant tree. Tests that exercise a
+    specific failure mode strip the relevant artifact off this complete
+    fixture."""
     (tmpdir / ".claude-plugin").mkdir(parents=True)
     (tmpdir / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps({"name": "jig", "version": "0.1.0"})
+        json.dumps(
+            {"name": "jig", "version": "0.1.0", "description": "test plugin"}
+        )
     )
     (tmpdir / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps(
             {
                 "name": "jig",
                 "owner": {"name": "ramboz"},
-                "plugins": [{"name": "jig", "source": "./"}],
+                "plugins": [
+                    {
+                        "name": "jig",
+                        "source": {
+                            "source": "git-subdir",
+                            "url": "https://example/jig.git",
+                            "path": ".",
+                        },
+                        "description": "test plugin",
+                    }
+                ],
             }
         )
     )
     (tmpdir / "agents").mkdir()
-    for name in ("implementer", "reviewer", "architect"):
+    for name in install_contract.REQUIRED_AGENTS:
         (tmpdir / "agents" / f"{name}.md").write_text(f"# {name}\n")
-    (tmpdir / "skills").mkdir()
-    (tmpdir / "skills" / "scaffold-init").mkdir()
-    (tmpdir / "skills" / "scaffold-init" / "SKILL.md").write_text("# scaffold-init\n")
+    skills = tmpdir / "skills"
+    skills.mkdir()
+    for skill in install_contract.EXPECTED_SKILLS:
+        (skills / skill).mkdir()
+        (skills / skill / "SKILL.md").write_text(f"# {skill}\n")
+    # hooks.json + the scripts it references (one well-formed entry per
+    # registered script), so the hook-contract check passes on the fixture.
+    hooks_scripts = tmpdir / "hooks" / "scripts"
+    hooks_scripts.mkdir(parents=True)
+    hook_entries = []
+    for script in verify_install._EXPECTED_HOOK_SCRIPTS:
+        (hooks_scripts / script).write_text("#!/bin/bash\n")
+        hook_entries.append(
+            {
+                "type": "command",
+                "command": (
+                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/" + script
+                ),
+            }
+        )
+    (tmpdir / "hooks" / "hooks.json").write_text(
+        json.dumps(
+            {"hooks": {"PreToolUse": [{"matcher": "Task", "hooks": hook_entries}]}}
+        )
+    )
     return tmpdir
 
 
@@ -79,16 +123,10 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
     # hooks/scripts/
     scripts = claude / "hooks" / "scripts"
     scripts.mkdir(parents=True)
-    for name in (
-        "jig-boundary-change-warn.sh",
-        "jig-context-check.sh",
-        "jig-memory-scan.sh",
-        "jig-post-edit-verify.sh",
-        "jig-secret-scan.sh",
-        "jig-spec-gate.sh",
-        "jig-task-capture.sh",
-        "jig-telemetry.sh",
-    ):
+    # Mirrors the full set scaffold.py copies (glob `jig-*.sh`) — kept equal
+    # to verify_install._EXPECTED_HOOK_SCRIPTS, which slice 047-01 corrected
+    # to include jig-skill-trace.sh.
+    for name in verify_install._EXPECTED_HOOK_SCRIPTS:
         s = scripts / name
         s.write_text("#!/bin/bash\n")
         s.chmod(0o755)
@@ -306,12 +344,156 @@ class HeadlessRunnerTests(unittest.TestCase):
             buf = io.StringIO()
             verify_install.run_headless(root, out=buf)
             lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
-            # 4 checks (marketplace / manifest / agents / skills) + 1 summary
-            self.assertGreaterEqual(len(lines), 5)
+            # 5 checks (marketplace / manifest / agents / skills / hooks) +
+            # 1 summary line (slice 047-01 added the hook-contract check).
+            self.assertGreaterEqual(len(lines), 6)
             self.assertTrue(
                 any("summary" in ln.lower() or "passed" in ln.lower() for ln in lines),
                 f"expected a summary line; got:\n{buf.getvalue()}",
             )
+
+
+# --------------------------------------------------------------------------
+# Slice 047-01 — plugin-mode install-contract checks
+# --------------------------------------------------------------------------
+
+
+class HookScriptDriftConsistencyTests(unittest.TestCase):
+    """Slice 047-01 item 5 (drift fix). `_EXPECTED_HOOK_SCRIPTS` is a
+    restated constant; pin it equal to the set hooks.json actually
+    registers so it cannot silently drift (it was missing
+    `jig-skill-trace.sh` before this slice)."""
+
+    def test_expected_hook_scripts_matches_hooks_json(self):
+        data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+        registered = install_contract.parse_hook_script_names(data)
+        self.assertEqual(
+            set(verify_install._EXPECTED_HOOK_SCRIPTS),
+            registered,
+            "verify_install._EXPECTED_HOOK_SCRIPTS drifted from the set "
+            "hooks.json registers — update the restated constant",
+        )
+
+    def test_skill_trace_hook_is_listed(self):
+        self.assertIn(
+            "jig-skill-trace.sh", verify_install._EXPECTED_HOOK_SCRIPTS
+        )
+
+
+class PluginModeSkillContractTests(unittest.TestCase):
+    """AC #3 — plugin-mode skill check asserts the FULL expected skill set,
+    not just 'at least one'. AC #4 — a missing skill is named."""
+
+    def test_full_skill_set_passes(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            passed, msg = verify_install.check_active_skills_present(root)
+            self.assertTrue(passed, msg)
+
+    def test_missing_expected_skill_fails_and_is_named(self):
+        import tempfile
+        import shutil
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            # Remove one expected skill from the otherwise-complete fixture.
+            shutil.rmtree(root / "skills" / "analyze")
+            passed, msg = verify_install.check_active_skills_present(root)
+            self.assertFalse(passed)
+            self.assertIn("analyze", msg)
+            self.assertIn("SKILL.md", msg)
+
+    def test_real_repo_has_full_skill_set(self):
+        passed, msg = verify_install.check_active_skills_present(REPO_ROOT)
+        self.assertTrue(passed, msg)
+
+
+class PluginModeHookContractTests(unittest.TestCase):
+    """AC #2 — plugin mode now validates hooks.json command shape + script
+    existence (it checked NO hooks before this slice)."""
+
+    def test_real_repo_hook_contract_passes(self):
+        passed, msg = verify_install.check_hook_contract(REPO_ROOT)
+        self.assertTrue(passed, msg)
+
+    def test_hook_check_in_plugin_check_list(self):
+        names = [name for name, _ in verify_install._CHECKS]
+        self.assertIn("hooks", names)
+
+    def test_bare_hook_command_fails(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            scripts = root / "hooks" / "scripts"
+            (scripts / "jig-x.sh").write_text("#!/bin/bash\n")
+            # Overwrite the well-formed fixture hooks.json with a bare-name
+            # entry (the failure under test).
+            (root / "hooks" / "hooks.json").write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "PreToolUse": [
+                                {
+                                    "matcher": "Task",
+                                    "hooks": [
+                                        {"type": "command", "command": "jig-x.sh"}
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                )
+            )
+            passed, msg = verify_install.check_hook_contract(root)
+            self.assertFalse(passed)
+            self.assertIn("jig-x.sh", msg)
+            self.assertIn("CLAUDE_PLUGIN_ROOT", msg)
+
+    def test_dangling_hook_script_fails(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            # Reference a script that was never written into hooks/scripts/.
+            (root / "hooks" / "hooks.json").write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "PreToolUse": [
+                                {
+                                    "matcher": "Task",
+                                    "hooks": [
+                                        {
+                                            "type": "command",
+                                            "command": (
+                                                "bash ${CLAUDE_PLUGIN_ROOT}"
+                                                "/hooks/scripts/jig-missing.sh"
+                                            ),
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                )
+            )
+            passed, msg = verify_install.check_hook_contract(root)
+            self.assertFalse(passed)
+            self.assertIn("jig-missing.sh", msg)
+
+    def test_missing_hooks_json_fails(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            # Remove the fixture's hooks.json so the check has none to read.
+            (root / "hooks" / "hooks.json").unlink()
+            passed, msg = verify_install.check_hook_contract(root)
+            self.assertFalse(passed)
+            self.assertIn("hooks.json", msg)
 
 
 # --------------------------------------------------------------------------
