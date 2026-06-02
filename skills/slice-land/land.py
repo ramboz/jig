@@ -53,6 +53,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
+from _common.parsing import check_deviation_log  # noqa: F401 (re-export)
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import parse_frontmatter as _parse_frontmatter
 from _common.parsing import SliceLookupError
@@ -135,14 +136,11 @@ def check_tests(target: Path) -> tuple:
     return "red", result.returncode
 
 
-def check_deviation_log(section: str) -> bool:
-    """Look for a `### Deviation log` (case-insensitive prefix) within the
-    slice section. `### Deviation log` and `### Deviation log (after
-    reconciliation)` both count."""
-    return bool(re.search(
-        r"(?im)^###\s+deviation\s+log\b",
-        section,
-    ))
+# Slice 045-03: `check_deviation_log` was lifted to `_common.parsing` so the
+# `workflow.py transition` gate (ADR-0014 §5) can reuse the SAME predicate
+# without a cross-skill import. Imported above and re-exported here so this
+# module's own callers keep using `land.check_deviation_log` unchanged
+# (`test_land.py` exercises it transitively through `prepare()`).
 
 
 CLOSE_OUT_RE = re.compile(r"(?im)^###\s+close[- ]?out\b")
