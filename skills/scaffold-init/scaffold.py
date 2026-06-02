@@ -988,10 +988,20 @@ def copy_machinery(plugin: Path, target: Path, *,
       `metadata.managed_by_jig`, non-jig entries survive).
     - UnmanagedHooksError fires BEFORE any filesystem mutation, so a
       refused call leaves no partial state — including no copied
-      skills/agents (this is the gap inbox 2026-05-15 closes)."""
+      skills/agents (this is the gap inbox 2026-05-15 closes).
+
+    Slice 052-04 (ADR-0013): the security floor's `.gitignore` secret block
+    is written here too, so `migrate copy-machinery` brings it to an
+    existing jig project (the secret-scan hook + `permissions.deny` defaults
+    already flow through `_copy_hooks_and_register` / `_merge_settings`).
+    The write is ungated infra — never tier-scoped (AC2) — and idempotent,
+    so the greenfield `scaffold()` caller can rely on it for the
+    `--with-machinery` path and only writes the floor itself on the
+    `--plugin-only` branch (where `copy_machinery` is not called)."""
     _check_hooks_safety(target, force=force)
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
+    _write_gitignore_secret_block(target)
 
 
 def _specs_dir_has_content(target: Path) -> bool:
@@ -1260,15 +1270,21 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # Slice 038-02: gate the on-disk skill set to the same tiers the
         # manifest records (installed_skills is derived from these per
         # ADR-0007), so disk == manifest.
+        #
+        # Slice 052-04: copy_machinery now also writes the secret-ignore
+        # .gitignore floor (so `migrate copy-machinery` brings it too), which
+        # covers the --with-machinery path here. The --plugin-only branch
+        # below writes it directly since copy_machinery is not called there.
         copy_machinery(plugin, target, force=force,
                        installed_tiers=installed_tiers)
-
-    # 5b. Slice 052-02 (ADR-0013): write/merge the secret-ignore .gitignore
-    # floor. Runs BEFORE the scaffold.json completion sentinel so a crash
-    # before the manifest leaves a re-runnable partial state. Idempotent +
-    # append-not-clobber, so --force re-scaffold and a pre-existing user
-    # .gitignore are both safe.
-    _write_gitignore_secret_block(target)
+    else:
+        # 5b. Slice 052-02 (ADR-0013): write/merge the secret-ignore
+        # .gitignore floor on the --plugin-only path (with-machinery gets it
+        # via copy_machinery above — slice 052-04). Runs BEFORE the
+        # scaffold.json completion sentinel so a crash before the manifest
+        # leaves a re-runnable partial state. Idempotent + append-not-clobber,
+        # so --force re-scaffold and a pre-existing user .gitignore are safe.
+        _write_gitignore_secret_block(target)
 
     # 6. scaffold.json install-state manifest — the COMPLETION SENTINEL
     # (slice 032-02). Written LAST so a crash before this point leaves

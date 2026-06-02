@@ -1700,6 +1700,105 @@ class CopyMachineryTests(unittest.TestCase):
         )
 
 
+class CopyMachinerySecurityFloorTests(unittest.TestCase):
+    """Slice 052-04 AC1/AC2 — `migrate copy-machinery` brings the security
+    floor to an existing jig project: the `.gitignore` secret block, the
+    `permissions.deny` defaults, and the secret-scan hook registration all
+    land, idempotently and without clobbering pre-existing user content.
+
+    The floor is ungated infra (AC2): it lands regardless of the target's
+    `installed_tiers` (these projects have no scaffold.json → copy-all)."""
+
+    GITIGNORE_MARKER = "# >>> jig secret-ignore >>>"
+    DENY_GLOBS = (
+        "Bash(git push --force*)",
+        "Bash(git reset --hard*)",
+        "Bash(rm -rf*)",
+    )
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-052-04-mig-"))
+        _seed_spec_driven_project(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read_settings(self) -> dict:
+        return _json.loads(
+            (self.tmpdir / ".claude" / "settings.json").read_text()
+        )
+
+    def _deny(self) -> list:
+        return self._read_settings().get("permissions", {}).get("deny", [])
+
+    def _secret_scan_registered(self) -> bool:
+        pre = self._read_settings().get("hooks", {}).get("PreToolUse", [])
+        for entry in pre:
+            if entry.get("matcher") != "Edit|Write|MultiEdit":
+                continue
+            if not (entry.get("metadata") or {}).get("managed_by_jig"):
+                continue
+            for h in entry.get("hooks", []):
+                if "jig-secret-scan.sh" in (h.get("command") or ""):
+                    return True
+        return False
+
+    # ----- AC1 — the .gitignore floor lands -----
+    def test_copy_machinery_writes_gitignore_secret_floor(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0,
+                         f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        gi = self.tmpdir / ".gitignore"
+        self.assertTrue(gi.is_file(),
+                        "migrate copy-machinery must write .gitignore")
+        text = gi.read_text()
+        self.assertIn(self.GITIGNORE_MARKER, text)
+        self.assertIn(".env", text)
+        self.assertIn("*.pem", text)
+
+    # ----- AC1 — permissions.deny defaults land -----
+    def test_copy_machinery_merges_permissions_deny(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        deny = self._deny()
+        for glob in self.DENY_GLOBS:
+            self.assertIn(glob, deny,
+                          f"migrate copy-machinery missing deny glob: {glob}")
+
+    # ----- AC1 — secret-scan hook registered -----
+    def test_copy_machinery_registers_secret_scan_hook(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertTrue(
+            self._secret_scan_registered(),
+            "migrate copy-machinery did not register the secret-scan hook",
+        )
+
+    # ----- AC1 — idempotent: no duplicate .gitignore block on re-run -----
+    def test_copy_machinery_gitignore_idempotent(self):
+        r1 = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r1.returncode, 0, f"stderr: {r1.stderr}")
+        r2 = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r2.returncode, 0, f"stderr: {r2.stderr}")
+        text = (self.tmpdir / ".gitignore").read_text()
+        self.assertEqual(
+            text.count(self.GITIGNORE_MARKER), 1,
+            "re-run duplicated the jig secret-ignore block",
+        )
+
+    # ----- AC1 — pre-existing user .gitignore content survives -----
+    def test_copy_machinery_preserves_user_gitignore_lines(self):
+        gi = self.tmpdir / ".gitignore"
+        gi.write_text("# my project\nnode_modules/\ndist/\n")
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        text = gi.read_text()
+        self.assertIn("node_modules/", text)
+        self.assertIn("dist/", text)
+        self.assertIn("# my project", text)
+        self.assertIn(self.GITIGNORE_MARKER, text)
+
+
 class CopyMachineryOperationsTests(unittest.TestCase):
     """Slice 021-01 AC #6 + AC #9 — `migrate.py report` surfaces the new
     subcommand in its Operations section when the verdict is `adoptable`

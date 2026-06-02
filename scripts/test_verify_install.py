@@ -47,9 +47,24 @@ def _make_fake_plugin_root(tmpdir: Path) -> Path:
     return tmpdir
 
 
+# Source of truth: scaffold.py `_PERMISSIONS_DENY_DEFAULTS` (slice 052-03)
+# and `_GITIGNORE_SECRET_PATTERNS` / `_GITIGNORE_BLOCK_BEGIN` (slice 052-02).
+# These literals mirror the AC1-named representative subset the floor checks
+# assert; verify_install.py is stdlib-only and cannot import scaffold, so the
+# fixtures hardcode the same markers the production checks do.
+_FLOOR_DENY_GLOBS = (
+    "Bash(git push --force*)",
+    "Bash(git reset --hard*)",
+    "Bash(rm -rf*)",
+)
+_FLOOR_GITIGNORE_MARKER = "# >>> jig secret-ignore >>>"
+
+
 def _make_fake_scaffold_root(tmpdir: Path) -> Path:
     """Build a minimum-shape scaffolded project that passes every
-    scaffold-mode check (slice 016-03 AC #4)."""
+    scaffold-mode check (slice 016-03 AC #4, extended by slice 052-04 with
+    the security floor: secret-scan registration, `permissions.deny`, and
+    the `.gitignore` secret block)."""
     claude = tmpdir / ".claude"
     # skills/
     skills = claude / "skills"
@@ -77,7 +92,9 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
         s = scripts / name
         s.write_text("#!/bin/bash\n")
         s.chmod(0o755)
-    # settings.json with at least one jig-managed hook entry
+    # settings.json with a jig-managed SessionStart entry PLUS the security
+    # floor: a jig-managed Edit|Write|MultiEdit secret-scan registration and
+    # the conservative permissions.deny guardrails (slice 052-04).
     (claude / "settings.json").write_text(
         json.dumps(
             {
@@ -96,14 +113,43 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
                             ],
                             "metadata": {"managed_by_jig": True},
                         }
-                    ]
-                }
+                    ],
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write|MultiEdit",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        "bash "
+                                        "${CLAUDE_PROJECT_DIR}/.claude/"
+                                        "hooks/scripts/jig-secret-scan.sh"
+                                    ),
+                                }
+                            ],
+                            "metadata": {"managed_by_jig": True},
+                        }
+                    ],
+                },
+                "permissions": {"deny": list(_FLOOR_DENY_GLOBS)},
             },
             indent=2,
         )
         + "\n"
     )
+    # .gitignore secret floor (slice 052-02).
+    (tmpdir / ".gitignore").write_text(
+        _FLOOR_GITIGNORE_MARKER + "\n.env\n*.pem\n# <<< jig secret-ignore <<<\n"
+    )
     return tmpdir
+
+
+def _make_full_floor_scaffold_root(tmpdir: Path) -> Path:
+    """Alias for `_make_fake_scaffold_root` — the base fixture now includes
+    the full security floor (slice 052-04). Kept as a descriptively-named
+    helper for the floor presence/absence tests, which strip individual
+    artifacts off this complete fixture to drive each absence case."""
+    return _make_fake_scaffold_root(tmpdir)
 
 
 # --------------------------------------------------------------------------
@@ -391,6 +437,172 @@ class ScaffoldModeChecksTests(unittest.TestCase):
                 "not scaffolded", buf.getvalue().lower(),
                 f"expected 'not scaffolded' message; got:\n{buf.getvalue()}",
             )
+
+
+# --------------------------------------------------------------------------
+# Slice 052-04 AC3/AC4 — security-floor presence checks
+# --------------------------------------------------------------------------
+
+
+class SecurityFloorChecksTests(unittest.TestCase):
+    """The three new scaffold-mode floor checks (slice 052-04, ADR-0013):
+    secret-scan registration, `permissions.deny` defaults, and the
+    `.gitignore` secret floor. Presence (full fixture passes) + per-artifact
+    absence (removing each one fails exactly its own check)."""
+
+    # ----- presence: full floor passes all three -----
+    def test_full_floor_fixture_passes_all_three_checks(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            for check in (
+                verify_install.check_scaffold_secret_scan_registered,
+                verify_install.check_scaffold_permissions_deny_floor,
+                verify_install.check_scaffold_gitignore_secret_floor,
+            ):
+                passed, msg = check(project)
+                self.assertTrue(passed, f"{check.__name__}: {msg}")
+
+    def test_full_floor_fixture_in_scaffold_check_list(self):
+        """The three checks are registered in `_SCAFFOLD_CHECKS`, so
+        `run_all_scaffold_checks` exercises them on a full-floor fixture."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            results = verify_install.run_all_scaffold_checks(project)
+            self.assertTrue(
+                all(passed for passed, _ in results),
+                f"all scaffold checks should pass on a full-floor fixture; "
+                f"got {results!r}",
+            )
+            names = [name for name, _ in verify_install._SCAFFOLD_CHECKS]
+            for expected in (
+                "secret-scan",
+                "permissions-deny",
+                "gitignore-floor",
+            ):
+                self.assertIn(expected, names)
+
+    # ----- absence: secret-scan registration missing -----
+    def test_secret_scan_check_fails_when_registration_absent(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            # Strip the PreToolUse secret-scan group, leaving the other
+            # jig-managed (SessionStart) hook — the generic registration
+            # check would still pass, but this stronger check must fail.
+            project = _make_full_floor_scaffold_root(Path(td))
+            settings_path = project / ".claude" / "settings.json"
+            data = json.loads(settings_path.read_text())
+            data["hooks"].pop("PreToolUse", None)
+            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            passed, msg = verify_install.check_scaffold_secret_scan_registered(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("secret-scan", msg.lower())
+
+    def test_secret_scan_check_fails_when_settings_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            (project / ".claude" / "settings.json").unlink()
+            passed, msg = verify_install.check_scaffold_secret_scan_registered(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("settings", msg.lower())
+
+    def test_secret_scan_check_fails_when_entry_not_jig_managed(self):
+        """A secret-scan command without the jig marker doesn't count."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            settings_path = project / ".claude" / "settings.json"
+            data = json.loads(settings_path.read_text())
+            for entry in data["hooks"]["PreToolUse"]:
+                entry.pop("metadata", None)
+            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            passed, _ = verify_install.check_scaffold_secret_scan_registered(
+                project
+            )
+            self.assertFalse(passed)
+
+    # ----- absence: permissions.deny floor missing -----
+    def test_permissions_deny_check_fails_when_absent(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            settings_path = project / ".claude" / "settings.json"
+            data = json.loads(settings_path.read_text())
+            data.pop("permissions", None)  # no deny floor at all
+            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            passed, msg = verify_install.check_scaffold_permissions_deny_floor(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("deny", msg.lower())
+
+    def test_permissions_deny_check_fails_when_partial(self):
+        """A deny array missing one of the representative guardrails fails."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            settings_path = project / ".claude" / "settings.json"
+            data = json.loads(settings_path.read_text())
+            data["permissions"]["deny"] = ["Bash(rm -rf*)"]  # drop two
+            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            passed, _ = verify_install.check_scaffold_permissions_deny_floor(
+                project
+            )
+            self.assertFalse(passed)
+
+    def test_permissions_deny_check_tolerates_extra_user_entries(self):
+        """An issubset check tolerates user-added deny entries."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            settings_path = project / ".claude" / "settings.json"
+            data = json.loads(settings_path.read_text())
+            data["permissions"]["deny"].append("Bash(curl*evil*)")
+            settings_path.write_text(json.dumps(data, indent=2) + "\n")
+            passed, msg = verify_install.check_scaffold_permissions_deny_floor(
+                project
+            )
+            self.assertTrue(passed, msg)
+
+    # ----- absence: .gitignore secret floor missing -----
+    def test_gitignore_floor_check_fails_when_file_absent(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            (project / ".gitignore").unlink()  # no .gitignore at all
+            passed, msg = verify_install.check_scaffold_gitignore_secret_floor(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn(".gitignore", msg.lower())
+
+    def test_gitignore_floor_check_fails_when_marker_absent(self):
+        """A .gitignore without the jig secret-ignore marker fails."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_full_floor_scaffold_root(Path(td))
+            (project / ".gitignore").write_text("node_modules/\ndist/\n")
+            passed, msg = verify_install.check_scaffold_gitignore_secret_floor(
+                project
+            )
+            self.assertFalse(passed)
+            self.assertIn("secret-ignore", msg.lower())
 
 
 # --------------------------------------------------------------------------

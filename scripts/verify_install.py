@@ -223,11 +223,126 @@ def check_scaffold_settings_registration(project_root: Path) -> CheckResult:
     )
 
 
+# ----------------------------------------------------------------------------
+# Security-floor presence checks (slice 052-04 AC3, ADR-0013)
+# ----------------------------------------------------------------------------
+#
+# The floor — secret-scan hook + conservative `permissions.deny` + secret-
+# ignore `.gitignore` — is scaffolded by slices 052-02/03 and brought to
+# existing projects by `migrate copy-machinery` (slice 052-04). These checks
+# assert it is on disk so a scaffolded/migrated project missing any single
+# floor artifact reports exactly which one (the spec-047 contract validator
+# is DRAFT and not landed, so this is the minimal floor-presence check the
+# DoR calls for — it does NOT block on 047). verify_install.py is stdlib-only
+# and never imports scaffold.py, so the expected markers below are hardcoded
+# with a source-of-truth pointer (the same precedent as `_EXPECTED_HOOK_SCRIPTS`).
+
+# Source of truth: scaffold.py `_PERMISSIONS_DENY_DEFAULTS` (slice 052-03).
+# A stable AC1-named representative SUBSET — force-push, hard-reset, rm -rf —
+# checked with issubset so user-added deny entries are tolerated. The full
+# defaults set is asserted in test_scaffold.py::PermissionsDenyTests; here we
+# only confirm the floor's conservative guardrails survived the merge.
+_EXPECTED_DENY_GLOBS = (
+    "Bash(git push --force*)",
+    "Bash(git reset --hard*)",
+    "Bash(rm -rf*)",
+)
+
+# Source of truth: scaffold.py `_GITIGNORE_BLOCK_BEGIN` (slice 052-02) and a
+# representative pair of `_GITIGNORE_SECRET_PATTERNS`.
+_EXPECTED_GITIGNORE_MARKER = "# >>> jig secret-ignore >>>"
+_EXPECTED_GITIGNORE_PATTERNS = (".env", "*.pem")
+
+# Source of truth: scaffold.py hook registration — the secret-scan hook is
+# registered against the `Edit|Write|MultiEdit` matcher with a jig marker.
+_SECRET_SCAN_SCRIPT = "jig-secret-scan.sh"
+_SECRET_SCAN_MATCHER = "Edit|Write|MultiEdit"
+
+
+def check_scaffold_secret_scan_registered(project_root: Path) -> CheckResult:
+    """`.claude/settings.json` registers the secret-scan hook: a jig-managed
+    (`metadata.managed_by_jig`) `Edit|Write|MultiEdit` entry whose command
+    references `jig-secret-scan.sh`. Stronger than the generic registration
+    check — it pins the specific floor hook, not just *any* jig hook."""
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.is_file():
+        return False, f"settings.json missing at {settings_path}"
+    try:
+        data = json.loads(settings_path.read_text())
+    except json.JSONDecodeError as exc:
+        return False, f"settings.json is not valid JSON: {exc}"
+    pre = (data.get("hooks") or {}).get("PreToolUse") or []
+    for entry in pre:
+        if entry.get("matcher") != _SECRET_SCAN_MATCHER:
+            continue
+        if not bool((entry.get("metadata") or {}).get("managed_by_jig")):
+            continue
+        for h in entry.get("hooks", []):
+            if _SECRET_SCAN_SCRIPT in (h.get("command") or ""):
+                return True, (
+                    "settings.json registers the secret-scan hook "
+                    f"({_SECRET_SCAN_SCRIPT}) on a jig-managed "
+                    f"{_SECRET_SCAN_MATCHER} entry"
+                )
+    return False, (
+        f"settings.json has no jig-managed {_SECRET_SCAN_MATCHER} entry "
+        f"referencing {_SECRET_SCAN_SCRIPT} (secret-scan hook not registered)"
+    )
+
+
+def check_scaffold_permissions_deny_floor(project_root: Path) -> CheckResult:
+    """`.claude/settings.json` `permissions.deny` contains the conservative
+    destructive-command guardrails (force-push / hard-reset / `rm -rf`).
+    Subset (issubset) check, so user-added deny entries are tolerated."""
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.is_file():
+        return False, f"settings.json missing at {settings_path}"
+    try:
+        data = json.loads(settings_path.read_text())
+    except json.JSONDecodeError as exc:
+        return False, f"settings.json is not valid JSON: {exc}"
+    deny = set((data.get("permissions") or {}).get("deny") or [])
+    missing = [g for g in _EXPECTED_DENY_GLOBS if g not in deny]
+    if missing:
+        return False, (
+            "permissions.deny missing conservative guardrail(s): "
+            f"{', '.join(missing)}"
+        )
+    return True, (
+        f"permissions.deny carries all {len(_EXPECTED_DENY_GLOBS)} "
+        "representative destructive-command guardrails"
+    )
+
+
+def check_scaffold_gitignore_secret_floor(project_root: Path) -> CheckResult:
+    """`.gitignore` exists and carries the jig secret-ignore block (marker +
+    at least the `.env` / `*.pem` patterns)."""
+    gitignore = project_root / ".gitignore"
+    if not gitignore.is_file():
+        return False, f".gitignore missing at {gitignore}"
+    text = gitignore.read_text()
+    if _EXPECTED_GITIGNORE_MARKER not in text:
+        return False, (
+            f".gitignore is missing the jig secret-ignore marker "
+            f"({_EXPECTED_GITIGNORE_MARKER!r})"
+        )
+    missing = [p for p in _EXPECTED_GITIGNORE_PATTERNS if p not in text]
+    if missing:
+        return False, (
+            f".gitignore secret block missing pattern(s): {', '.join(missing)}"
+        )
+    return True, ".gitignore carries the jig secret-ignore floor"
+
+
 _SCAFFOLD_CHECKS: list[tuple[str, Check]] = [
     ("skills", check_scaffold_skills_present),
     ("agents", check_scaffold_agents_present),
     ("hooks", check_scaffold_hook_scripts_present),
     ("settings", check_scaffold_settings_registration),
+    # Slice 052-04 — security-floor presence (ADR-0013).
+    ("secret-scan", check_scaffold_secret_scan_registered),
+    ("permissions-deny", check_scaffold_permissions_deny_floor),
+    ("gitignore-floor", check_scaffold_gitignore_secret_floor),
 ]
 
 

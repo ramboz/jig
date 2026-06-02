@@ -1884,6 +1884,16 @@ class SecurityFloorTests(unittest.TestCase):
         self.assertIn(">>> jig secret-ignore >>>", text)
         self.assertIn("<<< jig secret-ignore <<<", text)
 
+    def test_gitignore_written_in_plugin_only_mode(self):
+        """Slice 052-04 — the `.gitignore` floor must still land in
+        `--plugin-only` mode (the floor write must not be gated behind
+        `--with-machinery`)."""
+        result = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig secret-ignore >>>", text)
+        self.assertIn(".env", text)
+
     def test_gitignore_reincludes_env_placeholder_templates(self):
         """`.env.*` would otherwise ignore `.env.example` — but the
         secret-scan hook tells users to "commit a placeholder in a *.example
