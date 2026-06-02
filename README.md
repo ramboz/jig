@@ -4,160 +4,82 @@
 
 **jig** (noun): a tool that guides other tools to work accurately and consistently.
 
-## Why jig exists
+## Why jig
 
-Two years of vibe coding surfaced the same scars on every non-trivial project:
+Two years of AI-assisted coding leave the same scars on every non-trivial
+project: LLMs refactor whole layers before anything works end-to-end, "done"
+drifts because no acceptance criteria are written down, implementers grade
+their own homework, and mega-packs burn the context budget before your work
+loads. **jig encodes the workflow that prevents each one — so you don't
+rediscover it session by session.**
 
-- **Horizontal drift.** LLMs prefer to refactor whole layers before delivering anything end-to-end. By the time the flow lands, it's broken — and the tokens are gone. [SPIDR](https://www.mountaingoatsoftware.com/blog/five-simple-but-powerful-ways-to-split-user-stories) (Mike Cohn) splits work into thin vertical slices the model can actually hit.
-- **Invisible scope creep.** Without explicit acceptance criteria in the repo, "done" is whatever the model decided it meant. [Spec-driven development](https://github.com/github/spec-kit) makes the contract verifiable.
-- **Manual workflow repetition.** Spec → plan review → SPIDR alignment → implement → verify → reconcile docs. Every session. Encoding the loop as skills + hooks removes the manual babysitting.
-- **Implementers grade their own homework.** Sessions routinely end with "done" claims over partial work. A reviewer subagent works from a fresh, self-contained prompt — the spec plus the diff — with read-only tools, so it catches gaps the implementer glossed over ([LLM-as-judge](https://arxiv.org/abs/2306.05685)).
-- **Review depth shouldn't be locked in a private repo.** Internal PR/arch review skills can't ship publicly, but the workflow still needs a floor. jig's extension points defer to richer user-installed skills when present.
-- **Contracts parallelise work.** Strong interface contracts let frontend and backend (human or LLM) progress independently, and give the model a precise target instead of one it has to infer.
-- **Sessions are short; projects aren't.** A memory layer (hot cache + deep storage + inbox) means a new session picks up where the last left off without a re-briefing.
-
-jig encodes all of this so you don't rediscover it session by session.
+→ **[The jig philosophy](docs/philosophy.md)** — the full why: the named
+scars, how jig thinks, and the honest objections.
 
 ## What it does
 
 jig installs a focused, opinionated workflow layer into your project:
 
-- **Spec-driven development** — SPIDR-split vertical slices with Definition of Done per slice
-- **Multi-perspective review** — every slice runs through compliance (`jig:independent-review`, always) + craft (`pr-review`, always) + architecture (`arch-review`, on-demand via `arch_review: true` slice frontmatter). The craft + arch passes defer to richer user-installed skills when present.
-- **Typed contracts** — enforced boundaries at module interfaces for AI-legible codebases
-- **Memory layer** — cross-session continuity via hot cache + deep storage + inbox
-- **Deterministic gates** — hooks enforce "this MUST happen"; skills handle "when relevant"
+- **Spec-driven development** — SPIDR-split vertical slices, each with its own
+  Definition of Done.
+- **Multi-perspective review** — a fresh, read-only reviewer checks every
+  slice against its spec (compliance), plus a craft pass and an on-demand
+  architecture pass.
+- **Memory layer** — cross-session continuity via hot cache + deep storage +
+  inbox.
+- **Deterministic gates** — hooks enforce what *must* happen; skills carry
+  judgment.
 
-## Design philosophy
+A fixed, opinionated set — **7 Tier 0 skills** at the floor and 7 more on by
+default (Tier 1) — not a hundred-skill marketplace. For the full picture, see
+[product-vision.md](docs/product-vision.md) (vision, target users, principles)
+and [architecture.md](docs/architecture.md) (mechanics).
 
-> Intuitive automated triggering at the right moments, over explicit command surfaces.
+## Start here
 
-- 7 Tier 0 skills installed by default (not 100+)
-- 3 subagents (not 48 like ECC)
-- Hooks are the spine; skills are the LLM layer
-- 14 skills total across two tiers (Tier 1 adds on a test/workflow signal)
+**New to jig?** Read the
+**[adoption & readiness guide](docs/adoption-readiness.md)** first — who jig is
+for, what your repo needs, and your first 30 minutes.
 
-See [docs/product-vision.md](docs/product-vision.md) for the full vision (target users, competitive landscape, design principles) and [docs/architecture.md](docs/architecture.md) for the technical mechanics.
+Then, in a Claude Code session at your project root:
+
+```text
+Set up this project for AI-native development.
+```
+
+(or the explicit `/jig:scaffold-init`). This copies jig's docs, skills, hooks,
+and `settings.json` into your repo's `.claude/`, seeds a worked-example spec,
+and runs a "scaffold complete and verified" check. Follow it with
+`/jig:vision-elicitation` to set the vision every later slice is judged
+against.
+
+**Copy-paste prompts** for scaffolding and for taking a spec from idea to
+landed live in the **[prompt cookbook](docs/prompts.md)**.
+
+### Install shapes
+
+Two shapes, same source — full detail and how to choose in
+[adoption-readiness § Choosing an install shape](docs/adoption-readiness.md#choosing-an-install-shape):
+
+| Shape | Pick it when | Command |
+|---|---|---|
+| **Scaffold** (default) | You want to own and edit the machinery in version control. | `/jig:scaffold-init` |
+| **Plugin** | You want install-and-forget; the machinery upgrades centrally. | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` |
+
+Desktop (release zip) and from-source installs: see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Extension points
 
 > **Bring your own depth; jig provides the floor.**
 
-Some jig skills ship as **lightweight baselines** designed to defer to
-richer user-level skills when both are present. The auto-triggering
-description for each such skill includes an explicit deferral hint, so
-the Claude Code skill router picks a more specific user skill over
-jig's baseline.
-
-Example: `/jig:pr-review` ships a slim four-section PR review (scope /
-blockers / nits / strengths). Its deferral is **category-based, not
-name-specific** — any user-installed skill whose description identifies
-it as handling PR review, code review, or diff review wins, regardless
-of what the user named it. The common location is
-`~/.claude/skills/pr-review/`, but a skill named `code-reviewer`,
-`team-pr`, or anything else in that category beats jig's baseline too.
-The one carve-out is the bundled `review` skill — jig does not defer to
-that one (it stays below jig's baseline as the generic fallback).
-
-Second example: `/jig:arch-review` ships a slim four-section
-architecture / design-doc / RFC / ADR-draft review (summary / strengths
-/ concerns / open questions). Same category-based deferral: any
-user-installed skill whose description identifies it as handling
-architecture, design, RFC, or technical-design review wins. The pattern
-is reusable, not a one-off — `/jig:pr-review` and `/jig:arch-review`
-are the two current instances.
-
-This keeps jig opinionated about *workflow* (spec-driven, reviewer-gated,
-deterministic helpers) while staying out of the way of *judgment skills*
-you've already invested in.
-
-The `pr-review` and `arch-review` skills are not just on-demand — the
-`spec-workflow` skill auto-triggers them as part of the post-implementation
-review for every slice (craft pass always; arch pass on-demand via
-`arch_review: true` in the slice's frontmatter). Your installed skill wins
-the dispatch automatically.
-
-## Installation
-
-> **New to jig?** Read the
-> [adoption & readiness guide](docs/adoption-readiness.md) first — who jig
-> is for, who shouldn't adopt it yet, the prerequisites + a readiness
-> checklist, how to choose an install shape, and your first 30 minutes.
-
-jig ships in two install shapes. Both are served from the same repo;
-pick the one that matches how you intend to relate to the machinery.
-
-### Scaffold into your repo (recommended — own the machinery)
-
-> **Scaffold to own and edit the machinery in version control.**
-
-The default `scaffold-init` flow copies jig's skills, agents, hooks,
-and helper scripts into your project's `.claude/` directory, so you
-can edit any `SKILL.md` or helper under version control and
-customize jig per-project. The Claude Code skill router auto-discovers
-the scaffolded skills as project-scoped — no plugin install required.
-
-In a Claude Code session at your project root:
-
-```text
-/jig:scaffold-init
-```
-
-This produces `<your-project>/.claude/skills/jig-*/`,
-`.claude/agents/jig-*.md`, `.claude/hooks/scripts/jig-*.sh`, and
-`.claude/settings.json` registering the seven jig hooks against the
-project-local paths. The pre-016-03 docs-only behavior is preserved
-via `python3 scaffold.py --plugin-only <target>` if you want to
-combine scaffolded docs with a plugin-installed runtime.
-
-Verify the scaffold succeeded:
-
-```bash
-python3 scripts/verify_install.py --mode scaffold --project-root .
-```
-
-Expected output is four `PASS` lines and `summary: 4/4 passed`.
-
-### From this repository (Claude Code CLI — install-and-forget)
-
-> **Plugin install to install-and-forget; the machinery stays under
-> `${CLAUDE_PLUGIN_ROOT}` and upgrades centrally.**
-
-In a Claude Code session:
-
-```text
-/plugin marketplace add ramboz/jig
-/plugin install jig@jig
-```
-
-The repo is itself a single-plugin marketplace — no separate registry
-is needed. Restart Claude Code (or open a fresh session) after install
-so the three subagents (`implementer` / `reviewer` / `architect`)
-become reachable as `subagent_type` values.
-
-### From a release zip (Claude Code Desktop)
-
-1. Download `jig-vX.Y.Z.zip` from the
-   [Releases page](https://github.com/ramboz/jig/releases).
-2. In the Desktop app: **Customize → Personal Plugins (+) → Create Plugin → Upload plugin**, then drop the zip.
-
-For a one-shot session install via the CLI without a marketplace:
-
-```bash
-claude --plugin-dir path/to/jig-vX.Y.Z.zip
-```
-
-### From source (contributors)
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
-workflow used during development.
-
-## Getting started
-
-Once installed, open a new project directory in Claude Code and say:
-> "Set up this project for AI-native development"
-
-The `scaffold-init` skill will run and produce the docs/ scaffolding.
+A few jig skills — `pr-review`, `arch-review`, `contracts` — ship as
+lightweight baselines that **defer to a richer user-installed skill** in the
+same category when one is present. The deferral is category-based, not
+name-specific, so your own reviewer skill wins automatically, with no
+configuration. jig stays opinionated about *workflow* and out of the way of
+the *judgment skills you've already invested in*. Detail:
+[product-vision § Design principles](docs/product-vision.md#design-principles).
 
 ## Repository structure (for contributors)
 
@@ -177,63 +99,23 @@ docs/                            # Dev docs for jig itself (dogfooded workflow)
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the local install + verify
-flow, then [docs/workflow.md](docs/workflow.md) for the spec lifecycle.
-Every change to jig starts with a spec.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the local install + verify flow,
+then [docs/workflow.md](docs/workflow.md) for the spec lifecycle. **Every
+change to jig starts with a spec.** PRs squash-merge with conventional-commit
+titles (`feat(scope): …` / `fix(scope): …`); the `pr-title.yml` workflow
+enforces the shape, and CONTRIBUTING § Releasing has the version-bump effect of
+each prefix.
 
-PRs are merged via **squash merge** so that release-please reads clean
-conventional-commit subjects on `main`. The `pr-title.yml` workflow
-enforces conventional-commit shape on PR titles
-(`feat(scope): …` / `fix(scope): …` / etc.). See CONTRIBUTING.md
-"Releasing" for the version-bump effect of each prefix.
+How jig compares against other AI-native playbooks — and where each known gap
+is owned — lives in
+[CONTRIBUTING § Comparison and gap response](CONTRIBUTING.md#comparison-and-gap-response).
 
-## Status & roadmap
+## Status
 
-Tier 0 and Tier 1 are effectively complete — all 14 skills, 3 subagents,
-and the jig hooks ship today, and jig is dogfooded on its own spec
-lifecycle. For live, per-slice state see the
-[status board](docs/specs/README.md).
+Tier 0 and Tier 1 are complete — all 14 skills, 3 subagents, and the jig hooks
+ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
+state, see the **[status board](docs/specs/README.md)**.
 
-**Supported today:** Claude Code in both install shapes — scaffold mode
-(default; machinery copied into your `.claude/`) and plugin mode. Tier
-gating is real: `scaffold-init` copies only the tiers it records in
-`scaffold.json` (spec 038).
-
-**Planned / deferred:** Codex scaffold + plugin packaging, driven by user
-signal (spec 033). One honesty note on a promise jig does *not* make:
-reviewer isolation is **prompt- and tool-scoped** (a fresh, self-contained
-prompt + read-only tools), **not** a hard sandbox — see
-[docs/workflow.md](docs/workflow.md#post-implementation-review).
-
-### Gap-response map
-
-A 2026-05 comparison against other AI-native playbooks — refreshed by a
-2026-06-01 re-review — surfaced a set of gaps. Each is either addressed in
-the current docs/machinery or delegated to an owner spec. This table is the
-triage, so future readers don't have to rediscover it:
-
-| Gap | Status | Owner |
-|---|---|---|
-| Stale first-read status | This spec | [slice 048-01](docs/specs/048-guidelines-gap-response/slice-01-first-read-status-and-gap-map.md) |
-| Adoption / readiness guidance | This spec | [slice 048-02](docs/specs/048-guidelines-gap-response/slice-02-adoption-readiness-guide.md) + [048-03](docs/specs/048-guidelines-gap-response/slice-03-scaffolded-onboarding-handoff.md) |
-| Amendment readability | This spec | [slice 048-04](docs/specs/048-guidelines-gap-response/slice-04-amendment-effective-state-digest.md) |
-| Tier truth (real copy gates) | Landed | [spec 038](docs/specs/038-tier-reconciliation/spec.md) |
-| Reviewer-isolation honesty | Landed | [spec 040](docs/specs/040-isolation-honesty/spec.md) |
-| Security & secrets floor (MUST-rules / `.gitignore` / secret-scan / permission deny-rules) | Planned | [spec 052](docs/specs/052-security-scaffold/spec.md) |
-| Cross-tool portability (Codex / `AGENTS.md`) | Planned | [spec 033](docs/specs/033-host-adapter-portability/spec.md) |
-| Scaffold artifact fidelity | Planned | [spec 046](docs/specs/046-scaffold-artifact-fidelity/spec.md) |
-| Install-contract verification | Planned | [spec 047](docs/specs/047-install-contract-verification/spec.md) |
-| Review-lifecycle evidence + gates | Planned | [spec 045](docs/specs/045-review-lifecycle-gates/spec.md) |
-
-Legend: **Landed** = already in `main`; **This spec** = delivered by spec
-048 (the one you're reading about — check the
-[status board](docs/specs/README.md) for which of its slices have landed
-vs. are still in flight); **Planned** = a separate spec that moves on user
-signal.
-
-The 2026-06-01 re-review surfaced further net-new gaps routed out of this
-spec — AI-usage disclosure in PR bodies, baseline-alignment depth,
-operating-mode framing, model-routing guidance, config-evolution discipline,
-and ADR-template parity. To keep this first-read surface lean they aren't
-all listed above; each is routed to an owner in spec 048's full
-[gap inventory](docs/specs/048-guidelines-gap-response/spec.md#gap-inventory-routed).
+**Supported today:** Claude Code in both install shapes (scaffold default +
+plugin). **Planned:** Codex scaffold + plugin packaging, on user signal
+([spec 033](docs/specs/033-host-adapter-portability/spec.md)).
