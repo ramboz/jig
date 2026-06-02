@@ -72,16 +72,19 @@ If every box is checked, you're ready to scaffold.
 
 ## Choosing an install shape
 
-jig ships in two shapes (full detail in
-[README § Install shapes](../README.md#install-shapes)):
+First **acquire the plugin** (marketplace or release zip — see
+[README § Install shapes](../README.md#install-shapes)). That alone makes the
+`/jig:*` commands available. Then decide where the machinery lives — all three
+shapes start from that same install:
 
 | Shape | Pick it when | Start with |
 |---|---|---|
-| **Scaffold** (default) | You want to **own and edit** the machinery in version control and customize it per-project. | `/jig:scaffold-init` |
-| **Plugin** | You want **install-and-forget**; the machinery stays under `${CLAUDE_PLUGIN_ROOT}` and upgrades centrally. | `/plugin install jig@jig` |
+| **Own it** (default) | You want to **own, edit, and version-control** the machinery and customize it per-project. | `/jig:scaffold-init` |
+| **Central machinery** | You want the workspace docs in your repo but the machinery to **upgrade centrally** with the plugin. | `/jig:scaffold-init --plugin-only` |
+| **Plugin only** (full manual) | You already have your own setup and conventions and just want jig's skills + hooks available to **wire into your project by hand** — no generated `docs/` workspace, you place the pieces where your project wants them. | _(skip scaffold)_ |
 
-When in doubt, scaffold — owning the scaffolding is jig's default posture
-(product-vision § Design principle 7).
+When in doubt, scaffold and own it — owning the scaffolding is jig's default
+posture (product-vision § Design principle 7).
 
 ## Your first 30 minutes
 

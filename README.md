@@ -58,16 +58,30 @@ landed live in the **[prompt cookbook](docs/prompts.md)**.
 
 ### Install shapes
 
-Two shapes, same source — full detail and how to choose in
-[adoption-readiness § Choosing an install shape](docs/adoption-readiness.md#choosing-an-install-shape):
+Two independent choices: **how you acquire the plugin**, and **where the
+machinery lives** once it's installed. Full detail and how to choose in
+[adoption-readiness § Choosing an install shape](docs/adoption-readiness.md#choosing-an-install-shape).
 
-| Shape | Pick it when | Command |
+**1. Acquire the plugin** — puts the machinery under `${CLAUDE_PLUGIN_ROOT}`
+and makes the `/jig:*` commands available:
+
+| Source | Command |
+|---|---|
+| Marketplace | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` |
+| Release zip (Desktop) / from source | see [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+**2. Choose where the machinery lives** — `/jig:scaffold-init` runs the same
+either way; the flag picks the shape (recorded as `scaffold_mode` in
+`scaffold.json`):
+
+| Shape | What lands in your repo | Command |
 |---|---|---|
-| **Scaffold** (default) | You want to own and edit the machinery in version control. | `/jig:scaffold-init` |
-| **Plugin** | You want install-and-forget; the machinery upgrades centrally. | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` |
+| **Own it** (default) | Docs **and** machinery (`skills/`, `agents/`, `hooks/`, `settings.json`) copied into `.claude/` — version-controlled and editable. | `/jig:scaffold-init` |
+| **Central machinery** | Docs + `scaffold.json` only; machinery stays plugin-side and upgrades centrally. | `/jig:scaffold-init --plugin-only` |
+| **Plugin only** (full manual) | Nothing — `/jig:*` skills and hooks come from the plugin centrally. For folks who already have their own setup and want to wire jig's workflow into it by hand. | _(skip step 2)_ |
 
-Desktop (release zip) and from-source installs: see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+When in doubt, scaffold and own it — that's jig's default posture
+([product-vision § Design principle 7](docs/product-vision.md#design-principles)).
 
 ## Extension points
 
@@ -116,6 +130,7 @@ Tier 0 and Tier 1 are complete — all 15 skills, 3 subagents, and the jig hooks
 ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
 state, see the **[status board](docs/specs/README.md)**.
 
-**Supported today:** Claude Code in both install shapes (scaffold default +
-plugin). **Planned:** Codex scaffold + plugin packaging, on user signal
+**Supported today:** Claude Code in all install shapes above (own-it scaffold
+default, central machinery, or plugin-only). **Planned:** Codex scaffold +
+plugin packaging, on user signal
 ([spec 033](docs/specs/033-host-adapter-portability/spec.md)).
