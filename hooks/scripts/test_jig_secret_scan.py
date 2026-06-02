@@ -75,6 +75,12 @@ def env_real_secret() -> str:
     return "AWS_SECRET_ACCESS_KEY=" + "wJalr" + "XUtnFEMI9K7MDENGbPxRfiCYEXAMPLEKEY".replace("EXAMPLE", "rEAL")
 
 
+def bearer_token() -> str:
+    """A real-looking 'sk-'-prefixed opaque API token, assembled at runtime so
+    no contiguous secret-shaped literal lands on disk (see module docstring)."""
+    return "sk-" + "live" + "9aZ" + "Q2w" + "8xE" + "7rT" + "5yU" + "3iO" + "1pB"
+
+
 class BlockOnRealSecretTests(unittest.TestCase):
     """AC #2 / AC #3 — high-confidence patterns block (exit 2) with a
     structured message naming the file and the matched rule."""
@@ -148,6 +154,18 @@ class BlockOnRealSecretTests(unittest.TestCase):
                                      "branch-protection")),
             f"block message must name an out-of-band channel; got: {r.stderr!r}",
         )
+
+    def test_prefixed_bearer_token_blocks(self):
+        """A secret-named key assigned a real 'sk-'-prefixed opaque token must
+        still block (the tightened value-shape gate keeps genuine secrets)."""
+        path = "/tmp/app/secrets.py"
+        r = run_hook(self._write_payload(
+            'API_TOKEN = "' + bearer_token() + '"\n', path,
+        ))
+        self.assertEqual(r.returncode, 2,
+                         f"a real sk- token must still block; stderr={r.stderr!r}")
+        self.assertIn(path, r.stderr)
+        self.assertIn("secret-named", r.stderr)
 
 
 class AllowOnPlaceholderTests(unittest.TestCase):
@@ -345,6 +363,50 @@ class FailOpenRobustnessTests(unittest.TestCase):
     def test_empty_file_path_with_clean_content_exits_zero(self):
         r = run_hook({"tool_name": "Write", "tool_input": {"content": "clean"}})
         self.assertEqual(r.returncode, 0)
+
+
+class AllowOnCodeAnnotationTests(unittest.TestCase):
+    """Regression (056-02 fallout): the secret-named-.env-assignment rule must
+    NOT fire on ordinary code — Python/TS type annotations, bare literals, and
+    numeric defaults — even when the identifier contains a secret-y word like
+    'token' or 'secret'. The value has to look like a real opaque credential."""
+
+    def _write(self, content: str, file_path: str = "/tmp/app/models.py") -> subprocess.CompletedProcess:
+        return run_hook({
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": content},
+        })
+
+    def test_token_named_int_annotation_allowed(self):
+        # The exact shape that tripped the floor during slice 056-02.
+        r = self._write("    subagent_input_tokens: int = 0\n")
+        self.assertEqual(r.returncode, 0,
+                         f"type annotation must not block; stderr={r.stderr!r}")
+
+    def test_secret_named_optional_annotation_allowed(self):
+        r = self._write("    client_secret: Optional[str] = None\n")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
+
+    def test_apikey_named_str_default_allowed(self):
+        r = self._write('    api_key: str = ""\n')
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
+
+    def test_token_named_numeric_default_allowed(self):
+        r = self._write("max_tokens = 100000\n")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
+
+    def test_secret_named_bare_keyword_yaml_allowed(self):
+        # YAML-ish 'key: value' with a bare keyword value.
+        r = self._write("rotate_secret: true\n", "/tmp/app/config.yaml")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
+
+    def test_dataclass_token_fields_allowed(self):
+        r = self._write(
+            "@dataclass\nclass Report:\n    subagent_output_tokens: int = 0\n"
+            "    cache_read_tokens: int = 0\n",
+            "/tmp/app/report.py",
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
 
 
 if __name__ == "__main__":

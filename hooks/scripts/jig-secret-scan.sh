@@ -85,6 +85,63 @@ try:
             return True
         return False
 
+    # Opaque-credential prefixes — high-confidence even when short.
+    SECRET_VALUE_PREFIXES = (
+        'sk-', 'sk_', 'pk_', 'rk_', 'ghp_', 'gho_', 'ghu_', 'ghs_',
+        'github_pat_', 'xox', 'glpat-', 'AIza', 'ya29.', 'eyJ',
+        'hf_', 'shpat_', 'npm_', 'dop_v1_',
+    )
+    # Bare language literals / keywords / type names — never secrets.
+    CODE_LITERALS = frozenset((
+        'none', 'null', 'nil', 'true', 'false', 'undefined', 'nan',
+        'int', 'str', 'float', 'bool', 'bytes', 'list', 'dict', 'set',
+        'tuple', 'object', 'any', 'number', 'string', 'boolean', 'char',
+    ))
+    NUMBER_RE = r'[-+]?(?:0[xXbBoO][0-9A-Fa-f_]+|[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?)'
+
+    # looks_like_secret_value: True only when the value looks like an opaque
+    # credential token, so ordinary CODE — Python/TS type annotations like
+    # int = 0 or Optional[str] = None, bare literals, numbers — is NOT
+    # mistaken for a .env secret. ADR-0013: keep the floor conservative; a
+    # false negative (missed exotic secret) beats a false positive (blocking
+    # normal code). Real enforcement stays out-of-band (CI / server-side).
+    def looks_like_secret_value(value):
+        v = value.strip()
+        # Strip one balanced layer of surrounding quotes.
+        if len(v) >= 2 and v[0] in '\'\"' and v[-1] == v[0]:
+            v = v[1:-1].strip()
+        if not v:
+            return False
+        # Opaque tokens have no internal whitespace; expressions and
+        # annotations (int = 0, Optional[str] = None) do.
+        if re.search(r'\s', v):
+            return False
+        # Bare literals / keywords / type names.
+        if v.lower() in CODE_LITERALS:
+            return False
+        # Pure numeric literals (0, 0.0, -1, 1_000, 0x1f).
+        if re.fullmatch(NUMBER_RE, v):
+            return False
+        # Known credential prefixes are high-confidence on their own.
+        if any(v.startswith(p) for p in SECRET_VALUE_PREFIXES):
+            return True
+        # Code expressions: brackets / calls / comparisons, or an interior
+        # '=' (int=0, Optional[int]); trailing base64 '=' padding is allowed.
+        if re.search(r'[\[\](){}<>,;]', v):
+            return False
+        if '=' in v.rstrip('='):
+            return False
+        # Otherwise require a credential-like profile: a long opaque run
+        # mixing character classes (so a bare word or path fragment is safe).
+        if len(v) < 12:
+            return False
+        classes = (
+            bool(re.search(r'[a-z]', v))
+            + bool(re.search(r'[A-Z]', v))
+            + bool(re.search(r'[0-9]', v))
+        )
+        return classes >= 2
+
     findings = []  # (rule_name, snippet)
 
     # Rule 1 — AWS access key id (incl. ASIA temp/session keys). The trailing
@@ -118,9 +175,10 @@ try:
         key, value = m.group(1), m.group(2)
         if looks_placeholder(value):
             continue
-        # Require a value with at least a little entropy/length so a bare
-        # 'token: true' or 'password: yes' doesn't trip the floor.
-        if len(value.strip().strip('\'\"')) < 6:
+        # The value must look like a real opaque credential — not ordinary
+        # code. A bare 'token: true', a type annotation 'tokens: int = 0',
+        # or a numeric default must NOT trip the floor (see helper above).
+        if not looks_like_secret_value(value):
             continue
         findings.append(('secret-named .env assignment', key))
         break
