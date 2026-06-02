@@ -323,3 +323,19 @@ Surfaced in slice 048-04 (amendment digest). A scanner that greps `docs/` for a 
 **Why the compliance pass caught it and craft didn't:** the compliance reviewer ran the digest against the *real repo* and read ADR-0008; the craft reviewer validated the parsing logic in isolation against synthetic fixtures. Running new read-only tooling against the live tree (not just fixtures) is a cheap, high-signal review step for any scanner/report.
 
 Provenance: slice 048-04 compliance review (jig:reviewer), 2026-06-01.
+
+## A content-scanning PreToolUse hook blocks the writing of its own test fixtures
+Distinct from "the bootstrap paradox for self-enforcing hooks" above (that one is about *timing* — the spec-gate can't gate during scaffold creation). This one is about *content*: `jig-secret-scan.sh` (slice 052-02) is a PreToolUse `Edit|Write|MultiEdit` hook that scans the *pending content* for secret patterns. Once it's registered in `hooks/hooks.json`, it is live in the same session — so an `Edit`/`Write` of its own test file (`test_jig_secret_scan.py`, which must contain AWS-key / PEM / `.env`-secret literals to exercise the block path) would be blocked by the very hook under test, and would also commit a real-looking secret to the repo.
+
+**Fix (two-for-one):** assemble every secret-shaped literal in the test at *runtime* by string concatenation (`"AKIA" + "JKL4MNOP5QRS6TUV"`, build the PEM header from parts) so no contiguous secret-shaped match exists in any source file on disk. The hook never fires on the test file, AND no real-looking secret is committed (which would otherwise trip downstream scanners / CI). The TDD order also helps: write the failing hook-unit-test before the hook exists, so the first write predates the live hook.
+
+**Generalizable rule:** any new PreToolUse hook that inspects *content* (not just `file_path`) must have its test fixtures constructed so the fixtures themselves don't trip it — runtime assembly for secrets, or out-of-band file writes. The deliberate-override env var (`JIG_SECRET_SCAN_APPROVED=1`) does NOT help here: it must be in the Claude Code *process* env, which a subagent's `export` in a Bash call can't set.
+
+Provenance: slice 052-02 implementation + review, 2026-06-01.
+
+## Adding a jig tier skill touches more hardcoded lists than `_TIER_SKILLS`
+Adding `security-review` to Tier 1 (slice 052-05) required updating **three** hardcoded skill lists — `_TIER_SKILLS["tier-1"]` (`skills/scaffold-init/scaffold.py`, the source of truth), `TierSkillSetTests.EXPECTED_TIER_1` (`skills/scaffold-init/test_scaffold.py`), and **`TierUpgradeTests.TIER1`** (`skills/migrate/test_migrate.py`, easy to miss because it lives in the *migrate* suite, not scaffold's) — plus **three doc sites**: `docs/product-vision.md` (the "7 Tier 0 + N Tier 1" count *and* the numbered skill list), `skills/vision-elicitation/worked-example-jig.md` (count + two separate Tier-1 enumerations, one pinned by `test_..._tier_line_in_sync`), and `README.md` ("N skills total" / "all N skills" counts). The tier-gated *copy* tests read `_TIER_SKILLS` directly so they don't need touching, but the two upgrade/inventory tests keep parallel hardcoded copies. Miss any one and either `TierSkillSetTests` / `TierUpgradeTests` or a doc-sync test fails.
+
+**Generalizable rule:** when adding a Tier-1 skill, the checklist is `_TIER_SKILLS` + `EXPECTED_TIER_1` + `TierUpgradeTests.TIER1` + product-vision (count + list) + worked-example-jig (count + 2 lists) + README (counts) + the CLAUDE.md Skills table row. Run the full suite — the consistency tests name the location you missed. (Related but narrower: "Hook-count callouts in docs drift on hook additions" above.)
+
+Provenance: slice 052-05 implementation + reconciliation, 2026-06-01.

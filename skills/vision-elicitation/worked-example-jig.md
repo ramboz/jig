@@ -186,7 +186,7 @@ template drops the article for terseness.
 | Hand-rolled team CLAUDE.md | Tailored to one team | Expensive, non-portable |
 
 **Where jig fits:** between atomic skills and maximalist packs — a
-fixed-size opinionated workflow layer (7 Tier 0 + 7 Tier 1 skills,
+fixed-size opinionated workflow layer (7 Tier 0 + 8 Tier 1 skills,
 3 subagents) that ships with templates, hooks, and helpers.
 ```
 
@@ -199,7 +199,7 @@ shape.
 **Skill asks Q5.1, Q5.2, Q5.3, Q5.4:**
 
 **User answers:**
-- Core features: scaffold-init, memory-sync, spec-workflow, independent-review, migrate, vision-elicitation, contracts (Tier 0); adr-workflow, tdd-loop, slice-land, pr-review, arch-review, clarify, analyze (Tier 1); local-dev-parity (Tier 2, deferred)
+- Core features: scaffold-init, memory-sync, spec-workflow, independent-review, migrate, vision-elicitation, contracts (Tier 0); adr-workflow, tdd-loop, slice-land, pr-review, arch-review, clarify, analyze, security-review (Tier 1); local-dev-parity (Tier 2, deferred)
 - Tier clustering: yes — Tier 0 / Tier 1 / Tier 2
 - MVP: Tier 0 + Tier 1 (already shipped)
 - Out of scope: project-management surface; auto-coding; polyglot test runners; web UI
@@ -216,7 +216,7 @@ shape.
 Tier 0 (always installs): scaffold-init / memory-sync / spec-workflow /
 independent-review / migrate / vision-elicitation / contracts.
 Tier 1 (default-on): adr-workflow / tdd-loop / slice-land / pr-review /
-arch-review / clarify / analyze.
+arch-review / clarify / analyze / security-review.
 Tier 2 (opt-in by signal): local-dev-parity (deferred — no user signal).
 
 ### Tiers / phases

@@ -2216,7 +2216,7 @@ class TierUpgradeTests(unittest.TestCase):
     ]
     TIER1 = [
         "adr-workflow", "tdd-loop", "slice-land", "pr-review", "arch-review",
-        "clarify", "analyze",
+        "clarify", "analyze", "security-review",
     ]
 
     def setUp(self):
@@ -2294,7 +2294,7 @@ class TierUpgradeTests(unittest.TestCase):
 
     def test_plain_copy_machinery_respects_manifest_tiers(self):  # AC #2
         # No --add-tier on a tier-0 project: reads the manifest and copies
-        # only tier-0 (7), NOT all 14 — proving it is no longer copy-all.
+        # only tier-0 (7), NOT all 15 — proving it is no longer copy-all.
         r = run_migrate("copy-machinery", str(self.target))
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertEqual(self._on_disk(), set(self.TIER0))

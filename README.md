@@ -35,7 +35,7 @@ jig installs a focused, opinionated workflow layer into your project:
 - 7 Tier 0 skills installed by default (not 100+)
 - 3 subagents (not 48 like ECC)
 - Hooks are the spine; skills are the LLM layer
-- 14 skills total across two tiers (Tier 1 adds on a test/workflow signal)
+- 15 skills total across two tiers (Tier 1 adds on a test/workflow signal)
 
 See [docs/product-vision.md](docs/product-vision.md) for the full vision (target users, competitive landscape, design principles) and [docs/architecture.md](docs/architecture.md) for the technical mechanics.
 
@@ -189,7 +189,7 @@ enforces conventional-commit shape on PR titles
 
 ## Status & roadmap
 
-Tier 0 and Tier 1 are effectively complete — all 14 skills, 3 subagents,
+Tier 0 and Tier 1 are effectively complete — all 15 skills, 3 subagents,
 and the jig hooks ship today, and jig is dogfooded on its own spec
 lifecycle. For live, per-slice state see the
 [status board](docs/specs/README.md).

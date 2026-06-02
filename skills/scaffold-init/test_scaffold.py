@@ -1444,6 +1444,7 @@ class TierSkillSetTests(unittest.TestCase):
         "arch-review",
         "clarify",
         "analyze",
+        "security-review",
     ]
 
     # tier-2 is empty in scaffold.py today; this assertion turns a future

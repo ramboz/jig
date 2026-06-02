@@ -81,7 +81,7 @@ stanzas.
 | **claude-code-templates-style boilerplate** | Solves day-1 layout | Static — no living workflow, no reviewer subagent, no spec lifecycle |
 
 **Where jig fits:** between "atomic skills" and "maximalist packs" —
-a fixed-size opinionated workflow layer (7 Tier 0 + 7 Tier 1
+a fixed-size opinionated workflow layer (7 Tier 0 + **8** Tier 1
 skills, 3 subagents) that ships with the templates, hooks, and helpers
 to enforce it, and that defers to richer user-installed skills where
 they exist.
@@ -116,6 +116,7 @@ drivers once Tier 0 is in place.
 12. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern. `spec-workflow` invokes it automatically as the **arch pass** of the post-implementation review, **on-demand** when the slice's frontmatter declares `arch_review: true`.
 13. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications` (per spec 023, **no** deferral hint to spec-kit per explicit user direction 2026-05-18)
 14. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate (per spec 024 AC #6 — `_principles_check_block()` appended unconditionally to every reviewer prompt). Same no-deferral-hint stance as clarify
+15. **`security-review`** — slim baseline security review; orchestrates installed scanners (semgrep / bandit / gosec / npm audit / osv-scanner) + defers to a richer installed security skill (the user's own, Adobe's `adobe-security-*`, or a built-in `security-review`) via the same per-skill deferral pattern as `pr-review`. Heuristic-only floor when no scanner is present (per [ADR-0013](decisions/adr-0013-security-floor-policy.md))
 
 ### Tier 2 — opt-in by signal (deferred until pain reported)
 
