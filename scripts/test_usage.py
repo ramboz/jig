@@ -1,5 +1,6 @@
 """
-Tests for scripts/usage.py — on-demand per-spec orchestrator usage report.
+Tests for scripts/usage.py — on-demand per-spec usage report
+(orchestrator + subagent, spec 056).
 
 Run:
     python3 scripts/test_usage.py
@@ -8,12 +9,14 @@ Run:
 
 These tests build a synthetic `~/.claude/projects`-shaped fixture tree (a
 temp dir pointed at via `--projects-dir` / the `projects_dir=` seam) with
-crafted JSONL transcripts: assistant records carrying `message.usage`, and
-spec-path mentions in the content used for attribution. They assert:
+crafted JSONL transcripts: flat orchestrator session files, and nested
+`<session>/subagents/agent-*.jsonl` subagent transcripts. They assert:
 
   * correct attribution of sessions to a target spec (the dominant-mention
     heuristic);
-  * the four orchestrator token sums + total;
+  * the four orchestrator token sums + total (056-01);
+  * subagent accounting from the nested transcripts — the orchestrator/subagent
+    split, the combined total, and the per-`attributionAgent` breakdown (056-02);
   * the no-ccusage degradation path (an injected unavailable-ccusage seam);
   * read-only / no-mutation of the fixture tree.
 """
@@ -120,6 +123,47 @@ def _write_session(projects_dir: Path, encoded_cwd: str, session_id: str,
     d = projects_dir / encoded_cwd
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{session_id}.jsonl"
+    with p.open("w") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+    return p
+
+
+def _subagent_record(model, usage, attribution_agent, cwd=None,
+                     session="s1"):
+    """One nested-subagent assistant transcript record (slice 056-02).
+
+    Mirrors the real shape: ``isSidechain: true``, a per-turn
+    ``message.usage`` block, and the subagent type in the TOP-LEVEL
+    ``attributionAgent`` field (NOT inside message).
+    """
+    return {
+        "type": "assistant",
+        "isSidechain": True,
+        "attributionAgent": attribution_agent,
+        "cwd": cwd,
+        "sessionId": session,
+        "uuid": session + "-sa",
+        "message": {
+            "role": "assistant",
+            "model": model,
+            "content": [],
+            "usage": usage,
+        },
+    }
+
+
+def _write_subagents(projects_dir: Path, encoded_cwd: str, session_id: str,
+                     agent_file: str, records: list):
+    """Write a nested subagent JSONL under
+    ``projects_dir/<encoded_cwd>/<session_id>/subagents/<agent_file>.jsonl``.
+
+    This is the nested layout slice 056-02 reads: a sibling directory named
+    for the session UUID, holding one ``agent-*.jsonl`` per delegated turn.
+    """
+    d = projects_dir / encoded_cwd / session_id / "subagents"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{agent_file}.jsonl"
     with p.open("w") as fh:
         for r in records:
             fh.write(json.dumps(r) + "\n")
@@ -571,13 +615,13 @@ class CcusageRunnerTimeoutTests(unittest.TestCase):
 
 class HonestFramingTests(_TreeMixin, unittest.TestCase):
 
-    def test_output_notes_estimate_and_orchestrator_only(self):
+    def test_output_notes_estimate_orchestrator_and_subagent(self):
         rep = uu.build_report(spec="055", projects_dir=self.projects,
                               encoded_prefix=ENC_MAIN, ccusage_runner=None)
         out = uu.render(rep).lower()
         self.assertIn("estimate", out)
         self.assertIn("orchestrator", out)
-        # Mentions subagents land later (056-02).
+        # Subagent dimension landed in 056-02.
         self.assertIn("subagent", out)
 
 
@@ -617,6 +661,233 @@ class RobustnessTests(_TreeMixin, unittest.TestCase):
         # Should not raise when summing.
         sums = uu.sum_usage(recs)
         self.assertEqual(sums["input_tokens"], 0)
+
+
+# ---------------------------------------------------------------------------
+# Slice 056-02 — nested subagent transcripts (measured, not proxied)
+# ---------------------------------------------------------------------------
+
+class _SubagentTreeMixin:
+    """A spec-099 session in the main root with a nested subagents dir holding
+    TWO agent transcripts of DIFFERENT types, each with known per-turn usage:
+
+      * agent-aaa.jsonl — `jig:reviewer`, one turn: in 7, out 70, cR 700, cC 7
+      * agent-bbb.jsonl — `jig:implementer`, two turns:
+            in 3+1, out 30+10, cR 300+100, cC 3+1
+
+    Subagent totals: in 11, out 110, cR 1100, cC 11 (= 1232 tokens).
+    The flat (orchestrator) session carries its own distinct sums so the split
+    is unambiguous: in 100, out 200, cR 3000, cC 400 (= 3700 tokens).
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-sa-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+
+        # Flat orchestrator session for spec 099.
+        _write_session(
+            self.projects, ENC_MAIN, "sessSA",
+            [
+                _user_record(MAIN_CWD,
+                             "Work on specs/099-delegated — spec 099, slice 099-01.",
+                             session="sessSA"),
+                _assistant_record(
+                    "claude-opus-4-8",
+                    _usage(inp=100, out=200, cache_read=3000, cache_create=400),
+                    MAIN_CWD, session="sessSA",
+                    text="099-01, specs/099-delegated."),
+            ],
+        )
+
+        # Nested subagent transcripts for that session.
+        _write_subagents(
+            self.projects, ENC_MAIN, "sessSA", "agent-aaa",
+            [
+                _user_record(MAIN_CWD, "review this", session="sessSA"),
+                _subagent_record(
+                    "claude-opus-4-8",
+                    _usage(inp=7, out=70, cache_read=700, cache_create=7),
+                    "jig:reviewer", cwd=MAIN_CWD, session="sessSA"),
+            ],
+        )
+        _write_subagents(
+            self.projects, ENC_MAIN, "sessSA", "agent-bbb",
+            [
+                _subagent_record(
+                    "claude-opus-4-8",
+                    _usage(inp=3, out=30, cache_read=300, cache_create=3),
+                    "jig:implementer", cwd=MAIN_CWD, session="sessSA"),
+                _subagent_record(
+                    "claude-opus-4-8",
+                    _usage(inp=1, out=10, cache_read=100, cache_create=1),
+                    "jig:implementer", cwd=MAIN_CWD, session="sessSA"),
+            ],
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+
+class SubagentSumTests(_SubagentTreeMixin, unittest.TestCase):
+
+    def test_subagent_per_turn_sum(self):
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        # Summed across BOTH nested agent files, ALL turns.
+        self.assertEqual(rep.subagent_input_tokens, 11)
+        self.assertEqual(rep.subagent_output_tokens, 110)
+        self.assertEqual(rep.subagent_cache_read_tokens, 1100)
+        self.assertEqual(rep.subagent_cache_creation_tokens, 11)
+        self.assertEqual(rep.subagent_total_tokens, 11 + 110 + 1100 + 11)
+
+    def test_orchestrator_sums_unchanged_by_subagents(self):
+        # The flat-session (056-01) sums must NOT absorb subagent tokens.
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        self.assertEqual(rep.input_tokens, 100)
+        self.assertEqual(rep.output_tokens, 200)
+        self.assertEqual(rep.cache_read_tokens, 3000)
+        self.assertEqual(rep.cache_creation_tokens, 400)
+        self.assertEqual(rep.total_tokens, 100 + 200 + 3000 + 400)
+
+    def test_combined_total_is_orchestrator_plus_subagent(self):
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        self.assertEqual(rep.combined_total_tokens,
+                         rep.total_tokens + rep.subagent_total_tokens)
+        self.assertEqual(rep.combined_total_tokens, 3700 + 1232)
+
+    def test_subagent_breakdown_by_attribution_agent(self):
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        by_type = rep.subagent_by_type
+        self.assertIn("jig:reviewer", by_type)
+        self.assertIn("jig:implementer", by_type)
+        # reviewer: single turn.
+        r = by_type["jig:reviewer"]
+        self.assertEqual(r["input_tokens"], 7)
+        self.assertEqual(r["output_tokens"], 70)
+        self.assertEqual(r["cache_read_input_tokens"], 700)
+        self.assertEqual(r["cache_creation_input_tokens"], 7)
+        # implementer: two turns summed.
+        i = by_type["jig:implementer"]
+        self.assertEqual(i["input_tokens"], 4)
+        self.assertEqual(i["output_tokens"], 40)
+        self.assertEqual(i["cache_read_input_tokens"], 400)
+        self.assertEqual(i["cache_creation_input_tokens"], 4)
+
+    def test_render_shows_orchestrator_subagent_and_combined(self):
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        out = uu.render(rep)
+        low = out.lower()
+        self.assertIn("orchestrator", low)
+        self.assertIn("subagent", low)
+        self.assertIn("combined", low)
+        # The measured subagent total and combined total are rendered.
+        self.assertTrue(_shows_number(out, 1232), msg=out)   # subagent total
+        self.assertTrue(_shows_number(out, 3700 + 1232), msg=out)  # combined
+        # The per-type breakdown surfaces the agent types.
+        self.assertIn("jig:reviewer", out)
+        self.assertIn("jig:implementer", out)
+
+    def test_render_has_no_estimate_or_proxy_label_for_subagents(self):
+        # AC2: subagent usage is MEASURED, not a proxy/estimate. The output
+        # must not relabel the subagent dimension as an estimate/proxy, and
+        # must not carry the old 056-01 "subagent ... not yet included" line.
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        low = uu.render(rep).lower()
+        self.assertNotIn("proxy", low)
+        self.assertNotIn("not yet included", low)
+        self.assertNotIn("arrives in slice 056-02", low)
+
+
+class SubagentCostTests(_SubagentTreeMixin, unittest.TestCase):
+
+    def test_combined_cost_prices_orchestrator_and_subagent_tokens(self):
+        # ccusage rate: $0.001/token for claude-opus-4-8 (2.0 over 2000).
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN,
+                              ccusage_runner=lambda: CCUSAGE_JSON)
+        # Orchestrator $ over its 3700 tokens.
+        self.assertAlmostEqual(rep.cost_usd, 3700 * 0.001, places=6)
+        # Subagent $ over its 1232 tokens.
+        self.assertIsNotNone(rep.subagent_cost_usd)
+        self.assertAlmostEqual(rep.subagent_cost_usd, 1232 * 0.001, places=6)
+        # Combined $ = the true per-spec cost.
+        self.assertIsNotNone(rep.combined_cost_usd)
+        self.assertAlmostEqual(rep.combined_cost_usd,
+                               (3700 + 1232) * 0.001, places=6)
+
+
+class NoSubagentTests(_TreeMixin, unittest.TestCase):
+    """The 056-01 fixture tree has NO nested subagents dirs. Subagent totals
+    must be zero, silently — never throwing — and the orchestrator sums stay
+    exactly as 056-01 asserts.
+    """
+
+    def test_no_nested_dir_means_zero_subagent_total(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        self.assertEqual(rep.subagent_total_tokens, 0)
+        self.assertEqual(rep.subagent_by_type, {})
+        # Orchestrator sums identical to the 056-01 expectations.
+        self.assertEqual(rep.total_tokens, 16 + 160 + 1800 + 340)
+        # Combined collapses to the orchestrator total.
+        self.assertEqual(rep.combined_total_tokens, rep.total_tokens)
+
+    def test_no_subagent_cost_is_zero_not_none(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN,
+                              ccusage_runner=lambda: CCUSAGE_JSON)
+        # No subagent tokens -> subagent $ is 0.0 (a measured zero), and the
+        # combined cost equals the orchestrator cost.
+        self.assertEqual(rep.subagent_cost_usd, 0.0)
+        self.assertAlmostEqual(rep.combined_cost_usd, rep.cost_usd, places=9)
+
+
+class SubagentRobustnessTests(_SubagentTreeMixin, unittest.TestCase):
+
+    def test_malformed_nested_file_skipped_never_throws(self):
+        # Corrupt one nested agent file; the OTHER agent's turns still count,
+        # and the build must not raise.
+        bad = (self.projects / ENC_MAIN / "sessSA" / "subagents"
+               / "agent-aaa.jsonl")
+        with bad.open("w") as fh:
+            fh.write("not json at all\n")
+            fh.write('{"type": "assistant", "message": {oops}\n')
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        # Only agent-bbb (implementer, 2 turns) survives: in 4, out 40,
+        # cR 400, cC 4.
+        self.assertEqual(rep.subagent_input_tokens, 4)
+        self.assertEqual(rep.subagent_output_tokens, 40)
+        self.assertEqual(rep.subagent_cache_read_tokens, 400)
+        self.assertEqual(rep.subagent_cache_creation_tokens, 4)
+        self.assertNotIn("jig:reviewer", rep.subagent_by_type)
+        self.assertIn("jig:implementer", rep.subagent_by_type)
+
+    def test_subagent_record_missing_usage_skipped(self):
+        # A nested assistant record with no usage key must be skipped, not crash.
+        _write_subagents(
+            self.projects, ENC_MAIN, "sessSA", "agent-ccc",
+            [{"type": "assistant", "isSidechain": True,
+              "attributionAgent": "Explore",
+              "message": {"role": "assistant", "model": "claude-opus-4-8",
+                          "content": []}}],  # no usage
+        )
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        # Subagent totals unchanged by the usage-less Explore turn.
+        self.assertEqual(rep.subagent_total_tokens, 11 + 110 + 1100 + 11)
+        # Explore contributes a zero-valued breakdown bucket (or none); either
+        # way it adds no tokens.
+        explore = rep.subagent_by_type.get("Explore")
+        if explore is not None:
+            self.assertEqual(sum(explore.values()), 0)
 
 
 # ---------------------------------------------------------------------------

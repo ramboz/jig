@@ -29,20 +29,24 @@ Two hard-won findings frame the design:
    (opus-4-7/4-8 blend to ~$0.71/Mtok). `ccusage` (or its pricing source) is
    the authority. The tracker stores **token counts** (stable) and converts to
    $ at report time.
-2. **Subagent usage is under-recorded.** Subagent (`Agent`-tool) usage lands in
-   the parent transcript's `toolUseResult` as a **final-turn-only** summary
-   (`usage.iterations` length 1) plus cumulative `totalToolUseCount` /
-   `totalDurationMs` — *not* per-turn records. A naive `message.usage` sum
-   (what ccusage reads) misses it entirely; true subagent consumption needs a
-   **peak_cacheR × toolUseCount proxy**.
+2. **Subagent usage is fully logged — in nested transcripts.** Subagent
+   (`Agent`-tool) turns are recorded **per-turn** in nested
+   `~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/agent-*.jsonl`
+   files (`isSidechain: true`, full `message.usage`, subagent type in
+   `attributionAgent`). So subagent cost is **directly measurable** by summing
+   those files — no proxy needed. *(Correction, 2026-06-02, from the 056-01
+   review: an earlier by-hand analysis globbed `…/*.jsonl` one level deep, missed
+   the nested dirs, and wrongly concluded `toolUseResult` was the only record.
+   This supersedes the "proxy" framing in Goal #2, the Design notes, and the
+   Decisions/Clarifications below — 056-02 sums the nested transcripts.)*
 
 ## Goals
 
 1. **Per-spec token + cost report.** A developer can ask "what did spec NNN
    cost?" and get a token breakdown + a ccusage-based $ estimate.
 2. **Orchestrator vs subagent split.** Distinguish the long-lived orchestrator
-   (~90% of cost in the analysis) from delegated subagents, using the
-   `toolUseResult` proxy for the latter.
+   (~90% of cost in the analysis) from delegated subagents, by summing the
+   nested subagent transcripts (measured per-turn) for the latter.
 3. **Honest attribution.** Map transcripts → specs reliably (worktree/cwd; a
    `.jig/spec-ref` marker where ambiguous), and be explicit about what is
    *measured* vs *estimated*.
@@ -55,8 +59,8 @@ Two hard-won findings frame the design:
 - **Replacing ccusage.** We use ccusage for $ (pricing authority); the tracker
   adds the per-spec attribution ccusage doesn't do.
 - **Billing-grade accuracy.** Subscription-vs-API pricing makes $ notional; the
-  tracker is a *relative* optimization signal, honest about the subagent-proxy
-  approximation.
+  tracker is a *relative* optimization signal. (Both orchestrator and subagent
+  tokens are measured per-turn; only the $ conversion is an estimate.)
 - **Optimization itself.** Spec 055 owns the practices; 056 measures.
 
 ## SPIDR analysis
@@ -68,7 +72,7 @@ a developer runs a command and gets a number.
 | Slice | Delivers | Notes |
 |---|---|---|
 | 056-01 | `usage.py report <spec>` — reads local transcripts, attributes by worktree, sums **orchestrator** usage, $ via `ccusage` | the MVP; on-demand (no hook/ledger needed) |
-| 056-02 | + **subagent accounting** from `toolUseResult` (peak×turns proxy); orchestrator-vs-subagent split | closes the measurement gap |
+| 056-02 | + **subagent accounting** by summing the nested `subagents/*.jsonl` transcripts (measured, per-turn); orchestrator-vs-subagent split | closes the measurement gap |
 | 056-03 | + **`.jig/spec-ref` attribution marker** (stamped on slice transition) for exact session→spec mapping | replaces the content heuristic |
 
 **Spike rejected** — the substrate is known (the 055-motivating analysis
@@ -89,9 +93,11 @@ on-demand reading proves too slow or history is actually needed.
 - **Cost via ccusage.** Store token counts; for $, apply `ccusage`'s per-model
   effective rates to the attributed token totals (or shell to `ccusage
   --json` and reconcile). Never hard-code rates.
-- **Subagent proxy.** Per `Agent` `toolUseResult`: `usage` is final-turn-only,
-  so estimate cumulative cache_read ≈ `usage.cache_read_input_tokens` ×
-  `totalToolUseCount` × a factor (~0.5–1.0). Always label it an estimate.
+- **Subagent (measured).** Subagent turns are read **per-turn** from the nested
+  `<session>/subagents/agent-*.jsonl` transcripts (full `message.usage`),
+  grouped by `attributionAgent` (the subagent type). No proxy — the data is
+  fully logged. *(The earlier `toolUseResult` peak×turns proxy was superseded by
+  the 056-01 finding; see Overview finding #2.)*
 
 ## Decisions (resolved at clarify, 2026-06-01)
 
@@ -102,16 +108,18 @@ on-demand reading proves too slow or history is actually needed.
   then applies `ccusage`'s per-model effective rate to those sums for $.
   Attribution stays in jig; pricing stays in ccusage (no hand-rolled rates).
   → 056-01.
-- **Subagent proxy factor — RESOLVED: 0.7 central** (between linear-growth 0.5
-  and early-plateau 1.0); the raw final-turn-only sum is shown alongside as a
-  lower bound. → 056-02.
+- **Subagent measurement — RESOLVED (revised 2026-06-02):** sum the nested
+  `subagents/agent-*.jsonl` transcripts directly (measured per-turn), grouped by
+  `attributionAgent`. The earlier "proxy factor 0.7" decision is **superseded**
+  by the 056-01 finding that subagent usage is fully logged in nested files. →
+  056-02.
 - **`.jig/spec-ref` stamping point — RESOLVED:** on `workflow.py transition …
   IN_PROGRESS`. → 056-03.
 
 ## Slices
 
 - `slice-01-orchestrator-usage-report.md` — on-demand per-spec orchestrator token + ccusage $ report (MVP)
-- `slice-02-subagent-accounting.md` — subagent usage via the toolUseResult proxy; orchestrator-vs-subagent split
+- `slice-02-subagent-accounting.md` — subagent usage from nested transcripts (measured); orchestrator-vs-subagent split
 - `slice-03-spec-ref-attribution.md` — `.jig/spec-ref` marker for exact session→spec attribution
 
 ## Clarifications
@@ -130,6 +138,8 @@ _(category: Acceptance Criteria Testability)_
 _(category: Non-functional Requirements)_
 
 **0.7 central** (between linear-growth 0.5 and early-plateau 1.0). The raw final-turn-only `toolUseResult` sum is shown alongside as a lower bound.
+
+**[Superseded 2026-06-02 — from the 056-01 review:** subagent usage is fully logged per-turn in nested `subagents/*.jsonl`, so 056-02 sums those directly; the proxy and this factor are no longer used. See Overview finding #2.]**
 
 ### Q4: When should `.jig/spec-ref` be stamped?
 _(category: Edge Cases & Failure Modes)_
