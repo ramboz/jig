@@ -313,8 +313,10 @@ follow conventional-commit semantics organically.
 ### Building and smoke-testing a release zip locally
 
 The release workflow attaches a `jig-vX.Y.Z.zip` asset to every GitHub
-Release. You can build and verify the same zip locally before pushing
-any change to the build script:
+Release — this is the artifact end users install on Claude Desktop (see
+[README § Install shapes](README.md#install-shapes)). You can build and
+verify the same zip locally before pushing any change to the build
+script:
 
 ```bash
 # Build the zip (writes to ./dist/jig-v<version>.zip):

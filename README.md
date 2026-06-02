@@ -65,10 +65,13 @@ machinery lives** once it's installed. Full detail and how to choose in
 **1. Acquire the plugin** — puts the machinery under `${CLAUDE_PLUGIN_ROOT}`
 and makes the `/jig:*` commands available:
 
-| Source | Command |
+| Source | How |
 |---|---|
-| Marketplace | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` |
-| Release zip (Desktop) / from source | see [CONTRIBUTING.md](CONTRIBUTING.md) |
+| **Marketplace** (Claude Code) | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` |
+| **Release zip** (Claude Desktop) | Download `jig-vX.Y.Z.zip` from the [latest release](https://github.com/ramboz/jig/releases/latest), then add it via Claude Desktop's plugin manager (**Settings → Plugins**). |
+
+Running jig from a source checkout (for hacking on jig itself): see
+[CONTRIBUTING § Local dev install](CONTRIBUTING.md#local-dev-install).
 
 **2. Choose where the machinery lives** — `/jig:scaffold-init` runs the same
 either way; the flag picks the shape (recorded as `scaffold_mode` in
