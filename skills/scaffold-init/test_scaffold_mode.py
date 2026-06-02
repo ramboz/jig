@@ -602,6 +602,39 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
                     f"hook entry missing managed_by_jig marker: {entry}",
                 )
 
+    def test_pretooluse_registers_read_context_check(self):
+        """Slice 055-03 (AC #5) — the read-once / read-lean nudge is wired
+        into the generated settings.json: jig-context-check.sh appears under
+        PreToolUse with matcher 'Read', so scaffolded projects receive the
+        duplicate/large-read nudge, not just the jig repo. The pre-existing
+        PreToolUse matchers (e.g. the spec-gate's Edit|Write|MultiEdit) are
+        untouched."""
+        settings = json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+        pre_tool_use = settings["hooks"]["PreToolUse"]
+        read_entries = [
+            entry for entry in pre_tool_use
+            if entry.get("matcher") == "Read"
+            and any("jig-context-check.sh" in h.get("command", "")
+                    for h in entry.get("hooks", []))
+        ]
+        self.assertEqual(
+            len(read_entries), 1,
+            f"expected exactly one PreToolUse matcher:Read jig-context-check "
+            f"entry; got: {pre_tool_use}",
+        )
+        # Project-relative path, not plugin-root.
+        cmd = read_entries[0]["hooks"][0]["command"]
+        self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/", cmd)
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", cmd)
+        # The spec-gate's Edit|Write|MultiEdit matcher still present.
+        self.assertTrue(
+            any(entry.get("matcher") == "Edit|Write|MultiEdit"
+                for entry in pre_tool_use),
+            "pre-existing PreToolUse spec-gate matcher was disturbed",
+        )
+
     def test_userpromptsubmit_registers_context_check(self):
         """Slice 055-02 (AC #7) — the in-session growth nudge is wired into
         the generated settings.json: jig-context-check.sh appears under

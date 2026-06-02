@@ -444,3 +444,260 @@ def growth_nudge_for_turn(transcript_path, session_id, state_dir) -> "str | None
         return None
     except Exception:
         return None
+
+
+# --------------------------------------------------------------------------
+# Read-once / read-lean discipline (slice 055-03)
+#
+# Read is the single biggest one-time context source (~26% of orchestrator
+# context on jig's own development; e.g. spec.md was re-read 42× in the
+# "$540 session" — spec 008's quizzical-moore worktree). A `PreToolUse`
+# (matcher: Read) hook nudges on the two most common Read-side wasters:
+#
+#   1. Re-reading a file already in context (duplicate read). Tracked per
+#      session: a path seen on an earlier turn and Read again → one nudge,
+#      at most once per path.
+#   2. A whole-file Read (no offset/limit) of a file above a byte threshold,
+#      where a ranged read would suffice → suggest offset/limit.
+#
+# The decision is pure (``evaluate_read``); the per-session seen/nudged path
+# state lives in a state file under $TMPDIR, mirroring the growth-nudge
+# pattern. Every path is non-blocking and never raises (the hook always
+# exits 0).
+# --------------------------------------------------------------------------
+
+DEFAULT_READ_LEAN_BYTES = 64 * 1024
+"""Whole-file Reads at or above this size are nudged toward ``offset`` /
+``limit`` (slice 055-03 AC #3). 64 KiB ≈ 16K tokens at ``RATIO`` — already a
+meaningful chunk of the window for a single read, and large enough that the
+nudge fires on genuinely heavy files (a typical source file is far smaller)
+rather than on routine reads. Override via ``JIG_READ_LEAN_BYTES`` (a
+positive int of bytes); out-of-range / non-numeric values silently fall back
+to the default so a typo never crashes the hook."""
+
+
+def _resolve_read_lean_bytes() -> int:
+    """Read ``JIG_READ_LEAN_BYTES`` from env, falling back to the default.
+
+    Mirrors ``_resolve_window_bytes``: a non-positive or non-numeric value
+    silently falls back so a typo never crashes the hook (slice 055-03)."""
+    raw = os.environ.get("JIG_READ_LEAN_BYTES")
+    if raw is None:
+        return DEFAULT_READ_LEAN_BYTES
+    try:
+        value = int(raw)
+        if value <= 0:
+            return DEFAULT_READ_LEAN_BYTES
+        return value
+    except ValueError:
+        return DEFAULT_READ_LEAN_BYTES
+
+
+def duplicate_read_nudge_text(file_path: str) -> str:
+    """The soft nudge body for a duplicate read (slice 055-03 AC #2 / AC #4).
+
+    Recommends reusing the in-context copy, cites the motivating evidence
+    (the 42× ``spec.md`` re-read in the "$540 session"), and points at the
+    ``docs/workflow.md`` "Context-cost discipline" section."""
+    return (
+        f"Read-once nudge: {file_path} has already been Read this session, so "
+        "its contents are still in context. Re-reading it adds the whole file "
+        "to the orchestrator again — and the orchestrator is re-read on every "
+        "subsequent turn, so the cost compounds. Reuse the copy already in "
+        "context instead; if you need a specific part, Grep to locate it and "
+        "Read only that range. (In the \"$540 session\" a single spec.md was "
+        "re-read 42×.) See the \"Context-cost discipline\" section of "
+        "docs/workflow.md."
+    )
+
+
+def large_read_nudge_text(file_path: str, size_bytes: int) -> str:
+    """The soft nudge body for a large whole-file read (slice 055-03 AC #3 /
+    AC #4). Suggests ``offset`` / ``limit`` (or Grep-to-locate) and points at
+    the workflow discipline section."""
+    return (
+        f"Read-lean nudge: {file_path} is ~{size_bytes} bytes and is being "
+        "Read whole. A whole-file read of a large file lands the entire file "
+        "in the orchestrator, which is then re-read every subsequent turn. If "
+        "you only need part of it, pass offset / limit to Read a range, or "
+        "Grep to locate the relevant lines first. Read is the single biggest "
+        "context source. See the \"Context-cost discipline\" section of "
+        "docs/workflow.md."
+    )
+
+
+def _read_is_ranged(tool_input) -> bool:
+    """A Read is "ranged" when the tool input carries an ``offset`` or
+    ``limit`` — i.e. it is already a bounded read and exempt from the
+    large-whole-file nudge."""
+    if not isinstance(tool_input, dict):
+        return False
+    return tool_input.get("offset") is not None or tool_input.get("limit") is not None
+
+
+def evaluate_read(file_path, tool_input, seen_paths, nudged_paths) -> "dict":
+    """Decide whether the read-once / read-lean nudge should fire for this
+    ``Read`` tool call.
+
+    Pure: no I/O beyond an optional ``stat`` of ``file_path`` for the size
+    check, no env mutation. The hook loads the per-session state (the seen +
+    already-nudged path lists), calls this, then writes back the returned
+    ``seen_paths`` / ``nudged_paths``.
+
+    Parameters
+    ----------
+    file_path:
+        The Read's target path (``tool_input["file_path"]``). A falsy path
+        leaves the state unchanged and never nudges.
+    tool_input:
+        The Read tool input dict — inspected for ``offset`` / ``limit`` to
+        decide whether the read is already ranged (AC #3).
+    seen_paths:
+        Paths Read on a prior turn this session (the prior state).
+    nudged_paths:
+        Paths already nudged this session — the at-most-once-per-path set.
+
+    Returns a dict::
+
+        {
+            "nudge":        bool,             # fire a nudge this call?
+            "kind":         str | None,       # "duplicate" | "large" | None
+            "text":         str | None,       # the nudge body, or None
+            "seen_paths":   list[str],        # next seen state to persist
+            "nudged_paths": list[str],        # next nudged state to persist
+        }
+
+    Semantics:
+      - **Duplicate** (AC #2): if ``file_path`` is in ``seen_paths`` and not
+        already in ``nudged_paths`` → nudge once, record it as nudged. A path
+        already nudged stays silent (at most once per path). The duplicate
+        nudge takes priority over the large-read nudge (reusing the in-context
+        copy is the stronger advice).
+      - **Large whole-file** (AC #3): on a *first* read (not a duplicate) of a
+        non-ranged Read whose target is ``>= JIG_READ_LEAN_BYTES`` → nudge,
+        suggesting offset/limit. This does not consume the per-path
+        duplicate budget — a later re-read still earns the duplicate nudge.
+      - The path is always added to ``seen_paths`` so the next read is a
+        duplicate.
+    """
+    seen = list(seen_paths or [])
+    nudged = list(nudged_paths or [])
+
+    if not file_path:
+        return {
+            "nudge": False, "kind": None, "text": None,
+            "seen_paths": seen, "nudged_paths": nudged,
+        }
+
+    already_seen = file_path in seen
+    already_nudged = file_path in nudged
+
+    # Record the read as seen (idempotent) so the next read is a duplicate.
+    next_seen = seen if already_seen else seen + [file_path]
+
+    # ----- Duplicate read (highest priority) ------------------------------
+    if already_seen and not already_nudged:
+        return {
+            "nudge": True,
+            "kind": "duplicate",
+            "text": duplicate_read_nudge_text(file_path),
+            "seen_paths": next_seen,
+            "nudged_paths": nudged + [file_path],
+        }
+    if already_seen:
+        # Seen + already nudged → silent (at most once per path).
+        return {
+            "nudge": False, "kind": None, "text": None,
+            "seen_paths": next_seen, "nudged_paths": nudged,
+        }
+
+    # ----- First read: large whole-file check (AC #3) ---------------------
+    if not _read_is_ranged(tool_input):
+        try:
+            size = Path(file_path).stat().st_size
+        except Exception:
+            size = -1
+        if size >= _resolve_read_lean_bytes():
+            return {
+                "nudge": True,
+                "kind": "large",
+                "text": large_read_nudge_text(file_path, size),
+                "seen_paths": next_seen,
+                "nudged_paths": nudged,
+            }
+
+    return {
+        "nudge": False, "kind": None, "text": None,
+        "seen_paths": next_seen, "nudged_paths": nudged,
+    }
+
+
+def _read_state_file(state_dir, session_id: str) -> Path:
+    """Per-session read-tracking state-file path, keyed by session id, under
+    ``state_dir`` (typically ``$TMPDIR``). Distinct from the growth-nudge
+    state file (different prefix) so the two never collide. Non-filesystem-
+    safe session ids are reduced to their safe characters."""
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_"
+                   for c in (session_id or "default"))
+    if not safe:
+        safe = "default"
+    return Path(state_dir) / f"jig-read-paths-{safe}.json"
+
+
+def _read_read_state(state_path: Path) -> "tuple[list, list]":
+    """Load ``(seen_paths, nudged_paths)`` from the per-session state file.
+    Returns two empty lists on any error (missing / malformed) — never
+    raises."""
+    try:
+        data = json.loads(state_path.read_text())
+        seen = data.get("seen")
+        nudged = data.get("nudged")
+        seen = [s for s in seen if isinstance(s, str)] if isinstance(seen, list) else []
+        nudged = [s for s in nudged if isinstance(s, str)] if isinstance(nudged, list) else []
+        return seen, nudged
+    except Exception:
+        return [], []
+
+
+def _write_read_state(state_path: Path, seen_paths, nudged_paths) -> None:
+    """Persist ``(seen, nudged)``. Best-effort — swallows I/O errors so the
+    hook never blocks on a read-only / missing TMPDIR."""
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({
+            "seen": list(seen_paths),
+            "nudged": list(nudged_paths),
+        }))
+    except Exception:
+        pass
+
+
+def read_nudge_for_turn(file_path, tool_input, session_id, state_dir) -> "str | None":
+    """Top-level orchestration for the PreToolUse(Read) read-once/read-lean
+    nudge.
+
+    Loads the per-session seen/nudged path state → evaluates → persists the
+    new state → returns the nudge text, or ``None`` when nothing should fire.
+    Never raises: any failure path returns ``None`` so the hook stays silent
+    and non-blocking.
+
+    Deferred-by-design (mirrors the growth-nudge helper): the per-session
+    state file is left to the OS tmp-reaper rather than self-cleaned (tiny
+    JSON, unique session ids → no correctness issue); the read-modify-write is
+    unguarded — safe because PreToolUse calls are serial within a session.
+    """
+    try:
+        if not file_path:
+            return None
+        state_path = _read_state_file(state_dir, session_id)
+        seen, nudged = _read_read_state(state_path)
+        decision = evaluate_read(file_path, tool_input, seen, nudged)
+        if (decision["seen_paths"] != seen
+                or decision["nudged_paths"] != nudged):
+            _write_read_state(state_path, decision["seen_paths"],
+                              decision["nudged_paths"])
+        if decision["nudge"] and decision["text"]:
+            return decision["text"]
+        return None
+    except Exception:
+        return None

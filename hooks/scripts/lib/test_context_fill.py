@@ -27,6 +27,12 @@ from context_fill import (
     evaluate_growth,
     growth_nudge_for_turn,
     growth_nudge_text,
+    DEFAULT_READ_LEAN_BYTES,
+    _resolve_read_lean_bytes,
+    evaluate_read,
+    read_nudge_for_turn,
+    duplicate_read_nudge_text,
+    large_read_nudge_text,
 )
 
 
@@ -616,6 +622,270 @@ class GrowthNudgeForTurnTests(unittest.TestCase):
         # Should not raise; returns the nudge (state just isn't persisted).
         out = growth_nudge_for_turn(path, "s", bad_state)
         self.assertIsNotNone(out)
+
+
+# --------------------------------------------------------------------------
+# Slice 055-03 — read-once / read-lean discipline. Pure-function surface:
+# evaluate_read() (the duplicate-path + large-whole-file decision),
+# read_nudge_for_turn() (the hook's orchestration: state read → evaluate →
+# persist), and the two nudge-text builders. The PreToolUse(Read) hook owns
+# only the state-file I/O; these cover the testable policy it delegates to.
+# Read is the single biggest context source (~26%); e.g. spec.md was re-read
+# 42× in the "$540 session" (spec 008's quizzical-moore worktree).
+# --------------------------------------------------------------------------
+
+
+class ReadLeanDefaultsTests(unittest.TestCase):
+    """AC #3 — the read-lean byte threshold has a sensible default (64 KiB),
+    overridable via JIG_READ_LEAN_BYTES, with the same out-of-range /
+    non-numeric silent fallback as the other env knobs (slice 055-03
+    reconciliation: pin the value + exercise the fallback branch directly)."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("JIG_READ_LEAN_BYTES", None)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("JIG_READ_LEAN_BYTES", None)
+        else:
+            os.environ["JIG_READ_LEAN_BYTES"] = self._saved
+
+    def test_default_read_lean_bytes_is_64_kib(self):
+        self.assertEqual(DEFAULT_READ_LEAN_BYTES, 64 * 1024)
+
+    def test_default_when_env_unset(self):
+        os.environ.pop("JIG_READ_LEAN_BYTES", None)
+        self.assertEqual(_resolve_read_lean_bytes(), DEFAULT_READ_LEAN_BYTES)
+
+    def test_valid_env_override(self):
+        os.environ["JIG_READ_LEAN_BYTES"] = "100000"
+        self.assertEqual(_resolve_read_lean_bytes(), 100000)
+
+    def test_out_of_range_env_falls_back_to_default(self):
+        os.environ["JIG_READ_LEAN_BYTES"] = "-5"
+        self.assertEqual(_resolve_read_lean_bytes(), DEFAULT_READ_LEAN_BYTES)
+
+    def test_non_numeric_env_falls_back_to_default(self):
+        os.environ["JIG_READ_LEAN_BYTES"] = "lots"
+        self.assertEqual(_resolve_read_lean_bytes(), DEFAULT_READ_LEAN_BYTES)
+
+
+class EvaluateReadDuplicateTests(unittest.TestCase):
+    """AC #2 — evaluate_read flags a path Read more than once per session,
+    at most once per path. Pure: takes the prior (seen, nudged) sets and
+    returns {nudge, kind, text, seen_paths, nudged_paths} (the next state).
+    """
+
+    def test_first_read_is_silent(self):
+        d = evaluate_read("/a/b.py", {"file_path": "/a/b.py"}, [], [])
+        self.assertFalse(d["nudge"])
+        # Path now recorded as seen, not yet nudged.
+        self.assertIn("/a/b.py", d["seen_paths"])
+        self.assertNotIn("/a/b.py", d["nudged_paths"])
+
+    def test_second_read_same_path_nudges_once(self):
+        # Path already seen on a prior turn → the second read nudges.
+        d = evaluate_read("/a/b.py", {"file_path": "/a/b.py"},
+                          ["/a/b.py"], [])
+        self.assertTrue(d["nudge"])
+        self.assertEqual(d["kind"], "duplicate")
+        self.assertIn("/a/b.py", d["nudged_paths"])
+
+    def test_third_read_same_path_is_silent(self):
+        # Already seen AND already nudged → silent (at most once per path).
+        d = evaluate_read("/a/b.py", {"file_path": "/a/b.py"},
+                          ["/a/b.py"], ["/a/b.py"])
+        self.assertFalse(d["nudge"])
+        # Still recorded as nudged so further reads stay silent.
+        self.assertIn("/a/b.py", d["nudged_paths"])
+
+    def test_distinct_paths_are_silent(self):
+        d = evaluate_read("/a/c.py", {"file_path": "/a/c.py"},
+                          ["/a/b.py"], [])
+        self.assertFalse(d["nudge"])
+        self.assertIn("/a/c.py", d["seen_paths"])
+        self.assertIn("/a/b.py", d["seen_paths"])
+
+    def test_missing_file_path_is_silent(self):
+        d = evaluate_read("", {}, [], [])
+        self.assertFalse(d["nudge"])
+        # No path → state unchanged.
+        self.assertEqual(d["seen_paths"], [])
+
+    def test_duplicate_text_names_the_path(self):
+        d = evaluate_read("/a/b.py", {"file_path": "/a/b.py"},
+                          ["/a/b.py"], [])
+        self.assertIn("/a/b.py", d["text"])
+
+
+class EvaluateReadLargeWholeFileTests(unittest.TestCase):
+    """AC #3 — evaluate_read nudges on a whole-file Read (no offset/limit)
+    of a file above the size threshold, suggesting offset/limit. A ranged
+    Read (offset or limit present) is silent regardless of size."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-readlean-")
+        self.root = Path(self.tmpdir)
+        os.environ["JIG_READ_LEAN_BYTES"] = "100"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop("JIG_READ_LEAN_BYTES", None)
+
+    def _bigfile(self, name="big.py", size=500):
+        path = self.root / name
+        path.write_text("x" * size)
+        return path
+
+    def test_large_whole_file_read_nudges(self):
+        path = self._bigfile()
+        d = evaluate_read(str(path), {"file_path": str(path)}, [], [])
+        self.assertTrue(d["nudge"])
+        self.assertEqual(d["kind"], "large")
+        # AC #3: the nudge suggests offset/limit.
+        self.assertIn("offset", d["text"])
+        self.assertIn("limit", d["text"])
+
+    def test_ranged_read_is_silent_even_if_large(self):
+        path = self._bigfile()
+        d = evaluate_read(
+            str(path),
+            {"file_path": str(path), "offset": 1, "limit": 50},
+            [], [],
+        )
+        self.assertFalse(d["nudge"])
+
+    def test_limit_only_read_is_silent(self):
+        path = self._bigfile()
+        d = evaluate_read(
+            str(path), {"file_path": str(path), "limit": 50}, [], [],
+        )
+        self.assertFalse(d["nudge"])
+
+    def test_small_whole_file_read_is_silent(self):
+        small = self.root / "small.py"
+        small.write_text("x" * 10)  # below the 100-byte threshold
+        d = evaluate_read(str(small), {"file_path": str(small)}, [], [])
+        self.assertFalse(d["nudge"])
+
+    def test_duplicate_takes_priority_over_large(self):
+        """A second read of a large file fires the duplicate nudge (the
+        in-context copy is the stronger advice), not the large-read one."""
+        path = self._bigfile()
+        d = evaluate_read(str(path), {"file_path": str(path)},
+                          [str(path)], [])
+        self.assertTrue(d["nudge"])
+        self.assertEqual(d["kind"], "duplicate")
+
+    def test_unreadable_path_does_not_crash(self):
+        d = evaluate_read("/no/such/file.py",
+                          {"file_path": "/no/such/file.py"}, [], [])
+        # Can't stat → treat as not-large → silent first read.
+        self.assertFalse(d["nudge"])
+
+
+class ReadNudgeTextTests(unittest.TestCase):
+    """AC #4 — both nudge bodies cite the motivating evidence (the 42×
+    spec.md re-read in the "$540 session") and point at the workflow.md
+    Context-cost discipline section."""
+
+    def test_duplicate_text_cites_evidence_and_workflow(self):
+        text = duplicate_read_nudge_text("/x/spec.md")
+        self.assertIn("42", text)  # the 42× re-read
+        self.assertIn("Context-cost discipline", text)
+        self.assertIn("docs/workflow.md", text)
+
+    def test_large_text_suggests_offset_limit_and_workflow(self):
+        text = large_read_nudge_text("/x/big.py", 123456)
+        self.assertIn("offset", text)
+        self.assertIn("limit", text)
+        self.assertIn("Context-cost discipline", text)
+
+
+class ReadNudgeForTurnTests(unittest.TestCase):
+    """The hook's orchestration helper: state read → evaluate → persist.
+    Pins at-most-once-per-path across calls via a real per-session state
+    dir, matching what the shell calls (slice 055-03)."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-read-turn-"))
+        self.state = self.base / "state"
+        self.state.mkdir()
+        os.environ.pop("JIG_READ_LEAN_BYTES", None)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+        os.environ.pop("JIG_READ_LEAN_BYTES", None)
+
+    def test_first_read_returns_none(self):
+        self.assertIsNone(
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                "s", self.state)
+        )
+
+    def test_second_read_same_path_returns_text(self):
+        self.assertIsNone(
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                "sess", self.state)
+        )
+        out = read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                  "sess", self.state)
+        self.assertIsNotNone(out)
+        self.assertIn("/a/b.py", out)
+
+    def test_third_read_same_path_returns_none(self):
+        for _ in range(2):
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                "sess", self.state)
+        # Third read: already nudged → silent.
+        self.assertIsNone(
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                "sess", self.state)
+        )
+
+    def test_distinct_paths_return_none(self):
+        self.assertIsNone(
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                "sess", self.state)
+        )
+        self.assertIsNone(
+            read_nudge_for_turn("/a/c.py", {"file_path": "/a/c.py"},
+                                "sess", self.state)
+        )
+
+    def test_state_isolated_per_session(self):
+        # Session A sees /a/b.py twice (nudge on 2nd); session B's first
+        # read of the same path is silent (independent state).
+        read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"}, "A", self.state)
+        self.assertIsNotNone(
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"}, "A", self.state)
+        )
+        self.assertIsNone(
+            read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"}, "B", self.state)
+        )
+
+    def test_missing_file_path_returns_none(self):
+        self.assertIsNone(
+            read_nudge_for_turn("", {}, "s", self.state)
+        )
+
+    def test_never_raises_on_bad_state_dir(self):
+        # state_dir under a file → write fails; helper must still return the
+        # nudge on the duplicate and never raise (write is best-effort).
+        blocker = self.base / "afile"
+        blocker.write_text("x")
+        bad_state = blocker / "subdir"
+        # First read can't persist, so the second read also can't see it →
+        # it stays silent, but crucially nothing raises.
+        out1 = read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                   "s", bad_state)
+        self.assertIsNone(out1)
+        out2 = read_nudge_for_turn("/a/b.py", {"file_path": "/a/b.py"},
+                                   "s", bad_state)
+        # No exception is the contract; with no persistence it stays silent.
+        self.assertIsNone(out2)
 
 
 if __name__ == "__main__":

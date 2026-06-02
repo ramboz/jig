@@ -234,6 +234,26 @@ adding a jig agent would only duplicate a capable built-in. Revisit only if
 their return contract proves insufficient for jig's summary needs. (No ADR —
 the choice is low-stakes and reversible; no `agents/*.md` file is added.)
 
+### Read once, read lean
+
+Read is the single biggest one-time context source (~26% of orchestrator
+context on jig's own development). The two most common Read-side wasters:
+
+- **Don't re-Read what's already in context.** Once a file has been Read this
+  session, its contents are still loaded — re-reading adds the whole file
+  again, and the orchestrator is re-read on *every* subsequent turn, so the
+  cost compounds. Reuse the copy already in context. In the "$540 session"
+  (below) a single `spec.md` was re-read **42×**.
+- **Prefer Grep-to-locate plus a ranged Read over a whole-file scan.** When
+  you need a specific part of a large file, `Grep` to find the line(s), then
+  Read with `offset` / `limit` to pull just that range. Reading a large file
+  whole lands the entire file in context for no reason.
+
+A soft `PreToolUse` (matcher: `Read`) hook nudges on both — a duplicate read
+of the same path (at most once per path per session) and a whole-file Read of
+a file above `JIG_READ_LEAN_BYTES` (default 64 KiB). It never blocks; it is
+guidance, not a gate.
+
 ### Worked example: the "$540 session"
 
 A codebase-gap review run *entirely in the orchestrator* (spec 008's

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Fires on SessionStart AND UserPromptSubmit (slice 055-02 — one script, two
-# events; it branches on the hook input's `hook_event_name`). Emits soft
-# warnings (additionalContext) when the session looks at risk of context-fill
-# problems. Never blocks — always exits 0, never sets `continue: false`. Hard
-# gates live in servo.
+# Fires on SessionStart, UserPromptSubmit (slice 055-02), AND PreToolUse with
+# matcher Read (slice 055-03) — one script, three events; it branches on the
+# hook input's `hook_event_name`. Emits soft warnings (additionalContext)
+# when the session looks at risk of context-fill problems. Never blocks —
+# always exits 0, never sets `continue: false`. Hard gates live in servo.
 #
 # SessionStart branches (the always-loaded baseline — unchanged by 055-02):
 #   1. MCP-server count (legacy proxy). Warns above 8 servers — tool-
@@ -38,6 +38,19 @@
 #                                fraction of the window. Default 0.40 (the
 #                                dumb-zone line); same out-of-range fallback
 #                                as JIG_CONTEXT_SOFT_WARN_PCT.
+#   JIG_READ_LEAN_BYTES        — PreToolUse(Read) large-whole-file threshold
+#                                in bytes (slice 055-03). A whole-file Read
+#                                (no offset/limit) of a file at/above this
+#                                size is nudged toward offset/limit. Default
+#                                65536 (64 KiB); out-of-range / non-numeric
+#                                values silently fall back to the default.
+#
+# PreToolUse(Read) branch (slice 055-03 — the read-once / read-lean nudge):
+#   4. Tracks Read target paths per session in a state file under $TMPDIR.
+#      A path Read more than once → one nudge (at most once per path),
+#      recommending reuse of the in-context copy; a whole-file Read of a
+#      file above JIG_READ_LEAN_BYTES → a nudge suggesting offset/limit.
+#      Silent + safe on missing/malformed input and non-Read tools.
 #
 # On SessionStart both warnings can coexist in a single `additionalContext`
 # emission; they're concatenated with a blank line between them.
@@ -67,7 +80,30 @@ try:
 
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
 
-    if event == 'UserPromptSubmit':
+    if event == 'PreToolUse':
+        # ----- Branch 4: read-once / read-lean nudge (slice 055-03) ---
+        # Fires only for the Read tool (the hooks.json matcher narrows it;
+        # this also defends against a broadly-registered hook). Delegates to
+        # the testable helper: load per-session seen/nudged paths, decide if
+        # this Read is a duplicate or an oversized whole-file read, persist
+        # the new state, and return the nudge text or None. Never blocks.
+        try:
+            if payload.get('tool_name') == 'Read':
+                from lib.context_fill import read_nudge_for_turn
+                tool_input = payload.get('tool_input') or {}
+                if not isinstance(tool_input, dict):
+                    tool_input = {}
+                file_path = tool_input.get('file_path') or ''
+                session_id = payload.get('session_id') or 'default'
+                state_dir = os.environ.get('TMPDIR') or '/tmp'
+                nudge = read_nudge_for_turn(
+                    file_path, tool_input, session_id, state_dir)
+                if nudge:
+                    print(json.dumps({'continue': True, 'additionalContext': nudge}))
+        except Exception:
+            # The read nudge must never block the tool call — swallow.
+            pass
+    elif event == 'UserPromptSubmit':
         # ----- Branch 3: in-session growth nudge (slice 055-02) -------
         # Delegate to the testable helper: tail-read the transcript, apply
         # the per-band rate-limit (with re-arm-on-drop) against a per-session

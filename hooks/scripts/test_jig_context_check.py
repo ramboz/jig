@@ -428,6 +428,196 @@ class GrowthNudgeUserPromptTests(unittest.TestCase):
                           "hook must read the tail record, not the max")
 
 
+def run_hook_read(
+    project_dir: Path,
+    tool_input: dict,
+    *,
+    session_id: str = "rsess-1",
+    env_overrides: dict = None,
+    tmpdir: Path = None,
+) -> subprocess.CompletedProcess:
+    """Invoke jig-context-check.sh with a PreToolUse(Read) payload carrying
+    a Read tool_use (slice 055-03). The per-session read-state file lives
+    under TMPDIR; tests pass an isolated tmpdir so seen/nudged paths don't
+    leak between cases."""
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(project_dir)
+    for var in ("JIG_CONTEXT_WINDOW_BYTES", "JIG_CONTEXT_SOFT_WARN_PCT",
+                "JIG_CONTEXT_GROWTH_WARN_PCT", "JIG_READ_LEAN_BYTES"):
+        env.pop(var, None)
+    if tmpdir is not None:
+        env["TMPDIR"] = str(tmpdir)
+    if env_overrides:
+        env.update(env_overrides)
+    payload = {
+        "session_id": session_id,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": tool_input,
+    }
+    return subprocess.run(
+        ["bash", str(HOOK)],
+        input=json.dumps(payload),
+        capture_output=True, text=True, env=env,
+    )
+
+
+class ReadOnceHookTests(unittest.TestCase):
+    """Slice 055-03 — the PreToolUse(Read) branch. Synthetic Read tool_use
+    fixtures (Clarification Q4): first read of a path → silent; second read
+    of the same path → exactly one nudge; third → silent; distinct paths →
+    silent; malformed/missing input → silent; never blocks (exit 0)."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-055-03-"))
+        self.project = self.base / "project"
+        self.project.mkdir()
+        self.state = self.base / "state"
+        self.state.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def _read(self, file_path, *, session_id="s", extra=None, env=None):
+        tool_input = {"file_path": file_path}
+        if extra:
+            tool_input.update(extra)
+        return run_hook_read(
+            self.project, tool_input, session_id=session_id,
+            env_overrides=env, tmpdir=self.state,
+        )
+
+    # ----- AC #2: first read → silent -------------------------------------
+    def test_first_read_silent(self):
+        r = self._read("/a/b.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIsNone(parse_or_none(r))
+
+    # ----- AC #2: second read of same path → exactly one nudge ------------
+    def test_second_read_same_path_nudges(self):
+        first = self._read("/a/b.py", session_id="dup")
+        self.assertIsNone(parse_or_none(first))
+        second = self._read("/a/b.py", session_id="dup")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        out = parse_or_none(second)
+        self.assertIsNotNone(out, f"expected nudge; stdout={second.stdout}")
+        ctx = out["additionalContext"]
+        # Recommends reusing the in-context copy + cites the workflow section.
+        self.assertIn("/a/b.py", ctx)
+        self.assertIn("Context-cost discipline", ctx)
+        # AC #4: cites the 42× motivating evidence.
+        self.assertIn("42", ctx)
+
+    # ----- AC #2: third read of same path → silent (already nudged) -------
+    def test_third_read_same_path_silent(self):
+        self._read("/a/b.py", session_id="trip")
+        self.assertIsNotNone(parse_or_none(self._read("/a/b.py", session_id="trip")))
+        third = self._read("/a/b.py", session_id="trip")
+        self.assertEqual(third.returncode, 0)
+        self.assertIsNone(parse_or_none(third),
+                          f"third read must stay silent; got {third.stdout}")
+
+    # ----- AC #2: distinct paths → silent ---------------------------------
+    def test_distinct_paths_silent(self):
+        self.assertIsNone(parse_or_none(self._read("/a/b.py", session_id="dist")))
+        r = self._read("/a/c.py", session_id="dist")
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+    # ----- AC #2: never blocks --------------------------------------------
+    def test_never_emits_continue_false(self):
+        self._read("/a/b.py", session_id="blk")
+        second = self._read("/a/b.py", session_id="blk")
+        self.assertEqual(second.returncode, 0)
+        out = parse_or_none(second)
+        if out is not None:
+            self.assertTrue(out.get("continue", True) is True,
+                            f"continue must be True or absent; got {out!r}")
+
+    # ----- AC #5 robustness: missing tool_input → silent ------------------
+    def test_missing_tool_input_silent(self):
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.project)
+        env["TMPDIR"] = str(self.state)
+        payload = {"session_id": "s", "hook_event_name": "PreToolUse",
+                   "tool_name": "Read"}
+        r = subprocess.run(["bash", str(HOOK)], input=json.dumps(payload),
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+    def test_garbage_pretooluse_payload_silent(self):
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.project)
+        env["TMPDIR"] = str(self.state)
+        r = subprocess.run(["bash", str(HOOK)], input="not-json-at-all{{{",
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+    def test_empty_file_path_silent(self):
+        r = self._read("", session_id="empty")
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+    # ----- AC #3: large whole-file read → nudge; ranged read → silent -----
+    def test_large_whole_file_read_nudges(self):
+        big = self.project / "big.py"
+        big.write_text("x" * 500)
+        r = self._read(str(big), session_id="lg",
+                       env={"JIG_READ_LEAN_BYTES": "100"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = parse_or_none(r)
+        self.assertIsNotNone(out, f"expected large-read nudge; got {r.stdout}")
+        ctx = out["additionalContext"]
+        self.assertIn("offset", ctx)
+        self.assertIn("limit", ctx)
+
+    def test_ranged_read_of_large_file_silent(self):
+        big = self.project / "big.py"
+        big.write_text("x" * 500)
+        r = self._read(str(big), session_id="rng",
+                       extra={"offset": 1, "limit": 50},
+                       env={"JIG_READ_LEAN_BYTES": "100"})
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+
+class PreToolUseNonReadNoRegressionTests(unittest.TestCase):
+    """Slice 055-03 — the new PreToolUse(Read) branch must not disturb the
+    other events. A PreToolUse for a non-Read tool, and the SessionStart /
+    UserPromptSubmit branches, are unaffected by the read-tracking path."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-055-03-nr-"))
+        self.project = self.base / "project"
+        self.project.mkdir()
+        self.state = self.base / "state"
+        self.state.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def test_pretooluse_non_read_tool_silent(self):
+        """A PreToolUse(Read) hook script also receives Edit/Write events in
+        scaffolded installs that register it broadly; a non-Read tool_name
+        must be silent (the matcher narrows it, but the script defends too)."""
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.project)
+        env["TMPDIR"] = str(self.state)
+        payload = {"session_id": "s", "hook_event_name": "PreToolUse",
+                   "tool_name": "Edit",
+                   "tool_input": {"file_path": "/a/b.py"}}
+        # Even repeated, an Edit must never trigger the read-dedupe nudge.
+        for _ in range(3):
+            r = subprocess.run(["bash", str(HOOK)], input=json.dumps(payload),
+                               capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0)
+            self.assertIsNone(parse_or_none(r))
+
+
 class SessionStartNoRegressionTests(unittest.TestCase):
     """AC #1 — extending the script to UserPromptSubmit must not change the
     SessionStart baseline behavior. A SessionStart payload still runs the
