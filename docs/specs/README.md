@@ -160,8 +160,12 @@
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | **DONE** |  |
 | [053-craft-pass-skill-dispatch](053-craft-pass-skill-dispatch/spec.md) | 053-01 — file-read-dispatch | **DONE** | Craft/arch reviewer subagent has NO `Skill` tool → can't use the skill router; `review.py detect_richer_skill()` (USER-scope only, `~/.claude/skills/<name>/`) hands it the path to read-and-apply, else inlines baseline. Promotes spec 031 OQ#1 option (b). Retroactive record of landed commit 734e424; project-scope detection deferred. |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-01 — philosophy-doc | **DONE** |  |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-02 — prompt-cookbook | **DONE** |  |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-03 — readme-routing-hub | **DONE** |  |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-04 — reading-path-coherence | **DONE** |  |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-01 — Delegate file-heavy reading to isolated subagents | **DONE** |  |
-| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-02 — In-session context-growth nudge | READY_FOR_REVIEW |  |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-02 — In-session context-growth nudge | **DONE** | `JIG_CONTEXT_GROWTH_WARN_PCT` (default 0.40) sets the first band; 60/80% fixed offsets. `UserPromptSubmit` reads transcript-tail `cache_read`, once-per-band with re-arm-on-drop. Extends `jig-context-check.sh` (one script, two events); scaffolds into targets. |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-03 — Read-once / read-lean discipline | READY_FOR_REVIEW |  |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-04 — Keep verbose command output out of the orchestrator | READY_FOR_REVIEW |  |
 

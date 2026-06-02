@@ -116,3 +116,20 @@ The original spec is preserved above. Implementation notes:
   `test_links_to_routed_gap_inventory`. Full suite 1476 green; `spec_lint`
   clean across 51 specs. Slice stays DONE (this is reconciliation of an
   AC extended after landing, not new scope).
+
+## Amendments
+
+> Per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md):
+> this closed record's original ACs and deviation log are preserved above;
+> dated entries below record later overrides. (The README itself is live
+> prose — corrected inline, git history is its audit trail.)
+
+- **2026-06-01 (spec [054-03](../054-docs-front-door/slice-03-readme-routing-hub.md)):**
+  The gap-response map this slice added to `README.md` (AC #2 / AC #4) was
+  **relocated to `CONTRIBUTING.md`** (§ Comparison and gap response) to keep
+  the public README a lean routing hub. The map's intent is unchanged — it
+  stays visible and still links each gap's owner — only its home moved, which
+  AC #2's "`README.md` or a linked product-facing doc" wording already
+  permitted. The regression test `scripts/test_readme_status_current.py` was
+  retargeted to assert the table now lives in CONTRIBUTING (≥8 rows, owner
+  links, routed-inventory link) and that the README no longer carries it.

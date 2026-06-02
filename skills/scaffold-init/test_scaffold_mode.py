@@ -538,12 +538,28 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
             r"\$\{CLAUDE_PROJECT_DIR\}/\.claude/hooks/scripts/jig-[a-z-]+\.sh",
             settings_path.read_text(),
         )
-        # One command reference per hook script.
-        self.assertEqual(
-            len(project_dir_refs), len(EXPECTED_HOOK_SCRIPTS),
-            f"expected {len(EXPECTED_HOOK_SCRIPTS)} ${{CLAUDE_PROJECT_DIR}} "
-            f"script refs, got {len(project_dir_refs)}: {project_dir_refs}",
+        # One ${CLAUDE_PROJECT_DIR} ref per source command (a script may be
+        # registered on more than one event — e.g. slice 055-02 wires
+        # jig-context-check.sh onto both SessionStart and UserPromptSubmit).
+        source = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+        source_cmd_count = sum(
+            1
+            for entries in source["hooks"].values()
+            for entry in entries
+            for _ in entry.get("hooks", [])
         )
+        self.assertEqual(
+            len(project_dir_refs), source_cmd_count,
+            f"expected {source_cmd_count} ${{CLAUDE_PROJECT_DIR}} script refs "
+            f"(one per source command), got {len(project_dir_refs)}: "
+            f"{project_dir_refs}",
+        )
+        # Every distinct hook script still appears at least once.
+        for name in EXPECTED_HOOK_SCRIPTS:
+            self.assertTrue(
+                any(name in ref for ref in project_dir_refs),
+                f"hook script {name} missing from settings.json refs",
+            )
 
     def test_settings_json_shape_mirrors_source_hooks_json(self):
         """AC #2 — settings.json hook entries mirror hooks/hooks.json:
@@ -585,6 +601,31 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
                     meta.get("managed_by_jig"),
                     f"hook entry missing managed_by_jig marker: {entry}",
                 )
+
+    def test_userpromptsubmit_registers_context_check(self):
+        """Slice 055-02 (AC #7) — the in-session growth nudge is wired into
+        the generated settings.json: jig-context-check.sh appears under
+        UserPromptSubmit (the same script that runs on SessionStart), so
+        scaffolded projects get the mid-session nudge, not just the jig
+        repo."""
+        settings = json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+        ups_commands = [
+            h.get("command", "")
+            for entry in settings["hooks"]["UserPromptSubmit"]
+            for h in entry.get("hooks", [])
+        ]
+        self.assertTrue(
+            any("jig-context-check.sh" in c for c in ups_commands),
+            f"jig-context-check.sh must be registered on UserPromptSubmit; "
+            f"got: {ups_commands}",
+        )
+        # The command resolves to the project-relative path, not plugin-root.
+        ctx_cmds = [c for c in ups_commands if "jig-context-check.sh" in c]
+        for c in ctx_cmds:
+            self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/", c)
+            self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", c)
 
 
 class MergeExistingSettingsTests(unittest.TestCase):

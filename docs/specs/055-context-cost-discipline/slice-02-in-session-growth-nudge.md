@@ -1,7 +1,7 @@
 ---
-status: READY_FOR_REVIEW
+status: DONE
 dependencies: [055-01]
-last_verified:
+last_verified: 2026-06-01
 ---
 
 ## Slice 055-02 — In-session context-growth nudge
@@ -50,20 +50,20 @@ turns with 1 reset, context climbing to 840K).
    so scaffolded target projects receive the nudge, not just the jig repo.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green.
-- [ ] Coverage via **synthetic transcript JSONL fixtures** fed to the hook
+- [x] All ACs pass; full test suite green. 1683 tests, OK (3 skipped).
+- [x] Coverage via **synthetic transcript JSONL fixtures** fed to the hook
       script (mirroring `test_jig_context_check.py`, per Clarification Q4):
       below-threshold ⇒ silent; first crossing of a band ⇒ exactly one nudge;
       re-firing of the same band ⇒ silent; **drop-then-reclimb ⇒ re-armed
       nudge**; crossing a higher band ⇒ nudge; no-assistant-turn / malformed
       transcript ⇒ silent (never throws, never blocks).
-- [ ] A scaffold-mode test asserts the `UserPromptSubmit` hook lands in the
+- [x] A scaffold-mode test asserts the `UserPromptSubmit` hook lands in the
       generated `settings.json`.
-- [ ] Reviewed by `reviewer` subagent; implementation review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Deviation log produced.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if decisions were deferred.
+- [x] Reviewed by `reviewer` subagent; implementation review passed.
+- [x] Craft (pr-review) pass run; blockers addressed (4 nits → 1 fixed, 2 documented, 1 cosmetic logged; none blocking).
+- [x] Deviation log produced.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if decisions were deferred (n/a — no formal deferrals).
 
 **Anti-horizontal-phasing check:** After this slice a developer in a long
 session — in the jig repo *or* a scaffolded project — is prompted to compact
@@ -71,6 +71,55 @@ or delegate *before* the context balloons, at the start of each turn.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated; thresholds/env-var names recorded in
-      the Notes column.
-- [ ] CLAUDE.md hygiene per spec 025-01 rule.
+- [x] `docs/specs/README.md` regenerated; env-var (`JIG_CONTEXT_GROWTH_WARN_PCT`)
+      + band design recorded in the Notes column.
+- [x] CLAUDE.md hygiene per spec 025-01 rule (n/a — 055-02 does not close the
+      spec; 055-03 / 055-04 remain).
+
+### Deviation log (after reconciliation)
+
+The spec above is preserved. Implementation notes:
+
+1. **What shipped.** Implemented via the `jig:implementer` subagent (strict
+   TDD). `jig-context-check.sh` now branches on `hook_event_name`:
+   `UserPromptSubmit` runs the new in-session growth nudge; `SessionStart` runs
+   the existing baseline check unchanged (pinned by
+   `SessionStartNoRegressionTests`). The growth logic lives as pure,
+   unit-tested functions in `hooks/scripts/lib/context_fill.py`
+   (`read_tail_cache_read_tokens`, `evaluate_growth`, `growth_nudge_for_turn`,
+   `growth_nudge_text`); the new env var is **`JIG_CONTEXT_GROWTH_WARN_PCT`**
+   (default 0.40, same out-of-range fallback as `JIG_CONTEXT_SOFT_WARN_PCT`).
+   Registered under `UserPromptSubmit` in `hooks/hooks.json`; scaffold
+   propagation is automatic via `scaffold.py`'s `_build_jig_hook_entries`
+   (asserted by a new scaffold-mode test). Suite: 1683 tests, OK (3 skipped).
+
+2. **Dogfooding note.** The implementation (~100K tokens) and all three review
+   passes ran in isolated subagents; the orchestrator kept only summaries.
+
+3. **Design resolution (spec Open questions).** The escalation bands are
+   **40 / 60 / 80%**; only the **first** band is configurable (via
+   `JIG_CONTEXT_GROWTH_WARN_PCT`) — 0.60 / 0.80 are fixed offsets. This
+   resolves the spec's "40/60/80 vs. a single threshold" + env-var-name open
+   questions. Recorded in the status-board Notes column per Close-out.
+
+4. **Review findings folded in** (compliance + craft both `pass`; evidence in
+   `reviews/slice-02-{compliance,craft}.md`):
+   - *Fixed (craft nit)* — removed the `0.40` duplication between
+     `DEFAULT_GROWTH_THRESHOLD` and `GROWTH_BANDS[0]` (now
+     `GROWTH_BANDS = (DEFAULT_GROWTH_THRESHOLD, 0.60, 0.80)`; value unchanged,
+     `test_growth_bands_are_40_60_80` still green).
+   - *Documented (craft nits)* — added an in-code note on the two
+     deferred-by-design choices: the per-session `$TMPDIR` state file is left
+     to the OS tmp-reaper (not self-cleaned), and the state read-modify-write
+     is unguarded but safe because `UserPromptSubmit` turns are serial within a
+     session.
+
+5. **Findings logged, not changed** (non-blocking): the nudge text's `:.0f`
+   rounding can read "~40% … past the 40% mark" just over a band (cosmetic).
+
+6. **Plan adherence / impact.** Followed the planned shape; the implementer
+   split the logic into `evaluate_growth` (pure) + `growth_nudge_for_turn`
+   (I/O) — within the spec's "(your call)" latitude. No conventions impact.
+   Architecture: a new hook *event* registration extending spec 026's
+   context-fill seam — no module-boundary or public-contract change, so no ADR
+   (consistent with `arch_review: false`). Inbox: nothing to park.

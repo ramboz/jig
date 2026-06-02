@@ -15,7 +15,19 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from context_fill import estimate, DEFAULT_WINDOW_BYTES, DEFAULT_THRESHOLD, RATIO
+from context_fill import (
+    estimate,
+    DEFAULT_WINDOW_BYTES,
+    DEFAULT_THRESHOLD,
+    RATIO,
+    DEFAULT_GROWTH_THRESHOLD,
+    GROWTH_BANDS,
+    token_window,
+    read_tail_cache_read_tokens,
+    evaluate_growth,
+    growth_nudge_for_turn,
+    growth_nudge_text,
+)
 
 
 class EstimateBasicsTests(unittest.TestCase):
@@ -238,6 +250,372 @@ class EstimatePurityTests(unittest.TestCase):
         for key in ("bytes", "est_tokens", "ratio", "threshold",
                     "breakdown", "window_bytes"):
             self.assertIn(key, result, f"missing key: {key}")
+
+
+# --------------------------------------------------------------------------
+# Slice 055-02 — in-session context-growth nudge. Pure-function surface:
+# token_window(), read_tail_cache_read_tokens(), evaluate_growth(), plus the
+# new JIG_CONTEXT_GROWTH_WARN_PCT default + bands. The state-file I/O lives in
+# the hook; these cover the testable math the hook delegates to.
+# --------------------------------------------------------------------------
+
+
+class GrowthDefaultsTests(unittest.TestCase):
+    """AC #3 — the growth threshold defaults to 0.40 (the dumb-zone line)
+    and the bands are 40 / 60 / 80%."""
+
+    def test_default_growth_threshold_is_40_percent(self):
+        self.assertEqual(DEFAULT_GROWTH_THRESHOLD, 0.40)
+
+    def test_growth_bands_are_40_60_80(self):
+        self.assertEqual(GROWTH_BANDS, (0.40, 0.60, 0.80))
+
+    def test_token_window_is_window_bytes_over_ratio(self):
+        """AC #3 — the token-window reuses JIG_CONTEXT_WINDOW_BYTES / RATIO,
+        so bands are fractions of the configurable window, not hardcoded
+        token counts."""
+        os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+        # Default: 800_000 bytes / 4 = 200_000 tokens.
+        self.assertEqual(token_window(), DEFAULT_WINDOW_BYTES // RATIO)
+        self.assertEqual(token_window(), 200_000)
+
+    def test_token_window_honors_window_bytes_env(self):
+        try:
+            os.environ["JIG_CONTEXT_WINDOW_BYTES"] = "4000"
+            self.assertEqual(token_window(), 1000)  # 4000 / 4
+        finally:
+            os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+
+class GrowthThresholdEnvTests(unittest.TestCase):
+    """AC #3 — JIG_CONTEXT_GROWTH_WARN_PCT mirrors the out-of-range fallback
+    behavior of JIG_CONTEXT_SOFT_WARN_PCT (fallback 0.40)."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("JIG_CONTEXT_GROWTH_WARN_PCT", None)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("JIG_CONTEXT_GROWTH_WARN_PCT", None)
+        else:
+            os.environ["JIG_CONTEXT_GROWTH_WARN_PCT"] = self._saved
+
+    def _bands_for(self):
+        """evaluate_growth reads the env each call; assert via the first
+        band returned for a tokens value just over the threshold."""
+        # window 100 tokens; tokens at the threshold → first band == threshold.
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        try:
+            decision = evaluate_growth(
+                cache_read_tokens=100, warned_bands=[],
+            )
+            return decision
+        finally:
+            os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+    def test_env_override_changes_first_band(self):
+        os.environ["JIG_CONTEXT_GROWTH_WARN_PCT"] = "0.50"
+        # 100-token window, 49 tokens = 49% → below a 0.50 first band.
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        try:
+            below = evaluate_growth(cache_read_tokens=49, warned_bands=[])
+            self.assertFalse(below["nudge"])
+            at = evaluate_growth(cache_read_tokens=50, warned_bands=[])
+            self.assertTrue(at["nudge"])
+        finally:
+            os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+    def test_out_of_range_env_falls_back_to_040(self):
+        os.environ["JIG_CONTEXT_GROWTH_WARN_PCT"] = "40"  # percent, not fraction
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        try:
+            # Falls back to 0.40 → 39 tokens silent, 40 tokens nudges.
+            below = evaluate_growth(cache_read_tokens=39, warned_bands=[])
+            self.assertFalse(below["nudge"])
+            at = evaluate_growth(cache_read_tokens=40, warned_bands=[])
+            self.assertTrue(at["nudge"])
+        finally:
+            os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+    def test_non_numeric_env_falls_back_to_040(self):
+        os.environ["JIG_CONTEXT_GROWTH_WARN_PCT"] = "lots"
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        try:
+            at = evaluate_growth(cache_read_tokens=40, warned_bands=[])
+            self.assertTrue(at["nudge"])
+        finally:
+            os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+
+class EvaluateGrowthBandTests(unittest.TestCase):
+    """AC #4 — at most one nudge per band, re-arm on drop. evaluate_growth is
+    pure: it takes the current cache_read tokens + the prior warned-band list
+    and returns {nudge, band, warned_bands} (the next state)."""
+
+    def setUp(self):
+        # Pin a tidy 100-token window so band fractions map to round numbers:
+        # 40 tokens = 40%, 60 = 60%, 80 = 80%.
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        os.environ.pop("JIG_CONTEXT_GROWTH_WARN_PCT", None)
+
+    def tearDown(self):
+        os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+    def test_below_first_band_is_silent(self):
+        d = evaluate_growth(cache_read_tokens=39, warned_bands=[])
+        self.assertFalse(d["nudge"])
+        self.assertEqual(d["warned_bands"], [])
+
+    def test_first_crossing_nudges_once(self):
+        d = evaluate_growth(cache_read_tokens=45, warned_bands=[])
+        self.assertTrue(d["nudge"])
+        self.assertAlmostEqual(d["band"], 0.40, places=4)
+        # 0.40 band now recorded as warned.
+        self.assertIn(0.40, d["warned_bands"])
+
+    def test_recrossing_same_band_is_silent(self):
+        # Already warned the 0.40 band; still in [40, 60) → silent.
+        d = evaluate_growth(cache_read_tokens=55, warned_bands=[0.40])
+        self.assertFalse(d["nudge"])
+        # Still recorded.
+        self.assertIn(0.40, d["warned_bands"])
+
+    def test_higher_band_nudges_again(self):
+        # Warned 0.40; now at 60% → 0.60 band newly crossed.
+        d = evaluate_growth(cache_read_tokens=65, warned_bands=[0.40])
+        self.assertTrue(d["nudge"])
+        self.assertAlmostEqual(d["band"], 0.60, places=4)
+        self.assertIn(0.60, d["warned_bands"])
+        self.assertIn(0.40, d["warned_bands"])
+
+    def test_jump_straight_to_top_band_nudges(self):
+        # No prior warnings; jump to 85% → nudges, reports the top band (0.80).
+        d = evaluate_growth(cache_read_tokens=85, warned_bands=[])
+        self.assertTrue(d["nudge"])
+        self.assertAlmostEqual(d["band"], 0.80, places=4)
+        # All crossed bands recorded so re-crossing stays silent.
+        for b in (0.40, 0.60, 0.80):
+            self.assertIn(b, d["warned_bands"])
+
+    def test_drop_below_band_rearms(self):
+        # Warned 0.40 + 0.60; estimate drops to 30% (e.g. after /compact).
+        d = evaluate_growth(cache_read_tokens=30, warned_bands=[0.40, 0.60])
+        self.assertFalse(d["nudge"])
+        # Both bands re-armed (cleared), because 30% is below both.
+        self.assertNotIn(0.40, d["warned_bands"])
+        self.assertNotIn(0.60, d["warned_bands"])
+
+    def test_drop_then_reclimb_nudges_again(self):
+        # Step 1: climb to 45% → nudge, warned {0.40}.
+        d1 = evaluate_growth(cache_read_tokens=45, warned_bands=[])
+        self.assertTrue(d1["nudge"])
+        # Step 2: drop to 30% (compact) → silent, re-arm.
+        d2 = evaluate_growth(cache_read_tokens=30, warned_bands=d1["warned_bands"])
+        self.assertFalse(d2["nudge"])
+        # Step 3: reclimb to 45% → nudges AGAIN (band re-armed).
+        d3 = evaluate_growth(cache_read_tokens=45, warned_bands=d2["warned_bands"])
+        self.assertTrue(d3["nudge"])
+        self.assertAlmostEqual(d3["band"], 0.40, places=4)
+
+    def test_partial_drop_rearms_only_crossed_band(self):
+        # Warned 0.40 + 0.60; drop to 50% → below 0.60 (re-arm) but still
+        # at/above 0.40 (stays warned, no new nudge).
+        d = evaluate_growth(cache_read_tokens=50, warned_bands=[0.40, 0.60])
+        self.assertFalse(d["nudge"])
+        self.assertIn(0.40, d["warned_bands"])
+        self.assertNotIn(0.60, d["warned_bands"])
+
+    def test_zero_tokens_is_silent(self):
+        d = evaluate_growth(cache_read_tokens=0, warned_bands=[])
+        self.assertFalse(d["nudge"])
+
+    def test_none_tokens_is_silent(self):
+        """No assistant turn yet → cache_read_tokens is None → silent."""
+        d = evaluate_growth(cache_read_tokens=None, warned_bands=[])
+        self.assertFalse(d["nudge"])
+        self.assertEqual(d["warned_bands"], [])
+
+
+class ReadTailTests(unittest.TestCase):
+    """AC #2 / AC #5 — read_tail_cache_read_tokens reads the last assistant
+    record's cache_read_input_tokens from the transcript tail, and returns
+    None (never raises) for missing / empty / malformed inputs."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-tail-")
+        self.root = Path(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_jsonl(self, name, records):
+        import json as _json
+        path = self.root / name
+        path.write_text("\n".join(_json.dumps(r) for r in records) + "\n")
+        return path
+
+    def _assistant(self, cache_read):
+        return {
+            "type": "assistant",
+            "message": {"usage": {"cache_read_input_tokens": cache_read}},
+        }
+
+    def test_reads_last_assistant_cache_read(self):
+        path = self._write_jsonl("t.jsonl", [
+            {"type": "user", "message": {"role": "user"}},
+            self._assistant(1000),
+            {"type": "user", "message": {"role": "user"}},
+            self._assistant(50_000),
+        ])
+        self.assertEqual(read_tail_cache_read_tokens(path), 50_000)
+
+    def test_skips_trailing_non_assistant_records(self):
+        """The tail may end with user / tool-result records; the function
+        walks back to the last assistant usage."""
+        path = self._write_jsonl("t.jsonl", [
+            self._assistant(77_000),
+            {"type": "user", "message": {"role": "user"}},
+            {"type": "system", "subtype": "info"},
+        ])
+        self.assertEqual(read_tail_cache_read_tokens(path), 77_000)
+
+    def test_missing_file_returns_none(self):
+        self.assertIsNone(
+            read_tail_cache_read_tokens(self.root / "does-not-exist.jsonl")
+        )
+
+    def test_none_path_returns_none(self):
+        self.assertIsNone(read_tail_cache_read_tokens(None))
+
+    def test_empty_file_returns_none(self):
+        path = self.root / "empty.jsonl"
+        path.write_text("")
+        self.assertIsNone(read_tail_cache_read_tokens(path))
+
+    def test_no_assistant_record_returns_none(self):
+        path = self._write_jsonl("t.jsonl", [
+            {"type": "user", "message": {"role": "user"}},
+            {"type": "user", "message": {"role": "user"}},
+        ])
+        self.assertIsNone(read_tail_cache_read_tokens(path))
+
+    def test_malformed_lines_do_not_raise(self):
+        path = self.root / "bad.jsonl"
+        path.write_text("{not json\n" + "also not json\n")
+        # No assistant record parseable → None, no exception.
+        self.assertIsNone(read_tail_cache_read_tokens(path))
+
+    def test_malformed_tail_then_valid_assistant(self):
+        """A corrupt final line must not mask an earlier valid assistant
+        record reachable from the tail."""
+        import json as _json
+        good = _json.dumps(self._assistant(42_000))
+        path = self.root / "mixed.jsonl"
+        path.write_text(good + "\n" + "{garbage\n")
+        self.assertEqual(read_tail_cache_read_tokens(path), 42_000)
+
+    def test_assistant_without_usage_is_skipped(self):
+        path = self._write_jsonl("t.jsonl", [
+            self._assistant(33_000),
+            {"type": "assistant", "message": {}},  # no usage
+        ])
+        # Walks back past the usage-less record to the real one.
+        self.assertEqual(read_tail_cache_read_tokens(path), 33_000)
+
+
+class GrowthNudgeTextTests(unittest.TestCase):
+    """AC #1 / AC #6 — the nudge body recommends /compact or delegation and
+    points at the workflow.md discipline section."""
+
+    def test_text_mentions_compact_and_delegation(self):
+        text = growth_nudge_text(0.40, 0.45)
+        self.assertIn("/compact", text)
+        self.assertIn("delegat", text.lower())
+
+    def test_text_references_workflow_section(self):
+        text = growth_nudge_text(0.60, 0.65)
+        self.assertIn("Context-cost discipline", text)
+        self.assertIn("docs/workflow.md", text)
+
+
+class GrowthNudgeForTurnTests(unittest.TestCase):
+    """The hook's orchestration helper: tail-read → state → evaluate →
+    persist. Pins the per-band rate-limit + re-arm via a real state dir,
+    matching what the shell calls (slice 055-02)."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-growth-turn-"))
+        self.state = self.base / "state"
+        self.state.mkdir()
+        # 100-token window.
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        os.environ.pop("JIG_CONTEXT_GROWTH_WARN_PCT", None)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+        os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+
+    def _transcript(self, value, name="t.jsonl"):
+        import json as _json
+        path = self.base / name
+        rec = {"type": "assistant",
+               "message": {"usage": {"cache_read_input_tokens": value}}}
+        path.write_text(_json.dumps(rec) + "\n")
+        return path
+
+    def test_below_threshold_returns_none(self):
+        path = self._transcript(30)
+        self.assertIsNone(
+            growth_nudge_for_turn(path, "s", self.state)
+        )
+
+    def test_first_crossing_returns_text(self):
+        path = self._transcript(45)
+        out = growth_nudge_for_turn(path, "s", self.state)
+        self.assertIsNotNone(out)
+        self.assertIn("/compact", out)
+
+    def test_second_call_same_band_returns_none(self):
+        p1 = self._transcript(45, "a.jsonl")
+        self.assertIsNotNone(growth_nudge_for_turn(p1, "sess", self.state))
+        p2 = self._transcript(50, "b.jsonl")
+        self.assertIsNone(growth_nudge_for_turn(p2, "sess", self.state),
+                          "same band must stay silent across calls")
+
+    def test_drop_then_reclimb_rearms(self):
+        p1 = self._transcript(45, "a.jsonl")
+        self.assertIsNotNone(growth_nudge_for_turn(p1, "sess", self.state))
+        p2 = self._transcript(20, "b.jsonl")  # /compact
+        self.assertIsNone(growth_nudge_for_turn(p2, "sess", self.state))
+        p3 = self._transcript(45, "c.jsonl")  # re-climb
+        self.assertIsNotNone(growth_nudge_for_turn(p3, "sess", self.state),
+                             "re-armed band must nudge again")
+
+    def test_state_isolated_per_session(self):
+        # Session A warns; session B starts fresh and also warns.
+        a = self._transcript(45, "a.jsonl")
+        b = self._transcript(45, "b.jsonl")
+        self.assertIsNotNone(growth_nudge_for_turn(a, "A", self.state))
+        self.assertIsNotNone(growth_nudge_for_turn(b, "B", self.state))
+
+    def test_missing_transcript_returns_none(self):
+        self.assertIsNone(
+            growth_nudge_for_turn(self.base / "nope.jsonl", "s", self.state)
+        )
+
+    def test_never_raises_on_bad_state_dir(self):
+        # state_dir under a path component that is a file → write fails;
+        # helper must still return the nudge (write is best-effort) and
+        # never raise.
+        blocker = self.base / "afile"
+        blocker.write_text("x")
+        bad_state = blocker / "subdir"  # parent is a file
+        path = self._transcript(45)
+        # Should not raise; returns the nudge (state just isn't persisted).
+        out = growth_nudge_for_turn(path, "s", bad_state)
+        self.assertIsNotNone(out)
 
 
 if __name__ == "__main__":
