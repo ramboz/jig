@@ -79,6 +79,11 @@ the dispatch automatically.
 
 ## Installation
 
+> **New to jig?** Read the
+> [adoption & readiness guide](docs/adoption-readiness.md) first — who jig
+> is for, who shouldn't adopt it yet, the prerequisites + a readiness
+> checklist, how to choose an install shape, and your first 30 minutes.
+
 jig ships in two install shapes. Both are served from the same repo;
 pick the one that matches how you intend to relate to the machinery.
 
@@ -182,8 +187,53 @@ enforces conventional-commit shape on PR titles
 (`feat(scope): …` / `fix(scope): …` / etc.). See CONTRIBUTING.md
 "Releasing" for the version-bump effect of each prefix.
 
-## Status
+## Status & roadmap
 
-Tier 0 skills are in spec/draft phase. First implementation slice: `001-01 greenfield-scaffold`.
+Tier 0 and Tier 1 are effectively complete — all 14 skills, 3 subagents,
+and the jig hooks ship today, and jig is dogfooded on its own spec
+lifecycle. For live, per-slice state see the
+[status board](docs/specs/README.md).
 
-Check [docs/specs/README.md](docs/specs/README.md) for the current status board.
+**Supported today:** Claude Code in both install shapes — scaffold mode
+(default; machinery copied into your `.claude/`) and plugin mode. Tier
+gating is real: `scaffold-init` copies only the tiers it records in
+`scaffold.json` (spec 038).
+
+**Planned / deferred:** Codex scaffold + plugin packaging, driven by user
+signal (spec 033). One honesty note on a promise jig does *not* make:
+reviewer isolation is **prompt- and tool-scoped** (a fresh, self-contained
+prompt + read-only tools), **not** a hard sandbox — see
+[docs/workflow.md](docs/workflow.md#post-implementation-review).
+
+### Gap-response map
+
+A 2026-05 comparison against other AI-native playbooks — refreshed by a
+2026-06-01 re-review — surfaced a set of gaps. Each is either addressed in
+the current docs/machinery or delegated to an owner spec. This table is the
+triage, so future readers don't have to rediscover it:
+
+| Gap | Status | Owner |
+|---|---|---|
+| Stale first-read status | This spec | [slice 048-01](docs/specs/048-guidelines-gap-response/slice-01-first-read-status-and-gap-map.md) |
+| Adoption / readiness guidance | This spec | [slice 048-02](docs/specs/048-guidelines-gap-response/slice-02-adoption-readiness-guide.md) + [048-03](docs/specs/048-guidelines-gap-response/slice-03-scaffolded-onboarding-handoff.md) |
+| Amendment readability | This spec | [slice 048-04](docs/specs/048-guidelines-gap-response/slice-04-amendment-effective-state-digest.md) |
+| Tier truth (real copy gates) | Landed | [spec 038](docs/specs/038-tier-reconciliation/spec.md) |
+| Reviewer-isolation honesty | Landed | [spec 040](docs/specs/040-isolation-honesty/spec.md) |
+| Security & secrets floor (MUST-rules / `.gitignore` / secret-scan / permission deny-rules) | Planned | [spec 052](docs/specs/052-security-scaffold/spec.md) |
+| Cross-tool portability (Codex / `AGENTS.md`) | Planned | [spec 033](docs/specs/033-host-adapter-portability/spec.md) |
+| Scaffold artifact fidelity | Planned | [spec 046](docs/specs/046-scaffold-artifact-fidelity/spec.md) |
+| Install-contract verification | Planned | [spec 047](docs/specs/047-install-contract-verification/spec.md) |
+| Review-lifecycle evidence + gates | Planned | [spec 045](docs/specs/045-review-lifecycle-gates/spec.md) |
+
+Legend: **Landed** = already in `main`; **This spec** = delivered by spec
+048 (the one you're reading about — check the
+[status board](docs/specs/README.md) for which of its slices have landed
+vs. are still in flight); **Planned** = a separate spec that moves on user
+signal.
+
+The 2026-06-01 re-review surfaced further net-new gaps routed out of this
+spec — AI-usage disclosure in PR bodies, baseline-alignment depth,
+operating-mode framing, model-routing guidance, config-evolution discipline,
+and ADR-template parity. To keep this first-read surface lean they aren't
+all listed above; each is routed to an owner in spec 048's full
+[gap inventory](docs/specs/048-guidelines-gap-response/spec.md#gap-inventory-routed).

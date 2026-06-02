@@ -312,3 +312,31 @@ Diagnosed 2026-06-01: a freshly scaffolded project skipped the workflow + auto-a
 
 ## Stale plugin install drifts behind the repo (re-creates removed artifacts)
 During the 048 dogfood, the jig:implementer subagent ran from the PLUGIN-INSTALLED copy (~/.claude/plugins/.../jig), which was an older pre-spec-039 version: it wrote .claude/review-queue.json, the transient handoff file spec 039 removed. The worktree repo's agents/implementer.md (post-039) only reports deliverable paths. Result: test_stale_review_queue_file_removed failed until the file was deleted. Gotcha: when dogfooding jig-on-jig in a worktree while the plugin install lags the repo, removed behaviors can reappear via the stale installed agents/hooks/skills. Fix: reinstall/update the local jig plugin to resync; or run helpers from the repo, not the install. Plausibly contributed to the original 'felt unwired' report.
+
+## Markdown scanners must strip fenced code blocks — docs that document a marker match their own examples
+Surfaced in slice 048-04 (amendment digest). A scanner that greps `docs/` for a `## Amendments` heading also matches the *illustrative* example that ADR-0008 documents inside a fenced code block (`adr-0008-closed-spec-drift-policy.md` lines 96-108: a `markdown` fence whose caption reads "the above is what a `## Amendments` block on spec 016 would look like"). The first cut of `workflow.py amendments` did exactly this and false-positived ADR-0008 as carrying spec 016's "Hook count: five → seven" override — when only spec 016 has a real amendment. The unit tests missed it because the fixture wrote a *non-fenced* amendment block.
+
+**Fix:** strip fenced code blocks before scanning (`_strip_code_fences` in `skills/spec-workflow/workflow.py` — a DOTALL+MULTILINE regex that removes each fence-open-to-fence-close region), and add a fixture whose `## Amendments` lives inside a fence and must be ignored (`test_ignores_fenced_amendments_example`).
+
+**Generalizable rule:** any tool that greps jig's own markdown for a structural marker (`## Amendments`, `### YYYY-MM-DD —`, status markers) will eventually hit a doc that *documents that marker's format* in a code fence. Strip fences first, or scope the scan to the artifact classes that legitimately carry the marker. The existing `scripts/test_closed_spec_drift_sweep.py` regexes dodge this because they are line-anchored AND run against a fixed file allowlist — a free-roaming scanner has neither guard.
+
+**Why the compliance pass caught it and craft didn't:** the compliance reviewer ran the digest against the *real repo* and read ADR-0008; the craft reviewer validated the parsing logic in isolation against synthetic fixtures. Running new read-only tooling against the live tree (not just fixtures) is a cheap, high-signal review step for any scanner/report.
+
+Provenance: slice 048-04 compliance review (jig:reviewer), 2026-06-01.
+
+## Scaffold doc templates render into two install shapes — `${CLAUDE_PLUGIN_ROOT}` paths break in scaffold mode
+The `templates/docs/*.md.template` + `CLAUDE.md.template` files render for BOTH
+install shapes: `--plugin-only` (machinery stays under the plugin root) and the
+default in-repo scaffold (machinery copied to `.claude/skills/jig-*`). A
+`${CLAUDE_PLUGIN_ROOT}/skills/<name>/...` command path in a doc template is correct
+for plugin-only but **silently broken in a scaffolded project** — the env var is
+unset there and the helper actually lives at `.claude/skills/jig-<name>/...`. A real
+scaffold verification (2026-05-27) found the documented stocktake command failing for
+exactly this reason; slice 046-01 was the fix. **Fix pattern:** don't hard-code either
+shape into the template — render normally, then in scaffold mode apply the SAME
+`_rewrite_skill_md_paths` transform SKILL.md bodies already get, gated on
+`with_machinery` (`copy_template(..., post_render=...)`); plugin-only passes `None`
+and keeps the plugin-root path. **Generalizable lesson:** any new `${CLAUDE_PLUGIN_ROOT}`
+reference added to an adopter-facing doc template must survive the scaffold-mode rewrite
+(or be install-shape-aware), and generated docs should be tested by *running* the commands
+they document inside a temp scaffold, not just asserting on strings.

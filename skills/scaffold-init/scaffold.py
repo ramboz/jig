@@ -25,9 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
 
 
-# Schema version for scaffold.json
-JIG_VERSION = "0.1.0"
-
 # Tier 0 always installs. Tier 1 is gated on test signals (per Spike 001a:
 # "default for most projects" = "most projects have tests, so most install tier-1").
 # Tier 2 is offered, never auto-installed.
@@ -90,6 +87,46 @@ def plugin_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+class PluginManifestError(RuntimeError):
+    """Raised when `.claude-plugin/plugin.json` cannot yield a release version
+    (absent, malformed JSON, or missing/empty `version`). Slice 046-02 reads
+    the scaffold's recorded `jig_version` from this manifest — the single
+    source of truth — so a bad manifest must fail loudly rather than let
+    scaffold output record an invented version."""
+
+
+def _read_plugin_version(plugin: Path) -> str:
+    """Return the release version from `plugin/.claude-plugin/plugin.json`.
+
+    This is the canonical source for `scaffold.json.jig_version` (spec 046,
+    AC #1) — no production code hard-codes the release version. Raises
+    `PluginManifestError`, naming the manifest path and the problem, when the
+    manifest is absent, is malformed JSON, or lacks a non-empty `version`.
+    Callers read this before the first scaffold file write so a bad manifest
+    fails fast and leaves no partial scaffold (AC #3)."""
+    manifest_path = plugin / ".claude-plugin" / "plugin.json"
+    try:
+        raw = manifest_path.read_text()
+    except FileNotFoundError as exc:
+        raise PluginManifestError(
+            f"plugin manifest not found: {manifest_path} — cannot derive the "
+            "jig version for scaffold metadata."
+        ) from exc
+    try:
+        manifest = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise PluginManifestError(
+            f"plugin manifest {manifest_path} is not valid JSON: {exc}"
+        ) from exc
+    version = manifest.get("version")
+    if not version:
+        raise PluginManifestError(
+            f"plugin manifest {manifest_path} has no non-empty 'version' "
+            "field — cannot derive the jig version for scaffold metadata."
+        )
+    return version
+
+
 class UnrenderedPlaceholderError(RuntimeError):
     """Raised when a template contains placeholders no substitution covered."""
 
@@ -108,10 +145,23 @@ def render(template_text: str, substitutions: dict) -> str:
     return out
 
 
-def copy_template(src: Path, dst: Path, substitutions: dict) -> None:
-    """Read a `.template` file, render placeholders, write to dst."""
+def copy_template(src: Path, dst: Path, substitutions: dict,
+                  post_render=None) -> None:
+    """Read a `.template` file, render `{{KEY}}` placeholders, write to dst.
+
+    `post_render` (slice 046-01) is an optional `str -> str` transform
+    applied to the rendered body before writing. The greenfield in-repo
+    scaffold passes `_rewrite_skill_md_paths` here so documented
+    `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` helper paths become the copied
+    `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/` paths — the same
+    rewrite SKILL.md bodies already get, now applied to rendered docs so
+    the commands they document actually run inside the scaffolded target.
+    `--plugin-only` passes `None` (no rewrite — the plugin-root path is
+    correct when machinery is NOT copied locally)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     rendered = render(src.read_text(), substitutions)
+    if post_render is not None:
+        rendered = post_render(rendered)
     atomic_write_text(dst, rendered)
 
 
@@ -1047,14 +1097,28 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     project_name = target.name
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Slice 046-02: derive the version from the plugin manifest (single
+    # source of truth) here — before the first file write below — so a
+    # missing/malformed manifest fails fast and leaves no partial scaffold.
+    jig_version = _read_plugin_version(plugin)
     subs = {
         "PROJECT_NAME": project_name,
-        "JIG_VERSION": JIG_VERSION,
+        "JIG_VERSION": jig_version,
         "TIMESTAMP": timestamp,
     }
 
+    # Slice 046-01: in scaffold (in-repo) mode the runtime machinery is
+    # copied to `target/.claude/skills/jig-*`, so rendered docs must point
+    # at THOSE paths, not `${CLAUDE_PLUGIN_ROOT}/skills/...` (the env var is
+    # unset in a scaffolded project). Reuse the exact transform SKILL.md
+    # bodies already get (`_rewrite_skill_md_paths`). In `--plugin-only`
+    # mode the machinery stays under the plugin root, so the plugin-root
+    # path is correct and we pass no transform (None = leave docs verbatim).
+    doc_rewrite = _rewrite_skill_md_paths if with_machinery else None
+
     # 1. CLAUDE.md from the top-level template
-    copy_template(template_root / "CLAUDE.md.template", target / "CLAUDE.md", subs)
+    copy_template(template_root / "CLAUDE.md.template", target / "CLAUDE.md",
+                  subs, post_render=doc_rewrite)
 
     # 2. docs/ structure from templates/docs/*.md.template (recursive).
     # people.md is conditional — generated only when team is detected.
@@ -1071,7 +1135,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         if dst_name.name == "people.md" and not signals.is_team:
             continue
         dst = target / "docs" / dst_name
-        copy_template(src, dst, subs)
+        copy_template(src, dst, subs, post_render=doc_rewrite)
 
     # 2b. Slice 048-05: emit the seed reference spec (001-adopt-jig +
     # 002-first-spec stub + populated status board) into a greenfield

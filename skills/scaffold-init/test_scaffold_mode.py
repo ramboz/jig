@@ -428,6 +428,7 @@ EXPECTED_HOOK_SCRIPTS = (
     "jig-context-check.sh",
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
+    "jig-skill-trace.sh",
     "jig-spec-gate.sh",
     "jig-task-capture.sh",
     "jig-telemetry.sh",
@@ -1315,6 +1316,265 @@ class TierGatedCopyTests(unittest.TestCase):
         copy_all = Path(self.tmpdir) / "u-all"
         scaffold_mod._copy_skills_and_agents(plugin, copy_all, None)
         self.assertIn("totally-unmapped", self._on_disk_skills(copy_all))
+
+
+# --------------------------------------------------------------------------
+# Slice 046-01 — scaffold-doc-command-rendering. Generated docs must
+# contain commands, links, and skill names that work *inside* the
+# scaffolded target, not the source plugin checkout. Four ACs:
+#   AC1 — the documented stocktake command runs from the scaffold target.
+#   AC2 — generated relative links in core docs resolve in the target tree.
+#   AC3 — generated skill names are current (/jig:vision-elicitation, no
+#         stale alias, no future-tense for already-landed work).
+#   AC4 — ${CLAUDE_PLUGIN_ROOT} appears as a command path only in
+#         plugin-mode artifacts, not in a default (in-repo) scaffold.
+# --------------------------------------------------------------------------
+
+
+# Core generated docs an AC2/AC4 walker inspects. Relative to the target
+# root. These are the install-shape-facing docs a fresh adopter reads
+# first; the seed spec tree links only intra-seed and is covered by its
+# own greenfield emission.
+_CORE_DOCS = (
+    "CLAUDE.md",
+    "docs/workflow.md",
+    "docs/architecture.md",
+    "docs/conventions.md",
+    "docs/product-vision.md",
+)
+
+# A code-fence-embedded `python3 .../stocktake.py .` invocation. Captures
+# the helper path so AC1 can substitute ${CLAUDE_PROJECT_DIR} and run it.
+_STOCKTAKE_CMD_RE = re.compile(
+    r"^(python3\s+\S*stocktake\.py\s+\.)\s*$", re.MULTILINE
+)
+
+# Markdown inline link target: the `(...)` of `[text](target)`. We then
+# filter out external / anchor-only targets in the walker itself.
+_MD_LINK_RE = re.compile(r"\]\(([^)]+)\)")
+
+# Precise stale-alias probe. `/jig:vision-elicitation` CONTAINS the
+# substring `/jig:vision-elicit`, so a naive `in` check false-positives on
+# the correct name. The negative-lookahead asserts "the alias NOT followed
+# by `ation`" — i.e. the genuinely-stale short form only.
+_STALE_VISION_ALIAS_RE = re.compile(r"/jig:vision-elicit(?!ation)")
+
+
+def _scaffolded_links(doc_path: Path, target: Path):
+    """Yield (raw_target, resolved_path) for every *local* Markdown link in
+    `doc_path`. Skips http(s)://, mailto:, and pure `#anchor` links, and
+    strips any `#fragment` suffix before resolving. Links resolve against
+    the containing doc's directory (standard Markdown semantics)."""
+    text = doc_path.read_text()
+    for raw in _MD_LINK_RE.findall(text):
+        raw = raw.strip()
+        if (
+            raw.startswith("http://")
+            or raw.startswith("https://")
+            or raw.startswith("mailto:")
+            or raw.startswith("#")
+        ):
+            continue
+        # Drop a trailing #fragment (anchor into a file).
+        path_part = raw.split("#", 1)[0]
+        if not path_part:
+            continue
+        resolved = (doc_path.parent / path_part).resolve()
+        yield raw, resolved
+
+
+class ScaffoldDocStocktakeCommandTests(unittest.TestCase):
+    """AC1 — the stocktake command documented in the generated workflow doc
+    points at the copied helper and exits 0 from the scaffold target."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-stocktake-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        # Default (in-repo) scaffold — machinery copied to .claude/skills.
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_documented_stocktake_command_runs_from_target(self):
+        """AC1 — parse the stocktake command out of docs/workflow.md, resolve
+        ${CLAUDE_PROJECT_DIR} to the target, run it, and assert exit 0."""
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+        m = _STOCKTAKE_CMD_RE.search(workflow)
+        self.assertIsNotNone(
+            m,
+            "generated docs/workflow.md has no `python3 .../stocktake.py .` "
+            f"command line:\n{workflow}",
+        )
+        command = m.group(1)
+        # The documented command must NOT depend on ${CLAUDE_PLUGIN_ROOT},
+        # which is unset in a scaffolded project.
+        self.assertNotIn(
+            "${CLAUDE_PLUGIN_ROOT}", command,
+            "stocktake command still references ${CLAUDE_PLUGIN_ROOT}, which "
+            "is unset in a scaffolded project",
+        )
+        # Resolve the project-dir placeholder the way Claude Code would.
+        runnable = command.replace("${CLAUDE_PROJECT_DIR}", str(self.target))
+        parts = runnable.split()
+        # Swap the leading `python3` for the test interpreter for portability.
+        parts[0] = sys.executable
+        r = subprocess.run(parts, capture_output=True, text=True,
+                            cwd=str(self.target))
+        self.assertEqual(
+            r.returncode, 0,
+            f"documented stocktake command failed: {runnable!r}\n"
+            f"stdout={r.stdout}\nstderr={r.stderr}",
+        )
+
+    def test_workflow_doc_points_at_local_helper_path(self):
+        """AC1 — the generated doc documents the copied
+        .claude/skills/jig-scaffold-init/stocktake.py path, not the
+        plugin-root path."""
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+        self.assertIn(
+            ".claude/skills/jig-scaffold-init/stocktake.py", workflow,
+            "workflow.md should document the copied local helper path",
+        )
+        self.assertNotIn(
+            "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/stocktake.py",
+            workflow,
+            "workflow.md must not document the plugin-root stocktake path "
+            "in a scaffolded (in-repo) project",
+        )
+
+
+class ScaffoldDocLinksResolveTests(unittest.TestCase):
+    """AC2 — every relative Markdown link in the generated core docs
+    resolves to a real path in the scaffolded tree. Catches the old
+    `../../skills/contracts/SKILL.md` source-tree-only regression."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-links-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_relative_links_in_core_docs_resolve(self):
+        """AC2 — walk Markdown links across the core docs and report every
+        local target that does not exist in the scaffolded tree."""
+        missing = []
+        for rel in _CORE_DOCS:
+            doc = self.target / rel
+            self.assertTrue(doc.is_file(), f"core doc not generated: {doc}")
+            for raw, resolved in _scaffolded_links(doc, self.target):
+                if not resolved.exists():
+                    missing.append(f"{rel} -> {raw} (resolved: {resolved})")
+        self.assertEqual(
+            missing, [],
+            "generated core docs contain relative links that do not resolve "
+            "in the scaffolded tree:\n  " + "\n  ".join(missing),
+        )
+
+
+class ScaffoldDocSkillNamesCurrentTests(unittest.TestCase):
+    """AC3 — generated CLAUDE.md uses the current /jig:vision-elicitation
+    name, never the stale /jig:vision-elicit alias, and does not describe
+    already-landed work as future."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-names-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_claude_md_uses_current_vision_skill_name(self):
+        """AC3 — CLAUDE.md mentions /jig:vision-elicitation and not the
+        stale alias (precise negative-lookahead check — the correct name
+        contains the alias as a substring)."""
+        claude_md = (self.target / "CLAUDE.md").read_text()
+        self.assertIn(
+            "/jig:vision-elicitation", claude_md,
+            "CLAUDE.md should reference the current /jig:vision-elicitation "
+            "skill name",
+        )
+        stale = _STALE_VISION_ALIAS_RE.findall(claude_md)
+        self.assertEqual(
+            stale, [],
+            "CLAUDE.md still contains the stale /jig:vision-elicit alias "
+            f"(matches: {stale})",
+        )
+
+    def test_claude_md_has_no_future_tense_for_landed_work(self):
+        """AC3 — CLAUDE.md must not describe the (already-shipped)
+        vision-elicitation skill with a "once spec 017-02 ships"-style
+        future reference."""
+        claude_md = (self.target / "CLAUDE.md").read_text()
+        self.assertNotIn(
+            "once spec 017-02 ships", claude_md,
+            "CLAUDE.md describes already-landed work as future "
+            "('once spec 017-02 ships')",
+        )
+
+
+class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
+    """AC4 — ${CLAUDE_PLUGIN_ROOT} is install-shape-aware: absent as a
+    command path in a default (in-repo) scaffold, preserved under
+    --plugin-only (where the plugin root IS the correct location)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-shape-")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _scaffold(self, *args):
+        target = Path(self.tmpdir) / ("p-" + ("-".join(a.strip("-") for a in args) or "default"))
+        target.mkdir()
+        r = run_scaffold_with_args(target, *args)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        return target
+
+    def test_in_repo_scaffold_has_no_plugin_root_command_path(self):
+        """AC4 — no generated core doc uses ${CLAUDE_PLUGIN_ROOT}/skills/
+        as a command path in a default (in-repo) scaffold."""
+        target = self._scaffold()
+        offenders = []
+        for rel in _CORE_DOCS:
+            doc = target / rel
+            if not doc.is_file():
+                continue
+            if "${CLAUDE_PLUGIN_ROOT}/skills/" in doc.read_text():
+                offenders.append(rel)
+        self.assertEqual(
+            offenders, [],
+            "default (in-repo) scaffold leaks ${CLAUDE_PLUGIN_ROOT}/skills/ "
+            f"command paths in: {offenders}",
+        )
+
+    def test_plugin_only_scaffold_preserves_plugin_root_path(self):
+        """AC4 companion — under --plugin-only the rewrite is correctly
+        NOT applied: the workflow doc keeps the ${CLAUDE_PLUGIN_ROOT}
+        stocktake path, since the helper genuinely lives under the plugin
+        root in that install shape. Proves the rewrite is mode-gated, not
+        unconditional."""
+        target = self._scaffold("--plugin-only")
+        workflow = (target / "docs" / "workflow.md").read_text()
+        self.assertIn(
+            "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/stocktake.py",
+            workflow,
+            "--plugin-only scaffold should preserve the plugin-root "
+            "stocktake path (the rewrite must be mode-gated)",
+        )
 
 
 if __name__ == "__main__":

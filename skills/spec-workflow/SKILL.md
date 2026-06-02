@@ -170,13 +170,16 @@ The orchestrator runs the passes in this order:
 
 2. **Craft pass — `pr-review`** (always). After the compliance pass
    returns, build the craft-pass prompt with `review.py pr-review` and
-   spawn a second `reviewer`-shaped subagent. The prompt instructs the
-   reviewer to apply the four-bucket craft concerns (scope / blockers /
-   nits / strengths) from the most-specific `pr-review` SKILL.md
-   reachable in the environment — Claude's skill router resolves
-   user > project > `jig:pr-review` precedence via the skill description
-   hints, so the orchestrator does NOT do filesystem detection. The
-   pass returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
+   spawn a second `reviewer`-shaped subagent. The reviewer is read-only
+   (Read/Glob/Grep, **no `Skill` tool**), so it cannot route to a skill
+   via Claude's skill router; instead `review.py` detects a user-installed
+   `pr-review` skill on disk (`~/.claude/skills/pr-review/`) and the prompt
+   points the reviewer at that concrete path to read-and-apply, falling
+   back to jig's inlined baseline buckets (scope / blockers / nits /
+   strengths) when none is installed. (File-read dispatch — spec 031
+   Open-question-#1 option (b); a live probe showed the original
+   prose-router dispatch was inert on the no-Skill-tool subagent path.)
+   The pass returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
    RECONCILIATION NOTES` envelope as the compliance pass, with
    SPECIFIC ISSUES entries tagged `[blocker]` / `[nit]` / `[strength]`.
 
@@ -186,9 +189,9 @@ The orchestrator runs the passes in this order:
    build the arch-pass prompt with `review.py arch-review` and spawn a
    third `reviewer`-shaped subagent. The pass produces the four
    canonical arch buckets (summary / strengths / concerns / open
-   questions) wrapped in the same verdict envelope, routed via the
-   same prose-based dispatch to the most-specific `arch-review`
-   SKILL.md reachable. When the helper prints `false`, skip this
+   questions) wrapped in the same verdict envelope, using the same
+   file-read dispatch (`review.py` detects `~/.claude/skills/arch-review/`,
+   else inlines jig's baseline buckets). When the helper prints `false`, skip this
    pass entirely. Slice authors flip the flag by uncommenting the
    `arch_review: true` line in the slice template's frontmatter — set
    it when the slice changes module boundaries, public contracts, or

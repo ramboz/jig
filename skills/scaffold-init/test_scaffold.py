@@ -1766,5 +1766,241 @@ class CompletionVerificationTests(unittest.TestCase):
         self.assertIn("FAILED", buf.getvalue())
 
 
+class AdoptionHandoffTests(unittest.TestCase):
+    """Slice 048-03 — a freshly scaffolded project exposes the adoption /
+    readiness guidance: docs/adoption-readiness.md is copied into the
+    target so links resolve locally, CLAUDE.md carries a short pointer to
+    it (not the body), and nothing leaks a plugin-root or source path."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adopt-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        result = run_scaffold(self.target)
+        self.assertEqual(
+            result.returncode, 0,
+            f"scaffold.py failed: stderr={result.stderr}\nstdout={result.stdout}",
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read(self, rel: str) -> str:
+        return (self.target / rel).read_text()
+
+    # AC #3 — the guide is copied into the scaffolded tree.
+    def test_guide_copied_into_target(self):
+        self.assertTrue(
+            (self.target / "docs/adoption-readiness.md").is_file(),
+            "docs/adoption-readiness.md must be copied into the scaffolded "
+            "project so its links resolve locally (AC #3)",
+        )
+
+    # AC #1 / AC #2 — CLAUDE.md carries a short pointer, not the guide body.
+    def test_claude_md_points_but_does_not_inline(self):
+        claude = self._read("CLAUDE.md")
+        self.assertIn(
+            "docs/adoption-readiness.md", claude,
+            "CLAUDE.md must point at the adoption guide (AC #1)",
+        )
+        # The guide's distinctive section content must NOT be inlined into
+        # the always-loaded CLAUDE.md (AC #2 — a pointer, not the body).
+        self.assertNotIn(
+            "Your first 30 minutes", claude,
+            "CLAUDE.md must carry a short pointer, not the guide body (AC #2)",
+        )
+
+    # {{PROJECT_NAME}} substituted; no unrendered placeholder.
+    def test_project_name_substituted(self):
+        guide = self._read("docs/adoption-readiness.md")
+        self.assertIn("demo-project", guide,
+                      "the guide must substitute {{PROJECT_NAME}}")
+        self.assertNotIn("{{", guide, "the guide has an unrendered placeholder")
+
+    # AC #5 — no plugin-root / source-checkout leakage in the handoff.
+    def test_handoff_has_no_path_leakage(self):
+        for rel in ("docs/adoption-readiness.md", "CLAUDE.md"):
+            text = self._read(rel)
+            self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text,
+                             f"{rel} leaks plugin root (AC #5)")
+            self.assertNotIn(str(REPO_ROOT), text,
+                             f"{rel} leaks source-checkout path (AC #5)")
+
+    # AC #3 — every relative link in the guide resolves inside the target.
+    def test_guide_links_resolve_in_target(self):
+        guide_path = self.target / "docs/adoption-readiness.md"
+        link_re = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+        unresolved = []
+        for href in link_re.findall(guide_path.read_text()):
+            href = href.split("#", 1)[0].strip()
+            if not href or href.startswith(("http://", "https://", "mailto:")):
+                continue
+            if not (guide_path.parent / href).resolve().exists():
+                unresolved.append(href)
+        self.assertEqual(
+            unresolved, [],
+            f"adoption guide has links that don't resolve in the scaffolded "
+            f"tree (AC #3): {unresolved}",
+        )
+
+
+class VersionProvenanceTests(unittest.TestCase):
+    """Slice 046-02 — scaffold.json.jig_version is derived from the plugin
+    manifest (.claude-plugin/plugin.json), not a hard-coded constant.
+
+    AC1: version read from the manifest; no production code hard-codes the
+         release version.
+    AC2: generated metadata matches source.
+    AC3: missing / malformed / version-less manifest fails clearly.
+    AC4: a regression test fails if the manifest version drifts from the
+         recorded scaffold metadata.
+    """
+
+    @classmethod
+    def _load_scaffold_module(cls):
+        """Load scaffold.py as a module for direct symbol access."""
+        if getattr(cls, "_scaffold_mod", None) is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("scaffold", SCAFFOLD)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            cls._scaffold_mod = mod
+        return cls._scaffold_mod
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-46-02-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _live_manifest_version(self) -> str:
+        manifest = json.loads(
+            (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )
+        return manifest["version"]
+
+    # AC1 — no production code hard-codes the release version. The old
+    # `JIG_VERSION = "0.1.0"` constant must be gone, and the helper that
+    # derives the version from the manifest must exist.
+    def test_no_hardcoded_release_version_constant(self):
+        mod = self._load_scaffold_module()
+        self.assertFalse(
+            hasattr(mod, "JIG_VERSION"),
+            "scaffold.py must not keep a hard-coded JIG_VERSION constant "
+            "(AC1) — the version is derived from the plugin manifest.",
+        )
+        self.assertTrue(
+            hasattr(mod, "_read_plugin_version"),
+            "scaffold.py must expose _read_plugin_version() (AC1).",
+        )
+
+    def test_read_plugin_version_returns_manifest_version(self):
+        mod = self._load_scaffold_module()
+        self.assertEqual(
+            mod._read_plugin_version(REPO_ROOT),
+            self._live_manifest_version(),
+        )
+
+    # AC2 — a temp scaffold records the source manifest version.
+    def test_scaffold_json_jig_version_matches_source(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertEqual(
+            manifest["jig_version"],
+            self._live_manifest_version(),
+            "scaffold.json.jig_version must equal the source manifest version (AC2).",
+        )
+
+    # AC2 — brief.md shares the {{JIG_VERSION}} placeholder, so it must
+    # mention the same version.
+    def test_brief_mentions_source_version(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        brief = (self.target / "brief.md").read_text()
+        version = self._live_manifest_version()
+        self.assertIn(
+            f"Generated by jig {version} ", brief,
+            "brief.md must report the source manifest version (AC2).",
+        )
+
+    # AC3 — missing plugin.json fails with the custom exception, naming the
+    # manifest path.
+    def test_missing_manifest_raises_clear_error(self):
+        mod = self._load_scaffold_module()
+        fake_plugin = Path(self.tmpdir) / "no-manifest"
+        fake_plugin.mkdir()
+        with self.assertRaises(mod.PluginManifestError) as ctx:
+            mod._read_plugin_version(fake_plugin)
+        msg = str(ctx.exception)
+        self.assertIn("plugin.json", msg)
+
+    # AC3 — malformed JSON fails with the custom exception.
+    def test_malformed_manifest_raises_clear_error(self):
+        mod = self._load_scaffold_module()
+        fake_plugin = Path(self.tmpdir) / "bad-json"
+        (fake_plugin / ".claude-plugin").mkdir(parents=True)
+        (fake_plugin / ".claude-plugin" / "plugin.json").write_text("{ not json")
+        with self.assertRaises(mod.PluginManifestError) as ctx:
+            mod._read_plugin_version(fake_plugin)
+        msg = str(ctx.exception)
+        self.assertIn("plugin.json", msg)
+
+    # AC3 — a manifest lacking `version` (and an empty version) fails clearly.
+    def test_versionless_manifest_raises_clear_error(self):
+        mod = self._load_scaffold_module()
+        for payload in ('{"name": "jig"}', '{"name": "jig", "version": ""}'):
+            with self.subTest(payload=payload):
+                fake_plugin = Path(self.tmpdir) / f"noversion-{hash(payload)}"
+                (fake_plugin / ".claude-plugin").mkdir(parents=True)
+                (fake_plugin / ".claude-plugin" / "plugin.json").write_text(payload)
+                with self.assertRaises(mod.PluginManifestError) as ctx:
+                    mod._read_plugin_version(fake_plugin)
+                msg = str(ctx.exception)
+                self.assertIn("version", msg)
+
+    # AC3 (integration) — scaffold() propagates the error, and it raises
+    # BEFORE any file is written (fail-fast, no partial scaffold).
+    def test_scaffold_propagates_and_writes_nothing_on_bad_manifest(self):
+        mod = self._load_scaffold_module()
+        # A plugin root with a valid template tree but a malformed manifest.
+        fake_plugin = Path(self.tmpdir) / "plugin-bad-manifest"
+        fake_plugin.mkdir()
+        # Symlink the real templates so scaffold() gets past the template
+        # check and reaches the manifest read.
+        (fake_plugin / "templates").symlink_to(REPO_ROOT / "templates")
+        (fake_plugin / ".claude-plugin").mkdir()
+        (fake_plugin / ".claude-plugin" / "plugin.json").write_text("{ broken")
+        with self.assertRaises(mod.PluginManifestError):
+            mod.scaffold(self.target, fake_plugin, with_machinery=False)
+        # Fail-fast: no scaffold artifacts on disk (CLAUDE.md is the first
+        # file written, after the version is read).
+        self.assertFalse(
+            (self.target / "CLAUDE.md").exists(),
+            "a bad manifest must fail before the first file write (AC3).",
+        )
+        self.assertFalse((self.target / "scaffold.json").exists())
+
+    # AC4 — release-drift regression. A fresh scaffold's recorded version
+    # tracks the live manifest; this fails if a constant is reintroduced
+    # that drifts from .claude-plugin/plugin.json.
+    def test_release_drift_regression(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        live = json.loads(
+            (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )["version"]
+        self.assertEqual(
+            manifest["jig_version"], live,
+            "scaffold.json.jig_version drifted from the plugin manifest "
+            "version — derive it from .claude-plugin/plugin.json (AC4).",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

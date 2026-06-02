@@ -84,8 +84,7 @@ _(No decisions recorded yet. Add the first H3 when the first ADR accepts.)_
 > detected" section. "No external surfaces — this project is a library /
 > script / single-consumer internal tool" is a valid and honest answer;
 > the section's elicitation marker stays `status: skipped` rather than
-> being filled with a negation bullet. See
-> [`skills/contracts/SKILL.md`](../../skills/contracts/SKILL.md) for the
+> being filled with a negation bullet. Run `/jig:contracts` for the
 > per-surface recommendation table this elicitation references._
 
 - (surface 1 — **<surface type>** (recommended artifact: <name> at `<path>`) — brief description)

@@ -2,9 +2,9 @@
 >
 > Captures *why* this project exists, *for whom*, and *with what
 > principles*. Architectural mechanics live in [architecture.md](architecture.md).
-> Update via reconciliation, or via `/jig:vision-elicit` once it
-> ships (spec 017-02). Until then, each `<!-- elicited: PENDING /
-> status: unfilled -->` marker is a slot waiting to be hand-filled.
+> Update via reconciliation, or via `/jig:vision-elicitation`. Each
+> `<!-- elicited: PENDING / status: unfilled -->` marker is a slot
+> waiting to be filled.
 
 # Vision: {{PROJECT_NAME}}
 

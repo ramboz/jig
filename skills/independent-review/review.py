@@ -17,22 +17,25 @@ bash recipe uses it to pick the Task tool's `subagent_type` argument
 deterministically.
 
 Slice 031-01 added the `pr-review` subcommand: a craft-pass prompt that
-mirrors `implementation` but instructs the reviewer to apply the four-bucket
-craft concerns (scope / blockers / nits / strengths) from the most-specific
-`pr-review` SKILL.md reachable in the environment, with SPECIFIC ISSUES
-entries tagged `[blocker]`/`[nit]`/`[strength]` so the workflow can decide
-what blocks vs. becomes a reconciliation-log entry. Skill-routing dispatch
-runs via SKILL.md prose — no filesystem detection here (see spec 031-01
-AC #4 and the spec.md Open question on routing dispatch).
+mirrors `implementation` but evaluates *craft* (scope / blockers / nits /
+strengths) rather than acceptance criteria, with SPECIFIC ISSUES entries
+tagged `[blocker]`/`[nit]`/`[strength]` so the workflow can decide what
+blocks vs. becomes a reconciliation-log entry.
 
 Slice 031-02 added the `arch-review` subcommand: a third on-demand pass
-that runs only when a slice's frontmatter declares `arch_review: true`.
-The orchestrator queries that flag via `workflow.py arch-review-needed`
-before spawning the arch pass. The prompt mirrors `pr-review` in shape but
-swaps the bucket names to match `jig:arch-review`'s canonical output
-(summary / strengths / concerns / open questions) and routes to the
-most-specific `arch-review` SKILL.md reachable via the same
-prose-based dispatch.
+that runs only when a slice's frontmatter declares `arch_review: true`
+(queried via `workflow.py arch-review-needed`). It mirrors `pr-review` in
+shape but swaps the bucket names to match `jig:arch-review`'s canonical
+output (summary / strengths / concerns / open questions).
+
+Skill dispatch for both craft passes is FILE-READ based, not router-based:
+the craft/arch pass runs in a read-only `reviewer` subagent with no `Skill`
+tool, so it cannot use Claude's skill router. `detect_richer_skill()` checks
+for a user-installed skill on disk (`~/.claude/skills/<name>/SKILL.md`); when
+present the prompt hands the reviewer that concrete path to read-and-apply,
+else it inlines jig's baseline buckets. (A live probe showed the original
+prose-router dispatch was inert on the no-`Skill`-tool subagent path; this
+promotes spec 031 Open-question-#1 option (b) from deferred fallback.)
 
 Usage:
     python3 review.py implementation <spec.md> <slice-fragment> <deliverable-path>...
@@ -463,6 +466,48 @@ For each acceptance criterion in slice {slice_label}, verify:
 """
 
 
+# -------- Richer-skill detection (file-read dispatch) --------
+#
+# The craft (pr-review) and arch (arch-review) passes spawn a `reviewer`
+# subagent whose tools are Read/Glob/Grep only — it has NO `Skill` tool, so
+# it CANNOT route to a user-installed skill via Claude's skill router. A live
+# probe (an actual `reviewer`-shaped subagent handed the real craft prompt)
+# confirmed this: the subagent reports no skill-invocation capability at all,
+# but CAN `Read` files under `~/.claude/`. So the original prose dispatch
+# ("apply the most-specific SKILL.md the router resolves to") was inert on the
+# subagent path — the reviewer just followed the baseline buckets inlined in
+# this prompt and never reached a richer user skill.
+#
+# Fix: deterministically detect a richer user-installed skill on disk and hand
+# the reviewer its concrete path to read-and-apply. This promotes spec 031
+# Open-question-#1 option (b) ("filesystem-detect installed skills") from
+# "fallback if (a) misroutes" now that (a) is shown to misroute here.
+
+
+def detect_richer_skill(skill_name: str) -> "str | None":
+    """Return the path to a USER-scope installed `<skill_name>` SKILL.md
+    (`~/.claude/skills/<skill_name>/SKILL.md`), or None when only jig's
+    bundled baseline is available.
+
+    User-scope only, by design: a *project*-scope `.claude/skills/<name>/`
+    may be jig's OWN baseline, copied in by `scaffold-init` — indistinguishable
+    by path from a genuinely richer project skill — so detecting it would
+    false-positive on every scaffolded repo. User installs are unambiguous.
+    Project-scope detection is deferred (see docs/refinement-todo.md).
+
+    Conservative on every error (returns None): never block the craft/arch
+    pass because a `Path`/`home()`/`stat` call raised. `Path.home()` honors
+    `$HOME`, which keeps this hermetically testable.
+    """
+    try:
+        candidate = Path.home() / ".claude" / "skills" / skill_name / "SKILL.md"
+        if candidate.is_file():
+            return str(candidate)
+    except (OSError, ValueError, RuntimeError):
+        pass
+    return None
+
+
 # -------- pr-review prompt (slice 031-01) --------
 
 
@@ -502,11 +547,13 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
     RECONCILIATION NOTES envelope as the compliance pass so the workflow
     can consume one verdict shape regardless of which pass produced it.
 
-    Skill-routing dispatch is intentionally NOT done here — Claude's
-    skill router resolves user > project > `jig:pr-review` precedence
-    from each skill's description hints. The prompt below points the
-    reviewer at "the most-specific `pr-review` SKILL.md reachable"
-    without naming a specific install path.
+    Dispatch is file-read based, not router-based. The craft pass runs in
+    a read-only `reviewer` subagent with no `Skill` tool, so it cannot use
+    Claude's skill router. `detect_richer_skill("pr-review")` checks for a
+    user-installed skill on disk; when present, the prompt hands the reviewer
+    that concrete path to read-and-apply (it supersedes the inlined baseline
+    buckets). When absent, the prompt inlines jig's baseline buckets. Either
+    way, findings are normalized into the shared verdict envelope below.
 
     NOTE: unlike `build_implementation_prompt` and
     `build_reconciliation_prompt`, this builder does NOT append
@@ -517,6 +564,24 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
     framing the `jig:pr-review` skill description establishes.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    richer = detect_richer_skill("pr-review")
+    if richer:
+        routing_para = (
+            f"A richer `pr-review` skill is installed at `{richer}`.\n"
+            "**Read that SKILL.md in full now — and any reference files it "
+            "points to — then apply ITS review rubric as your craft pass.** It "
+            "supersedes the baseline buckets below. Your tools are read-only; "
+            "if you cannot read that path, fall back to the baseline. Whatever "
+            "rubric you apply, normalize your findings into the required output "
+            "envelope at the end of this prompt.\n\n"
+            "For reference, the four canonical buckets jig's bundled "
+            "`pr-review` SKILL.md baseline produces are:"
+        )
+    else:
+        routing_para = (
+            "Apply the craft concerns from jig's bundled `pr-review` SKILL.md "
+            "baseline. Its four canonical output buckets are:"
+        )
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -527,12 +592,7 @@ slice against its acceptance criteria — that work is done, and you must
 NOT re-evaluate it. Your job is to evaluate the *craft* of the
 implementation: scope, blockers, nits, and strengths.
 
-Apply the craft concerns described in the most-specific `pr-review`
-SKILL.md reachable in the environment (a user-installed `pr-review`
-skill at `~/.claude/skills/pr-review/`, a project-installed one at
-`.claude/skills/pr-review/`, or the bundled `jig:pr-review` baseline —
-whichever Claude's skill router resolves to). The four canonical output
-buckets that skill produces are:
+{routing_para}
 
 1. **Scope** — what the change touches, what it does not touch.
 2. **Blockers** — concrete must-fix items (correctness, security, missing
@@ -582,11 +642,11 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     passes so the workflow can consume one verdict shape across all
     three passes.
 
-    Same routing pattern as `build_pr_review_prompt`: SKILL.md prose
-    points the reviewer at the most-specific `arch-review` SKILL.md
-    reachable; Claude's skill router resolves user > project >
-    `jig:arch-review` precedence from each skill's description hints.
-    No filesystem detection here.
+    Same file-read dispatch as `build_pr_review_prompt`: the read-only
+    `reviewer` subagent has no `Skill` tool, so
+    `detect_richer_skill("arch-review")` checks disk for a user-installed
+    skill and hands the reviewer its concrete path to read-and-apply when
+    present; otherwise the prompt inlines jig's baseline arch buckets.
 
     NOTE: like `build_pr_review_prompt`, this builder does NOT append
     `_principles_check_block()`. Constitution-adherence is checked in
@@ -594,6 +654,24 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     architectural concerns only.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    richer = detect_richer_skill("arch-review")
+    if richer:
+        routing_para = (
+            f"A richer `arch-review` skill is installed at `{richer}`.\n"
+            "**Read that SKILL.md in full now — and any reference files it "
+            "points to — then apply ITS review rubric as your arch pass.** It "
+            "supersedes the baseline buckets below. Your tools are read-only; "
+            "if you cannot read that path, fall back to the baseline. Whatever "
+            "rubric you apply, normalize your findings into the required output "
+            "envelope at the end of this prompt.\n\n"
+            "For reference, the four canonical buckets jig's bundled "
+            "`arch-review` SKILL.md baseline produces are:"
+        )
+    else:
+        routing_para = (
+            "Apply the architectural concerns from jig's bundled `arch-review` "
+            "SKILL.md baseline. Its four canonical output buckets are:"
+        )
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -607,12 +685,7 @@ returned — that work is done, and you must NOT re-evaluate either. Your
 job is to evaluate the *architecture*: does the change preserve module
 boundaries, public contracts, and design coherence?
 
-Apply the architectural concerns described in the most-specific
-`arch-review` SKILL.md reachable in the environment (a user-installed
-`arch-review` skill at `~/.claude/skills/arch-review/`, a
-project-installed one at `.claude/skills/arch-review/`, or the bundled
-`jig:arch-review` baseline — whichever Claude's skill router resolves
-to). The four canonical output buckets that skill produces are:
+{routing_para}
 
 1. **Summary** — what the change does architecturally and your overall
    assessment.
