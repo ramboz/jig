@@ -156,7 +156,7 @@
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | DRAFT |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-01 — security-floor-policy-adr | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-02 — secret-prevention-floor | **DONE** |  |
-| [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | DRAFT |  |
+| [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | DRAFT |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | DRAFT |  |
 

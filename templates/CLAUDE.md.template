@@ -54,4 +54,5 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 - Load secrets from environment variables or a secret manager; keep them out of source.
 - `.env` and common key files are git-ignored by the scaffolded `.gitignore`; commit a `.env.example` with placeholders instead.
 - The `jig-secret-scan` PreToolUse hook blocks an obvious secret at write time — it is **defense-in-depth, not a guarantee** (real enforcement is out-of-band: CI secret-scanning, server-side git hooks, branch protection).
+- `.claude/settings.json` denies force-push / hard-reset / `rm -rf` by default — also **defense-in-depth, not a firewall** (deny-globs miss flag permutations; rely on branch protection + server-side hooks for the real guarantee).
 - For depth (SAST, dependency/CVE scanning, deeper rules), use a richer installed skill (`adobe-security-*`, your own, or `jig:security-review`).

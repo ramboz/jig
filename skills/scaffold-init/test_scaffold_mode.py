@@ -609,7 +609,14 @@ class MergeExistingSettingsTests(unittest.TestCase):
     # ----- AC #6 (j) --------------------------------------------------------
     def test_j_existing_non_hook_field_preserved(self):
         """AC #6 (j) — merge into existing settings.json: a non-hook
-        top-level field (e.g. 'permissions') is preserved after the merge."""
+        top-level field (e.g. 'env') is preserved after the merge.
+
+        Note (slice 052-03): `permissions.deny` is now jig-managed (the
+        destructive-command guardrail), so `permissions` is no longer an
+        untouched pass-through field — its `deny` array gains jig's defaults
+        while `allow` (and any other key) is preserved verbatim. `env` is
+        the pure untouched-field assertion here; the full permissions-merge
+        contract lives in test_scaffold.py::PermissionsDenyTests."""
         self._seed_settings({
             "permissions": {"allow": ["Bash(ls)"]},
             "env": {"FOO": "bar"},
@@ -619,9 +626,13 @@ class MergeExistingSettingsTests(unittest.TestCase):
         merged = json.loads(
             (self.target / ".claude" / "settings.json").read_text()
         )
-        # Non-hook fields survive.
-        self.assertEqual(merged.get("permissions"), {"allow": ["Bash(ls)"]})
+        # A genuine non-hook, non-permissions field survives untouched.
         self.assertEqual(merged.get("env"), {"FOO": "bar"})
+        # permissions.allow is preserved verbatim; permissions.deny gains
+        # jig's destructive-command defaults (slice 052-03).
+        self.assertEqual(merged.get("permissions", {}).get("allow"), ["Bash(ls)"])
+        self.assertIn("Bash(git push --force*)",
+                      merged.get("permissions", {}).get("deny", []))
         # jig hooks were appended.
         self.assertIn("hooks", merged)
         for event in EXPECTED_HOOK_EVENTS:

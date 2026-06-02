@@ -737,6 +737,34 @@ _JIG_HOOK_MARKER = {"managed_by_jig": True}
 _PLUGIN_HOOK_SCRIPT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
 _PROJECT_HOOK_SCRIPT_PREFIX = "${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/"
 
+# Slice 052-03 — conservative `permissions.deny` defaults scaffolded into
+# `.claude/settings.json` (the security floor's destructive-command guardrail,
+# ADR-0013 part 3). Canonical Claude Code permission-rule shape is
+# `Bash(<pattern with * wildcards>)`. The set covers the documented dangerous
+# forms — force-push, hard-reset, recursive-force `rm` — plus their common
+# flag permutations (`-f`, `* --force`, `--force-with-lease`, `rm -fr`,
+# `rm -r -f`) so the prefix globs catch the usual orderings.
+#
+# HONEST FRAMING (AC #3, per ADR-0013): these deny-globs are
+# DEFENSE-IN-DEPTH, NOT A FIREWALL. Glob prefixes inherently miss flag
+# permutations — e.g. `git push origin main --force` is NOT matched by the
+# `Bash(git push --force*)` prefix, which is why the `Bash(git push * --force*)`
+# wildcard form is also listed — but coverage is still not exhaustive, and a
+# permission rule lives inside the agent's own trust boundary (it can be
+# relaxed). The PRIMARY control therefore stays behavioral + out-of-band: CI,
+# server-side git hooks, and branch protection. "Deny rules are
+# defense-in-depth, not a firewall." (guidelines `04-configuration/permissions.md`).
+_PERMISSIONS_DENY_DEFAULTS = (
+    "Bash(git push --force*)",
+    "Bash(git push -f *)",
+    "Bash(git push * --force*)",
+    "Bash(git push *--force-with-lease*)",
+    "Bash(git reset --hard*)",
+    "Bash(rm -rf*)",
+    "Bash(rm -fr*)",
+    "Bash(rm -r -f*)",
+)
+
 
 def _is_jig_managed(entry: dict) -> bool:
     """An entry counts as jig-managed iff its `metadata.managed_by_jig` is
@@ -781,6 +809,31 @@ def _build_jig_hook_entries(plugin: Path) -> dict:
     return out
 
 
+def _merge_permissions_deny(existing_perms: dict) -> dict:
+    """Slice 052-03 — merge jig's conservative `permissions.deny` defaults
+    into a (possibly pre-existing) `permissions` block.
+
+    Marker = SET-MEMBERSHIP. `permissions.deny` is a plain array of strings,
+    so it cannot carry a per-entry `metadata.managed_by_jig` marker the way
+    hook entries do. jig-ownership of a deny entry is therefore identified by
+    membership in `_PERMISSIONS_DENY_DEFAULTS` — the faithful adaptation of
+    the hooks block's metadata-marker mechanism for a string array (AC #2:
+    "same jig-managed marker mechanism").
+
+    Strategy: keep every existing deny entry that is NOT in jig's set (so
+    user-added denies survive verbatim and in order), then append jig's full
+    set. This is idempotent (re-running yields the same set, no duplicates)
+    and never drops user entries. `allow`, `ask`, and any other
+    `permissions.*` keys are preserved untouched — only `deny` is
+    jig-managed. Returns a new dict; does not mutate `existing_perms`."""
+    perms: dict = dict(existing_perms) if existing_perms else {}
+    current_deny = list(perms.get("deny") or [])
+    jig_set = set(_PERMISSIONS_DENY_DEFAULTS)
+    user_deny = [d for d in current_deny if d not in jig_set]
+    perms["deny"] = user_deny + list(_PERMISSIONS_DENY_DEFAULTS)
+    return perms
+
+
 def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     """Merge jig's hook registration into a (possibly pre-existing) settings
     dict. Strategy: append-with-marker.
@@ -788,6 +841,11 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     - Non-hook top-level fields pass through untouched.
     - Per event: keep all non-jig-managed entries verbatim; replace any
       jig-managed entries with the fresh set (idempotent re-run).
+    - `permissions.deny` gains jig's conservative destructive-command
+      defaults via `_merge_permissions_deny` (slice 052-03); `permissions`'s
+      other keys (`allow` / `ask` / …) are preserved untouched. Because this
+      function is on the shared copy path, BOTH greenfield `scaffold()` and
+      `migrate copy-machinery` emit the deny defaults.
     - Returns a new dict; does not mutate `existing`."""
     merged: dict = dict(existing) if existing else {}
     hooks = dict(merged.get("hooks") or {})
@@ -796,6 +854,7 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
         survivors = [e for e in current if not _is_jig_managed(e)]
         hooks[event] = survivors + fresh_entries
     merged["hooks"] = hooks
+    merged["permissions"] = _merge_permissions_deny(merged.get("permissions"))
     return merged
 
 

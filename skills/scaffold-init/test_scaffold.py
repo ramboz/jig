@@ -2053,6 +2053,202 @@ class SecurityFloorTests(unittest.TestCase):
         )
 
 
+class PermissionsDenyTests(unittest.TestCase):
+    """Slice 052-03 — destructive-command-guardrail.
+
+    A fresh scaffold's `.claude/settings.json` carries conservative
+    `permissions.deny` defaults (force-push / hard-reset / `rm -rf`, AC #1).
+    The merge is non-destructive + idempotent (AC #2): jig-ownership of a
+    deny entry is identified by membership in `_PERMISSIONS_DENY_DEFAULTS`
+    (set-membership marker — a string array can't carry a per-entry
+    `metadata` marker), so user-added `allow` / `ask` / custom `deny`
+    entries survive and jig's globs are never duplicated.
+    """
+
+    # The three guardrails AC #1 names explicitly, in canonical
+    # `Bash(<pattern>)` rule shape.
+    FORCE_PUSH_GLOB = "Bash(git push --force*)"
+    HARD_RESET_GLOB = "Bash(git reset --hard*)"
+    RM_RF_GLOB = "Bash(rm -rf*)"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-052-03-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read_settings(self) -> dict:
+        return json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+
+    def _seed_settings(self, payload: dict) -> None:
+        settings = self.target / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps(payload, indent=2) + "\n")
+
+    def _rescaffold_force(self) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        return subprocess.run(
+            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+
+    # ---- AC #1: conservative deny defaults are scaffolded ----
+    def test_fresh_scaffold_has_destructive_deny_globs(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        deny = self._read_settings().get("permissions", {}).get("deny", [])
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertIn(
+                glob, deny,
+                f"scaffolded permissions.deny missing guardrail: {glob}",
+            )
+
+    def test_fresh_scaffold_deny_matches_constant(self):
+        """The scaffolded deny array is exactly jig's source-of-truth set
+        (no manual count drift)."""
+        mod = _load_scaffold_module()
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        deny = self._read_settings().get("permissions", {}).get("deny", [])
+        self.assertEqual(
+            set(deny), set(mod._PERMISSIONS_DENY_DEFAULTS),
+            "fresh scaffold deny array must equal _PERMISSIONS_DENY_DEFAULTS",
+        )
+
+    # ---- AC #2: non-destructive merge into a pre-existing settings.json ----
+    def test_merge_preserves_user_permissions_entries(self):
+        """A pre-existing settings.json with user allow + ask + a custom
+        deny entry: all survive AND jig's deny globs are added, with no
+        duplicates."""
+        custom_deny = "Bash(curl*evil.example.com*)"
+        self._seed_settings({
+            "permissions": {
+                "allow": ["Bash(ls*)", "Bash(git status*)"],
+                "ask": ["Bash(git commit*)"],
+                "deny": [custom_deny],
+            },
+        })
+        # --force is the documented escape hatch; the seed has no hooks so
+        # the unmanaged-hooks refusal does not apply, but a re-run over an
+        # existing tree still needs --force (scaffold.json sentinel).
+        r = self._rescaffold_force()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        perms = self._read_settings().get("permissions", {})
+        # User allow + ask survive untouched.
+        self.assertEqual(perms.get("allow"), ["Bash(ls*)", "Bash(git status*)"])
+        self.assertEqual(perms.get("ask"), ["Bash(git commit*)"])
+        # User's custom deny survives.
+        deny = perms.get("deny", [])
+        self.assertIn(custom_deny, deny)
+        # jig's guardrails were added.
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertIn(glob, deny)
+        # No duplicates anywhere in the deny array.
+        self.assertEqual(
+            len(deny), len(set(deny)),
+            f"permissions.deny has duplicate entries: {deny}",
+        )
+        # The custom deny appears exactly once.
+        self.assertEqual(deny.count(custom_deny), 1)
+
+    def test_merge_into_settings_without_permissions_key(self):
+        """If a pre-existing settings.json has no `permissions` key at all,
+        the merge creates `{"deny": [...]}` with jig's globs."""
+        self._seed_settings({"env": {"FOO": "bar"}})
+        r = self._rescaffold_force()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        settings = self._read_settings()
+        self.assertEqual(settings.get("env"), {"FOO": "bar"})
+        deny = settings.get("permissions", {}).get("deny", [])
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertIn(glob, deny)
+
+    # ---- AC #2: idempotent re-run ----
+    def test_deny_globs_idempotent_across_reruns(self):
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        second = self._rescaffold_force()
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        deny = self._read_settings().get("permissions", {}).get("deny", [])
+        # Each jig glob appears exactly once after a re-scaffold.
+        for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
+            self.assertEqual(
+                deny.count(glob), 1,
+                f"re-scaffold duplicated deny glob {glob}: {deny}",
+            )
+        self.assertEqual(
+            len(deny), len(set(deny)),
+            f"permissions.deny has duplicates after re-run: {deny}",
+        )
+
+    # ---- AC #2: unit-level merge logic (preserve + idempotent + no-clobber) ----
+    def test_merge_settings_permissions_unit(self):
+        """Unit: `_merge_settings` preserves user allow/ask/custom-deny,
+        appends jig's deny set exactly once, leaves non-`deny` permission
+        keys untouched, and is idempotent when called twice."""
+        mod = _load_scaffold_module()
+        existing = {
+            "permissions": {
+                "allow": ["Bash(ls*)"],
+                "ask": ["Bash(git commit*)"],
+                "deny": ["Bash(curl*evil*)"],
+            },
+        }
+        merged = mod._merge_settings(existing, {})
+        perms = merged["permissions"]
+        # Non-deny keys untouched.
+        self.assertEqual(perms["allow"], ["Bash(ls*)"])
+        self.assertEqual(perms["ask"], ["Bash(git commit*)"])
+        # User deny preserved + jig set appended, no duplicates.
+        self.assertIn("Bash(curl*evil*)", perms["deny"])
+        for glob in mod._PERMISSIONS_DENY_DEFAULTS:
+            self.assertIn(glob, perms["deny"])
+        self.assertEqual(len(perms["deny"]), len(set(perms["deny"])))
+        # Idempotent: a second merge over the result yields the same deny set.
+        merged2 = mod._merge_settings(merged, {})
+        self.assertEqual(merged2["permissions"]["deny"], perms["deny"])
+        # Does not mutate the input.
+        self.assertEqual(existing["permissions"]["deny"], ["Bash(curl*evil*)"])
+
+    def test_merge_dedups_user_supplied_jig_exact_glob_unit(self):
+        """Unit: if a user's deny array already contains one of jig's exact
+        globs, the merge must not duplicate it. Set-membership identifies the
+        entry as jig-owned, so it is filtered out of the user set then
+        re-appended exactly once (the dedup-and-relocate the docstring
+        promises). Pins the behavior directly rather than only via the
+        re-scaffold idempotency path."""
+        mod = _load_scaffold_module()
+        jig_glob = mod._PERMISSIONS_DENY_DEFAULTS[0]
+        existing = {
+            "permissions": {"deny": [jig_glob, "Bash(curl*evil*)"]},
+        }
+        merged = mod._merge_settings(existing, {})
+        deny = merged["permissions"]["deny"]
+        self.assertEqual(
+            deny.count(jig_glob), 1,
+            f"user-supplied jig-exact glob {jig_glob} was duplicated: {deny}",
+        )
+        # The genuinely-custom (non-jig) deny still survives exactly once.
+        self.assertEqual(deny.count("Bash(curl*evil*)"), 1)
+        self.assertEqual(len(deny), len(set(deny)))
+
+    def test_merge_settings_creates_permissions_when_absent_unit(self):
+        """Unit: `_merge_settings` on a dict with no `permissions` key
+        creates `permissions.deny` = jig's set."""
+        mod = _load_scaffold_module()
+        merged = mod._merge_settings({}, {})
+        self.assertEqual(
+            set(merged["permissions"]["deny"]),
+            set(mod._PERMISSIONS_DENY_DEFAULTS),
+        )
+
+
 def _load_scaffold_module():
     """Import scaffold.py as a module for direct symbol access (used by the
     unit-level idempotency test)."""
