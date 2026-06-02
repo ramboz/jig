@@ -167,7 +167,7 @@
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-01 — Delegate file-heavy reading to isolated subagents | **DONE** |  |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-02 — In-session context-growth nudge | **DONE** | `JIG_CONTEXT_GROWTH_WARN_PCT` (default 0.40) sets the first band; 60/80% fixed offsets. `UserPromptSubmit` reads transcript-tail `cache_read`, once-per-band with re-arm-on-drop. Extends `jig-context-check.sh` (one script, two events); scaffolds into targets. |
 | [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-03 — Read-once / read-lean discipline | **DONE** | `PreToolUse`/matcher `Read` nudge: duplicate Read of a path (once per path) + whole-file Read above `JIG_READ_LEAN_BYTES` (default 64 KiB; ranged reads exempt). Per-session `jig-read-paths-` state; extends `jig-context-check.sh`; scaffolds into targets. |
-| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-04 — Keep verbose command output out of the orchestrator | READY_FOR_REVIEW |  |
+| [055-context-cost-discipline](055-context-cost-discipline/spec.md) | 055-04 — Keep verbose command output out of the orchestrator | **DONE** | `agents/implementer.md` "Surface results, not logs" + workflow.md verbose-Bash rule (Bash output ≈19%): run the suite via the implementer; for one-off orchestrator commands summarize / `wc -l`. `tdd.py` untouched. **Closes spec 055.** |
 
 ## Deferred slices
 

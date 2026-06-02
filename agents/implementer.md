@@ -78,10 +78,21 @@ them entirely to `workflow.py transition`.
 - Do not touch files outside the spec's declared scope.
 - If you encounter something that should be a separate spec, park it in `docs/inbox.md`.
 
+## Surface results, not logs
+
+You run your own test and build commands inside this bounded, disposable
+context — that is the point of delegating to you. **Surface only the result**
+to the orchestrator: pass/fail plus the key failing lines (the assertion, the
+file:line, the error), **not full logs**. The orchestrator's context is re-read
+on every turn for the whole session; a dumped test run or build log would be
+paid for again on every subsequent turn. Run the suite here, distil it, report
+the verdict. If a failure needs the orchestrator's judgment, quote the handful
+of lines that matter, not the whole transcript.
+
 ## Output format
 
 When done, report:
 - Files created or modified (with line counts)
-- Tests written and their status (pass/fail)
+- Tests written and their status (pass/fail) — the result, not the full run output
 - Any deviations from the spec (even minor ones)
 - Anything that should go to `docs/inbox.md`

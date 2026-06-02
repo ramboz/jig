@@ -1,5 +1,7 @@
 """
-Docs-lint for the context-cost discipline section (spec 055-01).
+Docs-lint for the context-cost discipline section (spec 055-01; extended
+in 055-04 to also guard the implementer "surface results, not logs"
+instruction, the verbose-Bash rule, and the tdd-loop contract).
 
 Slice 055-01 establishes the thin-orchestrator principle in jig's
 workflow: file-heavy reading/analysis is delegated to a read-only
@@ -27,6 +29,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = REPO_ROOT / "docs" / "workflow.md"
 TEMPLATE = REPO_ROOT / "templates" / "CLAUDE.md.template"
+IMPLEMENTER = REPO_ROOT / "agents" / "implementer.md"
+TDD_PY = REPO_ROOT / "skills" / "tdd-loop" / "tdd.py"
 
 HEADING = "Context-cost discipline"
 
@@ -190,6 +194,124 @@ class CladeMdTemplatePointsToSection(unittest.TestCase):
             HEADING, hot_cache_block,
             "the Context-cost discipline pointer must live inside the "
             "Hot Cache block (spec 055-01 AC #4)",
+        )
+
+
+class ImplementerSurfacesResultsNotLogs(unittest.TestCase):
+    """Slice 055-04 AC #1: agents/implementer.md is updated to make explicit
+    that the implementer runs its own test/build commands and surfaces only
+    the result (pass/fail + key failing lines) to the orchestrator, not full
+    logs."""
+
+    def test_implementer_runs_its_own_commands(self) -> None:
+        body = _read(IMPLEMENTER).lower()
+        # The implementer runs the verbose commands in its own bounded context.
+        self.assertIn(
+            "run your own test", body,
+            "agents/implementer.md must state the implementer runs its own "
+            "test/build commands in its bounded context (spec 055-04 AC #1)",
+        )
+
+    def test_implementer_surfaces_result_not_full_logs(self) -> None:
+        body = _read(IMPLEMENTER).lower()
+        # The load-bearing instruction: surface the result, never full logs.
+        self.assertIn(
+            "surface only the result", body,
+            "agents/implementer.md must instruct surfacing only the result — "
+            "pass/fail plus the key failing lines (spec 055-04 AC #1)",
+        )
+        self.assertIn(
+            "pass/fail", body,
+            "the surface-only-results instruction must name what 'result' "
+            "means — pass/fail plus the key failing lines (spec 055-04 AC #1)",
+        )
+        self.assertIn(
+            "not full logs", body,
+            "agents/implementer.md must explicitly exclude full logs from "
+            "what the orchestrator receives (spec 055-04 AC #1)",
+        )
+
+
+class DisciplineKeepsVerboseBashOut(unittest.TestCase):
+    """Slice 055-04 AC #2/#3: the Context-cost discipline section gains a rule
+    that verbose commands belong in a subagent (or a summary), citing the
+    ≈19% Bash-output share, and gives concrete idioms."""
+
+    def test_verbose_bash_rule_present(self) -> None:
+        body = _read(WORKFLOW).lower()
+        # The rule's named cost driver — verbose command output.
+        self.assertIn(
+            "verbose command output", body,
+            "the section must add the verbose-command rule — verbose command "
+            "output belongs in a subagent or a summary (spec 055-04 AC #2)",
+        )
+        # The named verbose offenders.
+        self.assertIn(
+            "full test runs", body,
+            "the rule must name the verbose offenders — full test runs, "
+            "builds, long git log/diff (spec 055-04 AC #2)",
+        )
+        self.assertIn(
+            "git log", body,
+            "the rule must name long git log/diff among the verbose "
+            "offenders (spec 055-04 AC #2)",
+        )
+
+    def test_verbose_bash_rule_cites_19pct(self) -> None:
+        body = _read(WORKFLOW)
+        self.assertIn(
+            "19%", body,
+            "the verbose-command rule must cite Bash output ≈ 19% of "
+            "orchestrator context (spec 055-04 AC #2)",
+        )
+
+    def test_verbose_bash_rule_routes_to_subagent(self) -> None:
+        body = _read(WORKFLOW).lower()
+        # Idiom #1: run the suite via the implementer subagent. Match the
+        # phrase, not the bare word "implementer" (which already appears
+        # elsewhere in the doc), so this is a real red test for the new rule.
+        self.assertIn(
+            "run the suite via the implementer", body,
+            "the rule must give the concrete idiom — run the suite via the "
+            "implementer subagent (spec 055-04 AC #3)",
+        )
+
+    def test_verbose_bash_rule_gives_summarize_idiom(self) -> None:
+        body = _read(WORKFLOW).lower()
+        # Idiom #2: for one-off orchestrator commands, summarize before the
+        # output lands — summarizing flags or pipe to a count.
+        self.assertIn(
+            "summariz", body,
+            "the rule must give the summarize idiom for one-off orchestrator "
+            "commands (spec 055-04 AC #3)",
+        )
+        self.assertIn(
+            "wc -l", body,
+            "the rule must give a concrete reduce-the-output idiom — pipe to "
+            "a count (e.g. `… | wc -l`) rather than dumping full output "
+            "(spec 055-04 AC #3)",
+        )
+
+
+class TddLoopContractUnchanged(unittest.TestCase):
+    """Slice 055-04 AC #4: no regression to the tdd-loop helper contract —
+    tdd.py still exposes its normalized 0 green / 1 red / 2 env-error exit
+    codes. A source-level guard; runtime behavior is covered by
+    skills/tdd-loop/test_tdd.py."""
+
+    def test_tdd_py_exists(self) -> None:
+        self.assertTrue(
+            TDD_PY.is_file(),
+            "skills/tdd-loop/tdd.py must still exist (spec 055-04 AC #4)",
+        )
+
+    def test_tdd_py_declares_normalized_exit_codes(self) -> None:
+        body = _read(TDD_PY)
+        # The contract phrase the helper documents in its run subcommand.
+        self.assertIn(
+            "0 (green) / 1 (red) / 2 (env error)", body,
+            "tdd.py must still declare the normalized 0 green / 1 red / 2 "
+            "env-error exit-code contract (spec 055-04 AC #4)",
         )
 
 

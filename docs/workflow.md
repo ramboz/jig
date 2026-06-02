@@ -254,6 +254,25 @@ of the same path (at most once per path per session) and a whole-file Read of
 a file above `JIG_READ_LEAN_BYTES` (default 64 KiB). It never blocks; it is
 guidance, not a gate.
 
+### Keep verbose command output out of the orchestrator
+
+Bash output is ≈ 19% of one-time orchestrator context — and a single dumped
+test run or build log is then re-read on every subsequent turn. **Rule:**
+verbose command output (full test runs, builds, long `git log` / `git diff`)
+belongs in a subagent, or must be reduced to a summary before it enters
+orchestrator context.
+
+- **Run the suite via the implementer.** The `implementer` agent runs its own
+  test/build commands in its bounded context and surfaces only the result —
+  pass/fail plus the key failing lines, never the full log. The verbose output
+  is paid for once, in a disposable context.
+- **For a one-off command you must run in the orchestrator, summarize before
+  the output lands.** Prefer a runner's summarizing/quiet flag (e.g. `pytest -q`,
+  `--reporter=dot`) and a bounded VCS view (`git log --oneline -10`,
+  `git diff --stat`) over dumping the whole thing. When you only need a
+  magnitude, **pipe to a count** (`… | wc -l`, `grep -c`) rather than reading
+  every line.
+
 ### Worked example: the "$540 session"
 
 A codebase-gap review run *entirely in the orchestrator* (spec 008's
