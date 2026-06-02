@@ -160,6 +160,10 @@
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-04 — migrate-parity-and-verify | DRAFT |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-05 — security-review-baseline | DRAFT |  |
 | [053-craft-pass-skill-dispatch](053-craft-pass-skill-dispatch/spec.md) | 053-01 — file-read-dispatch | **DONE** | Craft/arch reviewer subagent has NO `Skill` tool → can't use the skill router; `review.py detect_richer_skill()` (USER-scope only, `~/.claude/skills/<name>/`) hands it the path to read-and-apply, else inlines baseline. Promotes spec 031 OQ#1 option (b). Retroactive record of landed commit 734e424; project-scope detection deferred. |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-01 — philosophy-doc | **DONE** |  |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-02 — prompt-cookbook | **DONE** |  |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-03 — readme-routing-hub | **DONE** |  |
+| [054-docs-front-door](054-docs-front-door/spec.md) | 054-04 — reading-path-coherence | **DONE** |  |
 
 ## Deferred slices
 

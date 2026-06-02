@@ -1,15 +1,20 @@
 """
-Tests that README.md's first-read status is current (spec 048-01).
+Tests that README.md's first-read status is current AND that the public README
+stays a lean routing hub (specs 048-01, 054-03).
 
-The pre-048 README carried a stale `## Status` block claiming Tier 0
-skills were "in spec/draft phase" and naming `001-01 greenfield-scaffold`
-as the "First implementation slice" — both false now that Tier 0 + Tier 1
-are effectively complete. Slice 048-01 replaced it with a current
-`## Status & roadmap` section plus a gap-response table that links each
-known comparison gap to its owner spec/slice.
+History:
+- 048-01 replaced a stale `## Status` block and ADDED a gap-response table to
+  the README so a reader could see which comparison gaps were owned where.
+- 054-03 moved that gap-response table OUT of the public README into
+  CONTRIBUTING.md (its contributor-facing home), keeping the README a lean
+  routing hub that links the philosophy doc + prompt cookbook. The
+  stale-status guard stays on the README; the gap-table guards now target
+  CONTRIBUTING.md, plus an inverse guard that the README no longer carries the
+  table.
 
-This suite pins the fix so a future edit can't silently reintroduce the
-stale wording or drop the gap map.
+This suite pins both halves so a future edit can't silently reintroduce the
+stale wording, re-bloat the README with the triage table, or drop the gap map
+from CONTRIBUTING.
 
 Run:
     python3 scripts/test_readme_status_current.py
@@ -23,16 +28,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
+CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 
-# Stale phrases the 048-01 fix removed; their return is a regression.
+# Stale phrases the 048-01 fix removed; their return to README is a regression.
 STALE_PHRASES = (
     "in spec/draft phase",
     "First implementation slice",
 )
 
-# External owner specs the gap-response map must link so future readers
-# don't have to rediscover the triage (AC #4). These are the spec dir
-# names, which appear in the link hrefs.
+# Owner specs the gap-response map must link (now inside CONTRIBUTING.md). The
+# dir names appear in the link hrefs.
 OWNER_SPECS = (
     "033-host-adapter-portability",
     "038-tier-reconciliation",
@@ -40,8 +45,6 @@ OWNER_SPECS = (
     "045-review-lifecycle-gates",
     "046-scaffold-artifact-fidelity",
     "047-install-contract-verification",
-    # Net-new security/secrets floor finding from the 2026-06-01 re-review,
-    # routed to spec 052 (extended AC #2, landed via #26).
     "052-security-scaffold",
 )
 
@@ -53,10 +56,10 @@ def _read(p: Path) -> str:
 
 
 def _gap_table_region(text: str) -> str:
-    """Return README text from the gap-response table header to the next
-    section heading (or EOF), or '' if the table is absent. Scoping
-    assertions to this region stops a stray owner-spec mention elsewhere
-    in the README from satisfying AC #4 vacuously."""
+    """Text from the gap-response table header to the next section heading (or
+    EOF), or '' if the table is absent. Scoping assertions to this region stops
+    a stray owner-spec mention elsewhere from satisfying the link checks
+    vacuously."""
     m = GAP_TABLE_HEADER_RE.search(text)
     if not m:
         return ""
@@ -66,7 +69,7 @@ def _gap_table_region(text: str) -> str:
 
 
 class ReadmeStatusIsCurrent(unittest.TestCase):
-    """AC #1: README no longer implies early-draft status."""
+    """AC #1 (048-01): README no longer implies early-draft status."""
 
     def setUp(self) -> None:
         self.text = _read(README)
@@ -77,36 +80,61 @@ class ReadmeStatusIsCurrent(unittest.TestCase):
                 self.assertNotIn(
                     phrase, self.text,
                     f"README reintroduced stale status wording {phrase!r} "
-                    f"(spec 048-01 removed it; Tier 0/1 are effectively complete)",
+                    f"(spec 048-01 removed it; Tier 0/1 are complete)",
                 )
 
 
-class ReadmeHasGapResponseMap(unittest.TestCase):
-    """AC #2 / AC #4: a gap-response table that links each gap's owner."""
+class ReadmeIsLeanRoutingHub(unittest.TestCase):
+    """054-03: the public README is a routing hub — no internal gap triage,
+    and it routes to the philosophy doc + the prompt cookbook."""
 
     def setUp(self) -> None:
         self.text = _read(README)
+
+    def test_readme_has_no_gap_table(self) -> None:
+        self.assertNotRegex(
+            self.text, GAP_TABLE_HEADER_RE,
+            "the gap-response table must NOT live in the public README — "
+            "054-03 moved it to CONTRIBUTING.md to keep the front door lean",
+        )
+
+    def test_readme_routes_to_philosophy(self) -> None:
+        self.assertIn(
+            "docs/philosophy.md", self.text,
+            "README must link docs/philosophy.md (the Why teaser routes there)",
+        )
+
+    def test_readme_routes_to_prompt_cookbook(self) -> None:
+        self.assertIn(
+            "docs/prompts.md", self.text,
+            "README must link the prompt cookbook (docs/prompts.md)",
+        )
+
+
+class ContributingHasGapResponseMap(unittest.TestCase):
+    """054-03: the gap-response map moved to CONTRIBUTING.md (048-01 AC #2/#4,
+    retargeted)."""
+
+    def setUp(self) -> None:
+        self.text = _read(CONTRIBUTING)
         self.table = _gap_table_region(self.text)
 
     def test_gap_response_table_present(self) -> None:
         self.assertRegex(
             self.text, GAP_TABLE_HEADER_RE,
-            "README must carry a gap-response table (a '| Gap |' header row) "
-            "so a reader can see which comparison gaps are owned here vs. "
-            "delegated to an owner spec (spec 048-01 AC #2)",
+            "CONTRIBUTING.md must carry the gap-response table (a '| Gap |' "
+            "header row) so contributors can see which comparison gaps are "
+            "owned where (spec 048-01 AC #2, relocated by 054-03)",
         )
 
     def test_gap_table_lists_at_least_eight_gaps(self) -> None:
-        # AC #2 enumerates eight minimum gaps. Count table data rows
-        # (pipe-leading lines in the region, minus the header and the
-        # `|---|` separator) so a present-but-empty table can't pass.
         rows = [ln for ln in self.table.splitlines()
                 if ln.lstrip().startswith("|") and "---" not in ln]
         data_rows = max(len(rows) - 1, 0)  # drop the header row
         self.assertGreaterEqual(
             data_rows, 8,
             f"gap-response table must list at least 8 gaps (AC #2); "
-            f"found {data_rows} data rows",
+            f"found {data_rows} data rows in CONTRIBUTING.md",
         )
 
     def test_gap_map_links_owner_specs_in_table(self) -> None:
@@ -115,13 +143,10 @@ class ReadmeHasGapResponseMap(unittest.TestCase):
                 self.assertIn(
                     owner, self.table,
                     f"gap-response map must link owner spec {owner} inside the "
-                    f"table region, not merely somewhere in the README (AC #4)",
+                    f"table region of CONTRIBUTING.md (AC #4)",
                 )
 
     def test_links_to_routed_gap_inventory(self) -> None:
-        # Extended AC #2 (landed via #26): net-new gaps may be summarized
-        # and linked to the spec's full routed inventory rather than
-        # reproduced row-by-row. Pin that link so the route stays reachable.
         self.assertIn(
             "048-guidelines-gap-response/spec.md#gap-inventory-routed",
             self.table,

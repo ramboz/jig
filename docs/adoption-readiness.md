@@ -1,13 +1,18 @@
 # Adopting jig: a readiness guide
 
 > A short, jig-sized guide for deciding **whether** jig fits your repo and
-> **how** to start safely. For the *why* behind jig see
-> [docs/product-vision.md](product-vision.md); for the workflow mechanics
-> see [docs/workflow.md](workflow.md).
+> **how** to start safely. For the *why* behind jig start with
+> [philosophy.md](philosophy.md) (or the deeper
+> [product-vision.md](product-vision.md)); for the workflow mechanics see
+> [workflow.md](workflow.md).
 
 jig is a focused workflow scaffold, not an organization-wide AI-native
 program. This page stays deliberately small — it points you at the right
 next action and links out, rather than recreating a leadership curriculum.
+
+**The reading path.** Evaluating or onboarding? Read in this order:
+[Why jig](philosophy.md) → this guide → [prompt cookbook](prompts.md) →
+[workflow](workflow.md).
 
 ## Who jig is for
 
@@ -68,7 +73,7 @@ If every box is checked, you're ready to scaffold.
 ## Choosing an install shape
 
 jig ships in two shapes (full detail in
-[README § Installation](../README.md#installation)):
+[README § Install shapes](../README.md#install-shapes)):
 
 | Shape | Pick it when | Start with |
 |---|---|---|
@@ -91,7 +96,8 @@ When in doubt, scaffold — owning the scaffolding is jig's default posture
    `docs/product-vision.md` and `docs/architecture.md` (or fill them by
    hand). This is what every later slice is judged against.
 4. **Cut your first spec** — `/jig:spec-workflow new <slug>`, then
-   SPIDR-split it into thin vertical slices.
+   SPIDR-split it into thin vertical slices. Copy-paste prompts for every
+   step are in the [prompt cookbook](prompts.md).
 5. **Run one slice end to end** — implement → independent review →
    reconcile → DONE. See
    [docs/workflow.md § Session workflow](workflow.md#session-workflow).
