@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [028-01]
-last_verified:
+last_verified: 2026-06-03
 ---
 
 ## Slice 049-01 — claim-and-release-on-transition
@@ -55,18 +55,21 @@ get one success and one structured refusal naming the existing claim.
    `transition` call sees the existing claim.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions). — 2085 tests, OK.
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases: collision refusal, `--release` without
-      `--reason`, `--no-push`, race-on-push recovery, claim cleared
-      on REVIEWED, claim cleared on back-transition.
-- [ ] Reviewed by `reviewer` subagent (compliance pass).
-- [ ] Craft pass via `pr-review` (no `[blocker]`-tagged findings).
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+      `--reason`, `--push` (opt-in; see deviation 1), race-on-push recovery,
+      claim cleared on REVIEWED, claim cleared on back-transition.
+- [x] Reviewed by `reviewer` subagent (compliance pass). — verdict pass,
+      `reviews/slice-01-compliance.md`.
+- [x] Craft pass via `pr-review` (no `[blocker]`-tagged findings). — verdict
+      pass, `reviews/slice-01-craft.md`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. — no new undefined cases; the two
+      craft nits are tracked in the deviation log below (§5).
 
 ### Close-out (post-DONE)
 
@@ -92,5 +95,70 @@ in the status board.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+1. **Claims are LOCAL by default; `--push` / `--pr` opt into the
+   origin/main reservation (deviation from AC2/AC6 wording).** The slice
+   text framed the IN_PROGRESS claim as reserve-on-origin *by default*
+   with `--no-push` as the opt-out (mirroring `workflow.py new`). On
+   explicit user direction the default was inverted: `transition …
+   IN_PROGRESS` stamps `claimed_by:` locally with **no network**, and
+   `--push` (direct) / `--pr` (via PR) opt into reserving the claim on
+   origin/main. Rationale: keep the everyday "start a slice" path
+   offline-friendly and non-blocking; the spec's *intent* (a structured
+   refusal when a parallel worktree already holds the claim) is preserved
+   on the opt-in path plus a local on-disk collision check (AC3). AC6's
+   "default refuses if origin unreachable" is reinterpreted as "refuses
+   when `--push` is chosen and origin is unreachable"
+   (`test_push_unreachable_origin_refuses`). The `--no-push` flag named in
+   the AC is therefore absent — subsumed by making local the default.
+
+2. **A single uniform detached-worktree reservation serves every
+   branch (incl. `main`).** `workflow.py new` routes on-branch (in-place
+   on `main`, detached worktree off-`main`) because it *creates* files.
+   The claim *edits an existing file*, and a detached checkout of
+   `origin/main` is collision-free from any branch — so the reservation
+   uses one detached-worktree path everywhere, reading the origin/main
+   copy via `git show origin/main:<path>` for the collision check and
+   pushing the claim commit BY SHA from `project_dir` (the 051 lesson).
+   Simpler than duplicating an on-`main` in-place variant; fully mockable.
+
+3. **Claims are a frontmatter-layout feature.** Stamping `claimed_by:`
+   into a legacy *prose-only* slice (no frontmatter) would synthesize a
+   spurious `---` block between the heading and the `**STATUS:**` line, so
+   claim bookkeeping is a no-op there and `--push`/`--pr`/`--release` on
+   such a slice refuse with a clear "requires a file-per-slice layout"
+   message.
+
+4. **Reviewer finding folded back in (was needs-changes → pass).** The
+   first compliance pass caught a real bug: the PR-fallback branch was
+   `claim/{raw slice label}`, but the human label carries spaces / an
+   em-dash and is an invalid git ref — the push would fail on a real
+   remote (the mocks hid it). Fixed by slugging the label through a new
+   `_ref_safe()` helper, and both PR-fallback tests now assert the pushed
+   `refs/heads/claim/…` ref is whitespace-free / a valid git ref
+   (`_assert_claim_branch_ref_valid`). Re-review verdict: pass.
+
+5. **Craft nits — deferred (no `refinement-todo` entry; no new undefined
+   case).** (a) `_append_release_log` appends the entry to the end of the
+   slice section rather than anchored under the `## Release log` heading —
+   correct for the current single-trailing-section shape; revisit if a
+   release log ever grows or gains following prose. (b) The "foreign claim
+   still IN_PROGRESS" predicate appears twice (on-disk check in
+   `transition()` and origin/main check in `_reserve_claim_on_main`) —
+   intentionally separate sources; per ADR-0002 a *third* caller would
+   trigger extracting a shared `_is_foreign_active_claim()` predicate.
+
+6. **AC8 live-remote dogfood — partial.** The LOCAL claim path was
+   dogfooded on this slice: `transition 049-01 IN_PROGRESS` stamped
+   `claimed_by: claude/competent-banach-f69ece`, and the REVIEWED
+   transition cleared it (AC4), both observed on disk. The full
+   live-remote leg (`--push` to `origin/main` + a parallel worktree
+   observing the refusal) writes a claim commit to the shared trunk and
+   is **pending explicit go-ahead** before that outward push is made.
+
+7. **Docs updated:** `skills/spec-workflow/SKILL.md` (transition flags +
+   claim contract), `docs/workflow.md` (claim-on-IN_PROGRESS note), the
+   `spec-workflow` row in `CLAUDE.md`, and the status-board Notes column.
+
+8. **New shared helper:** `_common/parsing.clear_frontmatter_field()`
+   (idempotent field removal) with its own unit tests — the natural
+   counterpart to `set_frontmatter_field`, used to clear `claimed_by:`.

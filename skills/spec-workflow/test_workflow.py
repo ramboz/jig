@@ -4155,6 +4155,328 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
 # ===========================================================================
 
 
+class SliceClaimTests(unittest.TestCase):
+    """Slice 049-01: claim-and-release on the IN_PROGRESS transition.
+
+    `transition <slice> IN_PROGRESS` stamps a `claimed_by:` identifier
+    and refuses a foreign on-disk claim; `push`/`pr_mode` additionally
+    reserve the claim on origin/main (mocked here — no real push). The
+    claim is cleared on REVIEWED / back-transitions, and `--release`
+    force-clears with an audit reason. Off-network (default) behaviors
+    call `transition()` directly; the reserve paths use the
+    `_SubprocessRecorder` git mock (same pattern as ReserveSpecTests)."""
+
+    REL = "docs/specs/200-demo/slice-01-demo.md"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-claim-")
+        self.root = Path(self.tmpdir)
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n"
+        )
+        self.slice = self.spec_dir / "slice-01-demo.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, status="READY_FOR_IMPLEMENTATION",
+                     claimed_by=None, extra=""):
+        fm = f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n"
+        if claimed_by:
+            fm += f"claimed_by: {claimed_by}\n"
+        fm += ("---\n\n## Slice 200-01 — demo\n\n"
+               "**Goal:** placeholder.\n\n**DoD:**\n- [ ] placeholder.\n")
+        self.slice.write_text(fm + extra)
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    # ---- AC1: stamp claimed_by ----------------------------------------
+
+    def test_in_progress_stamps_claimed_by_from_env(self):
+        """JIG_CLAIM_ID override is stamped verbatim (no human-identity
+        inference — spec 049 non-goal)."""
+        self._write_slice()
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-alpha"}):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        fm = self._fm()
+        self.assertEqual(fm["status"], "IN_PROGRESS")
+        self.assertEqual(fm.get("claimed_by"), "wt-alpha")
+
+    def test_in_progress_stamps_branch_name_when_no_env(self):
+        """Absent JIG_CLAIM_ID, the current branch name is used."""
+        self._write_slice()
+        from unittest.mock import patch
+        env = {k: v for k, v in os.environ.items() if k != "JIG_CLAIM_ID"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(_workflow, "_current_branch",
+                          return_value="feature/x"):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "feature/x")
+
+    def test_default_claim_touches_no_network(self):
+        """The default (local) claim performs no git fetch / push /
+        worktree calls — preserves the offline 'start a slice' UX."""
+        self._write_slice()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git fetch", flat)
+        self.assertNotIn("git push", flat)
+        self.assertNotIn("git worktree", flat)
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    # ---- AC3: collision refusal ---------------------------------------
+
+    def test_collision_refuses_foreign_in_progress_claim(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-other")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}):
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        msg = str(ctx.exception)
+        self.assertIn("wt-other", msg)
+        self.assertIn("--release", msg)
+        # The on-disk claim is untouched by the refusal.
+        self.assertEqual(self._fm().get("claimed_by"), "wt-other")
+
+    def test_reclaim_by_same_owner_is_idempotent(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    def test_claim_overrides_stale_foreign_claim_when_not_in_progress(self):
+        """AC3 refuses only when the foreign claim is ALSO IN_PROGRESS.
+        A leftover claimed_by on a non-IN_PROGRESS slice is overwritten."""
+        self._write_slice(status="READY_FOR_IMPLEMENTATION",
+                          claimed_by="wt-other")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    # ---- AC4: claim cleared on forward / back transition --------------
+
+    def test_claim_cleared_on_reviewed(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_REVIEW_EVIDENCE_GATE": "0"}):
+            _workflow.transition(self.spec, "200-01", "REVIEWED")
+        self.assertNotIn("claimed_by", self._fm())
+
+    def test_claim_cleared_on_back_to_ready(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        _workflow.transition(self.spec, "200-01", "READY_FOR_IMPLEMENTATION")
+        self.assertNotIn("claimed_by", self._fm())
+
+    def test_claim_cleared_on_back_to_draft(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        _workflow.transition(self.spec, "200-01", "DRAFT")
+        self.assertNotIn("claimed_by", self._fm())
+
+    # ---- AC5: --release ------------------------------------------------
+
+    def test_release_without_reason_refuses(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        with self.assertRaises(_workflow.WorkflowError) as ctx:
+            _workflow.transition(self.spec, "200-01",
+                                 "READY_FOR_IMPLEMENTATION", release=True)
+        self.assertIn("--reason", str(ctx.exception))
+
+    def test_release_clears_claim_and_logs_reason(self):
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-other")
+        _workflow.transition(self.spec, "200-01", "READY_FOR_IMPLEMENTATION",
+                             release=True, reason="original worktree abandoned")
+        text = self.slice.read_text()
+        fm = self._fm()
+        self.assertNotIn("claimed_by", fm)
+        self.assertEqual(fm["status"], "READY_FOR_IMPLEMENTATION")
+        self.assertIn("## Release log", text)
+        self.assertIn("original worktree abandoned", text)
+        self.assertIn("wt-other", text)
+
+    def test_release_on_prose_slice_refuses(self):
+        """Claims require a frontmatter slice; --release on a legacy
+        prose-only slice is refused rather than synthesizing a block."""
+        prose = self.spec_dir / "spec.md"
+        prose.write_text(
+            "# Spec 200\n\n## Slice 200-09 — legacy\n\n"
+            "**STATUS: IN_PROGRESS**\n"
+        )
+        with self.assertRaises(_workflow.WorkflowError) as ctx:
+            _workflow.transition(prose, "200-09",
+                                 "READY_FOR_IMPLEMENTATION",
+                                 release=True, reason="x")
+        self.assertIn("frontmatter", str(ctx.exception).lower())
+
+    # ---- AC2 / AC7: reserve-on-main (mocked subprocess) ---------------
+
+    def _push_recorder(self, origin_content, sha="abc123",
+                       push_rc=0, push_stderr=""):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "show"), returncode=0, stdout=origin_content)
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout=f"{sha}\n")
+        if push_rc != 0:
+            rec.stub(_matches("git", "push", "origin"),
+                     returncode=push_rc, stderr=push_stderr)
+        return rec
+
+    def _assert_claim_branch_ref_valid(self, rec):
+        """The PR-fallback pushes `<sha>:refs/heads/claim/<branch>`; the
+        slice label has spaces / an em-dash, so the branch must be slugged
+        into a valid git ref. Catch a raw-label regression."""
+        import re as _re
+        refs = [tok.split(":", 1)[1]
+                for call in rec.calls if call[:2] == ["git", "push"]
+                for tok in call if ":refs/heads/claim/" in tok]
+        self.assertTrue(refs, "no claim/ ref was pushed")
+        for ref in refs:
+            self.assertNotRegex(ref, r"\s",
+                                f"claim branch ref has whitespace: {ref!r}")
+            self.assertTrue(_re.fullmatch(r"refs/heads/claim/[A-Za-z0-9._/-]+",
+                                          ref),
+                            f"invalid git ref name: {ref!r}")
+
+    def test_push_reserves_claim_on_origin_main(self):
+        self._write_slice()
+        origin = self.slice.read_text()  # READY_FOR_IMPLEMENTATION, unclaimed
+        rec = self._push_recorder(origin)
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS", push=True)
+        flat = " | ".join(rec.argv_log())
+        # AC7: fetch → show(origin/main) → detached worktree → commit →
+        # push BY SHA → teardown, in that order.
+        self.assertIn("git fetch origin main", flat)
+        self.assertIn(f"git show origin/main:{self.REL}", flat)
+        self.assertIn("git worktree add --detach", flat)
+        self.assertIn("git commit", flat)
+        self.assertIn("git push origin abc123:refs/heads/main", flat)
+        self.assertIn("git worktree remove --force", flat)
+        # Caller's branch is never checked out / reset.
+        self.assertNotIn("git checkout main", flat)
+        self.assertNotIn("git reset --hard", flat)
+        # Local slice file also reflects the claim.
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    def test_push_origin_collision_refuses(self):
+        """The origin/main copy is already claimed IN_PROGRESS by another
+        worktree → refuse before creating any worktree or pushing."""
+        self._write_slice()
+        origin = ("---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                  "last_verified:\nclaimed_by: wt-other\n---\n\n"
+                  "## Slice 200-01 — demo\n")
+        rec = self._push_recorder(origin)
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                     push=True)
+        self.assertIn("wt-other", str(ctx.exception))
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git worktree add", flat)
+        self.assertNotIn("git push", flat)
+
+    def test_push_race_refuses_and_leaves_local_untouched(self):
+        self._write_slice()
+        original = self.slice.read_text()
+        rec = self._push_recorder(
+            original, push_rc=1,
+            push_stderr="! [rejected] main -> main (non-fast-forward)\n")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                     push=True)
+        self.assertIn("race", str(ctx.exception).lower())
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git worktree remove --force", flat)
+        # Reserve runs BEFORE the local write → caller's file untouched.
+        self.assertEqual(self.slice.read_text(), original)
+
+    def test_push_protection_falls_back_to_pr(self):
+        self._write_slice()
+        origin = self.slice.read_text()
+        rec = self._push_recorder(
+            origin, push_rc=1,
+            push_stderr="remote: error: GH006: Protected branch update failed.\n")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/user/repo/pull/9\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_shutil, "which", return_value="/usr/local/bin/gh"):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS", push=True)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn(":refs/heads/claim/", flat)
+        self.assertIn("gh pr create", flat)
+        self.assertIn("git worktree remove --force", flat)
+        self._assert_claim_branch_ref_valid(rec)
+
+    def test_pr_mode_implies_push_via_pr(self):
+        """--pr reserves on origin/main via a PR even without --push,
+        and never attempts a direct push to main."""
+        self._write_slice()
+        origin = self.slice.read_text()
+        rec = self._push_recorder(origin)
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:user/repo.git\n")
+        rec.stub(_matches("gh", "pr", "create"), returncode=0,
+                 stdout="https://github.com/user/repo/pull/9\n")
+        import shutil as _shutil
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_shutil, "which", return_value="/usr/local/bin/gh"):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                 pr_mode=True)
+        flat = " | ".join(rec.argv_log())
+        self.assertIn(":refs/heads/claim/", flat)
+        self.assertIn("gh pr create", flat)
+        self.assertNotIn("abc123:refs/heads/main", flat)
+        self._assert_claim_branch_ref_valid(rec)
+
+    def test_push_unreachable_origin_refuses(self):
+        """Opting into --push with an unreachable origin refuses (and
+        points at the local-only default)."""
+        self._write_slice()
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "fetch", "origin", "main"),
+                 returncode=1, stderr="fatal: unable to access origin\n")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                     push=True)
+        self.assertIn("unreachable", str(ctx.exception).lower())
+
+
 class _GateFixture(unittest.TestCase):
     """Builds a temp spec dir with one slice file and (optionally) review
     evidence + a deviation log, then drives gated transitions with the

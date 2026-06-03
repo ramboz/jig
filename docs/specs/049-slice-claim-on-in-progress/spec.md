@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 tier: (none — dev infrastructure)
 ---
