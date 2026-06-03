@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DRAFT
 dependencies: [028-01]
 last_verified:
-claimed_by: claude/competent-banach-f69ece
 ---
 
 ## Slice 049-01 — claim-and-release-on-transition
