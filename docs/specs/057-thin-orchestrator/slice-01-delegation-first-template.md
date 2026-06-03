@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: READY_FOR_REVIEW
 dependencies: [055-01, 056-03]
 last_verified:
 arch_review: true  # adds a workflow.py CLI surface + a new orchestration pattern

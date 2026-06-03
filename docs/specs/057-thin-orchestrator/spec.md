@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 ---
 
@@ -33,9 +33,12 @@ Findings that frame this spec:
   **structure delegation up front to minimize improvised orchestrator turns**,
   not to predict the bill.
 
-The conclusion: invest in the two **Family-2** knobs — **turn count** and
-**peak context**. This spec operationalizes one mechanism for each, both
-soft/non-blocking, both measurable now that spec 056 gives per-spec token
+The conclusion: the bulk of cost is the two **Family-2** knobs — **turn count**
+and **peak context** — so this spec operationalizes one mechanism for each
+(slices 057-01 and 057-02). Clarify (2026-06-03) added a third, distinct lever:
+**output volume** (slice 057-03) — output is ~22% of cost, separate from the
+`context × turns` product but a real share at 5× input price. All three are
+soft/non-blocking and measurable now that spec 056 gives per-spec token
 attribution (and the `.jig/spec-ref` marker gives exact go-forward numbers).
 
 ## Goals
@@ -45,12 +48,14 @@ attribution (and the `.jig/spec-ref` marker gives exact go-forward numbers).
    dispatches and integrates rather than doing turn-heavy work itself.
 2. **Cap peak orchestrator context** by escalating 055-02's warn-only growth
    nudge into an *actionable* compaction / handoff trigger at a high band.
-3. **Stay soft.** Both mechanisms are nudges/guidance, not enforcement —
+3. **Trim emitted output** — bound the delegation prompts the orchestrator
+   writes and the summaries subagents return (output is ~22% of cost, 5×-priced).
+4. **Stay soft.** All three mechanisms are nudges/guidance, not enforcement —
    consistent with 055's philosophy and ADR-0011 (deliberateness, not a
    firewall). jig cannot force `/compact`; it recommends, the user/harness acts.
-4. **Be measurable.** Use the 056 tracker + the `.jig/spec-ref` marker to verify
-   that disciplined slices show lower orchestrator turn-count / peak-context than
-   undisciplined ones, going forward.
+5. **Be measurable.** Use the 056 tracker + the `.jig/spec-ref` marker to verify
+   that disciplined slices show lower orchestrator turn-count / peak-context (and
+   output share) than undisciplined ones, going forward.
 
 ## Non-goals
 
@@ -68,8 +73,9 @@ attribution (and the `.jig/spec-ref` marker gives exact go-forward numbers).
 
 ## SPIDR analysis
 
-Axis: a **Rules + Interface** mix — two independent mechanisms, one per factor
-of `context × turns`. Each slice is independently **vertical** (delivers a
+Axis: a **Rules + Interface** mix — three independent mechanisms: two for the
+factors of `context × turns` (turn count, peak context) and one for output
+volume. Each slice is independently **vertical** (delivers a
 usable mechanism end-to-end). **Spike rejected** — the substrate is known: the
 deep-dive characterized the cost; 055-02's `jig-context-check.sh` hook exists to
 extend; subagent delegation is already proven (dogfooded on 056-03).
@@ -82,8 +88,8 @@ extend; subagent delegation is already proven (dogfooded on 056-03).
 
 ## Design notes
 
-- **057-01 (turn count).** A helper (`workflow.py session-plan <spec>`, or a
-  pure template — see Open questions) enumerates a spec's non-DEFERRED slices and
+- **057-01 (turn count).** `workflow.py session-plan <spec>` (clarify Q1/Q2:
+  helper form, stdout-only) enumerates a spec's non-DEFERRED slices and
   emits the standard per-slice phase sequence — implement → compliance → craft →
   [arch iff `arch_review`] → reconcile → land — with the subagent type + skill
   for each phase. The orchestrator then executes by *dispatching against the
