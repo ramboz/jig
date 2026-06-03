@@ -49,8 +49,9 @@ text/tool content —
   * ``spec NNN``             (prose reference)
 
 The dominant (most-mentioned) spec number wins; ties break to the lowest
-number for determinism. A session mentioning no spec is unattributed. Slice
-056-03 will replace this heuristic with an exact ``.jig/spec-ref`` marker.
+number for determinism. A session mentioning no spec is unattributed. When a
+session's ``cwd`` carries a ``.jig/spec-ref`` marker (slice 056-03), that exact
+attribution is preferred and this content heuristic is the fallback.
 
 Cost via ccusage (pricing authority)
 -------------------------------------
@@ -266,6 +267,75 @@ def dominant_spec(records: list):
 
 
 # ---------------------------------------------------------------------------
+# Exact attribution — the `.jig/spec-ref` marker (slice 056-03)
+# ---------------------------------------------------------------------------
+#
+# `workflow.py transition ... IN_PROGRESS` stamps `<cwd>/.jig/spec-ref` with
+# the spec being worked on. Format (line-oriented `key=value`, agreed with the
+# writer in skills/spec-workflow/workflow.py):
+#
+#     spec=056
+#     slice=056-03
+#
+# We read the `spec=` line and normalize it to a three-digit number — the same
+# key the content heuristic produces, so the rest of the pipeline is identical
+# whichever source attributed the session. Read-only and fail-soft: a missing /
+# unreadable / spec-less marker simply returns None (caller falls back to the
+# content heuristic).
+
+_SPEC_REF_RE = re.compile(r"(?m)^\s*spec\s*=\s*(\d{1,3})\s*$")
+
+
+def read_spec_ref_marker(cwd):
+    """Return the three-digit spec number recorded in ``<cwd>/.jig/spec-ref``,
+    or ``None`` when the marker is absent, unreadable, or has no ``spec=``
+    line. Never raises (read-only, fail-soft).
+    """
+    if not cwd:
+        return None
+    try:
+        marker = Path(cwd) / ".jig" / "spec-ref"
+        text = marker.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return None
+    m = _SPEC_REF_RE.search(text)
+    if not m:
+        return None
+    return f"{int(m.group(1)):03d}"
+
+
+def session_cwd(records: list):
+    """Return the working directory a session ran in (the ``cwd`` field carried
+    on its records), or ``None`` if no record carries one. Used to locate the
+    session's ``.jig/spec-ref`` marker.
+    """
+    for rec in records:
+        if isinstance(rec, dict):
+            cwd = rec.get("cwd")
+            if cwd:
+                return cwd
+    return None
+
+
+def attribute_session(records: list):
+    """Resolve a session to ``(spec_number, method)``.
+
+    Prefers the exact ``.jig/spec-ref`` marker in the session's ``cwd`` (method
+    ``"marker"``); falls back to the dominant content-mention heuristic (method
+    ``"heuristic"``). Returns ``(None, None)`` when neither attributes the
+    session. The marker wins even when content dominantly mentions a different
+    spec — the marker is the deliberate, authoritative signal (slice 056-03).
+    """
+    marked = read_spec_ref_marker(session_cwd(records))
+    if marked is not None:
+        return marked, "marker"
+    guessed = dominant_spec(records)
+    if guessed is not None:
+        return guessed, "heuristic"
+    return None, None
+
+
+# ---------------------------------------------------------------------------
 # Token summing (orchestrator message.usage)
 # ---------------------------------------------------------------------------
 
@@ -458,6 +528,11 @@ class Report:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     session_count: int = 0
+    # Attribution-confidence split (slice 056-03): how many attributed
+    # sessions came from the exact `.jig/spec-ref` marker vs. the content
+    # heuristic. marker + heuristic == session_count.
+    marker_session_count: int = 0
+    heuristic_session_count: int = 0
     models: list = field(default_factory=list)
     per_model: dict = field(default_factory=dict)
     cost_usd: float = None
@@ -531,14 +606,23 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     rep = Report(spec=target)
 
     # Attribute sessions, keeping the session PATH so we can locate each
-    # session's nested subagent transcripts (slice 056-02).
+    # session's nested subagent transcripts (slice 056-02). Slice 056-03:
+    # prefer the exact `.jig/spec-ref` marker; fall back to the content
+    # heuristic — and record which, so the report can flag confidence.
     attributed = []
+    marker_count = 0
+    heuristic_count = 0
     for session_path in find_sessions(projects_dir, encoded_prefix):
         records = read_session(session_path)
         if not records:
             continue
-        if dominant_spec(records) == target:
+        spec_num, method = attribute_session(records)
+        if spec_num == target:
             attributed.append((session_path, records))
+            if method == "marker":
+                marker_count += 1
+            else:
+                heuristic_count += 1
 
     # Orchestrator (flat session) totals — slice 056-01, unchanged.
     models = set()
@@ -583,6 +667,8 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
                     agg[f] += slot[f]
 
     rep.session_count = len(attributed)
+    rep.marker_session_count = marker_count
+    rep.heuristic_session_count = heuristic_count
     rep.models = sorted(models)
     rep.per_model = per_model
     rep.subagent_per_model = sub_per_model
@@ -691,6 +777,20 @@ def render(rep: Report) -> str:
 
     lines.append(f"  Sessions:               {rep.session_count}")
     lines.append(f"  Models:                 {', '.join(rep.models) or 'unknown'}")
+    # Slice 056-03: surface attribution confidence — how many sessions were
+    # mapped exactly (by the `.jig/spec-ref` marker) vs. heuristically (the
+    # dominant content-mention guess). The lower-confidence caveat is shown
+    # ONLY when heuristic sessions actually contributed.
+    lines.append(
+        f"  Attribution:            {rep.marker_session_count} by marker "
+        f"(exact), {rep.heuristic_session_count} by heuristic"
+    )
+    if rep.heuristic_session_count:
+        lines.append(
+            f"    note: {rep.heuristic_session_count} session(s) had no "
+            f".jig/spec-ref marker and fell back to the content heuristic "
+            f"(lower confidence) — treat their share as approximate."
+        )
     lines.append("")
 
     # --- Orchestrator (flat sessions, 056-01) -----------------------------
@@ -738,8 +838,10 @@ def _append_framing(lines: list, rep: Report) -> None:
         "from message.usage — the combined figure is the true per-spec cost."
     )
     lines.append(
-        "Attribution is a content heuristic (dominant spec-path mention); an "
-        "exact .jig/spec-ref marker arrives in slice 056-03."
+        "Attribution prefers the exact .jig/spec-ref marker (stamped by "
+        "`workflow.py transition ... IN_PROGRESS`); sessions without a marker "
+        "fall back to the content heuristic (dominant spec-path mention) and "
+        "are flagged above as lower-confidence (slice 056-03)."
     )
 
 

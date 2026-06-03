@@ -433,6 +433,74 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
         )
 
 
+# ---------- Slice 056-03: .jig/spec-ref attribution marker ----------
+#
+# When a slice begins (transition -> IN_PROGRESS), stamp a working-tree-local
+# `.jig/spec-ref` marker so `scripts/usage.py` can map this session's
+# transcripts to the exact spec, instead of guessing from content mentions.
+#
+# Format (simple, line-oriented `key=value`, one per line — both this writer
+# and usage.py's reader agree on it):
+#
+#     spec=056
+#     slice=056-03
+#
+# `spec=` is the three-digit spec number (the attribution key usage.py reads);
+# `slice=` records the current slice for human/debug context. The file lives at
+# <project-root>/.jig/spec-ref — alongside the tracked `.jig/test-command` —
+# and is git-ignored (a scoped `.gitignore` entry, NOT a blanket `.jig/`
+# ignore, so the tracked test-command file is unaffected). It is working-tree-
+# local on purpose: it reflects what THIS tree is working on and must not
+# travel across branches as a tracked file.
+IN_PROGRESS_STATUS = "IN_PROGRESS"
+
+
+def _spec_number_from_label(label: str) -> str:
+    """Extract the three-digit spec number from a slice label like
+    ``056-03 — foo`` / ``Slice 056-03``. Returns "" when no NNN-NN id is
+    present (defensive — the marker write then no-ops via the caller)."""
+    m = re.search(r"\b(\d{3})-\d{2}\b", label)
+    return m.group(1) if m else ""
+
+
+def _slice_id_from_label(label: str) -> str:
+    """Extract the ``NNN-NN`` slice id from a slice label. Returns "" when
+    absent."""
+    m = re.search(r"\b(\d{3}-\d{2})\b", label)
+    return m.group(1) if m else ""
+
+
+def _write_spec_ref_marker(spec_md: Path, slice_label: str) -> None:
+    """Best-effort: stamp `<project-root>/.jig/spec-ref` with the spec number
+    and current slice (slice 056-03). Idempotent — a repeated IN_PROGRESS
+    transition rewrites the same bytes via `atomic_write_text`.
+
+    Side-effect-isolated (AC #1 / AC #4): wrapped so ANY failure (unwritable
+    `.jig`, a non-dir occupying the path, a permission error, an
+    unresolvable project root) is swallowed and the transition — including
+    its review-evidence gates — proceeds unaffected. The marker is a
+    reporting aid, never a gate.
+
+    Project root is the spec's `parents[3]` (docs/specs/<dir>/spec.md ->
+    [0]=<dir>, [1]=specs, [2]=docs, [3]=root), matching the DONE-dependency
+    resolution in `transition`.
+    """
+    try:
+        spec_num = _spec_number_from_label(slice_label)
+        if not spec_num:
+            return  # no recognizable spec number — nothing useful to stamp
+        slice_id = _slice_id_from_label(slice_label)
+        root = spec_md.resolve().parents[3]
+        jig_dir = root / ".jig"
+        jig_dir.mkdir(parents=True, exist_ok=True)
+        body = f"spec={spec_num}\n"
+        if slice_id:
+            body += f"slice={slice_id}\n"
+        atomic_write_text(jig_dir / "spec-ref", body)
+    except Exception:  # noqa: BLE001 — best-effort; never block the transition
+        return
+
+
 def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     """Transition the named slice's STATUS to `new_status`. Auto-ticks
     "Implementation review passed" on REVIEWED, and "Reconciliation
@@ -555,6 +623,15 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     # what's already in spec.md (or when spec.md has no frontmatter).
     # Ordered AFTER the slice write so the rollup reflects the new state.
     _write_spec_rollup(spec_md)
+
+    # Slice 056-03: when a slice begins, stamp the working-tree-local
+    # `.jig/spec-ref` attribution marker. Ordered AFTER all status writes
+    # so the marker only follows a successful status transition (no git
+    # commit happens here — the ordering is about local write success). Best-effort and
+    # side-effect-isolated — a failed write never blocks the transition or
+    # its review-evidence gates (the gate already ran and passed above).
+    if new_status == IN_PROGRESS_STATUS:
+        _write_spec_ref_marker(spec_md, slice_name)
 
     return f"transitioned {slice_name}: {old_status} → {new_status}"
 

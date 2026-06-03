@@ -1,7 +1,7 @@
 ---
-status: READY_FOR_REVIEW
+status: DONE
 dependencies: [056-01]
-last_verified:
+last_verified: 2026-06-02
 ---
 
 ## Slice 056-03 — `.jig/spec-ref` marker for exact session→spec attribution
@@ -29,19 +29,45 @@ sessions → specs exactly (and is transparent when it can't).
    review-evidence gates (the marker write is additive and side-effect-isolated).
 
 **DoD:**
-- [ ] All ACs pass; full suite green.
-- [ ] Coverage: a `.jig/spec-ref`-bearing session attributes by marker; a
+- [x] All ACs pass; full suite green.
+- [x] Coverage: a `.jig/spec-ref`-bearing session attributes by marker; a
       bare session falls back to the heuristic and is flagged; the marker write
       is idempotent and non-blocking; transition gates unaffected.
-- [ ] Reviewed by `reviewer` subagent; implementation review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Deviation log produced.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if decisions were deferred.
+- [x] Reviewed by `reviewer` subagent; implementation review passed.
+- [x] Craft (pr-review) pass run; blockers addressed.
+- [x] Deviation log produced.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if decisions were deferred. (none deferred — N/A)
 
 **Anti-horizontal-phasing check:** After this slice the report's per-spec
 attribution is exact (marker-based) where the marker exists, and honestly
 flagged where it falls back — the developer trusts the numbers more.
+
+### Deviation log (after reconciliation)
+
+Implemented as specified; all four ACs met (compliance + craft passes both
+`pass`, no blockers). Decisions / deviations during implementation:
+
+- **Marker format.** A line-oriented `key=value` file `.jig/spec-ref`:
+  `spec=NNN` (the attribution key) + `slice=NNN-NN` (human/debug context).
+  Writer (`workflow.py`) and reader (`usage.py`) share the format; the reader
+  normalizes `spec=N` → three digits and tolerates a missing `slice=` line.
+- **Fifth touched file (`.gitignore`).** Beyond the four enumerated
+  deliverables, a *scoped* ignore for `.jig/spec-ref` was added (not a blanket
+  `.jig/`), so the already-tracked `.jig/test-command` is unaffected. The marker
+  is working-tree-local by design (AC#1/#2) and must not be committed or travel
+  across branches.
+- **Attribution invariant (load-bearing).** Marker attribution assumes a
+  session's `cwd` equals the project root holding `.jig` (the worktree≈root
+  model); the writer derives that root from `spec_md.resolve().parents[3]`. A
+  spec edited from outside its own worktree would stamp the marker in the spec's
+  tree, not the editor's cwd — consistent with the worktree-per-task design.
+- **Craft nits addressed.** (1) Reworded the `workflow.py` comment that said the
+  marker "follows a committed transition" — the transition writes files, it does
+  not `git commit`. (2) Corrected `usage.py`'s module-docstring forward-reference
+  ("056-03 will replace this heuristic") to present tense now that the marker is
+  live. (3) Kept the single-use `IN_PROGRESS_STATUS` constant the craft pass
+  flagged as cosmetic — a named status constant reads clearly and is harmless.
 
 ### Close-out (post-DONE)
 

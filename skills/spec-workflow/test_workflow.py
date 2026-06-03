@@ -198,6 +198,108 @@ class TransitionTests(unittest.TestCase):
                          "frontmatter-only slice")
 
 
+class SpecRefMarkerTests(unittest.TestCase):
+    """Slice 056-03: transition -> IN_PROGRESS stamps a `.jig/spec-ref`
+    marker in the project working tree recording the spec number + the
+    current slice. The write is idempotent and best-effort (never blocks
+    the transition or its review-evidence gates).
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-specref-")
+        # A project-root layout so workflow.py can derive the root from the
+        # spec path (docs/specs/<dir>/spec.md -> parents[3] is the root, the
+        # `.jig/` home). The root needn't be a scaffold for the marker write.
+        self.root = Path(self.tmpdir) / "proj"
+        self.spec_dir = self.root / "docs" / "specs" / "056-token-usage-tracking"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, label: str, status: str = "DRAFT") -> None:
+        self.spec.write_text(
+            f"---\nstatus: {status}\n---\n\n# Spec X\n\n## Overview\n\nsynthetic.\n"
+            f"\n## Slice {label}\n\n"
+            f"**STATUS: {status}**\n\n**Goal:** placeholder.\n"
+        )
+
+    def _marker(self) -> Path:
+        return self.root / ".jig" / "spec-ref"
+
+    def test_in_progress_writes_spec_ref_marker(self):
+        self._write_slice("056-03 alpha")
+        result = run_workflow("transition", str(self.spec), "056-03",
+                              "IN_PROGRESS")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        marker = self._marker()
+        self.assertTrue(marker.is_file(), "marker not written")
+        text = marker.read_text()
+        # Records the spec number AND the current slice, parseably.
+        self.assertRegex(text, r"(?m)^spec=056\s*$")
+        self.assertRegex(text, r"(?m)^slice=056-03\s*$")
+
+    def test_marker_is_idempotent_across_repeated_transitions(self):
+        self._write_slice("056-03 alpha")
+        run_workflow("transition", str(self.spec), "056-03", "IN_PROGRESS")
+        first = self._marker().read_text()
+        # Transition the same slice to IN_PROGRESS again (idempotent re-stamp).
+        run_workflow("transition", str(self.spec), "056-03", "IN_PROGRESS")
+        second = self._marker().read_text()
+        self.assertEqual(first, second, "re-stamp duplicated / drifted marker")
+
+    def test_marker_reflects_the_transitioning_slice(self):
+        # Two slices; transitioning the SECOND must stamp slice=056-02.
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec X\n\n## Overview\n\nsynthetic.\n"
+            "\n## Slice 056-01 first\n\n**STATUS: DONE**\n\n**Goal:** x.\n"
+            "\n## Slice 056-02 second\n\n**STATUS: DRAFT**\n\n**Goal:** y.\n"
+        )
+        run_workflow("transition", str(self.spec), "056-02", "IN_PROGRESS")
+        text = self._marker().read_text()
+        self.assertRegex(text, r"(?m)^spec=056\s*$")
+        self.assertRegex(text, r"(?m)^slice=056-02\s*$")
+
+    def test_non_in_progress_transition_does_not_require_marker(self):
+        # A DRAFT->READY transition is not the stamping point; it must not
+        # fail even though no marker is written for it.
+        self._write_slice("056-03 alpha")
+        result = run_workflow("transition", str(self.spec), "056-03",
+                              "READY_FOR_IMPLEMENTATION")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+    def test_marker_write_failure_does_not_block_transition(self):
+        # AC1/AC4: a failed marker write must NOT block the transition.
+        # Simulate an unwritable target by occupying `.jig` with a regular
+        # FILE (so `.jig/spec-ref` can't be created — NotADirectoryError).
+        self._write_slice("056-03 alpha")
+        (self.root / ".jig").write_text("not a directory")
+        result = run_workflow("transition", str(self.spec), "056-03",
+                              "IN_PROGRESS")
+        # Transition still succeeds despite the marker write failing.
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        # And the status actually flipped.
+        self.assertIn("**STATUS: IN_PROGRESS**", self.spec.read_text())
+
+    def test_marker_write_does_not_disturb_review_evidence_gate(self):
+        # AC4 regression: the marker write is additive — it must not affect
+        # the review-evidence gate. With the gate ON and no evidence, a
+        # transition to REVIEWED must STILL be refused (the marker logic does
+        # not run for REVIEWED, and does not relax the gate).
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec X\n\n## Overview\n\nsynthetic.\n"
+            "\n## Slice 056-03 alpha\n\n**STATUS: IN_PROGRESS**\n\n"
+            "**Goal:** placeholder.\n"
+        )
+        result = run_workflow("transition", str(self.spec), "056-03",
+                              "REVIEWED", gate=True)
+        self.assertNotEqual(result.returncode, 0,
+                            "review-evidence gate must still refuse REVIEWED")
+        self.assertIn("review evidence", result.stderr.lower())
+
+
 class StatusBoardTests(unittest.TestCase):
     """workflow.py status-board <project-dir>."""
 

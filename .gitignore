@@ -2,6 +2,14 @@
 .claude/review-queue.json
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Working-tree-local spec-attribution marker (slice 056-03), stamped by
+# `workflow.py transition ... IN_PROGRESS` and read by scripts/usage.py to map
+# this checkout's sessions to a spec. Per-checkout state — must NOT be tracked
+# or travel across branches. Scoped to the file (NOT a blanket `.jig/`) because
+# `.jig/test-command` IS tracked.
+.jig/spec-ref
+
 .DS_Store
 node_modules/
 *.pyc

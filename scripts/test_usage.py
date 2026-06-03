@@ -1016,5 +1016,228 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertTrue(_shows_number(result.stdout, 1800), msg=result.stdout)
 
 
+# ---------------------------------------------------------------------------
+# Slice 056-03 — .jig/spec-ref marker attribution (exact session->spec)
+# ---------------------------------------------------------------------------
+
+class SpecRefMarkerReadTests(unittest.TestCase):
+    """Unit-level tests for the marker reader: it parses the `spec=` line out
+    of a `<cwd>/.jig/spec-ref` file and normalizes to a 3-digit number,
+    returning None when absent / unreadable / spec-less.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-marker-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _write_marker(self, body: str) -> str:
+        jig = self._tmp / ".jig"
+        jig.mkdir(parents=True, exist_ok=True)
+        (jig / "spec-ref").write_text(body)
+        return str(self._tmp)
+
+    def test_reads_spec_number_from_marker(self):
+        cwd = self._write_marker("spec=056\nslice=056-03\n")
+        self.assertEqual(uu.read_spec_ref_marker(cwd), "056")
+
+    def test_marker_spec_is_normalized_to_three_digits(self):
+        cwd = self._write_marker("spec=56\nslice=56-03\n")
+        self.assertEqual(uu.read_spec_ref_marker(cwd), "056")
+
+    def test_absent_marker_returns_none(self):
+        # A cwd with no .jig/spec-ref file.
+        self.assertIsNone(uu.read_spec_ref_marker(str(self._tmp)))
+
+    def test_marker_without_spec_line_returns_none(self):
+        cwd = self._write_marker("slice=056-03\n")
+        self.assertIsNone(uu.read_spec_ref_marker(cwd))
+
+    def test_nonexistent_cwd_returns_none_no_throw(self):
+        self.assertIsNone(
+            uu.read_spec_ref_marker(str(self._tmp / "does-not-exist")))
+
+    def test_none_cwd_returns_none(self):
+        self.assertIsNone(uu.read_spec_ref_marker(None))
+
+
+class _MarkerTreeMixin:
+    """Two sessions for the same repo whose `cwd` points at REAL temp dirs:
+
+      * sessMarker — cwd has a .jig/spec-ref naming spec 070, but its TEXT
+        content dominantly mentions a DIFFERENT spec (071). The marker must
+        win — proving attribution is by marker, not content, when present.
+      * sessHeuristic — cwd has NO marker; content dominantly mentions 070.
+        It must fall back to the heuristic and be FLAGGED as heuristic.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-mtree-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+
+        # Real cwd dirs (the marker reader stats <cwd>/.jig/spec-ref).
+        self.marker_cwd = self._tmp / "wt-marker"
+        self.marker_cwd.mkdir()
+        (self.marker_cwd / ".jig").mkdir()
+        (self.marker_cwd / ".jig" / "spec-ref").write_text(
+            "spec=070\nslice=070-01\n")
+        self.bare_cwd = self._tmp / "wt-bare"
+        self.bare_cwd.mkdir()  # no .jig/spec-ref
+
+        enc_marker = uu.encode_cwd(str(self.marker_cwd))
+        enc_bare = uu.encode_cwd(str(self.bare_cwd))
+        # A single encoded prefix that spans both (their common ancestor).
+        self.prefix = uu.encode_cwd(str(self._tmp))
+
+        # Marker session: content screams 071, marker says 070.
+        _write_session(
+            self.projects, enc_marker, "sessMarker",
+            [
+                _user_record(str(self.marker_cwd),
+                             "specs/071-decoy spec 071 071-01 071-02 "
+                             "specs/071-decoy spec 071.",
+                             session="sessMarker"),
+                _assistant_record(
+                    "claude-opus-4-8",
+                    _usage(inp=10, out=20, cache_read=30, cache_create=40),
+                    str(self.marker_cwd), session="sessMarker",
+                    text="071-01 specs/071-decoy spec 071 everywhere 071-02."),
+            ],
+        )
+        # Bare session: no marker; content dominantly mentions 070.
+        _write_session(
+            self.projects, enc_bare, "sessHeuristic",
+            [
+                _user_record(str(self.bare_cwd),
+                             "specs/070-real spec 070 070-01.",
+                             session="sessHeuristic"),
+                _assistant_record(
+                    "claude-opus-4-8",
+                    _usage(inp=1, out=2, cache_read=3, cache_create=4),
+                    str(self.bare_cwd), session="sessHeuristic",
+                    text="070-01 specs/070-real spec 070."),
+            ],
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+
+class MarkerAttributionTests(_MarkerTreeMixin, unittest.TestCase):
+
+    def test_marker_session_attributed_by_marker_not_content(self):
+        # The marker session's content dominantly mentions 071, but its
+        # marker names 070 — so it must attribute to 070 (marker wins).
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None)
+        # Both the marker session AND the bare (heuristic) session land on 070.
+        self.assertEqual(rep.session_count, 2)
+        # Marker session tokens (10/20/30/40) + bare (1/2/3/4) are both summed.
+        self.assertEqual(rep.input_tokens, 11)
+        self.assertEqual(rep.output_tokens, 22)
+        self.assertEqual(rep.cache_read_tokens, 33)
+        self.assertEqual(rep.cache_creation_tokens, 44)
+
+    def test_marker_session_not_attributed_to_content_spec(self):
+        # Spec 071 (the content-dominant spec of the marker session) must get
+        # NO sessions, because the marker overrides content.
+        rep = uu.build_report(spec="071", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None)
+        self.assertEqual(rep.session_count, 0)
+
+    def test_attribution_method_counts_recorded(self):
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None)
+        # One attributed by marker, one by heuristic.
+        self.assertEqual(rep.marker_session_count, 1)
+        self.assertEqual(rep.heuristic_session_count, 1)
+
+    def test_report_flags_heuristic_sessions(self):
+        # AC3: the reader must be able to see that some sessions were
+        # attributed heuristically (lower confidence) vs by marker.
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None)
+        out = uu.render(rep).lower()
+        self.assertIn("marker", out)
+        self.assertIn("heuristic", out)
+        # The counts surface in the output (1 marker, 1 heuristic).
+        self.assertIn("1", uu.render(rep))
+
+
+class AllMarkerNoHeuristicFlagTests(unittest.TestCase):
+    """When every attributed session has a marker, the report should say so
+    (no heuristic caveat) — the confidence is high.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-allmark-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+        self.cwd = self._tmp / "wt"
+        self.cwd.mkdir()
+        (self.cwd / ".jig").mkdir()
+        (self.cwd / ".jig" / "spec-ref").write_text("spec=080\nslice=080-02\n")
+        enc = uu.encode_cwd(str(self.cwd))
+        self.prefix = uu.encode_cwd(str(self._tmp))
+        _write_session(
+            self.projects, enc, "sessOnly",
+            [
+                _assistant_record(
+                    "claude-opus-4-8",
+                    _usage(inp=5, out=5, cache_read=5, cache_create=5),
+                    str(self.cwd), session="sessOnly",
+                    text="no spec mentions in text at all"),
+            ],
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_marker_attributes_even_with_no_content_mention(self):
+        # The session text mentions NO spec, so the heuristic alone would
+        # leave it unattributed. The marker rescues it -> attributed to 080.
+        rep = uu.build_report(spec="080", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None)
+        self.assertEqual(rep.session_count, 1)
+        self.assertEqual(rep.marker_session_count, 1)
+        self.assertEqual(rep.heuristic_session_count, 0)
+
+    def test_all_marker_report_has_no_heuristic_caveat(self):
+        rep = uu.build_report(spec="080", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None)
+        out = uu.render(rep).lower()
+        # All attributions are by marker -> exact; no "fell back" caveat.
+        self.assertNotIn("fell back", out)
+        self.assertNotIn("heuristic (lower confidence)", out)
+
+
+class MarkerFallbackRegressionTests(_TreeMixin, unittest.TestCase):
+    """AC2 fallback: the 056-01 fixture tree has NO markers anywhere, so the
+    content heuristic must still drive attribution exactly as before — and
+    every attributed session is flagged heuristic.
+    """
+
+    def test_no_markers_falls_back_to_heuristic_unchanged(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        # 056-01 expectations are unchanged.
+        self.assertEqual(rep.session_count, 2)
+        self.assertEqual(rep.total_tokens, 16 + 160 + 1800 + 340)
+        # Both attributed by heuristic (no markers present).
+        self.assertEqual(rep.marker_session_count, 0)
+        self.assertEqual(rep.heuristic_session_count, 2)
+
+    def test_heuristic_only_report_is_flagged(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        out = uu.render(rep).lower()
+        self.assertIn("heuristic", out)
+
+
 if __name__ == "__main__":
     unittest.main()
