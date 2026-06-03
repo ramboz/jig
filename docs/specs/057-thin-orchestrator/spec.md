@@ -62,9 +62,9 @@ attribution (and the `.jig/spec-ref` marker gives exact go-forward numbers).
 - **Hard enforcement / blocking gates.** These are nudges (ADR-0011).
 - **Implementing compaction itself.** jig cannot run `/compact` or rewrite the
   harness's context; 057-02 *prompts* an action — the user/harness performs it.
-- **Output-token reduction.** Output is ~22% of cost (5×-priced, larger than
-  folklore) — a real but separate, smaller lever. Parked as a possible future
-  slice / spec (see Open questions).
+- ~~Output-token reduction~~ — **moved into scope as slice 057-03** at clarify
+  (2026-06-03). Output is ~22% of cost (5×-priced, larger than folklore) — a
+  real, if smaller, lever; the user chose to address it here rather than park it.
 
 ## SPIDR analysis
 
@@ -78,6 +78,7 @@ extend; subagent delegation is already proven (dogfooded on 056-03).
 |---|---|---|
 | 057-01 | **Delegation-first session template** — a per-spec dispatch plan (each slice → implementer + which review passes + which skills) + workflow.md "run thin" guidance, so the orchestrator dispatches-and-integrates instead of improvising work across many turns | **turn count** |
 | 057-02 | **Active compaction trigger** — `jig-context-check.sh` escalates from warn-only to an actionable compaction / fresh-session-handoff prompt at a high band | **peak context** |
+| 057-03 | **Output discipline** — bound the size of delegation prompts the orchestrator writes + summaries subagents return (output is 5×-priced, ~22% of cost); sibling to 055-04 | **output volume** |
 
 ## Design notes
 
@@ -107,17 +108,48 @@ extend; subagent delegation is already proven (dogfooded on 056-03).
 
 - `slice-01-delegation-first-template.md` — per-spec dispatch plan + "run thin" guidance (turn-count lever)
 - `slice-02-active-compaction-trigger.md` — 055-02 hook escalates to an actionable compaction nudge (peak-context lever)
+- `slice-03-output-discipline.md` — bound delegation-prompt + returned-summary size (output-volume lever; added at clarify)
 
 ## Open questions
 
-1. **057-01 form** — `workflow.py session-plan` helper vs a pure-guidance
-   template vs a skill? (Mirror the 056 clarify decision: script-first, skill
-   later only if discovery/triggering proves worth it.)
-2. **057-01 plan artifact** — stdout-only, or persisted (e.g. the `plan.md` jig
-   already references per spec, or a `.jig/`-local file)?
-3. **057-02 band default** — what `JIG_CONTEXT_COMPACT_PCT` default, and should
-   the hook attempt to signal the harness's native `/compact` (if a hook channel
-   exists) or stay prompt-only?
-4. **Output discipline (~22%)** — promote to a future slice here, or a separate
-   spec? (Concise delegation prompts + concise returned summaries; output is
-   5×-priced.)
+_All four resolved at clarify (2026-06-03) — see ## Clarifications below._
+
+## Clarifications
+
+### Q1: What form should the 057-01 delegation-first dispatch plan take?
+_(category: Scope & Boundaries / Acceptance Criteria Testability)_
+
+**workflow.py helper** — a `session-plan <spec>` subcommand emits the per-slice
+dispatch plan deterministically. Script-first, mirroring the 056 precedent (a
+skill can come later only if discovery/triggering proves worth it).
+
+### Q2: Where should the dispatch plan output live?
+_(category: Acceptance Criteria Testability)_
+
+**stdout-only** — emit on demand to stdout; no persisted file (leanest;
+consistent with `usage.py report`).
+
+### Q3: How should the 057-02 compaction trigger act when context crosses the high band?
+_(category: Non-functional Requirements / Edge Cases & Failure Modes)_
+
+**Prompt-only, ~75% default** — emit an actionable text recommendation (compact
+/ hand off + carry-over hint) at a default ~0.75 band (tunable via
+`JIG_CONTEXT_COMPACT_PCT`); never run `/compact` itself (ADR-0011: nudge, not
+enforcement).
+
+### Q4: The ~22% output-token cost lever — where should it go?
+_(category: Scope & Boundaries)_
+
+**Add as a 057-03 slice** — an output-discipline slice in this spec (concise
+delegation prompts + concise returned subagent summaries).
+
+### Coverage summary
+
+| Category | Status |
+|---|---|
+| Scope & Boundaries | Resolved |
+| Acceptance Criteria Testability | Resolved |
+| Dependencies & Blockers | Clear |
+| Non-functional Requirements | Resolved |
+| Edge Cases & Failure Modes | Partial — 057-01's empty-/non-standard-slice handling not yet pinned (deferred to implementation) |
+| Terminology Consistency | Clear |

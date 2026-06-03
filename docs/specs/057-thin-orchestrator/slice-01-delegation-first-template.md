@@ -24,7 +24,8 @@ work itself. Cuts orchestrator **turn count**, the data-confirmed cost driver
 **Acceptance Criteria:**
 
 1. **A dispatch plan is emitted from the spec deterministically.** Given a spec
-   path, the mechanism lists each non-DEFERRED slice and, per slice, the
+   path, `workflow.py session-plan <spec>` prints **to stdout** (clarify Q1/Q2)
+   each non-DEFERRED slice and, per slice, the
    standard phase sequence — implement → compliance → craft →
    *arch (iff the slice's `arch_review: true`)* → reconcile → land — naming the
    subagent type and skill for each phase. Output is a function of the spec's

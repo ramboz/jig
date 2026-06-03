@@ -175,6 +175,7 @@
 | [056-token-usage-tracking](056-token-usage-tracking/spec.md) | 056-03 — `.jig/spec-ref` marker for exact session→spec attribution | **DONE** | `.jig/spec-ref` (`spec=NNN` + `slice=NNN-NN`; working-tree-local, gitignored, scoped so tracked `.jig/test-command` is unaffected) stamped on `transition … IN_PROGRESS`, best-effort / non-blocking (a failed write never blocks the transition or its gates). `usage.py` **prefers the marker** over the dominant-spec-mention heuristic and **flags** heuristic-only sessions as lower-confidence. Load-bearing invariant: marker attribution assumes a session's `cwd` equals the worktree root (`spec.md parents[3]`). **Closes spec 056.** |
 | [057-thin-orchestrator](057-thin-orchestrator/spec.md) | 057-01 — Delegation-first session template | DRAFT |  |
 | [057-thin-orchestrator](057-thin-orchestrator/spec.md) | 057-02 — Active compaction trigger | DRAFT |  |
+| [057-thin-orchestrator](057-thin-orchestrator/spec.md) | 057-03 — Output discipline (concise delegation prompts + summaries) | DRAFT |  |
 
 ## Deferred slices
 
