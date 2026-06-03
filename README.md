@@ -35,6 +35,44 @@ default (Tier 1) — not a hundred-skill marketplace. For the full picture, see
 [product-vision.md](docs/product-vision.md) (vision, target users, principles)
 and [architecture.md](docs/architecture.md) (mechanics).
 
+## Principles jig encodes
+
+The convictions behind the mechanisms — each one wired into something concrete,
+not left as advice:
+
+- **The harness matters more than the model.** jig *is* a harness: the
+  instructions an agent reads, the tools it can run, the feedback loops that
+  correct it, the isolation boundaries that contain it. Swapping models won't
+  close a workflow gap — the scaffold does.
+- **Guardrails, not guidelines.** What *must* happen is enforced mechanically by
+  hooks (secret scanning, spec gates, review-evidence gates); what takes
+  *judgment* lives in skills. The line between a deterministic gate and an
+  advisory nudge is drawn on purpose.
+- **The context window is working memory, not a storage buffer.** Irrelevant
+  context degrades reasoning, so jig keeps a lean hot cache, loads deeper docs
+  on demand, and delegates file-heavy reading to subagents that return only a
+  summary — and it *measures* the cost rather than guessing at it.
+- **Review is the bottleneck.** Agents produce faster than review capacity
+  grows, so jig won't let implementers grade their own homework: a fresh,
+  read-only reviewer checks every slice against its spec, and the verdicts are
+  durable artifacts that gate the next state.
+- **Specs and docs are code, and they ship in slices.** Specs, ADRs, and the
+  memory layer are version-controlled and reconciled before a slice lands — so
+  "done" never drifts, and work arrives as vertical slices instead of one big-bang
+  mega-commit.
+
+These are the outward-facing worldview; several are also load-bearing build
+rules jig holds *itself* to, spec by spec — see
+[product-vision § Design principles](docs/product-vision.md#design-principles)
+for the operational detail.
+
+Two more jig is building toward, honestly not yet landed: **one development
+experience across AI tools** (a host-adapter layer beyond Claude Code — [spec
+033](docs/specs/033-host-adapter-portability/spec.md)) and **coordination across
+a multi-repo workspace** (a federation tier — [spec
+034](docs/specs/034-federation-tier/spec.md)). Both are on the roadmap, not
+shipped today.
+
 ## Start here
 
 **New to jig?** Read the
