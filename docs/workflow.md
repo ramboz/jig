@@ -51,6 +51,16 @@ nudge that blocks nothing; the deterministic gate lives in the transition
 helper. State names match `VALID_STATUSES` in
 [skills/spec-workflow/workflow.py](../skills/spec-workflow/workflow.py).
 
+**Slice ownership (claim-on-IN_PROGRESS, spec 049-01).** Transitioning a
+frontmatter slice to `IN_PROGRESS` stamps a `claimed_by:` identifier
+(current branch name, or `JIG_CLAIM_ID`) so two parallel worktrees don't
+both pick up the same slice — the move refuses a foreign claim that is
+still `IN_PROGRESS`, naming the holder. The claim is **local by default**;
+`workflow.py transition … IN_PROGRESS --push` (or `--pr`) reserves it on
+`origin/main` so other worktrees see it. It clears on the move to
+`REVIEWED` and on any back-transition; `--release --reason "<why>"`
+force-clears a stale claim and logs it to the slice's `## Release log`.
+
 ## SPIDR splitting
 
 All specs are SPIDR-split before implementation begins:
