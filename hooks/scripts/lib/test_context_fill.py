@@ -22,11 +22,14 @@ from context_fill import (
     RATIO,
     DEFAULT_GROWTH_THRESHOLD,
     GROWTH_BANDS,
+    DEFAULT_COMPACT_THRESHOLD,
+    _resolve_compact_threshold,
     token_window,
     read_tail_cache_read_tokens,
     evaluate_growth,
     growth_nudge_for_turn,
     growth_nudge_text,
+    compaction_nudge_text,
     DEFAULT_READ_LEAN_BYTES,
     _resolve_read_lean_bytes,
     evaluate_read,
@@ -622,6 +625,154 @@ class GrowthNudgeForTurnTests(unittest.TestCase):
         # Should not raise; returns the nudge (state just isn't persisted).
         out = growth_nudge_for_turn(path, "s", bad_state)
         self.assertIsNotNone(out)
+
+
+# --------------------------------------------------------------------------
+# Slice 057-02 — active-compaction trigger. The compaction band rides the
+# SAME band machinery as the 055-02 warn bands (no duplicate state); only the
+# message differs. Pure-function surface: DEFAULT_COMPACT_THRESHOLD,
+# _resolve_compact_threshold(), compaction_nudge_text(), and the message
+# selection in growth_nudge_for_turn().
+# --------------------------------------------------------------------------
+
+
+class CompactThresholdDefaultsTests(unittest.TestCase):
+    """057-02 — the compaction band defaults to 0.75, above the warn bands,
+    overridable via JIG_CONTEXT_COMPACT_PCT with the same out-of-range silent
+    fallback as the other PCT knobs."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("JIG_CONTEXT_COMPACT_PCT", None)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("JIG_CONTEXT_COMPACT_PCT", None)
+        else:
+            os.environ["JIG_CONTEXT_COMPACT_PCT"] = self._saved
+
+    def test_default_compact_threshold_is_75_percent(self):
+        self.assertEqual(DEFAULT_COMPACT_THRESHOLD, 0.75)
+
+    def test_compact_band_is_above_warn_bands(self):
+        """The compaction band must sit above the 40/60 warn bands so it is a
+        distinct higher escalation (AC #2)."""
+        self.assertGreater(DEFAULT_COMPACT_THRESHOLD, max(GROWTH_BANDS[:2]))
+
+    def test_default_when_env_unset(self):
+        os.environ.pop("JIG_CONTEXT_COMPACT_PCT", None)
+        self.assertEqual(_resolve_compact_threshold(), DEFAULT_COMPACT_THRESHOLD)
+
+    def test_valid_env_override(self):
+        os.environ["JIG_CONTEXT_COMPACT_PCT"] = "0.90"
+        self.assertEqual(_resolve_compact_threshold(), 0.90)
+
+    def test_out_of_range_env_falls_back(self):
+        os.environ["JIG_CONTEXT_COMPACT_PCT"] = "75"  # percent, not fraction
+        self.assertEqual(_resolve_compact_threshold(), DEFAULT_COMPACT_THRESHOLD)
+
+    def test_non_numeric_env_falls_back(self):
+        os.environ["JIG_CONTEXT_COMPACT_PCT"] = "lots"
+        self.assertEqual(_resolve_compact_threshold(), DEFAULT_COMPACT_THRESHOLD)
+
+
+class CompactionNudgeTextTests(unittest.TestCase):
+    """057-02 AC #1 — the compaction body is actionable (compact OR hand off)
+    and names a concrete carry-over (spec path, current slice, open threads).
+    Distinct from the warn message (AC #2)."""
+
+    def test_text_is_actionable_compact_or_handoff(self):
+        text = compaction_nudge_text(0.75, 0.78)
+        self.assertIn("/compact", text)
+        self.assertIn("hand off", text.lower())
+
+    def test_text_names_concrete_carry_over(self):
+        text = compaction_nudge_text(0.75, 0.78)
+        lower = text.lower()
+        self.assertIn("carry over", lower)
+        self.assertIn("spec path", lower)
+        self.assertIn("slice", lower)
+        self.assertIn("open thread", lower)
+
+    def test_text_references_workflow_section(self):
+        text = compaction_nudge_text(0.75, 0.78)
+        self.assertIn("Context-cost discipline", text)
+        self.assertIn("docs/workflow.md", text)
+
+    def test_text_is_distinct_from_warn_message(self):
+        """AC #2 — the compaction message must not read as the plain growth
+        warn nudge."""
+        compaction = compaction_nudge_text(0.75, 0.78)
+        warn = growth_nudge_text(0.40, 0.45)
+        self.assertNotEqual(compaction, warn)
+        self.assertNotIn("Active-compaction", warn)
+        self.assertNotIn("carry over", warn.lower())
+
+
+class CompactionGrowthForTurnTests(unittest.TestCase):
+    """057-02 — message selection in growth_nudge_for_turn: below the
+    compaction band → warn message; at/above → the actionable compaction
+    message; reuses the once-per-band + re-arm-on-drop machinery (AC #3)."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-compact-turn-"))
+        self.state = self.base / "state"
+        self.state.mkdir()
+        # 100-token window: tokens map directly to percent.
+        os.environ["JIG_CONTEXT_WINDOW_BYTES"] = str(100 * RATIO)
+        os.environ.pop("JIG_CONTEXT_GROWTH_WARN_PCT", None)
+        os.environ.pop("JIG_CONTEXT_COMPACT_PCT", None)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+        os.environ.pop("JIG_CONTEXT_WINDOW_BYTES", None)
+        os.environ.pop("JIG_CONTEXT_COMPACT_PCT", None)
+
+    def _transcript(self, value, name="t.jsonl"):
+        import json as _json
+        path = self.base / name
+        rec = {"type": "assistant",
+               "message": {"usage": {"cache_read_input_tokens": value}}}
+        path.write_text(_json.dumps(rec) + "\n")
+        return path
+
+    def test_warn_band_emits_warn_message_not_compaction(self):
+        # 45% → 0.40 warn band, below the 0.75 compaction band.
+        out = growth_nudge_for_turn(self._transcript(45), "s", self.state)
+        self.assertIsNotNone(out)
+        self.assertNotIn("Active-compaction", out)
+        self.assertIn("Context-growth", out)
+
+    def test_compaction_band_emits_compaction_message(self):
+        # 78% → crosses the 0.75 compaction band.
+        out = growth_nudge_for_turn(self._transcript(78), "s", self.state)
+        self.assertIsNotNone(out)
+        self.assertIn("Active-compaction", out)
+        self.assertIn("carry over", out.lower())
+
+    def test_compaction_band_fires_once(self):
+        # First crossing nudges; staying above does not re-fire.
+        first = growth_nudge_for_turn(self._transcript(78, "a.jsonl"), "sess", self.state)
+        self.assertIn("Active-compaction", first)
+        second = growth_nudge_for_turn(self._transcript(79, "b.jsonl"), "sess", self.state)
+        self.assertIsNone(second, "staying above the band must not re-fire")
+
+    def test_drop_then_recross_rearms_compaction(self):
+        first = growth_nudge_for_turn(self._transcript(78, "a.jsonl"), "sess", self.state)
+        self.assertIn("Active-compaction", first)
+        # Drop below the compaction band (after a /compact) — silent re-arm.
+        drop = growth_nudge_for_turn(self._transcript(50, "b.jsonl"), "sess", self.state)
+        # Re-cross → compaction message fires again.
+        reclimb = growth_nudge_for_turn(self._transcript(78, "c.jsonl"), "sess", self.state)
+        self.assertIsNotNone(reclimb)
+        self.assertIn("Active-compaction", reclimb)
+
+    def test_env_override_changes_compaction_band(self):
+        os.environ["JIG_CONTEXT_COMPACT_PCT"] = "0.90"
+        # 78% is now below the 0.90 compaction band but above 0.60 → warn msg.
+        out = growth_nudge_for_turn(self._transcript(78), "s", self.state)
+        self.assertIsNotNone(out)
+        self.assertNotIn("Active-compaction", out)
 
 
 # --------------------------------------------------------------------------

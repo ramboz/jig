@@ -89,10 +89,21 @@ paid for again on every subsequent turn. Run the suite here, distil it, report
 the verdict. If a failure needs the orchestrator's judgment, quote the handful
 of lines that matter, not the whole transcript.
 
+## Return a tight envelope, not a transcript
+
+Your reply to the orchestrator is **output it pays for at write price and then
+re-reads on every subsequent turn** (spec 057's output-volume lever, the
+return-side of the "surface results, not logs" rule above). Return a tight
+**envelope** — changed files (paths, with line counts), the test result
+(pass/fail counts, not the full run), and any deviations — **not full logs or
+transcripts**. Do not paste file contents you only read, and do not echo back
+the whole prompt. If the orchestrator needs a load-bearing snippet (a function
+signature, a failing assertion), quote just that.
+
 ## Output format
 
-When done, report:
+When done, report this envelope:
 - Files created or modified (with line counts)
-- Tests written and their status (pass/fail) — the result, not the full run output
+- Tests written and their status (pass/fail counts) — the result, not the full run output
 - Any deviations from the spec (even minor ones)
 - Anything that should go to `docs/inbox.md`

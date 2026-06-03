@@ -265,6 +265,42 @@ def check_scaffold_hook_scripts_present(project_root: Path) -> CheckResult:
     )
 
 
+# Slice 057-02 — the active-compaction trigger ships in the copied
+# hooks/scripts/lib/context_fill.py (the UserPromptSubmit branch of
+# jig-context-check.sh delegates to it). The behavior is keyed on the
+# JIG_CONTEXT_COMPACT_PCT knob; its presence in the copied helper is the
+# scaffold-side assertion that the trigger flowed through (AC #5).
+_COMPACT_TRIGGER_HELPER = "context_fill.py"
+_COMPACT_TRIGGER_MARKER = "JIG_CONTEXT_COMPACT_PCT"
+
+
+def check_scaffold_compaction_trigger(project_root: Path) -> CheckResult:
+    """The copied `hooks/scripts/lib/context_fill.py` carries the active-
+    compaction trigger (slice 057-02): the `JIG_CONTEXT_COMPACT_PCT` band knob
+    the UserPromptSubmit branch of `jig-context-check.sh` delegates to. The
+    whole helper is copied verbatim by scaffold-init, so a content marker is
+    the right granularity — it confirms the *behavior* shipped, not merely that
+    a file with the right name exists."""
+    helper = (project_root / ".claude" / "hooks" / "scripts"
+              / "lib" / _COMPACT_TRIGGER_HELPER)
+    if not helper.is_file():
+        return False, (
+            f"context-fill helper missing at {helper} "
+            "(active-compaction trigger cannot have shipped)"
+        )
+    text = helper.read_text()
+    if _COMPACT_TRIGGER_MARKER not in text:
+        return False, (
+            f"{_COMPACT_TRIGGER_HELPER} is missing the active-compaction band "
+            f"knob ({_COMPACT_TRIGGER_MARKER!r}) — the 057-02 trigger did not "
+            "flow to this install"
+        )
+    return True, (
+        "context-fill helper carries the active-compaction trigger "
+        f"({_COMPACT_TRIGGER_MARKER})"
+    )
+
+
 def check_scaffold_settings_registration(project_root: Path) -> CheckResult:
     """`.claude/settings.json` is coherent for a scaffolded target (slice
     047-02 AC #2): present + valid JSON, carries at least one jig-managed
@@ -440,6 +476,8 @@ _SCAFFOLD_CHECKS: list[tuple[str, Check]] = [
     ("skill-closure", check_scaffold_skill_closure),
     ("agents", check_scaffold_agents_present),
     ("hooks", check_scaffold_hook_scripts_present),
+    # Slice 057-02 — the active-compaction trigger flowed to this install.
+    ("compaction-trigger", check_scaffold_compaction_trigger),
     # Slice 047-02 (AC #2) — settings.json coherence (strengthened: command
     # shape + script existence, not just 'an entry exists').
     ("settings", check_scaffold_settings_registration),

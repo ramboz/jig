@@ -90,6 +90,19 @@ configured ``JIG_CONTEXT_GROWTH_WARN_PCT`` at evaluation time; 0.60 / 0.80 are
 fixed. All are fractions of the configurable token-window, never hardcoded
 token counts."""
 
+DEFAULT_COMPACT_THRESHOLD = 0.75
+"""Active-compaction band for the in-session nudge (slice 057-02, spec
+Decisions §Q3: "Prompt-only, ~75% default"). When transcript-tail context
+crosses this band, the nudge escalates from the warn-only growth message
+(40/60/80) to an *actionable* compaction / fresh-session-handoff prompt — the
+peak-context lever in cost ∝ context × turns. 0.75 sits **above** the warn
+bands (it lands between the fixed 0.60 and 0.80 escalation bands) so a long
+session is told to *act* well before the window is exhausted, while the
+40/60/80 warn messages stay intact below it. jig only *recommends* — it never
+runs ``/compact`` itself (ADR-0011: nudge, not enforcement). Override via
+``JIG_CONTEXT_COMPACT_PCT`` (a fraction in (0, 1], same out-of-range fallback
+as the other PCT knobs)."""
+
 
 def _resolve_window_bytes() -> int:
     """Read ``JIG_CONTEXT_WINDOW_BYTES`` from env, falling back to the
@@ -137,6 +150,29 @@ def _resolve_growth_threshold() -> float:
         return value
     except ValueError:
         return DEFAULT_GROWTH_THRESHOLD
+
+
+def _resolve_compact_threshold() -> float:
+    """Read ``JIG_CONTEXT_COMPACT_PCT`` from env, falling back to 0.75.
+
+    Mirrors ``_resolve_growth_threshold`` exactly: the value is a fraction in
+    (0, 1]; out-of-range or non-numeric values silently fall back to the
+    default so a typo never crashes the hook (slice 057-02).
+
+    Expected **above** the warn bands (it is the high escalation band). A
+    pathological config that sets it below ``JIG_CONTEXT_GROWTH_WARN_PCT``
+    still works — the band set is just sorted — but inverts the intended
+    warn-then-compact escalation; that's outside the supported envelope."""
+    raw = os.environ.get("JIG_CONTEXT_COMPACT_PCT")
+    if raw is None:
+        return DEFAULT_COMPACT_THRESHOLD
+    try:
+        value = float(raw)
+        if value <= 0 or value > 1:
+            return DEFAULT_COMPACT_THRESHOLD
+        return value
+    except ValueError:
+        return DEFAULT_COMPACT_THRESHOLD
 
 
 def token_window() -> int:
@@ -277,11 +313,19 @@ def read_tail_cache_read_tokens(transcript_path) -> "int | None":
 
 def _growth_bands() -> "tuple[float, ...]":
     """The active escalation bands: ``GROWTH_BANDS`` with the first band
-    replaced by the configured ``JIG_CONTEXT_GROWTH_WARN_PCT``. Returns a
-    sorted, de-duplicated tuple so a configured threshold that coincides with
-    or exceeds a fixed band doesn't double-fire."""
+    replaced by the configured ``JIG_CONTEXT_GROWTH_WARN_PCT``, plus the
+    configured compaction band (``JIG_CONTEXT_COMPACT_PCT``, slice 057-02).
+    Returns a sorted, de-duplicated tuple so a configured threshold that
+    coincides with another band doesn't double-fire.
+
+    The compaction band rides the **same** once-per-band + re-arm-on-drop
+    machinery as the warn bands (slice 057-02 AC #3 — no duplicate state). The
+    message selection (warn vs. compaction) happens in the orchestration layer
+    from the fired band's relation to ``_resolve_compact_threshold()``; the
+    band set itself is uniform here."""
     first = _resolve_growth_threshold()
     bands = {first} | {b for b in GROWTH_BANDS[1:] if b > first}
+    bands.add(_resolve_compact_threshold())
     return tuple(sorted(bands))
 
 
@@ -380,6 +424,27 @@ def growth_nudge_text(band: float, ratio: float) -> str:
     )
 
 
+def compaction_nudge_text(band: float, ratio: float) -> str:
+    """The soft `additionalContext` body for the active-compaction band
+    (slice 057-02 AC #1). Distinct from ``growth_nudge_text`` (AC #2): instead
+    of a size warning it gives a concrete next step — compact now, or hand off
+    to a fresh session — *plus* a one-line carry-over checklist (spec path,
+    current slice, open threads) so the handoff loses nothing. jig only
+    recommends; it never runs ``/compact`` itself (ADR-0011)."""
+    band_pct = band * 100
+    actual_pct = ratio * 100
+    return (
+        f"Active-compaction nudge: the orchestrator's context is ~{actual_pct:.0f}% "
+        f"of the window (past the {band_pct:.0f}% compaction band). This is the "
+        "second cost factor — peak context in cost ≈ context × turns. "
+        "Act now rather than just noting the size: run /compact to shed the "
+        "transcript, OR hand off to a fresh session. Either way, carry over: "
+        "the spec path, the current slice, and any open threads / decisions in "
+        "flight. (jig recommends — it does not run /compact for you.) See the "
+        "\"Context-cost discipline\" section of docs/workflow.md."
+    )
+
+
 def _state_file(state_dir, session_id: str) -> Path:
     """Per-session state-file path, keyed by session id, under ``state_dir``
     (typically ``$TMPDIR``). A non-filesystem-safe session id is reduced to
@@ -440,7 +505,16 @@ def growth_nudge_for_turn(transcript_path, session_id, state_dir) -> "str | None
         if decision["warned_bands"] != sorted(set(prior)):
             _write_warned_bands(state_path, decision["warned_bands"])
         if decision["nudge"] and decision["band"] is not None:
-            return growth_nudge_text(decision["band"], decision["ratio"])
+            # Slice 057-02: the compaction band rides the same band machinery
+            # (once-per-band, re-arm-on-drop) as the 055-02 warn bands; only
+            # the message differs. When the fired band is at/above the
+            # configured compaction threshold, escalate from the warn message
+            # to the actionable compaction / handoff prompt (AC #1 / #2).
+            band = decision["band"]
+            compact = _resolve_compact_threshold()
+            if band >= compact - 1e-9:
+                return compaction_nudge_text(band, decision["ratio"])
+            return growth_nudge_text(band, decision["ratio"])
         return None
     except Exception:
         return None

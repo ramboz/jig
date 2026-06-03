@@ -21,7 +21,10 @@
 #      (40/60/80%) per session, tracked in a per-session state file under
 #      $TMPDIR; the band re-arms when the estimate drops back below it (e.g.
 #      after /compact). Silent + safe when there's no assistant turn yet or
-#      the transcript is missing/unreadable/malformed.
+#      the transcript is missing/unreadable/malformed. Slice 057-02 adds a
+#      higher active-compaction band (JIG_CONTEXT_COMPACT_PCT, default 0.75):
+#      crossing it swaps the warn-only message for an actionable compaction /
+#      fresh-session-handoff prompt — same band machinery, different message.
 #
 # Environment variables (read by lib/context_fill.py):
 #   JIG_CONTEXT_WINDOW_BYTES   — context window size in bytes. Default
@@ -38,6 +41,16 @@
 #                                fraction of the window. Default 0.40 (the
 #                                dumb-zone line); same out-of-range fallback
 #                                as JIG_CONTEXT_SOFT_WARN_PCT.
+#   JIG_CONTEXT_COMPACT_PCT     — UserPromptSubmit active-compaction band as a
+#                                fraction of the window (slice 057-02). Default
+#                                0.75 — above the 40/60 warn bands. Crossing it
+#                                escalates from the warn-only growth message to
+#                                an actionable compaction / fresh-session-handoff
+#                                prompt (with a carry-over hint). Rides the same
+#                                once-per-band + re-arm-on-drop machinery; only
+#                                the message differs. jig recommends — it never
+#                                runs /compact (ADR-0011). Same out-of-range
+#                                fallback as the other PCT knobs.
 #   JIG_READ_LEAN_BYTES        — PreToolUse(Read) large-whole-file threshold
 #                                in bytes (slice 055-03). A whole-file Read
 #                                (no offset/limit) of a file at/above this

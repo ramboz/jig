@@ -428,6 +428,130 @@ class GrowthNudgeUserPromptTests(unittest.TestCase):
                           "hook must read the tail record, not the max")
 
 
+class CompactionTriggerUserPromptTests(unittest.TestCase):
+    """Slice 057-02 — the active-compaction band on UserPromptSubmit. The same
+    hook + transcript fixtures as 055-02, but crossing the high compaction band
+    (default 0.75) emits the *actionable* compaction message (compact / hand
+    off + carry-over) instead of the plain growth warning. Reuses the
+    once-per-band + re-arm-on-drop machinery; the warn bands are unaffected."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-057-02-"))
+        self.project = self.base / "project"
+        self.project.mkdir()
+        self.transcripts = self.base / "transcripts"
+        self.transcripts.mkdir()
+        self.state = self.base / "state"
+        self.state.mkdir()
+        # 100-token window: tokens map directly to percent.
+        self.window_env = {"JIG_CONTEXT_WINDOW_BYTES": "400"}
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def _run(self, values, *, session_id="s", extra_env=None):
+        path = write_transcript(
+            self.transcripts / f"{session_id}.jsonl", values
+        )
+        env = dict(self.window_env)
+        if extra_env:
+            env.update(extra_env)
+        return run_hook_prompt(
+            self.project, path, session_id=session_id,
+            env_overrides=env, tmpdir=self.state,
+        )
+
+    # ----- AC #1: crossing the compaction band → actionable message --------
+    def test_compaction_band_emits_actionable_message(self):
+        r = self._run([78])  # 78% ≥ 75% compaction band
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = parse_or_none(r)
+        self.assertIsNotNone(out, f"expected compaction nudge; stdout={r.stdout}")
+        ctx = out["additionalContext"]
+        # Actionable: compact OR hand off, plus a concrete carry-over.
+        self.assertIn("/compact", ctx)
+        self.assertIn("hand off", ctx.lower())
+        self.assertIn("carry over", ctx.lower())
+        self.assertIn("spec path", ctx.lower())
+        self.assertIn("slice", ctx.lower())
+        self.assertIn("open thread", ctx.lower())
+        self.assertIn("Context-cost discipline", ctx)
+
+    # ----- AC #2: the warn bands are unaffected (distinct message) ---------
+    def test_warn_band_still_emits_warn_message(self):
+        r = self._run([45])  # 45% → 0.40 warn band, below compaction
+        out = parse_or_none(r)
+        self.assertIsNotNone(out)
+        ctx = out["additionalContext"]
+        # The 055-02 growth message, NOT the compaction one.
+        self.assertNotIn("Active-compaction", ctx)
+        self.assertNotIn("carry over", ctx.lower())
+
+    # ----- AC #3: compaction band fires once; staying above is silent ------
+    def test_compaction_fires_once(self):
+        first = self._run([78], session_id="once")
+        self.assertIn("Active-compaction",
+                      parse_or_none(first)["additionalContext"])
+        second = self._run([79], session_id="once")
+        self.assertEqual(second.returncode, 0)
+        self.assertIsNone(parse_or_none(second),
+                          f"staying above must not re-fire; got {second.stdout}")
+
+    # ----- AC #3: drop then re-cross → re-armed compaction nudge -----------
+    def test_drop_then_recross_rearms(self):
+        first = self._run([78], session_id="rearm")
+        self.assertIn("Active-compaction",
+                      parse_or_none(first)["additionalContext"])
+        drop = self._run([50], session_id="rearm")  # /compact below the band
+        self.assertIsNone(parse_or_none(drop))
+        reclimb = self._run([78], session_id="rearm")
+        out = parse_or_none(reclimb)
+        self.assertIsNotNone(out, "re-armed compaction band must nudge again")
+        self.assertIn("Active-compaction", out["additionalContext"])
+
+    # ----- AC #4: never blocks --------------------------------------------
+    def test_never_emits_continue_false(self):
+        r = self._run([90])
+        self.assertEqual(r.returncode, 0)
+        out = parse_or_none(r)
+        if out is not None:
+            self.assertTrue(out.get("continue", True) is True,
+                            f"continue must be True or absent; got {out!r}")
+
+    # ----- AC #4: malformed transcript → silent, never throws -------------
+    def test_malformed_transcript_silent(self):
+        path = self.transcripts / "bad.jsonl"
+        path.write_text("{not valid json\n!!!\n")
+        r = run_hook_prompt(self.project, path, session_id="bad",
+                            env_overrides=self.window_env, tmpdir=self.state)
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+    # ----- AC #4: missing transcript → silent -----------------------------
+    def test_missing_transcript_silent(self):
+        r = run_hook_prompt(self.project, self.transcripts / "nope.jsonl",
+                            session_id="missing",
+                            env_overrides=self.window_env, tmpdir=self.state)
+        self.assertEqual(r.returncode, 0)
+        self.assertIsNone(parse_or_none(r))
+
+    # ----- AC #1: env override of the compaction band ---------------------
+    def test_compaction_band_env_override(self):
+        # Raise the bar to 0.90: 78% now emits the warn message, not compaction.
+        r = self._run([78], session_id="ovr",
+                       extra_env={"JIG_CONTEXT_COMPACT_PCT": "0.90"})
+        out = parse_or_none(r)
+        self.assertIsNotNone(out)
+        self.assertNotIn("Active-compaction", out["additionalContext"])
+        # 92% crosses the overridden 0.90 band → compaction message.
+        r2 = self._run([92], session_id="ovr2",
+                        extra_env={"JIG_CONTEXT_COMPACT_PCT": "0.90"})
+        out2 = parse_or_none(r2)
+        self.assertIsNotNone(out2)
+        self.assertIn("Active-compaction", out2["additionalContext"])
+
+
 def run_hook_read(
     project_dir: Path,
     tool_input: dict,
