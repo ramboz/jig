@@ -1,10 +1,19 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: []
 last_verified:
 ---
 
 ## Slice 051-03 — land-time collision guardrail
+
+**STATUS: DEFERRED** _(the worktree-aware reserve mechanism — 051-01/02 — landed without it; this independent backstop was not built on `rescue/reservation-from-worktree`)_
+
+**Resolution trigger:** First number collision that slips past the
+worktree-aware reservation flow (a hand-created spec dir / ADR file, a
+`--no-push` local pick, or offline work that never reserved) and reaches a
+land attempt — i.e. the backstop's value becomes observed, not theoretical.
+Until then, reserve-on-`origin/main` (now usable from any worktree per
+ADR-0015) is the primary defense and this guardrail stays parked.
 
 **Goal:** `land.py prepare` refuses to land a branch whose new spec or
 ADR numbers already exist on `origin/main` under a different slug —

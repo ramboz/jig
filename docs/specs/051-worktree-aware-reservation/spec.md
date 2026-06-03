@@ -1,10 +1,22 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
 ---
 
 # Spec 051: worktree-aware number reservation
+
+> **Implementation status (2026-06-02).** Slices **051-01** (spec reservation,
+> `workflow.py new`) and **051-02** (ADR reservation, `adr.py new`) are
+> **DONE** on branch `rescue/reservation-from-worktree` (commits `fbb5d6f`
+> rescue + `b759cab` B1-fix). The reservation mechanism is recorded in
+> [ADR-0015](../../decisions/adr-0015-worktree-aware-reservation.md) (Accepted).
+> Slice **051-03** (land-time collision guardrail) is **DEFERRED** — it was not
+> built in this change. **Retro provenance:** the implementation was first
+> written by a mis-configured session directly on `main` and left uncommitted;
+> it was rescued onto this branch, then independently reviewed and hardened
+> (one blocker, B1 = relative-origin push failure, found and fixed). This spec
+> is updated after the fact to record what shipped.
 
 ## Overview
 
@@ -111,22 +123,28 @@ Diagnosis captured via `debug-workflow` (diagnose mode), 2026-05-29.
 
 ## Open questions
 
-- **Reservation mechanism (load-bearing — likely an ADR in 051-01).**
-  Three candidates:
+- **Reservation mechanism (load-bearing — ADR in 051-01). RESOLVED →
+  option (B), recorded in
+  [ADR-0015](../../decisions/adr-0015-worktree-aware-reservation.md).**
+  Three candidates were weighed:
   - **(A) Plumbing commit, no checkout.** Build the reservation commit
     against `origin/main`'s tree with `git commit-tree` (+ a temp
     index for the added file), then `git push origin <sha>:main`.
     Touches neither `HEAD` nor the index nor the working tree. Cleanest
     on Goal #2, but uses lower-level git plumbing.
-  - **(B) Ephemeral detached reservation.** Create a detached commit
-    from `origin/main` in a scratch area, push, then materialize the
-    file in the caller's tree. More moving parts; same end state.
+  - **(B) Ephemeral detached reservation — CHOSEN.** Build the
+    reservation commit in an ephemeral **detached** worktree checked out
+    at `origin/main` (`git worktree add --detach <tmp> origin/main`),
+    push it BY SHA from `project_dir`, then tear the worktree down. Same
+    end state as (A); reuses the familiar worktree + commit + push shape
+    instead of lower-level plumbing. The spec originally leaned (A); the
+    implementation chose (B) — recorded as a deviation in ADR-0015 and the
+    051-01 deviation log.
   - **(C) Relax the preflight only.** Allow any branch, commit the
     reservation onto the *current* branch, push `HEAD:main`. Simplest
     diff, but pollutes the feature branch with the reservation commit
-    and risks pushing unrelated commits — likely rejected.
-  Lean (A). Decide in slice 051-01; record as an ADR if the mechanism
-  is judged load-bearing (it sets the pattern 051-02 mirrors).
+    and risks pushing unrelated commits — rejected for push mode, but
+    adopted (scoped) for the `--no-push` provisional path only.
 - **Guardrail strictness (051-03).** Refuse (exit non-zero) vs warn on
   a detected number collision at land time. Lean refuse for spec/ADR
   *number* clashes (cheap to fix, expensive if merged), warn for
@@ -146,9 +164,9 @@ mirrors it into `adr.py`; 051-03 is the independent backstop.
 
 ### Slices
 
-- [051-01 — worktree-aware spec reservation](slice-01-worktree-aware-spec-reservation.md) — DRAFT
-- [051-02 — worktree-aware ADR reservation](slice-02-worktree-aware-adr-reservation.md) — DRAFT
-- [051-03 — land-time collision guardrail](slice-03-land-time-collision-guardrail.md) — DRAFT
+- [051-01 — worktree-aware spec reservation](slice-01-worktree-aware-spec-reservation.md) — DONE
+- [051-02 — worktree-aware ADR reservation](slice-02-worktree-aware-adr-reservation.md) — DONE
+- [051-03 — land-time collision guardrail](slice-03-land-time-collision-guardrail.md) — DEFERRED
 
 ## References
 

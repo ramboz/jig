@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [051-01]
-last_verified:
+last_verified: 2026-06-02
 ---
 
 ## Slice 051-02 — worktree-aware ADR reservation
@@ -44,15 +44,19 @@ from any branch in any worktree, mirroring slice 051-01's mechanism.
 - Slug collision against an `origin/main`-only ADR: refuses, as today.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass (AC #2 met in *spirit*, not letter — see deviation §2:
+      inline-mirror, not a shared extracted helper, per ADR-0002); full test
+      suite green (no regressions). 1935 tests, OK (skipped=3).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture; worktree behavior tested with a temp linked worktree.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
-      `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+      (Real-git E2E mirrors 051-01: relative-origin + `--no-push`.)
+- [x] Reviewed by an independent agent (no implementation context); the
+      ADR mirror was reviewed together with 051-01 (`reviews/slice-01-craft.md`).
+- [x] Implementation review passed (B1 fix applied to `adr.py`'s mirror too).
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed (this reconciliation pass).
+- [x] `docs/refinement-todo.md` updated (shared "refuse on non-main" entry
+      marked RESOLVED — it covered both `workflow.py new` and `adr.py new`).
 
 ### Close-out (post-DONE)
 
@@ -69,4 +73,27 @@ reserved collision-free from a worktree — the same end-to-end value as
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+1. **What shipped (commit `fbb5d6f`, hardened in `b759cab`).** The mirror of
+   051-01's mechanism in `skills/adr-workflow/adr.py`: `reserve_adr` routes on
+   `_current_branch`; off-main push mode uses
+   `_reserve_via_detached_worktree` (ephemeral detached worktree at
+   `origin/main`, push the reservation commit BY SHA from `project_dir`,
+   teardown in `finally` incl. `git worktree prune`); off-main `--no-push`
+   uses `_reserve_local_on_current_branch` with a pathspec-scoped commit. On
+   `main`, the existing 028-01 flow is unchanged. The B1 relative-origin fix
+   was applied here too.
+
+2. **Deviation from AC #2 — inline-mirror, not a shared extracted helper.**
+   AC #2 required ADR reservation to *share* 051-01's primitive via a shared
+   helper. The implementation instead **inline-mirrors** the worktree-aware
+   helpers between `adr.py` and `workflow.py`, exactly as the original
+   reservation code (spec 028-01) inline-mirrors spec 003-03. Rationale: only
+   two callers exist, and [ADR-0002](../../decisions/adr-0002-contracts-stays-deferred.md)'s
+   extraction trigger is three callers needing the same helper (reaffirmed by
+   ADR-0003). Extraction is the right move at the *third* caller (e.g. if spec
+   049's reserve-on-`IN_PROGRESS` adopts the same mechanism). Captured in
+   [ADR-0015](../../decisions/adr-0015-worktree-aware-reservation.md).
+
+3. **Scope.** Delivers the ADR-number surface (`adr.py new`) off-main. The
+   `--no-push` / `--pr` flags retain their semantics, now usable off-main.
+   No `docs/conventions.md` change.

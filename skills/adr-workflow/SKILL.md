@@ -59,13 +59,23 @@ permissions, the helper automatically falls back to a
 `reserve/adr-NNNN-<slug>` branch + `gh pr create`. This locks the
 ADR number **team-wide** before any drafting begins, killing the
 parallel-worktree numbering-collision failure mode that motivated
-spec 028. Run it from a clean main.
+spec 028.
+
+**Works from any branch or worktree** (ADR-0015 / spec 051, mirroring
+`workflow.py new`). The helper routes on the current branch: on `main`
+it runs the proven in-place flow (clean tree required); off `main` — a
+feature branch or a linked `.claude/worktrees/*` worktree — it reserves
+via an *ephemeral detached worktree* at `origin/main`, never touching
+your branch, cwd, or working tree. No need to switch to `main` (a linked
+worktree can't, anyway).
 
 Flags:
 
-- `--no-push` — commit locally only; skip fetch / push entirely.
-  Preflight still applies: must be on `main`, clean worktree (so
-  the reservation commit always lands on a clean main).
+- `--no-push` — commit locally only; skip fetch / push entirely. On
+  `main` it commits on `main`; off `main` it commits a *provisional*
+  reservation on the current branch (the number is local-view and may
+  collide at merge — treat it as provisional). Pathspec-scoped, so
+  unrelated staged work is not swept into the reservation commit.
 - `--pr` — skip the direct-push attempt; go straight to branch + PR.
   Useful when you already know main is protection-locked. Mutually
   exclusive with `--no-push`.
@@ -258,15 +268,16 @@ which surface.
 - **Substring matching mirrors `workflow.py`.** `0001-01` does not collide
   with `0001` since ADR numbers are matched as exact 4-digit prefixes,
   not free-form substrings (unlike slice fragments).
-- **`adr.py new` refuses off-main and on a dirty worktree.** Per slice
-  028-01 (parity with `workflow.py new`), the reservation must land
-  on a clean main even under `--no-push`. If you've drafted ADR
-  content on a feature branch and need to retroactively reserve a
-  number, the workaround mirrors the `workflow.py new`-on-feature-
-  branch gap (see [docs/refinement-todo.md](../../docs/refinement-todo.md)
-  for the deferred resolution): `git checkout main`, run `adr.py new
-  <slug>`, then cherry-pick or merge your draft content onto the
-  reservation commit.
+- **`adr.py new` is worktree-aware (ADR-0015 / spec 051).** It routes on
+  the current branch: on `main` it runs the proven 028-01 in-place flow
+  (clean tree required); off `main` — a feature branch or a linked
+  worktree — it reserves via an ephemeral detached worktree at
+  `origin/main` (push mode) or commits a provisional reservation on the
+  current branch (`--no-push`), without disturbing your branch or tree.
+  You no longer need to `git checkout main` first (and a linked worktree
+  can't, since the primary worktree holds `main`). The earlier
+  off-main/dirty-tree refusal — and its impossible `git checkout main`
+  workaround — is gone.
 
 ## Reconciliation checklist
 

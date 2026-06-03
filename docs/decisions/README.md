@@ -19,6 +19,7 @@
 - [ADR-0012: Scaffold-init tiers gate which skills install](adr-0012-scaffold-tier-gated-install.md) — jig's positioning rests on "tier-gated installs": the README and product-vision docs present Tier 0 as a small, opinionated floor and Tier 1 as an opt-in default. (2026-05-29, Accepted)
 - [ADR-0013: Security-scaffold floor policy](adr-0013-security-floor-policy.md) — jig's founding design principle is *"everything that MUST happen is a hook"* — deterministic enforcement over human vigilance. (2026-06-01, Accepted)
 - [ADR-0014: Review-evidence model — durable verdict artifacts gate the lifecycle](adr-0014-review-evidence-model.md) — jig's workflow documentation presents post-implementation review and reconciliation as load-bearing gates. (2026-06-01, Accepted)
+- [ADR-0015: Worktree-aware number reservation — branch-routed reserve, detached worktree off main](adr-0015-worktree-aware-reservation.md) — [Spec 003-03](../specs/003-spec-workflow-promotion/spec.md) (spec numbers, `workflow.py new`) and [spec 028-01](../specs/028-parallel-session-locks/slice-01-adr-numbering-on-main.md) (ADR numbers, `adr.py new`) built reserve-on-`origin/main`: claim a sequential number by committing a stub and pushing it to `origin/main`, so parallel sessions cannot both grab the same `NNN`/`NNNN`. (2026-06-02, Accepted)
 
 ## Format
 
