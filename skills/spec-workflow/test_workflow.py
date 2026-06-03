@@ -4477,6 +4477,124 @@ class SliceClaimTests(unittest.TestCase):
         self.assertIn("unreachable", str(ctx.exception).lower())
 
 
+class StatusBoardClaimRenderTests(unittest.TestCase):
+    """Slice 049-02: the status board renders `IN_PROGRESS (<claimed_by>)`
+    for claimed in-progress slices; everything else is byte-identical to the
+    pre-049-02 render."""
+
+    def _status_cell(self, table, label):
+        for line in table.splitlines():
+            if f"| {label} |" in line:
+                return line.split("|")[3].strip()
+        raise AssertionError(f"row not found for label {label!r}:\n{table}")
+
+    # AC1
+    def test_in_progress_renders_claim_suffix(self):
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "", "wt-foo")]
+        table = _workflow.render_status_table(rows)
+        self.assertEqual(self._status_cell(table, "200-01 — a"),
+                         "IN_PROGRESS (wt-foo)")
+
+    # AC1 — fallback when unclaimed
+    def test_in_progress_without_claim_renders_plain(self):
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "", "")]
+        table = _workflow.render_status_table(rows)
+        self.assertEqual(self._status_cell(table, "200-01 — a"), "IN_PROGRESS")
+
+    # AC1 — legacy 5-tuple row (pre-049-02 collect_slices shape) is tolerated
+    def test_legacy_5tuple_row_renders_plain(self):
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "")]
+        table = _workflow.render_status_table(rows)
+        self.assertEqual(self._status_cell(table, "200-01 — a"), "IN_PROGRESS")
+
+    # AC2 — other states unchanged; claimed_by ignored on non-IN_PROGRESS
+    def test_other_states_unchanged(self):
+        cases = [("DRAFT", "DRAFT"), ("READY_FOR_REVIEW", "READY_FOR_REVIEW"),
+                 ("READY_FOR_IMPLEMENTATION", "READY_FOR_IMPLEMENTATION"),
+                 ("REVIEWED", "REVIEWED"), ("RECONCILED", "RECONCILED"),
+                 ("DONE", "**DONE**")]
+        for status, expect in cases:
+            rows = [("200-x", "200-01 — a", status, "", "", "wt-foo")]
+            table = _workflow.render_status_table(rows)
+            self.assertEqual(self._status_cell(table, "200-01 — a"), expect,
+                             f"status {status} should ignore claimed_by")
+
+    # AC6 — truncation above the bound
+    def test_long_claim_truncated(self):
+        long = "claude/" + "x" * 40
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "", long)]
+        cell = self._status_cell(_workflow.render_status_table(rows),
+                                 "200-01 — a")
+        self.assertEqual(cell, f"IN_PROGRESS ({long[:27]}…)")
+
+    def test_claim_at_bound_not_truncated(self):
+        c = "x" * 30
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "", c)]
+        cell = self._status_cell(_workflow.render_status_table(rows),
+                                 "200-01 — a")
+        self.assertEqual(cell, f"IN_PROGRESS ({c})")
+
+    # AC5 — DEFERRED table carries no claim suffix
+    def test_deferred_table_unaffected(self):
+        rows = [("200-x", "200-09 — d", "DEFERRED", "trigger here", "",
+                 "wt-foo")]
+        deferred = _workflow.render_deferred_table(rows)
+        self.assertIn("trigger here", deferred)
+        self.assertNotIn("wt-foo", deferred)
+
+    # AC3 — render idempotence
+    def test_render_idempotent(self):
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "", "wt-foo"),
+                ("200-x", "200-02 — b", "DONE", "", "", "")]
+        once = _workflow.render_status_table(rows)
+        twice = _workflow.render_status_table(rows)
+        self.assertEqual(once, twice)
+
+    # AC2/AC7 — byte-identity snapshot over mixed rows
+    def test_byte_identity_mixed_snapshot(self):
+        rows = [("200-x", "200-01 — a", "IN_PROGRESS", "", "", "wt-foo"),
+                ("200-x", "200-02 — b", "IN_PROGRESS", "", "", ""),
+                ("200-x", "200-03 — c", "DONE", "", "", "")]
+        table = _workflow.render_status_table(rows)
+        expected = (
+            "| Spec | Slice | Status | Notes |\n"
+            "|------|-------|--------|-------|\n"
+            "| [200-x](200-x/spec.md) | 200-01 — a | IN_PROGRESS (wt-foo) |  |\n"
+            "| [200-x](200-x/spec.md) | 200-02 — b | IN_PROGRESS |  |\n"
+            "| [200-x](200-x/spec.md) | 200-03 — c | **DONE** |  |\n"
+        )
+        self.assertEqual(table, expected)
+
+    # AC3/AC4 — end-to-end regen: claim surfaces, Notes preserved, idempotent
+    def test_regen_surfaces_claim_and_is_idempotent(self):
+        tmp = tempfile.mkdtemp(prefix="jig-board-claim-")
+        try:
+            root = Path(tmp)
+            sd = root / "docs" / "specs" / "200-demo"
+            sd.mkdir(parents=True)
+            (sd / "spec.md").write_text(
+                "---\nstatus: IN_PROGRESS\n---\n\n# Spec 200\n\n"
+                "## Overview\n\nx\n")
+            (sd / "slice-01-a.md").write_text(
+                "---\nstatus: IN_PROGRESS\nclaimed_by: wt-foo\n---\n\n"
+                "## Slice 200-01 — a\n\n**Goal:** x.\n")
+            (root / "docs" / "specs" / "README.md").write_text(
+                "# Spec Status Board\n\n"
+                "| Spec | Slice | Status | Notes |\n"
+                "|------|-------|--------|-------|\n"
+                "| [200-demo](200-demo/spec.md) | 200-01 — a | IN_PROGRESS | "
+                "curated note |\n")
+            _workflow.regenerate_status_board(root)
+            board = (root / "docs" / "specs" / "README.md").read_text()
+            self.assertIn("IN_PROGRESS (wt-foo)", board)
+            self.assertIn("curated note", board)  # AC4: Notes preserved
+            msg = _workflow.regenerate_status_board(root)  # AC3: idempotent
+            self.assertIn("already current", msg)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class _GateFixture(unittest.TestCase):
     """Builds a temp spec dir with one slice file and (optionally) review
     evidence + a deviation log, then drives gated transitions with the

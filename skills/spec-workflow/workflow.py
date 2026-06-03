@@ -820,13 +820,16 @@ def _write_spec_rollup(spec_path: Path) -> bool:
 
 def collect_slices(project_dir: Path) -> list:
     """Walk docs/specs/*/spec.md and collect (spec_dir, slice_label, status,
-    resolution_trigger, kind) tuples in file order. resolution_trigger is
-    the empty string when the slice is not DEFERRED (or simply has no
-    `**Resolution trigger:**` line). `kind` is the slice's frontmatter
-    `kind:` value (slice 029-01: `"spike"` / `"feature"` / `""` for
-    unset). Slice 029-02 reads this to drive the marker in
+    resolution_trigger, kind, claimed_by) tuples in file order.
+    resolution_trigger is the empty string when the slice is not DEFERRED
+    (or simply has no `**Resolution trigger:**` line). `kind` is the slice's
+    frontmatter `kind:` value (slice 029-01: `"spike"` / `"feature"` / `""`
+    for unset). Slice 029-02 reads this to drive the marker in
     `render_status_table` — recomputed every regen from the slice's
-    frontmatter, so the marker is never stored separately."""
+    frontmatter, so the marker is never stored separately. `claimed_by`
+    (slice 049-02) is the slice's frontmatter `claimed_by:` value (set by
+    `transition … IN_PROGRESS`, spec 049-01; `""` when unclaimed),
+    rendered as a suffix on IN_PROGRESS Status cells."""
     specs_dir = project_dir / "docs" / "specs"
     if not specs_dir.is_dir():
         return []
@@ -853,8 +856,11 @@ def collect_slices(project_dir: Path) -> list:
             # Slice 029-02: read `kind:` from frontmatter (slice 029-01
             # convention). Defaults to "" when unset — same as feature.
             kind = str(fm_fields.get("kind", "")).strip()
+            # Slice 049-02: read `claimed_by:` (spec 049-01). "" when unset.
+            claimed_by = str(fm_fields.get(CLAIM_FIELD, "")).strip()
             rows.append(
-                (spec_dir, loc.label, status or "UNKNOWN", trigger, kind),
+                (spec_dir, loc.label, status or "UNKNOWN", trigger, kind,
+                 claimed_by),
             )
     return rows
 
@@ -903,11 +909,34 @@ def parse_existing_notes(existing: str) -> dict:
     return notes_map
 
 
+# Slice 049-02: cap the `claimed_by` suffix rendered in the board's Status
+# cell so a long branch name can't blow out the column width. A claim at or
+# below CLAIM_DISPLAY_MAX renders in full; a longer one is truncated to
+# CLAIM_DISPLAY_TRUNC chars + an ellipsis. Invariant: keep
+# CLAIM_DISPLAY_TRUNC < CLAIM_DISPLAY_MAX so a truncated suffix is always
+# shorter than the untruncated bound (the +ellipsis still fits the budget).
+CLAIM_DISPLAY_MAX = 30
+CLAIM_DISPLAY_TRUNC = 27
+
+
+def _render_claim_suffix(claimed_by: str) -> str:
+    """Slice 049-02: ` (<claim>)` suffix for an IN_PROGRESS Status cell, or
+    "" when unclaimed. Truncates an over-long claim to keep the cell bounded
+    (AC6)."""
+    claim = (claimed_by or "").strip()
+    if not claim:
+        return ""
+    if len(claim) > CLAIM_DISPLAY_MAX:
+        claim = claim[:CLAIM_DISPLAY_TRUNC] + "…"
+    return f" ({claim})"
+
+
 def render_status_table(rows: list, notes_map: dict = None) -> str:
     """Build the Markdown table for the status board. `notes_map` carries
     Notes from the prior version of the board, looked up by (spec_dir, label).
-    Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), and 5-tuple
-    (slice 029-02, with `kind`) row shapes.
+    Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), 5-tuple
+    (slice 029-02, with `kind`), and 6-tuple (slice 049-02, with
+    `claimed_by`) row shapes.
 
     Slice 029-02: when a row's `kind == "spike"`, the slice cell is
     prepended with the `SPIKE_MARKER` glyph + a space. The marker is a
@@ -919,8 +948,14 @@ def render_status_table(rows: list, notes_map: dict = None) -> str:
     for row in rows:
         spec_dir, label, status = row[0], row[1], row[2]
         kind = row[4] if len(row) >= 5 else ""
+        claimed_by = row[5] if len(row) >= 6 else ""
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
         status_cell = f"**{status}**" if status == "DONE" else status
+        # Slice 049-02: surface the owning worktree on IN_PROGRESS rows.
+        # Other states are untouched (byte-identical render); legacy /
+        # unclaimed IN_PROGRESS rows fall back to plain `IN_PROGRESS`.
+        if status == "IN_PROGRESS":
+            status_cell = status + _render_claim_suffix(claimed_by)
         notes = notes_map.get((spec_dir, label), "")
         # Slice 029-02: prepend the spike marker on the slice cell only
         # when the slice's `kind == "spike"`. Single-emoji + space prefix;
