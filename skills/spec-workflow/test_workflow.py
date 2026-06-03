@@ -4236,6 +4236,21 @@ class SliceClaimTests(unittest.TestCase):
         self.assertNotIn("git worktree", flat)
         self.assertEqual(self._fm().get("claimed_by"), "wt-me")
 
+    def test_project_root_for_spec_is_depth_safe(self):
+        """Regression (CI, PR #35): the claim path derived the project root
+        via a bare `spec_md.resolve().parents[3]`, which raises
+        `IndexError(3)` on a shallow path — CI's `/tmp/jig-x/spec.md` has
+        only three parents, so every frontmatter→IN_PROGRESS transition
+        crashed (`workflow.py failed: 3`). It passed locally only because
+        macOS tmp resolves to a deeper `/private/tmp/...`. The depth-safe
+        helper must return `parents[3]` for a real nested spec path and
+        fall back (never raise) for a shallow one."""
+        nested = Path("/proj/docs/specs/049-x/spec.md")
+        self.assertEqual(_workflow._project_root_for_spec(nested).name,
+                         "proj")
+        shallow = Path("/x/spec.md")  # two parents → must fall back, not crash
+        self.assertIsInstance(_workflow._project_root_for_spec(shallow), Path)
+
     # ---- AC3: collision refusal ---------------------------------------
 
     def test_collision_refuses_foreign_in_progress_claim(self):

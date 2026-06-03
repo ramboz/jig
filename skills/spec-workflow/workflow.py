@@ -510,6 +510,25 @@ def _write_spec_ref_marker(spec_md: Path, slice_label: str) -> None:
         return
 
 
+def _project_root_for_spec(spec_md: Path) -> Path:
+    """Best-effort project root for a `docs/specs/<dir>/spec.md` path
+    (= `parents[3]`: [0]=<dir>, [1]=specs, [2]=docs, [3]=root). Slice
+    049-01 used a bare `parents[3]`, which raises `IndexError` for a
+    shallow / non-standard path (e.g. a test fixture at `/tmp/x/spec.md`
+    — only three parents). Degrade gracefully so claim bookkeeping never
+    crashes on path depth: fall back to the nearest ancestor containing a
+    `.git`, else the spec's own directory. For a real nested spec path the
+    result is identical to `parents[3]`."""
+    resolved = spec_md.resolve()
+    parents = resolved.parents
+    if len(parents) > 3:
+        return parents[3]
+    for anc in parents:
+        if (anc / ".git").exists():
+            return anc
+    return resolved.parent
+
+
 def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                push: bool = False, pr_mode: bool = False,
                release: bool = False, reason: str = None) -> str:
@@ -573,11 +592,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     # claim machinery is a no-op for legacy prose-only (no-frontmatter)
     # slices — stamping a field there would synthesize a spurious `---`
     # block. project_dir mirrors the DONE-branch derivation below
-    # (docs/specs/<dir>/spec.md → parents[3]).
+    # (docs/specs/<dir>/spec.md → parents[3]), via a depth-safe helper.
     existing_claim = str(fm_fields.get(CLAIM_FIELD) or "").strip()
     claim_identifier = None
     if has_frontmatter and new_status == IN_PROGRESS_STATUS and not release:
-        claim_project_dir = spec_md.resolve().parents[3]
+        claim_project_dir = _project_root_for_spec(spec_md)
         claim_identifier = _claim_identifier(claim_project_dir)
         # AC3: refuse a foreign claim that is already IN_PROGRESS on disk.
         if (existing_claim and existing_claim != claim_identifier
@@ -665,7 +684,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # refusal leaves the caller's slice file untouched.
         if (new_status == IN_PROGRESS_STATUS and not release
                 and (push or pr_mode)):
-            claim_project_dir = spec_md.resolve().parents[3]
+            claim_project_dir = _project_root_for_spec(spec_md)
             rel_path = loc.path.resolve().relative_to(
                 claim_project_dir).as_posix()
             _reserve_claim_on_main(

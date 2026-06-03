@@ -175,3 +175,19 @@ The original spec is preserved above. Implementation notes:
 8. **New shared helper:** `_common/parsing.clear_frontmatter_field()`
    (idempotent field removal) with its own unit tests — the natural
    counterpart to `set_frontmatter_field`, used to clear `claimed_by:`.
+
+9. **CI fix — depth-safe project-root derivation (found on PR #35).**
+   The claim path derived the project root with a bare
+   `spec_md.resolve().parents[3]`. That raises `IndexError(3)` on a
+   shallow path — CI's `/tmp/jig-x/spec.md` has only three parents — so
+   every frontmatter→IN_PROGRESS transition crashed there
+   (`workflow.py failed: 3`, exit 1; 4 transition tests red). It passed
+   locally only because macOS tmp resolves to a deeper `/private/tmp/…`
+   (≥4 parents). Fixed with a `_project_root_for_spec()` helper that
+   returns `parents[3]` for a real nested spec path and falls back
+   gracefully (nearest `.git` ancestor, else the spec's own dir) for a
+   shallow one; both claim call-sites use it. Machine-independent
+   regression guard added (`test_project_root_for_spec_is_depth_safe`).
+   The identical pre-existing `parents[3]` at the DONE-dependency check
+   was left as-is — not part of this regression and covered by tests
+   that use properly-nested paths.
