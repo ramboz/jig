@@ -1,0 +1,123 @@
+---
+status: DRAFT
+skill: spec-workflow
+---
+
+# Spec 057: Thin-orchestrator discipline (delegation-first sessions + active compaction)
+
+## Overview
+
+Spec 055 shipped four **soft, scaffolded** context-cost mechanisms (delegate
+reads, in-session growth nudge, read-once/lean, verbose-Bash containment). This
+spec is the **data-driven follow-on**: a 2026-06-03 cross-session deep-dive (25
+recent sessions, 8,379 orchestrator turns; script + results in `/tmp/`, to be
+promoted) measured **where cost actually is** and **which levers move it**.
+
+Findings that frame this spec:
+
+- **Cost ≈ orchestrator context × turns.** `cache_read` is **52–55%** of
+  cost-equivalent spend and correlates almost perfectly with turn count
+  (r = 0.92) and peak per-turn context (r = 0.96). This is the dominant lever.
+- **`cache_creation` (22–27%) is ~99% structural/incremental growth, NOT
+  cache-TTL expiry.** Only **1.2%** of creation lands on post-gap (>5 min)
+  turns; caches survive multi-hour idle (a ~4 h-gap turn re-read 797K tokens at
+  read price with zero creation). A longer cache TTL / hit-rate tuning would
+  recover essentially nothing → **rejected as a lever** (see Non-goals).
+- **Model choice is minor.** The orchestrator is ~98% Opus already and
+  subagents are only **17%** of combined cost — the orchestrator's own re-read
+  is the budget.
+- **Plannability is partial.** Subagent phases are moderately predictable
+  (reviewer ≈ 383K cost-eq, implementer ≈ 1.1M; CV ≈ 0.5–0.6), but
+  **orchestrator per-session cost is highly variable (CV ≈ 0.98)** — dominated
+  by *turn count*, which is not constant. So the plannable lever is to
+  **structure delegation up front to minimize improvised orchestrator turns**,
+  not to predict the bill.
+
+The conclusion: invest in the two **Family-2** knobs — **turn count** and
+**peak context**. This spec operationalizes one mechanism for each, both
+soft/non-blocking, both measurable now that spec 056 gives per-spec token
+attribution (and the `.jig/spec-ref` marker gives exact go-forward numbers).
+
+## Goals
+
+1. **Cut orchestrator turn count** on spec-implementation sessions by making
+   delegation the *default, planned-up-front* shape — the orchestrator
+   dispatches and integrates rather than doing turn-heavy work itself.
+2. **Cap peak orchestrator context** by escalating 055-02's warn-only growth
+   nudge into an *actionable* compaction / handoff trigger at a high band.
+3. **Stay soft.** Both mechanisms are nudges/guidance, not enforcement —
+   consistent with 055's philosophy and ADR-0011 (deliberateness, not a
+   firewall). jig cannot force `/compact`; it recommends, the user/harness acts.
+4. **Be measurable.** Use the 056 tracker + the `.jig/spec-ref` marker to verify
+   that disciplined slices show lower orchestrator turn-count / peak-context than
+   undisciplined ones, going forward.
+
+## Non-goals
+
+- **Cache-TTL / cache-hit-rate tuning.** The deep-dive falsified it as a lever
+  (1.2% gap-correlated creation; caches survive multi-hour idle). Parked with
+  evidence; do not re-explore without new data.
+- **Model-downgrade policy (Family 3).** Subagents are only ~17% of cost; the
+  saving is small. Out of scope.
+- **Hard enforcement / blocking gates.** These are nudges (ADR-0011).
+- **Implementing compaction itself.** jig cannot run `/compact` or rewrite the
+  harness's context; 057-02 *prompts* an action — the user/harness performs it.
+- **Output-token reduction.** Output is ~22% of cost (5×-priced, larger than
+  folklore) — a real but separate, smaller lever. Parked as a possible future
+  slice / spec (see Open questions).
+
+## SPIDR analysis
+
+Axis: a **Rules + Interface** mix — two independent mechanisms, one per factor
+of `context × turns`. Each slice is independently **vertical** (delivers a
+usable mechanism end-to-end). **Spike rejected** — the substrate is known: the
+deep-dive characterized the cost; 055-02's `jig-context-check.sh` hook exists to
+extend; subagent delegation is already proven (dogfooded on 056-03).
+
+| Slice | Delivers | Lever |
+|---|---|---|
+| 057-01 | **Delegation-first session template** — a per-spec dispatch plan (each slice → implementer + which review passes + which skills) + workflow.md "run thin" guidance, so the orchestrator dispatches-and-integrates instead of improvising work across many turns | **turn count** |
+| 057-02 | **Active compaction trigger** — `jig-context-check.sh` escalates from warn-only to an actionable compaction / fresh-session-handoff prompt at a high band | **peak context** |
+
+## Design notes
+
+- **057-01 (turn count).** A helper (`workflow.py session-plan <spec>`, or a
+  pure template — see Open questions) enumerates a spec's non-DEFERRED slices and
+  emits the standard per-slice phase sequence — implement → compliance → craft →
+  [arch iff `arch_review`] → reconcile → land — with the subagent type + skill
+  for each phase. The orchestrator then executes by *dispatching against the
+  plan* rather than deciding each step ad hoc. The plannability finding is the
+  rationale: delegated phases are predictable; the orchestrator's turn count is
+  the variable, so front-loading delegation decisions is what shrinks it. Mirrors
+  055-01's doc pattern (workflow.md guidance + a Hot-Cache/template pointer).
+- **057-02 (peak context).** Extend the existing 055-02 `UserPromptSubmit`
+  handler in `jig-context-check.sh` (which already reads the transcript-tail
+  `cache_read` and bands at `JIG_CONTEXT_GROWTH_WARN_PCT` 40/60/80). Add a higher
+  **compaction band** (new knob, e.g. `JIG_CONTEXT_COMPACT_PCT`, default above
+  the warn bands) that emits an *actionable* message: recommend compaction, or a
+  fresh-session handoff with a one-line "carry over: spec path, current slice,
+  open threads" hint. Reuse the once-per-band + re-arm-on-drop machinery; don't
+  duplicate the warn messages. Fail-open, advisory only.
+- **Honesty on the evidence.** n = 25, single user, jig-specific workflow;
+  attribution heuristic for 24/25 sessions; cost ratios are API list-price
+  proxies (read 0.1× / write 1.25× / output 5× input), not billed dollars. The
+  lever *ranking* is robust (r ≈ 0.9+); the absolute splits are directional.
+
+## Slices
+
+- `slice-01-delegation-first-template.md` — per-spec dispatch plan + "run thin" guidance (turn-count lever)
+- `slice-02-active-compaction-trigger.md` — 055-02 hook escalates to an actionable compaction nudge (peak-context lever)
+
+## Open questions
+
+1. **057-01 form** — `workflow.py session-plan` helper vs a pure-guidance
+   template vs a skill? (Mirror the 056 clarify decision: script-first, skill
+   later only if discovery/triggering proves worth it.)
+2. **057-01 plan artifact** — stdout-only, or persisted (e.g. the `plan.md` jig
+   already references per spec, or a `.jig/`-local file)?
+3. **057-02 band default** — what `JIG_CONTEXT_COMPACT_PCT` default, and should
+   the hook attempt to signal the harness's native `/compact` (if a hook channel
+   exists) or stay prompt-only?
+4. **Output discipline (~22%)** — promote to a future slice here, or a separate
+   spec? (Concise delegation prompts + concise returned summaries; output is
+   5×-priced.)
