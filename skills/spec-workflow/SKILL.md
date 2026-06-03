@@ -158,6 +158,18 @@ SKILL.md hand-off is the documented gate.
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" transition \
      "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" IN_PROGRESS
    ```
+   **Claim-on-IN_PROGRESS (spec 049-01).** On a frontmatter (file-per-slice)
+   slice this stamps `claimed_by:` (the current branch name, or
+   `JIG_CLAIM_ID`) so parallel worktrees don't both pick up the same slice.
+   It refuses if the slice is already claimed by a *different* identifier and
+   still `IN_PROGRESS` — naming the holder and pointing at `--release`. The
+   claim is **local by default**; add `--push` (direct) or `--pr` (via PR) to
+   reserve it on `origin/main` so other worktrees see it (race / protected-
+   branch handling mirrors `workflow.py new`). The claim is cleared on the
+   forward move to `REVIEWED` and on any back-transition to
+   `READY_FOR_IMPLEMENTATION` / `DRAFT`. To force-release a stale claim:
+   `transition <spec> <slice> READY_FOR_IMPLEMENTATION --release --reason
+   "<why>"` (clears `claimed_by:`, logs to the slice's `## Release log`).
 3. Fill in / refresh `plan.md` and `tasks.md` for the slice.
 4. Spawn the `implementer` subagent with the spec path. Implementer writes the
    deliverable to disk (TDD — failing tests first).

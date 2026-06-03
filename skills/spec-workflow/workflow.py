@@ -30,6 +30,7 @@ from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
     check_deviation_log,
+    clear_frontmatter_field,
     frontmatter_flag_truthy,
     parse_frontmatter,
     set_frontmatter_field,
@@ -223,6 +224,14 @@ def _slice_frontmatter(section: str) -> tuple:
 def _set_slice_frontmatter_field(section: str, key: str, value) -> str:
     hdr, body = _split_slice_section(section)
     new_body = set_frontmatter_field(body, key, value)
+    return hdr + new_body
+
+
+def _clear_slice_frontmatter_field(section: str, key: str) -> str:
+    """Slice 049-01: drop a frontmatter field from a slice section,
+    layout-aware (mirrors `_set_slice_frontmatter_field`)."""
+    hdr, body = _split_slice_section(section)
+    new_body = clear_frontmatter_field(body, key)
     return hdr + new_body
 
 
@@ -635,7 +644,28 @@ def _write_spec_ref_marker(spec_md: Path, slice_label: str) -> None:
         return
 
 
-def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
+def _project_root_for_spec(spec_md: Path) -> Path:
+    """Best-effort project root for a `docs/specs/<dir>/spec.md` path
+    (= `parents[3]`: [0]=<dir>, [1]=specs, [2]=docs, [3]=root). Slice
+    049-01 used a bare `parents[3]`, which raises `IndexError` for a
+    shallow / non-standard path (e.g. a test fixture at `/tmp/x/spec.md`
+    — only three parents). Degrade gracefully so claim bookkeeping never
+    crashes on path depth: fall back to the nearest ancestor containing a
+    `.git`, else the spec's own directory. For a real nested spec path the
+    result is identical to `parents[3]`."""
+    resolved = spec_md.resolve()
+    parents = resolved.parents
+    if len(parents) > 3:
+        return parents[3]
+    for anc in parents:
+        if (anc / ".git").exists():
+            return anc
+    return resolved.parent
+
+
+def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
+               push: bool = False, pr_mode: bool = False,
+               release: bool = False, reason: str = None) -> str:
     """Transition the named slice's STATUS to `new_status`. Auto-ticks
     "Implementation review passed" on REVIEWED, and "Reconciliation
     review passed" on RECONCILED (slice 003-04). When the slice has a
@@ -648,13 +678,27 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
     evidence (ADR-0014 §5) — the move is refused unless the required
     verdict artifacts exist and clear (and, for RECONCILED/DONE, the
     deviation log is present). The gate is ON by default; bypass with
-    `JIG_REVIEW_EVIDENCE_GATE=0`. Returns a summary string."""
+    `JIG_REVIEW_EVIDENCE_GATE=0`.
+
+    Slice 049-01: → IN_PROGRESS stamps a `claimed_by:` identifier
+    (branch name, or `JIG_CLAIM_ID`) and refuses an on-disk foreign
+    claim that is still IN_PROGRESS (AC3); `push`/`pr_mode` additionally
+    reserve the claim on origin/main so parallel worktrees see it (local
+    by default). → REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT clear the
+    claim. `release` (with a `reason`) force-clears a stale claim and
+    appends a `## Release log` entry. Returns a summary string."""
     if new_status not in VALID_STATUSES:
         raise WorkflowError(
             f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
         )
     if not spec_md.is_file():
         raise WorkflowError(f"spec file not found: {spec_md}")
+
+    # Slice 049-01: --release requires an audit reason (AC5).
+    if release and not (reason and reason.strip()):
+        raise WorkflowError(
+            '--release requires --reason "<text>" for the audit trail.'
+        )
 
     loc = load_slice(spec_md, slice_fragment)
     section = loc.text[loc.start:loc.end]
@@ -677,6 +721,27 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
             f"invalid transition: DEFERRED → {new_status}. "
             f"From DEFERRED, only DRAFT (re-open) is allowed."
         )
+
+    # Slice 049-01: claim context. Claims live in slice frontmatter, so the
+    # claim machinery is a no-op for legacy prose-only (no-frontmatter)
+    # slices — stamping a field there would synthesize a spurious `---`
+    # block. project_dir mirrors the DONE-branch derivation below
+    # (docs/specs/<dir>/spec.md → parents[3]), via a depth-safe helper.
+    existing_claim = str(fm_fields.get(CLAIM_FIELD) or "").strip()
+    claim_identifier = None
+    if has_frontmatter and new_status == IN_PROGRESS_STATUS and not release:
+        claim_project_dir = _project_root_for_spec(spec_md)
+        claim_identifier = _claim_identifier(claim_project_dir)
+        # AC3: refuse a foreign claim that is already IN_PROGRESS on disk.
+        if (existing_claim and existing_claim != claim_identifier
+                and current_status == "IN_PROGRESS"):
+            raise WorkflowError(
+                f"slice {loc.label} is currently claimed by "
+                f"{existing_claim!r} (status IN_PROGRESS). To take it over, "
+                f"have the owner release it, or force-release with:\n"
+                f"    workflow.py transition <spec> {loc.label} "
+                f'READY_FOR_IMPLEMENTATION --release --reason "..."'
+            )
 
     # Pre-flight: DONE transition validates `dependencies:` from frontmatter.
     if new_status == "DONE" and fm_fields.get("dependencies"):
@@ -722,6 +787,51 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str) -> str:
         raise WorkflowError(
             "no `**STATUS: ...**` marker or frontmatter `status:` field "
             "found in slice section"
+        )
+
+    # Slice 049-01: claim bookkeeping in the slice frontmatter (no-op on
+    # legacy prose-only slices, which have no frontmatter to carry a claim —
+    # stamping a field there would synthesize a spurious `---` block).
+    #   - release        : clear claimed_by + append a ## Release log entry.
+    #   - → IN_PROGRESS  : stamp claimed_by (the identifier resolved above).
+    #   - → REVIEWED /
+    #     READY_FOR_IMPLEMENTATION / DRAFT : clear claimed_by (AC4).
+    if has_frontmatter:
+        if release:
+            released_from = existing_claim or "(unclaimed)"
+            new_section = _clear_slice_frontmatter_field(
+                new_section, CLAIM_FIELD)
+            new_section = _append_release_log(
+                new_section, released_from, reason)
+        elif new_status == IN_PROGRESS_STATUS:
+            new_section = _set_slice_frontmatter_field(
+                new_section, CLAIM_FIELD, claim_identifier,
+            )
+        elif new_status in _CLAIM_CLEARING_STATUSES and existing_claim:
+            new_section = _clear_slice_frontmatter_field(
+                new_section, CLAIM_FIELD)
+
+        # The claim is LOCAL by default (no network — preserves the everyday
+        # "start a slice" UX). `--push` / `--pr` opt into reserving it on
+        # origin/main so parallel worktrees see it. The reservation runs
+        # BEFORE the local write, so a collision / race / unreachable-origin
+        # refusal leaves the caller's slice file untouched.
+        if (new_status == IN_PROGRESS_STATUS and not release
+                and (push or pr_mode)):
+            claim_project_dir = _project_root_for_spec(spec_md)
+            rel_path = loc.path.resolve().relative_to(
+                claim_project_dir).as_posix()
+            _reserve_claim_on_main(
+                claim_project_dir, rel_path, claim_identifier, loc.label,
+                pr_mode=pr_mode,
+            )
+    elif release or (new_status == IN_PROGRESS_STATUS and (push or pr_mode)):
+        # Claims require a frontmatter slice; surface rather than silently
+        # synthesize a block on a legacy prose-only slice.
+        raise WorkflowError(
+            f"slice {loc.label} has no frontmatter block — claim operations "
+            f"(--push / --pr / --release) require a file-per-slice "
+            f"(frontmatter) layout (spec 018)."
         )
 
     # Slice 018-02: `loc.label` is already the resolved slice label from
@@ -863,13 +973,16 @@ def _write_spec_rollup(spec_path: Path) -> bool:
 
 def collect_slices(project_dir: Path) -> list:
     """Walk docs/specs/*/spec.md and collect (spec_dir, slice_label, status,
-    resolution_trigger, kind) tuples in file order. resolution_trigger is
-    the empty string when the slice is not DEFERRED (or simply has no
-    `**Resolution trigger:**` line). `kind` is the slice's frontmatter
-    `kind:` value (slice 029-01: `"spike"` / `"feature"` / `""` for
-    unset). Slice 029-02 reads this to drive the marker in
+    resolution_trigger, kind, claimed_by) tuples in file order.
+    resolution_trigger is the empty string when the slice is not DEFERRED
+    (or simply has no `**Resolution trigger:**` line). `kind` is the slice's
+    frontmatter `kind:` value (slice 029-01: `"spike"` / `"feature"` / `""`
+    for unset). Slice 029-02 reads this to drive the marker in
     `render_status_table` — recomputed every regen from the slice's
-    frontmatter, so the marker is never stored separately."""
+    frontmatter, so the marker is never stored separately. `claimed_by`
+    (slice 049-02) is the slice's frontmatter `claimed_by:` value (set by
+    `transition … IN_PROGRESS`, spec 049-01; `""` when unclaimed),
+    rendered as a suffix on IN_PROGRESS Status cells."""
     specs_dir = project_dir / "docs" / "specs"
     if not specs_dir.is_dir():
         return []
@@ -896,8 +1009,11 @@ def collect_slices(project_dir: Path) -> list:
             # Slice 029-02: read `kind:` from frontmatter (slice 029-01
             # convention). Defaults to "" when unset — same as feature.
             kind = str(fm_fields.get("kind", "")).strip()
+            # Slice 049-02: read `claimed_by:` (spec 049-01). "" when unset.
+            claimed_by = str(fm_fields.get(CLAIM_FIELD, "")).strip()
             rows.append(
-                (spec_dir, loc.label, status or "UNKNOWN", trigger, kind),
+                (spec_dir, loc.label, status or "UNKNOWN", trigger, kind,
+                 claimed_by),
             )
     return rows
 
@@ -946,11 +1062,34 @@ def parse_existing_notes(existing: str) -> dict:
     return notes_map
 
 
+# Slice 049-02: cap the `claimed_by` suffix rendered in the board's Status
+# cell so a long branch name can't blow out the column width. A claim at or
+# below CLAIM_DISPLAY_MAX renders in full; a longer one is truncated to
+# CLAIM_DISPLAY_TRUNC chars + an ellipsis. Invariant: keep
+# CLAIM_DISPLAY_TRUNC < CLAIM_DISPLAY_MAX so a truncated suffix is always
+# shorter than the untruncated bound (the +ellipsis still fits the budget).
+CLAIM_DISPLAY_MAX = 30
+CLAIM_DISPLAY_TRUNC = 27
+
+
+def _render_claim_suffix(claimed_by: str) -> str:
+    """Slice 049-02: ` (<claim>)` suffix for an IN_PROGRESS Status cell, or
+    "" when unclaimed. Truncates an over-long claim to keep the cell bounded
+    (AC6)."""
+    claim = (claimed_by or "").strip()
+    if not claim:
+        return ""
+    if len(claim) > CLAIM_DISPLAY_MAX:
+        claim = claim[:CLAIM_DISPLAY_TRUNC] + "…"
+    return f" ({claim})"
+
+
 def render_status_table(rows: list, notes_map: dict = None) -> str:
     """Build the Markdown table for the status board. `notes_map` carries
     Notes from the prior version of the board, looked up by (spec_dir, label).
-    Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), and 5-tuple
-    (slice 029-02, with `kind`) row shapes.
+    Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), 5-tuple
+    (slice 029-02, with `kind`), and 6-tuple (slice 049-02, with
+    `claimed_by`) row shapes.
 
     Slice 029-02: when a row's `kind == "spike"`, the slice cell is
     prepended with the `SPIKE_MARKER` glyph + a space. The marker is a
@@ -962,8 +1101,14 @@ def render_status_table(rows: list, notes_map: dict = None) -> str:
     for row in rows:
         spec_dir, label, status = row[0], row[1], row[2]
         kind = row[4] if len(row) >= 5 else ""
+        claimed_by = row[5] if len(row) >= 6 else ""
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
         status_cell = f"**{status}**" if status == "DONE" else status
+        # Slice 049-02: surface the owning worktree on IN_PROGRESS rows.
+        # Other states are untouched (byte-identical render); legacy /
+        # unclaimed IN_PROGRESS rows fall back to plain `IN_PROGRESS`.
+        if status == "IN_PROGRESS":
+            status_cell = status + _render_claim_suffix(claimed_by)
         notes = notes_map.get((spec_dir, label), "")
         # Slice 029-02: prepend the spike marker on the slice cell only
         # when the slice's `kind == "spike"`. Single-emoji + space prefix;
@@ -2349,6 +2494,245 @@ def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
 # ---------- end slice 003-03 ----------
 
 
+# ---------- Slice 049-01: claim-on-transition ----------
+#
+# Mirrors the spec 028-01 / 003-03 reserve-on-main primitives (reused
+# directly: _run, _classify_push_failure, _check_gh_and_remote,
+# _current_branch) and the spec 051 / ADR-0015 worktree-aware
+# detached-checkout shape. Where `workflow.py new` reserves a NEW spec
+# number by CREATING files, the IN_PROGRESS transition reserves a CLAIM
+# on an EXISTING slice file: it flips `status: IN_PROGRESS` and stamps
+# `claimed_by:` on the origin/main copy so two parallel worktrees cannot
+# both pick up the same slice. A single detached-worktree path serves
+# every branch (incl. a linked worktree that can't check out `main`),
+# since the claim edits an existing file rather than creating one. Per
+# ADR-0002's three-callers rule the push/race/PR-fallback shape stays
+# inline-mirrored, not extracted (this is the second caller).
+
+CLAIM_FIELD = "claimed_by"
+_CLAIM_CLEARING_STATUSES = ("REVIEWED", "READY_FOR_IMPLEMENTATION", "DRAFT")
+
+
+def _claim_identifier(project_dir: Path) -> str:
+    """Identity stamped into `claimed_by:`. The `JIG_CLAIM_ID` env
+    override wins (spec 049 non-goal: no human-identity inference);
+    otherwise the current branch name (parity with `workflow.py new`'s
+    routing). Falls back to 'detached' when neither is available."""
+    env = os.environ.get("JIG_CLAIM_ID")
+    if env and env.strip():
+        return env.strip()
+    return _current_branch(project_dir) or "detached"
+
+
+def _ref_safe(label: str) -> str:
+    """Slug a slice label into a git-ref-safe token for the PR-fallback
+    branch name. The human label (e.g. `049-01 — claim-and-release`)
+    carries spaces / em-dashes that are invalid in a ref; lower-case and
+    collapse every non-`[a-z0-9]` run to a single hyphen (mirrors the
+    003-03 precedent of branching off the filesystem-safe `spec_dirname`,
+    not the prose label)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    return slug or "slice"
+
+
+def _build_claim_pr_body(slice_label: str, identifier: str,
+                         rel_path: str) -> str:
+    """PR body for the protected-branch claim fallback."""
+    return (
+        f"Claims slice `{slice_label}` for `{identifier}` on the shared "
+        f"trunk, so parallel worktrees cannot both pick it up.\n"
+        f"\n"
+        f"This PR flips `status: IN_PROGRESS` and stamps "
+        f"`claimed_by: {identifier}` on `{rel_path}`.\n"
+        f"\n"
+        f"Generated by `workflow.py transition ... IN_PROGRESS` "
+        f"(see spec 049-01 slice-claim-on-IN_PROGRESS for rationale).\n"
+    )
+
+
+def _claim_pr_fallback(sha: str, project_dir: Path, claim_branch: str,
+                       slice_label: str, identifier: str,
+                       pr_body: str) -> None:
+    """Protected-branch fallback for the claim push: push the claim
+    commit (BY SHA, from project_dir so a relative `origin` URL resolves)
+    to a new `claim/` branch and open a PR. Mirrors
+    `_pr_fallback_from_worktree` (003-03) with claim-flavored messaging."""
+    _check_gh_and_remote(project_dir)
+    rc, _out, err = _run(
+        ["git", "push", "origin", f"{sha}:refs/heads/{claim_branch}"],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback push to {claim_branch!r} failed: {err.strip()}. "
+            f"The claim commit exists only in the ephemeral worktree; "
+            f"re-run to retry."
+        )
+    title = f"docs(specs): claim {slice_label} ({identifier})"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body,
+         "--head", claim_branch, "--base", "main"],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback `gh pr create` failed: {err.strip()}. "
+            f"Branch origin/{claim_branch} is pushed; open the PR "
+            f"manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def _reserve_claim_on_main(project_dir: Path, rel_path: str,
+                           identifier: str, slice_label: str,
+                           pr_mode: bool = False) -> None:
+    """Reserve a slice claim on origin/main. Fetches origin/main, reads
+    the slice's origin/main copy, refuses if it is already claimed by a
+    different identifier while IN_PROGRESS (the collision backstop), then
+    builds the claim commit in an ephemeral detached worktree and pushes
+    `HEAD:main` BY SHA. Race → re-run; protected branch → PR fallback.
+    Raises WorkflowError on collision / race / unreachable origin; the
+    caller's working tree, branch, and branch tip are never touched."""
+    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    if rc != 0:
+        raise WorkflowError(
+            f"cannot reserve the claim: `git fetch origin main` failed "
+            f"({err.strip()}). origin/main is unreachable — re-run with "
+            f"--no-push for a local provisional claim."
+        )
+
+    rc, content, err = _run(
+        ["git", "show", f"origin/main:{rel_path}"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"cannot reserve the claim: {rel_path} is not on origin/main "
+            f"({err.strip()}). Land the slice on main first, or use "
+            f"--no-push for a local provisional claim."
+        )
+
+    fields, _ = parse_frontmatter(content)
+    existing = str(fields.get(CLAIM_FIELD) or "").strip()
+    origin_status = str(fields.get("status") or "").strip()
+    if existing and existing != identifier and origin_status == "IN_PROGRESS":
+        raise WorkflowError(
+            f"slice {slice_label} is already claimed by {existing!r} on "
+            f"origin/main (status IN_PROGRESS). Have the current owner "
+            f"release it, or force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."'
+        )
+    if existing == identifier and origin_status == "IN_PROGRESS":
+        # Idempotent re-claim — already ours on origin/main; nothing to push.
+        print(f"claim already held by {identifier!r} on origin/main")
+        return
+
+    new_content = set_frontmatter_field(content, "status", "IN_PROGRESS")
+    new_content = set_frontmatter_field(new_content, CLAIM_FIELD, identifier)
+
+    wt = Path(tempfile.mkdtemp(prefix="jig-claim-"))
+    try:
+        rc, _out, err = _run(
+            ["git", "worktree", "add", "--detach", str(wt), "origin/main"],
+            cwd=project_dir,
+        )
+        if rc != 0:
+            raise WorkflowError(
+                f"could not create the ephemeral claim worktree at "
+                f"origin/main ({err.strip()})."
+            )
+
+        target = wt / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(target, new_content)
+        rc, _out, err = _run(["git", "add", rel_path], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git add {rel_path}` in the claim worktree failed: "
+                f"{err.strip()}."
+            )
+        commit_msg = f"docs(specs): claim {slice_label} ({identifier})"
+        rc, _out, err = _run(["git", "commit", "-m", commit_msg], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git commit` in the claim worktree failed: {err.strip()}."
+            )
+
+        # Resolve the SHA so we can push BY SHA from project_dir (a relative
+        # `origin` URL would not resolve against the temp worktree — the
+        # 051 lesson).
+        rc, sha, err = _run(["git", "rev-parse", "HEAD"], cwd=wt)
+        if rc != 0 or not sha.strip():
+            raise WorkflowError(
+                f"could not resolve the claim commit SHA ({err.strip()})."
+            )
+        sha = sha.strip()
+
+        pr_body = _build_claim_pr_body(slice_label, identifier, rel_path)
+        claim_branch = f"claim/{_ref_safe(slice_label)}"
+
+        if pr_mode:
+            _claim_pr_fallback(
+                sha, project_dir, claim_branch, slice_label, identifier,
+                pr_body,
+            )
+            return
+
+        rc, _out, err = _run(
+            ["git", "push", "origin", f"{sha}:refs/heads/main"],
+            cwd=project_dir,
+        )
+        if rc == 0:
+            print(f"claimed {slice_label} on origin/main as {identifier!r}")
+            return
+
+        kind = _classify_push_failure(err)
+        if kind == "race":
+            # The stranded commit lives only in the worktree the `finally`
+            # removes — no reset needed.
+            raise WorkflowError(
+                f"race-on-push claiming {slice_label}: origin/main advanced "
+                f"({err.strip()}). Re-run the transition to re-check the "
+                f"claim against the new origin/main."
+            )
+        if kind == "protection":
+            sys.stderr.write(
+                f"direct push refused ({err.strip()}); falling back to "
+                f"PR mode...\n"
+            )
+            _claim_pr_fallback(
+                sha, project_dir, claim_branch, slice_label, identifier,
+                pr_body,
+            )
+            return
+
+        raise WorkflowError(
+            f"`git push origin {sha}:refs/heads/main` failed claiming "
+            f"{slice_label}: {err.strip()} (the claim commit lived only in "
+            f"the ephemeral worktree, which has been removed; re-run)."
+        )
+    finally:
+        _run(["git", "worktree", "remove", "--force", str(wt)],
+             cwd=project_dir)
+        shutil.rmtree(wt, ignore_errors=True)
+        _run(["git", "worktree", "prune"], cwd=project_dir)
+
+
+def _append_release_log(section: str, released_from: str, reason: str) -> str:
+    """Append a dated release entry to the slice's `## Release log`
+    section (created if absent). Audit trail for `--release` (AC5)."""
+    entry = f"- {_today()} — released claim from {released_from}: {reason.strip()}\n"
+    body = section.rstrip("\n")
+    if "## Release log" in section:
+        return body + "\n" + entry
+    return body + "\n\n## Release log\n\n" + entry
+
+
+# ---------- end slice 049-01 ----------
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="workflow.py",
                                 description="jig spec-workflow helper")
@@ -2358,6 +2742,21 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument("spec", help="path to spec.md")
     pt.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pt.add_argument("status", help=f"new status; one of: {', '.join(VALID_STATUSES)}")
+    # Slice 049-01: slice-claim flags (meaningful on the IN_PROGRESS
+    # transition + --release). The claim is local by default; --push / --pr
+    # opt into reserving it on origin/main.
+    pt.add_argument("--push", action="store_true",
+                    help="(IN_PROGRESS) reserve the claim on origin/main so "
+                         "parallel worktrees see it (default: local-only)")
+    pt.add_argument("--pr", dest="pr_mode", action="store_true",
+                    help="(IN_PROGRESS) reserve the claim on origin/main via "
+                         "a PR instead of a direct push (implies --push)")
+    pt.add_argument("--release", action="store_true",
+                    help="force-release an existing claim (clears claimed_by); "
+                         "requires --reason")
+    pt.add_argument("--reason", default=None,
+                    help="audit reason recorded in the slice's ## Release log "
+                         "(required with --release)")
 
     pb = sub.add_parser("status-board",
                         help="regenerate docs/specs/README.md from spec.md files")
@@ -2450,7 +2849,11 @@ def main(argv: list) -> int:
 
     try:
         if ns.command == "transition":
-            summary = transition(Path(ns.spec), ns.slice, ns.status)
+            summary = transition(
+                Path(ns.spec), ns.slice, ns.status,
+                push=ns.push, pr_mode=ns.pr_mode,
+                release=ns.release, reason=ns.reason,
+            )
             print(summary)
         elif ns.command == "status-board":
             summary = regenerate_status_board(Path(ns.project), force=ns.force)

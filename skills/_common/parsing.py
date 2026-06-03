@@ -416,3 +416,44 @@ def set_frontmatter_field(text: str, key: str, value) -> str:
     leading = m.group(1) or ""
     new_block = f"{leading}---\n{new_body}\n---\n"
     return new_block + text[m.end():]
+
+
+def clear_frontmatter_field(text: str, key: str) -> str:
+    """Idempotent removal of a single frontmatter field.
+
+    Drops the `key:` line (and any indented block-list continuation
+    rows beneath it). No-op when the key is absent or no frontmatter
+    block exists — the input is returned unchanged. Used by the
+    slice-claim flow (spec 049-01) to clear `claimed_by:` on release
+    and on forward / back transitions.
+    """
+    m = _FM_BLOCK_RE.match(text)
+    if not m:
+        return text
+
+    body = m.group(2)
+    lines = body.splitlines()
+    key_re = re.compile(r"^" + re.escape(key) + r":\s*(.*)$")
+    idx = None
+    for i, line in enumerate(lines):
+        if line.startswith((" ", "\t")):
+            continue
+        if key_re.match(line):
+            idx = i
+            break
+    if idx is None:
+        return text
+
+    # Drop the key line plus any indented block-list continuation rows.
+    j = idx + 1
+    while j < len(lines) and (lines[j].startswith((" ", "\t"))
+                              and lines[j].lstrip().startswith("- ")):
+        j += 1
+    new_lines = lines[:idx] + lines[j:]
+    leading = m.group(1) or ""
+    if new_lines:
+        new_block = f"{leading}---\n" + "\n".join(new_lines) + "\n---\n"
+    else:
+        # The block held only this field — leave an empty (but valid) block.
+        new_block = f"{leading}---\n---\n"
+    return new_block + text[m.end():]

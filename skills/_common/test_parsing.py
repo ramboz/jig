@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from parsing import (
     FRONTMATTER_TRUTHY,
     check_deviation_log,
+    clear_frontmatter_field,
     find_slice_file,
     find_slice_section,
     frontmatter_flag_truthy,
@@ -203,6 +204,42 @@ class SetFrontmatterFieldTests(unittest.TestCase):
         text = "---\nstatus: DRAFT\n---\nBody.\n"
         once = set_frontmatter_field(text, "status", "DONE")
         twice = set_frontmatter_field(once, "status", "DONE")
+        self.assertEqual(once, twice)
+
+
+class ClearFrontmatterFieldTests(unittest.TestCase):
+    """Slice 049-01: idempotent removal of a single frontmatter field."""
+
+    def test_removes_scalar_field(self):
+        text = "---\nstatus: IN_PROGRESS\nclaimed_by: wt-x\n---\nBody.\n"
+        new = clear_frontmatter_field(text, "claimed_by")
+        fields, _ = parse_frontmatter(new)
+        self.assertNotIn("claimed_by", fields)
+        self.assertEqual(fields["status"], "IN_PROGRESS")  # preserved
+        self.assertIn("Body.", new)
+
+    def test_noop_when_key_absent(self):
+        text = "---\nstatus: DRAFT\n---\nBody.\n"
+        self.assertEqual(clear_frontmatter_field(text, "claimed_by"), text)
+
+    def test_noop_when_no_block(self):
+        text = "Body only.\n"
+        self.assertEqual(clear_frontmatter_field(text, "claimed_by"), text)
+
+    def test_removes_block_list_continuation(self):
+        text = ("---\nclaimed_by: wt-x\ndependencies:\n  - a\n  - b\n"
+                "status: DRAFT\n---\nBody.\n")
+        new = clear_frontmatter_field(text, "dependencies")
+        fields, _ = parse_frontmatter(new)
+        self.assertNotIn("dependencies", fields)
+        self.assertNotIn("- a", new)
+        self.assertEqual(fields["status"], "DRAFT")
+        self.assertEqual(fields["claimed_by"], "wt-x")
+
+    def test_idempotent(self):
+        text = "---\nstatus: IN_PROGRESS\nclaimed_by: wt-x\n---\nBody.\n"
+        once = clear_frontmatter_field(text, "claimed_by")
+        twice = clear_frontmatter_field(once, "claimed_by")
         self.assertEqual(once, twice)
 
 
