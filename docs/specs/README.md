@@ -153,9 +153,9 @@
 | [049-slice-claim-on-in-progress](049-slice-claim-on-in-progress/spec.md) | 049-02 — status-board-claim-rendering | DRAFT |  |
 | [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-01 — memory-sync-team-recheck | DRAFT |  |
 | [050-solo-team-redetection](050-solo-team-redetection/spec.md) | 050-02 — stale-audit-team-signal | DRAFT |  |
-| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-01 — worktree-aware spec reservation | DRAFT |  |
-| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-02 — worktree-aware ADR reservation | DRAFT |  |
-| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | DRAFT |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-01 — worktree-aware spec reservation | **DONE** |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-02 — worktree-aware ADR reservation | **DONE** |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | DEFERRED |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-01 — security-floor-policy-adr | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-02 — secret-prevention-floor | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | **DONE** |  |
@@ -197,3 +197,4 @@
 | [017-vision-elicitation](017-vision-elicitation/spec.md) | 017-04 — seed-ADR-pass | First 5 real `/jig:vision-elicit` runs after 017-02 lands. If >25% of those runs name an explicit locked-in decision during Section 6 (Stack) elicitation that the user would have wanted auto-scaffolded as an ADR, promote 017-04 to DRAFT. If <25%, deferral becomes permanent — the elicitation output already names decisions inline and ADR seeding can stay manual. |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-05 - codex-scaffold-adapter | A real user asks to use jig from Codex, or a dogfood comparison shows Codex support is needed for an active project. |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-06 - codex-plugin-packaging | Codex scaffold mode has at least one successful real-project use, and a user asks for install-and-forget Codex plugin distribution. |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | First number collision that slips past the |

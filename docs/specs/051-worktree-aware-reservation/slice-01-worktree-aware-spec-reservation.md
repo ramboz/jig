@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: []
-last_verified:
+last_verified: 2026-06-02
 arch_review: true
 ---
 
@@ -57,18 +57,21 @@ arch_review: true
   as today.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions). 1935 tests, OK (skipped=3).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture, including the offline-fetch and on-main-backward-compat
       cases. Worktree behavior tested with a temp linked worktree.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
-      `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
-- [ ] If the mechanism is recorded as an ADR, the ADR is Accepted and
-      linked from this slice + the status-board Notes column.
+      (Real-git E2E: relative-origin reservation + `--no-push` dirty-safety.)
+- [x] Reviewed by an independent agent (no implementation context).
+      Verdict recorded at `reviews/slice-01-craft.md`.
+- [x] Implementation review passed (one blocker, B1 = relative-origin push
+      failure, found and FIXED in commit b759cab).
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed (this reconciliation pass; deviations folded in below).
+- [x] `docs/refinement-todo.md` updated (the "refuse on non-main branches"
+      entry marked RESOLVED, linking ADR-0015 + this spec).
+- [x] The mechanism is recorded as an ADR — [ADR-0015](../../decisions/adr-0015-worktree-aware-reservation.md)
+      (Accepted 2026-06-02) — linked here + in the status-board Notes column.
 
 ### Close-out (post-DONE)
 
@@ -88,4 +91,53 @@ work) is delivered for specs, independent of 051-02/03.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+1. **Provenance — rescued, then hardened.** The implementation was first
+   written by a mis-configured session **directly on `main` in the primary
+   worktree and left uncommitted**. It was snapshotted onto branch
+   `rescue/reservation-from-worktree` verbatim (commit `fbb5d6f`) so it would
+   survive independent of `main`, then independently reviewed and hardened
+   (commit `b759cab`). This slice is therefore a **retro record** of work
+   that already shipped on the branch — authored after the fact to give the
+   feature its proper spec + ADR home.
+
+2. **What shipped (commit `fbb5d6f`).** Branch-routed reservation in
+   `skills/spec-workflow/workflow.py`: `reserve_spec` reads
+   `_current_branch(project_dir)` and dispatches. On `main` the proven
+   003-03 + 037-02 in-place flow runs unchanged. Off `main` (push mode)
+   `_reserve_via_detached_worktree` builds the stub commit in an ephemeral
+   **detached** worktree at `origin/main` (`git worktree add --detach <tmp>
+   origin/main`), pushes it, and tears the worktree down in a `finally`. Off
+   `main` with `--no-push`, `_reserve_local_on_current_branch` commits a
+   provisional reservation on the current branch with a **pathspec-scoped**
+   commit so unrelated staged work is not swept in. `_refuse_if_dirty`'s old
+   branch==main check moved to the dispatch.
+
+3. **Mechanism choice — option (B), deviating from the spec's lean toward
+   (A).** The spec's Open-question leaned to (A) (plumbing commit via `git
+   commit-tree`, no checkout). The implementation chose **(B) ephemeral
+   detached reservation** — same end state, reuses the familiar worktree +
+   commit + push shape rather than lower-level plumbing. Recorded in
+   [ADR-0015](../../decisions/adr-0015-worktree-aware-reservation.md).
+
+4. **Inline-mirror, deviating from AC #2's shared-helper assumption.** AC #2
+   (in the sibling slice 051-02) assumed the primitive would be extracted to
+   a shared helper. It is instead **inline-mirrored** between `workflow.py`
+   and `adr.py`: there are two callers, and ADR-0002's extraction trigger is
+   three (the precedent the original 003-03/028-01 helpers already follow).
+   Recorded in ADR-0015 and slice 051-02's deviation log.
+
+5. **Blocker B1 found by review and fixed (commit `b759cab`).** The
+   independent review found that the off-main push originally ran from inside
+   the temp worktree (`cwd=wt`), which fails for repos with a RELATIVE
+   `origin` URL (e.g. `../origin.git`) — git resolves the relative remote
+   against cwd, and the temp worktree sits outside the repo tree. Fix: push
+   the reservation commit **BY SHA from `project_dir`** (the objects live in
+   the shared store). Also added `git worktree prune` to the `finally` and
+   fixed three stale `_preflight_branch_and_worktree` references. Two real-git
+   E2E tests landed (relative-origin reservation locks B1; `--no-push`
+   dirty-safety). Verdict + findings: `reviews/slice-01-craft.md`.
+
+6. **Plan adherence / scope.** Delivers AC #1–#7 for the spec surface
+   (`workflow.py new`). The land-time collision guardrail (slice 051-03) is
+   **not** part of this change and stays DEFERRED. No `docs/conventions.md`
+   change; the decision content lives in ADR-0015.

@@ -121,16 +121,22 @@ SKILL.md hand-off is the documented gate.
    automatically falls back to a `reserve/NNN-<slug>` branch + `gh pr
    create`. This locks the number **team-wide** before any drafting
    begins, killing the parallel-worktree spec-number-collision failure
-   mode logged across specs 014/015/016/017. Run it from a clean main.
+   mode logged across specs 014/015/016/017.
 
-   Flags: `--no-push` for solo machines without a remote (commit
-   locally only, never touch fetch/push); `--pr` to skip the
-   direct-push attempt on protection-locked main.
+   **Works from any branch or worktree** (ADR-0015 / spec 051). The
+   helper routes on the current branch: on `main` it runs the proven
+   in-place flow (clean tree required, since the commit lands on local
+   `main`); off `main` — a feature branch or a linked `.claude/worktrees/*`
+   worktree — it builds the reservation commit in an *ephemeral detached
+   worktree* checked out at `origin/main` and pushes it by SHA, never
+   touching your branch, cwd, or working tree. You no longer need to
+   switch to `main` (and a linked worktree can't, anyway).
 
-   For projects without remote access — or when you'd rather pick the
-   number by hand — you can still `mkdir docs/specs/NNN-<slug>/` and
-   write `spec.md` directly; `workflow.py new` is the convenience path,
-   not a gate.
+   Flags: `--no-push` for solo machines without a remote, or for an
+   off-main *provisional* reservation committed on the current branch
+   (the number is local-view and may collide at merge — treat it as
+   provisional); `--pr` to skip the direct-push attempt on
+   protection-locked main.
 3. Create `docs/specs/NNN-<slug>/{spec.md,plan.md,tasks.md}` with the conventional
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers
