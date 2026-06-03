@@ -5288,5 +5288,226 @@ class ReserveSpecFromLinkedWorktreeE2E(unittest.TestCase):
         self.assertIn("unrelated.txt", staged)
 
 
+# ---------------------------------------------------------------------------
+# Slice 057-01 — `session-plan` delegation-first dispatch plan
+# ---------------------------------------------------------------------------
+
+
+class SessionPlanTests(unittest.TestCase):
+    """Slice 057-01: `workflow.py session-plan <spec>` emits, per
+    non-DEFERRED slice, the standard phase sequence (implement →
+    compliance → craft → [arch iff `arch_review: true`] → reconcile →
+    land) naming the subagent type + skill for each phase. stdout-only,
+    no side effects (clarify Q1/Q2).
+
+    Fixtures use the canonical file-per-slice layout: `spec.md` carries
+    the overview, sibling `slice-NN-<short>.md` files carry the slice
+    frontmatter (where `arch_review:` / `status:` live).
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-session-plan-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, fname: str, label: str, status: str = "DRAFT",
+                     arch_review: str = None) -> None:
+        fm = [f"status: {status}", "dependencies: []", "last_verified:"]
+        if arch_review is not None:
+            fm.append(f"arch_review: {arch_review}")
+        block = "---\n" + "\n".join(fm) + "\n---\n\n"
+        (self.tmpdir / fname).write_text(
+            block + f"## Slice {label}\n\n**Goal:** placeholder.\n"
+        )
+
+    def _run(self):
+        return run_workflow("session-plan", str(self.spec))
+
+    # AC #1 — deterministic per-slice phase sequence, named subagent+skill
+    def test_emits_phase_sequence_per_slice(self):
+        self._write_slice("slice-01-alpha.md", "057-01 alpha")
+        self._write_slice("slice-02-beta.md", "057-02 beta")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = result.stdout
+        # Both slices appear.
+        self.assertIn("057-01 alpha", out)
+        self.assertIn("057-02 beta", out)
+        # The standard non-arch phase set is named with subagent + skill.
+        for phase in ("implement", "compliance", "craft", "reconcile", "land"):
+            self.assertIn(phase, out.lower())
+        self.assertIn("implementer", out)
+        self.assertIn("jig:independent-review", out)
+        self.assertIn("pr-review", out)
+        self.assertIn("slice-land", out)
+
+    # AC #1 — arch phase iff slice declares arch_review: true
+    def test_arch_phase_only_for_arch_review_slice(self):
+        self._write_slice("slice-01-plain.md", "057-01 plain")
+        self._write_slice("slice-02-arch.md", "057-02 arch",
+                           arch_review="true")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = result.stdout
+        # The arch-review skill is named (for the arch slice).
+        self.assertIn("arch-review", out)
+        # Split output per slice and assert presence/absence of arch phase.
+        idx_plain = out.index("057-01 plain")
+        idx_arch = out.index("057-02 arch")
+        plain_block = out[idx_plain:idx_arch]
+        arch_block = out[idx_arch:]
+        self.assertNotIn("arch-review", plain_block,
+                         "plain slice must NOT include the arch phase")
+        self.assertIn("arch-review", arch_block,
+                      "arch_review:true slice must include the arch phase")
+
+    # AC #1 — truthy variations route to arch phase via FRONTMATTER_TRUTHY
+    def test_arch_phase_for_truthy_variations(self):
+        for truthy in ("yes", "True", "1", "on"):
+            with self.subTest(truthy=truthy):
+                self._write_slice("slice-01-arch.md", "057-01 arch",
+                                  arch_review=truthy)
+                result = self._run()
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                self.assertIn("arch-review", result.stdout)
+
+    # AC #1 — DEFERRED slices are excluded
+    def test_deferred_slice_excluded(self):
+        self._write_slice("slice-01-live.md", "057-01 live",
+                          status="IN_PROGRESS")
+        self._write_slice("slice-02-parked.md", "057-02 parked",
+                          status="DEFERRED")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("057-01 live", result.stdout)
+        self.assertNotIn("057-02 parked", result.stdout)
+
+    # AC #2 — delegation-first: marks delegated phases vs the dispatch loop,
+    # and states the turn-count rationale.
+    def test_delegation_first_framing(self):
+        self._write_slice("slice-01-alpha.md", "057-01 alpha")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        low = result.stdout.lower()
+        # Names the subagent delegation explicitly.
+        self.assertIn("subagent", low)
+        # States the turn-count rationale (re-reads context every turn).
+        self.assertIn("turn", low)
+        self.assertTrue(
+            "re-read" in low or "every turn" in low or "re-reads" in low,
+            "plan should state the orchestrator re-reads its context each turn",
+        )
+
+    # AC #4 — soft / no side effects on spec or slice state.
+    def test_no_side_effects(self):
+        self._write_slice("slice-01-alpha.md", "057-01 alpha")
+        slice_path = self.tmpdir / "slice-01-alpha.md"
+        spec_before = self.spec.read_text()
+        slice_before = slice_path.read_text()
+        before_files = sorted(p.name for p in self.tmpdir.iterdir())
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(self.spec.read_text(), spec_before)
+        self.assertEqual(slice_path.read_text(), slice_before)
+        self.assertEqual(sorted(p.name for p in self.tmpdir.iterdir()),
+                         before_files)
+
+    # Edge: zero non-DEFERRED slices → clear message, no crash.
+    def test_no_slices_to_plan_message(self):
+        self._write_slice("slice-01-parked.md", "057-01 parked",
+                          status="DEFERRED")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("no slices to plan", result.stdout.lower())
+
+    def test_no_slices_at_all_message(self):
+        # Spec with overview only, no slice files.
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("no slices to plan", result.stdout.lower())
+
+
+class SessionPlanDocTests(unittest.TestCase):
+    """Slice 057-01 AC #3: `docs/workflow.md` gains a delegation-first /
+    'run thin' dispatch-and-integrate section, reachable from the
+    Context-cost-discipline guidance (parity with 055-01's doc pattern)."""
+
+    def setUp(self):
+        self.text = (REPO_ROOT / "docs" / "workflow.md").read_text()
+
+    def test_run_thin_section_present(self):
+        self.assertRegex(
+            self.text,
+            r"(?im)^###\s+Run thin",
+            "docs/workflow.md must gain a 'Run thin' delegation-first section",
+        )
+
+    def test_section_names_dispatch_and_turn_count_rationale(self):
+        # The section should explain dispatch-and-integrate + the
+        # turn-count cost rationale, and point at session-plan.
+        low = self.text.lower()
+        self.assertIn("dispatch", low)
+        self.assertIn("session-plan", low)
+        self.assertIn("turn count", low)
+
+
+class OutputDisciplineDocTests(unittest.TestCase):
+    """Slice 057-03 AC #1: `docs/workflow.md` gains an output-discipline
+    section — bound the size of the delegation prompts the orchestrator
+    writes and the summaries subagents return (output is 5x-priced, the
+    sibling lever to 055-04's verbose-Bash containment)."""
+
+    def setUp(self):
+        self.text = (REPO_ROOT / "docs" / "workflow.md").read_text()
+
+    def test_output_discipline_section_present(self):
+        # Match the new 057-03 heading specifically — not the pre-existing
+        # 055-04 "Keep verbose command output out of the orchestrator"
+        # heading, which a bare `.*output` regex would also satisfy (so the
+        # test would stay green even if the 057-03 section were removed).
+        self.assertRegex(
+            self.text,
+            r"(?im)^###\s+.*(emitted output|output lean|lean.*output)",
+            "docs/workflow.md must gain an output-discipline section",
+        )
+
+    def test_section_covers_scoped_prompts_and_return_envelope(self):
+        # The section should say delegation prompts point at files/paths to
+        # READ rather than pasting contents, state the deliverable + return
+        # envelope, and prefer a prompt FILE over inlining a large prompt.
+        low = self.text.lower()
+        self.assertIn("return envelope", low)
+        self.assertIn("prompt file", low)
+        # Mentions pointing at paths to read rather than pasting contents.
+        self.assertRegex(self.text, r"(?i)point .*(read|path|file)")
+
+
+class AgentReturnEnvelopeDocTests(unittest.TestCase):
+    """Slice 057-03 AC #2: the subagent return convention is codified in the
+    relevant `agents/*.md` — reviewers/implementers return a tight envelope
+    (verdict / summary / changed-files), not full logs or transcripts."""
+
+    def test_implementer_return_envelope_present(self):
+        text = (REPO_ROOT / "agents" / "implementer.md").read_text().lower()
+        self.assertIn("envelope", text)
+        # The implementer's tight return covers changed files + the result.
+        self.assertIn("changed", text)
+        self.assertIn("not full logs", text.replace("-", " "))
+
+    def test_reviewer_return_envelope_present(self):
+        text = (REPO_ROOT / "agents" / "reviewer.md").read_text().lower()
+        self.assertIn("envelope", text)
+        # The reviewer's tight return is verdict + summary, not a transcript.
+        self.assertIn("verdict", text)
+        self.assertIn("not full logs", text.replace("-", " "))
+
+
 if __name__ == "__main__":
     unittest.main()

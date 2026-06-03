@@ -276,6 +276,140 @@ def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("arch_review", ""))
 
 
+# ---------- session-plan: delegation-first dispatch plan (slice 057-01) ----------
+
+# The standard per-slice phase sequence. Each tuple is
+# (phase, subagent type, skill) — the orchestrator dispatches each phase to
+# the named subagent + skill rather than doing the turn-heavy work itself.
+# Each phase is either DELEGATED to a subagent (runs in its own isolated
+# context) or an ORCHESTRATOR dispatch step (the orchestrator's own loop).
+# Fields: (phase, mode, actor, skill) where mode is "delegate"|"dispatch",
+# `actor` is the subagent type for delegated phases (None for dispatch
+# steps the orchestrator drives itself), and `skill` is the jig skill the
+# phase runs (None when the phase has no skill — e.g. `implement`, which
+# the `implementer` *agent* performs). Mirrors CLAUDE.md "Session workflow"
+# and docs/workflow.md "Post-implementation review".
+# The arch phase is conditional (emitted iff the slice declares
+# `arch_review: true`); it is inserted between `craft` and `reconcile`.
+_SESSION_PLAN_PHASES = (
+    ("implement", "delegate", "implementer", None),
+    ("compliance", "delegate", "reviewer", "jig:independent-review"),
+    ("craft", "delegate", "reviewer", "pr-review"),
+    # arch (conditional) inserted here for arch_review:true slices.
+    ("reconcile", "dispatch", None, "jig:independent-review"),
+    ("land", "dispatch", None, "jig:slice-land"),
+)
+
+_SESSION_PLAN_ARCH_PHASE = ("arch", "delegate", "reviewer", "arch-review")
+
+# Where the conditional arch phase slots into the sequence (after craft).
+_SESSION_PLAN_ARCH_AFTER = "craft"
+
+
+def _slice_status_from_section(section: str) -> str:
+    """Layout-aware status read for a slice section/file — frontmatter
+    `status:` first, else the prose `**STATUS: X**` marker. Mirrors the
+    read in `collect_slices` / `compute_spec_status`. Returns "" when
+    neither is present."""
+    fm_fields, _ = _slice_frontmatter(section)
+    if fm_fields.get("status"):
+        return str(fm_fields["status"])
+    sm = _STATUS_MARKER_RE.search(section)
+    return sm.group(2) if sm else ""
+
+
+def session_plan(spec_path: Path) -> str:
+    """Slice 057-01: emit a deterministic, delegation-first dispatch plan
+    for a spec — each non-DEFERRED slice mapped to its phase sequence
+    (implement → compliance → craft → [arch iff `arch_review: true`] →
+    reconcile → land) with the subagent type + skill for each phase.
+
+    Pure function of the spec's slices + their frontmatter — no hidden
+    state, no side effects on spec/slice files (clarify Q1/Q2: helper
+    form, stdout-only). The orchestrator then *dispatches against the
+    plan* rather than improvising each step across many turns — cutting
+    turn count, the data-confirmed cost driver (cost ∝ turns, r = 0.92).
+
+    Empty / non-standard edge case: a spec with zero non-DEFERRED slices
+    prints a clear "no slices to plan" message (with the reason) rather
+    than crashing or emitting an empty plan.
+    """
+    spec_path = Path(spec_path)
+
+    # Enumerate slices via the shared dual-layout iterator, excluding
+    # DEFERRED. `arch_review` is read per-slice from its frontmatter via
+    # the shared truthy predicate (no hand-rolled truthiness).
+    planned = []  # list of (label, needs_arch)
+    total = 0
+    for loc in _iter_slices_common(spec_path):
+        total += 1
+        section = loc.text[loc.start:loc.end]
+        status = _slice_status_from_section(section)
+        if status == "DEFERRED":
+            continue
+        fm_fields, _ = _slice_frontmatter(section)
+        needs_arch = frontmatter_flag_truthy(fm_fields.get("arch_review", ""))
+        planned.append((loc.label, needs_arch))
+
+    lines = []
+    lines.append(f"# Session plan — {spec_path}")
+    lines.append("")
+    # Delegation-first framing + turn-count rationale (AC #2).
+    lines.append("Delegation-first dispatch plan. The orchestrator re-reads "
+                 "its full context on EVERY turn, so its cost is roughly "
+                 "context-size x turn count (the data-confirmed driver: "
+                 "cost is proportional to turns, r = 0.92). Push multi-turn "
+                 "sub-work into bounded subagents that return compact "
+                 "summaries; the orchestrator DISPATCHES each phase below and "
+                 "INTEGRATES the result, rather than doing turn-heavy work "
+                 "itself.")
+    lines.append("")
+    lines.append("Each phase is either DELEGATED to a [subagent] (runs in its "
+                 "own isolated context) or an ORCHESTRATOR step (the "
+                 "orchestrator's own dispatch-and-integrate loop). A phase that "
+                 "runs a jig {skill} names it; `implement` runs the "
+                 "[implementer] agent (no skill), and `reconcile`/`land` are "
+                 "orchestrator-driven steps.")
+    lines.append("")
+
+    if not planned:
+        if total == 0:
+            reason = "this spec has no slices"
+        else:
+            reason = "every slice is DEFERRED"
+        lines.append(f"No slices to plan ({reason}).")
+        return "\n".join(lines) + "\n"
+
+    def _render_phase(step, phase, mode, actor, skill, note=""):
+        if mode == "delegate":
+            head = f"DELEGATE to [{actor}] subagent"
+        else:  # dispatch — orchestrator's own loop
+            head = "ORCHESTRATOR step"
+        if skill:
+            head += f", runs {{{skill}}}"
+        line = f"  {step}. {phase} — {head}"
+        if note:
+            line += f"  {note}"
+        return line
+
+    for label, needs_arch in planned:
+        lines.append(f"## Slice {label}")
+        lines.append("")
+        step = 1
+        for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
+            lines.append(_render_phase(step, phase, mode, actor, skill))
+            step += 1
+            if phase == _SESSION_PLAN_ARCH_AFTER and needs_arch:
+                aphase, amode, aactor, askill = _SESSION_PLAN_ARCH_PHASE
+                lines.append(_render_phase(
+                    step, aphase, amode, aactor, askill,
+                    note="(slice declares arch_review: true)"))
+                step += 1
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _validate_dependencies(deps: list, project_dir: Path,
                            current_spec: Path) -> list:
     """For each dep token, verify it's satisfied. Returns a list of
@@ -2684,6 +2818,16 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("slice",
                     help="slice name or fragment (case-insensitive substring)")
 
+    # Slice 057-01: delegation-first per-slice dispatch plan (stdout-only).
+    psp = sub.add_parser(
+        "session-plan",
+        help="print a delegation-first dispatch plan for a spec — each "
+             "non-DEFERRED slice mapped to its phase sequence (implement → "
+             "reviews → reconcile → land) with subagent + skill per phase "
+             "(slice 057-01)",
+    )
+    psp.add_argument("spec", help="path to spec.md")
+
     # Slice 048-04: read-only digest of the `## Amendments` overrides on
     # closed records (ADR-0010) — current truth without rereading drift.
     pam = sub.add_parser(
@@ -2731,6 +2875,8 @@ def main(argv: list) -> int:
         elif ns.command == "arch-review-needed":
             needed = slice_needs_arch_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "session-plan":
+            sys.stdout.write(session_plan(Path(ns.spec)))
         elif ns.command == "amendments":
             sys.stdout.write(amendment_digest(Path(ns.project_dir)))
     except StatusBoardRaceError as exc:

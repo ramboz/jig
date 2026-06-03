@@ -221,6 +221,34 @@ This is a *cost* argument that lands on the same place as the "dumb zone"
 *quality* argument (>40% context fill degrades recall): both say keep the
 orchestrator lean.
 
+### Run thin — dispatch and integrate, don't do the work yourself
+
+**Rule:** when picking up a spec, plan the delegation up front and then run
+the orchestrator as a thin *dispatch-and-integrate* loop. The cross-session
+deep-dive (spec 057) confirmed the dominant cost driver is **turn count**:
+because the orchestrator re-reads its full context on every turn, cost is
+roughly *context-size × turns*, and turn count correlates with cost-equivalent
+spend at r = 0.92. The plannable lever is to **front-load the delegation
+decisions** so the orchestrator dispatches against a plan rather than
+improvising work across many turns.
+
+- **Get the plan deterministically.** `python3 skills/spec-workflow/workflow.py
+  session-plan <spec.md>` enumerates the spec's non-DEFERRED slices and prints,
+  per slice, the standard phase sequence — implement → compliance → craft →
+  *arch (only when the slice declares `arch_review: true`)* → reconcile →
+  land — naming the **subagent type** and **skill** for each phase. It is a
+  pure function of the slices + their frontmatter, stdout-only, with no side
+  effects on spec/slice state (advisory, not a gate — ADR-0011).
+- **Dispatch each phase to a subagent; keep only the summary.** Each phase the
+  plan marks DELEGATED runs in a subagent's isolated, disposable context (the
+  implementer writes code and runs tests; the reviewer subagents review). The
+  orchestrator's own loop is just hand off the phase, read the returned summary,
+  decide the next dispatch. Multi-turn sub-work belongs in a bounded subagent
+  that returns a compact summary — never run it turn-after-turn in the
+  orchestrator (see the "$540 session" below for the anti-pattern).
+- **Soft, not enforced.** The plan is guidance; nothing gates on it. It exists
+  to make delegation the *default, planned-up-front* shape, not to block work.
+
 ### Delegate file-heavy reading
 
 **Rule:** when a step will read more than a couple of files, or scan a
@@ -282,6 +310,36 @@ orchestrator context.
   `git diff --stat`) over dumping the whole thing. When you only need a
   magnitude, **pipe to a count** (`… | wc -l`, `grep -c`) rather than reading
   every line.
+
+### Keep emitted output lean — concise prompts, tight return envelopes
+
+Output tokens are **5×-priced** and measured at ~22% of cost-equivalent spend
+on jig (the 2026-06-03 deep-dive, spec 057) — separate from the *context ×
+turns* product but a real share. This is the **output-volume** lever, sibling
+to the verbose-Bash containment above: that rule kept verbose *Bash* output
+out of the orchestrator's context; this one bounds what the orchestrator
+*emits* — the delegation prompts it writes to subagents and the summaries
+subagents return. **Rule:** keep both ends of the orchestrator↔subagent
+boundary lean.
+
+- **Scoped, concise delegation prompts.** Point the subagent at the **files /
+  paths to read** rather than pasting their contents into the prompt — the
+  subagent has Read access and its own bounded context; pasted contents are
+  output you pay for at write price. State the **deliverable** and the
+  expected **return envelope**, not background prose the subagent can
+  reconstruct from the files.
+- **Prefer a prompt file over inlining.** When a delegation prompt is large
+  (a full reviewer prompt, a multi-section task brief), write it to a file and
+  point the subagent at that path rather than inlining it — the prompt is then
+  emitted once to disk, not re-emitted as output on every dispatch. `review.py`
+  already builds reviewer prompts this way.
+- **Tight return envelope, not a transcript.** Subagents return a compact
+  envelope — verdict / summary / changed-files — not full logs or transcripts
+  (codified in `agents/implementer.md` and `agents/reviewer.md`). This is the
+  return-side of the verbose-Bash rule: the orchestrator pays output price for
+  what the subagent emits, then re-reads it on every subsequent turn.
+- **Soft, not enforced.** Guidance only; nothing gates on output size (ADR-0011
+  — deliberateness, not a firewall).
 
 ### Worked example: the "$540 session"
 

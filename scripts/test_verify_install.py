@@ -148,6 +148,15 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
         s = scripts / name
         s.write_text("#!/bin/bash\n")
         s.chmod(0o755)
+    # hooks/scripts/lib/context_fill.py — the copied helper the
+    # UserPromptSubmit branch delegates to; carries the active-compaction
+    # band knob (slice 057-02). The compaction-trigger check asserts the
+    # marker's presence here.
+    lib = scripts / "lib"
+    lib.mkdir()
+    (lib / verify_install._COMPACT_TRIGGER_HELPER).write_text(
+        f"# stub helper\n{verify_install._COMPACT_TRIGGER_MARKER} = 'x'\n"
+    )
     # settings.json with a jig-managed SessionStart entry PLUS the security
     # floor: a jig-managed Edit|Write|MultiEdit secret-scan registration and
     # the conservative permissions.deny guardrails (slice 052-04).
@@ -681,8 +690,43 @@ class ScaffoldContractWiringTests(unittest.TestCase):
 
     def test_new_checks_registered_in_scaffold_check_list(self):
         names = [name for name, _ in verify_install._SCAFFOLD_CHECKS]
-        for expected in ("skill-closure", "manifest", "docs"):
+        for expected in ("skill-closure", "manifest", "docs",
+                         "compaction-trigger"):
             self.assertIn(expected, names, names)
+
+    # ---- Slice 057-02: active-compaction trigger presence ----
+    def test_compaction_trigger_check_passes_on_full_fixture(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            passed, _ = verify_install.check_scaffold_compaction_trigger(project)
+            self.assertTrue(passed)
+
+    def test_compaction_trigger_fails_when_helper_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            (project / ".claude" / "hooks" / "scripts" / "lib"
+             / verify_install._COMPACT_TRIGGER_HELPER).unlink()
+            passed, msg = verify_install.check_scaffold_compaction_trigger(project)
+            self.assertFalse(passed)
+            self.assertIn(verify_install._COMPACT_TRIGGER_HELPER, msg)
+
+    def test_compaction_trigger_fails_when_marker_absent(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            # Helper present but missing the band knob (trigger didn't flow).
+            (project / ".claude" / "hooks" / "scripts" / "lib"
+             / verify_install._COMPACT_TRIGGER_HELPER).write_text(
+                "# stub without the compaction knob\n"
+            )
+            passed, msg = verify_install.check_scaffold_compaction_trigger(project)
+            self.assertFalse(passed)
+            self.assertIn(verify_install._COMPACT_TRIGGER_MARKER, msg)
 
     def test_full_fixture_passes_all_scaffold_checks(self):
         import tempfile

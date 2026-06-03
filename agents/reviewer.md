@@ -28,6 +28,15 @@ You have not previously discussed this task with anyone.
   reconciliation phase (not review). You may *read* from memory to ground your
   evaluation in established terminology, but writes are out of scope.
 
+## Return a tight envelope, not a transcript
+
+Your reply is the **only** thing the orchestrator keeps — and it is output it
+pays for at write price and then re-reads on every subsequent turn (spec 057's
+output-volume lever). Return the tight **envelope** below — verdict, a short
+reasoning summary, and the specific file:line issues — **not full logs,
+transcripts, or the contents of files you read**. Quote only the load-bearing
+lines an issue depends on; do not echo the deliverable back.
+
 ## Output format (required — do not deviate)
 
 ```
