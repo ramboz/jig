@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import install_contract  # noqa: E402
+import scaffold_contract  # noqa: E402  — slice 047-02 scaffold contract
 import verify_install  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -108,13 +109,30 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
     """Build a minimum-shape scaffolded project that passes every
     scaffold-mode check (slice 016-03 AC #4, extended by slice 052-04 with
     the security floor: secret-scan registration, `permissions.deny`, and
-    the `.gitignore` secret block)."""
+    the `.gitignore` secret block; extended by slice 047-02 with the tier-0
+    skill set, a valid `scaffold.json`, and helper-free SKILL.md bodies so
+    the strengthened scaffold-contract checks — skill closure, settings
+    coherence, manifest, docs — all pass on this fixture)."""
     claude = tmpdir / ".claude"
-    # skills/
+    # skills/ — the full tier-0 set (slice 047-02 strengthened the skills
+    # check to assert the tier-gated expected set declared in scaffold.json,
+    # so the fixture must carry every tier-0 skill, not just one). Each
+    # SKILL.md is helper-free local prose (no `${CLAUDE_PROJECT_DIR}` helper
+    # refs to resolve, no stale `${CLAUDE_PLUGIN_ROOT}/skills/` path).
     skills = claude / "skills"
     skills.mkdir(parents=True)
-    (skills / "jig-scaffold-init").mkdir()
-    (skills / "jig-scaffold-init" / "SKILL.md").write_text("# scaffold-init\n")
+    _FIXTURE_TIER0_SKILLS = (
+        "scaffold-init",
+        "memory-sync",
+        "spec-workflow",
+        "independent-review",
+        "migrate",
+        "vision-elicitation",
+        "contracts",
+    )
+    for skill in _FIXTURE_TIER0_SKILLS:
+        (skills / f"jig-{skill}").mkdir()
+        (skills / f"jig-{skill}" / "SKILL.md").write_text(f"# {skill}\n")
     # agents/
     agents = claude / "agents"
     agents.mkdir()
@@ -178,6 +196,32 @@ def _make_fake_scaffold_root(tmpdir: Path) -> Path:
     # .gitignore secret floor (slice 052-02).
     (tmpdir / ".gitignore").write_text(
         _FLOOR_GITIGNORE_MARKER + "\n.env\n*.pem\n# <<< jig secret-ignore <<<\n"
+    )
+    # scaffold.json install-state manifest (slice 047-02 manifest check).
+    # Declares the tier-0 set the skills/ dir above carries, with the
+    # `<tier>/<skill>` installed_skills derived from it (ADR-0007 invariant).
+    (tmpdir / "scaffold.json").write_text(
+        json.dumps(
+            {
+                "jig_version": "1.9.0",
+                "timestamp": "2026-06-02T00:00:00Z",
+                "project_name": tmpdir.name,
+                "installed_tiers": ["tier-0"],
+                "installed_skills": [
+                    f"tier-0/{skill}" for skill in _FIXTURE_TIER0_SKILLS
+                ],
+                "scaffold_signals": {
+                    "has_llm_agent_files": False,
+                    "has_ci": False,
+                    "has_tests": False,
+                    "is_team": False,
+                },
+                "hook_profile": "standard",
+                "scaffold_mode": "in-repo",
+            },
+            indent=2,
+        )
+        + "\n"
     )
     return tmpdir
 
@@ -619,6 +663,145 @@ class ScaffoldModeChecksTests(unittest.TestCase):
                 "not scaffolded", buf.getvalue().lower(),
                 f"expected 'not scaffolded' message; got:\n{buf.getvalue()}",
             )
+
+
+# --------------------------------------------------------------------------
+# Slice 047-02 — scaffold-contract checks wired into scaffold mode
+# --------------------------------------------------------------------------
+
+
+class ScaffoldContractWiringTests(unittest.TestCase):
+    """Slice 047-02 strengthens the scaffold-mode checks and adds two new
+    ones, all delegating to `scaffold_contract`. These tests confirm the
+    checks are wired into `_SCAFFOLD_CHECKS` (so they run via the
+    scaffold-mode verifier, AC #4) and that each strengthened/new check
+    fails when its target contract is violated — not just 'something exists'.
+    Each driven off the shared `_make_fake_scaffold_root` fixture (now a full
+    tier-0 scaffold with a valid scaffold.json)."""
+
+    def test_new_checks_registered_in_scaffold_check_list(self):
+        names = [name for name, _ in verify_install._SCAFFOLD_CHECKS]
+        for expected in ("skill-closure", "manifest", "docs"):
+            self.assertIn(expected, names, names)
+
+    def test_full_fixture_passes_all_scaffold_checks(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            results = verify_install.run_all_scaffold_checks(project)
+            self.assertTrue(
+                all(passed for passed, _ in results),
+                f"all scaffold checks should pass on the full fixture; "
+                f"got {results!r}",
+            )
+
+    # ---- AC #1: helper closure wired into the skills/skill-closure check ----
+    def test_skill_closure_check_fails_on_dangling_helper(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            # Add a SKILL.md referencing a local helper that doesn't exist.
+            skill_md = (
+                project / ".claude" / "skills" / "jig-spec-workflow"
+                / "SKILL.md"
+            )
+            skill_md.write_text(
+                "# spec-workflow\n\n```bash\n"
+                "python3 \"${CLAUDE_PROJECT_DIR}/.claude/skills/"
+                "jig-spec-workflow/workflow.py\" new x\n```\n"
+            )  # workflow.py NOT created in the fixture
+            passed, msg = verify_install.check_scaffold_skill_closure(project)
+            self.assertFalse(passed)
+            self.assertIn("workflow.py", msg)
+
+    def test_skill_closure_check_fails_on_stale_plugin_root_path(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            skill_md = (
+                project / ".claude" / "skills" / "jig-migrate" / "SKILL.md"
+            )
+            skill_md.write_text(
+                "# migrate\n\n```bash\n"
+                "python3 ${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py "
+                "report .\n```\n"
+            )
+            passed, msg = verify_install.check_scaffold_skill_closure(project)
+            self.assertFalse(passed)
+            self.assertIn("CLAUDE_PLUGIN_ROOT", msg)
+
+    # ---- AC #2: settings coherence (strengthened) ----
+    def test_settings_check_fails_on_dangling_hook_script(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            # Remove a script a settings hook command references.
+            (
+                project / ".claude" / "hooks" / "scripts"
+                / "jig-secret-scan.sh"
+            ).unlink()
+            passed, msg = (
+                verify_install.check_scaffold_settings_registration(project)
+            )
+            self.assertFalse(passed)
+            self.assertIn("jig-secret-scan.sh", msg)
+
+    # ---- AC #3: manifest check wired in ----
+    def test_manifest_check_fails_when_jig_version_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            manifest = project / "scaffold.json"
+            data = json.loads(manifest.read_text())
+            del data["jig_version"]
+            manifest.write_text(json.dumps(data, indent=2) + "\n")
+            passed, msg = verify_install.check_scaffold_manifest(project)
+            self.assertFalse(passed)
+            self.assertIn("jig_version", msg)
+
+    def test_manifest_check_fails_when_manifest_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            (project / "scaffold.json").unlink()
+            passed, msg = verify_install.check_scaffold_manifest(project)
+            self.assertFalse(passed)
+            self.assertIn("scaffold.json", msg)
+
+    # ---- AC #4: docs smoke check wired in + runnable via the verifier ----
+    def test_docs_check_fails_on_dangling_local_link(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            doc = project / "docs" / "guide.md"
+            doc.parent.mkdir(parents=True, exist_ok=True)
+            doc.write_text("See [the plan](./missing.md).\n")
+            passed, msg = verify_install.check_scaffold_docs(project)
+            self.assertFalse(passed)
+            self.assertIn("missing.md", msg)
+
+    def test_docs_check_runnable_via_scaffold_mode_runner(self):
+        """AC #4 — the docs smoke check runs as part of the scaffold-mode
+        verifier: a dangling local link makes `run_headless_scaffold` exit
+        non-zero and name the offending doc."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            project = _make_fake_scaffold_root(Path(td))
+            doc = project / "docs" / "guide.md"
+            doc.parent.mkdir(parents=True, exist_ok=True)
+            doc.write_text("Broken [link](./nope.md).\n")
+            buf = io.StringIO()
+            rc = verify_install.run_headless_scaffold(project, out=buf)
+            self.assertEqual(rc, 1, msg=buf.getvalue())
+            self.assertIn("nope.md", buf.getvalue())
 
 
 # --------------------------------------------------------------------------

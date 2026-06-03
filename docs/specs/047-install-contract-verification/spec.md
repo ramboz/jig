@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: release-pipeline, scaffold-init
 tier: release infrastructure
 adr_required: false

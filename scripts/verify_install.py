@@ -28,6 +28,7 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import install_contract  # noqa: E402  — the plugin/release install contract
+import scaffold_contract  # noqa: E402  — the scaffold-target install contract
 
 class VerifyError(RuntimeError):
     """Raised when verify_install is called with an unknown agent type."""
@@ -199,7 +200,12 @@ _EXPECTED_HOOK_SCRIPTS = (
 
 def check_scaffold_skills_present(project_root: Path) -> CheckResult:
     """At least one `.claude/skills/jig-*/SKILL.md` exists under the
-    project root."""
+    project root.
+
+    This stays the shallow base-presence check; slice 047-02 adds the deeper
+    `check_scaffold_skill_closure` (tier-gated expected set + copied-helper
+    closure + stale plugin-root-path detection) as a separate check so each
+    reports its own focused diagnostic."""
     skills_dir = project_root / ".claude" / "skills"
     if not skills_dir.is_dir():
         return False, f".claude/skills/ dir missing at {skills_dir}"
@@ -209,6 +215,21 @@ def check_scaffold_skills_present(project_root: Path) -> CheckResult:
             f"no jig-prefixed skill SKILL.md files found under {skills_dir}"
         )
     return True, f"{len(skill_mds)} scaffolded skill SKILL.md file(s) present"
+
+
+def check_scaffold_skill_closure(project_root: Path) -> CheckResult:
+    """Slice 047-02 (AC #1) — the copied scaffold skills form a coherent,
+    closed local install: the tier-gated expected skill set (read from
+    `scaffold.json`) is present, every local helper a copied SKILL.md
+    references resolves on disk (incl. cross-skill references), and no copied
+    SKILL.md still carries a stale `${CLAUDE_PLUGIN_ROOT}/skills/...` helper
+    path (spec 046-01 rewrites those to local paths). Delegates to
+    `scaffold_contract.scaffold_skill_problems`; each diagnostic names the
+    offending skill/helper + the rule (AC #4)."""
+    problems = scaffold_contract.scaffold_skill_problems(project_root)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "copied scaffold skills are present and helper-closed"
 
 
 def check_scaffold_agents_present(project_root: Path) -> CheckResult:
@@ -245,31 +266,60 @@ def check_scaffold_hook_scripts_present(project_root: Path) -> CheckResult:
 
 
 def check_scaffold_settings_registration(project_root: Path) -> CheckResult:
-    """`.claude/settings.json` parses as JSON and has at least one
-    jig-managed hook entry (`metadata.managed_by_jig: true`)."""
-    settings_path = project_root / ".claude" / "settings.json"
-    if not settings_path.is_file():
-        return False, f"settings.json missing at {settings_path}"
-    try:
-        data = json.loads(settings_path.read_text())
-    except json.JSONDecodeError as exc:
-        return False, f"settings.json is not valid JSON: {exc}"
-    hooks = data.get("hooks") or {}
-    jig_entries = [
-        entry
-        for entries in hooks.values()
-        for entry in (entries or [])
-        if bool((entry.get("metadata") or {}).get("managed_by_jig"))
-    ]
-    if not jig_entries:
+    """`.claude/settings.json` is coherent for a scaffolded target (slice
+    047-02 AC #2): present + valid JSON, carries at least one jig-managed
+    hook entry, and every jig-managed hook command uses the scaffold-mode
+    invocation shape (`bash ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/
+    <name>`) pointing at a copied script that exists under
+    `.claude/hooks/scripts/`.
+
+    Strengthened from the pre-047-02 'at least one jig-managed entry exists'
+    check: it now also pins the command shape + script existence, so a
+    scaffold with a registered-but-dangling hook command fails (the
+    anti-horizontal-phasing target). Delegates to
+    `scaffold_contract.validate_scaffold_settings`; each diagnostic names the
+    offending entry/script + the rule (AC #4)."""
+    problems = scaffold_contract.validate_scaffold_settings(project_root)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "settings.json registers coherent jig-managed hook entries"
+
+
+def check_scaffold_manifest(project_root: Path) -> CheckResult:
+    """Slice 047-02 (AC #3) — `scaffold.json` carries the metadata
+    scaffold-mode consumers rely on: a non-empty `jig_version` (spec 046-02,
+    not an unrendered `{{...}}` placeholder), `project_name`, `scaffold_mode`,
+    an `installed_tiers` list, and (if present) an `installed_skills` list
+    whose tier prefixes are all installed (the ADR-0007 invariant). Delegates
+    to `scaffold_contract.validate_scaffold_manifest`; each diagnostic names
+    the field + the file (AC #4)."""
+    manifest_path = project_root / "scaffold.json"
+    if not manifest_path.is_file():
         return False, (
-            "settings.json has no jig-managed hook entries "
-            "(metadata.managed_by_jig marker missing on every entry)"
+            f"scaffold.json missing at {manifest_path} "
+            "(scaffold install-state manifest absent)"
         )
-    return True, (
-        f"settings.json registers {len(jig_entries)} jig-managed hook "
-        "entry/entries"
-    )
+    try:
+        data = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as exc:
+        return False, f"scaffold.json is not valid JSON: {exc}"
+    problems = scaffold_contract.validate_scaffold_manifest(data)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "scaffold.json metadata is present and coherent"
+
+
+def check_scaffold_docs(project_root: Path) -> CheckResult:
+    """Slice 047-02 (AC #4) — smoke-check the scaffolded target's docs +
+    copied SKILL.md bodies for broken local helper commands (a referenced
+    `${CLAUDE_PROJECT_DIR}/.claude/skills/...` helper that doesn't exist) and
+    dangling local Markdown links in the project's own docs (`docs/**`,
+    `CLAUDE.md`). Delegates to `scaffold_contract.scaffold_doc_problems`; each
+    diagnostic names the offending doc, the missing target, and the rule."""
+    problems = scaffold_contract.scaffold_doc_problems(project_root)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "scaffolded docs/commands resolve locally"
 
 
 # ----------------------------------------------------------------------------
@@ -385,9 +435,18 @@ def check_scaffold_gitignore_secret_floor(project_root: Path) -> CheckResult:
 
 _SCAFFOLD_CHECKS: list[tuple[str, Check]] = [
     ("skills", check_scaffold_skills_present),
+    # Slice 047-02 (AC #1) — copied-skill helper closure + tier-gated set +
+    # stale plugin-root-path detection.
+    ("skill-closure", check_scaffold_skill_closure),
     ("agents", check_scaffold_agents_present),
     ("hooks", check_scaffold_hook_scripts_present),
+    # Slice 047-02 (AC #2) — settings.json coherence (strengthened: command
+    # shape + script existence, not just 'an entry exists').
     ("settings", check_scaffold_settings_registration),
+    # Slice 047-02 (AC #3) — scaffold.json metadata (incl. jig_version).
+    ("manifest", check_scaffold_manifest),
+    # Slice 047-02 (AC #4) — local command/link smoke checks.
+    ("docs", check_scaffold_docs),
     # Slice 052-04 — security-floor presence (ADR-0013).
     ("secret-scan", check_scaffold_secret_scan_registered),
     ("permissions-deny", check_scaffold_permissions_deny_floor),
@@ -462,15 +521,25 @@ def run_completion_summary(
     human-readable summary (per-check PASS/FAIL + overall verdict) for
     the `scaffold-init` wizard's closing report (slice 048-06).
 
-    Mode-awareness (the correctness nuance): the four machinery checks
-    (`skills` / `agents` / `hooks` / `settings`) validate `.claude/`
-    artifacts that exist ONLY in `--with-machinery` (in-repo) mode. In
-    `--plugin-only` mode that machinery lives in the installed plugin,
-    not the target, so running those checks would false-fail a perfectly
-    good plugin-only scaffold. They are therefore included only when
-    `with_machinery=True`. The seed/docs presence check (AC #3) runs in
-    BOTH modes — but only when `seed_expected=True`; a non-greenfield
+    Mode-awareness (the correctness nuance): the machinery checks (`skills` /
+    `skill-closure` / `agents` / `hooks` / `settings` / `manifest` + the
+    security-floor trio) validate `.claude/` artifacts that exist ONLY in
+    `--with-machinery` (in-repo) mode. In `--plugin-only` mode that machinery
+    lives in the installed plugin, not the target, so running those checks
+    would false-fail a perfectly good plugin-only scaffold. They are therefore
+    included only when `with_machinery=True`. The seed presence check (AC #3)
+    runs in BOTH modes — but only when `seed_expected=True`; a non-greenfield
     scaffold legitimately skipped the seed and must not report it missing.
+
+    Slice 047-02 mode-awareness: the `docs` smoke check (AC #4) is ALSO gated
+    on `seed_expected`. The scaffolded `CLAUDE.md` / `docs/adoption-readiness
+    .md` templates carry relative links INTO the worked-example seed
+    (`docs/specs/001-adopt-jig/...`). Those links resolve iff the seed was
+    emitted, so when the seed is skipped (non-greenfield) they legitimately
+    dangle and must not be reported — exactly the same reasoning that gates
+    the seed check itself. (The standalone `--mode scaffold` verifier —
+    `run_headless_scaffold` — runs `docs` unconditionally; it targets a real
+    greenfield scaffold where the seed, and thus the links, are present.)
 
     Returns 0 when every applicable check passed, 1 otherwise — so a
     failed check is loud and actionable (AC #4), never a silent partial
@@ -482,8 +551,19 @@ def run_completion_summary(
 
     checks: list[tuple[str, Check]] = []
     if with_machinery:
-        checks.extend(_SCAFFOLD_CHECKS)
+        # The `docs` check is seed-coupled (its scaffolded docs link into the
+        # seed), so it is added below under the `seed_expected` gate — not in
+        # the always-run machinery set.
+        checks.extend(
+            (name, check)
+            for name, check in _SCAFFOLD_CHECKS
+            if name != "docs"
+        )
     if seed_expected:
+        if with_machinery:
+            # Seed present → the scaffolded docs' links into the seed resolve,
+            # so the doc/command smoke check is meaningful here.
+            checks.append(("docs", check_scaffold_docs))
         checks.append(("seed", check_scaffold_seed_present))
 
     out.write(f"\nScaffold verification — mode: {mode_label}\n")
