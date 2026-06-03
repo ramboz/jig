@@ -1765,17 +1765,18 @@ def _reserve_local_on_current_branch(slug: str, project_dir: Path,
     return 0
 
 
-def _pr_fallback_from_worktree(wt: Path, project_dir: Path,
+def _pr_fallback_from_worktree(sha: str, project_dir: Path,
                                reserve_branch: str, num_str: str,
                                slug: str, pr_body: str) -> None:
     """Protected-branch fallback for the detached-worktree path. Simpler
     than the on-main `_do_pr_fallback` (there is no local `main` to
-    un-strand): push the detached reservation commit straight to a new
+    un-strand): push the detached reservation commit (BY SHA, from
+    `project_dir` so a relative `origin` URL resolves) straight to a new
     remote branch and open the PR. `gh`/remote guards mirror 003-03."""
     _check_gh_and_remote(project_dir)
     rc, _out, err = _run(
-        ["git", "push", "origin", f"HEAD:refs/heads/{reserve_branch}"],
-        cwd=wt,
+        ["git", "push", "origin", f"{sha}:refs/heads/{reserve_branch}"],
+        cwd=project_dir,
     )
     if rc != 0:
         raise WorkflowError(
@@ -1787,7 +1788,7 @@ def _pr_fallback_from_worktree(wt: Path, project_dir: Path,
     rc, out, err = _run(
         ["gh", "pr", "create", "--title", title, "--body", pr_body,
          "--head", reserve_branch, "--base", "main"],
-        cwd=wt,
+        cwd=project_dir,
     )
     if rc != 0:
         raise WorkflowError(
@@ -1868,18 +1869,35 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
             )
         print(f"reserved {spec_dirname}")
 
+        # Resolve the reservation commit's SHA so we can push it BY SHA from
+        # `project_dir`. Pushing from `wt` would resolve a RELATIVE `origin`
+        # URL against the temp dir and fail; the commit's objects live in the
+        # shared object store, so its SHA is reachable from `project_dir`,
+        # where the `origin` remote-name resolves correctly.
+        rc, sha, err = _run(["git", "rev-parse", "HEAD"], cwd=wt)
+        if rc != 0 or not sha.strip():
+            raise WorkflowError(
+                f"could not resolve the reservation commit SHA ({err.strip()}); "
+                f"the ephemeral worktree will be removed."
+            )
+        sha = sha.strip()
+
         pr_body = _build_pr_body(num_str, slug, project_dir)
         reserve_branch = f"reserve/{spec_dirname}"
 
         if pr_mode:
             _pr_fallback_from_worktree(
-                wt, project_dir, reserve_branch, num_str, slug, pr_body,
+                sha, project_dir, reserve_branch, num_str, slug, pr_body,
             )
             _print_draft_hint(spec_dirname)
             return 0
 
-        # Direct push of the detached reservation commit onto main.
-        rc, _out, err = _run(["git", "push", "origin", "HEAD:main"], cwd=wt)
+        # Direct push of the detached reservation commit onto main, BY SHA
+        # from project_dir (where the `origin` remote-name resolves).
+        rc, _out, err = _run(
+            ["git", "push", "origin", f"{sha}:refs/heads/main"],
+            cwd=project_dir,
+        )
         if rc == 0:
             print(f"reserved {spec_dirname} on origin/main")
             _print_draft_hint(spec_dirname)
@@ -1902,13 +1920,13 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
                 f"PR mode...\n"
             )
             _pr_fallback_from_worktree(
-                wt, project_dir, reserve_branch, num_str, slug, pr_body,
+                sha, project_dir, reserve_branch, num_str, slug, pr_body,
             )
             _print_draft_hint(spec_dirname)
             return 0
 
         raise WorkflowError(
-            f"`git push origin HEAD:main` failed: {err.strip()} "
+            f"`git push origin {sha}:refs/heads/main` failed: {err.strip()} "
             f"(the reservation commit lived only in the reservation "
             f"worktree, which has been removed; inspect and re-run)."
         )
@@ -1919,6 +1937,9 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
         _run(["git", "worktree", "remove", "--force", str(wt)],
              cwd=project_dir)
         shutil.rmtree(wt, ignore_errors=True)
+        # Prune any stale .git/worktrees/ admin entry so it can't accumulate
+        # if `worktree remove` ever failed above.
+        _run(["git", "worktree", "prune"], cwd=project_dir)
 
 
 def reserve_spec(slug: str, project_dir: Path,

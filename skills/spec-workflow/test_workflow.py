@@ -1352,8 +1352,11 @@ class ReserveSpecTests(unittest.TestCase):
         rec = _SubprocessRecorder()
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
                  returncode=0, stdout="feature/x\n")
-        # fetch / worktree add / add / commit / push HEAD:main / worktree
-        # remove all default to rc=0 in the recorder.
+        # The reservation commit is pushed BY SHA, so rev-parse must return a
+        # non-empty SHA. fetch / worktree add / add / commit / push <sha>:main
+        # / worktree remove all default to rc=0 in the recorder.
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="0a1b2c3d\n")
         from unittest.mock import patch
         with patch.object(_workflow, "subprocess") as sp_mod:
             sp_mod.run = rec
@@ -1367,8 +1370,10 @@ class ReserveSpecTests(unittest.TestCase):
         # (which a linked worktree can't do).
         self.assertIn("git worktree add --detach", flat)
         self.assertIn("origin/main", flat)
-        # Pushes the detached HEAD onto main — NOT `git push origin main`.
-        self.assertIn("git push origin HEAD:main", flat)
+        # Pushes the detached commit onto main BY SHA — NOT `git push origin
+        # main` and NOT `HEAD:main` (which would resolve a relative origin URL
+        # against the temp worktree).
+        self.assertIn("git push origin 0a1b2c3d:refs/heads/main", flat)
         # The ephemeral worktree is always torn down.
         self.assertIn("git worktree remove --force", flat)
         # The caller's branch is never checked out or reset.
@@ -1383,7 +1388,10 @@ class ReserveSpecTests(unittest.TestCase):
         rec = _SubprocessRecorder()
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
                  returncode=0, stdout="feature/x\n")
-        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="0a1b2c3d\n")
+        # Push argv now starts with the SHA refspec, so match on the prefix.
+        rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
                  stderr="! [rejected] HEAD -> main (non-fast-forward)\n")
         from unittest.mock import patch
@@ -1408,7 +1416,12 @@ class ReserveSpecTests(unittest.TestCase):
                  returncode=0, stdout="feature/x\n")
         rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
                  returncode=0, stdout="git@github.com:user/repo.git\n")
-        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="0a1b2c3d\n")
+        # First push (direct to main, by SHA) is refused by branch protection;
+        # the one-shot stub fires on it, the later PR-fallback push to the
+        # reserve/ branch falls through to the recorder's rc=0 default.
+        rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
                  stderr="remote: error: GH006: Protected branch update failed.\n")
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
@@ -1424,8 +1437,8 @@ class ReserveSpecTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         flat = " | ".join(rec.argv_log())
-        # Reservation commit pushed straight to a reserve/ branch...
-        self.assertIn("git push origin HEAD:refs/heads/reserve/", flat)
+        # Reservation commit pushed straight to a reserve/ branch (by SHA)...
+        self.assertIn(":refs/heads/reserve/", flat)
         # ...and a PR opened with explicit head/base.
         self.assertIn("gh pr create", flat)
         self.assertIn("--head", flat)
@@ -3432,7 +3445,7 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
     refuses on diverged local main. Mirrors slice 037-01's tuple-key
     behavior dispatcher (see `test_land.py:1750-1787`).
 
-    `_next_spec_number` and `_preflight_branch_and_worktree` (and
+    `_next_spec_number` and `_current_branch` / `_refuse_if_dirty` (and
     `reserve_spec`'s post-fetch diverged-main check) all call
     `subprocess.run` via the module-level `_run`. We patch the module's
     `subprocess` so the recorder intercepts every call.
@@ -4658,6 +4671,64 @@ class ReserveSpecFromLinkedWorktreeE2E(unittest.TestCase):
             "rev-parse", "HEAD", cwd=self.feat).stdout.strip()
         self.assertEqual(feat_head_before, feat_head_after)
         self.assertFalse((self.feat / "docs/specs/003-gamma").exists())
+
+    def test_reserve_from_linked_worktree_with_relative_origin_url(self):
+        # B1 regression lock: when `origin`'s URL is RELATIVE, the old code
+        # (which pushed from the ephemeral temp worktree under $TMPDIR)
+        # resolved the URL against the wrong base and the push died late.
+        # Pushing the commit BY SHA from `project_dir` resolves the relative
+        # URL correctly. This test FAILS before the fix and PASSES after.
+        rel = self._git("remote", "set-url", "origin", "../origin.git",
+                        cwd=self.work)
+        self.assertEqual(rel.returncode, 0, f"set-url failed: {rel.stderr}")
+        # Confirm the precondition: the linked worktree genuinely sees a
+        # relative origin URL.
+        url = self._git("remote", "get-url", "origin", cwd=self.feat)
+        self.assertEqual(url.stdout.strip(), "../origin.git")
+
+        # Reserve in push mode from the real linked worktree — REAL git.
+        code = _workflow.reserve_spec(
+            "gamma", project_dir=self.feat, no_push=False, pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        # The ref REALLY moved on origin: the new spec is on origin/main.
+        ls = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.origin)
+        self.assertIn("docs/specs/003-gamma/spec.md", ls.stdout)
+
+        # And the ephemeral reservation worktree was still cleaned up.
+        wl = self._git("worktree", "list", cwd=self.work).stdout
+        self.assertNotIn("jig-reserve-spec", wl)
+
+    def test_reserve_no_push_does_not_sweep_unrelated_staged_file(self):
+        # M1 regression lock: --no-push commits ONLY the two stub files via a
+        # pathspec-limited commit, even when the caller has unrelated work
+        # already staged. The staged file must survive uncommitted.
+        (self.feat / "unrelated.txt").write_text("do not commit me\n")
+        add = self._git("add", "unrelated.txt", cwd=self.feat)
+        self.assertEqual(add.returncode, 0, f"git add failed: {add.stderr}")
+
+        code = _workflow.reserve_spec(
+            "delta", project_dir=self.feat, no_push=True, pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        # (a) The reservation commit contains ONLY the two stub files.
+        names = self._git(
+            "show", "--name-only", "--pretty=format:", "HEAD", cwd=self.feat
+        ).stdout.split()
+        self.assertEqual(
+            sorted(names),
+            ["docs/specs/003-delta/slice-01-tbd.md",
+             "docs/specs/003-delta/spec.md"],
+            f"commit swept extra files: {names}",
+        )
+
+        # (b) The unrelated file is still staged/uncommitted (not swept in).
+        self.assertNotIn("unrelated.txt", names)
+        staged = self._git(
+            "diff", "--cached", "--name-only", cwd=self.feat).stdout
+        self.assertIn("unrelated.txt", staged)
 
 
 if __name__ == "__main__":

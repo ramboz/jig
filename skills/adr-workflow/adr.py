@@ -171,7 +171,7 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
 # triggers extraction" rule (ADR-0003 applied that rule to find_slice_section
 # — this is the same precedent, two callers, extraction deferred). Mirrored:
 # _PUSH_PROTECTION_SIGNALS, _PUSH_RACE_SIGNALS, _run, _classify_push_failure,
-# _preflight_branch_and_worktree, _check_gh_and_remote, _do_pr_fallback,
+# _current_branch, _refuse_if_dirty, _check_gh_and_remote, _do_pr_fallback,
 # _build_pr_body. `_validate_slug` is shared with cmd_new and uses adr.py's
 # looser `^[a-z0-9][a-z0-9-]*$` regex (intentionally divergent from
 # workflow.py's `^[a-z][a-z0-9-]*$` so existing digit-prefixed ADR slugs
@@ -462,16 +462,17 @@ def _reserve_local_on_current_branch(slug: str, project_dir: Path,
     return 0
 
 
-def _pr_fallback_from_worktree(wt: Path, project_dir: Path,
+def _pr_fallback_from_worktree(sha: str, project_dir: Path,
                                reserve_branch: str, number: str,
                                slug: str, pr_body: str) -> None:
     """Protected-branch fallback for the detached-worktree path: push the
-    detached reservation commit straight to a new remote branch and open the
-    PR (no local `main` to un-strand). Mirrors workflow.py."""
+    detached reservation commit (BY SHA, from `project_dir` so a relative
+    `origin` URL resolves) straight to a new remote branch and open the PR
+    (no local `main` to un-strand). Mirrors workflow.py."""
     _check_gh_and_remote(project_dir)
     rc, _out, err = _run(
-        ["git", "push", "origin", f"HEAD:refs/heads/{reserve_branch}"],
-        cwd=wt,
+        ["git", "push", "origin", f"{sha}:refs/heads/{reserve_branch}"],
+        cwd=project_dir,
     )
     if rc != 0:
         raise AdrError(
@@ -483,7 +484,7 @@ def _pr_fallback_from_worktree(wt: Path, project_dir: Path,
     rc, out, err = _run(
         ["gh", "pr", "create", "--title", title, "--body", pr_body,
          "--head", reserve_branch, "--base", "main"],
-        cwd=wt,
+        cwd=project_dir,
     )
     if rc != 0:
         raise AdrError(
@@ -564,17 +565,33 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
             )
         print(f"reserved adr-{number}-{slug}")
 
+        # Resolve the reservation commit's SHA so we can push it BY SHA from
+        # `project_dir`. Pushing from `wt` would resolve a RELATIVE `origin`
+        # URL against the temp dir and fail; the commit's objects live in the
+        # shared object store, so its SHA is reachable from `project_dir`,
+        # where the `origin` remote-name resolves correctly.
+        rc, sha, err = _run(["git", "rev-parse", "HEAD"], cwd=wt)
+        if rc != 0 or not sha.strip():
+            raise AdrError(
+                f"could not resolve the reservation commit SHA ({err.strip()}); "
+                f"the ephemeral worktree will be removed."
+            )
+        sha = sha.strip()
+
         pr_body = _build_pr_body(number, slug)
         reserve_branch = f"reserve/adr-{number}-{slug}"
 
         if pr_mode:
             _pr_fallback_from_worktree(
-                wt, project_dir, reserve_branch, number, slug, pr_body,
+                sha, project_dir, reserve_branch, number, slug, pr_body,
             )
             _print_draft_hint(number, slug)
             return 0
 
-        rc, _out, err = _run(["git", "push", "origin", "HEAD:main"], cwd=wt)
+        rc, _out, err = _run(
+            ["git", "push", "origin", f"{sha}:refs/heads/main"],
+            cwd=project_dir,
+        )
         if rc == 0:
             print(f"reserved adr-{number}-{slug} on origin/main")
             _print_draft_hint(number, slug)
@@ -596,13 +613,13 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
                 f"PR mode...\n"
             )
             _pr_fallback_from_worktree(
-                wt, project_dir, reserve_branch, number, slug, pr_body,
+                sha, project_dir, reserve_branch, number, slug, pr_body,
             )
             _print_draft_hint(number, slug)
             return 0
 
         raise AdrError(
-            f"`git push origin HEAD:main` failed: {err.strip()} "
+            f"`git push origin {sha}:refs/heads/main` failed: {err.strip()} "
             f"(the reservation commit lived only in the reservation "
             f"worktree, which has been removed; inspect and re-run)."
         )
@@ -610,6 +627,9 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
         _run(["git", "worktree", "remove", "--force", str(wt)],
              cwd=project_dir)
         shutil.rmtree(wt, ignore_errors=True)
+        # Prune any stale .git/worktrees/ admin entry so it can't accumulate
+        # if `worktree remove` ever failed above.
+        _run(["git", "worktree", "prune"], cwd=project_dir)
 
 
 def reserve_adr(slug: str, project_dir: Path, title: str = "",

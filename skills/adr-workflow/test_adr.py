@@ -147,7 +147,7 @@ class NewTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _stub_preflight_ok(self, rec: "_SubprocessRecorder") -> None:
-        """Stub the three git calls that `_preflight_branch_and_worktree`
+        """Stub the three git calls that `_current_branch` / `_refuse_if_dirty`
         + the slug/preflight chain make: branch == main, clean worktree,
         origin URL on github.com. Mirrors `ReserveAdrTests._stub_preflight_ok`."""
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
@@ -1392,6 +1392,9 @@ class ReserveAdrTests(unittest.TestCase):
         rec = _SubprocessRecorder()
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
                  returncode=0, stdout="feature/foo\n")
+        # Reservation commit is pushed BY SHA, so rev-parse must be non-empty.
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="0a1b2c3d\n")
         from unittest.mock import patch
         with patch.object(_adr_mod, "subprocess") as sp_mod:
             sp_mod.run = rec
@@ -1403,7 +1406,7 @@ class ReserveAdrTests(unittest.TestCase):
         flat = " | ".join(rec.argv_log())
         self.assertIn("git worktree add --detach", flat)
         self.assertIn("origin/main", flat)
-        self.assertIn("git push origin HEAD:main", flat)
+        self.assertIn("git push origin 0a1b2c3d:refs/heads/main", flat)
         self.assertIn("git worktree remove --force", flat)
         self.assertNotIn("git checkout main", flat)
         self.assertNotIn("git reset --hard", flat)
@@ -1413,7 +1416,10 @@ class ReserveAdrTests(unittest.TestCase):
         rec = _SubprocessRecorder()
         rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
                  returncode=0, stdout="feature/foo\n")
-        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="0a1b2c3d\n")
+        # Push argv now starts with the SHA refspec, so match on the prefix.
+        rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
                  stderr="! [rejected] HEAD -> main (non-fast-forward)\n")
         from unittest.mock import patch
@@ -1436,7 +1442,12 @@ class ReserveAdrTests(unittest.TestCase):
                  returncode=0, stdout="feature/foo\n")
         rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
                  returncode=0, stdout="git@github.com:user/repo.git\n")
-        rec.stub(_matches("git", "push", "origin", "HEAD:main"),
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="0a1b2c3d\n")
+        # First push (direct to main, by SHA) is refused by branch protection;
+        # the one-shot stub fires on it, the later PR-fallback push to the
+        # reserve/ branch falls through to the recorder's rc=0 default.
+        rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
                  stderr="remote: error: GH006: Protected branch update failed.\n")
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
@@ -1452,7 +1463,7 @@ class ReserveAdrTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         flat = " | ".join(rec.argv_log())
-        self.assertIn("git push origin HEAD:refs/heads/reserve/adr-", flat)
+        self.assertIn(":refs/heads/reserve/adr-", flat)
         self.assertIn("gh pr create", flat)
         self.assertIn("--head", flat)
         self.assertIn("--base", flat)
@@ -1950,6 +1961,61 @@ class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
         self.assertEqual(feat_head_before, feat_head_after)
         self.assertFalse(
             (self.feat / "docs/decisions/adr-0003-gamma.md").exists())
+
+    def test_reserve_from_linked_worktree_with_relative_origin_url(self):
+        # B1 regression lock: with a RELATIVE origin URL, the old code (push
+        # from the ephemeral temp worktree under $TMPDIR) resolved the URL
+        # against the wrong base and died late. Pushing the commit BY SHA from
+        # `project_dir` resolves it correctly. FAILS before the fix, PASSES
+        # after. Mirrors ReserveSpecFromLinkedWorktreeE2E.
+        rel = self._git("remote", "set-url", "origin", "../origin.git",
+                        cwd=self.work)
+        self.assertEqual(rel.returncode, 0, f"set-url failed: {rel.stderr}")
+        url = self._git("remote", "get-url", "origin", cwd=self.feat)
+        self.assertEqual(url.stdout.strip(), "../origin.git")
+
+        code = _adr_mod.reserve_adr(
+            "gamma", project_dir=self.feat, title="", no_push=False,
+            pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        # The ref REALLY moved on origin.
+        ls = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.origin)
+        self.assertIn("docs/decisions/adr-0003-gamma.md", ls.stdout)
+
+        wl = self._git("worktree", "list", cwd=self.work).stdout
+        self.assertNotIn("jig-reserve-adr", wl)
+
+    def test_reserve_no_push_does_not_sweep_unrelated_staged_file(self):
+        # M1 regression lock: --no-push commits ONLY the stub ADR file via a
+        # pathspec-limited commit, even when the caller has unrelated work
+        # already staged. The staged file must survive uncommitted. (ADR
+        # reservation writes a single stub file, vs. the spec path's two.)
+        (self.feat / "unrelated.txt").write_text("do not commit me\n")
+        add = self._git("add", "unrelated.txt", cwd=self.feat)
+        self.assertEqual(add.returncode, 0, f"git add failed: {add.stderr}")
+
+        code = _adr_mod.reserve_adr(
+            "delta", project_dir=self.feat, title="", no_push=True,
+            pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        # (a) The reservation commit contains ONLY the stub ADR file.
+        names = self._git(
+            "show", "--name-only", "--pretty=format:", "HEAD", cwd=self.feat
+        ).stdout.split()
+        self.assertEqual(
+            sorted(names), ["docs/decisions/adr-0003-delta.md"],
+            f"commit swept extra files: {names}",
+        )
+
+        # (b) The unrelated file is still staged/uncommitted (not swept in).
+        self.assertNotIn("unrelated.txt", names)
+        staged = self._git(
+            "diff", "--cached", "--name-only", cwd=self.feat).stdout
+        self.assertIn("unrelated.txt", staged)
 
 
 if __name__ == "__main__":
