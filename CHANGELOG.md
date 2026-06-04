@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.10.0](https://github.com/ramboz/jig/compare/v1.9.0...v1.10.0) (2026-06-04)
+
+
+### Features
+
+* **041:** add routing-stats histogram; close spec 041 (skill-routing observability) ([ceb31ec](https://github.com/ramboz/jig/commit/ceb31ec78c24c294589f37f0cabf86a26abc1611))
+* **047:** enforce the plugin/release install contract (047-01) ([61293e7](https://github.com/ramboz/jig/commit/61293e7674f2227dc4a381a0cc8e7c411c018e71))
+* **047:** enforce the scaffold-target install contract (047-02; closes spec 047) ([2086c58](https://github.com/ramboz/jig/commit/2086c5815b33f97d512e9a8786b01bbe2613dddf))
+* **049:** slice-claim on IN_PROGRESS — claim/release + opt-in reserve-on-main + board rendering (closes spec 049) ([#35](https://github.com/ramboz/jig/issues/35)) ([0cce8b3](https://github.com/ramboz/jig/commit/0cce8b30b5580066f22928b3d35b8d64b03d0f98))
+* **055:** keep verbose command output out of the orchestrator (055-04 DONE; closes spec 055) ([59b8404](https://github.com/ramboz/jig/commit/59b8404ee559ee9afdb6068f08ff8a6b707eb174))
+* **056:** exact .jig/spec-ref attribution marker (056-03 DONE; closes spec 056) ([6e34bc2](https://github.com/ramboz/jig/commit/6e34bc2f09a725dbecaeedc3e5c00b8640cae198))
+* **056:** per-spec orchestrator usage report — usage.py (056-01 DONE) ([206bbe7](https://github.com/ramboz/jig/commit/206bbe7211aeb6a25c8c0edeecca1dbac852967c))
+* **056:** subagent accounting via nested transcripts (056-02 DONE) ([d7cfc2e](https://github.com/ramboz/jig/commit/d7cfc2e27e444690281d1fe8cf010b19b35d4d3b))
+* **057:** thin-orchestrator discipline — three cost levers ([#36](https://github.com/ramboz/jig/issues/36)) ([cea217a](https://github.com/ramboz/jig/commit/cea217a16e6f8f2a94b472ce7a2255bf8eb57080))
+* **reserve:** worktree-aware reservation (workflow.py/adr.py new from any worktree) ([#33](https://github.com/ramboz/jig/issues/33)) ([63fcd32](https://github.com/ramboz/jig/commit/63fcd32291627025f4c661d1fd07cd684bbb94d9))
+
+
+### Bug Fixes
+
+* **secret-scan:** stop flagging type annotations as .env secrets ([25b2f5e](https://github.com/ramboz/jig/commit/25b2f5e02e66fadff0dbd6fd76ed27d83f9fe603))
+
+
+### Documentation
+
+* **057:** apply clarify — pin 057-01/02 decisions + add 057-03 output-discipline slice ([96a435b](https://github.com/ramboz/jig/commit/96a435ba29fd6efe0abc3e17e7c974539425056d))
+* **057:** draft thin-orchestrator spec — delegation-first sessions + active compaction ([f57920d](https://github.com/ramboz/jig/commit/f57920d0d5a4eba371294a165d0029f3e2b173d6))
+* **057:** move slices to READY_FOR_REVIEW + fix three-lever framing ([81bb9e6](https://github.com/ramboz/jig/commit/81bb9e67290c75b103caa26c96110ab514e25259))
+* **058:** design bug-fix workflow — ADR-0016 + spec 058 + slices ([52657f4](https://github.com/ramboz/jig/commit/52657f429170f64e0723cab35be21dc2f4acd8f4))
+* **CLAUDE:** add Context-cost discipline pointer to the Key-terms Hot Cache (spec 055 follow-up) ([8ae5cb3](https://github.com/ramboz/jig/commit/8ae5cb33162cdfbff75b73572bf80b3d3a10e849))
+* **decisions:** reserve adr-0016-bug-fix-lifecycle ([cfffe08](https://github.com/ramboz/jig/commit/cfffe083095c09451eaa493946710ab7389ef0aa))
+* **front-door:** promote release-zip install to a README option ([1d00d0f](https://github.com/ramboz/jig/commit/1d00d0fa22410a2e141a6357ac4f731bff0146dc))
+* **readme:** name the AI-native principles jig encodes ([#34](https://github.com/ramboz/jig/issues/34)) ([17b2c60](https://github.com/ramboz/jig/commit/17b2c6002a45fbb5159edacdc12c5fc7f36753ea))
+* retire obsolete security-lens slices + sweep stale deferred items ([488dd3e](https://github.com/ramboz/jig/commit/488dd3e72a7cd4aed2d625ecd6576d007900aa7d))
+* **specs:** author spec 056 token-usage-tracking (step 1; READY_FOR_REVIEW) ([fcf82d1](https://github.com/ramboz/jig/commit/fcf82d105e430060e0f426dae2ac731becadc0b1))
+* **specs:** claim 049-01 — claim-and-release-on-transition (claude/competent-banach-f69ece) ([a98372a](https://github.com/ramboz/jig/commit/a98372a34975b01a04e17abc5197ec654586093d))
+* **specs:** release 049-01 live-dogfood claim (restore slice to pre-claim DRAFT state) ([7b5e6f5](https://github.com/ramboz/jig/commit/7b5e6f59497d88ea23e8bf6b0afbc2459090d620))
+* **specs:** reserve 058-bug-fix-workflow ([9a5f720](https://github.com/ramboz/jig/commit/9a5f720c3ce5f1f73a000aa587a30e6483d68b42))
+
 ## [1.9.0](https://github.com/ramboz/jig/compare/v1.8.0...v1.9.0) (2026-06-02)
 
 
