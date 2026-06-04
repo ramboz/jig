@@ -835,7 +835,7 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         out = out.replace("CLAUDE.md", "AGENTS.md")
         out = out.replace("Claude Code", "Codex")
         out = out.replace("Claude", "Codex")
-        out = cls.restore_claude_only_migrate_copy_machinery(out)
+        out = cls.finalize_codex_migrate_skill(out)
         scaffold_invocation = (
             'python3 "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/'
             'jig-scaffold-init/scaffold.py" \\\n'
@@ -848,8 +848,19 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         return out
 
     @staticmethod
-    def restore_claude_only_migrate_copy_machinery(body: str) -> str:
-        """Keep migrate copy-machinery honest in Codex-rendered prose."""
+    def replace_rendered_section(body: str, start: str, end: str,
+                                 replacement: str) -> str:
+        start_idx = body.find(start)
+        if start_idx == -1:
+            return body
+        end_idx = body.find(end, start_idx)
+        if end_idx == -1:
+            return body
+        return body[:start_idx] + replacement + body[end_idx:]
+
+    @staticmethod
+    def finalize_codex_migrate_skill(body: str) -> str:
+        """Keep the rendered migrate skill honest for Codex paths."""
         if "copy-machinery" not in body:
             return body
         out = body
@@ -857,23 +868,122 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             out = out.replace(
                 "user-invocable: true\n---\n",
                 "user-invocable: true\n---\n\n"
-                "> Codex adapter note: `report`, `rename-decisions`, and "
-                "`split-slices` run from the copied Codex helper path. "
-                "`copy-machinery` remains Claude-only until migrate grows a "
-                "host-aware machinery-copy path. Cross-reference rewrites in "
-                "`rename-decisions` still use the helper's Claude-shaped "
-                "scan scope.\n",
+                "> Codex adapter note: `rename-decisions` and "
+                "`copy-machinery` are host-aware. Use `--host codex` when "
+                "running them from Codex-facing docs or source checkouts; "
+                "helpers copied under `.codex/skills/` infer Codex by "
+                "default.\n",
                 1,
             )
-        out = out.replace(".codex/settings.json", ".claude/settings.json")
-        out = out.replace(".codex/skills/", ".claude/skills/")
-        out = out.replace(".codex/agents/", ".claude/agents/")
-        out = out.replace(".codex/hooks/scripts/", ".claude/hooks/scripts/")
+        out = CodexScaffoldRenderer.replace_rendered_section(
+            out,
+            "`migrate.py` exposes four subcommands:",
+            "## How to use",
+            "`migrate.py` exposes four subcommands:\n\n"
+            "- `report` — strictly read-only inventory + plan.\n"
+            "- `rename-decisions` — applies ADR-0004's rename. Idempotent; "
+            "refuses on conflict; has a `--dry-run` mode; use "
+            "`--host codex` when running from Codex-facing source or plugin "
+            "paths.\n"
+            "- `split-slices` — extracts embedded slice sections into "
+            "sibling slice files.\n"
+            "- `copy-machinery` — copies jig runtime machinery into the "
+            "target's Codex scaffold runtime under `.codex/`; use "
+            "`--host codex` from source or plugin paths.\n\n",
+        )
+        out = CodexScaffoldRenderer.replace_rendered_section(
+            out,
+            "Host selection:",
+            "How to run it:",
+            "Host selection:\n\n"
+            "- Use `--host codex` when invoking from Codex-facing source "
+            "or plugin docs.\n"
+            "- `--host auto` infers Codex only when this helper itself runs "
+            "under `.codex/skills/`; from source or plugin paths, pass "
+            "`--host codex` explicitly.\n\n",
+        )
+        out = CodexScaffoldRenderer.replace_rendered_section(
+            out,
+            "What it does:",
+            "### Refusal: unmanaged hooks",
+            "What it does:\n\n"
+            "1. Copies Codex skills into `.codex/skills/jig-<name>/`, "
+            "rewriting helper paths in SKILL.md bodies to that runtime.\n"
+            "2. Copies non-discoverable helper aliases under "
+            "`.codex/skills/<name>/` so peer helper imports continue to "
+            "resolve without duplicate discoverable skills.\n"
+            "3. Copies Codex agents into `.codex/agents/jig-*.toml`.\n"
+            "4. Copies hook scripts into `.codex/hooks/scripts/`, pinning "
+            "each script's mode to `0o755`.\n"
+            "5. Generates or merges Codex hook registration in "
+            "`.codex/hooks.json`, with a top-level jig-managed metadata "
+            "marker.\n\n"
+            "Subsequent runs are idempotent: re-running `copy-machinery` "
+            "overwrites copied runtime files in place and regenerates "
+            "jig-managed `.codex/hooks.json` as a whole.\n\n",
+        )
+        out = re.sub(
+            r"If the host hook configuration already exists.*?"
+            r"`scaffold-init` enforces\.",
+            "If `.codex/hooks.json` already exists without top-level "
+            "`metadata.managed_by_jig: true`, `copy-machinery` exits "
+            "non-zero (exit code 3) and emits the `UnmanagedHooksError` "
+            "refuse-message to stderr — no filesystem writes occur. This "
+            "matches the same safety stance `scaffold-init` enforces.",
+            out,
+            flags=re.DOTALL,
+        )
+        out = re.sub(
+            r"With `--force`, `--host claude`.*?has been backed up\.",
+            "With `--force`, Codex replaces an unmanaged `.codex/hooks.json` "
+            "with jig's generated hook registration. Use this only when you "
+            "are sure the existing hook config should be replaced or has "
+            "been backed up.",
+            out,
+            flags=re.DOTALL,
+        )
         out = out.replace(
-            "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-migrate/migrate.py",
-            "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py",
+            "**`migrate.py` is read-only EXCEPT for `rename-decisions`.",
+            "**`migrate.py report` is read-only; migration operations are "
+            "bounded mutators.",
+        )
+        out = CodexScaffoldRenderer.replace_rendered_section(
+            out,
+            "- **`rename-decisions` is bounded by `<project-dir>`.",
+            "- **Always `--dry-run` first.",
+            "- **`rename-decisions` is bounded by `<project-dir>`.** It "
+            "never reads or writes outside the directory passed on the CLI. "
+            "With `--host codex`, it scans shared `docs/` plus `AGENTS.md` "
+            "and `.codex/`. Well-known skip paths (`.git`, `node_modules`, "
+            "`.venv`, `__pycache__`, `dist`, `build`, etc.) are excluded "
+            "from cross-reference scanning.\n",
+        )
+        out = out.replace(
+            "rename-decisions <project-dir> --dry-run",
+            "rename-decisions <project-dir> --host codex --dry-run",
+        )
+        out = out.replace(
+            "copy-machinery <project-dir> --force",
+            "copy-machinery <project-dir> --host codex --force",
+        )
+        out = out.replace(
+            "rename-decisions <project-dir>\n",
+            "rename-decisions <project-dir> --host codex\n",
+        )
+        out = out.replace(
+            "copy-machinery <project-dir>\n",
+            "copy-machinery <project-dir> --host codex\n",
+        )
+        out = out.replace(
+            "copy-machinery <project-dir>`",
+            "copy-machinery <project-dir> --host codex`",
         )
         return out
+
+    @staticmethod
+    def restore_claude_only_migrate_copy_machinery(body: str) -> str:
+        """Backward-compatible alias for older callers."""
+        return CodexScaffoldRenderer.finalize_codex_migrate_skill(body)
 
     @staticmethod
     def codex_agent_file_name(name: str) -> str:
@@ -1074,17 +1184,18 @@ def _copy_codex_skills(plugin: Path, target: Path,
         if skill_dir.name.startswith("_"):
             _copy_codex_skill_dir(skill_dir, skills_dst / skill_dir.name)
             continue
+        logical_name = skill_dir.name.removeprefix("jig-")
         if not (skill_dir / "SKILL.md").is_file():
             continue
-        tier = _SKILL_TO_TIER.get(skill_dir.name)
+        tier = _SKILL_TO_TIER.get(logical_name)
         if selected_tiers is not None and tier not in selected_tiers:
             continue
-        _copy_codex_skill_dir(skill_dir, skills_dst / f"jig-{skill_dir.name}")
+        _copy_codex_skill_dir(skill_dir, skills_dst / f"jig-{logical_name}")
         # Non-discoverable alias for helpers that resolve peer paths by the
         # original skill directory name. Omit SKILL.md to avoid duplicate skills.
         _copy_codex_skill_dir(
             skill_dir,
-            skills_dst / skill_dir.name,
+            skills_dst / logical_name,
             include_skill_md=False,
         )
 
@@ -1464,9 +1575,9 @@ def install_codex_agents(plugin: Path, agents_dir: Path, *,
 
 def copy_machinery(plugin: Path, target: Path, *,
                    force: bool = False,
-                   installed_tiers: "list | None" = None) -> None:
-    """Copy jig's runtime machinery (skills + agents + hooks + settings.json)
-    from `plugin` into `target/.claude/`.
+                   installed_tiers: "list | None" = None,
+                   host: str = "claude") -> None:
+    """Copy jig's runtime machinery into the target's host-local runtime.
 
     Public façade introduced by slice 021-01 so that `migrate.py
     copy-machinery` can reuse exactly the same logic `scaffold-init` uses
@@ -1490,6 +1601,11 @@ def copy_machinery(plugin: Path, target: Path, *,
     `_select_tiers` result; `migrate.py copy-machinery` passes the tiers it
     resolves from / raises in the target manifest (slice 038-04).
 
+    `host` defaults to `claude`, preserving the original `.claude/` output
+    and settings merge. `host="codex"` routes through the Codex scaffold
+    adapter and writes `.codex/` skills, agents, hook scripts, templates, and
+    hook registration instead.
+
     Safety guarantees:
     - Executable bit pinned to 0o755 on copied hook scripts.
     - Marker-based merge in `.claude/settings.json` (replace-in-place by
@@ -1506,6 +1622,13 @@ def copy_machinery(plugin: Path, target: Path, *,
     so the greenfield `scaffold()` caller can rely on it for the
     `--with-machinery` path and only writes the floor itself on the
     `--plugin-only` branch (where `copy_machinery` is not called)."""
+    if host == "codex":
+        copy_codex_machinery(
+            plugin, target, force=force, installed_tiers=installed_tiers,
+        )
+        return
+    if host != "claude":
+        raise ValueError(f"unsupported scaffold host: {host}")
     _check_hooks_safety(target, force=force)
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
@@ -1917,12 +2040,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # .gitignore floor (so `migrate copy-machinery` brings it too), which
         # covers the --with-machinery path here. The --plugin-only branch
         # below writes it directly since copy_machinery is not called there.
-        if host == "codex":
-            copy_codex_machinery(plugin, target, force=force,
-                                 installed_tiers=installed_tiers)
-        else:
-            copy_machinery(plugin, target, force=force,
-                           installed_tiers=installed_tiers)
+        copy_machinery(plugin, target, force=force,
+                       installed_tiers=installed_tiers, host=host)
     else:
         # 5b. Slice 052-02 (ADR-0013): write/merge the secret-ignore
         # .gitignore floor on the --plugin-only path (with-machinery gets it

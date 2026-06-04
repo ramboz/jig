@@ -10,9 +10,9 @@ description: >
   slice-to-spec migration workflow — judgment-driven, no helper — for
   projects with flat `docs/slices/*.md` files that need to be grouped
   into nested `docs/specs/MNN-slug/slice-NN-*.md` form. Slice 021-01
-  added `copy-machinery` (copy jig's skills + agents + hooks +
-  settings.json into the target's `.claude/`, reusing scaffold-mode's
-  helpers). Use when the user says "migrate this project to jig",
+  added `copy-machinery` (copy jig's skills + agents + hooks into the
+  target's host-local runtime, reusing scaffold-mode's helpers). Use
+  when the user says "migrate this project to jig",
   "adopt jig here", "this repo already has specs — set up jig",
   "scaffold-init refused — what now", "introduce jig to an existing
   codebase", "apply ADR-0004 to my project", "migrate flat slices into
@@ -43,11 +43,18 @@ tree.
 a migration plan, then (in later slices) apply the rename / restructure
 operations.
 
-As of slice 008-02, `migrate.py` exposes two subcommands:
+`migrate.py` exposes four subcommands:
 
 - `report` — strictly read-only inventory + plan.
-- `rename-decisions` — first mutating subcommand; applies ADR-0004's
-  rename. Idempotent; refuses on conflict; has a `--dry-run` mode.
+- `rename-decisions` — applies ADR-0004's rename. Idempotent; refuses
+  on conflict; has a `--dry-run` mode; `--host claude|codex` selects
+  whether cross-reference rewrites scan `CLAUDE.md`/`.claude/` or
+  `AGENTS.md`/`.codex/`.
+- `split-slices` — extracts embedded slice sections into sibling
+  slice files.
+- `copy-machinery` — copies jig runtime machinery into the target's
+  host-local scaffold runtime; `--host claude` writes `.claude/`, and
+  `--host codex` writes `.codex/`.
 
 ## How to use
 
@@ -82,8 +89,9 @@ What it does, in display order:
 2. Per-file renames: `NNN-<slug>.md` → `adr-NNNN-<slug>.md`
    (pad 3-digit to 4-digit; add `adr-` prefix where missing).
 3. Cross-reference rewrites in text files under `docs/`, `CLAUDE.md`,
-   and `.claude/`. The helper itself (`migrate.py` and its fixtures)
-   is never rewritten.
+   and `.claude/` by default. With `--host codex`, rewrites scan
+   `docs/`, `AGENTS.md`, and `.codex/` instead. The helper itself
+   (`migrate.py` and its fixtures) is never rewritten.
 
 Refusal cases (exit 2, no mutations):
 
@@ -99,8 +107,8 @@ No-op cases (exit 0):
 ### Run the copy-machinery operation
 
 `copy-machinery` brings a migrated project to scaffold-mode parity —
-the same `.claude/` shape `/jig:scaffold-init` produces by default for
-greenfield projects (per spec 016-03). See the dedicated section
+the same host-local runtime shape `/jig:scaffold-init` produces by
+default for greenfield projects. See the dedicated section
 [`## Copying machinery into your project`](#copying-machinery-into-your-project)
 below for the full description.
 
@@ -251,11 +259,11 @@ python3 .../migrate.py report /path/to/existing-project
 ## Copying machinery into your project
 
 `copy-machinery` brings a migrated project to scaffold-mode parity —
-the same `.claude/` shape `/jig:scaffold-init` produces by default for
-greenfield projects (per spec 016-03). After running it, the project
-owns its own copy of jig's skills, agents, hook scripts, and
-`settings.json` registration. The dev can edit those files in their
-own repo, and they ride along under version control.
+the same host-local runtime shape `/jig:scaffold-init` produces by
+default for greenfield projects. After running it, the project owns its
+own copy of jig's skills, agents, hook scripts, and hook registration.
+The dev can edit those files in their own repo, and they ride along
+under version control.
 
 When to use it:
 
@@ -267,8 +275,19 @@ When to use it:
   installed plugin under `${CLAUDE_PLUGIN_ROOT}`).
 
 `migrate.py report` will surface this subcommand in the Operations
-section when the verdict is `adoptable` or `partial` AND the target's
-`.claude/skills/` has no pre-existing `jig-*` skill dir.
+section when the verdict is `adoptable` or `partial` and the default
+host scan does not find pre-existing jig-managed skills. Codex users can
+also run the explicit `copy-machinery --host codex` command when they
+want Codex runtime machinery even if the conservative report wording is
+not the deciding signal.
+
+Host selection:
+
+- `--host claude` writes Claude scaffold machinery under `.claude/`
+  and is the source-checkout default.
+- `--host codex` writes Codex scaffold machinery under `.codex/`.
+- `--host auto` is the CLI default; helpers copied under `.codex/skills/`
+  infer Codex, and all other invocations infer Claude.
 
 How to run it:
 
@@ -279,32 +298,35 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
 
 What it does:
 
-1. Copies `<plugin-root>/skills/<name>/` → `<project>/.claude/skills/
-   jig-<name>/`, rewriting every plugin-root path string in SKILL.md
-   bodies to the `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`
-   equivalent.
-2. Copies `<plugin-root>/agents/*.md` →
-   `<project>/.claude/agents/jig-*.md` byte-identically.
-3. Copies `<plugin-root>/hooks/scripts/jig-*.sh` →
-   `<project>/.claude/hooks/scripts/`, pinning each script's mode to
-   `0o755`.
-4. Generates or merges `<project>/.claude/settings.json` with hook
-   entries registered against `${CLAUDE_PROJECT_DIR}/.claude/hooks/
-   scripts/jig-*.sh` paths. Every jig-managed entry carries a
-   `metadata.managed_by_jig: true` marker.
+1. Copies skills into the host runtime (`.claude/skills/jig-<name>/`
+   or `.codex/skills/jig-<name>/`), rewriting helper paths in SKILL.md
+   bodies to that runtime.
+2. Copies agents into the host runtime (`.claude/agents/jig-*.md` for
+   Claude, `.codex/agents/jig-*.toml` for Codex).
+3. Copies hook scripts into the host runtime, pinning each script's mode
+   to `0o755`.
+4. Generates or merges host hook registration. `--host claude` uses
+   `.claude/settings.json`, with per-entry `metadata.managed_by_jig:
+   true` markers. `--host codex` uses `.codex/hooks.json`, with a
+   top-level jig-managed metadata marker.
 
 Subsequent runs are idempotent: re-running `copy-machinery` overwrites
-the copied files in place and updates the jig-managed entries in
-settings.json by replace-in-place (per the `managed_by_jig` marker).
-Non-jig hooks in an existing settings.json survive untouched.
+the copied files in place and updates jig-managed hook registration. On
+`--host claude`, non-jig hooks in `.claude/settings.json` survive
+untouched. On `--host codex`, jig-managed `.codex/hooks.json` is
+regenerated as a whole because Codex hook registration is a single file
+with top-level jig metadata.
 
 ### Refusal: unmanaged hooks
 
-If `.claude/settings.json` already exists and has hooks under
-`hooks.<event>` but NONE of them carry the `managed_by_jig` marker,
+If the host hook configuration already exists and is not jig-managed,
 `copy-machinery` exits non-zero (exit code 3) and emits the
 `UnmanagedHooksError` refuse-message to stderr — no filesystem writes
-occur. This matches the same safety stance `scaffold-init` enforces.
+occur. For `--host claude`, this means `.claude/settings.json` has
+hooks under `hooks.<event>` but none carry the `managed_by_jig` marker.
+For `--host codex`, this means `.codex/hooks.json` exists without top-level
+`metadata.managed_by_jig: true`. This matches the same safety stance
+`scaffold-init` enforces.
 
 The documented escape is `--force`:
 
@@ -313,21 +335,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
   copy-machinery <project-dir> --force
 ```
 
-With `--force`, jig's hooks are appended alongside the existing
-entries (which survive unchanged). Use this only when you are sure the
-existing hooks should coexist with jig's, not be replaced.
+With `--force`, `--host claude` appends jig's hooks alongside existing
+entries, which survive unchanged. With `--force`, `--host codex`
+replaces an unmanaged `.codex/hooks.json` with jig's generated hook
+registration. Use the Codex force path only when you are sure the
+existing hook config should be replaced or has been backed up.
 
 ### Relationship to scaffold-mode
 
 `migrate.py copy-machinery` is the migration-path equivalent of
 `scaffold-init --with-machinery` (default since slice 016-03). Both
-end up calling the same `copy_machinery(plugin, target, *, force)`
-façade in `scaffold.py`, so the resulting `.claude/` shape is
-byte-identical regardless of which adoption path produced it. Closing
-this gap was spec 021's reason for being — until 021-01 landed,
-migrated projects defaulted to plugin-mode (machinery under
-`${CLAUDE_PLUGIN_ROOT}`) while greenfield projects defaulted to
-scaffold-mode (machinery under `${CLAUDE_PROJECT_DIR}/.claude/`).
+end up calling the same host-aware `copy_machinery(plugin, target, *,
+force, host)` façade in `scaffold.py`, so the resulting host runtime
+shape is equivalent regardless of which adoption path produced it.
+Closing this gap for Claude was spec 021's reason for being; spec 059-01
+extends the same adoption path to Codex.
 
 ## Agentic slice-to-spec migration
 
@@ -467,17 +489,20 @@ verification report.
 
 ## Gotchas
 
-- **`migrate.py` is read-only EXCEPT for `rename-decisions`.** The
-  source is partitioned by a sentinel comment (`# ---------- BEGIN
-  MUTATING CODE PATH (rename-decisions) ----------`); the `SafetyTests`
-  regex sweep applies only to the region above the sentinel. The
-  `report` subcommand stays pure-read; future mutating subcommands
-  land below the sentinel with their own bounded safety surface.
+- **`migrate.py report` is read-only; migration operations are bounded
+  mutators.** The first mutating region was introduced by
+  `rename-decisions` and remains protected by the sentinel comment
+  (`# ---------- BEGIN MUTATING CODE PATH (rename-decisions) ----------`);
+  later mutators (`split-slices`, `copy-machinery`) have their own
+  command-specific preflights and tests. The `report` subcommand stays
+  pure-read.
 - **`rename-decisions` is bounded by `<project-dir>`.** It never
   reads or writes outside the directory passed on the CLI. Within
-  scope it only touches `docs/`, `CLAUDE.md`, and `.claude/`; well-
-  known skip paths (`.git`, `node_modules`, `.venv`, `__pycache__`,
-  `dist`, `build`, etc.) are excluded from cross-reference scanning.
+  scope it scans shared `docs/` plus the selected host primer/runtime:
+  `CLAUDE.md` and `.claude/` for `--host claude`, or `AGENTS.md` and
+  `.codex/` for `--host codex`. Well-known skip paths (`.git`,
+  `node_modules`, `.venv`, `__pycache__`, `dist`, `build`, etc.) are
+  excluded from cross-reference scanning.
 - **Always `--dry-run` first.** Even with idempotency and refusal
   on conflict, the plan output is the canonical preview surface.
   Two consecutive `--dry-run` invocations produce byte-identical
@@ -515,12 +540,12 @@ verification report.
 - **Custom skills and agents are inventoried but never migrated.**
   Out of 008's scope by explicit non-goal. The Inventory row lists
   them; the Ambiguity row asks the user how to reconcile.
-- **The report scans `docs/` and `.claude/` only.** Other directories
-  (e.g. `documentation/`, `proposals/`, `architecture/`) are not
-  inspected. A future slice may add `--docs-root` to broaden the
+- **The report scans jig's canonical docs shape only.** Other
+  directories (e.g. `documentation/`, `proposals/`, `architecture/`) are
+  not inspected. A future slice may add `--docs-root` to broaden the
   scan — for 008-01, projects with non-standard layouts get a
-  `not-yet-spec-driven` verdict and a recommendation to either
-  rename their dirs or use `/jig:scaffold-init`.
+  `not-yet-spec-driven` verdict and a recommendation to either rename
+  their dirs or use `/jig:scaffold-init`.
 - **Spikes are inventoried but not migrated.** jig has no
   spike-workflow skill yet (separate gap; tracked in inbox/refinement
   -todo). The Ambiguity section notes the count and recommends

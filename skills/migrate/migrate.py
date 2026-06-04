@@ -36,9 +36,37 @@ class MigrateError(RuntimeError):
 
 class MigrateMachineryRefusalError(RuntimeError):
     """Raised by `copy_machinery` when the scaffold-mode helper refuses
-    (currently: unmanaged hooks in the target's settings.json without
+    (currently: unmanaged hooks in the target host configuration without
     --force). Caller exits 3, mirroring `LooksAlreadySpecDrivenError`
     precedent from 008-05."""
+
+
+_VALID_HOSTS = frozenset({"claude", "codex"})
+
+
+def _infer_host_from_runtime() -> str:
+    """Infer the host from the copied helper path.
+
+    Source-checkout and Claude plugin/scaffold invocations default to Claude.
+    A helper copied under `.codex/skills/...` defaults to Codex so Codex
+    scaffold users do not need to remember a flag for ordinary reruns.
+    """
+    parts = [part.lower() for part in Path(__file__).resolve().parts]
+    for i in range(len(parts) - 1):
+        if parts[i] == ".codex" and parts[i + 1] == "skills":
+            return "codex"
+    return "claude"
+
+
+def _resolve_host(host: 'str | None') -> str:
+    if host in (None, "", "auto"):
+        return _infer_host_from_runtime()
+    if host not in _VALID_HOSTS:
+        raise MigrateError(
+            f"unsupported host: {host!r}; expected one of "
+            f"{', '.join(sorted(_VALID_HOSTS))}"
+        )
+    return host
 
 
 # ---------- Inventory model ----------
@@ -1002,9 +1030,13 @@ def _should_skip_dir(path: Path) -> bool:
     return path.name in _SKIP_PATH_NAMES
 
 
-def _walk_text_files(project_dir: Path) -> list:
-    """Yield text files under `project_dir/docs/`, `project_dir/CLAUDE.md`,
-    and `project_dir/.claude/`. Honors `_SKIP_PATH_NAMES`."""
+def _walk_text_files(project_dir: Path, host: str = "claude") -> list:
+    """Yield text files under host-appropriate cross-reference roots.
+
+    Shared docs are always in scope. Claude scans `CLAUDE.md` and
+    `.claude/`; Codex scans `AGENTS.md` and `.codex/`. Both honor
+    `_SKIP_PATH_NAMES`, including nested `worktrees/` directories.
+    """
     out = []
 
     def _walk(root: Path):
@@ -1022,11 +1054,18 @@ def _walk_text_files(project_dir: Path) -> list:
                 continue
             out.append(entry)
 
+    resolved_host = _resolve_host(host)
+    if resolved_host == "codex":
+        primer = project_dir / "AGENTS.md"
+        runtime_dir = project_dir / ".codex"
+    else:
+        primer = project_dir / "CLAUDE.md"
+        runtime_dir = project_dir / ".claude"
+
     _walk(project_dir / "docs")
-    claude_md = project_dir / "CLAUDE.md"
-    if claude_md.is_file() and _is_text_path(claude_md):
-        out.append(claude_md)
-    _walk(project_dir / ".claude")
+    if primer.is_file() and _is_text_path(primer):
+        out.append(primer)
+    _walk(runtime_dir)
     return out
 
 
@@ -1109,7 +1148,7 @@ def _apply_substitutions(text: str, old_dir: str, new_dir: str,
     return out, count
 
 
-def plan_rename(project_dir: Path) -> RenamePlan:
+def plan_rename(project_dir: Path, host: str = "claude") -> RenamePlan:
     """Build (but do not apply) the rename plan. Raises MigrateError on
     conflict or collision (preserving the no-partial-writes invariant)."""
     if not project_dir.exists():
@@ -1192,7 +1231,7 @@ def plan_rename(project_dir: Path) -> RenamePlan:
     # Cross-reference rewrites — scan all in-scope text files and count
     # substitutions. The actual rewrite is deferred to apply_rename.
     cross_ref_rewrites = _plan_cross_refs(
-        project_dir, old_dir_str, new_dir_str, name_map,
+        project_dir, old_dir_str, new_dir_str, name_map, host=host,
     )
 
     return RenamePlan(
@@ -1203,11 +1242,11 @@ def plan_rename(project_dir: Path) -> RenamePlan:
 
 
 def _plan_cross_refs(project_dir: Path, old_dir: str, new_dir: str,
-                     name_map: dict) -> list:
+                     name_map: dict, host: str = "claude") -> list:
     """Scan text files under in-scope roots and identify which need
     rewriting. Returns a sorted list of CrossRefRewrite entries."""
     rewrites = []
-    for path in _walk_text_files(project_dir):
+    for path in _walk_text_files(project_dir, host=host):
         if _is_helper_or_fixture(path):
             continue
         try:
@@ -1306,11 +1345,12 @@ def _replay_substitution_params(plan: RenamePlan) -> tuple:
     return old_dir, new_dir, name_map
 
 
-def rename_decisions(project_dir: Path, dry_run: bool = False) -> tuple:
+def rename_decisions(project_dir: Path, dry_run: bool = False,
+                     host: str = "claude") -> tuple:
     """Top-level entry for the rename-decisions subcommand.
 
     Returns `(summary_text, exit_code)`."""
-    plan = plan_rename(project_dir)
+    plan = plan_rename(project_dir, host=host)
     if plan.is_empty():
         return ("already aligned: nothing to do\n", 0)
     lines = apply_rename(plan, project_dir, dry_run=dry_run)
@@ -1551,6 +1591,7 @@ def _resolve_plugin_root() -> Path:
 
 def copy_machinery(
     project_dir: Path, *, force: bool = False, add_tiers: list | None = None,
+    host: str = "claude",
 ) -> tuple:
     """Top-level entry for the `copy-machinery` subcommand.
 
@@ -1591,6 +1632,7 @@ def copy_machinery(
     # migrate.py is run as a script (`python3 migrate.py ...`), `skills`
     # is not importable. Load by file path via `importlib.util` so both
     # modes work uniformly.
+    resolved_host = _resolve_host(host)
     plugin = _resolve_plugin_root()
     scaffold_mod = _load_scaffold_module(plugin)
 
@@ -1624,6 +1666,7 @@ def copy_machinery(
     try:
         scaffold_mod.copy_machinery(
             plugin, project_dir, force=force, installed_tiers=copy_tiers,
+            host=resolved_host,
         )
     except scaffold_mod.UnmanagedHooksError as exc:
         # Re-raise as a migrate-side typed exception so main()'s
@@ -1637,8 +1680,9 @@ def copy_machinery(
     if commit_tiers is not None:
         scaffold_mod.write_installed_tiers(project_dir, commit_tiers)
 
+    runtime_dir = ".codex" if resolved_host == "codex" else ".claude"
     return (
-        f"{upgrade_note}copied machinery into {project_dir / '.claude'}\n",
+        f"{upgrade_note}copied machinery into {project_dir / runtime_dir}\n",
         0,
     )
 
@@ -1669,6 +1713,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="emit the operations plan to stdout without writing anything",
     )
+    rd.add_argument(
+        "--host", choices=("auto", "claude", "codex"), default="auto",
+        help="host runtime whose primer and machinery paths should be scanned "
+             "(default: auto; copied .codex helpers infer codex)",
+    )
 
     ss = sub.add_parser(
         "split-slices",
@@ -1684,17 +1733,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cm = sub.add_parser(
         "copy-machinery",
-        help="copy jig's skills + agents + hooks + settings.json into "
-             "the target's .claude/ (scaffold-mode parity, slice 021-01)",
+        help="copy jig's skills, agents, hooks, and hook configuration "
+             "into the target's host-local runtime (scaffold-mode parity)",
     )
     cm.add_argument("project_dir",
                     help="path to the project to receive jig's machinery")
     cm.add_argument(
         "--force", action="store_true",
         help="override the unmanaged-hooks safety check when "
-             ".claude/settings.json already has hook entries without a "
-             "jig-managed marker (same escape hatch as scaffold-init's "
-             "--force)",
+             "the host hook configuration already has unmanaged entries "
+             "(same escape hatch as scaffold-init's --force)",
+    )
+    cm.add_argument(
+        "--host", choices=("auto", "claude", "codex"), default="auto",
+        help="host runtime to copy into: claude => .claude/, codex => .codex/ "
+             "(default: auto; copied .codex helpers infer codex)",
     )
     cm.add_argument(
         "--add-tier", dest="add_tier", action="append", metavar="TIER",
@@ -1720,7 +1773,7 @@ def main(argv: list) -> int:
             return code
         if ns.cmd == "rename-decisions":
             text, code = rename_decisions(
-                Path(ns.project_dir), dry_run=ns.dry_run,
+                Path(ns.project_dir), dry_run=ns.dry_run, host=ns.host,
             )
             sys.stdout.write(text)
             return code
@@ -1733,6 +1786,7 @@ def main(argv: list) -> int:
         if ns.cmd == "copy-machinery":
             text, code = copy_machinery(
                 Path(ns.project_dir), force=ns.force, add_tiers=ns.add_tier,
+                host=ns.host,
             )
             sys.stdout.write(text)
             return code
