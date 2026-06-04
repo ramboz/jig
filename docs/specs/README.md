@@ -189,7 +189,7 @@
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-04 — review integration: bug-review + craft + conditional security | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-05 — escalation seam + close/learning gate + origin/main reservation | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-06 — `jig:bug-fix` skill + plugin wiring + workflow.md routing | DRAFT |  |
-| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-01 - host-aware-migrate-machinery | RECONCILED |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-01 - host-aware-migrate-machinery | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-02 - codex-hook-trust-onboarding | DRAFT |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-03 - codex-install-contract-smoke | DRAFT |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-04 - codex-skill-override-deferral | DRAFT |  |
