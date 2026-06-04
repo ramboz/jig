@@ -1,9 +1,10 @@
 """
 Codex plugin packaging contract tests — slice 033-06.
 
-These tests pin the install-and-forget Codex plugin surface without adding a
-second Codex implementation path. The package must keep using the root
-skills/hooks/agents source tree that scaffold mode already renders from.
+These tests pin the centralized Codex plugin surface without adding a second
+Codex implementation path. The package must keep using the root
+skills/hooks/agents source tree that scaffold mode already renders from, while
+documenting the Codex hook trust step that runs after plugin installation.
 """
 
 import json
@@ -23,6 +24,12 @@ import build_codex_plugin  # noqa: E402
 
 CLAUDE_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 CODEX_MANIFEST = REPO_ROOT / ".codex-plugin" / "plugin.json"
+
+
+def _section_between(text: str, start: str, end: str) -> str:
+    start_idx = text.index(start)
+    end_idx = text.index(end, start_idx)
+    return text[start_idx:end_idx]
 
 
 def _build_codex_plugin_dir() -> Path:
@@ -78,6 +85,11 @@ class CodexPluginManifestTests(unittest.TestCase):
         ):
             self.assertIn(key, interface)
         self.assertLessEqual(len(interface["defaultPrompt"]), 3)
+
+    def test_manifest_warns_hooks_need_trust_before_running(self):
+        description = self.manifest["interface"]["longDescription"]
+        self.assertIn("review and trust bundled hooks via /hooks", description)
+        self.assertIn("before they run", description)
 
 
 class CodexPluginRuntimeTests(unittest.TestCase):
@@ -215,6 +227,58 @@ class CodexPluginDocsTests(unittest.TestCase):
     def test_architecture_marks_codex_plugin_supported(self):
         text = (REPO_ROOT / "docs" / "architecture.md").read_text()
         self.assertIn("| Codex | Plugin | v2 supported |", text)
+
+    def test_architecture_records_codex_plugin_hook_trust_runtime(self):
+        text = (REPO_ROOT / "docs" / "architecture.md").read_text()
+        section = _section_between(
+            text,
+            "### Codex plugin packaging",
+            "### Context economy",
+        )
+        self.assertIn("plugin-bundled command hooks", section)
+        self.assertIn("review and trust them through `/hooks`", section)
+        self.assertIn("changed hook definitions require renewed trust", section)
+
+    def test_readme_places_hook_trust_step_after_codex_plugin_add(self):
+        text = (REPO_ROOT / "README.md").read_text()
+        section = _section_between(
+            text,
+            "### Codex plugin (central install)",
+            "### From source (contributors)",
+        )
+        install_idx = section.index("codex plugin add jig@jig")
+        trust_idx = section.index("open `/hooks`")
+        package_idx = section.index("The Codex plugin package includes")
+        self.assertLess(install_idx, trust_idx)
+        self.assertLess(trust_idx, package_idx)
+        self.assertIn("reviewed and trusted before they run", section)
+        self.assertIn("skips the hook gates", section)
+        self.assertIn("current hook definition hash", section)
+
+    def test_claude_plugin_install_docs_do_not_carry_codex_hook_trust(self):
+        text = (REPO_ROOT / "README.md").read_text()
+        section = _section_between(
+            text,
+            "**1. Acquire the plugin**",
+            "## Codex Distribution",
+        )
+        self.assertNotIn("/hooks", section)
+        self.assertNotIn("Codex requires", section)
+        self.assertNotIn("hook definition hash", section)
+
+    def test_generated_plugin_readme_keeps_hook_trust_step(self):
+        plugin_dir = _build_codex_plugin_dir()
+        try:
+            section = _section_between(
+                (plugin_dir / "README.md").read_text(),
+                "### Codex plugin (central install)",
+                "### From source (contributors)",
+            )
+            self.assertIn("codex plugin add jig@jig", section)
+            self.assertIn("open `/hooks`", section)
+            self.assertIn("skips the hook gates", section)
+        finally:
+            shutil.rmtree(plugin_dir.parent, ignore_errors=True)
 
     def test_docs_record_plugin_agent_discovery_deviation(self):
         readme = (REPO_ROOT / "README.md").read_text()
