@@ -192,6 +192,9 @@ Codex plugin mode uses `.codex-plugin/plugin.json` and the same root
 sets `PLUGIN_ROOT` for plugin hooks and keeps `CLAUDE_PLUGIN_ROOT`
 compatible, so the canonical hook registrations remain unchanged for
 Claude plugin mode and continue to work in Codex plugin mode.
+Codex still treats plugin-bundled command hooks as non-managed hooks:
+users must review and trust them through `/hooks` before jig's hook gates
+run, and changed hook definitions require renewed trust.
 
 `scripts/build_codex_plugin.py` produces the installable Codex plugin
 directory plus a generated `.agents/plugins/marketplace.json` beside it.

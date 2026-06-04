@@ -156,7 +156,7 @@ This produces `<your-project>/AGENTS.md`, `.codex/skills/jig-*/`,
 `.codex/hooks.json`. This is the Codex mode to use when you want the
 workflow machinery editable in the project itself.
 
-### Codex plugin (install-and-forget)
+### Codex plugin (central install)
 
 Build the Codex-native plugin package from the shared source tree:
 
@@ -171,6 +171,13 @@ next to the plugin directory. Install that generated marketplace:
 codex plugin marketplace add dist/codex-plugin
 codex plugin add jig@jig
 ```
+
+After `codex plugin add`, start or restart Codex and open `/hooks` in the
+CLI. Codex requires non-managed command hooks, including plugin-bundled
+hooks, to be reviewed and trusted before they run. Until you trust jig's
+hook definitions, Codex can load the plugin skills but skips the hook gates;
+after you rebuild or reinstall the plugin, revisit `/hooks` because trust is
+recorded against the current hook definition hash.
 
 The Codex plugin package includes `.codex-plugin/plugin.json`, rendered
 Codex skill copies, `hooks/hooks.json`, hook scripts, templates, and the
