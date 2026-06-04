@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: ["033-07"]
-last_verified: 2026-05-29
+last_verified: 2026-06-04
 arch_review: true
 ---
 
@@ -36,15 +36,15 @@ invoked from a Codex scaffolded runtime.
    self-migration behavior do not regress.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 
 ### Close-out (post-DONE)
@@ -61,4 +61,29 @@ creating or rewriting Claude-only runtime files.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- Added explicit `--host auto|claude|codex` selection to
+  `rename-decisions` and `copy-machinery`. `auto` stays Claude in source
+  checkouts and infers Codex only from helpers copied below
+  `.codex/skills/`, avoiding false Codex inference for Codex-app worktrees.
+- `rename-decisions --host codex` scans `docs/`, `AGENTS.md`, and
+  `.codex/`; the default Claude path still scans `docs/`, `CLAUDE.md`,
+  and `.claude/`.
+- `migrate copy-machinery --host codex` routes through the existing Codex
+  scaffold copy helpers, writing `.codex/` runtime files and refusing
+  unmanaged `.codex/hooks.json` before partial writes.
+- The Codex skill renderer now removes the old "copy-machinery remains
+  Claude-only" caveat and renders host-aware migrate command examples.
+- Review follow-up: fixed copied-helper auto reruns so a helper executed
+  from `.codex/skills/jig-migrate/migrate.py` treats materialized
+  `jig-*` skill dirs as already-prefixed sources instead of creating
+  `jig-jig-*` directories. Added a byte-stability regression test.
+- Review follow-up: clarified `--force` semantics for Codex. Claude
+  `--force` appends/merges in `.claude/settings.json`; Codex `--force`
+  replaces unmanaged `.codex/hooks.json`, so generated Codex prose now
+  says that directly and includes `--host codex` on the forced command.
+- Review follow-up: corrected the public `copy-machinery --help` summary
+  to say host-neutral hook configuration instead of `settings.json`, with
+  focused coverage to prevent a stale Claude-only help contract.
+- Closed the host-aware migrate entry in `docs/refinement-todo.md`.
+- Verification: `python3 scripts/run_tests.py` passed on 2026-06-04
+  (2185 tests, 3 skipped).
