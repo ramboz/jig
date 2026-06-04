@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "jig",
     "shortDescription": "Spec-driven, review-gated workflow for Codex",
-    "longDescription": "jig packages spec workflow, review prompts, deterministic hooks, and scaffold helpers for Codex. Install as a plugin for centralized skills and hooks, or run scaffold-init with --host codex to copy editable project-local Codex files.",
+    "longDescription": "jig packages spec workflow, review prompts, deterministic hooks, and scaffold helpers for Codex. Install as a plugin for centralized skills and hooks, then review and trust bundled hooks via /hooks before they run; or run scaffold-init with --host codex to copy editable project-local Codex files.",
     "developerName": "ramboz",
     "category": "Engineering",
     "capabilities": [
