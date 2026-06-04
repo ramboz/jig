@@ -909,6 +909,76 @@ class RenameCrossRefTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    def test_codex_host_scans_agents_and_codex_runtime(self):
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "x\n",
+            "docs/architecture.md": "doc ref docs/adrs/0001-foo.md\n",
+            "AGENTS.md": "primer ref docs/adrs/0001-foo.md\n",
+            ".codex/skills/jig-migrate/SKILL.md":
+                "skill ref docs/adrs/0001-foo.md\n",
+            ".codex/hooks.json": '{"note":"docs/adrs/0001-foo.md"}\n',
+            "CLAUDE.md": "claude ref should remain docs/adrs/0001-foo.md\n",
+            ".claude/skills/jig-migrate/SKILL.md":
+                "claude skill should remain docs/adrs/0001-foo.md\n",
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir), "--host", "codex")
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertIn(
+                "docs/decisions/adr-0001-foo.md",
+                (tmpdir / "AGENTS.md").read_text(),
+            )
+            self.assertIn(
+                "docs/decisions/adr-0001-foo.md",
+                (tmpdir / ".codex" / "skills" / "jig-migrate" / "SKILL.md")
+                .read_text(),
+            )
+            self.assertIn(
+                "docs/decisions/adr-0001-foo.md",
+                (tmpdir / ".codex" / "hooks.json").read_text(),
+            )
+            self.assertIn(
+                "docs/decisions/adr-0001-foo.md",
+                (tmpdir / "docs" / "architecture.md").read_text(),
+            )
+            self.assertIn("docs/adrs/0001-foo.md",
+                          (tmpdir / "CLAUDE.md").read_text())
+            self.assertIn(
+                "docs/adrs/0001-foo.md",
+                (tmpdir / ".claude" / "skills" / "jig-migrate" / "SKILL.md")
+                .read_text(),
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_claude_host_keeps_existing_scan_scope(self):
+        tmpdir = _make_tree({
+            "docs/adrs/0001-foo.md": "x\n",
+            "CLAUDE.md": "claude ref docs/adrs/0001-foo.md\n",
+            ".claude/skills/jig-migrate/SKILL.md":
+                "claude skill ref docs/adrs/0001-foo.md\n",
+            "AGENTS.md": "codex primer should remain docs/adrs/0001-foo.md\n",
+            ".codex/hooks.json": '{"note":"docs/adrs/0001-foo.md"}\n',
+        })
+        try:
+            r = run_migrate("rename-decisions", str(tmpdir), "--host", "claude")
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertIn(
+                "docs/decisions/adr-0001-foo.md",
+                (tmpdir / "CLAUDE.md").read_text(),
+            )
+            self.assertIn(
+                "docs/decisions/adr-0001-foo.md",
+                (tmpdir / ".claude" / "skills" / "jig-migrate" / "SKILL.md")
+                .read_text(),
+            )
+            self.assertIn("docs/adrs/0001-foo.md",
+                          (tmpdir / "AGENTS.md").read_text())
+            self.assertIn("docs/adrs/0001-foo.md",
+                          (tmpdir / ".codex" / "hooks.json").read_text())
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 class RenameContainmentTests(unittest.TestCase):
     """AC #6 — helper does not operate outside <project-dir>."""
@@ -1492,6 +1562,8 @@ class CopyMachineryTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertIn("project", r.stdout.lower())
         self.assertIn("--force", r.stdout)
+        self.assertIn("hook configuration", r.stdout)
+        self.assertNotIn("settings.json", r.stdout)
 
     # ----- AC #3 — subcommand exits 0 on success ---------------------------
     def test_subcommand_returns_zero_on_clean_target(self):
@@ -1701,6 +1773,109 @@ class CopyMachineryTests(unittest.TestCase):
             user_present,
             "user's Edit-matcher hook was clobbered under --force",
         )
+
+
+class CodexCopyMachineryTests(unittest.TestCase):
+    """Slice 059-01 — host-aware `copy-machinery` for Codex scaffold mode."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-059-codex-copy-"))
+        _seed_spec_driven_project(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_copy_machinery_host_codex_writes_codex_runtime_only(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn(str(self.tmpdir / ".codex"), r.stdout)
+        self.assertTrue(
+            (self.tmpdir / ".codex" / "skills" / "jig-migrate" / "SKILL.md")
+            .is_file(),
+            "Codex migrate skill was not copied",
+        )
+        self.assertTrue(
+            (self.tmpdir / ".codex" / "agents" / "jig-reviewer.toml").is_file(),
+            "Codex TOML agents were not copied",
+        )
+        self.assertTrue(
+            (self.tmpdir / ".codex" / "hooks.json").is_file(),
+            "Codex hooks config was not written",
+        )
+        self.assertFalse(
+            (self.tmpdir / ".claude").exists(),
+            "Codex copy-machinery must not create Claude runtime files",
+        )
+
+    def test_copy_machinery_host_codex_renders_honest_migrate_skill(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        body = (
+            self.tmpdir / ".codex" / "skills" / "jig-migrate" / "SKILL.md"
+        ).read_text()
+        self.assertIn("--host codex", body)
+        self.assertIn(".codex/", body)
+        self.assertIn("AGENTS.md", body)
+        self.assertIn(
+            "Use `--host codex` when invoking from Codex-facing source "
+            "or plugin docs.",
+            body,
+        )
+        self.assertIn("Copies Codex agents into `.codex/agents/jig-*.toml`.", body)
+        self.assertIn("copy-machinery <project-dir> --host codex --force", body)
+        self.assertNotIn("copy-machinery` remains Claude-only", body)
+        self.assertNotIn(".claude/settings.json", body)
+        self.assertNotIn(".codex/settings.json", body)
+        self.assertNotIn("`.codex/agents/jig-*.toml`.codex", body)
+        self.assertNotIn("--host claude", body)
+        self.assertNotIn("`--host claude` writes Codex", body)
+        self.assertNotIn("all other invocations infer Codex", body)
+        self.assertNotIn("Non-jig hooks in an existing settings.json survive", body)
+        self.assertNotIn("read-only EXCEPT", body)
+        self.assertNotIn("For Codex, this means .codex/settings.json", body)
+
+    def test_copy_machinery_host_codex_refuses_unmanaged_hooks_json_cleanly(self):
+        hooks_path = self.tmpdir / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        hooks_path.write_text('{"hooks": {"PreToolUse": []}}\n')
+        r = run_migrate("copy-machinery", str(self.tmpdir), "--host", "codex")
+        self.assertEqual(r.returncode, 3, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("--force", r.stderr)
+        self.assertFalse(
+            (self.tmpdir / ".codex" / "skills").exists(),
+            "refused Codex copy left partial skills on disk",
+        )
+
+    def test_copied_codex_helper_auto_rerun_does_not_jig_jig(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        codex_root = self.tmpdir / ".codex"
+        copied_helper = codex_root / "skills" / "jig-migrate" / "migrate.py"
+        self.assertTrue(copied_helper.is_file(), copied_helper)
+        before = _hash_tree(codex_root)
+
+        env = os.environ.copy()
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        rerun = subprocess.run(
+            [sys.executable, str(copied_helper), "copy-machinery", str(self.tmpdir)],
+            cwd=self.tmpdir,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(
+            rerun.returncode, 0,
+            f"copied helper rerun failed: stdout={rerun.stdout!r} "
+            f"stderr={rerun.stderr!r}",
+        )
+        self.assertEqual(
+            _hash_tree(codex_root), before,
+            "copied Codex helper rerun should be byte-stable",
+        )
+        bad = sorted((codex_root / "skills").glob("jig-jig-*"))
+        self.assertEqual(bad, [], f"copied helper created double-prefixed dirs: {bad}")
 
 
 class CopyMachinerySecurityFloorTests(unittest.TestCase):

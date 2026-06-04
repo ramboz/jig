@@ -77,7 +77,7 @@ def render_codex_plugin_skill_body(body: str) -> str:
 
     Codex plugin mode is central-install like Claude plugin mode, so helper
     paths stay plugin-root based. Host wording and scaffold defaults are
-    Codex-shaped, and migrate's Claude-only copy-machinery caveats are restored
+    Codex-shaped, and migrate's host-aware command examples are finalized
     after the broad wording rewrite.
     """
     out = body.replace(
@@ -102,9 +102,7 @@ def render_codex_plugin_skill_body(body: str) -> str:
     out = out.replace("CLAUDE.md", "AGENTS.md")
     out = out.replace("Claude Code", "Codex")
     out = out.replace("Claude", "Codex")
-    out = scaffold_mod.CodexScaffoldRenderer.restore_claude_only_migrate_copy_machinery(
-        out
-    )
+    out = scaffold_mod.CodexScaffoldRenderer.finalize_codex_migrate_skill(out)
     scaffold_invocation = 'python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" \\\n'
     if scaffold_invocation in out and "--host codex" not in out:
         out = out.replace(
