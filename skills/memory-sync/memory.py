@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
+from _common import team_signal
 
 
 # Heading marker used to find the Key terms list inside CLAUDE.md Hot Cache.
@@ -47,6 +48,143 @@ def plugin_root() -> Path:
     if env:
         return Path(env).resolve()
     return Path(__file__).resolve().parents[2]
+
+
+# ---------- Slice 050-01/050-02: team-recheck (shared `_common` signal) ----------
+# AC1 — re-check uses the EXACT detection the rest of jig uses; no
+# re-implementation. The team-signal logic (contributor count, threshold,
+# the `.jig/no-people-md` marker contract, `people_md_path`) lives in
+# `_common.team_signal`, its single home since slice 050-02 tripped
+# ADR-0002's rule-of-three (scaffold-init / memory-sync / workflow.py stale).
+# memory.py imports it directly — the hyphenated-dir importlib loader the
+# 050-01 reconciliation added is retired by the cleaner `_common` import.
+
+
+def _bootstrap_people_md(target: Path) -> tuple:
+    """Write `docs/memory/people.md` from the REAL scaffold-init template
+    (AC5 — no embedded duplicate). Returns `(written: bool, message: str)`.
+
+    Locates the template the same way scaffold-init does — under
+    `plugin_root()/templates/` — and renders its `{{PROJECT_NAME}}`
+    placeholder before an atomic write. If the template cannot be resolved
+    (e.g. a scaffold-mode target whose `templates/` dir was not copied in),
+    degrades gracefully: returns (False, <manual-create guidance>) and the
+    caller exits 0."""
+    people = team_signal.people_md_path(target)
+    if people.exists():
+        return (False, f"people.md already exists at {people} — leaving it untouched.")
+
+    template = plugin_root() / "templates" / "docs" / "memory" / "people.md.template"
+    if not template.is_file():
+        return (
+            False,
+            "could not locate the people.md template at "
+            f"{template} — create docs/memory/people.md manually "
+            "(this is expected for a scaffold-mode target without a "
+            "bundled templates/ dir).",
+        )
+    # Inline `{{PROJECT_NAME}}`-only substitution is byte-identical to
+    # scaffold-init's `copy_template` for the CURRENT single-placeholder
+    # template (it carries no other placeholder and no `${CLAUDE_PLUGIN_ROOT}`
+    # path for scaffold's `render()` leftover-check / `_rewrite_skill_md_paths`
+    # to act on). That identity (slice 050-01 AC5) is now an invariant of the
+    # template's content; `test_memory.py::BootstrapTemplateParityTests` guards
+    # it by rendering the real template through BOTH paths and asserting
+    # byte-equality — if the template ever gains a second placeholder, that
+    # cross-check fails loudly here instead of shipping unrendered drift.
+    rendered = template.read_text().replace("{{PROJECT_NAME}}", target.name)
+    people.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(people, rendered)
+    return (True, f"bootstrapped {people} from the scaffold-init template.")
+
+
+def team_check(target: Path, *, bootstrap: bool = False, never: bool = False,
+               isatty: "bool | None" = None) -> int:
+    """Re-run jig's team signal and nudge to bootstrap people.md when the
+    project has grown (spec 050-01). Returns a process exit code (always 0 in
+    normal operation — this is an advisory, never a blocker).
+
+    Flow:
+      - `--bootstrap`: write people.md from the template (refuse-on-exists).
+      - `--never`: write the `.jig/no-people-md` opt-out marker.
+      - otherwise: no-op when people.md exists (AC2), the marker exists
+        (AC3), or the signal does not fire; else emit the structured nudge
+        (AC4). When stdin is a TTY, prompt y/n/never and act; when NOT a TTY
+        (CI / agent), print the advisory + follow-up commands and exit 0
+        without blocking (AC7).
+    """
+    people = team_signal.people_md_path(target)
+    marker = team_signal.no_people_md_marker_path(target)
+
+    # Explicit actions first — they are how the agent relays a non-TTY user
+    # choice back into the helper. By design these run BEFORE the signal-fires
+    # check: the flags relay the user's explicit [y]/[never] decision, so they
+    # act unconditionally (an explicit --bootstrap writes people.md even on a
+    # solo repo); the signal was already gated at nudge time.
+    if bootstrap:
+        _written, msg = _bootstrap_people_md(target)
+        print(f"team-check: {msg}")
+        return 0
+    if never:
+        team_signal.write_no_people_md_marker(target)
+        print(f"team-check: wrote opt-out marker {marker} — no further nudges.")
+        return 0
+
+    # No-op suppressors.
+    if people.exists():
+        print("team-check: people.md already present — no nudge.")
+        return 0
+    if marker.exists():
+        print(f"team-check: opt-out marker {marker} present — no nudge.")
+        return 0
+
+    count = team_signal.count_team_contributors(target)
+    if count < team_signal.TEAM_THRESHOLD:
+        print(f"team-check: solo project ({count} contributor"
+              f"{'' if count == 1 else 's'}) — no nudge.")
+        return 0
+
+    # Signal fires, people.md absent, marker absent → nudge (AC4).
+    advisory = (
+        f"team-check: this project now has {count} git contributors but "
+        "docs/memory/people.md is absent.\n"
+        "  people.md gives the agent per-person context (attribution, "
+        "message framing, module ownership).\n"
+        "  Options:\n"
+        "    [y]     bootstrap docs/memory/people.md now (from the template)\n"
+        "    [n]     skip this run (you'll be asked again next memory-sync)\n"
+        "    [never] suppress future nudges (writes .jig/no-people-md)"
+    )
+    print(advisory)
+
+    if isatty is None:
+        isatty = sys.stdin.isatty()
+
+    if not isatty:
+        # AC7 — non-interactive: print the follow-up commands, do NOT block.
+        rel = "docs/memory/people.md"
+        print(
+            "  Non-interactive run: not prompting. To act, re-run with the "
+            "matching flag:\n"
+            f"    memory.py team-check --bootstrap <target>   # create {rel}\n"
+            "    memory.py team-check --never <target>       # suppress forever"
+        )
+        return 0
+
+    # Interactive — prompt and act.
+    try:
+        answer = input("  Bootstrap people.md? [y/n/never]: ").strip().lower()
+    except EOFError:
+        answer = "n"
+    if answer in ("y", "yes"):
+        _written, msg = _bootstrap_people_md(target)
+        print(f"team-check: {msg}")
+    elif answer == "never":
+        team_signal.write_no_people_md_marker(target)
+        print(f"team-check: wrote opt-out marker {marker} — no further nudges.")
+    else:
+        print("team-check: skipped this run.")
+    return 0
 
 
 def _ensure_dir(path: Path) -> None:
@@ -447,6 +585,24 @@ def _build_parser() -> argparse.ArgumentParser:
     ps = sub.add_parser("summary")
     ps.add_argument("target")
 
+    # Slice 050-01 — re-run scaffold-init's team signal at end of memory-sync.
+    ptc = sub.add_parser(
+        "team-check",
+        help="re-evaluate the team signal; nudge to bootstrap people.md "
+             "when the project has grown past solo (spec 050-01)",
+    )
+    tc_action = ptc.add_mutually_exclusive_group()
+    tc_action.add_argument(
+        "--bootstrap", action="store_true",
+        help="write docs/memory/people.md from the template (refuses if it "
+             "already exists)",
+    )
+    tc_action.add_argument(
+        "--never", action="store_true",
+        help="write the .jig/no-people-md opt-out marker (suppress nudges)",
+    )
+    ptc.add_argument("target")
+
     return p
 
 
@@ -493,6 +649,10 @@ def main(argv: list) -> int:
             sys.stdout.write(f"source: {source}\n")
         elif ns.command == "summary":
             sys.stdout.write(summary(target))
+        elif ns.command == "team-check":
+            return team_check(
+                target, bootstrap=ns.bootstrap, never=ns.never,
+            )
     except Exception as exc:
         sys.stderr.write(f"memory-sync failed: {exc}\n")
         return 1

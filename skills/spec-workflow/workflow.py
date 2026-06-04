@@ -24,6 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
+from _common import team_signal
+from _common.team_signal import team_context_drift
 from _common.parsing import iter_slices as _iter_slices_common
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import (
@@ -1316,8 +1318,18 @@ def _stale_check(item_path: Path, last_verified_str: str,
 
 
 def find_stale_items(project_dir: Path, days: int = 90) -> list:
-    """Walk slices and ADRs; return list of (display_path, reason) for
-    items that meet the conjunctive staleness criterion. Read-only."""
+    """Walk slices and ADRs; return a list of `(display, reason, category)`
+    findings. Read-only.
+
+    `category` distinguishes finding kinds so downstream filters (CI,
+    scripts) can act on them differently (slice 050-02 AC5):
+      - `"last-verified"` — the conjunctive freshness drift (last_verified
+        older than `days` AND a dependency changed since); the original and
+        only finding kind before slice 050-02.
+      - `"team-context"` — the team signal fires but `docs/memory/people.md`
+        is absent (and the `.jig/no-people-md` opt-out marker is absent).
+        Computed once per invocation via `team_context_drift` (a single git
+        walk — AC6, no double-walk)."""
     today = datetime.date.today()
     out = []
 
@@ -1346,7 +1358,7 @@ def find_stale_items(project_dir: Path, days: int = 90) -> list:
                     spec_md, lv, deps, days, project_dir, today,
                 )
                 if is_stale:
-                    out.append((display, reason))
+                    out.append((display, reason, "last-verified"))
 
     # ADRs: docs/decisions/adr-NNNN-*.md
     decisions_dir = project_dir / "docs" / "decisions"
@@ -1365,18 +1377,42 @@ def find_stale_items(project_dir: Path, days: int = 90) -> list:
                 adr_path, lv, deps, days, project_dir, today,
             )
             if is_stale:
-                out.append((str(rel), reason))
+                out.append((str(rel), reason, "last-verified"))
+
+    # Slice 050-02 — team-context drift: the team signal fires but
+    # docs/memory/people.md is absent (and no .jig/no-people-md opt-out).
+    # `team_context_drift` encodes the full predicate (signal + absences) and
+    # performs at most one git walk, so the count is computed once per `stale`
+    # invocation (AC6 — no double-walk; AC3 — marker suppresses; AC2 —
+    # read-only, it never writes). Surfaced as a finding row like every
+    # last_verified drift (AC1); stale stays exit-0 (AC4 resolved intent).
+    contributor_count = team_context_drift(project_dir)
+    if contributor_count is not None:
+        out.append((
+            "team-signal",
+            f"project has {contributor_count} contributors but people.md "
+            "is absent. Run /jig:memory-sync to bootstrap.",
+            "team-context",
+        ))
+
     return out
 
 
 def stale(project_dir: Path, days: int = 90) -> str:
-    """Render the stale-items report to a string. Always exits 0;
-    the report is informational, never gating."""
+    """Render the stale-items report to a string. Always exits 0; the report
+    is informational, never gating (a deliberate 015-03 design — the CLI
+    dispatch returns 0 regardless of findings).
+
+    Each finding is a `(display, reason, category)` tuple (slice 050-02);
+    `category` is carried for downstream filtering but not rendered in the
+    human report, which stays the unchanged `  <display>: <reason>` shape so
+    a `team-context` row reads `  team-signal: project has N contributors
+    but people.md is absent. Run /jig:memory-sync to bootstrap.`"""
     items = find_stale_items(project_dir, days=days)
     if not items:
         return f"no stale items (threshold: {days} days)\n"
     lines = [f"stale items ({len(items)}; threshold: {days} days):"]
-    for display, reason in items:
+    for display, reason, _category in items:
         lines.append(f"  {display}: {reason}")
     return "\n".join(lines) + "\n"
 

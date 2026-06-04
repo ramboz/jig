@@ -911,6 +911,198 @@ class StaleCheckTests(unittest.TestCase):
         self.assertIn("951-01", r2.stdout)
 
 
+def _git_on_path() -> bool:
+    try:
+        subprocess.run(["git", "--version"], capture_output=True, check=True)
+        return True
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_git_on_path(), "git not available")
+class StaleTeamSignalTests(unittest.TestCase):
+    """Slice 050-02: `workflow.py stale` surfaces a `category: team-context`
+    finding when the team signal fires but `docs/memory/people.md` is absent
+    (and the `.jig/no-people-md` opt-out marker is absent). Read-only; exit
+    code is unchanged (stale stays exit-0 — see the AC4 resolution in the
+    deviation log)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-teamstale-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # --- git fixture helpers (mirror test_scaffold.py / test_memory.py) ---
+    def _git(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            ["git", "-C", str(self.target), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit_as(self, name, email, filename):
+        (self.target / filename).write_text("seed")
+        self._git("add", filename)
+        self._git("commit", "-m", f"add {filename}", env_extra={
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+        })
+
+    def _make_team_repo(self):
+        """>= 2 distinct authors → team signal fires."""
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Bob", "bob@example.com", "b.txt")
+
+    def _make_solo_repo(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+
+    def _people(self) -> Path:
+        return self.target / "docs" / "memory" / "people.md"
+
+    def _marker(self) -> Path:
+        return self.target / ".jig" / "no-people-md"
+
+    # AC1 — finding present: signal fires + no people.md + no marker → a row
+    # naming the contributor count N and the bootstrap hint.
+    def test_finding_present_when_signal_fires_and_people_absent(self):
+        self._make_team_repo()
+        self.assertFalse(self._people().exists())
+        result = run_workflow("stale", "--project-dir", str(self.target))
+        self.assertIn("team-signal:", result.stdout)
+        self.assertIn("2 contributors", result.stdout)
+        self.assertIn("people.md is absent", result.stdout)
+        self.assertIn("/jig:memory-sync", result.stdout)
+
+    # AC5 — the finding carries a `category: team-context` tag distinct from
+    # last_verified rows. Asserted at the structured `find_stale_items` level.
+    def test_finding_carries_team_context_category(self):
+        self._make_team_repo()
+        items = _workflow.find_stale_items(self.target)
+        team_rows = [it for it in items if it[2] == "team-context"]
+        self.assertEqual(len(team_rows), 1,
+                         "exactly one team-context finding expected")
+        display, reason, category = team_rows[0]
+        self.assertEqual(category, "team-context")
+        self.assertIn("team-signal", display)
+        self.assertIn("2 contributors", reason)
+        # The bootstrap hint must be carried at the structured (reason)
+        # level too, not only in the human-rendered stdout — downstream
+        # filters reading `find_stale_items` should see the actionable
+        # remedy without re-parsing the printed output.
+        self.assertIn("/jig:memory-sync", reason)
+
+    # AC3 — opt-out marker present → no finding.
+    def test_no_finding_when_marker_present(self):
+        self._make_team_repo()
+        self._marker().parent.mkdir(parents=True, exist_ok=True)
+        self._marker().write_text("# opt out\n")
+        items = _workflow.find_stale_items(self.target)
+        self.assertEqual([it for it in items if it[2] == "team-context"], [])
+        result = run_workflow("stale", "--project-dir", str(self.target))
+        self.assertNotIn("team-signal:", result.stdout)
+
+    # people.md exists → no finding.
+    def test_no_finding_when_people_md_exists(self):
+        self._make_team_repo()
+        self._people().parent.mkdir(parents=True, exist_ok=True)
+        self._people().write_text("# People\n")
+        items = _workflow.find_stale_items(self.target)
+        self.assertEqual([it for it in items if it[2] == "team-context"], [])
+
+    # Solo repo → signal does not fire → no finding.
+    def test_no_finding_on_solo_repo(self):
+        self._make_solo_repo()
+        items = _workflow.find_stale_items(self.target)
+        self.assertEqual([it for it in items if it[2] == "team-context"], [])
+
+    # Monorepo-parent → guarded to solo → no finding.
+    def test_no_finding_on_monorepo_parent(self):
+        # self.target is a SUBDIR of a multi-author parent repo.
+        parent = Path(self.tmpdir)
+        env = os.environ.copy()
+        subprocess.run(["git", "-C", str(parent), "init", "-q"],
+                       capture_output=True, env=env, check=True)
+        for name, email, fn in [("Alice", "alice@x.com", "pa.txt"),
+                                 ("Bob", "bob@x.com", "pb.txt")]:
+            (parent / fn).write_text("x")
+            subprocess.run(["git", "-C", str(parent), "add", fn],
+                           capture_output=True, env=env, check=True)
+            subprocess.run(["git", "-C", str(parent), "commit", "-q", "-m", fn],
+                           capture_output=True, check=True, env={
+                               **env,
+                               "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+                               "GIT_COMMITTER_NAME": name,
+                               "GIT_COMMITTER_EMAIL": email,
+                           })
+        items = _workflow.find_stale_items(self.target)
+        self.assertEqual([it for it in items if it[2] == "team-context"], [])
+
+    # AC4 (resolved intent) — stale stays exit-0 even when the team-signal
+    # finding is the only finding present. The finding is surfaced like every
+    # other stale row; it does not flip the exit code (see the deviation log).
+    def test_stale_exits_zero_with_team_finding(self):
+        self._make_team_repo()
+        result = run_workflow("stale", "--project-dir", str(self.target))
+        self.assertIn("team-signal:", result.stdout)
+        self.assertEqual(result.returncode, 0,
+                         "stale must stay exit-0 even with a team-signal finding")
+
+    # AC2 (read-only) — the check writes/mutates nothing: no people.md, no
+    # marker, no docs/memory dir created by the audit itself.
+    def test_finding_is_read_only(self):
+        self._make_team_repo()
+        run_workflow("stale", "--project-dir", str(self.target))
+        self.assertFalse(self._people().exists(),
+                         "stale must not create people.md")
+        self.assertFalse(self._marker().exists(),
+                         "stale must not write the opt-out marker")
+
+    # AC6 (no double-walk) — a single `find_stale_items` invocation computes
+    # the contributor count at most once (no per-finding git re-shell).
+    def test_no_double_walk_counts_once(self):
+        self._make_team_repo()
+        import unittest.mock as _mock
+        # Also seed a last_verified drift row so there are MULTIPLE findings;
+        # the team count must still be computed exactly once for the run.
+        import datetime as _dt
+        yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+        dep_dir = self.target / "docs/specs/960-dep"
+        dep_dir.mkdir(parents=True, exist_ok=True)
+        dep_md = dep_dir / "spec.md"
+        dep_md.write_text("# Dep\n\n## Slice 960-01 d\n\n**STATUS: DONE**\n\nB.\n")
+        import time as _time
+        _ts = _time.mktime(_dt.datetime.fromisoformat(yesterday).timetuple())
+        os.utime(dep_md, (_ts, _ts))
+        old = (_dt.date.today() - _dt.timedelta(days=200)).isoformat()
+        cons_dir = self.target / "docs/specs/961-cons"
+        cons_dir.mkdir(parents=True, exist_ok=True)
+        (cons_dir / "spec.md").write_text(
+            f"# Spec\n\n## Slice 961-01 c\n\n---\nstatus: RECONCILED\n"
+            f"dependencies: [960-01]\nlast_verified: {old}\n---\n\nBody.\n"
+        )
+        with _mock.patch.object(
+            _workflow.team_signal, "count_team_contributors",
+            wraps=_workflow.team_signal.count_team_contributors,
+        ) as spy:
+            items = _workflow.find_stale_items(self.target)
+        # Both finding kinds present.
+        self.assertTrue(any(it[2] == "team-context" for it in items))
+        self.assertTrue(any(it[2] == "last-verified" for it in items))
+        self.assertLessEqual(
+            spy.call_count, 1,
+            "count_team_contributors must be invoked at most once per stale run",
+        )
+
+
 class RoutingStatsTests(unittest.TestCase):
     """Slice 041-02: `workflow.py routing-stats` renders a category-split
     histogram (jig baseline vs. richer/other) from the shared

@@ -456,6 +456,130 @@ class TeamDetectionTests(unittest.TestCase):
         )
 
 
+def _load_scaffold_module():
+    """Load scaffold.py as a module for in-process helper tests (the dir
+    name has a hyphen, so a plain `import` won't work)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jig_scaffold_for_test", SCAFFOLD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@unittest.skipUnless(_git_available(), "git not available")
+class CountTeamContributorsParityTests(unittest.TestCase):
+    """Slice 050-01 AC6 — `count_team_contributors` (int) and `detect_team`
+    (bool) must agree on the ≥2 threshold across the fixture matrix. The
+    threshold lives in exactly one place.
+
+    Slice 050-02 (ADR-0002 rule-of-three) moved the count + threshold into
+    `_common.team_signal`. scaffold's `count_team_contributors` is now a
+    re-export of that single source of truth (asserted by
+    `test_count_is_common_reexport`), and `detect_team` delegates to it; this
+    matrix pins that the re-exported behavior is unchanged."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-count-")
+        self.target = Path(self.tmpdir) / "proj"
+        self.target.mkdir()
+        self.mod = _load_scaffold_module()
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
+        from _common import team_signal
+        self.team_signal = team_signal
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _git(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            ["git", "-C", str(self.target), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit_as(self, name, email, filename):
+        (self.target / filename).write_text("seed")
+        self._git("add", filename)
+        env = {
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+        }
+        self._git("commit", "-m", f"add {filename}", env_extra=env)
+
+    def _assert_parity(self, expected_count):
+        # Target the _common helper directly — it is the single source of
+        # truth post-extraction (slice 050-02).
+        count = self.team_signal.count_team_contributors(self.target)
+        verdict = self.mod.detect_team(self.target)
+        self.assertEqual(count, expected_count,
+                         f"count_team_contributors should be {expected_count}")
+        self.assertEqual(verdict, count >= self.team_signal.TEAM_THRESHOLD,
+                         "detect_team must equal (count >= TEAM_THRESHOLD)")
+
+    def test_count_is_common_reexport(self):
+        """scaffold.count_team_contributors must BE the _common function —
+        a single source of truth, not a divergent copy (ADR-0002)."""
+        self.assertIs(self.mod.count_team_contributors,
+                      self.team_signal.count_team_contributors)
+
+    def test_parity_solo(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Alice", "alice@example.com", "b.txt")
+        self._assert_parity(1)
+
+    def test_parity_team_2(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Bob", "bob@example.com", "b.txt")
+        self._assert_parity(2)
+
+    def test_parity_team_3(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Bob", "bob@example.com", "b.txt")
+        self._commit_as("Carol", "carol@example.com", "c.txt")
+        self._assert_parity(3)
+
+    def test_parity_mailmap_coalesced(self):
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@work.com", "a.txt")
+        self._commit_as("Alice", "alice@personal.com", "b.txt")
+        (self.target / ".mailmap").write_text(
+            "Alice <alice@work.com> <alice@personal.com>\n"
+        )
+        self._assert_parity(1)
+
+    def test_parity_monorepo_parent(self):
+        """Target is a SUBDIR of a multi-author parent repo → guarded to 0
+        (solo), so count and detect_team must both reflect the guard."""
+        parent = Path(self.tmpdir)
+        env = os.environ.copy()
+        subprocess.run(["git", "-C", str(parent), "init", "-q"],
+                       capture_output=True, env=env, check=True)
+        for name, email, fn in [("Alice", "alice@x.com", "pa.txt"),
+                                 ("Bob", "bob@x.com", "pb.txt")]:
+            (parent / fn).write_text("x")
+            subprocess.run(["git", "-C", str(parent), "add", fn],
+                           capture_output=True, env=env, check=True)
+            env_extra = {
+                **env,
+                "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+            }
+            subprocess.run(["git", "-C", str(parent), "commit", "-q", "-m", fn],
+                           capture_output=True, env=env_extra, check=True)
+        # self.target is a subdir of parent (not its own repo root)
+        self._assert_parity(0)
+
+    def test_parity_non_git(self):
+        # No git init at all — both helpers fail-soft.
+        self._assert_parity(0)
+
+
 class SignalDetectionTests(unittest.TestCase):
     """Slice 001-03 — detector + tier selection + brief.md."""
 
@@ -691,6 +815,31 @@ class WizardQATests(unittest.TestCase):
         self.assertFalse((self.target / "docs/memory/people.md").exists(),
                          "--solo should suppress people.md even on multi-author git repo")
         self.assertFalse(self._manifest()["scaffold_signals"]["is_team"])
+
+    # Slice 050-01 — explicit --solo writes a tracked opt-out marker so
+    # memory-sync's team-recheck never re-nudges a deliberate solo project.
+    def test_solo_flag_writes_no_people_md_marker(self):
+        result = run_scaffold_with_args(self.target, "--solo")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        marker = self.target / ".jig" / "no-people-md"
+        self.assertTrue(marker.exists(),
+                        "--solo must write the .jig/no-people-md opt-out marker")
+
+    # Slice 050-01 — auto-detected solo (no --solo flag) must NOT write the
+    # marker, or a solo-scaffolded project that later grows is permanently
+    # suppressed (defeating spec 050).
+    def test_auto_solo_does_not_write_marker(self):
+        # bare dir → inferred solo, no explicit override
+        result = run_scaffold_with_args(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        marker = self.target / ".jig" / "no-people-md"
+        self.assertFalse(marker.exists(),
+                         "auto-detected solo must NOT write the opt-out marker")
+        # marker must not be gitignored — it is a tracked project-level opt-out
+        gitignore = self.target / ".gitignore"
+        if gitignore.exists():
+            self.assertNotIn("no-people-md", gitignore.read_text(),
+                             "the marker is tracked; must not be in .gitignore")
 
     # 3. CI flag overrides _detect_ci
     def test_has_ci_flag_sets_strict_profile(self):

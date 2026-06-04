@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: memory-sync
 tier: (none — dev infrastructure)
 ---
@@ -93,25 +93,40 @@ re-check should preserve that.
 
 ## Open questions
 
-- **`memory-sync` integration point.** Lean: add the check at the
-  end of `memory-sync` after the existing memory persistence runs.
-  Alternative: a separate `workflow.py team-check` invocation.
-  Lean toward memory-sync because that's the existing maintenance
-  cadence; alternative is over-engineering.
-- **Nudge UX shape.** Structured prompt vs. printed advisory message
-  the user can ignore. Lean: structured prompt with three options
-  (y / n / never) so "never" has a durable home in `.jig/`. Bare
-  advisory invites repeat-nudge fatigue.
-- **`scaffold-init` parity.** Should `scaffold-init` itself write
-  the `.jig/no-people-md` marker when team-signal returns false?
-  Today the absence-of-`people.md` is the signal, but adding the
-  marker would let `memory-sync` distinguish "never had it" from
-  "explicitly opted out." Lean yes; cheap, removes ambiguity.
-- **Stale-audit signal shape.** Should the stale audit surface
-  "team signal fires but no `people.md`" as a row in `workflow.py
-  stale` output, or as a separate `workflow.py team-check`
-  command? Lean: row in `stale` to avoid a new command surface,
-  consistent with how `last_verified` drift is surfaced today.
+_All four resolved 2026-06-04 before implementation (recorded here; the
+spec is still DRAFT, so corrected inline per ADR-0010)._
+
+- **`memory-sync` integration point.** **RESOLVED:** a new
+  `memory.py team-check` subcommand, which `memory-sync`'s SKILL.md
+  runs as its final step (matches the existing "invoke `memory.py`
+  once per item" pattern; lets slice 050-02's `stale` import the same
+  helper). The separate-`workflow.py`-command alternative was rejected
+  as over-engineering.
+- **Nudge UX shape.** **RESOLVED:** structured `[y]/[n]/[never]`
+  advisory. A real `input()` prompt fires only when stdin is a TTY
+  (AC7 guards the non-TTY path); `--bootstrap` / `--never` flags let
+  the agent act on the user's choice in non-TTY (agent-invoked)
+  context.
+- **`scaffold-init` parity.** **RESOLVED (yes, explicit-only):**
+  `scaffold-init --solo` writes a **tracked** `.jig/no-people-md`
+  marker (project-level opt-out, like `.jig/test-command`).
+  *Auto-detected* solo does NOT write it — otherwise a project
+  scaffolded solo that later grows would be permanently suppressed,
+  defeating this spec. The `Overrides` dataclass already distinguishes
+  an explicit `--solo` (is_team=False) from an inferred solo (None),
+  so the marker is written iff the override is explicitly False.
+- **Stale-audit signal shape.** **RESOLVED:** a finding row inside
+  `workflow.py stale` carrying a `category: team-context` tag (no new
+  command surface), consistent with how `last_verified` drift is
+  surfaced today.
+
+**Implementation note (threshold parity).** `detect_team()` returns
+only a `bool` but the nudge and the stale row need the contributor
+count N. The count-of-distinct-mailmap-authors logic is extracted into
+a sibling helper returning `int`; `detect_team` becomes
+`return <count>(...) >= 2`. Both skills import the shared helper, so
+the `≥2` threshold lives in exactly one place (AC6 parity is then
+structural, not asserted-by-coincidence).
 
 ## Decomposition
 
@@ -119,8 +134,8 @@ Two slices, sequenced. SPIDR Interface-axis split.
 
 ### Slices
 
-- [050-01 — memory-sync-team-recheck](slice-01-memory-sync-team-recheck.md) — DRAFT
-- [050-02 — stale-audit-team-signal](slice-02-stale-audit-team-signal.md) — DRAFT
+- [050-01 — memory-sync-team-recheck](slice-01-memory-sync-team-recheck.md) — DONE
+- [050-02 — stale-audit-team-signal](slice-02-stale-audit-team-signal.md) — DONE
 
 ## References
 

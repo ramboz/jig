@@ -724,5 +724,356 @@ class AppendLockSkillDocsTests(unittest.TestCase):
         )
 
 
+def _git_available() -> bool:
+    try:
+        return subprocess.run(
+            ["git", "--version"], capture_output=True, timeout=3
+        ).returncode == 0
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_git_available(), "git not available")
+class TeamCheckTests(unittest.TestCase):
+    """Slice 050-01 — `memory.py team-check` re-runs scaffold-init's team
+    signal and nudges to bootstrap people.md when the project has grown."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-teamcheck-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # --- git fixture helpers (mirror test_scaffold.py's pattern) ---
+    def _git(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            ["git", "-C", str(self.target), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit_as(self, name: str, email: str, filename: str):
+        (self.target / filename).write_text("seed")
+        self._git("add", filename)
+        env = {
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+        }
+        self._git("commit", "-m", f"add {filename}", env_extra=env)
+
+    def _make_team_repo(self):
+        """≥2 distinct authors → signal fires."""
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Bob", "bob@example.com", "b.txt")
+
+    def _make_solo_repo(self):
+        """1 author → signal does not fire."""
+        self._git("init", "-q")
+        self._commit_as("Alice", "alice@example.com", "a.txt")
+        self._commit_as("Alice", "alice@example.com", "b.txt")
+
+    def _people(self) -> Path:
+        return self.target / "docs/memory/people.md"
+
+    def _marker(self) -> Path:
+        return self.target / ".jig" / "no-people-md"
+
+    # AC4 — signal fires AND people.md absent AND marker absent → nudge.
+    # Non-TTY (subprocess has no tty) so it must NOT block.
+    def test_nudge_when_signal_fires_and_people_absent(self):
+        self._make_team_repo()
+        # scaffold ran on a bare dir (solo) so people.md is absent
+        self.assertFalse(self._people().exists())
+        result = run_memory(self.target, "team-check")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        out = result.stdout
+        # names the contributor count
+        self.assertIn("2", out, "advisory should name N=2 contributors")
+        # three labeled options present
+        self.assertIn("[y]", out)
+        self.assertIn("[n]", out)
+        self.assertIn("[never]", out)
+
+    # AC7 — non-TTY mode prints the advisory + follow-up commands, exits 0,
+    # does NOT prompt/block, does NOT write anything.
+    def test_non_tty_prints_followup_commands_and_does_not_block(self):
+        self._make_team_repo()
+        result = run_memory(self.target, "team-check")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("--bootstrap", result.stdout)
+        self.assertIn("--never", result.stdout)
+        # nothing written: no people.md, no marker
+        self.assertFalse(self._people().exists())
+        self.assertFalse(self._marker().exists())
+
+    # AC2 — people.md exists → no-op regardless of signal.
+    def test_no_nudge_when_people_md_exists(self):
+        self._make_team_repo()
+        self._people().parent.mkdir(parents=True, exist_ok=True)
+        self._people().write_text("# People\n\nhand-written\n")
+        result = run_memory(self.target, "team-check")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertNotIn("[never]", result.stdout,
+                         "no nudge options when people.md already exists")
+        # file untouched
+        self.assertIn("hand-written", self._people().read_text())
+
+    # AC3 — marker exists → no-op (suppressed forever).
+    def test_no_nudge_when_marker_exists(self):
+        self._make_team_repo()
+        self._marker().parent.mkdir(parents=True, exist_ok=True)
+        self._marker().write_text("# opt out\n")
+        result = run_memory(self.target, "team-check")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertNotIn("[never]", result.stdout,
+                         "marker must suppress the nudge")
+        self.assertFalse(self._people().exists())
+
+    # Signal does not fire (solo) → no-op.
+    def test_no_nudge_on_solo_repo(self):
+        self._make_solo_repo()
+        result = run_memory(self.target, "team-check")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertNotIn("[never]", result.stdout)
+        self.assertFalse(self._people().exists())
+
+    # AC5 — --bootstrap writes people.md from the real template.
+    def test_bootstrap_writes_people_md_from_template(self):
+        self._make_team_repo()
+        result = run_memory(self.target, "team-check", "--bootstrap")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertTrue(self._people().exists(),
+                        "--bootstrap must create people.md")
+        body = self._people().read_text()
+        # Same shape as scaffold-init's output (template watermark + project name)
+        self.assertIn("Status: Draft (wizard-generated)", body)
+        self.assertIn(self.target.name, body,
+                      "{{PROJECT_NAME}} should be substituted")
+        # No unrendered placeholders leaked
+        self.assertNotIn("{{PROJECT_NAME}}", body)
+
+    # AC5 — --bootstrap refuses to overwrite an existing people.md.
+    def test_bootstrap_refuses_overwrite(self):
+        self._make_team_repo()
+        self._people().parent.mkdir(parents=True, exist_ok=True)
+        self._people().write_text("# People\n\nhand-written\n")
+        result = run_memory(self.target, "team-check", "--bootstrap")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        # existing content preserved
+        self.assertIn("hand-written", self._people().read_text())
+
+    # --never writes the opt-out marker.
+    def test_never_writes_marker(self):
+        self._make_team_repo()
+        result = run_memory(self.target, "team-check", "--never")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertTrue(self._marker().exists(),
+                        "--never must write .jig/no-people-md")
+
+    # SKILL.md documents the new step.
+    def test_skill_md_documents_team_check(self):
+        skill = (REPO_ROOT / "skills" / "memory-sync" / "SKILL.md").read_text()
+        self.assertIn("team-check", skill,
+                      "SKILL.md must document the team-check step")
+
+
+def _load_memory_module():
+    """Load memory.py as a module for in-process interactive-path tests
+    (the dir name has a hyphen, so a plain `import` won't work)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jig_memory_for_test", MEMORY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_scaffold_module():
+    """Load scaffold.py as a module so the cross-check test can render the
+    people.md template through scaffold-init's OWN `copy_template`/`render`
+    (the dir name has a hyphen, so a plain `import` won't work)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jig_scaffold_for_test", SCAFFOLD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class BootstrapTemplateParityTests(unittest.TestCase):
+    """Slice 050-02 reconciliation (craft nit 1) — enforce AC5's byte-identity.
+
+    Slice 050-02 retired the importlib loader, so `memory.py
+    _bootstrap_people_md` now renders the people.md template via an inline
+    `.read_text().replace("{{PROJECT_NAME}}", ...)` instead of calling
+    scaffold-init's `copy_template`/`render`. Today the two outputs are
+    byte-identical (the template carries only `{{PROJECT_NAME}}` and no
+    plugin-root path), so slice 050-01's AC5 ("no drift, mirrors scaffold
+    output") still holds — but that identity is now an IMPLICIT invariant of
+    the template's content, not enforced by shared code. Both 050-02 reviewers
+    flagged it.
+
+    This test renders the REAL `templates/docs/memory/people.md.template`
+    through BOTH paths into equivalent targets and asserts byte-identity. If
+    the template ever gains a second placeholder or a `${CLAUDE_PLUGIN_ROOT}`
+    path, memory-sync's bootstrap (which only substitutes `{{PROJECT_NAME}}`
+    and applies no `render()` leftover-check / `_rewrite_skill_md_paths`
+    post_render) would diverge from scaffold's `copy_template` — and this
+    assertion fails loudly here rather than silently shipping the drift."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-bootstrap-parity-")
+        # SAME project-name input for both paths so the comparison is fair:
+        # `_bootstrap_people_md` derives `{{PROJECT_NAME}}` from `target.name`,
+        # exactly as scaffold's `subs["PROJECT_NAME"] = target.name` does.
+        self.project_name = "demo-project"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_bootstrap_render_matches_scaffold_copy_template_byte_for_byte(self):
+        memory = _load_memory_module()
+        scaffold_mod = _load_scaffold_module()
+
+        os.environ["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        template = (
+            REPO_ROOT / "templates" / "docs" / "memory" / "people.md.template"
+        )
+        self.assertTrue(template.is_file(),
+                        f"real people.md template must exist at {template}")
+
+        # --- Path A: memory-sync's bootstrap (the inline-render production code).
+        mem_target = Path(self.tmpdir) / self.project_name
+        mem_target.mkdir()
+        written, _msg = memory._bootstrap_people_md(mem_target)
+        self.assertTrue(written, "bootstrap should have written people.md")
+        mem_people = mem_target / "docs" / "memory" / "people.md"
+        mem_bytes = mem_people.read_bytes()
+
+        # --- Path B: scaffold-init's own copy_template, with the EXACT
+        # substitutions and post_render scaffold uses for people.md (full subs
+        # dict + the machinery-mode `_rewrite_skill_md_paths` doc-rewrite). If
+        # the template later gains a `{{JIG_VERSION}}`/`{{TIMESTAMP}}`
+        # placeholder or a plugin-root path, this path renders it while Path A
+        # leaves it raw — and the byte comparison below diverges.
+        scaffold_dst = Path(self.tmpdir) / "scaffold-out" / "people.md"
+        subs = {
+            "PROJECT_NAME": self.project_name,
+            "JIG_VERSION": "0.0.0-test",
+            "TIMESTAMP": "2026-01-01T00:00:00Z",
+        }
+        scaffold_mod.copy_template(
+            template, scaffold_dst, subs,
+            post_render=scaffold_mod._rewrite_skill_md_paths,
+        )
+        scaffold_bytes = scaffold_dst.read_bytes()
+
+        self.assertEqual(
+            mem_bytes, scaffold_bytes,
+            "memory-sync bootstrap and scaffold-init copy_template must render "
+            "the people.md template byte-identically (AC5). They diverged — the "
+            "template likely gained a placeholder or plugin-root path that "
+            "scaffold's render() handles but memory-sync's inline "
+            "`{{PROJECT_NAME}}`-only substitution does not. Route the bootstrap "
+            "through scaffold's render path (or re-pin this invariant).",
+        )
+
+
+@unittest.skipUnless(_git_available(), "git not available")
+class TeamCheckInteractiveTests(unittest.TestCase):
+    """Slice 050-01 AC4 (interactive arm) — when stdin is a TTY the nudge
+    prompts and acts. Driven in-process via team_check(isatty=True) with a
+    patched input(), since a subprocess can't present a real TTY."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-teamint-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        subprocess.run([sys.executable, str(SCAFFOLD), str(self.target)],
+                       capture_output=True, text=True, env=env, check=True)
+        # team repo so the signal fires
+        self._git("init", "-q")
+        for name, email, fn in [("Alice", "alice@x.com", "a.txt"),
+                                 ("Bob", "bob@x.com", "b.txt")]:
+            self._commit_as(name, email, fn)
+        self.mod = _load_memory_module()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _git(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(["git", "-C", str(self.target), *args],
+                              capture_output=True, text=True, env=env, check=True)
+
+    def _commit_as(self, name, email, fn):
+        (self.target / fn).write_text("seed")
+        self._git("add", fn)
+        self._git("commit", "-m", fn, env_extra={
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+        })
+
+    def _run_with_answer(self, answer):
+        import builtins
+        orig = builtins.input
+        builtins.input = lambda *a, **k: answer
+        try:
+            os.environ["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+            return self.mod.team_check(self.target, isatty=True)
+        finally:
+            builtins.input = orig
+
+    def test_interactive_yes_bootstraps(self):
+        rc = self._run_with_answer("y")
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.target / "docs/memory/people.md").exists(),
+                        "interactive [y] must bootstrap people.md")
+
+    def test_interactive_never_writes_marker(self):
+        rc = self._run_with_answer("never")
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.target / ".jig" / "no-people-md").exists(),
+                        "interactive [never] must write the opt-out marker")
+        self.assertFalse((self.target / "docs/memory/people.md").exists())
+
+    def test_interactive_no_does_nothing(self):
+        rc = self._run_with_answer("n")
+        self.assertEqual(rc, 0)
+        self.assertFalse((self.target / "docs/memory/people.md").exists())
+        self.assertFalse((self.target / ".jig" / "no-people-md").exists())
+
+    # Scaffold-mode fallback: when the people.md template can't be resolved
+    # (a scaffolded target has no bundled templates/ dir), --bootstrap must
+    # degrade gracefully — no people.md written, a manual-create message,
+    # and a non-fatal outcome (caller exits 0).
+    def test_bootstrap_degrades_when_template_missing(self):
+        fake_root = Path(self.tmpdir) / "no-templates-root"
+        (fake_root / "skills").mkdir(parents=True)
+        orig = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        os.environ["CLAUDE_PLUGIN_ROOT"] = str(fake_root)
+        try:
+            written, msg = self.mod._bootstrap_people_md(self.target)
+        finally:
+            if orig is not None:
+                os.environ["CLAUDE_PLUGIN_ROOT"] = orig
+            else:
+                os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        self.assertFalse(written, "no people.md should be written without a template")
+        self.assertIn("manually", msg.lower())
+        self.assertFalse((self.target / "docs/memory/people.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

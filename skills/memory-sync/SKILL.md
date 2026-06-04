@@ -92,6 +92,31 @@ time, then persist now.
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" summary <target>
    ```
+5. **Re-check the team signal** as the final step (spec 050-01). This
+   re-runs scaffold-init's exact team detection (≥2 distinct mailmap git
+   authors, monorepo-guarded). When the project has grown past solo and
+   `docs/memory/people.md` is absent (and no `.jig/no-people-md` opt-out
+   marker is present), the helper surfaces a structured nudge:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" team-check <target>
+   ```
+   The advisory offers three options — `[y]` bootstrap people.md now,
+   `[n]` skip this run, `[never]` suppress future nudges. In an
+   **interactive terminal** the helper prompts and acts. In **agent
+   (non-TTY) context** it prints the advisory and exits 0 *without
+   blocking* — **you must surface the advisory to the user, ask which
+   option they want, and relay their choice** by re-running with the
+   matching flag:
+   ```bash
+   # user chose [y] — create docs/memory/people.md from the template:
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" team-check --bootstrap <target>
+   # user chose [never] — write the opt-out marker, never ask again:
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" team-check --never <target>
+   # user chose [n] — do nothing this run (they'll be asked next memory-sync).
+   ```
+   `team-check` is a no-op when `people.md` already exists, when
+   `.jig/no-people-md` is present, or when the project is still solo —
+   so it is safe to run unconditionally at the end of every memory-sync.
 
 ## Judgment guidance
 

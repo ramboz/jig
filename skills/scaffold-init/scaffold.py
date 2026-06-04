@@ -15,7 +15,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
@@ -23,6 +22,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
+# Team-signal detection + the .jig/no-people-md marker contract live in
+# _common per ADR-0002's rule-of-three (slice 050-02): scaffold-init,
+# memory-sync, and workflow.py stale are the three callers. Re-exported
+# here so scaffold's existing public names (`count_team_contributors`,
+# `detect_team`, the marker helpers) keep resolving for callers and tests.
+from _common.team_signal import (  # noqa: F401  (re-export)
+    NO_PEOPLE_MD_RELPATH,
+    count_team_contributors,
+    no_people_md_marker_path,
+    people_md_path,
+    team_signal_fires,
+    write_no_people_md_marker,
+)
 
 
 # Tier 0 always installs. Tier 1 is gated on test signals (per Spike 001a:
@@ -413,33 +425,13 @@ def detect_signals(target: Path) -> Signals:
 
 
 def detect_team(target: Path) -> bool:
-    """True iff `git log` in target shows ≥2 unique author emails.
-    Solo is the safe default — returns False on non-git dirs, missing binary,
-    any git failure, or when target is inside a parent repo (avoids monorepo
-    misdetection: scaffolding a fresh subdir of a multi-author repo would
-    otherwise count the parent's authors).
-    Uses `--use-mailmap` so one person with multiple emails counts once."""
-    try:
-        # Refuse to climb to a parent repo: target itself must be the repo root.
-        toplevel = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if toplevel.returncode != 0:
-            return False
-        if Path(toplevel.stdout.strip()).resolve() != Path(target).resolve():
-            return False
-
-        out = subprocess.run(
-            ["git", "-C", str(target), "log", "--use-mailmap", "--format=%aE"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:
-        return False
-    if out.returncode != 0:
-        return False
-    authors = {line.strip().lower() for line in out.stdout.splitlines() if line.strip()}
-    return len(authors) >= 2
+    """True iff `target`'s git history shows >= the team threshold of distinct
+    mailmap-normalized author emails. Solo is the safe default. Thin wrapper
+    over `_common.team_signal.team_signal_fires` — the count logic, the
+    threshold, and the fail-soft + monorepo-guard behavior all live in the
+    shared module (ADR-0002 rule-of-three, slice 050-02); this name is kept
+    because `detect_signals` and `_render_brief` reference it."""
+    return team_signal_fires(target)
 
 
 def _select_tiers(signals: Signals) -> tuple[list, list]:
@@ -1309,6 +1301,16 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # when any spec already exists, so a migrate path / --force re-scaffold
     # never overwrites the user's work.
     _emit_seed_spec(template_root, target, subs)
+
+    # 2c. Slice 050-01: an EXPLICIT `--solo` (overrides.is_team is False)
+    # writes the tracked `.jig/no-people-md` opt-out marker so memory-sync's
+    # team-recheck never re-nudges a deliberate solo project. Critically,
+    # this fires ONLY on the explicit override — an *inferred* solo
+    # (overrides absent, or is_team is None) must NOT write the marker, or a
+    # solo-scaffolded project that later grows past one contributor would be
+    # permanently suppressed (resolved OQ#3 — explicit-only).
+    if overrides is not None and overrides.is_team is False:
+        write_no_people_md_marker(target)
 
     # 3. Directories that should exist (even if empty for now)
     (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
