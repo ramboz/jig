@@ -22,6 +22,7 @@
 - [ADR-0015: Worktree-aware number reservation — branch-routed reserve, detached worktree off main](adr-0015-worktree-aware-reservation.md) — [Spec 003-03](../specs/003-spec-workflow-promotion/spec.md) (spec numbers, `workflow.py new`) and [spec 028-01](../specs/028-parallel-session-locks/slice-01-adr-numbering-on-main.md) (ADR numbers, `adr.py new`) built reserve-on-`origin/main`: claim a sequential number by committing a stub and pushing it to `origin/main`, so parallel sessions cannot both grab the same `NNN`/`NNNN`. (2026-06-02, Accepted)
 - [ADR-0016: Parallel proportional bug-fix lifecycle](adr-0016-bug-fix-lifecycle.md) — Not all work in a jig project is spec-driven. (2026-06-03, Proposed)
 - [ADR-0017: Code-health as a scaffolded, language-detected capability](adr-0017-scaffolded-code-health.md) — jig has no code-health capability. (2026-06-04, Accepted)
+- [ADR-0018: Dual-host generated plugin artifacts](adr-0018-dual-host-generated-plugin-artifacts.md) — Spec 033 made Codex a supported host alongside Claude. (2026-06-05, Accepted)
 
 ## Format
 
