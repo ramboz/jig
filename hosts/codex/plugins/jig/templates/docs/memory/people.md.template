@@ -1,0 +1,25 @@
+# People
+
+> Status: Draft (wizard-generated)
+>
+> Collaborators and context for {{PROJECT_NAME}}. Loaded on demand when
+> interacting with team-related work (code reviews, attribution, communication).
+>
+> Add entries via `/jig:memory-sync` or when a context lookup hits a person you
+> don't recognize.
+
+## How to use this file
+
+The agent reads from here to attribute changes, frame messages, and decide who
+might own a given module. Update entries as roles change.
+
+<!-- Format per person:
+
+## Name
+
+**Role:** ...
+**Areas of focus:** ...
+**Context for the agent:** (anything useful — communication preferences, time zone,
+expertise, what they own)
+
+-->

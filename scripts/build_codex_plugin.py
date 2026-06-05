@@ -5,6 +5,12 @@ Materializes a Codex-native plugin tree from jig's canonical source tree.
 The checked-in source remains Claude-compatible at root; this builder rewrites
 only the staged plugin copy so Codex users get Codex-shaped skill prose and
 plugin-root command paths without forking source skills.
+
+Per slice 061-02 / ADR-0018, the default output is the committed peer at
+`hosts/codex/plugins/jig` (sibling of `hosts/claude/`), so Claude and Codex sit
+as parallel committed packages built from canonical source. The marketplace
+descriptor lands at `hosts/codex/.agents/plugins/marketplace.json` with a
+package-relative `source.path` of `./plugins/jig`.
 """
 
 from __future__ import annotations
@@ -209,10 +215,14 @@ def _validate_output_dir(source_root: Path, output_dir: Path) -> tuple[bool, str
             source_root / "docs",
             source_root / ".github",
         }
-        if not _is_relative_to(output_dir, source_root / "dist"):
+        if not (
+            _is_relative_to(output_dir, source_root / "hosts")
+            or _is_relative_to(output_dir, source_root / "dist")
+        ):
             return (
                 False,
-                "output directory inside the source tree must be under dist/",
+                "output directory inside the source tree must be under "
+                "hosts/ or dist/",
             )
         if output_dir in source_owned_roots or any(
             root in output_dir.parents for root in source_owned_roots
@@ -271,7 +281,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="output plugin directory (default: dist/codex-plugin/plugins/jig)",
+        help="output plugin directory (default: hosts/codex/plugins/jig)",
     )
     return parser
 
@@ -282,7 +292,7 @@ def main(argv: list[str]) -> int:
     output_dir = (
         Path(ns.output_dir)
         if ns.output_dir
-        else source_root / "dist" / "codex-plugin" / "plugins" / "jig"
+        else source_root / "hosts" / "codex" / "plugins" / "jig"
     )
     code = build(source_root=source_root, output_dir=output_dir)
     if code == 0:
