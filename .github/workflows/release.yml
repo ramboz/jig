@@ -38,21 +38,80 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build release zip
+      # Host-explicit release zips (slice 061-04), each archived from its
+      # committed hosts/<host>/ package:
+      #   - jig-claude-vX.Y.Z.zip : flat, drag-droppable Claude plugin
+      #   - jig-codex-vX.Y.Z.zip  : extract-then-add Codex marketplace bundle
+      - name: Build Claude release zip
         run: |
           python3 scripts/build_release_zip.py \
+            --host claude \
             --version "${{ needs.release-please.outputs.version }}" \
-            --output "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
+            --output "dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip"
 
-      - name: Smoke-test zip contents
+      - name: Build Codex release zip
         run: |
           python3 scripts/build_release_zip.py \
-            --smoke-test "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
+            --host codex \
+            --version "${{ needs.release-please.outputs.version }}" \
+            --output "dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip"
 
-      - name: Upload zip to release
+      - name: Smoke-test Claude zip
+        run: |
+          python3 scripts/build_release_zip.py \
+            --host claude \
+            --smoke-test "dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip"
+
+      - name: Smoke-test Codex zip
+        run: |
+          python3 scripts/build_release_zip.py \
+            --host codex \
+            --smoke-test "dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip"
+
+      # Legacy host-neutral jig-vX.Y.Z.zip: kept ONE cycle as a byte-identical
+      # alias of the Claude zip (the legacy artifact was always Claude-shaped).
+      # Gentle deprecation — removed next cycle. See the release-note block
+      # below and slice 061-04's deviation log.
+      - name: Create legacy alias zip (deprecated, Claude-shaped)
+        run: |
+          cp \
+            "dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip" \
+            "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
+
+      - name: Upload zips to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload \
             "${{ needs.release-please.outputs.tag_name }}" \
+            "dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip" \
+            "dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip" \
             "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
+
+      # Append a fixed "Install artifacts" note to release-please's notes
+      # (fetch-then-append; never overwrite the generated changelog).
+      - name: Append install-artifacts note to release body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          existing="$(gh release view "$TAG" --json body -q .body)"
+          note="$(cat <<EOF
+
+          ## Install artifacts
+
+          - \`jig-claude-v${VERSION}.zip\` — flat, drag-droppable Claude plugin
+            (\`.claude-plugin/plugin.json\` at the zip root; loadable via
+            \`claude --plugin-dir <extracted-dir>\` or drag-drop into the
+            \`/plugin\` UI).
+          - \`jig-codex-v${VERSION}.zip\` — an **extract-then-add marketplace
+            bundle** for Codex: extract it, then run
+            \`codex plugin marketplace add <extracted-dir>\`. Codex has no
+            zip-drop install; do not load this archive in place as a plugin.
+          - \`jig-v${VERSION}.zip\` — **deprecated** byte-identical alias of the
+            Claude zip, kept one cycle for compatibility and **removed next
+            release**. Switch to \`jig-claude-v${VERSION}.zip\`.
+          EOF
+          )"
+          gh release edit "$TAG" --notes "${existing}${note}"

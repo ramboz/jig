@@ -204,7 +204,7 @@
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-01 - committed Claude package + repoint marketplace | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-02 - committed Codex package peer | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-03 - host-package drift guard | **DONE** |  |
-| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-04 - host-explicit release zips | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-04 - host-explicit release zips | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-05 - symmetric install + scaffold docs | DRAFT |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-06 - Claude install verification | DRAFT |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-07 - Codex install verification | DRAFT |  |
