@@ -187,7 +187,7 @@
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-02 - codex-hook-trust-onboarding | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-03 - codex-install-contract-smoke | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-04 - codex-skill-override-deferral | **DONE** |  |
-| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-05 - codex-role-capability-dogfood | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-05 - codex-role-capability-dogfood | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 🔬 059-06 - codex-plugin-agent-discovery-spike | DRAFT |  |
 
 ## Deferred slices
