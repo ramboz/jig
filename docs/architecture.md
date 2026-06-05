@@ -213,6 +213,18 @@ unsupported `agents` field to `.codex-plugin/plugin.json`; plugin users run
 an explicit post-install helper to copy the generated `jig-*.toml` files into
 their chosen Codex agents directory.
 
+**Codex plugin agent-discovery spike (059-06).** The official Codex manual
+was rechecked on 2026-06-05: `plugins/build` documents `.codex-plugin/plugin.json`
+with `skills`, while `plugins` describes plugin bundles as skills, apps, and
+MCP servers, and `subagents` documents custom agents as standalone TOML files
+under `.codex/agents/` or `~/.codex/agents/`. Local `codex-cli 0.133.0` was
+then probed through `scripts/codex_agent_discovery_probe.py` with an isolated
+marketplace and temporary `CODEX_HOME`; the installed plugin cache retained
+`agents/jig-*.toml`, but `codex debug prompt-input` did not expose those
+plugin-bundled TOML files as custom agents. The explicit
+`--install-codex-agents` helper remains the supported plugin contract until
+official docs or the probe show plugin-native discovery.
+
 ### Context economy (the "dumb zone")
 *Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#2).
 *Mechanics:* the `jig-context-check` hook warns at session start when fill approaches the ~40% threshold, and nudges again on in-session growth as context crosses configurable bands (40/60/80%, plus a higher active-compaction band per spec 057-02). Skills use progressive disclosure — body loads only on trigger; supporting files load only when referenced.
