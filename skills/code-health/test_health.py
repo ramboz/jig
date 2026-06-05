@@ -12,6 +12,7 @@ style in skills/tdd-loop/test_tdd.py).
 """
 
 import importlib.util
+import json
 import os
 import shlex
 import subprocess
@@ -49,6 +50,18 @@ def _write(path: Path, content: str = "") -> Path:
     return path
 
 
+def _seed_python(target: Path) -> Path:
+    """Seed a Python ecosystem marker so detection fires (slice 060-03 —
+    ecosystem detection is now a real gate per AC4; a bare empty dir is
+    legitimately 'unknown', so the 060-01 Python tests now plant a marker)."""
+    return _write(target / "pyproject.toml", "[project]\nname = \"x\"\n")
+
+
+def _seed_node(target: Path) -> Path:
+    """Seed a Node ecosystem marker (package.json) so Node detection fires."""
+    return _write(target / "package.json", '{"name": "x"}\n')
+
+
 # A representative `ruff check --output-format=json` payload (two findings,
 # two distinct rule codes). Used by the findings tests so the summary parsing
 # is exercised against ruff's real JSON shape.
@@ -68,6 +81,7 @@ class ResolverTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.target = Path(self.tmp.name)
+        _seed_python(self.target)  # ecosystem marker so detection fires
         self._h = _load_health()
 
     def tearDown(self):
@@ -250,6 +264,7 @@ class DegradationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.target = Path(self.tmp.name)
+        _seed_python(self.target)  # single Python ecosystem, no resolvable linter
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -341,6 +356,7 @@ class DetectTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.target = Path(self.tmp.name)
+        _seed_python(self.target)  # ecosystem marker so detection fires
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -379,6 +395,319 @@ class CliBasicsTests(unittest.TestCase):
     def test_no_subcommand_exits_2(self):
         result = run_health()
         self.assertEqual(result.returncode, 2)
+
+
+# A representative `eslint --format json` payload: two files, three messages
+# total across two distinct ruleIds.
+ESLINT_JSON_THREE_MSGS = json.dumps([
+    {
+        "filePath": "/x/a.js",
+        "messages": [
+            {"ruleId": "no-unused-vars", "severity": 2, "message": "x"},
+            {"ruleId": "semi", "severity": 1, "message": "y"},
+        ],
+        "errorCount": 1,
+        "warningCount": 1,
+    },
+    {
+        "filePath": "/x/b.js",
+        "messages": [
+            {"ruleId": "no-unused-vars", "severity": 2, "message": "z"},
+        ],
+        "errorCount": 1,
+        "warningCount": 0,
+    },
+])
+
+ESLINT_JSON_CLEAN = json.dumps([
+    {"filePath": "/x/a.js", "messages": [], "errorCount": 0, "warningCount": 0},
+])
+
+# A ruff complexity-probe payload (one function over the C901 threshold).
+RUFF_COMPLEXITY_JSON = (
+    '[{"code": "C901", "filename": "a.py", "location": {"row": 5, "column": 1}}]'
+)
+
+
+# -------------------- TableExtensibilityTests --------------------
+
+
+class TableExtensibilityTests(unittest.TestCase):
+    """AC #1 — ecosystems live in a data structure, iterated; adding one is a
+    table entry, not a control-flow fork."""
+
+    def setUp(self):
+        self._h = _load_health()
+
+    def test_ecosystems_are_a_table(self):
+        names = {eco.name for eco in self._h.ECOSYSTEMS}
+        self.assertIn("python", names)
+        self.assertIn("node", names)
+
+    def test_each_ecosystem_has_required_fields(self):
+        for eco in self._h.ECOSYSTEMS:
+            self.assertTrue(callable(eco.detect))
+            self.assertTrue(callable(eco.resolve_primary))
+            self.assertTrue(callable(eco.summarize_primary))
+            self.assertTrue(eco.no_linter_msg)
+            self.assertIsInstance(eco.advisory_probes, list)
+
+
+# -------------------- NodeDetectionTests --------------------
+
+
+class NodeDetectionTests(unittest.TestCase):
+    """AC #1 / AC #2 — package.json selects the Node ecosystem; eslint
+    resolves on PATH and via npx."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        _seed_node(self.target)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_node_marker_selects_node_ecosystem(self):
+        matches = self._h._detect_ecosystems(self.target)
+        names = [eco.name for eco in matches]
+        self.assertEqual(names, ["node"])
+
+    def test_eslint_resolves_on_path(self):
+        def fake_which(name):
+            return "/usr/bin/eslint" if name == "eslint" else None
+        with patch.object(self._h.shutil, "which", side_effect=fake_which):
+            argv = self._h.resolve_lint_command(self.target)
+        self.assertIsNotNone(argv)
+        self.assertEqual(argv[0], "eslint")
+        self.assertIn("--format", argv)
+        self.assertIn("json", argv)
+
+    def test_eslint_resolves_via_npx(self):
+        def fake_which(name):
+            return "/usr/bin/npx" if name == "npx" else None
+        with patch.object(self._h.shutil, "which", side_effect=fake_which):
+            argv = self._h.resolve_lint_command(self.target)
+        self.assertIsNotNone(argv)
+        self.assertEqual(argv[:2], ["npx", "eslint"])
+
+    def test_node_no_linter_degrades_exit_2(self):
+        with patch.object(self._h.shutil, "which", return_value=None):
+            code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 2)
+
+
+# -------------------- EslintSummaryTests --------------------
+
+
+class EslintSummaryTests(unittest.TestCase):
+    """AC #2 — eslint JSON parsed into count (total messages) + top ruleIds;
+    exit 1 on findings, 0 on clean."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        _seed_node(self.target)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_summarize_eslint_counts_messages_and_top_rules(self):
+        count, top = self._h._summarize_eslint(ESLINT_JSON_THREE_MSGS)
+        self.assertEqual(count, 3)
+        self.assertEqual(top[0], "no-unused-vars")  # most common ruleId
+        self.assertIn("semi", top)
+
+    def test_eslint_findings_exit_1_with_summary(self):
+        stdout_buf = []
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["eslint", "--format", "json", "."]):
+            with patch.object(self._h, "_run_advisory_probes", return_value=[]):
+                with patch.object(self._h.subprocess, "run") as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=1, stdout=ESLINT_JSON_THREE_MSGS, stderr="")
+                    with patch("sys.stdout") as mock_out:
+                        mock_out.write = lambda s: stdout_buf.append(s)
+                        code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 1)
+        out = "".join(stdout_buf)
+        self.assertIn("3", out)
+        self.assertIn("no-unused-vars", out)
+
+    def test_eslint_clean_exit_0(self):
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["eslint", "--format", "json", "."]):
+            with patch.object(self._h, "_run_advisory_probes", return_value=[]):
+                with patch.object(self._h.subprocess, "run") as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0, stdout=ESLINT_JSON_CLEAN, stderr="")
+                    code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0)
+
+
+# -------------------- PrettierAdvisoryTests --------------------
+
+
+class PrettierAdvisoryTests(unittest.TestCase):
+    """AC #2 / AC #3 — prettier is an advisory probe: its signal appears in
+    the summary but does NOT flip a clean eslint run's exit code."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        _seed_node(self.target)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_prettier_signal_does_not_flip_clean_exit(self):
+        # eslint clean (rc 0) but prettier reports files needing formatting
+        # (rc 1). Exit code must stay 0; prettier line appears in the summary.
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            if argv[0] == "eslint" or "eslint" in argv:
+                return MagicMock(returncode=0, stdout=ESLINT_JSON_CLEAN, stderr="")
+            # prettier --check: non-zero + a file path on stdout
+            return MagicMock(returncode=1, stdout="src/a.js\n", stderr="")
+
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["eslint", "--format", "json", "."]):
+            with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                with patch("sys.stdout") as mock_out:
+                    mock_out.write = lambda s: stdout_buf.append(s)
+                    code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0, "prettier (advisory) must not flip the exit code")
+        out = "".join(stdout_buf).lower()
+        self.assertIn("prettier", out, "prettier signal must appear in the summary")
+
+    def test_prettier_clean_reports_nothing(self):
+        line = self._h._summarize_prettier_probe(0, "", "")
+        self.assertIsNone(line)
+
+
+# -------------------- ComplexityAdvisoryTests --------------------
+
+
+class ComplexityAdvisoryTests(unittest.TestCase):
+    """AC #3 — Python complexity is an advisory probe: signal appears in the
+    summary, doesn't change the exit code, best-effort failure swallowed."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        _seed_python(self.target)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_complexity_signal_in_summary_clean_primary(self):
+        # ruff primary clean (rc 0); complexity probe reports one function.
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            if "--select" in argv:  # the complexity probe
+                return MagicMock(returncode=1, stdout=RUFF_COMPLEXITY_JSON, stderr="")
+            return MagicMock(returncode=0, stdout="[]", stderr="")
+
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["ruff", "check", "--output-format=json", "."]):
+            with patch.object(self._h.shutil, "which", return_value="/usr/bin/ruff"):
+                with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                    with patch("sys.stdout") as mock_out:
+                        mock_out.write = lambda s: stdout_buf.append(s)
+                        code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0, "complexity (advisory) must not flip the exit code")
+        out = "".join(stdout_buf).lower()
+        self.assertIn("complexity", out)
+        self.assertIn("c901", out)
+
+    def test_complexity_probe_best_effort_swallows_failure(self):
+        # The complexity probe raises on start; the run must not crash and
+        # must report nothing for complexity.
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            if "--select" in argv:
+                raise FileNotFoundError("ruff vanished mid-run")
+            return MagicMock(returncode=0, stdout="[]", stderr="")
+
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["ruff", "check", "--output-format=json", "."]):
+            with patch.object(self._h.shutil, "which", return_value="/usr/bin/ruff"):
+                with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                    with patch("sys.stdout") as mock_out:
+                        mock_out.write = lambda s: stdout_buf.append(s)
+                        code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0)
+        out = "".join(stdout_buf).lower()
+        self.assertNotIn("complexity", out)
+
+    def test_complexity_probe_unparseable_reports_nothing(self):
+        line = self._h._summarize_complexity_probe(1, "not json at all", "")
+        self.assertIsNone(line)
+
+
+# -------------------- MixedAndUnknownTests --------------------
+
+
+class MixedAndUnknownTests(unittest.TestCase):
+    """AC #4 — mixed (both markers) and unknown (no markers, no override)
+    degrade to exit 2 + a recommendation; never a traceback."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_mixed_ecosystems_exit_2(self):
+        _seed_python(self.target)
+        _seed_node(self.target)
+        with patch.object(self._h.shutil, "which", return_value="/usr/bin/x"):
+            code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 2)
+
+    def test_mixed_recommendation_names_both_and_override(self):
+        _seed_python(self.target)
+        _seed_node(self.target)
+        msg = self._h._degradation_message(self.target).lower()
+        self.assertIn("python", msg)
+        self.assertIn("node", msg)
+        self.assertIn(".jig/lint-command", msg)
+
+    def test_unknown_ecosystem_exit_2(self):
+        # No markers, no override → exit 2 + a recommendation.
+        with patch.object(self._h.shutil, "which", return_value="/usr/bin/x"):
+            code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 2)
+
+    def test_unknown_recommendation_mentions_ecosystem_and_override(self):
+        msg = self._h._degradation_message(self.target).lower()
+        self.assertIn("ecosystem", msg)
+        self.assertIn(".jig/lint-command", msg)
+
+    def test_mixed_no_traceback_via_cli(self):
+        _seed_python(self.target)
+        _seed_node(self.target)
+        result = run_health("check", str(self.target))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("traceback", (result.stdout + result.stderr).lower())
+
+    def test_override_wins_over_mixed(self):
+        # Even with both markers, a .jig/lint-command override bypasses
+        # detection entirely (preserves 060-01 semantics).
+        _seed_python(self.target)
+        _seed_node(self.target)
+        _write(self.target / ".jig" / "lint-command", "my-linter src\n")
+        argv = self._h.resolve_lint_command(self.target)
+        self.assertEqual(argv, shlex.split("my-linter src"))
 
 
 if __name__ == "__main__":

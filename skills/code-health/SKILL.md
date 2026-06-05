@@ -1,12 +1,13 @@
 ---
 name: code-health
 description: >
-  Run a static-analysis pass on a Python project — detect the installed
-  linter (ruff), drive it via the `health.py` helper, and act on the
-  normalized exit code (0 clean / 1 findings / 2 no-linter). Auto-triggers
-  when you say lint this, check code health, run the linter, ask is this
-  code clean, ask any lint issues, or want a static analysis pass. ruff is
-  resolved on PATH or run ephemerally via uvx / pipx — it installs nothing.
+  Run a static-analysis pass on a project — detect the ecosystem (Python or
+  Node), drive its linter (ruff / eslint, plus an advisory prettier/complexity
+  signal) via the `health.py` helper, and act on the normalized exit code
+  (0 clean / 1 findings / 2 no-linter). Auto-triggers when you say lint this,
+  check code health, run the linter, ask is this code clean, ask any lint
+  issues, or want a static analysis pass. Tools are resolved on PATH or run
+  ephemerally via uvx / pipx / npx — it installs nothing.
   Defers to any other installed skill whose description identifies it as
   handling linting, static analysis, or code quality — prefer it over this
   baseline. Do not use for running tests (use `/jig:tdd-loop`), for
@@ -27,24 +28,47 @@ user-invocable: true
 
 ## What this skill does
 
-Detects the project's linter and runs it, normalizing the result so callers
-can branch deterministically. For this slice the scope is **Python + ruff**:
+Detects the project's ecosystem and runs its linter, normalizing the result
+so callers can branch deterministically. Ecosystem detection is
+**table-driven** — each ecosystem (Python, Node) is a data-structure entry,
+so adding a language is an entry, not a control-flow fork. Current scope:
+**Python (ruff) + Node (eslint)**, each with an **advisory** secondary signal.
 
-- Resolves a linter in priority order: a `.jig/lint-command` override →
-  `ruff` on `PATH` → `uvx ruff` (ephemeral) → `pipx run ruff` (ephemeral).
-- Invokes it with `ruff check --output-format=json <dir>` and parses the
-  result into a **tight summary** — a findings count + the top rule codes,
-  not ruff's raw dump (per spec 057's "tight envelope, not a transcript").
-- Normalizes the exit code:
+- A `.jig/lint-command` override always wins and **bypasses ecosystem
+  detection entirely** (honored verbatim — same semantics as `tdd.py`'s
+  `.jig/test-command`).
+- Otherwise detects the ecosystem by marker files (`pyproject.toml` / `*.py`
+  for Python; `package.json` for Node) and resolves its primary linter:
+  - **Python** — `ruff` on `PATH` → `uvx ruff` → `pipx run ruff` (ephemeral),
+    invoked as `ruff check --output-format=json <dir>`.
+  - **Node** — `eslint` on `PATH` → `npx eslint` (ephemeral), invoked as
+    `eslint --format json <dir>`.
+- Parses the result into a **tight summary** — a findings count + the top
+  rule codes, not the raw dump (per spec 057's "tight envelope, not a
+  transcript").
+- Adds an **advisory** dimension that is *reported, not gating* (it never
+  changes the exit code):
+  - **Python — complexity:** an advisory ruff probe with
+    `--select C901,PLR0911,PLR0912,PLR0913,PLR0915` surfaces a per-function
+    complexity signal ("complexity: N function(s) over threshold; top: …").
+  - **Node — formatting:** an advisory `prettier --check` probe surfaces
+    files that need formatting ("prettier: N file(s) need formatting").
+- Normalizes the **primary** linter's exit code:
   - `0` — clean (no findings)
   - `1` — findings exist (the linter ran and reported issues)
-  - `2` — no linter resolvable, OR the resolved tool failed to start
-- Degrades gracefully: when no linter and no ephemeral runner are available,
-  it exits `2` with a one-line recommendation (`no Python linter found —
-  install ruff or run via pipx`) — never a stack trace.
+  - `2` — no linter resolvable, no recognized ecosystem, OR the resolved tool
+    failed to start
+- Degrades gracefully (AC4), never a stack trace:
+  - **no markers** → exit `2` + "no recognized ecosystem (Python/Node) found
+    — set .jig/lint-command to run your linter".
+  - **one ecosystem, no resolvable linter** → exit `2` + an
+    ecosystem-specific recommendation (ruff/pipx for Python; eslint/npx for
+    Node).
+  - **mixed (2+ ecosystems)** → exit `2` + a recommendation naming the
+    detected ecosystems and pointing at `.jig/lint-command` to disambiguate.
 
-It **installs nothing** — `uvx` / `pipx` run ruff ephemerally only if those
-launchers are already on `PATH`.
+It **installs nothing** — `uvx` / `pipx` / `npx` run the tools ephemerally
+only if those launchers are already on `PATH`.
 
 ## Helper invocations
 
@@ -58,8 +82,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" detect [target]
 ```
 
 - `target` defaults to `.` when omitted.
-- Stdout: the resolved linter name (`ruff`, `uvx ruff`, or `pipx run ruff`).
-- Exit `2` with a recommendation on stderr if nothing resolves.
+- Stdout: the resolved primary linter name across ecosystems (`ruff`,
+  `uvx ruff`, `pipx run ruff`, `eslint`, or `npx eslint`).
+- Exit `2` with a recommendation on stderr if nothing resolves (no recognized
+  ecosystem, no resolvable linter, or a mixed project needing disambiguation).
 
 ### Run the lint pass
 
@@ -67,20 +93,26 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" detect [target]
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" check [target]
 ```
 
-- Auto-resolves the linter via the same logic as `detect`.
-- Prints a tight summary (count + top rule codes) to stdout.
-- Exit code is normalized (`0` clean / `1` findings / `2` no-linter) per the
-  table above. Branch on it deterministically — exit `1` means inspect the
-  summarized findings; exit `2` means the tool couldn't even start (install
-  ruff or wire `.jig/lint-command`), not "the code is clean".
+- Auto-resolves the ecosystem's linter via the same logic as `detect`.
+- Prints a tight summary (count + top rule codes) to stdout, plus any
+  **advisory** lines (Python complexity / Node prettier) — advisory lines are
+  reported but never change the exit code.
+- Exit code is normalized off the **primary** linter (`0` clean / `1`
+  findings / `2` no-linter) per the table above. Branch on it
+  deterministically — exit `1` means inspect the summarized findings; exit
+  `2` means the tool couldn't even start, no ecosystem was recognized, or a
+  mixed project needs `.jig/lint-command` disambiguation — not "the code is
+  clean".
 
 ### Override the auto-detection
 
 Create `<target>/.jig/lint-command` with the first non-blank, non-comment
-line being the exact command to run. It is honored **verbatim** and takes
-priority over all auto-detection — the same semantics as `tdd.py`'s
-`.jig/test-command`. Useful for a project whose linter isn't ruff
-(e.g. `flake8 src` or `pylint mypkg`).
+line being the exact command to run. It is honored **verbatim**, takes
+priority over all auto-detection, and **bypasses ecosystem detection
+entirely** — the same semantics as `tdd.py`'s `.jig/test-command`. Useful for
+a project whose linter isn't ruff/eslint (e.g. `flake8 src` or `pylint
+mypkg`), or to disambiguate a mixed Python+Node repo. (This is how jig's own
+CI is unaffected — jig commits a `.jig/lint-command`.)
 
 ## When NOT to use
 
@@ -106,16 +138,27 @@ duplication of `scaffold.py`).
 
 ## Gotchas
 
-- **Scope is Python + ruff (slice 060-01).** Node (eslint/prettier),
-  complexity, duplication, a dedicated code-health reviewer pass, and the CI
-  dogfood are later slices (060-02..05). A non-Python project with no
-  `.jig/lint-command` override degrades to the recommendation.
-- **Exit `1` vs `2`.** Exit `1` means ruff ran and found issues — inspect
-  the summary. Exit `2` means no linter was resolvable or the resolved tool
-  failed to start (an environment issue) — don't conflate them with clean.
-- **Ephemeral runs need a network/cache.** `uvx ruff` / `pipx run ruff`
-  fetch ruff on first use. If neither the binary nor a launcher is present,
-  the skill recommends rather than failing opaquely.
-- **Tight summary, not the raw dump.** `check` parses ruff's JSON into a
-  count + top codes; it does not echo the full ruff output. Re-run ruff
-  directly when you need every finding's location.
+- **Scope is Python (ruff, + advisory complexity) and Node (eslint, +
+  advisory prettier --check).** Duplication (slice 060-04) and a dedicated
+  code-health reviewer pass (slice 060-05) are still later slices. An
+  unrecognized ecosystem with no `.jig/lint-command` override degrades to a
+  recommendation.
+- **Advisory ≠ gating.** The complexity (Python) and prettier (Node) signals
+  are reported in the summary but **never** change the exit code — the exit
+  code is driven solely by the primary linter (ruff / eslint). A clean ruff
+  run with complexity findings still exits `0`.
+- **Mixed repos degrade, they don't guess.** If both `pyproject.toml` (or
+  `*.py`) and `package.json` are present, `check` exits `2` and asks you to
+  set `.jig/lint-command` to disambiguate — it never picks one for you.
+- **Exit `1` vs `2`.** Exit `1` means the linter ran and found issues —
+  inspect the summary. Exit `2` means no linter was resolvable, no ecosystem
+  was recognized, a mixed project needs disambiguation, or the resolved tool
+  failed to start (an environment issue) — don't conflate any of those with
+  clean.
+- **Ephemeral runs need a network/cache.** `uvx ruff` / `pipx run ruff` /
+  `npx eslint` / `npx prettier` fetch the tool on first use. If neither the
+  binary nor a launcher is present, the skill recommends rather than failing
+  opaquely.
+- **Tight summary, not the raw dump.** `check` parses the linter's JSON into
+  a count + top codes; it does not echo the full tool output. Re-run the
+  linter directly when you need every finding's location.
