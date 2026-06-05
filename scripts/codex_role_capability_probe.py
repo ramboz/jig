@@ -17,11 +17,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 
