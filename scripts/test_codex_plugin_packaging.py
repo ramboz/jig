@@ -145,6 +145,44 @@ class CodexPluginBuilderTests(unittest.TestCase):
         self.assertIn("--host codex", text)
         self.assertNotIn("${CODEX_PROJECT_DIR:-$PWD}/.codex/skills", text)
 
+    def test_builder_renders_codex_override_guidance(self):
+        for skill in ("pr-review", "arch-review", "contracts"):
+            text = (self.plugin_dir / "skills" / skill / "SKILL.md").read_text()
+            self.assertIn(
+                f"$HOME/.agents/skills/{skill}/",
+                text,
+                f"Codex plugin {skill} should name Codex's user skill path",
+            )
+            self.assertNotIn(
+                "~/.claude/skills",
+                text,
+                f"Codex plugin {skill} leaked Claude skill path guidance",
+            )
+            self.assertNotIn(
+                "~/.codex/skills",
+                text,
+                f"Codex plugin {skill} invented an unsupported skill path",
+            )
+            self.assertNotIn(
+                "Codex skill router",
+                text,
+                f"Codex plugin {skill} should use documented skill-selection wording",
+            )
+            self.assertNotIn(
+                "router will prefer",
+                text,
+                f"Codex plugin {skill} should not promise router precedence",
+            )
+
+        pr_review = (
+            self.plugin_dir / "skills" / "pr-review" / "SKILL.md"
+        ).read_text()
+        self.assertIn(
+            "Codex-rendered guidance keeps richer-skill deferral to "
+            "interactive skill selection or explicit invocation",
+            pr_review,
+        )
+
     def test_builder_copies_hooks_templates_and_agent_prompts(self):
         for rel in (
             "hooks/hooks.json",

@@ -103,6 +103,7 @@ def render_codex_plugin_skill_body(body: str) -> str:
     out = out.replace("Claude Code", "Codex")
     out = out.replace("Claude", "Codex")
     out = scaffold_mod.CodexScaffoldRenderer.finalize_codex_migrate_skill(out)
+    out = scaffold_mod.CodexScaffoldRenderer.rewrite_skill_override_guidance(out)
     scaffold_invocation = 'python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" \\\n'
     if scaffold_invocation in out and "--host codex" not in out:
         out = out.replace(
