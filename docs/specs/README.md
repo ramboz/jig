@@ -195,6 +195,11 @@
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-04 — Duplication: native-first, `npx jscpd` fallback | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-05 — Distinct code-health reviewer pass | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-06 — Tier-2 scaffold-the-floor (opt-in) | DEFERRED |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-01 - `dist/claude-plugin` generated artifact | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-02 - host-explicit release archives | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-03 - artifact-first install docs | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-04 - Claude artifact install verification | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-05 - Codex artifact install verification | DRAFT |  |
 
 ## Deferred slices
 
