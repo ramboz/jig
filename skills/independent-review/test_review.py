@@ -1543,8 +1543,8 @@ class TestQualitySnapshotHelperTests(unittest.TestCase):
         Verifies the `quality.py exited non-zero` fallback message.
 
         Closes the AC3 coverage gap flagged at review."""
-        from unittest import mock
         from types import SimpleNamespace
+        from unittest import mock
         module = self._import_review_module()
         root = Path(tempfile.mkdtemp(prefix="jig-rev-tq-nzexit-"))
         self._tmpdirs.append(root)

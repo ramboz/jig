@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEALTH_PY = REPO_ROOT / "skills" / "code-health" / "health.py"

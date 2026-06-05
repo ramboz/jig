@@ -243,11 +243,11 @@ def render_inventory(inv: Inventory, project_dir: Path) -> str:
                     f"spike memos (inventoried only; spike workflow is a "
                     f"separate jig gap) |")
     if inv.workflow is not None:
-        rows.append(f"| `docs/workflow.md` | 1 | workflow doc present |")
+        rows.append("| `docs/workflow.md` | 1 | workflow doc present |")
     if inv.architecture is not None:
-        rows.append(f"| `docs/architecture.md` | 1 | architecture doc present |")
+        rows.append("| `docs/architecture.md` | 1 | architecture doc present |")
     if inv.product_vision is not None:
-        rows.append(f"| `docs/product-vision.md` | 1 | product-vision doc present |")
+        rows.append("| `docs/product-vision.md` | 1 | product-vision doc present |")
     if inv.custom_skills:
         names = ", ".join(f"`{p.name}`" for p in inv.custom_skills)
         rows.append(f"| `.claude/skills/` | {len(inv.custom_skills)} | "
@@ -1367,7 +1367,7 @@ def _plan_split_slices(spec_md: Path):
     spec_dir = spec_md.parent
     headings = list(_SLICE_H2_RE.finditer(text))
     plan = []
-    for i, m in enumerate(headings):
+    for m in headings:
         spec_num = m.group(1)
         slice_num = m.group(2)
         shortname = m.group(3).strip()

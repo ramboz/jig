@@ -6,7 +6,6 @@ Run from the repo root:
 """
 
 import importlib.util
-import json
 import os
 import re
 import subprocess
@@ -495,7 +494,6 @@ class AppendLockTests(unittest.TestCase):
         # context manager; we hold it via threading.Event coordination.
         acquired = threading.Event()
         release = threading.Event()
-        outcome = {}
 
         def holder():
             lock_dir = memory._resolve_lock_dir(self.target)

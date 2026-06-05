@@ -35,7 +35,6 @@ from typing import Callable, Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import install_contract  # noqa: E402  — the plugin/release install contract
 
-
 # A field-level validator takes the parsed manifest data and returns a list
 # of human-readable problem strings (empty == valid). Routing plugin.json and
 # marketplace.json through `install_contract` keeps the manifest contract in

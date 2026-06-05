@@ -16,7 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import install_contract  # noqa: E402
-import scaffold_contract  # noqa: E402  — slice 047-02 scaffold contract
 import verify_install  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -344,8 +343,8 @@ class HeadlessChecksOnFixtureTests(unittest.TestCase):
             self.assertIn("reviewer", msg)
 
     def test_missing_skills_dir_fails(self):
-        import tempfile
         import shutil
+        import tempfile
 
         with tempfile.TemporaryDirectory() as td:
             root = _make_fake_plugin_root(Path(td))
@@ -446,8 +445,8 @@ class PluginModeSkillContractTests(unittest.TestCase):
             self.assertTrue(passed, msg)
 
     def test_missing_expected_skill_fails_and_is_named(self):
-        import tempfile
         import shutil
+        import tempfile
 
         with tempfile.TemporaryDirectory() as td:
             root = _make_fake_plugin_root(Path(td))
@@ -571,8 +570,8 @@ class ScaffoldModeChecksTests(unittest.TestCase):
             )
 
     def test_scaffold_skills_check_fails_when_missing(self):
-        import tempfile
         import shutil
+        import tempfile
 
         with tempfile.TemporaryDirectory() as td:
             project = _make_fake_scaffold_root(Path(td))
@@ -582,8 +581,8 @@ class ScaffoldModeChecksTests(unittest.TestCase):
             self.assertIn("skill", msg.lower())
 
     def test_scaffold_agents_check_fails_when_missing(self):
-        import tempfile
         import shutil
+        import tempfile
 
         with tempfile.TemporaryDirectory() as td:
             project = _make_fake_scaffold_root(Path(td))
@@ -593,8 +592,8 @@ class ScaffoldModeChecksTests(unittest.TestCase):
             self.assertIn("agent", msg.lower())
 
     def test_scaffold_hook_scripts_check_fails_when_missing(self):
-        import tempfile
         import shutil
+        import tempfile
 
         with tempfile.TemporaryDirectory() as td:
             project = _make_fake_scaffold_root(Path(td))

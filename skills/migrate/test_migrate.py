@@ -203,7 +203,8 @@ class AmbiguityTests(unittest.TestCase):
         """Reviewer-flagged latent bug: prior version filtered README only
         for decisions/adrs/skills/agents; slices/spikes were unfiltered.
         A `docs/slices/README.md` would have been counted as a slice."""
-        import tempfile, shutil
+        import shutil
+        import tempfile
         tmpdir = Path(tempfile.mkdtemp(prefix="jig-mig-slice-readme-"))
         try:
             slices = tmpdir / "docs" / "slices"
@@ -225,7 +226,8 @@ class AmbiguityTests(unittest.TestCase):
 
     def test_readme_excluded_from_spikes_count(self):
         """Same latent bug, spike side."""
-        import tempfile, shutil
+        import shutil
+        import tempfile
         tmpdir = Path(tempfile.mkdtemp(prefix="jig-mig-spike-readme-"))
         try:
             spikes = tmpdir / "docs" / "spikes"
@@ -248,7 +250,8 @@ class AmbiguityTests(unittest.TestCase):
         `.claude/agents/README.md` as a custom agent — that's a docs
         file, not an agent definition. README.md must be filtered out
         the same way it's filtered from decisions/adrs."""
-        import tempfile, shutil
+        import shutil
+        import tempfile
         tmpdir = Path(tempfile.mkdtemp(prefix="jig-mig-readme-"))
         try:
             agents = tmpdir / ".claude" / "agents"
@@ -1236,12 +1239,12 @@ class SplitSlicesTests(unittest.TestCase):
         sys.path.insert(0, str(REPO_ROOT / "skills" / "_common"))
         from parsing import iter_slices
         locs = list(iter_slices(self.spec_md))
-        labels = sorted(l.label for l in locs)
+        labels = sorted(sl.label for sl in locs)
         self.assertEqual(labels, ["999-01 — alpha", "999-02 — beta"])
         # All come from slice files now, not spec.md
-        self.assertTrue(all(l.path.name.startswith("slice-")
-                            for l in locs),
-                        f"expected all slice files, got: {[l.path.name for l in locs]}")
+        self.assertTrue(all(sl.path.name.startswith("slice-")
+                            for sl in locs),
+                        f"expected all slice files, got: {[sl.path.name for sl in locs]}")
 
     # AC #7-ish: --dry-run writes nothing, exit 0
     def test_dry_run_exits_zero(self):

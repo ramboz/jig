@@ -99,7 +99,8 @@ class MemoryScanHookTests(unittest.TestCase):
 
     def test_silent_on_known_terms_in_glossary(self):
         subprocess.run(
-            [sys.executable, str(MEMORY), "add-term", "Quartzite", "a metamorphic rock", str(self.target)],
+            [sys.executable, str(MEMORY), "add-term", "Quartzite",
+             "a metamorphic rock", str(self.target)],
             capture_output=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
             check=True,
         )
@@ -188,7 +189,8 @@ class TaskCaptureHookTests(unittest.TestCase):
         self.assertIsNone(out)
 
     def test_flags_we_should_also(self):
-        _, out = self._capture_output("the change works. we should also update the docs at some point.")
+        _, out = self._capture_output(
+            "the change works. we should also update the docs at some point.")
         self.assertIsNotNone(out)
         self.assertIn("triage", out["additionalContext"].lower())
 

@@ -23,11 +23,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import team_signal  # noqa: F401  (re-exported for test monkeypatching)
 from _common.atomic_io import atomic_write_text
-from _common import team_signal
-from _common.team_signal import team_context_drift
-from _common.parsing import iter_slices as _iter_slices_common
-from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
@@ -37,8 +34,10 @@ from _common.parsing import (
     parse_frontmatter,
     set_frontmatter_field,
 )
+from _common.parsing import iter_slices as _iter_slices_common
+from _common.parsing import load_slice as _load_slice_common
 from _common.review_evidence import validate_evidence
-
+from _common.team_signal import team_context_drift
 
 VALID_STATUSES = (
     "DRAFT",

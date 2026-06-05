@@ -16,12 +16,13 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
+
 # Team-signal detection + the .jig/no-people-md marker contract live in
 # _common per ADR-0002's rule-of-three (slice 050-02): scaffold-init,
 # memory-sync, and workflow.py stale are the three callers. Re-exported
@@ -35,7 +36,6 @@ from _common.team_signal import (  # noqa: F401  (re-export)
     team_signal_fires,
     write_no_people_md_marker,
 )
-
 
 # Tier 0 always installs. Tier 1 is gated on test signals (per Spike 001a:
 # "default for most projects" = "most projects have tests, so most install tier-1").

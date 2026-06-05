@@ -30,7 +30,6 @@ from pathlib import Path
 
 from _common.atomic_io import atomic_write_text
 
-
 # The team signal fires at >= 2 distinct contributors. Lives here only; both
 # `team_signal_fires` and (via re-export) scaffold-init's `detect_team`
 # read it, so the threshold can never drift between callers (spec 050

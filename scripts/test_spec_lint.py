@@ -19,7 +19,6 @@ SPEC_LINT = REPO_ROOT / "scripts" / "spec_lint.py"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import spec_lint as sl
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -285,7 +284,7 @@ class ContradictionDetectionTests(unittest.TestCase):
 class LintFunctionTests(unittest.TestCase):
 
     def setUp(self):
-        import tempfile, os
+        import tempfile
         self._tmpdir = tempfile.mkdtemp()
 
     def tearDown(self):

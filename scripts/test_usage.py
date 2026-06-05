@@ -36,7 +36,6 @@ USAGE = REPO_ROOT / "scripts" / "usage.py"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import usage as uu
 
-
 # ---------------------------------------------------------------------------
 # Fixture helpers — build a synthetic ~/.claude/projects tree.
 # ---------------------------------------------------------------------------

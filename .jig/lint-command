@@ -1,0 +1,1 @@
+pipx run --spec ruff==0.15.16 ruff check --output-format=json .

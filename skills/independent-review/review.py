@@ -56,10 +56,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common.parsing import load_slice as _load_slice_common
-from _common.parsing import SliceLookupError
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
+from _common.parsing import SliceLookupError
+from _common.parsing import load_slice as _load_slice_common
 
 
 class ReviewError(RuntimeError):

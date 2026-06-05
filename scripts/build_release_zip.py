@@ -30,7 +30,6 @@ import zipfile
 from pathlib import Path
 from typing import Iterable
 
-
 # Files / directories to include in the zip, relative to the source root.
 # Directories are walked recursively; individual files are copied as-is.
 _INCLUDE_ROOTS: tuple[str, ...] = (
@@ -259,7 +258,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--version",
         default=None,
-        help="release version (must match .claude-plugin/plugin.json's version) — required in build mode",
+        help="release version (must match .claude-plugin/plugin.json's version) "
+             "— required in build mode",
     )
     p.add_argument(
         "--output",

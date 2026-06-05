@@ -228,7 +228,9 @@ def _extract_kind(section: str) -> str:
             value = line.partition(":")[2].strip()
             if "#" in value and not (value.startswith('"') or value.startswith("'")):
                 value = value.split("#", 1)[0].rstrip()
-            if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
+            if len(value) >= 2 and (
+                (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
+            ):
                 value = value[1:-1]
             return value
     return ""
@@ -460,7 +462,7 @@ def lint_all(specs: list, strict: bool = False) -> tuple:
     summary = (
         f"\n## Summary\n\n"
         f"Linted {len(specs)} spec(s); "
-        f"{'no contradictions found' if worst == 0 else 'contradictions found (exit ' + str(worst) + ')'}.\n"
+        f"{'no contradictions found' if worst == 0 else f'contradictions found (exit {worst})'}.\n"
     )
     parts.append(summary)
     return "\n\n".join(parts), worst

@@ -1,6 +1,5 @@
 """Tests for skills/_common/parsing.py."""
 
-import os
 import shutil
 import sys
 import tempfile
@@ -10,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from parsing import (
     FRONTMATTER_TRUTHY,
+    SliceLocation,
+    SliceLookupError,
     check_deviation_log,
     clear_frontmatter_field,
     find_slice_file,
@@ -19,10 +20,7 @@ from parsing import (
     load_slice,
     parse_frontmatter,
     set_frontmatter_field,
-    SliceLocation,
-    SliceLookupError,
 )
-
 
 SPEC_TWO_SLICES = """\
 # Spec X
@@ -452,7 +450,7 @@ class IterSlicesTests(_SpecDirFixture):
             "## Slice X-02 — beta\n\nBody beta.\n"
         )
         locs = list(iter_slices(spec_path))
-        self.assertEqual([l.label for l in locs], ["X-01 — alpha", "X-02 — beta"])
+        self.assertEqual([sl.label for sl in locs], ["X-01 — alpha", "X-02 — beta"])
         for loc in locs:
             self.assertEqual(loc.path, spec_path)
             self.assertIn("Slice " + loc.label[:4], loc.text[loc.start:loc.end])
@@ -464,13 +462,13 @@ class IterSlicesTests(_SpecDirFixture):
         spec_path.write_text("# Spec X\n\n## Overview\n\nNo slices here.\n")
 
         locs = list(iter_slices(spec_path))
-        labels = [l.label for l in locs]
+        labels = [sl.label for sl in locs]
         self.assertEqual(labels, [
             "018-01 — parser-foundation-and-dual-read",
             "018-02 — caller-recognition",
         ])
         # Each yielded loc maps to a distinct slice file
-        paths = {l.path for l in locs}
+        paths = {sl.path for sl in locs}
         self.assertEqual(len(paths), 2)
         self.assertTrue(all(p.suffix == ".md" and p.name != "spec.md"
                             for p in paths))
@@ -516,7 +514,7 @@ class IterSlicesTests(_SpecDirFixture):
         spec_path = self.tmpdir / "spec.md"
         spec_path.write_text("# Spec X\n")
         locs = list(iter_slices(spec_path))
-        self.assertEqual([l.path.name for l in locs],
+        self.assertEqual([sl.path.name for sl in locs],
                          ["slice-01-alpha.md", "slice-02-beta.md"])
 
     def test_file_with_no_slice_header_is_skipped(self):
@@ -528,7 +526,7 @@ class IterSlicesTests(_SpecDirFixture):
         spec_path = self.tmpdir / "spec.md"
         spec_path.write_text("# Spec X\n")
         locs = list(iter_slices(spec_path))
-        self.assertEqual([l.path.name for l in locs], ["slice-01-good.md"])
+        self.assertEqual([sl.path.name for sl in locs], ["slice-01-good.md"])
 
 
 # ---------- spike `kind` frontmatter (slice 029-01) ----------

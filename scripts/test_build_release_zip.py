@@ -7,7 +7,6 @@ and AC #4 (output validation gate).
 
 import io
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_release_zip  # noqa: E402
 import install_contract  # noqa: E402
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _PLUGIN_VERSION = json.loads(
@@ -152,7 +150,8 @@ class ExclusionTests(unittest.TestCase):
             self.names = set(zf.namelist())
 
     def test_no_test_files(self):
-        test_files = [n for n in self.names if Path(n).name.startswith("test_") and n.endswith(".py")]
+        test_files = [n for n in self.names
+                      if Path(n).name.startswith("test_") and n.endswith(".py")]
         self.assertEqual(
             test_files, [],
             f"zip must not contain test_*.py files; found {test_files!r}",

@@ -91,7 +91,6 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Encoded-cwd prefix derivation
 # ---------------------------------------------------------------------------
@@ -742,7 +741,7 @@ def _token_block(lines: list, inp: int, out: int, cr: int, cc: int,
     lines.append(f"  output_tokens:          {_fmt(out)}")
     lines.append(f"  cache_read_tokens:      {_fmt(cr)}")
     lines.append(f"  cache_creation_tokens:  {_fmt(cc)}")
-    lines.append(f"  ------------------------")
+    lines.append("  ------------------------")
     lines.append(f"  total_tokens:           {_fmt(total)}")
 
 
@@ -769,8 +768,8 @@ def render(rep: Report) -> str:
             f"(no spec-path mentions found in any transcript)."
         )
         lines.append("")
-        lines.append(f"  Total tokens: 0")
-        lines.append(f"  $ estimate:   n/a")
+        lines.append("  Total tokens: 0")
+        lines.append("  $ estimate:   n/a")
         lines.append("")
         _append_framing(lines, rep)
         return "\n".join(lines) + "\n"

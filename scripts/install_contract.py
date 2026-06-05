@@ -32,10 +32,8 @@ deliberately NOT modeled here.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Iterable
-
 
 # ---------------------------------------------------------------------------
 # Skills the plugin ships

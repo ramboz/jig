@@ -16,7 +16,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 # slice 032-01 AC #3 sweep targets (paths are relative to repo root).
 SWEPT_HELPERS = (
     "skills/scaffold-init/scaffold.py",

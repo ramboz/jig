@@ -34,7 +34,6 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-
 # How many distinct rule codes to surface in the tight summary (spec 057 —
 # a count + the top codes, not the raw ruff dump).
 TOP_CODES = 5

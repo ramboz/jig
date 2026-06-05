@@ -905,7 +905,8 @@ def _classify_status(section_body: str) -> str:
 def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     """Append supersession lines to both ADRs. Returns (old_path, new_path).
 
-    - Old ADR's `## Status` body gains a `Superseded by [ADR-<new>](./adr-<new>-<slug>.md) (TODAY)` line.
+    - Old ADR's `## Status` body gains a
+      `Superseded by [ADR-<new>](./adr-<new>-<slug>.md) (TODAY)` line.
     - New ADR's `## Status` body gains a `Supersedes ADR-<old>` line (plain text).
     Both Accepted (date) lines are preserved. Atomic writes; refusal-on-precondition
     happens BEFORE any file mutation (so a failed precondition never leaves either

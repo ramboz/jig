@@ -43,7 +43,6 @@ import re
 from collections import namedtuple
 from pathlib import Path
 
-
 # Tokens treated as truthy in a YAML-lite frontmatter boolean-ish field
 # (e.g. a slice's `arch_review:`). The YAML-permissive set so a hand-edit
 # isn't punished by token choice; PyYAML is not a jig dependency, so the

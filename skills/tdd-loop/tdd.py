@@ -28,7 +28,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 # Signal sets — kept in module scope so tests can introspect if needed.
 VITEST_DEPS = {"vitest"}
 JEST_DEPS = {"jest"}

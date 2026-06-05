@@ -217,7 +217,8 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             text=True,
             env=env,
         )
-        self.assertEqual(result.returncode, 2, f"gate should block; got {result.returncode}, stderr={result.stderr}")
+        self.assertEqual(result.returncode, 2,
+                         f"gate should block; got {result.returncode}, stderr={result.stderr}")
         self.assertIn("conventions.md", result.stderr.lower() + result.stdout.lower())
 
     def test_conventions_gate_allows_with_approval(self):
@@ -703,7 +704,7 @@ class SignalDetectionTests(unittest.TestCase):
                         if s.startswith("tier-1/")]
         self.assertTrue(
             tier1_skills,
-            f"tier-1 in installed_tiers but no tier-1/* in installed_skills",
+            "tier-1 in installed_tiers but no tier-1/* in installed_skills",
         )
         # And one named tier-1 skill should be present
         self.assertIn("tier-1/tdd-loop", manifest["installed_skills"])
@@ -1885,8 +1886,9 @@ class CompletionVerificationTests(unittest.TestCase):
         # of the wizard helper (scaffold itself refuses re-scaffold). We assert
         # on the completion summary directly through verify_install.
         sys.path.insert(0, str(REPO_ROOT / "scripts"))
-        import verify_install  # noqa: E402
         import io
+
+        import verify_install  # noqa: E402
 
         (self.target / "docs/specs/001-adopt-jig/spec.md").unlink()
         buf = io.StringIO()
@@ -1900,8 +1902,9 @@ class CompletionVerificationTests(unittest.TestCase):
     # AC #4 — a missing machinery artifact in an in-repo scaffold fails too.
     def test_missing_machinery_artifact_makes_verification_fail(self):
         sys.path.insert(0, str(REPO_ROOT / "scripts"))
-        import verify_install  # noqa: E402
         import io
+
+        import verify_install  # noqa: E402
 
         first = run_scaffold(self.target)
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")

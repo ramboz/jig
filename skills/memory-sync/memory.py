@@ -30,9 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common.atomic_io import atomic_write_text
 from _common import team_signal
-
+from _common.atomic_io import atomic_write_text
 
 # Heading marker used to find the Key terms list inside CLAUDE.md Hot Cache.
 HOT_CACHE_KEY_TERMS_HEADING = "### Key terms"
@@ -328,7 +327,7 @@ def _file_lock(lock_path: Path, timeout: float):
                         f"{timeout}s (another process is holding it; "
                         f"see PID in {lock_path}). Re-run, or kill the "
                         f"stale holder if it has crashed."
-                    )
+                    ) from None
                 time.sleep(0.05)
         # Lock acquired — record the holder PID for diagnostics.
         try:

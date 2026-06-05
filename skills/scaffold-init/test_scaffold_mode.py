@@ -575,14 +575,14 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
                 len(src_event), len(dst_event),
                 f"hook event {event} entry count drifted",
             )
-            for src_entry, dst_entry in zip(src_event, dst_event):
+            for src_entry, dst_entry in zip(src_event, dst_event, strict=True):
                 # matcher (when present) carries over
                 self.assertEqual(
                     src_entry.get("matcher"), dst_entry.get("matcher"),
                     f"matcher drifted in {event}",
                 )
                 # Inner hook list shape
-                for src_h, dst_h in zip(src_entry["hooks"], dst_entry["hooks"]):
+                for src_h, dst_h in zip(src_entry["hooks"], dst_entry["hooks"], strict=True):
                     self.assertEqual(src_h.get("type"), dst_h.get("type"))
                     self.assertEqual(src_h.get("timeout"), dst_h.get("timeout"))
                     self.assertEqual(src_h.get("async"), dst_h.get("async"))

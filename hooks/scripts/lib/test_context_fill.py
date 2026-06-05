@@ -16,26 +16,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from context_fill import (
-    estimate,
-    DEFAULT_WINDOW_BYTES,
-    DEFAULT_THRESHOLD,
-    RATIO,
-    DEFAULT_GROWTH_THRESHOLD,
-    GROWTH_BANDS,
     DEFAULT_COMPACT_THRESHOLD,
+    DEFAULT_GROWTH_THRESHOLD,
+    DEFAULT_READ_LEAN_BYTES,
+    DEFAULT_THRESHOLD,
+    DEFAULT_WINDOW_BYTES,
+    GROWTH_BANDS,
+    RATIO,
     _resolve_compact_threshold,
-    token_window,
-    read_tail_cache_read_tokens,
+    _resolve_read_lean_bytes,
+    compaction_nudge_text,
+    duplicate_read_nudge_text,
+    estimate,
     evaluate_growth,
+    evaluate_read,
     growth_nudge_for_turn,
     growth_nudge_text,
-    compaction_nudge_text,
-    DEFAULT_READ_LEAN_BYTES,
-    _resolve_read_lean_bytes,
-    evaluate_read,
-    read_nudge_for_turn,
-    duplicate_read_nudge_text,
     large_read_nudge_text,
+    read_nudge_for_turn,
+    read_tail_cache_read_tokens,
+    token_window,
 )
 
 
@@ -241,8 +241,8 @@ class EstimatePurityTests(unittest.TestCase):
 
     def test_does_not_print(self):
         """estimate() must not print to stdout/stderr — caller controls I/O."""
-        import io
         import contextlib
+        import io
         (self.root / "CLAUDE.md").write_text("payload")
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -761,7 +761,7 @@ class CompactionGrowthForTurnTests(unittest.TestCase):
         first = growth_nudge_for_turn(self._transcript(78, "a.jsonl"), "sess", self.state)
         self.assertIn("Active-compaction", first)
         # Drop below the compaction band (after a /compact) — silent re-arm.
-        drop = growth_nudge_for_turn(self._transcript(50, "b.jsonl"), "sess", self.state)
+        growth_nudge_for_turn(self._transcript(50, "b.jsonl"), "sess", self.state)
         # Re-cross → compaction message fires again.
         reclimb = growth_nudge_for_turn(self._transcript(78, "c.jsonl"), "sess", self.state)
         self.assertIsNotNone(reclimb)

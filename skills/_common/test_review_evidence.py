@@ -17,7 +17,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import review_evidence as ev  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Fixture builders — synthetic spec dirs + verdict files in temp dirs.
 # Per the slice brief: fixtures live in temp dirs, NEVER in the real

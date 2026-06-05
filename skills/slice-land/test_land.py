@@ -676,6 +676,7 @@ class SkillSurfaceTests(unittest.TestCase):
 
 import importlib.util as _ilu
 
+
 # Load land.py as a module for direct-call tests (needed for mocking).
 # importlib bypasses the hyphen-in-directory-name limitation.
 def _load_land():
@@ -834,7 +835,7 @@ class ExecuteDryRunTests(unittest.TestCase):
         as `origin/main`, so the pre-flight would fail with 'branch main not
         found'. Dry-run prints would-be commands without verifying state.
         """
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         self.spec.write_text(
             _spec_with_slice("007-02 — test", "DONE")
         )
@@ -871,7 +872,7 @@ class ExecuteSafetyBranchTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _execute_with_branch(self, branch_name: str) -> tuple:
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         with patch.object(_land, "_detect_branch", return_value=branch_name), \
              patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
              patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)):
@@ -889,7 +890,7 @@ class ExecuteSafetyBranchTests(unittest.TestCase):
         self.assertIn("Refusing", report)
 
     def test_feature_branch_not_refused(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         with patch.object(_land, "_detect_branch", return_value="feat/my-slice"), \
              patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
              patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
@@ -915,7 +916,8 @@ class ExecuteSafetyFFTests(unittest.TestCase):
         from unittest.mock import patch
         with patch.object(_land, "_detect_branch", return_value="feat/test"), \
              patch.object(_land, "_check_ff_viable",
-                          return_value=(False, "main has diverged — FF merge not possible; pull or rebase first")), \
+                          return_value=(False, "main has diverged — FF merge not "
+                                        "possible; pull or rebase first")), \
              patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)):
             report, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
         self.assertEqual(code, 1)
@@ -980,7 +982,7 @@ class ExecuteGitFailureTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_merge_failure_exits_one(self):
-        from unittest.mock import patch, call
+        from unittest.mock import patch
 
         call_log = []
 
@@ -1221,7 +1223,7 @@ class ExecutePrDryRunTests(unittest.TestCase):
     def test_dry_run_no_live_subprocess(self):
         """Dry-run must not call _run_git_cmd or _run_gh_cmd with
         dry_run=False (no live execution)."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         # Wrap the helpers so we can inspect dry_run kwarg per-call
         git_calls = []
         gh_calls = []
@@ -1852,8 +1854,8 @@ class CheckFfViableFetchFailureTests(unittest.TestCase):
     def test_fetch_failure_warns_and_falls_back_to_local(self):
         """AC #4 — `git fetch origin main` non-zero → stderr warning,
         then existing local-main ancestor check is used."""
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
         # Behavior: origin exists, fetch fails, local main is ancestor
         # of branch (legacy path succeeds).
         def fake_run(args, **kwargs):
@@ -1887,8 +1889,8 @@ class CheckFfViableNoOriginTests(unittest.TestCase):
 
     def test_no_origin_remote_silently_falls_back(self):
         """AC #5 — `git config remote.origin.url` fails → silent local."""
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
         # Tracker for fetch-being-skipped: if fetch is called we'll
         # fail the test by counting.
         fetch_count = {"n": 0}
@@ -1922,8 +1924,8 @@ class CheckFfViableNoOriginTests(unittest.TestCase):
         """AC #5 — origin exists, fetch succeeds, but rev-parse
         --verify origin/main fails (ref absent locally) → silent
         local."""
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
 
         def fake_run(args, **kwargs):
             if "config" in args:

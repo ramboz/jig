@@ -73,7 +73,8 @@ def write_sample_readme(path: Path) -> None:
         "## Format\n\n"
         "Each ADR lives at `docs/decisions/adr-NNNN-<slug>.md`. "
         "Title: `# ADR-NNNN: <Title>`.\n\n"
-        "Required sections: Status, Context, Decision Options Considered, Recommended Decision, Consequences.\n\n"
+        "Required sections: Status, Context, Decision Options Considered, "
+        "Recommended Decision, Consequences.\n\n"
         "## When to write an ADR\n\n"
         "- Hard-to-reverse decisions\n"
         "- Decisions that affect multiple modules or the public API\n"
@@ -95,7 +96,8 @@ def write_refinement_todo(path: Path) -> None:
         "**Resolution trigger:** First time we need to react to subagent start.\n\n"
         "## Operations\n\n"
         "### ~~Decision: scaffold-stable ADR trigger~~ — RESOLVED 2026-05-12\n"
-        "~~**Deferred:** The mechanism to flip docs from `Draft` to `Stable` is described but not implemented.~~\n"
+        "~~**Deferred:** The mechanism to flip docs from `Draft` to `Stable` "
+        "is described but not implemented.~~\n"
         "**Resolved by:** [ADR-0001: scaffold-stable trigger]"
         "(decisions/adr-0001-scaffold-stable.md).\n\n"
         "### Decision: Scaffold.json manifest format\n"
@@ -426,7 +428,8 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         content = (self.adrs_dir / "README.md").read_text()
         self.assertIn(
-            f"- [ADR-0001: Alpha](adr-0001-alpha.md) — Alpha context one-liner. ({TODAY}, Accepted)",
+            f"- [ADR-0001: Alpha](adr-0001-alpha.md) — Alpha context one-liner. "
+            f"({TODAY}, Accepted)",
             content,
         )
 
@@ -488,8 +491,8 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         content = (self.adrs_dir / "README.md").read_text()
         # Two bullet lines, one per real ADR.
-        bullets = [l for l in content.splitlines()
-                   if re.match(r"^- \[ADR-\d{4}:", l)]
+        bullets = [ln for ln in content.splitlines()
+                   if re.match(r"^- \[ADR-\d{4}:", ln)]
         self.assertEqual(len(bullets), 2,
                          f"expected exactly 2 bullets; got {bullets}")
         # Each bullet stays under a sane width.
@@ -675,7 +678,8 @@ class SupersedeTests(unittest.TestCase):
     # ---- AC #1: happy path ----
 
     def test_supersede_appends_to_old_status_with_link_and_today_date(self):
-        """Old ADR's Status block gains: `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (TODAY)`."""
+        """Old ADR's Status block gains:
+        `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (TODAY)`."""
         result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         old = (self.adrs_dir / "adr-0001-old.md").read_text()
@@ -730,7 +734,7 @@ class SupersedeTests(unittest.TestCase):
         old = (self.adrs_dir / "adr-0001-old.md").read_text()
         self.assertRegex(
             old,
-            rf"Accepted \(2026-01-01\)\nSuperseded by \[ADR-0002\]",
+            r"Accepted \(2026-01-01\)\nSuperseded by \[ADR-0002\]",
         )
 
     def test_supersede_prints_both_paths_to_stdout(self):
@@ -841,7 +845,6 @@ class SupersedeTests(unittest.TestCase):
 
     def test_supersede_refusal_does_not_mutate_either_file(self):
         """If supersession refuses, neither ADR is partially-modified."""
-        old_before = (self.adrs_dir / "adr-0001-old.md").read_text()
         new_before = (self.adrs_dir / "adr-0002-new.md").read_text()
         # Trigger the Proposed-old refusal
         _write_proposed_adr(self.adrs_dir / "adr-0001-old.md",
@@ -885,9 +888,9 @@ class SupersedeTests(unittest.TestCase):
 
         new = (self.adrs_dir / "adr-0002-new.md").read_text()
         self.assertIn(
-            f"## Status\n\n"
-            f"Accepted (2026-05-15)\n"
-            f"Supersedes ADR-0001\n",
+            "## Status\n\n"
+            "Accepted (2026-05-15)\n"
+            "Supersedes ADR-0001\n",
             new,
         )
 

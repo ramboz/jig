@@ -15,7 +15,6 @@ import json
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".github" / "release-please-config.json"
 MANIFEST_PATH = REPO_ROOT / ".github" / ".release-please-manifest.json"

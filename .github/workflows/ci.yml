@@ -41,3 +41,6 @@ jobs:
 
       - name: Validate manifests
         run: python3 scripts/validate_manifests.py
+
+      - name: Code-health floor (ruff)
+        run: python3 skills/code-health/health.py check .

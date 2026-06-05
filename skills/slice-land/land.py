@@ -53,10 +53,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
-from _common.parsing import check_deviation_log  # noqa: F401 (re-export)
+from _common.parsing import (
+    SliceLookupError,
+    check_deviation_log,  # noqa: F401 (re-export)
+)
 from _common.parsing import load_slice as _load_slice_common
 from _common.parsing import parse_frontmatter as _parse_frontmatter
-from _common.parsing import SliceLookupError
 
 
 class LandError(RuntimeError):
@@ -308,7 +310,7 @@ def render_readiness_section(checks: dict) -> str:
 
     # Status
     if checks["status_ok"]:
-        lines.append(f"- [x] Status: DONE")
+        lines.append("- [x] Status: DONE")
     else:
         actual = checks["status_actual"]
         lines.append(f"- [ ] Status: {actual} (must be DONE)")
@@ -780,7 +782,7 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
             return "\n".join(parts) + "\n", 1
 
     git_steps = [
-        (["checkout", "main"], f"git checkout main"),
+        (["checkout", "main"], "git checkout main"),
         (["merge", branch, "--ff-only"], f"git merge {branch} --ff-only"),
         (["push", "origin", "main"], "git push origin main"),
     ]
@@ -898,7 +900,7 @@ def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
         lines.append("```")
         for args, _ in git_steps:
             lines.append("git " + " ".join(args))
-        for args, label_str in gh_steps:
+        for _args, label_str in gh_steps:
             lines.append(label_str)
         lines.append("```")
         parts.extend(lines)

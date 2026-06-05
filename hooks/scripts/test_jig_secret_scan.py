@@ -72,7 +72,8 @@ def openssh_pem_block() -> str:
 
 def env_real_secret() -> str:
     """A .env-style assignment of a secret-named key to a real-looking value."""
-    return "AWS_SECRET_ACCESS_KEY=" + "wJalr" + "XUtnFEMI9K7MDENGbPxRfiCYEXAMPLEKEY".replace("EXAMPLE", "rEAL")
+    return ("AWS_SECRET_ACCESS_KEY=" + "wJalr"
+            + "XUtnFEMI9K7MDENGbPxRfiCYEXAMPLEKEY".replace("EXAMPLE", "rEAL"))
 
 
 def bearer_token() -> str:
@@ -171,7 +172,8 @@ class BlockOnRealSecretTests(unittest.TestCase):
 class AllowOnPlaceholderTests(unittest.TestCase):
     """AC #3 — placeholder / example forms must NOT block (exit 0)."""
 
-    def _write(self, content: str, file_path: str = "/tmp/app/config.py") -> subprocess.CompletedProcess:
+    def _write(self, content: str,
+               file_path: str = "/tmp/app/config.py") -> subprocess.CompletedProcess:
         return run_hook({
             "tool_name": "Write",
             "tool_input": {"file_path": file_path, "content": content},
@@ -371,7 +373,8 @@ class AllowOnCodeAnnotationTests(unittest.TestCase):
     numeric defaults — even when the identifier contains a secret-y word like
     'token' or 'secret'. The value has to look like a real opaque credential."""
 
-    def _write(self, content: str, file_path: str = "/tmp/app/models.py") -> subprocess.CompletedProcess:
+    def _write(self, content: str,
+               file_path: str = "/tmp/app/models.py") -> subprocess.CompletedProcess:
         return run_hook({
             "tool_name": "Write",
             "tool_input": {"file_path": file_path, "content": content},

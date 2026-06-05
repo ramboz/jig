@@ -45,7 +45,6 @@ from typing import Iterable
 # iteration is reused rather than re-implemented.
 import install_contract
 
-
 # ---------------------------------------------------------------------------
 # Tier tables (restated — source of truth: scaffold._TIER_SKILLS)
 # ---------------------------------------------------------------------------

@@ -1070,10 +1070,10 @@ class StaleTeamSignalTests(unittest.TestCase):
     # the contributor count at most once (no per-finding git re-shell).
     def test_no_double_walk_counts_once(self):
         self._make_team_repo()
-        import unittest.mock as _mock
         # Also seed a last_verified drift row so there are MULTIPLE findings;
         # the team count must still be computed exactly once for the run.
         import datetime as _dt
+        import unittest.mock as _mock
         yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
         dep_dir = self.target / "docs/specs/960-dep"
         dep_dir.mkdir(parents=True, exist_ok=True)
@@ -1155,9 +1155,9 @@ class RoutingStatsTests(unittest.TestCase):
                             str(self.project), *extra)
 
     def _row(self, stdout: str, category: str) -> str:
-        return next(l for l in stdout.splitlines()
-                    if l.strip().startswith(category + " ")
-                    or l.strip() == category)
+        return next(ln for ln in stdout.splitlines()
+                    if ln.strip().startswith(category + " ")
+                    or ln.strip() == category)
 
     def test_missing_log_friendly_message(self):
         # No skill-usage.jsonl written at all → friendly, no crash.
@@ -2172,9 +2172,10 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
         rec.stub(_matches("git", "commit"), returncode=0)
 
     def test_emits_spec_md_plus_starter_slice_file(self):
-        from unittest.mock import patch
-        import skills  # noqa: F401 — namespace anchor
         import importlib
+        from unittest.mock import patch
+
+        import skills  # noqa: F401 — namespace anchor
         _workflow = importlib.import_module("skills.spec-workflow.workflow")
         rec = _SubprocessRecorder()
         self._stub_subprocess(rec)
@@ -2191,8 +2192,8 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
                         "starter slice file slice-01-tbd.md must be emitted")
 
     def test_spec_md_has_no_embedded_slice_section(self):
-        from unittest.mock import patch
         import importlib
+        from unittest.mock import patch
         _workflow = importlib.import_module("skills.spec-workflow.workflow")
         rec = _SubprocessRecorder()
         self._stub_subprocess(rec)
@@ -2207,8 +2208,8 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
                          "(slices live in sibling files now)")
 
     def test_starter_slice_file_has_file_per_slice_shape(self):
-        from unittest.mock import patch
         import importlib
+        from unittest.mock import patch
         _workflow = importlib.import_module("skills.spec-workflow.workflow")
         rec = _SubprocessRecorder()
         self._stub_subprocess(rec)
@@ -2231,8 +2232,8 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
         """End-to-end: after `new`, `iter_slices(spec.md)` yields the
         starter slice — proves the helpers from 018-01/02 see the
         scaffolded shape end-to-end."""
-        from unittest.mock import patch
         import importlib
+        from unittest.mock import patch
         _workflow = importlib.import_module("skills.spec-workflow.workflow")
         rec = _SubprocessRecorder()
         self._stub_subprocess(rec)
@@ -2246,7 +2247,7 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
         from parsing import iter_slices
         spec_md = self.target / "docs/specs/001-demo-slug/spec.md"
         locs = list(iter_slices(spec_md))
-        labels = [l.label for l in locs]
+        labels = [sl.label for sl in locs]
         self.assertIn("001-01 — tbd", labels)
 
 
@@ -3270,7 +3271,7 @@ class StatusBoardRollupTests(unittest.TestCase):
         after = spec_md.read_text()
         # spec.md not changed (rollup matched what's already there)
         self.assertEqual(before, after,
-                         f"spec.md was rewritten despite no rollup change")
+                         "spec.md was rewritten despite no rollup change")
 
     # AC #3: status-board writes regardless of board-table-changes
     # (a spec whose status flips DRAFT → DONE updates spec.md even if
@@ -3947,8 +3948,8 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
 
     def test_pr_mode_is_push_mode_equivalent_for_scan(self):
         """AC #2 — `--pr` (push-mode-equivalent) scans `origin/main`."""
-        from unittest.mock import patch
         import shutil as _shutil
+        from unittest.mock import patch
         self._mkspec("001-existing")
         behavior = self._default_preflight_behavior()
         behavior[("verify", "origin/main")] = _make_proc(0, "abc\n", "")
@@ -3988,8 +3989,8 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
 
     def test_no_origin_remote_falls_back_silently(self):
         """AC #3 — no origin → working-tree scan with no warning."""
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
         self._mkspec("001-existing")
         self._mkspec("007-other")
         behavior = self._default_preflight_behavior()
@@ -4037,8 +4038,8 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
     def test_no_origin_main_ref_falls_back_silently(self):
         """AC #3 — origin exists, fetch succeeds, but `rev-parse --verify
         origin/main` fails → fall back to working-tree scan, silently."""
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
         self._mkspec("001-existing")
         self._mkspec("003-other")
         behavior = self._default_preflight_behavior()
@@ -4214,8 +4215,8 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
         stderr (workflow.py:1278-1282) is emitted verbatim; the new
         diverged-main check is skipped (no origin/main to compare); the
         scan falls back to working-tree per AC #3."""
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
         self._mkspec("001-existing")
         self._mkspec("004-other")
         behavior = self._default_preflight_behavior()

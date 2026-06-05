@@ -64,7 +64,6 @@ import os
 from pathlib import Path
 from typing import Dict
 
-
 RATIO = 4
 """Bytes per token (rough English-prose heuristic)."""
 

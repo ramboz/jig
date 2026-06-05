@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import install_contract  # noqa: E402  — the plugin/release install contract
 import scaffold_contract  # noqa: E402  — the scaffold-target install contract
 
+
 class VerifyError(RuntimeError):
     """Raised when verify_install is called with an unknown agent type."""
 
@@ -658,7 +659,7 @@ def run_headless_scaffold(project_root: Path, out=None) -> int:
 
     results = run_all_scaffold_checks(project_root)
     failed = 0
-    for (name, _), (passed, msg) in zip(_SCAFFOLD_CHECKS, results):
+    for (name, _), (passed, msg) in zip(_SCAFFOLD_CHECKS, results, strict=True):
         marker = "PASS" if passed else "FAIL"
         out.write(f"{marker} {name}: {msg}\n")
         if not passed:
@@ -682,7 +683,7 @@ def run_headless(plugin_root: Path, out=None) -> int:
 
     results = run_all_checks(plugin_root)
     failed = 0
-    for (name, _), (passed, msg) in zip(_CHECKS, results):
+    for (name, _), (passed, msg) in zip(_CHECKS, results, strict=True):
         marker = "PASS" if passed else "FAIL"
         out.write(f"{marker} {name}: {msg}\n")
         if not passed:

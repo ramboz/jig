@@ -9,7 +9,6 @@ Covers AC #2 cases (a–e):
   (e) unicode content round-trips correctly (utf-8 encoding).
 """
 
-import os
 import shutil
 import sys
 import tempfile

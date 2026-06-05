@@ -1,0 +1,7 @@
+# jig code-health floor — spec 060-02 / ADR-0017.
+# Config-only: jig is not a pip package; this just configures the lint floor.
+line-length = 100
+
+[lint]
+select = ["F", "E", "W", "I", "B"]
+ignore = ["E402"]  # sys.path.insert before imports is a deliberate jig pattern
