@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: release-pipeline, scaffold-init
 tier: host-adapter
 adr_required: true
