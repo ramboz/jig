@@ -91,8 +91,9 @@ and runs a "scaffold complete and verified" check. Follow it with
 `/jig:vision-elicitation` to set the vision every later slice is judged
 against.
 
-**Copy-paste prompts** for scaffolding and for taking a spec from idea to
-landed live in the **[prompt cookbook](docs/prompts.md)**.
+**Copy-paste prompts** live in the **[prompt cookbook](docs/prompts.md)**, in
+the order you run them: scaffold the repo once, then repeat the idea-to-landed
+loop for every feature.
 
 ### Install shapes
 

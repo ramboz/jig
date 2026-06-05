@@ -1,17 +1,30 @@
 # Prompt cookbook
 
-> Copy-paste prompts for the two journeys you'll hit first: scaffolding a
-> project, and taking a spec from idea to landed. jig's skills auto-trigger on
-> description matching, so the natural-language prompts work as-is — the
-> explicit `/jig:*` command is shown alongside, where one applies, for when
-> you'd rather be deliberate. For the lifecycle these prompts drive, see
-> [workflow.md](workflow.md); to decide whether jig fits your repo first, see
-> [adoption-readiness.md](adoption-readiness.md).
+> Copy-paste prompts for getting started, in the order you run them.
 
-## Recipe 1 — Scaffold a project
+There are **two stages, and they're consecutive — not alternatives**. You run
+**Stage 1 once** to set jig up in a repo, then repeat **Stage 2 for every
+feature** you build:
+
+```text
+Stage 1 — First-time setup        Stage 2 — The core loop
+      (once per repo)        ──▶     (repeat per feature)  ⟲
+```
+
+If you've already scaffolded this repo (you have a `docs/specs/` folder), skip
+to Stage 2.
+
+jig's skills auto-trigger on description matching, so the natural-language
+prompts work as-is — the explicit `/jig:*` command is shown alongside, where
+one applies, for when you'd rather be deliberate. For the lifecycle these
+prompts drive, see [workflow.md](workflow.md); to decide whether jig fits your
+repo first, see [adoption-readiness.md](adoption-readiness.md).
+
+## Stage 1 — First-time setup (once per repo)
 
 **Use this when:** you've just opened a repo in Claude Code and want jig's
-workflow in place.
+workflow in place. You run this **once** per repo — once it's done, you live in
+Stage 2.
 
 ```text
 Set up this project for AI-native development.
@@ -40,7 +53,11 @@ Run the vision wizard to fill in our product vision and architecture.
 /jig:vision-elicitation
 ```
 
-## Recipe 2 — Draft and implement a spec, end to end
+## Stage 2 — The core loop (repeat per feature)
+
+**Requires Stage 1.** This stage assumes jig is already scaffolded in the repo —
+if you don't have a `docs/specs/` folder yet, run Stage 1 first. You'll run this
+whole loop again for **every** feature you build.
 
 The core loop. Each step is a copy-paste prompt; the lifecycle states
 (`DRAFT → READY_FOR_REVIEW → READY_FOR_IMPLEMENTATION → IN_PROGRESS →
