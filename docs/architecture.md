@@ -281,6 +281,19 @@ Codex agent files are generated TOML custom-agent definitions with the
 closest supported `sandbox_mode` for each role; the canonical source prompts
 remain the Markdown files in `agents/`.
 
+**Codex role capability dogfood (059-05).** The generated role files use this
+mapping: `jig-implementer` -> `workspace-write`, `jig-reviewer` ->
+`read-only`, and `jig-architect` -> `read-only`. Local Codex CLI 0.133.0
+validates those sandbox modes through `scripts/codex_role_capability_probe.py`:
+the documented `:read-only` permissions profile blocks a scratch-project write
+with `PermissionError: [Errno 1] Operation not permitted`, while `:workspace`
+allows the same write inside the scratch workspace. Codex custom agents are
+spawned only when explicitly requested and inspected through `/agent`;
+`codex debug prompt-input` does not currently expose project custom-agent
+entries, so noninteractive review automation should keep using generated
+`review.py` prompts with a read-only runner unless the user is intentionally
+dogfooding an interactive `jig-reviewer` custom-agent thread.
+
 ## Managed-File Metadata Policy
 
 Scaffolded files are tracked with a **manifest-only** default: `scaffold.json`

@@ -368,6 +368,18 @@ If Codex is missing or a live-only command is not available in CI, the script
 prints an `UNAVAILABLE ...` row instead of silently counting that probe as a
 pass. Static package and custom-agent install failures remain hard failures.
 
+When changing Codex custom-agent role behavior or sandbox assumptions, also
+run:
+
+```bash
+python3 scripts/codex_role_capability_probe.py
+```
+
+This validates `jig-implementer`, `jig-reviewer`, and `jig-architect` TOML
+files, then probes local Codex debug/sandbox surfaces when available. See
+[docs/codex-role-capability.md](docs/codex-role-capability.md) for the
+interactive `/agent` dogfood prompt and the noninteractive review fallback.
+
 ## Spec workflow (short version)
 
 1. Pick up the next `READY_FOR_IMPLEMENTATION` slice from
