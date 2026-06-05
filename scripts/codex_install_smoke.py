@@ -19,11 +19,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:
@@ -31,7 +31,6 @@ if str(ROOT / "scripts") not in sys.path:
 
 import build_codex_plugin  # noqa: E402
 import install_contract  # noqa: E402
-
 
 PASS = "PASS"
 FAIL = "FAIL"
