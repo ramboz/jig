@@ -260,13 +260,19 @@ def _validate_prompt_agent_discovery(prompt_json: str) -> DiscoveryResult:
     joined = "\n".join(_prompt_input_texts(data))
     visible = [name for name in ROLE_AGENT_NAMES if name in joined]
     missing = [name for name in ROLE_AGENT_NAMES if name not in joined]
-    if visible and not missing:
+    if visible:
+        missing_suffix = (
+            ""
+            if not missing
+            else "; missing expected role(s): " + ", ".join(missing)
+        )
         return DiscoveryResult(
             "codex-plugin-agent-discovery",
             PASS,
             (
                 "plugin-native custom-agent discovery observed for "
                 + ", ".join(visible)
+                + missing_suffix
                 + "; add a follow-up adapter slice before removing the "
                 "explicit install helper"
             ),
