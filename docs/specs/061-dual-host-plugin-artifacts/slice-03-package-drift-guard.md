@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: ["061-01", "061-02"]
 last_verified: 2026-06-05
 ---
