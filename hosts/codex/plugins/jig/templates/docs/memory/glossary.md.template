@@ -1,0 +1,13 @@
+# Glossary
+
+> Status: Draft (wizard-generated)
+>
+> Domain terms and project-specific vocabulary for {{PROJECT_NAME}}. Loaded on demand
+> when the hot cache (CLAUDE.md) misses. Update via `/jig:memory-sync` or when
+> `jig-memory-scan` surfaces an unknown reference.
+>
+> When `jig-memory-scan` flags an unrecognized capitalized reference, the user
+> provides the definition once and `memory-sync` writes it here. High-frequency
+> terms (referenced ≥3 times in a session) are promoted to the CLAUDE.md hot cache.
+
+<!-- Terms below, alphabetical. Format: ## TERM, followed by definition prose. -->
