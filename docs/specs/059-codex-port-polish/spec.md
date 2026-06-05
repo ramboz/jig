@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: scaffold-init, migrate, release-pipeline
 tier: host-adapter
 adr_required: false

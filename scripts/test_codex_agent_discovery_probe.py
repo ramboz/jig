@@ -211,6 +211,24 @@ class CodexAgentDiscoveryLiveProbeTests(unittest.TestCase):
         self.assertIn("plugin-native custom-agent discovery observed", result.message)
         self.assertIn("follow-up adapter slice", result.message)
 
+    def test_live_probe_reports_partial_plugin_native_agent_discovery(self):
+        self.prompt_text = discovery_probe.ROLE_AGENT_NAMES[0]
+        results = discovery_probe.run_probe(
+            source_root=REPO_ROOT,
+            work_root=self.tmp / "work",
+            codex_home=self.tmp / "codex-home",
+            codex_bin=str(self.codex_bin),
+            runner=self._runner,
+        )
+        result = [
+            item for item in results
+            if item.name == "codex-plugin-agent-discovery"
+        ][0]
+        self.assertEqual(result.status, discovery_probe.PASS)
+        self.assertIn("plugin-native custom-agent discovery observed", result.message)
+        self.assertIn("missing expected role(s)", result.message)
+        self.assertIn("follow-up adapter slice", result.message)
+
     def test_missing_debug_prompt_surface_is_unavailable(self):
         def runner(args, cwd, env, timeout):
             args = [str(arg) for arg in args]
@@ -264,7 +282,7 @@ class CodexAgentDiscoveryDocsTests(unittest.TestCase):
             / "059-codex-port-polish"
             / "slice-06-codex-plugin-agent-discovery-spike.md"
         ).read_text()
-        self.assertIn("status: IN_PROGRESS", text)
+        self.assertIn("codex-plugin-agent-discovery-spike", text)
         self.assertIn("Official Codex documentation was rechecked", text)
         self.assertIn("codex-cli 0.133.0", text)
         self.assertIn("--install-codex-agents", text)
