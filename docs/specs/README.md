@@ -195,9 +195,9 @@
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-04 — Duplication: native-first, `npx jscpd` fallback | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-05 — Distinct code-health reviewer pass | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-06 — Tier-2 scaffold-the-floor (opt-in) | DEFERRED |  |
-| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-01 - committed Claude package + repoint marketplace | DRAFT |  |
-| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-02 - committed Codex package peer | DRAFT |  |
-| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-03 - host-package drift guard | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-01 - committed Claude package + repoint marketplace | **DONE** |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-02 - committed Codex package peer | **DONE** |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-03 - host-package drift guard | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-04 - host-explicit release zips | DRAFT |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-05 - symmetric install + scaffold docs | DRAFT |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-06 - Claude install verification | DRAFT |  |
