@@ -1,0 +1,52 @@
+---
+status: DRAFT
+---
+
+# Spec 002: First spec — replace me
+
+## Overview
+
+**Replace this with your first real spec.** Run `/jig:spec-workflow` to
+author it, or edit this file by hand. Spec
+[001-adopt-jig](../001-adopt-jig/spec.md) above is a complete `DONE`
+worked example — copy its shape: an overview, a SPIDR decomposition, and
+one or more vertical slices in sibling `slice-NN-<short>.md` files.
+
+This stub is intentionally `DRAFT`, **not**
+`READY_FOR_IMPLEMENTATION`: an empty placeholder is not ready to build,
+and marking it ready would be dishonest. Move it to
+`READY_FOR_IMPLEMENTATION` only once it describes real, testable work.
+
+## Decomposition
+
+**SPIDR axis: _TODO — pick the axis that best splits your work._**
+
+### Slices
+
+1. **`002-01 <name>`** — _TODO: describe the first vertical slice._
+
+## Slice 002-01 — replace-me
+
+**Goal:** _TODO: one sentence stating the end-to-end value this slice
+delivers. Replace this entire spec with your first real unit of work._
+
+**DoR:**
+- ✅ _TODO: prerequisites that must hold before this becomes
+  `READY_FOR_IMPLEMENTATION`._
+
+**Acceptance Criteria:**
+
+1. **_TODO: first AC._** Sharp, testable, observable from outside.
+
+**DoD:**
+- [ ] All ACs pass; full test suite green (no regressions).
+- [ ] Implementer test coverage exercises each AC with at least one
+      fixture.
+- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+      `review.py`.
+- [ ] Implementation review passed.
+- [ ] Deviation log produced under this slice heading.
+- [ ] Reconciliation review passed.
+
+**Anti-horizontal-phasing check:** _TODO: describe the end-to-end
+observable value a user gets after this slice lands._

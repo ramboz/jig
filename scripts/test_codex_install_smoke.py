@@ -118,6 +118,53 @@ class CodexSmokeStaticTests(unittest.TestCase):
         )
 
 
+class CodexSmokeCommittedPackageTests(unittest.TestCase):
+    """Slice 061-02 — smoke can validate the committed hosts/codex/ package in
+    place (no rebuild) while preserving the UNAVAILABLE-when-CLI-absent path."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-codex-committed-test-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_validates_committed_package_without_rebuilding(self):
+        results = codex_install_smoke.run_smoke(
+            source_root=REPO_ROOT,
+            work_root=self.tmp / "work",
+            codex_home=self.tmp / "codex-home",
+            use_committed_package=True,
+            skip_live_codex=True,
+        )
+        by_name = {result.name: result for result in results}
+        # No rebuild happens; the build step is reported as a skip/pass over
+        # the committed tree.
+        self.assertEqual(
+            by_name["generated-package"].status, codex_install_smoke.PASS, by_name
+        )
+        self.assertEqual(
+            by_name["codex-agent-install"].status, codex_install_smoke.PASS
+        )
+        self.assertEqual(
+            by_name["codex-live-surfaces"].status, codex_install_smoke.UNAVAILABLE
+        )
+        self.assertEqual(
+            codex_install_smoke.exit_code(results, require_live_codex=False), 0
+        )
+
+    def test_committed_package_missing_cli_is_unavailable(self):
+        results = codex_install_smoke.run_smoke(
+            source_root=REPO_ROOT,
+            work_root=self.tmp / "work",
+            codex_home=self.tmp / "codex-home",
+            codex_bin=str(self.tmp / "missing-codex"),
+            use_committed_package=True,
+        )
+        cli = [r for r in results if r.name == "codex-cli"][0]
+        self.assertEqual(cli.status, codex_install_smoke.UNAVAILABLE)
+        self.assertIn("not found", cli.message)
+
+
 class CodexSmokeLiveProbeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="jig-codex-live-test-"))

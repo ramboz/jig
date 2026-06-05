@@ -578,35 +578,60 @@ def run_smoke(
     codex_bin: str = "codex",
     skip_live_codex: bool = False,
     require_live_codex: bool = False,
+    use_committed_package: bool = False,
     runner: CommandRunner = _run_command,
     timeout: int = 30,
 ) -> list[SmokeResult]:
     source_root = source_root.resolve()
     work_root.mkdir(parents=True, exist_ok=True)
-    marketplace_root = work_root / "codex-plugin"
-    plugin_dir = marketplace_root / "plugins" / "jig"
     agents_dir = work_root / "codex-agents"
 
-    build_code = build_codex_plugin.build(
-        source_root=source_root,
-        output_dir=plugin_dir,
-    )
     results: list[SmokeResult] = []
-    if build_code != 0:
-        return [
+    if use_committed_package:
+        # Validate the committed peer (slice 061-02) in place rather than
+        # rebuilding into a temp tree. The committed package is the same
+        # footprint the build path produces; the live-CLI probe (below) is
+        # unchanged and still reports UNAVAILABLE when no CLI is present.
+        marketplace_root = source_root / "hosts" / "codex"
+        plugin_dir = marketplace_root / "plugins" / "jig"
+        if not (plugin_dir / ".codex-plugin" / "plugin.json").is_file():
+            return [
+                SmokeResult(
+                    "build-generated-package",
+                    FAIL,
+                    f"committed Codex package missing at {plugin_dir}; "
+                    "run scripts/build_host_packages.py",
+                )
+            ]
+        results.append(
             SmokeResult(
                 "build-generated-package",
-                FAIL,
-                f"build_codex_plugin exited {build_code}",
+                PASS,
+                f"validating committed Codex plugin package at {plugin_dir}",
             )
-        ]
-    results.append(
-        SmokeResult(
-            "build-generated-package",
-            PASS,
-            f"built Codex plugin package at {plugin_dir}",
         )
-    )
+    else:
+        marketplace_root = work_root / "codex-plugin"
+        plugin_dir = marketplace_root / "plugins" / "jig"
+        build_code = build_codex_plugin.build(
+            source_root=source_root,
+            output_dir=plugin_dir,
+        )
+        if build_code != 0:
+            return [
+                SmokeResult(
+                    "build-generated-package",
+                    FAIL,
+                    f"build_codex_plugin exited {build_code}",
+                )
+            ]
+        results.append(
+            SmokeResult(
+                "build-generated-package",
+                PASS,
+                f"built Codex plugin package at {plugin_dir}",
+            )
+        )
     results.append(_validate_generated_package(plugin_dir, marketplace_root))
     results.append(
         _install_and_validate_codex_agents(
@@ -700,6 +725,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="return exit 2 if any live Codex probe is UNAVAILABLE",
     )
     parser.add_argument(
+        "--use-committed-package",
+        action="store_true",
+        default=os.environ.get("JIG_CODEX_SMOKE_USE_COMMITTED") == "1",
+        help=(
+            "validate the committed hosts/codex/ package in place instead of "
+            "rebuilding into a temp tree (also enabled by "
+            "JIG_CODEX_SMOKE_USE_COMMITTED=1)"
+        ),
+    )
+    parser.add_argument(
         "--keep-work",
         action="store_true",
         help="keep the temporary work directory and print its path",
@@ -727,6 +762,7 @@ def main(argv: Sequence[str]) -> int:
             codex_bin=ns.codex_bin,
             skip_live_codex=ns.skip_live_codex,
             require_live_codex=ns.require_live_codex,
+            use_committed_package=ns.use_committed_package,
             timeout=ns.timeout,
         )
         _print_results(results, sys.stdout)
@@ -744,6 +780,7 @@ def main(argv: Sequence[str]) -> int:
             codex_bin=ns.codex_bin,
             skip_live_codex=ns.skip_live_codex,
             require_live_codex=ns.require_live_codex,
+            use_committed_package=ns.use_committed_package,
             timeout=ns.timeout,
         )
         _print_results(results, sys.stdout)
