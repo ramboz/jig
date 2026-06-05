@@ -2,6 +2,13 @@
 # Config-only: jig is not a pip package; this just configures the lint floor.
 line-length = 100
 
+# Generated, committed host packages (spec 061 / ADR-0018) are build outputs
+# byte-copied from already-linted source — exclude them from the floor so the
+# gate lints the source, not the artifact (the parallel to gitignored dist/,
+# which ruff already skips via .gitignore). Drift between source and these
+# copies is caught by the host-package drift guard, not by ruff.
+extend-exclude = ["hosts/"]
+
 [lint]
 select = ["F", "E", "W", "I", "B"]
 ignore = ["E402"]  # sys.path.insert before imports is a deliberate jig pattern

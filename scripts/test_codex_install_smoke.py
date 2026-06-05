@@ -17,7 +17,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
@@ -31,7 +30,9 @@ def _completed(
     stdout: str = "",
     stderr: str = "",
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(args=args, returncode=returncode, stdout=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(
+        args=args, returncode=returncode, stdout=stdout, stderr=stderr
+    )
 
 
 def _fake_codex_bin(tmp: Path) -> Path:
@@ -189,7 +190,10 @@ class CodexSmokeLiveProbeTests(unittest.TestCase):
         ):
             self.assertEqual(by_name[name].status, codex_install_smoke.PASS, by_name[name])
         called_commands = [call[1:] for call in self.calls if call[0] == str(self.codex_bin)]
-        self.assertIn(["plugin", "marketplace", "add", str(self.tmp / "work" / "codex-plugin")], called_commands)
+        self.assertIn(
+            ["plugin", "marketplace", "add", str(self.tmp / "work" / "codex-plugin")],
+            called_commands,
+        )
         self.assertIn(["plugin", "add", "jig@jig"], called_commands)
         self.assertIn(
             ["debug", "prompt-input", codex_install_smoke._SKILL_VISIBILITY_PROMPT],
