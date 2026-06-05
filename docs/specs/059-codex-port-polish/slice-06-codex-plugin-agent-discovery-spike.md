@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: ["033-07"]
-last_verified: 2026-05-29
+last_verified: 2026-06-05
 kind: spike
 ---
 
@@ -16,9 +16,27 @@ support plugin-level custom-agent discovery, or is jig's explicit
 
 **Time-box:** 4 hours.
 
-**Findings:** _Filled during IN_PROGRESS._
+**Findings:** Official Codex documentation was rechecked on 2026-06-05 using
+the current Codex manual fetched from `developers.openai.com`. The documented
+plugin manifest example still uses `.codex-plugin/plugin.json` with `skills`;
+the plugin overview describes plugins as bundles of skills, apps, and MCP
+servers; and the custom-agent docs describe standalone TOML files under
+project-local `.codex/agents/` or user-local `~/.codex/agents/`. No official
+plugin-level custom-agent manifest field or plugin-bundled discovery path was
+found.
 
-**Outcome:** _Filled at DONE._
+Local CLI probing used `codex-cli 0.133.0` and an isolated temporary
+`CODEX_HOME`. `scripts/codex_agent_discovery_probe.py` built the generated
+Codex plugin package, added the temp marketplace, installed `jig@jig`, verified
+that the installed plugin cache carried `agents/jig-*.toml`, and then checked
+`codex debug prompt-input` with a prompt that did not contain the role names.
+The plugin-bundled agent templates were not exposed as custom agents.
+
+**Outcome:** The explicit `--install-codex-agents` helper remains the correct
+Codex plugin contract. No unsupported `.codex-plugin/plugin.json` agent field
+should be added. If a future Codex release documents or exposes plugin-native
+custom-agent discovery, add a follow-up adapter slice before removing the
+helper.
 
 **DoR:**
 - Codex TOML role-agent rendering from 033-07 is DONE.
@@ -44,16 +62,17 @@ support plugin-level custom-agent discovery, or is jig's explicit
    guessed `.codex-plugin/plugin.json` fields to production packaging.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. _(No new decision deferred; the
+      existing agent-discovery watch item was refreshed with 059-06 evidence.)_
 
 ### Close-out (post-DONE)
 
@@ -69,4 +88,4 @@ continuing the explicit install-helper workaround.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+_TODO after reconciliation._

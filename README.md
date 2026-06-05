@@ -178,11 +178,14 @@ The Codex plugin package includes `.codex-plugin/plugin.json`, rendered
 Codex skill copies, `hooks/hooks.json`, hook scripts, templates, and the
 canonical agent prompts plus generated TOML custom-agent templates.
 Codex custom-agent discovery uses TOML agent files under
-project-local or user-local `.codex/agents/`; plugin-level custom-agent
-discovery is not documented today. After installing the plugin, run the
-explicit post-install step to copy jig's custom agents into the global
-Codex agents directory. From the installed Codex plugin context, the helper
-is addressed through the plugin root:
+project-local or user-local `.codex/agents/`. Rechecked on 2026-06-05:
+the official Codex manual still documents plugin manifests for skills and
+plugin surfaces, not plugin-level custom agents, and local `codex-cli 0.133.0`
+does not expose plugin-bundled `agents/jig-*.toml` files as custom agents
+after an isolated plugin install. After installing the plugin, run the
+explicit post-install step to copy jig's custom agents into the global Codex
+agents directory. From the installed Codex plugin context, the helper is
+addressed through the plugin root:
 
 ```bash
 python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" --install-codex-agents
@@ -222,6 +225,17 @@ That probe validates the generated `jig-implementer`, `jig-reviewer`, and
 `read-only` posture, and probes local Codex sandbox/debug surfaces when
 available. See [docs/codex-role-capability.md](docs/codex-role-capability.md)
 for the interactive `/agent` dogfood prompt and noninteractive review fallback.
+
+To re-check whether Codex has gained plugin-native custom-agent discovery, run:
+
+```bash
+python3 scripts/codex_agent_discovery_probe.py
+```
+
+The probe builds the same generated Codex plugin package, installs it through
+an isolated marketplace and temporary `CODEX_HOME`, confirms the plugin cache
+carries `agents/jig-*.toml`, and verifies whether Codex exposes those
+plugin-bundled templates as custom agents without running the explicit helper.
 
 ### From source (contributors)
 
