@@ -1,0 +1,147 @@
+> Status: Draft (wizard-generated)
+>
+> Captures *why* this project exists, *for whom*, and *with what
+> principles*. Architectural mechanics live in [architecture.md](architecture.md).
+> Update via reconciliation, or via `/jig:vision-elicitation`. Each
+> `<!-- elicited: PENDING / status: unfilled -->` marker is a slot
+> waiting to be filled.
+
+# Vision: {{PROJECT_NAME}}
+
+## Identity
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _One sentence: what does this project do? Optionally followed by a
+> tagline subhead and a brief positioning-recovery story (if there
+> is one)._
+
+- **Vision statement:** (one sentence)
+- **Tagline** *(optional)*: (`<name> (noun): __`)
+- **Positioning story** *(optional)*: (e.g. "we pivoted from X to Y
+  after realizing Z")
+
+## Target users
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _Be concrete — name specific user types, not generic categories.
+> Also name who this is **not** for; defining by exclusion is often
+> clearer than by inclusion._
+
+- **For:** (2–4 specific user types — e.g. "first-time Claude Code
+  users", "devs migrating legacy specs")
+- **Not for:** (1–3 personas explicitly out of scope)
+
+## Core problem
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _What's broken about how users try to do this today? Tell the story
+> of the paths users currently take and where each falls short._
+
+- **Problem (2–3 sentences):** (...)
+- **Today's paths and where they fall short:**
+  - (Path 1 — where it falls short)
+  - (Path 2 — where it falls short)
+  - (Path 3 — where it falls short)
+- **Originating incident / audit** *(optional)*: (...)
+
+## Competitive landscape
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _3–5 alternatives a user might consider, with strength + shortfall
+> for each. Finish with one sentence positioning this project among
+> them._
+
+| Option | What it does | Where it falls short for this gap |
+|---|---|---|
+| _(alternative 1)_ | _(strength)_ | _(shortfall)_ |
+| _(alternative 2)_ | _(strength)_ | _(shortfall)_ |
+| _(alternative 3)_ | _(strength)_ | _(shortfall)_ |
+
+**Where this project fits:** (one sentence)
+
+## Scope
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _Features in priority order. Optional tier or phase clustering.
+> MVP vs deferred. Explicit non-goals._
+
+### Core features (prioritized)
+
+1. (feature)
+2. (feature)
+3. (feature)
+
+### Tiers / phases *(optional)*
+
+- (e.g. always-install / default-on / opt-in; or MVP / v2 / v3)
+
+### MVP scope
+
+- (which features are in MVP)
+
+### Out of scope (deliberately)
+
+- (non-goal 1)
+- (non-goal 2)
+- (non-goal 3)
+
+## Stack
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _Runtime, platform commitments, locked-vs-open status per
+> decision. This section's answers also feed the Tech stack stanza
+> in [architecture.md](architecture.md)._
+
+- **Runtime / language:** (...)
+- **Platform commitments:**
+  - Cloud target: (...)
+  - Deployment shape: (...)
+  - Package manager: (...)
+  - Database: (...)
+  - Key external services: (...)
+- **Locked-in vs. still open:** _(per decision above; locked-in
+  decisions are candidates for seed ADRs once 017-04 lands)_
+
+## Design principles & constraints
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _Principles every spec should be judged against. Non-obvious
+> constraints. 3–7 items is a healthy range — fewer means you're
+> hiding choices, more means you're not prioritizing._
+
+1. (principle)
+2. (principle)
+3. (principle)
+
+**Non-obvious constraints:** (perf budgets, regulatory, team size,
+cost, context-window economics, backward-compat policy)
+
+## How new work enters
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _How will new features get prioritized? What triggers a new spec?
+> Capturing this up front prevents speculative scope creep later._
+
+- **Prioritization model:** (signal-driven / roadmap-driven /
+  stakeholder-driven / mixed)
+- **Spec-triggering rules:** (e.g. "pain hit twice",
+  "cross-project comparison revealed a pattern", "compliance
+  requirement landed")
+
+## Open questions
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _Architectural questions that don't have answers yet. These
+> become entries in [docs/refinement-todo.md](refinement-todo.md)._
+
+- (open question 1)
+- (open question 2)
