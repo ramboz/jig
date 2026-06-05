@@ -2,7 +2,8 @@
 status: DRAFT
 skill: release-pipeline, scaffold-init
 tier: host-adapter
-adr_required: false
+adr_required: true
+adr: ../../decisions/adr-0018-dual-host-generated-plugin-artifacts.md
 ---
 
 # Spec 061: Dual-host plugin artifacts
@@ -30,6 +31,9 @@ tree remains the canonical place to edit skills, agents, hooks,
 templates, and host manifests. Install, scaffold, smoke-test, and release
 instructions point at the generated host artifact, not at the source
 root by accident.
+
+The architectural decision is recorded in
+[ADR-0018](../../decisions/adr-0018-dual-host-generated-plugin-artifacts.md).
 
 ## Goals
 
@@ -97,6 +101,7 @@ artifact-first documentation, and host-specific install verification.
 
 ## Dependencies / coordination
 
+- Implements [ADR-0018](../../decisions/adr-0018-dual-host-generated-plugin-artifacts.md).
 - Coordinate with [Spec 013](../013-release-pipeline/spec.md) because it
   owns release zip creation and GitHub release upload.
 - Coordinate with [Spec 033](../033-host-adapter-portability/spec.md)
@@ -116,3 +121,4 @@ artifact-first documentation, and host-specific install verification.
 - [scripts/codex_install_smoke.py](../../../scripts/codex_install_smoke.py)
 - [.github/workflows/release.yml](../../../.github/workflows/release.yml)
 - [README.md](../../../README.md)
+- [ADR-0018: Dual-host generated plugin artifacts](../../decisions/adr-0018-dual-host-generated-plugin-artifacts.md)
