@@ -1066,8 +1066,8 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _run_codex_scaffold(self) -> subprocess.CompletedProcess:
-        return run_scaffold_with_args(self.target, "--host", "codex")
+    def _run_codex_scaffold(self, *extra_args: str) -> subprocess.CompletedProcess:
+        return run_scaffold_with_args(self.target, "--host", "codex", *extra_args)
 
     def test_codex_scaffold_tree_has_no_claude_only_files(self):
         r = self._run_codex_scaffold()
@@ -1121,6 +1121,50 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         common = self.target / ".codex" / "skills" / "_common"
         self.assertTrue((common / "parsing.py").is_file())
         self.assertFalse((common / "test_parsing.py").exists())
+
+    def test_codex_review_skills_use_codex_user_skill_locations(self):
+        r = self._run_codex_scaffold("--has-tests")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        for skill in ("pr-review", "arch-review", "contracts"):
+            copied = (
+                self.target / ".codex" / "skills" / f"jig-{skill}"
+                / "SKILL.md"
+            ).read_text()
+            self.assertIn(
+                f"$HOME/.agents/skills/{skill}/",
+                copied,
+                f"Codex-rendered {skill} should name Codex's user skill path",
+            )
+            self.assertNotIn(
+                "~/.claude/skills",
+                copied,
+                f"Codex-rendered {skill} leaked Claude skill path guidance",
+            )
+            self.assertNotIn(
+                "~/.codex/skills",
+                copied,
+                f"Codex-rendered {skill} invented an unsupported skill path",
+            )
+            self.assertNotIn(
+                "Codex skill router",
+                copied,
+                f"Codex-rendered {skill} should use documented skill-selection wording",
+            )
+            self.assertNotIn(
+                "router will prefer",
+                copied,
+                f"Codex-rendered {skill} should not promise router precedence",
+            )
+
+        pr_review = (
+            self.target / ".codex" / "skills" / "jig-pr-review" / "SKILL.md"
+        ).read_text()
+        self.assertIn(
+            "Codex-rendered guidance keeps richer-skill deferral to "
+            "interactive skill selection or explicit invocation",
+            pr_review,
+        )
 
     def test_codex_agents_materialize_as_toml(self):
         r = self._run_codex_scaffold()
