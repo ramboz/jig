@@ -193,6 +193,8 @@
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-03 — review integration: refactor-review + craft + conditional security + conditional arch | DRAFT |  |
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-04 — carve-out seam + close/learning + behaviour-delta gate + origin/main reservation | DRAFT |  |
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-05 — `jig:refactor` skill + plugin wiring + workflow.md routing | DRAFT |  |
+| [063-scaffold-precondition-gate](063-scaffold-precondition-gate/spec.md) | 063-01 — classify-and-route-on-new | DRAFT |  |
+| [063-scaffold-precondition-gate](063-scaffold-precondition-gate/spec.md) | 063-02 — skill-step0-precondition | DRAFT |  |
 
 ## Deferred slices
 
