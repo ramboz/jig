@@ -2216,7 +2216,7 @@ class TierUpgradeTests(unittest.TestCase):
     ]
     TIER1 = [
         "adr-workflow", "tdd-loop", "slice-land", "pr-review", "arch-review",
-        "clarify", "analyze", "security-review",
+        "clarify", "analyze", "security-review", "code-health",
     ]
 
     def setUp(self):

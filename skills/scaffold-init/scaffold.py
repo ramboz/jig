@@ -74,6 +74,7 @@ _TIER_SKILLS = {
         "clarify",
         "analyze",
         "security-review",
+        "code-health",  # spec 060 / ADR-0017 — Tier-1 detect-and-drive linter
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }

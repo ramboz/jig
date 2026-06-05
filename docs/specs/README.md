@@ -182,7 +182,7 @@
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-04 — review integration: bug-review + craft + conditional security | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-05 — escalation seam + close/learning gate + origin/main reservation | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-06 — `jig:bug-fix` skill + plugin wiring + workflow.md routing | DRAFT |  |
-| [060-code-health-capability](060-code-health-capability/spec.md) | 060-01 — Python lint, detect-and-drive | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-01 — Python lint, detect-and-drive | **DONE** | `jig:code-health` + `health.py` (tier-1); detect→drive ruff→normalize 0/1/2→tight summary→degrade. Resolves `.jig/lint-command`→ruff-on-PATH→`uvx ruff`→`pipx run ruff` (installs nothing). `check` captures+summarizes (count+top codes), NOT stream (vs `tdd.py`) — feeds the 060-05 reviewer pass per spec 057. Inline-mirrors `tdd.py` (ADR-0002 2nd caller; extract on 3rd). |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-02 — Dogfood onto jig: CI Ruff floor | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-03 — Broaden ecosystems + complexity dimension | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-04 — Duplication: native-first, `npx jscpd` fallback | DRAFT |  |

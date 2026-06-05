@@ -76,6 +76,7 @@ _TIER_SKILLS: dict[str, list[str]] = {
         "clarify",
         "analyze",
         "security-review",
+        "code-health",
     ],
     "tier-2": [],
 }
