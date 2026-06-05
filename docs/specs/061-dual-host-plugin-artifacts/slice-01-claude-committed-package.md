@@ -1,7 +1,7 @@
 ---
 status: IN_PROGRESS
 dependencies: []
-last_verified:
+last_verified: 2026-06-05
 ---
 
 ## Slice 061-01 - committed Claude package + repoint marketplace
@@ -57,7 +57,7 @@ of the whole repository.
       `review.py`.
 - [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
