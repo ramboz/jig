@@ -190,7 +190,7 @@
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-01 - host-aware-migrate-machinery | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-02 - codex-hook-trust-onboarding | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-03 - codex-install-contract-smoke | **DONE** |  |
-| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-04 - codex-skill-override-deferral | DRAFT |  |
+| [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-04 - codex-skill-override-deferral | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 059-05 - codex-role-capability-dogfood | **DONE** |  |
 | [059-codex-port-polish](059-codex-port-polish/spec.md) | 🔬 059-06 - codex-plugin-agent-discovery-spike | DRAFT |  |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-01 — Python lint, detect-and-drive | **DONE** | `jig:code-health` + `health.py` (tier-1); detect→drive ruff→normalize 0/1/2→tight summary→degrade. Resolves `.jig/lint-command`→ruff-on-PATH→`uvx ruff`→`pipx run ruff` (installs nothing). `check` captures+summarizes (count+top codes), NOT stream (vs `tdd.py`) — feeds the 060-05 reviewer pass per spec 057. Inline-mirrors `tdd.py` (ADR-0002 2nd caller; extract on 3rd). |

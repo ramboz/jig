@@ -836,6 +836,7 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         out = out.replace("Claude Code", "Codex")
         out = out.replace("Claude", "Codex")
         out = cls.finalize_codex_migrate_skill(out)
+        out = cls.rewrite_skill_override_guidance(out)
         scaffold_invocation = (
             'python3 "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/'
             'jig-scaffold-init/scaffold.py" \\\n'
@@ -845,6 +846,105 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
                 scaffold_invocation,
                 scaffold_invocation + "     --host codex \\\n",
             )
+        return out
+
+    @staticmethod
+    def rewrite_skill_override_guidance(body: str) -> str:
+        """Keep richer-skill deferral prose aligned with Codex locations.
+
+        Canonical jig skills remain Claude-compatible at source. Codex
+        renderers rewrite that prose to the documented skill locations:
+        user skills under `$HOME/.agents/skills`, repo skills under
+        `.agents/skills`, and installable distribution through plugins.
+        """
+        out = re.sub(
+            r"`~/\.codex/skills/([A-Za-z0-9_-]+)/`",
+            r"`$HOME/.agents/skills/\1/`",
+            body,
+        )
+        out = out.replace(
+            "Common location:\n  `$HOME/.agents/skills/",
+            "Codex user location:\n  `$HOME/.agents/skills/",
+        )
+        out = re.sub(
+            r"Common location:\s+(`\$HOME/\.agents/skills/[A-Za-z0-9_-]+/`)",
+            r"Codex user location: \1",
+            out,
+        )
+        out = out.replace(
+            "the\n"
+            "> Codex skill router prefers",
+            "Codex\n"
+            "> can prefer",
+        )
+        out = out.replace(
+            "the Codex skill router prefers",
+            "Codex can prefer",
+        )
+        out = out.replace(
+            "The Codex skill router should route to the\n"
+            "  more specific skill automatically; if you want to be sure, explicitly\n"
+            "  invoke it.",
+            "Codex can select the\n"
+            "  more specific skill by description; if you want to be sure, explicitly\n"
+            "  invoke that skill.",
+        )
+        out = out.replace(
+            "The Codex skill router should route\n"
+            "  to the more specific skill automatically; if you want to be sure,\n"
+            "  explicitly invoke it.",
+            "Codex can select\n"
+            "  the more specific skill by description; if you want to be sure,\n"
+            "  explicitly invoke that skill.",
+        )
+        out = out.replace(
+            "Jig's\n"
+            "  description tells the Codex router",
+            "Jig's\n"
+            "  description tells Codex",
+        )
+        out = out.replace(
+            "Jig's description tells the Codex router",
+            "Jig's description tells Codex",
+        )
+        out = out.replace(
+            "If the router consistently picks jig's\n"
+            "  baseline over such a skill",
+            "If Codex consistently picks jig's\n"
+            "  baseline over such a skill",
+        )
+        out = out.replace(
+            "**This router-based deferral applies to _interactive_ use only.**",
+            "**This richer-skill deferral applies to _interactive_ use only.**",
+        )
+        out = out.replace(
+            "**This router-based deferral applies to _interactive_ use\n"
+            "  only.**",
+            "**This richer-skill deferral applies to _interactive_ use\n"
+            "  only.**",
+        )
+        out = re.sub(
+            r"there\s+"
+            r"`review\.py` does explicit file-read dispatch \(detects\n"
+            r"  `\$HOME/\.agents/skills/([A-Za-z0-9_-]+)/` and points the "
+            r"reviewer at it\)\.",
+            "there\n"
+            "  `review.py` uses a host-specific file-read fallback outside "
+            "this Codex-rendered skill-selection path. Codex-rendered "
+            "guidance keeps "
+            "richer-skill deferral to interactive skill selection or "
+            "explicit invocation.",
+            out,
+        )
+        out = out.replace(
+            "so it cannot use the router at all",
+            "so it cannot use interactive skill selection",
+        )
+        out = re.sub(
+            r"scope and the router will prefer\s+it\.",
+            "scope and Codex can prefer it.",
+            out,
+        )
         return out
 
     @staticmethod
