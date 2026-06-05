@@ -25,12 +25,13 @@ from _common import review_evidence as ev  # noqa: E402
 
 
 def write_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
-                          *, arch_review: bool = False) -> Path:
+                          *, arch_review: bool = False,
+                          code_health_review: bool = False) -> Path:
     """Create `spec_dir/spec.md` + a sibling `slice-NN-<slug>.md` file.
 
     Returns the spec.md path. The slice file carries `arch_review: true`
-    in its frontmatter when `arch_review` is set, so `required_passes`
-    can be exercised against both shapes.
+    and/or `code_health_review: true` in its frontmatter when set, so
+    `required_passes` can be exercised against each shape.
     """
     spec_dir.mkdir(parents=True, exist_ok=True)
     spec = spec_dir / "spec.md"
@@ -40,6 +41,8 @@ def write_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
     fm = "---\nstatus: IN_PROGRESS\ndependencies: []\n"
     if arch_review:
         fm += "arch_review: true\n"
+    if code_health_review:
+        fm += "code_health_review: true\n"
     fm += "---\n"
     slice_file = spec_dir / f"slice-{slice_no}-{slug}.md"
     slice_file.write_text(
@@ -93,9 +96,10 @@ def write_verdict_file(spec_dir: Path, slice_no: str, pass_name: str,
 
 class VocabularyTests(unittest.TestCase):
     def test_pass_vocabulary(self):
+        # Slice 060-05 added the gated `code-health` pass.
         self.assertEqual(
             set(ev.PASSES),
-            {"compliance", "craft", "arch", "reconciliation"},
+            {"compliance", "craft", "arch", "code-health", "reconciliation"},
         )
 
     def test_verdict_vocabulary(self):
@@ -136,6 +140,11 @@ class PathResolverTests(unittest.TestCase):
         # The NN comes from the slice-NN-*.md filename, not the fragment.
         p = ev.evidence_path(self.spec, "0XX-02", "reconciliation")
         self.assertEqual(p.name, "slice-02-reconciliation.md")
+
+    def test_code_health_path_filename(self):
+        # Slice 060-05: the code-health pass picks up the same path convention.
+        p = ev.evidence_path(self.spec, "0XX-02", "code-health")
+        self.assertEqual(p.name, "slice-02-code-health.md")
 
     def test_unknown_pass_rejected(self):
         with self.assertRaises(ev.EvidenceError):
@@ -179,6 +188,31 @@ class RequiredPassesTests(unittest.TestCase):
     def test_unknown_stage_rejected(self):
         with self.assertRaises(ev.EvidenceError):
             ev.required_passes("BOGUS", arch_review=False)
+
+    # Slice 060-05: the gated code-health pass.
+    def test_code_health_in_passes(self):
+        self.assertIn("code-health", ev.PASSES)
+
+    def test_reviewed_adds_code_health_when_flagged(self):
+        req = ev.required_passes("REVIEWED", arch_review=False,
+                                 code_health_review=True)
+        self.assertEqual(set(req), {"compliance", "craft", "code-health"})
+
+    def test_reviewed_omits_code_health_by_default(self):
+        # Default code_health_review=False → existing slices unaffected.
+        req = ev.required_passes("REVIEWED", arch_review=False)
+        self.assertNotIn("code-health", req)
+
+    def test_reviewed_adds_both_arch_and_code_health(self):
+        req = ev.required_passes("REVIEWED", arch_review=True,
+                                 code_health_review=True)
+        self.assertEqual(set(req),
+                         {"compliance", "craft", "arch", "code-health"})
+
+    def test_reconciled_ignores_code_health_flag(self):
+        req = ev.required_passes("RECONCILED", arch_review=False,
+                                 code_health_review=True)
+        self.assertEqual(set(req), {"reconciliation"})
 
 
 class ArchReviewTruthyTokenTests(unittest.TestCase):
@@ -328,10 +362,12 @@ class ValidateEvidenceTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _spec(self, slug, slice_no, *, arch_review=False):
+    def _spec(self, slug, slice_no, *, arch_review=False,
+              code_health_review=False):
         spec_dir = self.tmp / slug
         return write_spec_with_slice(spec_dir, slice_no, "thing",
-                                     arch_review=arch_review)
+                                     arch_review=arch_review,
+                                     code_health_review=code_health_review)
 
     def test_reviewed_clears_when_compliance_and_craft_pass(self):
         spec = self._spec("045-a", "02")
@@ -371,6 +407,57 @@ class ValidateEvidenceTests(unittest.TestCase):
         write_verdict_file(spec.parent, "02", "craft", verdict="pass")
         diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
         self.assertEqual(diags, [])
+
+    # Slice 060-05: the gated code-health pass in validate_evidence.
+    def test_reviewed_blocks_when_code_health_required_but_missing(self):
+        spec = self._spec("060-c", "02", code_health_review=True)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertTrue(
+            any("code-health" in d for d in diags),
+            f"code_health_review: true → missing code-health must block: {diags}")
+
+    def test_reviewed_clears_with_code_health_when_flagged_and_present(self):
+        spec = self._spec("060-d", "02", code_health_review=True)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        write_verdict_file(spec.parent, "02", "code-health", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertEqual(diags, [], f"expected clean, got: {diags}")
+
+    def test_reviewed_ignores_code_health_when_not_flagged(self):
+        # Back-compat: a slice WITHOUT the flag never requires code-health.
+        spec = self._spec("060-e", "02", code_health_review=False)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertEqual(diags, [], f"unflagged slice must not need code-health: {diags}")
+
+    def test_code_health_review_flag_truthy_tokens(self):
+        for tok in ("true", "yes", "on", "1", "YES"):
+            spec = self._spec(f"060-flag-{tok}", "02")
+            # rewrite slice with the raw token value
+            slc = spec.parent / "slice-02-thing.md"
+            slc.write_text(
+                "---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                f"code_health_review: {tok}\n---\n\n## Slice 0XX-02 — thing\n"
+            )
+            self.assertTrue(
+                ev._code_health_review_flag(spec, "0XX-02"),
+                f"code_health_review: {tok!r} should require code-health",
+            )
+        for tok in ("false", "no", "0"):
+            spec = self._spec(f"060-flag-neg-{tok}", "02")
+            slc = spec.parent / "slice-02-thing.md"
+            slc.write_text(
+                "---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                f"code_health_review: {tok}\n---\n\n## Slice 0XX-02 — thing\n"
+            )
+            self.assertFalse(
+                ev._code_health_review_flag(spec, "0XX-02"),
+                f"code_health_review: {tok!r} should not require code-health",
+            )
 
     def test_superseded_only_fail_blocks_with_actionable_diag(self):
         """ADR §3/§4: a required pass file that exists but is `fail` (not

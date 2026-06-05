@@ -42,7 +42,10 @@ Usage:
     python3 review.py reconciliation <spec.md> <slice-fragment>
     python3 review.py pr-review     <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py arch-review   <spec.md> <slice-fragment> <deliverable-path>...
-    python3 review.py subagent-type {implementation|reconciliation|pr-review|arch-review}
+    python3 review.py code-health   <spec.md> <slice-fragment> <deliverable-path>...
+                                    [--summary-file PATH]
+    python3 review.py subagent-type
+        {implementation|reconciliation|pr-review|arch-review|code-health}
 """
 
 from __future__ import annotations
@@ -725,6 +728,99 @@ boundaries, public contracts, and design coherence?
 """
 
 
+# -------- code-health prompt (slice 060-05) --------
+
+
+def build_code_health_review_prompt(spec_path: Path, slice_label: str,
+                                    deliverables: list, summary: str) -> str:
+    """Construct the standard code-health-review prompt (slice 060-05).
+
+    The on-demand code-health pass runs AFTER the compliance + craft (+
+    arch) passes, but ONLY when the slice's frontmatter declares
+    `code_health_review: true` (queried via
+    `workflow.py code-health-review-needed`). It is gated, not always-on:
+    ADR-0017 flags the per-slice review cost (specs 055/057
+    context-cost discipline) and recommends gating it like arch-review.
+
+    SPINE-RUNS-THE-TOOL / REVIEWER-JUDGES-THE-SUMMARY (AC2). The reviewer
+    subagent is read-only (Read / Glob / Grep, NO Bash), so `health.py`
+    is run by the orchestrator / CI and its tight summary is passed IN
+    here as `summary` — never raw logs, never run by the subagent. The
+    reviewer renders the judgment a *tool* cannot: is this duplication
+    within the ADR-0002 inline-mirror budget? is this complexity inherent
+    or fixable? are these lint findings worth blocking on?
+
+    The pass produces the same VERDICT / REASONING / SPECIFIC ISSUES /
+    RECONCILIATION NOTES envelope as the other passes, with each SPECIFIC
+    ISSUES entry tagged `[blocker]` / `[nit]` / `[strength]` so the
+    workflow can decide what blocks the REVIEWED transition vs. becomes a
+    reconciliation-log item.
+
+    NOTE: like `build_pr_review_prompt` / `build_arch_review_prompt`, this
+    builder does NOT append `_principles_check_block()`. The code-health
+    pass is scoped to the health-summary judgment only.
+
+    Richer-skill deferral is intentionally NOT wired here (unlike
+    pr-review / arch-review): there is no established "richer code-health
+    reviewer" skill category to detect, so jig's rubric is inlined. (See
+    the deviation log.)
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    summary_block = summary.rstrip() if summary and summary.strip() else \
+        "_(no health.py summary was provided — judge on the deliverables " \
+        "alone, and note the missing summary in your reasoning.)_"
+    return f"""{_PREAMBLE}
+
+## Your job
+
+You are running the **code-health pass** on slice **{slice_label}**. The
+slice declared `code_health_review: true` in its frontmatter. The
+compliance pass (jig:independent-review), the craft pass (pr-review), and
+(if applicable) the arch pass have already returned — that work is done,
+and you must NOT re-evaluate any of it. Your job is the judgment a static
+tool *cannot* make about the change's code health.
+
+**`health.py` has already been run by the orchestrator / CI — you are
+read-only (no Bash) and must NOT try to run it.** Its tight summary is
+provided below; judge THAT summary (and the deliverables), never raw logs.
+
+## health.py summary (run by the spine; judge this, do not re-run)
+
+```
+{summary_block}
+```
+
+## What to read (in this order)
+
+1. The spec — `{spec_path}`. Read slice **{slice_label}** for context,
+   but do NOT re-evaluate the acceptance criteria — that's the
+   compliance pass's job.
+2. The deliverables:
+{deliverable_lines}
+3. Any related files in the repo you need to judge whether a flagged
+   pattern is acceptable (read-only).
+
+{_PROHIBITIONS}
+## Evaluate (the judgment a tool can't)
+
+- **Duplication** — is any reported duplication within the ADR-0002
+  inline-mirror budget (two callers may mirror; a third triggers an
+  extract), or is it genuine copy-paste that should be a shared helper?
+- **Complexity** — is a flagged complex function *inherent* to the
+  problem (and well-tested), or fixable bloat worth refactoring now?
+- **Lint findings** — which findings are worth blocking on vs. nits, and
+  are any false positives for this change's context?
+- **Net direction** — does the change leave the codebase's health better,
+  neutral, or worse?
+
+Tag every SPECIFIC ISSUES entry with one of `[blocker]` / `[nit]` /
+`[strength]`: `[blocker]` entries block the REVIEWED transition;
+`[nit]`/`[strength]` entries become reconciliation-log items.
+
+{_PR_REVIEW_OUTPUT_FORMAT}
+"""
+
+
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     """Construct the standard reconciliation-review prompt.
 
@@ -971,6 +1067,22 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pa.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
 
+    # Slice 060-05: code-health pass — on-demand (gated by
+    # `code_health_review: true`), mirrors `arch-review` plus a summary.
+    # `health.py` is run by the spine; its tight summary is fed IN via
+    # --summary-file (or stdin) — the read-only reviewer never runs it.
+    pch = sub.add_parser(
+        "code-health",
+        help="construct a code-health-pass prompt",
+    )
+    pch.add_argument("spec", help="path to spec.md")
+    pch.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pch.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+    pch.add_argument(
+        "--summary-file", dest="summary_file", default=None,
+        help="path to the health.py summary text (default: read stdin)",
+    )
+
     # Slice 045-02: record a durable verdict file for a (slice, pass).
     prec = sub.add_parser(
         "record-review",
@@ -1036,7 +1148,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pt.add_argument(
         "mode",
-        choices=["implementation", "reconciliation", "pr-review", "arch-review"],
+        choices=["implementation", "reconciliation", "pr-review",
+                 "arch-review", "code-health"],
         help=(
             "review mode (currently informational — every mode returns the "
             "same name; the choice exists for forward compatibility)"
@@ -1094,6 +1207,10 @@ def main(argv: list) -> int:
             prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "arch-review":
             prompt = build_arch_review_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "code-health":
+            summary = _read_summary(ns)
+            prompt = build_code_health_review_prompt(
+                spec, slice_label, ns.deliverables, summary)
         else:
             prompt = build_reconciliation_prompt(spec, slice_label)
         sys.stdout.write(prompt)

@@ -1262,6 +1262,184 @@ class ArchReviewSubagentTypeTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "general-purpose")
 
 
+class CodeHealthPromptTests(unittest.TestCase):
+    """Slice 060-05 AC1/AC2: `review.py code-health <spec> <slice>
+    <deliverable>... [--summary-file PATH]` builds a self-contained prompt
+    that:
+      - feeds in the spec + slice + deliverable paths + the health.py summary
+      - states the spine ran health.py (the read-only reviewer must NOT)
+      - asks for the duplication / complexity / lint judgment a tool can't make
+      - tags SPECIFIC ISSUES with [blocker]/[nit]/[strength]
+      - wraps output in the standard VERDICT envelope
+    """
+
+    SUMMARY = "lint: 3 findings (C901 x2, PLR0913 x1); duplication: 2 clones"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-ch-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "060-05 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self, summary: str = None):
+        sfile = Path(self.tmpdir) / "summary.txt"
+        sfile.write_text(self.SUMMARY if summary is None else summary)
+        result = run_review(
+            "code-health", str(self.spec), "060-05",
+            "skills/foo/foo.py", "skills/foo/test_foo.py",
+            "--summary-file", str(sfile),
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result.stdout
+
+    def test_includes_standard_preamble(self):
+        prompt = self._prompt()
+        self.assertIn("You are an independent reviewer", prompt)
+
+    def test_includes_spec_path(self):
+        prompt = self._prompt()
+        self.assertIn(str(self.spec), prompt)
+
+    def test_includes_slice_label(self):
+        prompt = self._prompt()
+        self.assertIn("060-05", prompt)
+
+    def test_lists_deliverable_paths_verbatim(self):
+        prompt = self._prompt()
+        self.assertIn("skills/foo/foo.py", prompt)
+        self.assertIn("skills/foo/test_foo.py", prompt)
+
+    def test_injects_summary_text(self):
+        prompt = self._prompt()
+        self.assertIn(self.SUMMARY, prompt)
+
+    def test_states_spine_ran_the_tool(self):
+        prompt = self._prompt()
+        # AC2: the reviewer must be told health.py was already run and it
+        # must NOT run it (read-only, no Bash).
+        self.assertRegex(
+            prompt,
+            r"(?is)health\.py.*(already\s+been\s+run|run by the).*",
+            "prompt must state health.py was run by the spine/orchestrator",
+        )
+        self.assertRegex(
+            prompt, r"(?i)(no Bash|must NOT (try to )?run|read-only)",
+            "prompt must tell the reviewer not to run health.py itself",
+        )
+
+    def test_asks_for_duplication_and_complexity_judgment(self):
+        prompt = self._prompt()
+        self.assertRegex(prompt, r"(?i)duplication")
+        self.assertRegex(prompt, r"(?i)complexity")
+        self.assertIn("ADR-0002", prompt)
+
+    def test_tags_blocker_nit_strength(self):
+        prompt = self._prompt()
+        for tag in ("[blocker]", "[nit]", "[strength]"):
+            self.assertIn(tag, prompt,
+                          f"prompt must instruct the {tag} tag")
+
+    def test_includes_verdict_envelope(self):
+        prompt = self._prompt()
+        for marker in ("VERDICT", "REASONING", "SPECIFIC ISSUES",
+                       "RECONCILIATION NOTES"):
+            self.assertIn(marker, prompt, f"missing envelope marker: {marker}")
+        self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    def test_does_not_re_evaluate_acceptance_criteria(self):
+        prompt = self._prompt()
+        self.assertNotRegex(
+            prompt, r"(?i)for\s+each\s+acceptance\s+criterion",
+            "code-health prompt must not re-evaluate ACs",
+        )
+
+    def test_summary_read_from_stdin_when_no_file(self):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), "code-health", str(self.spec),
+             "060-05", "skills/foo/foo.py"],
+            input="STDIN-SUMMARY-SENTINEL\n",
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("STDIN-SUMMARY-SENTINEL", result.stdout)
+
+    def test_requires_at_least_one_deliverable(self):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), "code-health", str(self.spec),
+             "060-05"],
+            input="", capture_output=True, text=True, env=env,
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_refuses_missing_spec(self):
+        missing = Path(self.tmpdir) / "nope.md"
+        result = run_review("code-health", str(missing), "060-05", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    def test_empty_summary_degrades_gracefully(self):
+        # AC2 graceful-degrade: no summary provided (empty stdin) → the prompt
+        # still builds (exit 0) and tells the reviewer to judge on the
+        # deliverables, rather than emitting an empty/blank summary block.
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), "code-health", str(self.spec),
+             "060-05", "skills/foo/foo.py"],
+            input="", capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("no health.py summary", result.stdout.lower())
+
+    def test_missing_summary_file_errors(self):
+        # --summary-file pointing at a nonexistent path → clean exit-2
+        # ReviewError, not a traceback.
+        missing = Path(self.tmpdir) / "no-such-summary.txt"
+        result = run_review(
+            "code-health", str(self.spec), "060-05", "skills/foo/foo.py",
+            "--summary-file", str(missing),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("summary file not found", result.stderr.lower())
+        self.assertNotIn("traceback", result.stderr.lower())
+
+
+class CodeHealthSubagentTypeTests(unittest.TestCase):
+    """Slice 060-05: `review.py subagent-type code-health` returns the same
+    reviewer/general-purpose precedence as the other modes."""
+
+    def _run(self, *args, env_overrides=None, drop_plugin_root=False):
+        env = os.environ.copy()
+        if drop_plugin_root:
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+        if env_overrides:
+            env.update(env_overrides)
+        return subprocess.run(
+            [sys.executable, str(REVIEW), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_returns_reviewer_when_plugin_root_set(self):
+        result = self._run(
+            "subagent-type", "code-health",
+            env_overrides={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "reviewer")
+
+    def test_returns_general_purpose_when_plugin_root_unset(self):
+        result = self._run("subagent-type", "code-health", drop_plugin_root=True)
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "general-purpose")
+
+
 class SpecWorkflowSkillThreePassTests(unittest.TestCase):
     """Slice 031-01 AC #3 + AC #6: `skills/spec-workflow/SKILL.md`
     § "After implementation" documents the three-pass flow:

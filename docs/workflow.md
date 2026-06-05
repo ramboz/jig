@@ -78,16 +78,16 @@ All specs are SPIDR-split before implementation begins:
 1. Check `docs/specs/README.md` for current status board.
 2. Pick up the next `READY_FOR_IMPLEMENTATION` slice.
 3. Spawn the `implementer` subagent with the spec path.
-4. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — three passes via `jig:independent-review`, `pr-review`, and optionally `arch-review`).
-5. Address reviewer findings; `[blocker]`-tagged craft/arch findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.
+4. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — up to four passes via `jig:independent-review`, `pr-review`, and optionally `arch-review` (`arch_review: true`) + `jig:code-health` (`code_health_review: true`)).
+5. Address reviewer findings; `[blocker]`-tagged craft/arch/code-health findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.
 6. Run reconciliation: update `architecture.md` if module boundaries changed; annotate spec with deviation log; run + `record-review` the reconciliation review, then `workflow.py transition … RECONCILED` (gated on that evidence + the deviation log).
 7. `workflow.py transition … DONE` (re-validates the full review-evidence set + dependencies). Update `docs/specs/README.md`.
 8. Run `memory-sync` to consolidate learnings.
 
 ## Post-implementation review
 
-Every slice goes through up to three review passes between IN_PROGRESS
-and REVIEWED.
+Every slice goes through up to four review passes between IN_PROGRESS
+and REVIEWED — two always-on, two gated on slice frontmatter flags.
 
 1. **Compliance pass — `jig:independent-review`** (always). A reviewer
    subagent with a fresh, self-contained prompt and read-only tools
@@ -116,9 +116,20 @@ and REVIEWED.
    dispatch (`~/.claude/skills/arch-review/`, else jig's baseline).
    Output: summary / strengths / concerns / open questions. Same block
    rule as the craft pass.
+4. **Code-health pass — `jig:code-health`** (on-demand, **gated** by
+   `code_health_review: true` — spec 060-05 / ADR-0017). The orchestrator
+   runs `health.py` and feeds its **tight summary** into
+   `review.py code-health … --summary-file`; the read-only reviewer (no
+   Bash) judges that summary — never raw logs, never runs the tool itself
+   (AC2). It renders the judgment a tool can't: duplication within the
+   ADR-0002 inline-mirror budget? complexity inherent or fixable? lint
+   findings worth blocking on? Same `[blocker]`/`[nit]` block rule as the
+   craft pass. Gated (not always-on) because ADR-0017 flags the per-slice
+   review cost (specs 055/057 context-cost discipline); it defaults off.
 
-Order: compliance → craft → (arch if flagged). All required passes
-must `pass` for the IN_PROGRESS → REVIEWED transition.
+Order: compliance → craft → (arch if `arch_review: true`) → (code-health
+if `code_health_review: true`). All required passes must `pass` for the
+IN_PROGRESS → REVIEWED transition.
 
 The reviewer's isolation is prompt- and tool-scoped — a self-contained
 prompt plus read-only tools — not a hard sandbox (parent context is
@@ -130,7 +141,8 @@ technically reachable; see `skills/independent-review/SKILL.md`
 Each pass produces a **durable verdict artifact**, not ephemeral chat.
 After a pass returns, record its verdict with `review.py record-review`,
 which writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
-(`<pass>` ∈ `compliance` / `craft` / `arch` / `reconciliation`; schema
+(`<pass>` ∈ `compliance` / `craft` / `arch` / `code-health` /
+`reconciliation`; schema
 in `skills/_common/review_evidence.py`, ADR-0014 §1–3). The end-to-end
 enforced path is:
 
@@ -143,7 +155,8 @@ enforced path is:
 3. **Run the gated transition** — `workflow.py transition <spec.md>
    <slice> REVIEWED`. The helper imports the same validator and **refuses**
    the move unless `compliance` + `craft` (+ `arch` when the slice
-   declares `arch_review: true`) all exist and carry `verdict: pass`. A
+   declares `arch_review: true`, + `code-health` when it declares
+   `code_health_review: true`) all exist and carry `verdict: pass`. A
    refusal names the missing/invalid artifact and the `record-review`
    command to produce it. (`review.py check-reviews … --stage REVIEWED`
    runs the same check ahead of the transition.)
@@ -235,8 +248,10 @@ improvising work across many turns.
 - **Get the plan deterministically.** `python3 skills/spec-workflow/workflow.py
   session-plan <spec.md>` enumerates the spec's non-DEFERRED slices and prints,
   per slice, the standard phase sequence — implement → compliance → craft →
-  *arch (only when the slice declares `arch_review: true`)* → reconcile →
-  land — naming the **subagent type** and **skill** for each phase. It is a
+  *arch (only when the slice declares `arch_review: true`)* →
+  *code-health (only when it declares `code_health_review: true`)* →
+  reconcile → land — naming the **subagent type** and **skill** for each
+  phase. It is a
   pure function of the slices + their frontmatter, stdout-only, with no side
   effects on spec/slice state (advisory, not a gate — ADR-0011).
 - **Dispatch each phase to a subagent; keep only the summary.** Each phase the

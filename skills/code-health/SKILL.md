@@ -150,14 +150,52 @@ have independent lifecycles. The deliberate duplication is noted in
 `health.py`'s module docstring (exactly as `tdd.py` documents its own
 duplication of `scaffold.py`).
 
+## The code-health review pass (slice 060-05)
+
+Beyond the `health.py` runner, jig wires a distinct **code-health review
+pass** into the post-implementation flow (alongside compliance / craft /
+arch). The layering ([ADR-0017](../../docs/decisions/adr-0017-scaffolded-code-health.md)):
+the **spine runs the tool** (`health.py`), and a **read-only `reviewer`
+subagent judges its tight summary** — rendering the judgment a static tool
+*can't*: is reported duplication within the [ADR-0002](../../docs/decisions/adr-0002-extract-helper-on-third-caller.md)
+inline-mirror budget (two callers may mirror; a third triggers an extract)?
+is a flagged complex function inherent or fixable? are the lint findings
+worth blocking on?
+
+- **The reviewer never runs `health.py`.** It is read-only
+  (Read/Glob/Grep, no Bash). The orchestrator / CI runs `health.py`,
+  captures the tight summary, and feeds it into the prompt via
+  `review.py code-health … --summary-file <path>` (or stdin). The reviewer
+  judges the summary, never raw logs.
+- **The pass is GATED, not always-on.** It runs only when a slice's
+  frontmatter declares `code_health_review: true` — exactly mirroring how
+  `arch_review: true` gates the arch pass. **Why gated:** ADR-0017 flags
+  the per-slice review cost (the spec 055/057 context-cost discipline —
+  every pass adds orchestrator turns + a subagent), and recommends gating
+  it like arch-review rather than spending it on every slice. The flag
+  defaults off, so existing slices are unaffected; a slice author opts in
+  when a change is duplication-/complexity-heavy enough to warrant the
+  judgment.
+- **Evidence + block rule.** The verdict is recorded as
+  `docs/specs/NNN-slug/reviews/slice-NN-code-health.md` ([ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md)
+  evidence model). `[blocker]`-tagged findings block the `REVIEWED`
+  transition; `[nit]`-tagged findings become reconciliation-log items —
+  the same rule as the craft/arch passes. `workflow.py transition`
+  requires the `code-health` verdict for `REVIEWED`/`DONE` iff the flag is
+  set. Query the flag with
+  `workflow.py code-health-review-needed <spec.md> <slice>`.
+
+See `skills/spec-workflow/SKILL.md` § "After implementation" for the full
+four-pass orchestration recipe.
+
 ## Gotchas
 
 - **Scope is Python (ruff, + advisory complexity) and Node (eslint, +
   advisory prettier --check), plus a cross-ecosystem advisory duplication
   signal (`npx jscpd`).** The dedicated code-health reviewer pass (slice
-  060-05) is still a later slice; the Tier-2 scaffold-the-floor work (slice
-  060-06) is **DEFERRED**. An unrecognized ecosystem with no
-  `.jig/lint-command` override degrades to a recommendation.
+  060-05) is now live — see "The code-health review pass" above; the Tier-2
+  scaffold-the-floor work (slice 060-06) is **DEFERRED**. An unrecognized
+  ecosystem with no `.jig/lint-command` override degrades to a recommendation.
 - **Advisory ≠ gating.** The complexity (Python), prettier (Node), and
   duplication (cross-ecosystem) signals are reported in the summary but
   **never** change the exit code — the exit code is driven solely by the

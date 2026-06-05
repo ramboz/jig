@@ -3445,6 +3445,61 @@ class SliceNeedsArchReviewTests(unittest.TestCase):
         self.assertIn(result.stdout, ("true\n", "true"))
 
 
+class SliceNeedsCodeHealthReviewTests(unittest.TestCase):
+    """Slice 060-05: `workflow.py code-health-review-needed` mirrors
+    `arch-review-needed`, reading the slice's `code_health_review:`
+    frontmatter flag and defaulting to false when absent (back-compat —
+    every existing slice has no flag)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-ch-needed-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.slice_file = self.tmpdir / "slice-05-ch.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, fm_extra: str) -> None:
+        self.slice_file.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n"
+            f"{fm_extra}---\n\n## Slice 060-05 alpha\n\n**Goal:** x.\n"
+        )
+
+    def _run(self):
+        return run_workflow("code-health-review-needed", str(self.spec), "060-05")
+
+    def test_false_when_absent(self):
+        self._write_slice("")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "false")
+
+    def test_true_when_set(self):
+        self._write_slice("code_health_review: true\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "true")
+
+    def test_false_when_explicit_false(self):
+        self._write_slice("code_health_review: false\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "false")
+
+    def test_truthy_variations(self):
+        for tok in ("yes", "True", "1", "on"):
+            self._write_slice(f"code_health_review: {tok}\n")
+            r = self._run()
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip(), "true",
+                             f"{tok!r} should be truthy")
+
+
 class SliceTemplateArchReviewHintTests(unittest.TestCase):
     """Slice 031-02 AC #1 + AC #6: the slice template at
     `templates/docs/specs/slice-template.md` ships the `arch_review:`
@@ -4825,6 +4880,7 @@ class _GateFixture(unittest.TestCase):
 
     def write_slice(self, status: str, *, slice_no: str = "01",
                     slug: str = "thing", arch_review: bool = False,
+                    code_health_review: bool = False,
                     deviation_log: bool = False,
                     dod_lines: list = None,
                     label: str = None) -> None:
@@ -4835,6 +4891,8 @@ class _GateFixture(unittest.TestCase):
         fm = ["---", f"status: {status}", "dependencies: []", "last_verified:"]
         if arch_review:
             fm.append("arch_review: true")
+        if code_health_review:
+            fm.append("code_health_review: true")
         fm.append("---")
         body = ["", f"## Slice {label}", "", "**Goal:** placeholder.", ""]
         if dod_lines:
@@ -4995,6 +5053,39 @@ class TransitionReviewedGateTests(_GateFixture):
                          "REVIEWED", gate=True)
         self.assertEqual(r.returncode, 0,
                          f"arch should not be required; stderr={r.stderr}")
+
+    # --- code-health: required only when flagged (slice 060-05) ---
+    def test_reviewed_blocked_when_code_health_flagged_but_missing(self):
+        self.write_slice("IN_PROGRESS", code_health_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        # code-health evidence absent though the slice declares the flag.
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("code-health", r.stderr.lower())
+        self.assertEqual(self._status_in_slice(), "IN_PROGRESS")
+
+    def test_reviewed_clears_when_code_health_flagged_and_present(self):
+        self.write_slice("IN_PROGRESS", code_health_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        self.write_evidence("code-health")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected REVIEWED to clear; stderr={r.stderr}")
+
+    def test_reviewed_ignores_code_health_when_not_flagged(self):
+        # BACK-COMPAT (critical): a slice WITHOUT code_health_review must NOT
+        # suddenly require a code-health verdict.
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"code-health should not be required; stderr={r.stderr}")
 
 
 class TransitionReconciledGateTests(_GateFixture):
@@ -5511,10 +5602,13 @@ class SessionPlanTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _write_slice(self, fname: str, label: str, status: str = "DRAFT",
-                     arch_review: str = None) -> None:
+                     arch_review: str = None,
+                     code_health_review: str = None) -> None:
         fm = [f"status: {status}", "dependencies: []", "last_verified:"]
         if arch_review is not None:
             fm.append(f"arch_review: {arch_review}")
+        if code_health_review is not None:
+            fm.append(f"code_health_review: {code_health_review}")
         block = "---\n" + "\n".join(fm) + "\n---\n\n"
         (self.tmpdir / fname).write_text(
             block + f"## Slice {label}\n\n**Goal:** placeholder.\n"
@@ -5570,6 +5664,36 @@ class SessionPlanTests(unittest.TestCase):
                 result = self._run()
                 self.assertEqual(result.returncode, 0, msg=result.stderr)
                 self.assertIn("arch-review", result.stdout)
+
+    # Slice 060-05 — code-health phase iff slice declares code_health_review
+    def test_code_health_phase_only_for_flagged_slice(self):
+        self._write_slice("slice-01-plain.md", "057-01 plain")
+        self._write_slice("slice-02-ch.md", "057-02 ch",
+                           code_health_review="true")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = result.stdout
+        self.assertIn("jig:code-health", out)
+        idx_plain = out.index("057-01 plain")
+        idx_ch = out.index("057-02 ch")
+        plain_block = out[idx_plain:idx_ch]
+        ch_block = out[idx_ch:]
+        self.assertNotIn("jig:code-health", plain_block,
+                         "plain slice must NOT include the code-health phase")
+        self.assertIn("jig:code-health", ch_block,
+                      "code_health_review:true slice must include the phase")
+
+    def test_code_health_phase_after_arch_when_both(self):
+        self._write_slice("slice-01-both.md", "057-01 both",
+                           arch_review="true", code_health_review="true")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = result.stdout
+        # arch must be emitted before code-health (after-craft ordering).
+        self.assertIn("arch-review", out)
+        self.assertIn("jig:code-health", out)
+        self.assertLess(out.index("arch-review"), out.index("jig:code-health"),
+                        "arch phase must come before code-health phase")
 
     # AC #1 — DEFERRED slices are excluded
     def test_deferred_slice_excluded(self):

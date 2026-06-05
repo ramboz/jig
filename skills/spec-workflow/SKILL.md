@@ -176,10 +176,11 @@ SKILL.md hand-off is the documented gate.
 
 ### After implementation
 
-Slices 031-01 + 031-02 wired a **multi-pass review flow** into the
+Slices 031-01 + 031-02 + 060-05 wired a **multi-pass review flow** into the
 post-implementation step. Every slice runs through two passes before the
-`IN_PROGRESS → REVIEWED` transition; a third (architecture) pass fires on
-demand when the slice's frontmatter declares `arch_review: true`.
+`IN_PROGRESS → REVIEWED` transition; two further passes fire on demand —
+the **arch** pass when the slice declares `arch_review: true`, and the
+**code-health** pass when it declares `code_health_review: true`.
 
 The orchestrator runs the passes in this order:
 
@@ -218,9 +219,28 @@ The orchestrator runs the passes in this order:
    it when the slice changes module boundaries, public contracts, or
    architecture-shaped concerns.
 
+4. **Code-health pass — `jig:code-health`** (on-demand, **gated**). Before
+   running, query the slice's `code_health_review:` frontmatter flag via
+   `workflow.py code-health-review-needed`. When it prints `true`, **run
+   `health.py` yourself** (the orchestrator / CI), capture its tight
+   summary, and feed THAT summary into `review.py code-health … --summary-file`
+   (or via stdin). Then spawn a `reviewer`-shaped subagent. **The reviewer
+   is read-only (Read/Glob/Grep, no Bash) — it must NOT run `health.py`;
+   it judges the summary you provide.** The reviewer renders the judgment a
+   tool can't: is duplication within the [ADR-0002](../../docs/decisions/adr-0002-extract-helper-on-third-caller.md)
+   inline-mirror budget? is a complex function inherent or fixable? are
+   the lint findings worth blocking on? The pass returns the same verdict
+   envelope, with SPECIFIC ISSUES tagged `[blocker]` / `[nit]` /
+   `[strength]`. **Why gated, not always-on:** [ADR-0017](../../docs/decisions/adr-0017-scaffolded-code-health.md)
+   flags the per-slice review cost (specs 055/057 context-cost discipline)
+   and recommends gating it like arch-review — so it defaults off and slice
+   authors opt in with `code_health_review: true`. The evidence file is
+   `reviews/slice-NN-code-health.md`.
+
 **Block rule for the REVIEWED transition.** All required passes
-(compliance + craft, plus arch when `arch_review: true`) must pass
-before `transition <slice> REVIEWED`:
+(compliance + craft, plus arch when `arch_review: true`, plus code-health
+when `code_health_review: true`) must pass before
+`transition <slice> REVIEWED`:
 
 - Any `fail` verdict from any pass blocks the transition.
 - `needs-changes` from the compliance pass blocks (the implementer
@@ -233,6 +253,9 @@ before `transition <slice> REVIEWED`:
 - The arch pass follows the same rule as the craft pass:
   `[blocker]`-tagged entries block; `[nit]`-tagged entries and
   `needs-changes` become reconciliation-log items.
+- The code-health pass follows the same rule: `[blocker]`-tagged entries
+  block the `REVIEWED` transition; `[nit]`-tagged entries become
+  reconciliation-log items.
 
 **The gate is mechanical, not advisory (slice 045-03 / [ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md) §5).**
 `workflow.py transition` now *refuses* the `REVIEWED` / `RECONCILED` /
@@ -240,7 +263,8 @@ before `transition <slice> REVIEWED`:
 `review.py record-review` as `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md`
 — exists and clears (`verdict: pass`). `REVIEWED` requires
 `compliance` + `craft` (+ `arch` when the slice declares
-`arch_review: true`); `RECONCILED` requires the `reconciliation` verdict
+`arch_review: true`, + `code-health` when it declares
+`code_health_review: true`); `RECONCILED` requires the `reconciliation` verdict
 **and** a `### Deviation log` subsection; `DONE` re-validates the whole
 set (in addition to the existing `dependencies:` check). A refusal names
 the missing/invalid artifact and the `record-review` command to produce
@@ -262,8 +286,9 @@ After all required passes pass:
    evidence"). The `REVIEWED` transition is gated on this evidence, so it
    is not optional.
 6. Transition: `transition <spec.md> <slice> REVIEWED`. The gate
-   re-validates the recorded `compliance` + `craft` (+ `arch`) verdicts
-   before the status flips (and before the 003-04 auto-tick).
+   re-validates the recorded `compliance` + `craft` (+ `arch`,
+   + `code-health`) verdicts before the status flips (and before the
+   003-04 auto-tick).
 
 **Recovering from a failed review.** A `fail`/`needs-changes` verdict — or
 a `[blocker]`-tagged craft/arch finding, which is recorded as a non-`pass`
@@ -310,6 +335,28 @@ if [ "$NEED_ARCH" = "true" ]; then
     subagent-type arch-review)
   # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
 fi
+
+# Code-health pass (only when slice frontmatter has `code_health_review: true`)
+# The orchestrator runs health.py and feeds its summary IN — the read-only
+# reviewer never runs the tool (no Bash).
+if ! NEED_CH=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+    code-health-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"); then
+  echo "code-health-review-needed failed — aborting" >&2
+  exit 2
+fi
+if [ "$NEED_CH" = "true" ]; then
+  # Run the jig:code-health runner yourself (health.py check .) and capture
+  # its tight summary to /tmp/health-summary.txt — the read-only reviewer
+  # MUST NOT run it. (The runner ships with the Tier-1 jig:code-health skill;
+  # if it isn't installed, note "summary unavailable" and judge on the
+  # deliverables.)
+  PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    code-health "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+    "<deliverable-path-1>" ... --summary-file /tmp/health-summary.txt)
+  SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    subagent-type code-health)
+  # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+fi
 ```
 
 ### Reconciliation (REVIEWED → RECONCILED)
@@ -325,8 +372,9 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
    subsection under the slice heading (ADR-0014 §5).
 2. Commit the work.
 3. After commit: `transition <spec.md> <slice> DONE`. `DONE` re-validates
-   the whole evidence set — `compliance` + `craft` (+ `arch`) +
-   `reconciliation` — on top of the existing `dependencies:` check.
+   the whole evidence set — `compliance` + `craft` (+ `arch`,
+   + `code-health`) + `reconciliation` — on top of the existing
+   `dependencies:` check.
 4. Regenerate the board: `workflow.py status-board <project-dir>`.
 5. Run `/jig:memory-sync` (or `memory.py`) to consolidate any new learnings.
 

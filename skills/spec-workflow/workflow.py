@@ -277,6 +277,26 @@ def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("arch_review", ""))
 
 
+def slice_needs_code_health_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares
+    `code_health_review: true` (slice 060-05; mirrors
+    `slice_needs_arch_review` exactly).
+
+    Drives the orchestrator's decision to spawn the on-demand code-health
+    review pass, and keeps the spawner in lock-step with the evidence
+    gate's reader (`review_evidence._code_health_review_flag`) via the same
+    shared `frontmatter_flag_truthy` predicate. Defaults to False on any
+    miss (no frontmatter, field absent, non-truthy value) so every
+    existing slice (no flag) is unaffected — the pass is opt-in/gated.
+
+    Layout-aware via `load_slice`; raises WorkflowError on slice lookup
+    failures, like `slice_needs_arch_review`.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("code_health_review", ""))
+
+
 # ---------- session-plan: delegation-first dispatch plan (slice 057-01) ----------
 
 # The standard per-slice phase sequence. Each tuple is
@@ -292,11 +312,14 @@ def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
 # and docs/workflow.md "Post-implementation review".
 # The arch phase is conditional (emitted iff the slice declares
 # `arch_review: true`); it is inserted between `craft` and `reconcile`.
+# The code-health phase is likewise conditional (emitted iff the slice
+# declares `code_health_review: true` — slice 060-05); it is inserted
+# after the arch phase (or after craft when no arch) and before reconcile.
 _SESSION_PLAN_PHASES = (
     ("implement", "delegate", "implementer", None),
     ("compliance", "delegate", "reviewer", "jig:independent-review"),
     ("craft", "delegate", "reviewer", "pr-review"),
-    # arch (conditional) inserted here for arch_review:true slices.
+    # arch + code-health (both conditional) inserted here, in that order.
     ("reconcile", "dispatch", None, "jig:independent-review"),
     ("land", "dispatch", None, "jig:slice-land"),
 )
@@ -305,6 +328,11 @@ _SESSION_PLAN_ARCH_PHASE = ("arch", "delegate", "reviewer", "arch-review")
 
 # Where the conditional arch phase slots into the sequence (after craft).
 _SESSION_PLAN_ARCH_AFTER = "craft"
+
+# The conditional code-health phase (slice 060-05). Slots in right after
+# the craft block (and after arch, since arch is emitted first).
+_SESSION_PLAN_CODE_HEALTH_PHASE = (
+    "code-health", "delegate", "reviewer", "jig:code-health")
 
 
 def _slice_status_from_section(section: str) -> str:
@@ -340,7 +368,7 @@ def session_plan(spec_path: Path) -> str:
     # Enumerate slices via the shared dual-layout iterator, excluding
     # DEFERRED. `arch_review` is read per-slice from its frontmatter via
     # the shared truthy predicate (no hand-rolled truthiness).
-    planned = []  # list of (label, needs_arch)
+    planned = []  # list of (label, needs_arch, needs_code_health)
     total = 0
     for loc in _iter_slices_common(spec_path):
         total += 1
@@ -350,7 +378,9 @@ def session_plan(spec_path: Path) -> str:
             continue
         fm_fields, _ = _slice_frontmatter(section)
         needs_arch = frontmatter_flag_truthy(fm_fields.get("arch_review", ""))
-        planned.append((loc.label, needs_arch))
+        needs_code_health = frontmatter_flag_truthy(
+            fm_fields.get("code_health_review", ""))
+        planned.append((loc.label, needs_arch, needs_code_health))
 
     lines = []
     lines.append(f"# Session plan — {spec_path}")
@@ -393,19 +423,29 @@ def session_plan(spec_path: Path) -> str:
             line += f"  {note}"
         return line
 
-    for label, needs_arch in planned:
+    for label, needs_arch, needs_code_health in planned:
         lines.append(f"## Slice {label}")
         lines.append("")
         step = 1
         for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
             lines.append(_render_phase(step, phase, mode, actor, skill))
             step += 1
-            if phase == _SESSION_PLAN_ARCH_AFTER and needs_arch:
-                aphase, amode, aactor, askill = _SESSION_PLAN_ARCH_PHASE
-                lines.append(_render_phase(
-                    step, aphase, amode, aactor, askill,
-                    note="(slice declares arch_review: true)"))
-                step += 1
+            if phase == _SESSION_PLAN_ARCH_AFTER:
+                # arch first (when declared), then code-health — both
+                # conditional, both slotted between craft and reconcile.
+                if needs_arch:
+                    aphase, amode, aactor, askill = _SESSION_PLAN_ARCH_PHASE
+                    lines.append(_render_phase(
+                        step, aphase, amode, aactor, askill,
+                        note="(slice declares arch_review: true)"))
+                    step += 1
+                if needs_code_health:
+                    cphase, cmode, cactor, cskill = \
+                        _SESSION_PLAN_CODE_HEALTH_PHASE
+                    lines.append(_render_phase(
+                        step, cphase, cmode, cactor, cskill,
+                        note="(slice declares code_health_review: true)"))
+                    step += 1
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -2853,6 +2893,16 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("slice",
                     help="slice name or fragment (case-insensitive substring)")
 
+    # Slice 060-05: code-health-pass gating mirror of arch-review-needed.
+    pch = sub.add_parser(
+        "code-health-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`code_health_review: true`; 'false' otherwise (slice 060-05)",
+    )
+    pch.add_argument("spec", help="path to spec.md")
+    pch.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
     # Slice 057-01: delegation-first per-slice dispatch plan (stdout-only).
     psp = sub.add_parser(
         "session-plan",
@@ -2909,6 +2959,9 @@ def main(argv: list) -> int:
             )
         elif ns.command == "arch-review-needed":
             needed = slice_needs_arch_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "code-health-review-needed":
+            needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "session-plan":
             sys.stdout.write(session_plan(Path(ns.spec)))
