@@ -1,0 +1,95 @@
+> Status: Draft (wizard-generated)
+>
+> Technical mechanics. Vision and design principles live in
+> [product-vision.md](product-vision.md). Update via reconciliation after each
+> spec slice completes.
+
+# Architecture: {{PROJECT_NAME}}
+
+> For *what this project is*, *who it's for*, and *why*, see
+> [product-vision.md](product-vision.md). This document covers the technical
+> mechanics: repository structure, tech stack, decisions, modules, data.
+
+## Repository structure
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _The top-level layout of this codebase. One line per directory beats nothing —
+> it's the easiest place for a new contributor to start. Replace the placeholder
+> below with the real tree once it exists._
+
+```
+{{PROJECT_NAME}}/
+├── (top-level directory)         # (one-line purpose)
+├── (top-level directory)         # (one-line purpose)
+└── ...
+```
+
+## Tech stack
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> **Deferred — no signal from initial pitch.** Will be decided in the first
+> spec that requires a runtime/language choice. Each locked-in decision below
+> should get its own ADR under `docs/decisions/`.
+
+- **Runtime / language:** (...)
+- **Platform commitments:** (...)
+- **Package manager:** (...)
+- **Database / state:** (...)
+- **Key external services:** (...)
+
+## Core architecture decisions
+
+> _One H3 subsection per decision. Each decision should reference its ADR
+> (when one exists) and split into Principle (from
+> [product-vision.md](product-vision.md) where applicable) + Mechanics
+> (technical detail). This section is the running summary; decisions
+> themselves live in `docs/decisions/`._
+
+_(No decisions recorded yet. Add the first H3 when the first ADR accepts.)_
+
+## Module boundaries
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> **Deferred — no modules yet.** Boundaries become explicit when the first
+> contract is defined. Until then, name the top-level *concerns* even if their
+> interfaces aren't formal yet — "today's coupling is one-directional read-only"
+> is a valid answer.
+
+- (top-level concern 1)
+- (top-level concern 2)
+- (top-level concern 3)
+
+## Data model
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _The state this project owns. "Stateless" or "minimal — config files only"
+> is a valid and honest answer for small projects; name it explicitly rather
+> than leaving the section blank._
+
+- (state element 1 — what it is, where it lives)
+- (state element 2 — what it is, where it lives)
+
+## Contract surfaces
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _External interfaces this project commits to as caller-facing surfaces.
+> Populated by `/jig:vision-elicitation` Section 13 (added by spec 022-02);
+> consumed by `/jig:independent-review`'s reviewer-prompt conditional
+> contract-surface check and by `/jig:migrate report`'s "Contract surfaces
+> detected" section. "No external surfaces — this project is a library /
+> script / single-consumer internal tool" is a valid and honest answer;
+> the section's elicitation marker stays `status: skipped` rather than
+> being filled with a negation bullet. Run `/jig:contracts` for the
+> per-surface recommendation table this elicitation references._
+
+- (surface 1 — **<surface type>** (recommended artifact: <name> at `<path>`) — brief description)
+- (surface 2 — same shape)
+
+## Open questions
+
+> Deferred items live in [refinement-todo.md](refinement-todo.md).
