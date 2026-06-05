@@ -182,6 +182,12 @@
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-04 — review integration: bug-review + craft + conditional security | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-05 — escalation seam + close/learning gate + origin/main reservation | DRAFT |  |
 | [058-bug-fix-workflow](058-bug-fix-workflow/spec.md) | 058-06 — `jig:bug-fix` skill + plugin wiring + workflow.md routing | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-01 — Python lint, detect-and-drive | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-02 — Dogfood onto jig: CI Ruff floor | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-03 — Broaden ecosystems + complexity dimension | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-04 — Duplication: native-first, `npx jscpd` fallback | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-05 — Distinct code-health reviewer pass | DRAFT |  |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-06 — Tier-2 scaffold-the-floor (opt-in) | DEFERRED |  |
 
 ## Deferred slices
 
@@ -207,3 +213,4 @@
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-05 - codex-scaffold-adapter | A real user asks to use jig from Codex, or a dogfood comparison shows Codex support is needed for an active project. |
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-06 - codex-plugin-packaging | Codex scaffold mode has at least one successful real-project use, and a user asks for install-and-forget Codex plugin distribution. |
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | First number collision that slips past the |
+| [060-code-health-capability](060-code-health-capability/spec.md) | 060-06 — Tier-2 scaffold-the-floor (opt-in) | Tier-1 (slices 01–05) has shipped and proven out on jig, **and** a user/project explicitly wants jig to *provision* a default code-health config rather than only drive an existing one. |
