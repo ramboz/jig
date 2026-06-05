@@ -331,6 +331,43 @@ The smoke-test prints the same four `PASS marketplace / manifest / agents
 checked-out repo. The CI `package` job runs the equivalent steps in
 the release workflow.
 
+### Smoke-testing the Codex plugin package locally
+
+Codex has a separate generated package and install path. Before shipping
+Codex-facing packaging or hook-trust changes, run:
+
+```bash
+python3 scripts/codex_install_smoke.py
+```
+
+This builds the generated package under a temp workspace, validates the
+Codex manifest/skills/hooks/marketplace descriptor, runs
+`--install-codex-agents` against a temp agents directory, and then probes
+`codex plugin marketplace add`, `codex plugin list`, `codex plugin add`,
+model-visible skill discovery, hook config visibility, and the hook-trust
+surface when a usable `codex` CLI is present. The command creates an isolated
+child `CODEX_HOME` by default, so the marketplace and plugin add probes do
+not mutate your real Codex config.
+
+Useful knobs:
+
+```bash
+# Keep the temp build/CODEX_HOME around for inspection:
+python3 scripts/codex_install_smoke.py --keep-work
+
+# Make live Codex unavailability fail the run (useful on a Codex-capable box):
+python3 scripts/codex_install_smoke.py --require-live-codex
+
+# Reuse a named isolated home or choose a specific CLI:
+JIG_CODEX_SMOKE_CODEX_HOME=/tmp/jig-codex-home \
+JIG_CODEX_SMOKE_CODEX_BIN=/opt/homebrew/bin/codex \
+python3 scripts/codex_install_smoke.py
+```
+
+If Codex is missing or a live-only command is not available in CI, the script
+prints an `UNAVAILABLE ...` row instead of silently counting that probe as a
+pass. Static package and custom-agent install failures remain hard failures.
+
 ## Spec workflow (short version)
 
 1. Pick up the next `READY_FOR_IMPLEMENTATION` slice from

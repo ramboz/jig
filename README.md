@@ -199,6 +199,23 @@ defaults to `~/.codex/agents`. Use `--codex-agents-dir <dir>` to target
 another Codex agents directory, and `--force` only when replacing existing
 user-owned `jig-*.toml` files is intentional.
 
+To smoke-test the full generated Codex install contract locally, run:
+
+```bash
+python3 scripts/codex_install_smoke.py
+```
+
+The smoke command builds the same `codex-plugin/plugins/jig` layout in an
+isolated temp workspace, validates the generated Codex package, runs the
+custom-agent helper against a temp agents directory, and probes the Codex CLI
+plugin surfaces when `codex` is available. It sets a temporary child
+`CODEX_HOME` by default so the marketplace/plugin add probe does not touch your
+real Codex config. For debugging, set `JIG_CODEX_SMOKE_CODEX_HOME=<dir>` or
+pass `--codex-home <dir>`; set `JIG_CODEX_SMOKE_CODEX_BIN=<path>` or
+`--codex-bin <path>` to choose a specific CLI. If Codex is not installed, the
+live portion reports `UNAVAILABLE` while the static package and agent checks
+still run.
+
 ### From source (contributors)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
