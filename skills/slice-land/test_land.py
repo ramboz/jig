@@ -689,6 +689,41 @@ def _load_land():
 _land = _load_land()
 
 
+class PrTitleShapeTests(unittest.TestCase):
+    def test_pr_title_strips_numeric_slice_prefix_from_subject(self):
+        title = _land._pr_title(
+            "059-04 - codex-skill-override-deferral",
+            "codex-port-polish",
+        )
+        self.assertEqual(
+            title,
+            "feat(codex-port-polish): codex skill override deferral",
+        )
+
+    def test_pr_title_scope_uses_single_skill_frontmatter(self):
+        with tempfile.TemporaryDirectory(prefix="jig-title-scope-") as tmp:
+            spec_dir = Path(tmp) / "007-slice-land"
+            spec_dir.mkdir()
+            spec = spec_dir / "spec.md"
+            spec.write_text("---\nskill: slice-land\n---\n\n# Spec\n")
+
+            self.assertEqual(_land._pr_title_scope(spec), "slice-land")
+
+    def test_pr_title_scope_falls_back_to_spec_slug_for_multi_skill_specs(self):
+        with tempfile.TemporaryDirectory(prefix="jig-title-scope-") as tmp:
+            spec_dir = Path(tmp) / "059-codex-port-polish"
+            spec_dir.mkdir()
+            spec = spec_dir / "spec.md"
+            spec.write_text(
+                "---\n"
+                "skill: scaffold-init, migrate, release-pipeline\n"
+                "---\n\n"
+                "# Spec\n"
+            )
+
+            self.assertEqual(_land._pr_title_scope(spec), "codex-port-polish")
+
+
 def _make_subprocess_mock(returncode: int = 0, stdout: str = "", stderr: str = ""):
     """Return a mock CompletedProcess-like object."""
     from unittest.mock import MagicMock
@@ -1419,10 +1454,9 @@ class ExecutePrSuccessTests(unittest.TestCase):
 
     def test_pr_title_uses_frontmatter_skill_scope(self):
         """Slice 007-03 AC #2 — `gh pr create --title` arg must follow the
-        `feat(<skill>): <slice-label>` shape, with `<skill>` pulled from
-        the spec frontmatter (`foo` for the synthetic spec used here).
-        Reviewer feedback (implementation review §1) pinned this as an
-        explicit-surface gap on the success path."""
+        `feat(<scope>): <subject>` shape. For a single-skill spec, the
+        scope comes from `skill:`; the subject drops the numeric slice
+        prefix so GitHub's conventional-title check accepts it."""
         from unittest.mock import patch
         title_seen = []
 
@@ -1443,8 +1477,9 @@ class ExecutePrSuccessTests(unittest.TestCase):
         self.assertEqual(len(title_seen), 1,
                          f"expected exactly one --title arg, got {title_seen}")
         title = title_seen[0]
-        # Synthetic spec frontmatter is `skill: foo`
-        self.assertRegex(title, r"^feat\(foo\):\s+007-03",
+        # Synthetic spec frontmatter is `skill: foo`; slice label is
+        # `007-03 — test`, so the conventional subject is `test`.
+        self.assertEqual(title, "feat(foo): test",
                          f"title shape mismatch: {title!r}")
 
 
