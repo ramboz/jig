@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: []
 last_verified:
 ---
@@ -55,7 +55,7 @@ of the whole repository.
       fixture. Edge cases listed in the slice are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
 - [ ] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
@@ -74,4 +74,24 @@ proving the repo root is no longer Claude's install tree.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- **AC #1 reuse vs. restate.** `build_claude_plugin.py` reuses
+  `build_release_zip`'s `_is_excluded_dir` / `_is_excluded_file` predicates
+  and its `_INCLUDE_FILES` / `_INCLUDE_ROOTS` *by reference* (a consistency
+  test pins the predicate identity). The Claude include set is the release
+  set **minus `.codex-plugin`** (host-specific, AC #2), and the root
+  `.claude-plugin/marketplace.json` is excluded via an explicit
+  `_EXCLUDE_RELATIVE_PATHS` because the remote-install pointer stays at the
+  repo root.
+- **AC #4 output-dir guard.** Mirrors `build_codex_plugin._validate_output_dir`
+  but additionally allows outputs under `hosts/` (the committed-package home),
+  not just `dist/` — otherwise the default `hosts/claude` target would be
+  refused as "inside the source tree."
+- **AC #5 contract shape.** `install_contract.py` did not previously *force*
+  both host manifests to co-exist in one tree, so no check was weakened.
+  Added a positive `validate_claude_package(plugin_root)` helper that asserts
+  the package carries `.claude-plugin/plugin.json` + all skills/agents and
+  carries **neither** `.claude-plugin/marketplace.json` **nor** any
+  `.codex-plugin/` content — giving validators a single source of truth for
+  "what a Claude install tree is" instead of assuming the source root is it.
+- Committed `hosts/claude/` (83 files) was produced by running the builder;
+  the CI drift guard that regenerates-and-diffs it is slice 061-03, not here.

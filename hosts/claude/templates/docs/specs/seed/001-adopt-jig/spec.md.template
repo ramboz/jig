@@ -1,0 +1,37 @@
+---
+status: DONE
+skill: scaffold-init
+---
+
+# Spec 001: Adopt jig
+
+## Overview
+
+This is the worked-example spec that `scaffold-init` seeds into a fresh
+project so the very first turn has a faithful pattern to imitate. It
+records the genuine first unit of work in `{{PROJECT_NAME}}`: adopting
+jig by running `scaffold-init` to lay down the docs tree, CLAUDE.md, the
+status board, and the runtime machinery under `.claude/`.
+
+It is **real, permanent project history**, not a labelled-deletable
+demo. Scaffolding genuinely was the first thing that happened here, so
+`001-adopt-jig` stays. Read [slice-01-bootstrap.md](slice-01-bootstrap.md)
+for the full slice shape — Goal, DoR, Acceptance Criteria, DoD,
+anti-horizontal-phasing check, and a short real deviation log — and use
+it as the template for your own slices.
+
+The next spec, [002-first-spec](../002-first-spec/spec.md), is a `DRAFT`
+stub waiting for your first real piece of work.
+
+## Decomposition
+
+**SPIDR axis: Interface.** Adoption is a one-shot interface change: the
+project goes from "no workflow scaffold" to "jig docs + machinery
+present and wired." A single vertical slice delivers it end-to-end.
+
+### Slices
+
+1. **`001-01 bootstrap`** — Run `scaffold-init` so the project opens
+   with the jig docs tree, CLAUDE.md, an honest status board, and the
+   `.claude/` runtime machinery. DONE — see
+   [slice-01-bootstrap.md](slice-01-bootstrap.md).
