@@ -1,0 +1,113 @@
+> Status: Draft (wizard-generated)
+
+# Workflow: {{PROJECT_NAME}}
+
+## How we build
+
+Spec-driven development with SPIDR slicing, independent review, and reconciliation.
+
+## Spec lifecycle
+
+```
+DRAFT → READY_FOR_REVIEW → READY_FOR_IMPLEMENTATION → IN_PROGRESS
+  → REVIEWED → RECONCILED → DONE
+```
+
+## SPIDR splitting
+
+All non-trivial specs are SPIDR-split before implementation:
+
+- **S — Spike**: last resort, only when none of P/I/D/R apply
+- **P — Path**: split by alternative paths (happy path first)
+- **I — Interface**: split by UI/platform/channel (minimal first)
+- **D — Data**: split by data subset (less data first)
+- **R — Rules**: split by business rules (simple first)
+
+**Anti-horizontal-phasing rule:** every slice must touch the user-facing layer
+and deliver end-to-end value.
+
+## Session workflow
+
+1. Check `docs/specs/README.md` for current status board.
+2. Pick up next `READY_FOR_IMPLEMENTATION` slice.
+3. Spawn the `implementer` subagent with the spec path.
+4. After the deliverable is on disk, run the post-implementation review (three passes — see below).
+5. Address findings; `[blocker]`-tagged craft/arch entries block the REVIEWED transition, `[nit]`-tagged ones become reconciliation-log items.
+6. Reconcile: update docs, write deviation log, run reconciliation review.
+7. Run `/jig:memory-sync` to consolidate learnings.
+8. Update spec status to DONE.
+
+## Post-implementation review
+
+Every slice runs up to three review passes between IN_PROGRESS and REVIEWED:
+
+1. **Compliance** — `jig:independent-review` (always). Spec-AC check by a fresh reviewer subagent.
+2. **Craft** — `pr-review` (always). Routes to the most-specific installed skill (user > project > `jig:pr-review`).
+3. **Architecture** — `arch-review` (on-demand). Runs only when the slice's frontmatter declares `arch_review: true`. Same precedence as craft.
+
+Order: compliance → craft → (arch if flagged). All required passes must `pass` for REVIEWED.
+
+### Review evidence gates the transition
+
+Each pass produces a durable verdict artifact — these gates are mechanical,
+not honour-system prose, and no `Stop` hook is involved:
+
+1. Build the prompt (`review.py implementation` / `pr-review` / `arch-review`)
+   and spawn the reviewer.
+2. Record the verdict:
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py \
+     record-review docs/specs/NNN-slug/spec.md "<slice>" \
+     --pass compliance --verdict pass --reviewer jig:reviewer \
+     --prompt-source "review.py implementation ..." --summary-file verdict.md
+   ```
+
+   This writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
+   (`<pass>` ∈ compliance / craft / arch / reconciliation).
+3. Run the gated transition:
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py \
+     transition docs/specs/NNN-slug/spec.md "<slice>" REVIEWED
+   ```
+
+`workflow.py transition` **refuses** REVIEWED / RECONCILED / DONE unless the
+required verdicts exist and carry `verdict: pass` (RECONCILED also needs a
+`### Deviation log` subsection; DONE re-validates the full set plus
+`dependencies:`). A refusal names the missing artifact and the
+`record-review` command. The gate enforces evidence consistency, not human
+sign-off — it lives in the agent's trust boundary, so a deliberate
+out-of-band flow can bypass it with `JIG_REVIEW_EVIDENCE_GATE=0`.
+
+**Recovering from a failed review:** address findings, re-run the pass,
+`record-review` again (overwrites the earlier file for that `(slice, pass)`
+in place — git history keeps the prior verdict), then re-run the transition.
+
+## Stocktake
+
+After every few reconciled slices, review what was deferred during scaffolding to see if any items now have signal:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/stocktake.py .
+```
+
+The stocktake reports:
+- Number of slices in `STATUS: DONE` or `STATUS: RECONCILED`
+- Deferred items from `docs/refinement-todo.md`, grouped by category
+- A promotion suggestion when ≥3 slices have reconciled — review which items can now be promoted to specs or ADRs
+
+This is a `skill, not a hook` (per slice 001-04 design): it requires judgment about which deferred items are now ripe. Run it manually as part of a reconciliation step, or whenever you want a snapshot.
+
+## Hook Strictness Profiles
+
+jig hooks support three enforcement levels via the `SCAFFOLD_HOOK_PROFILE` env var:
+
+- **minimal** — telemetry only, no blocking
+- **standard** — blocks on spec gates and reconciliation; warns on contract changes
+- **strict** — blocks on everything including style/lint failures
+
+> **Deferred — `SCAFFOLD_HOOK_PROFILE` is not yet read by any hook.** The default
+> behavior is currently fixed (equivalent to `standard`). Implementation lives in
+> a future jig slice. Set the env var in advance to express intent; effective
+> enforcement will catch up once the dispatch logic ships.

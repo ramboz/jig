@@ -9,7 +9,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/ramboz/jig.git",
-        "path": "."
+        "path": "hosts/claude"
       },
       "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for Claude Code"
     }

@@ -32,6 +32,7 @@ deliberately NOT modeled here.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -574,4 +575,70 @@ def missing_agents(plugin_root: Path) -> list[str]:
                 f"agents/{agent}.md: missing agent definition "
                 "(expected per install contract)"
             )
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# Claude install-tree contract (committed hosts/claude package — spec 061-01)
+# ---------------------------------------------------------------------------
+#
+# Per ADR-0018 the repository root is canonical source; the *installable*
+# Claude payload is the committed, runtime-only `hosts/claude/` package. That
+# package carries `.claude-plugin/plugin.json`, the runtime skill/agent/hook
+# subset, and (optionally) README/LICENSE. It deliberately does NOT carry the
+# remote-install pointer (`.claude-plugin/marketplace.json` stays at the repo
+# root, resolving the plugin to `./hosts/claude`) and never carries any Codex
+# (`.codex-plugin/`) content. This helper validates a directory *as* a Claude
+# install tree so a single source of truth governs what the package must (and
+# must not) contain — the validators no longer assume the Claude artifact is
+# the source root or that both host manifests co-exist in one tree.
+
+
+def validate_claude_package(plugin_root: Path) -> list[str]:
+    """Validate `plugin_root` as a committed Claude install tree (spec 061-01).
+
+    Requires (AC #5):
+      - `.claude-plugin/plugin.json` present and satisfying the plugin
+        manifest contract;
+      - every EXPECTED skill and REQUIRED agent present;
+      - NO `.claude-plugin/marketplace.json` (the remote-install pointer lives
+        at the repo root, not inside the package);
+      - NO `.codex-plugin/` content (the Claude package is runtime-only and
+        host-specific).
+
+    Returns diagnostics (empty == valid); each names the offending path and
+    the rule (AC #4-style)."""
+    problems: list[str] = []
+
+    plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+    if not plugin_json.is_file():
+        problems.append(
+            f".claude-plugin/plugin.json: missing at {plugin_json} "
+            "(a Claude package must carry its source manifest)"
+        )
+    else:
+        try:
+            data = json.loads(plugin_json.read_text())
+        except (ValueError, OSError) as exc:
+            problems.append(
+                f".claude-plugin/plugin.json: unreadable/invalid JSON ({exc})"
+            )
+        else:
+            problems.extend(validate_plugin_manifest(data))
+
+    if (plugin_root / ".claude-plugin" / "marketplace.json").exists():
+        problems.append(
+            ".claude-plugin/marketplace.json: must NOT live inside the Claude "
+            "package (the remote-install pointer stays at the repo root, "
+            "resolving the plugin to ./hosts/claude)"
+        )
+
+    if (plugin_root / ".codex-plugin").exists():
+        problems.append(
+            ".codex-plugin/: must NOT appear in the Claude package "
+            "(the package is host-specific and runtime-only)"
+        )
+
+    problems.extend(missing_skills(plugin_root))
+    problems.extend(missing_agents(plugin_root))
     return problems
