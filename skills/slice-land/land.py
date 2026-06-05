@@ -392,19 +392,66 @@ def render_next_steps_direct(branch: str, worktree: str) -> str:
 
 def _parse_skill_from_frontmatter(spec_text: str) -> str:
     """Extract the `skill:` value from the spec's YAML frontmatter (if any).
-    Returns "" if not found — caller falls back to a generic prefix."""
+    Returns "" if no single skill value is present."""
     m = re.match(r"\A---\s*\n(.*?)\n---\s*\n", spec_text, re.DOTALL)
     if not m:
         return ""
-    skill_match = re.search(r"^skill:\s*(\S+)\s*$", m.group(1), re.MULTILINE)
+    skill_match = re.search(
+        r"^skill:\s*([A-Za-z0-9_-]+)\s*$",
+        m.group(1),
+        re.MULTILINE,
+    )
     return skill_match.group(1) if skill_match else ""
 
 
+def _safe_pr_title_token(value: str) -> str:
+    token = value.strip().lower()
+    token = re.sub(r"[_\s]+", "-", token)
+    token = re.sub(r"[^a-z0-9-]+", "", token)
+    token = re.sub(r"-+", "-", token).strip("-")
+    return token
+
+
+def _pr_title_scope(spec_path: Path) -> str:
+    """Return a conventional-commit scope for PR titles.
+
+    Prefer a single `skill:` frontmatter value. Multi-skill specs fall back
+    to the spec directory slug because the PR-title workflow requires one
+    scope, not a comma-separated list.
+    """
+    skill = _parse_skill_from_frontmatter(spec_path.read_text())
+    if skill:
+        return _safe_pr_title_token(skill) or "spec"
+    spec_slug = re.sub(r"^\d{3}-", "", spec_path.parent.name)
+    return _safe_pr_title_token(spec_slug) or "spec"
+
+
+def _pr_title_subject(slice_label: str) -> str:
+    subject = re.sub(
+        r"^\s*(?:Slice\s+)?\d{3}-\d{2}\s*(?:[-\u2013\u2014:]\s*)?",
+        "",
+        slice_label,
+    )
+    subject = subject.strip().replace("_", " ").replace("-", " ")
+    subject = re.sub(r"\s+", " ", subject).strip()
+    subject = subject.rstrip(".")
+    if not subject:
+        return "land slice"
+    subject = subject[0].lower() + subject[1:]
+    if not re.match(r"^[a-z]", subject):
+        return "land slice"
+    return subject
+
+
+def _pr_title(slice_label: str, scope: str) -> str:
+    safe_scope = _safe_pr_title_token(scope) or "spec"
+    return f"feat({safe_scope}): {_pr_title_subject(slice_label)}"
+
+
 def render_next_steps_pr(branch: str, pr_body_path: Path, slice_label: str,
-                         skill: str = "") -> str:
+                         scope: str = "spec") -> str:
     """PR-mode (push + gh pr create) commands."""
-    scope = f"({skill})" if skill else ""
-    title = f"feat{scope}: {slice_label}"
+    title = _pr_title(slice_label, scope)
     return (
         "## Next steps (mode: pr)\n\n"
         "Run these from the project root:\n\n"
@@ -513,9 +560,9 @@ def prepare(spec_path: Path, slice_fragment: str,
                                   deviation_excerpt)
             atomic_write_text(pr_body_path, body)
             # Spec-level `skill:` frontmatter ALWAYS lives in spec.md,
-            # never in a sibling slice file — read from spec_path directly.
-            skill = _parse_skill_from_frontmatter(spec_path.read_text())
-            parts.append(render_next_steps_pr(branch, pr_body_path, label, skill))
+            # never in a sibling slice file — derive from spec_path directly.
+            scope = _pr_title_scope(spec_path)
+            parts.append(render_next_steps_pr(branch, pr_body_path, label, scope))
 
     report = "\n".join(parts) + "\n"
     return report, (1 if has_blocker else 0)
@@ -877,13 +924,9 @@ def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
     body = render_pr_body(label, spec_path, goal, ac_items, deviation_excerpt)
     atomic_write_text(pr_body_path, body)
 
-    # Spec-level frontmatter (the `skill:` field for the PR title prefix)
-    # ALWAYS lives in spec.md, never in a slice file — read spec_path
-    # directly even when the slice body came from a sibling file.
-    spec_md_text = spec_path.read_text()
-    skill = _parse_skill_from_frontmatter(spec_md_text)
-    scope = f"({skill})" if skill else ""
-    title = f"feat{scope}: {label}"
+    # Spec-level frontmatter ALWAYS lives in spec.md, never in a slice file;
+    # derive scope from spec_path even when the slice body came from a sibling.
+    title = _pr_title(label, _pr_title_scope(spec_path))
 
     git_steps = [
         (["push", "-u", "origin", branch], f"git push -u origin {branch}"),
