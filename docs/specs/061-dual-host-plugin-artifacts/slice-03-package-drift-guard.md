@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: ["061-01", "061-02"]
-last_verified:
+last_verified: 2026-06-05
 ---
 
 ## Slice 061-03 - host-package drift guard
@@ -49,9 +49,9 @@ fails when the committed packages are stale relative to source.
       fixture. Edge cases listed in the slice are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
@@ -69,4 +69,29 @@ packages cannot silently drift.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- **Drift guard layered on 061-02's `build_all`.** `--check` (`check_drift`)
+  regenerates both packages into a `mkdtemp` scratch dir and diffs against the
+  committed `hosts/` via `_diff_packages`/`_file_map` — read-only against the
+  committed tree (torn down in a `finally`; `test_check_does_not_mutate_committed_tree`
+  proves it). The failure message names each stale path plus the regenerate
+  command + `git add hosts/`. CI runs it as a dedicated `ci.yml` step; a
+  determinism test asserts byte-identical re-builds; both edge cases
+  (version-only bump reflecting into BOTH manifests; partial tree fully
+  replaced) have dedicated tests.
+- **Lint factored out.** The repo carried pre-existing ruff (I001) debt that
+  the whole-repo code-health gate fails on; that cleanup + the ruff
+  `extend-exclude` for the generated `hosts/` packages was landed as a
+  separate `chore(lint)` commit at the base of the stack, not bundled here.
+- **Drift compare ignores ephemeral bytecode.** `_file_map` skips
+  `__pycache__`/`*.pyc` (`_is_ephemeral`) — the builders never emit them, but
+  CI runs the test suite *before* the guard, and a test importing a module out
+  of `hosts/` seeds a `__pycache__` the freshly-built scratch tree lacks, which
+  would otherwise read as spurious drift. Regression-tested
+  (`test_check_ignores_ephemeral_bytecode_caches`).
+- **Known cosmetic nits (non-blocking, from craft review).** `build_all`
+  returns `claude_code or codex_code`, so a non-zero Claude exit masks the
+  Codex code in the return value (both builders still run and print);
+  `build_codex_plugin.build` has no `out=` sink while `build_claude_plugin.build`
+  does (asymmetric signatures); the module docstring header still reads
+  "slice 061-02" though it separately calls out the 061-03 drift-guard
+  addition. Left as-is — candidates for a future tidy, not load-bearing.
