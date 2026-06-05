@@ -6,6 +6,28 @@
 
 We use the workflow jig is designed to produce — dogfooding from day one.
 
+## Host packages (`hosts/`) — regenerate, never hand-edit
+
+Per [ADR-0018](decisions/adr-0018-dual-host-generated-plugin-artifacts.md) the repository
+root is canonical source; the committed `hosts/claude/` and `hosts/codex/`
+trees are **generated** runtime install payloads. They are checked in so a
+remote `marketplace add` resolves a clean package, but they are derived
+artifacts — never hand-edit a file under `hosts/`.
+
+The loop when you change source (a skill, hook, agent, manifest, template — or
+bump a version in a `*-plugin/plugin.json` manifest):
+
+1. **Edit source** at the repo root (not under `hosts/`).
+2. **Regenerate both packages:** `python3 scripts/build_host_packages.py`
+3. **Commit `hosts/`** alongside the source change (`git add hosts/`).
+
+CI runs the **drift guard** (`python3 scripts/build_host_packages.py --check`)
+on every PR: it regenerates into a scratch dir and diffs against the committed
+`hosts/` tree, failing — and naming the stale path plus the regenerate command
+— when source was edited without rebuilding. So a forgotten rebuild (including a
+release version bump that must reflect into both packages) cannot merge
+silently.
+
 ## Spec lifecycle
 
 Every non-trivial piece of work gets a spec in `docs/specs/NNN-name/`. The
