@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: ["061-01"]
-last_verified:
+last_verified: 2026-06-05
 ---
 
 ## Slice 061-02 - committed Codex package peer
@@ -45,14 +45,14 @@ source.
   package without losing its live-CLI probe path.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
@@ -69,4 +69,36 @@ proving Codex and Claude now sit as symmetric committed packages.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- **AC #1/#3** — `build_codex_plugin.py` default output retargeted from
+  `dist/codex-plugin/plugins/jig` to `hosts/codex/plugins/jig`. The existing
+  `_marketplace_root_for` (parent-is-`plugins` → grandparent) and the
+  relative-path logic in `_write_marketplace` handle the new layout unchanged:
+  the descriptor lands at `hosts/codex/.agents/plugins/marketplace.json` with
+  package-relative `source.path: ./plugins/jig`. No marketplace-writing code
+  changed — only the default target and help/docstring strings.
+- **AC #4** — `_validate_output_dir` widened to accept outputs under `hosts/`
+  *or* `dist/` (mirrors 061-01's `build_claude_plugin._validate_output_dir`).
+  Source-root / source-owned-runtime-path / ancestor refusals unchanged.
+- **AC #5** — added `scripts/build_host_packages.py` with a `build_all`
+  entry point that invokes BOTH `build_claude_plugin.build` (→ `hosts/claude/`)
+  and `build_codex_plugin.build` (→ `hosts/codex/plugins/jig`) in one run.
+  Both builders run regardless of the first's exit so a single invocation
+  surfaces every problem; returns the first non-zero code. Rebuilding
+  `hosts/claude/` is byte-identical to 061-01's committed tree (deterministic),
+  so the unified entry point introduces no claude-side drift.
+- **Edge case (stale tree)** — inherited from `build_codex_plugin.build`'s
+  existing `shutil.rmtree` + recreate (full replace, not merge); covered by a
+  new test.
+- **Edge case (smoke retarget)** — rather than always rebuilding into a temp
+  tree, `codex_install_smoke.run_smoke` gained a `use_committed_package` flag
+  (CLI `--use-committed-package` / `JIG_CODEX_SMOKE_USE_COMMITTED=1`) that
+  validates the committed `hosts/codex/` package in place. The default behavior
+  (rebuild-into-temp, exercising the builder) and the live-CLI probe path
+  (UNAVAILABLE when no CLI present) are both preserved unchanged.
+- **Deviation: `dist/` still accepted.** `_validate_output_dir` keeps allowing
+  `dist/` outputs (not just `hosts/`) so `build_release_zip` / ad-hoc temp
+  builds and the smoke test's temp-tree default keep working. The committed
+  *default* is `hosts/codex/`; `dist/` remains a valid explicit `--output-dir`.
+- README / install-doc updates are out of scope here (slice 061-05); the CI
+  drift-guard wrapping `build_host_packages.py` is 061-03; release zips are
+  061-04. No `docs/refinement-todo.md` entries were needed.
