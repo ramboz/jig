@@ -19,14 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_codex_plugin  # noqa: E402
 import install_contract  # noqa: E402
-
 
 PASS = "PASS"
 FAIL = "FAIL"
