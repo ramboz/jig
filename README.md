@@ -211,6 +211,18 @@ pass `--codex-home <dir>`; set `JIG_CODEX_SMOKE_CODEX_BIN=<path>` or
 live portion reports `UNAVAILABLE` while the static package and agent checks
 still run.
 
+To dogfood Codex role-agent capability semantics separately, run:
+
+```bash
+python3 scripts/codex_role_capability_probe.py
+```
+
+That probe validates the generated `jig-implementer`, `jig-reviewer`, and
+`jig-architect` TOML files, confirms the intended `workspace-write` vs.
+`read-only` posture, and probes local Codex sandbox/debug surfaces when
+available. See [docs/codex-role-capability.md](docs/codex-role-capability.md)
+for the interactive `/agent` dogfood prompt and noninteractive review fallback.
+
 ### From source (contributors)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
