@@ -2,8 +2,9 @@
 name: code-health
 description: >
   Run a static-analysis pass on a project — detect the ecosystem (Python or
-  Node), drive its linter (ruff / eslint, plus an advisory prettier/complexity
-  signal) via the `health.py` helper, and act on the normalized exit code
+  Node), drive its linter (ruff / eslint, plus advisory prettier/complexity
+  and a cross-ecosystem duplication signal) via the `health.py` helper, and
+  act on the normalized exit code
   (0 clean / 1 findings / 2 no-linter). Auto-triggers when you say lint this,
   check code health, run the linter, ask is this code clean, ask any lint
   issues, or want a static analysis pass. Tools are resolved on PATH or run
@@ -53,6 +54,19 @@ so adding a language is an entry, not a control-flow fork. Current scope:
     complexity signal ("complexity: N function(s) over threshold; top: …").
   - **Node — formatting:** an advisory `prettier --check` probe surfaces
     files that need formatting ("prettier: N file(s) need formatting").
+  - **Cross-ecosystem — duplication:** an advisory probe (run for BOTH
+    Python and Node) reports copy/paste duplication. It is **native-first**
+    (an explicit extension point for a future per-ecosystem native
+    duplication tool — currently empty, since no jig ecosystem ships a
+    distinct native detector), falls back to an ephemeral **`npx jscpd`**
+    when `npx` is on `PATH` (the Node analogue of `pipx run`, works on any
+    language, installs nothing), and otherwise emits
+    `duplication: skipped (no detector) — install a duplication tool or Node
+    (npx jscpd) to enable`. When it runs, the summary is a tight
+    percentage + the top clones as `file:line`
+    ("duplication: 4.2% (12 clones); top: foo.py:10, bar.py:88") — never the
+    raw jscpd log. Like the other advisory signals it is **reported, never
+    gating** (it cannot change the exit code).
 - Normalizes the **primary** linter's exit code:
   - `0` — clean (no findings)
   - `1` — findings exist (the linter ran and reported issues)
@@ -95,8 +109,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" check [target]
 
 - Auto-resolves the ecosystem's linter via the same logic as `detect`.
 - Prints a tight summary (count + top rule codes) to stdout, plus any
-  **advisory** lines (Python complexity / Node prettier) — advisory lines are
-  reported but never change the exit code.
+  **advisory** lines (Python complexity / Node prettier / cross-ecosystem
+  duplication) — advisory lines are reported but never change the exit code.
 - Exit code is normalized off the **primary** linter (`0` clean / `1`
   findings / `2` no-linter) per the table above. Branch on it
   deterministically — exit `1` means inspect the summarized findings; exit
@@ -139,14 +153,27 @@ duplication of `scaffold.py`).
 ## Gotchas
 
 - **Scope is Python (ruff, + advisory complexity) and Node (eslint, +
-  advisory prettier --check).** Duplication (slice 060-04) and a dedicated
-  code-health reviewer pass (slice 060-05) are still later slices. An
-  unrecognized ecosystem with no `.jig/lint-command` override degrades to a
-  recommendation.
-- **Advisory ≠ gating.** The complexity (Python) and prettier (Node) signals
-  are reported in the summary but **never** change the exit code — the exit
-  code is driven solely by the primary linter (ruff / eslint). A clean ruff
-  run with complexity findings still exits `0`.
+  advisory prettier --check), plus a cross-ecosystem advisory duplication
+  signal (`npx jscpd`).** The dedicated code-health reviewer pass (slice
+  060-05) is still a later slice; the Tier-2 scaffold-the-floor work (slice
+  060-06) is **DEFERRED**. An unrecognized ecosystem with no
+  `.jig/lint-command` override degrades to a recommendation.
+- **Advisory ≠ gating.** The complexity (Python), prettier (Node), and
+  duplication (cross-ecosystem) signals are reported in the summary but
+  **never** change the exit code — the exit code is driven solely by the
+  primary linter (ruff / eslint). A clean ruff run with complexity or
+  duplication findings still exits `0`.
+- **Duplication is honest about being unavailable.** Unlike complexity /
+  prettier (which stay silent when their tool isn't present), the duplication
+  probe emits `duplication: skipped (no detector) …` when neither a native
+  tool nor `npx` is available — so a reader knows the dimension was *not
+  measured* rather than *measured clean*. It writes jscpd's JSON report to a
+  temp dir outside the project (read back, then removed) so it never pollutes
+  your tree, and runs jscpd without `--threshold` so jscpd itself never exits
+  non-zero (advisory, not gating).
+- **The override path runs no advisory probes** (including duplication) — it
+  honors `.jig/lint-command` verbatim without ecosystem detection, so jig's
+  own dogfood CI (which sets an override) is unaffected.
 - **Mixed repos degrade, they don't guess.** If both `pyproject.toml` (or
   `*.py`) and `package.json` are present, `check` exits `2` and asks you to
   set `.jig/lint-command` to disambiguate — it never picks one for you.
@@ -156,9 +183,10 @@ duplication of `scaffold.py`).
   failed to start (an environment issue) — don't conflate any of those with
   clean.
 - **Ephemeral runs need a network/cache.** `uvx ruff` / `pipx run ruff` /
-  `npx eslint` / `npx prettier` fetch the tool on first use. If neither the
-  binary nor a launcher is present, the skill recommends rather than failing
-  opaquely.
+  `npx eslint` / `npx prettier` / `npx jscpd` fetch the tool on first use. If
+  neither the binary nor a launcher is present, the skill recommends (for the
+  primary linter) or reports `skipped (no detector)` (for duplication) rather
+  than failing opaquely.
 - **Tight summary, not the raw dump.** `check` parses the linter's JSON into
   a count + top codes; it does not echo the full tool output. Re-run the
   linter directly when you need every finding's location.

@@ -1,5 +1,7 @@
 """
-AC verification tests for slice 060-01 — Python lint, detect-and-drive.
+AC verification tests for the code-health helper (spec 060) — spanning
+slice 060-01 (Python lint), 060-03 (table-driven ecosystems + complexity),
+and 060-04 (duplication: native-first / `npx jscpd` fallback).
 
 Run from the repo root:
     python3 scripts/run_tests.py
@@ -11,6 +13,7 @@ The subprocess + tool-resolution boundary is mocked (mirrors the mocking
 style in skills/tdd-loop/test_tdd.py).
 """
 
+import glob
 import importlib.util
 import json
 import os
@@ -708,6 +711,299 @@ class MixedAndUnknownTests(unittest.TestCase):
         _write(self.target / ".jig" / "lint-command", "my-linter src\n")
         argv = self._h.resolve_lint_command(self.target)
         self.assertEqual(argv, shlex.split("my-linter src"))
+
+
+# A representative `jscpd --reporters json` report (one clone, 50%
+# duplicated across two files). Mirrors the real jscpd-report.json shape
+# verified against `npx jscpd`: statistics.total.{percentage,clones} +
+# duplicates[].{firstFile,secondFile}.{name,startLoc.line}.
+JSCPD_REPORT_ONE_CLONE = json.dumps({
+    "statistics": {
+        "total": {
+            "lines": 26,
+            "clones": 1,
+            "duplicatedLines": 13,
+            "percentage": 50,
+        },
+    },
+    "duplicates": [
+        {
+            "format": "javascript",
+            "lines": 14,
+            "firstFile": {"name": "src/a.js", "startLoc": {"line": 1}},
+            "secondFile": {"name": "src/b.js", "startLoc": {"line": 1}},
+        },
+    ],
+})
+
+# A jscpd report with no clones (clean) — percentage 0, empty duplicates.
+JSCPD_REPORT_CLEAN = json.dumps({
+    "statistics": {"total": {"clones": 0, "percentage": 0}},
+    "duplicates": [],
+})
+
+
+# -------------------- DuplicationResolverTests --------------------
+
+
+class DuplicationResolverTests(unittest.TestCase):
+    """AC1/AC2 — the duplication resolver's documented order: native (none
+    wired yet — empty structural branch), then `npx jscpd` when npx is on
+    PATH, else None (→ the skip line)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_resolves_npx_jscpd_when_npx_present(self):
+        # AC2 — npx on PATH (+ a runner-provided workdir) → `npx jscpd ...`
+        # writing its report into that workdir via --output.
+        workdir = self.target / "wd"
+        workdir.mkdir()
+
+        def fake_which(name):
+            return "/usr/bin/npx" if name == "npx" else None
+        with patch.object(self._h.shutil, "which", side_effect=fake_which):
+            argv = self._h._resolve_duplication(self.target, workdir)
+        self.assertIsNotNone(argv)
+        self.assertEqual(argv[:2], ["npx", "jscpd"])
+        self.assertIn("--output", argv)
+        self.assertIn(str(workdir), argv)
+
+    def test_resolves_none_when_no_npx(self):
+        # AC3 — no native tool, no npx → None (triggers the skip line).
+        # NOTE: there is intentionally NO native-duplication tool wired yet
+        # (see _resolve_duplication's native extension point); we do NOT fake
+        # one here — the native branch is currently empty by design.
+        with patch.object(self._h.shutil, "which", return_value=None):
+            argv = self._h._resolve_duplication(self.target, self.target)
+        self.assertIsNone(argv)
+
+    def test_resolves_none_when_no_workdir(self):
+        # Defensive: even with npx present, no workdir → None (the runner
+        # always supplies one for this probe, but the resolver guards).
+        with patch.object(self._h.shutil, "which", return_value="/usr/bin/npx"):
+            argv = self._h._resolve_duplication(self.target, None)
+        self.assertIsNone(argv)
+
+
+# -------------------- JscpdParsingTests --------------------
+
+
+class JscpdParsingTests(unittest.TestCase):
+    """AC4 — parse the jscpd JSON report into a tight percentage + top
+    file:line clones; malformed input degrades gracefully (no crash)."""
+
+    def setUp(self):
+        self._h = _load_health()
+
+    def test_parses_percentage_and_top_clones(self):
+        line = self._h._summarize_jscpd_report(JSCPD_REPORT_ONE_CLONE)
+        self.assertIsNotNone(line)
+        self.assertIn("duplication", line.lower())
+        self.assertIn("50", line)  # percentage
+        self.assertIn("src/a.js:1", line)  # top clone file:line
+
+    def test_clean_report_reports_zero(self):
+        line = self._h._summarize_jscpd_report(JSCPD_REPORT_CLEAN)
+        self.assertIsNotNone(line)
+        self.assertIn("0", line)
+
+    def test_malformed_report_no_crash_no_junk(self):
+        # Unparseable / missing report → None (report nothing), never raise.
+        self.assertIsNone(self._h._summarize_jscpd_report("not json at all"))
+        self.assertIsNone(self._h._summarize_jscpd_report(""))
+        self.assertIsNone(self._h._summarize_jscpd_report("{}"))
+
+
+# -------------------- DuplicationAdvisoryTests --------------------
+
+
+class DuplicationAdvisoryTests(unittest.TestCase):
+    """AC2/AC3/AC4 — duplication is an advisory probe: it appears in the
+    summary, never flips a clean primary exit, and emits a `skipped (no
+    detector)` line when nothing resolves (the skip_summary extension)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_jscpd_signal_does_not_flip_clean_exit(self):
+        # AC2/AC3 — ruff primary clean (rc 0); duplication probe (jscpd) runs
+        # and reports a percentage. Exit stays 0; the line appears.
+        _seed_python(self.target)
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            if "jscpd" in argv:
+                # jscpd ran; the summarizer reads the report file, so the
+                # subprocess result itself can be anything benign.
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="[]", stderr="")
+
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["ruff", "check", "--output-format=json", "."]):
+            with patch.object(self._h.shutil, "which",
+                              side_effect=lambda n: "/x" if n in ("ruff", "npx") else None):
+                with patch.object(self._h, "_summarize_jscpd_report",
+                                  return_value="duplication: 50.0% (1 clones); top: src/a.js:1"):
+                    with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                        with patch("sys.stdout") as mock_out:
+                            mock_out.write = lambda s: stdout_buf.append(s)
+                            code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0, "duplication (advisory) must not flip the exit code")
+        out = "".join(stdout_buf).lower()
+        self.assertIn("duplication", out)
+        self.assertIn("50", out)
+
+    def test_skip_line_when_no_detector_and_exit_unaffected(self):
+        # AC3 — no native tool, no npx → the duplication probe emits a
+        # `skipped (no detector)` line AND the overall exit is unaffected.
+        _seed_python(self.target)
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            return MagicMock(returncode=0, stdout="[]", stderr="")
+
+        # ruff resolves (so the primary runs clean) but npx does not.
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["ruff", "check", "--output-format=json", "."]):
+            with patch.object(self._h.shutil, "which",
+                              side_effect=lambda n: "/x" if n == "ruff" else None):
+                with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                    with patch("sys.stdout") as mock_out:
+                        mock_out.write = lambda s: stdout_buf.append(s)
+                        code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0, "advisory skip must not flip the exit code")
+        out = "".join(stdout_buf).lower()
+        self.assertIn("duplication", out)
+        self.assertIn("skipped", out)
+        self.assertIn("no detector", out)
+
+
+# -------------------- AdvisoryProbeSkipSummaryTests --------------------
+
+
+class AdvisoryProbeSkipSummaryTests(unittest.TestCase):
+    """The AdvisoryProbe.skip_summary extension: a probe WITHOUT skip_summary
+    (complexity / prettier) stays SILENT when its resolver returns None, while
+    a probe WITH skip_summary (duplication) emits its skip line. Proves the
+    060-04 extension did not regress 060-03 behavior."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_probe_without_skip_summary_silent_when_unresolved(self):
+        probe = self._h.AdvisoryProbe(
+            name="x",
+            resolve=lambda t, w: None,
+            summarize=lambda rc, o, e, w: "should never appear",
+        )
+        lines = self._h._run_advisory_probes([probe], self.target)
+        self.assertEqual(lines, [])
+
+    def test_probe_with_skip_summary_emits_when_unresolved(self):
+        probe = self._h.AdvisoryProbe(
+            name="dup",
+            resolve=lambda t, w: None,
+            summarize=lambda rc, o, e, w: None,
+            skip_summary="duplication: skipped (no detector)",
+        )
+        lines = self._h._run_advisory_probes([probe], self.target)
+        self.assertEqual(lines, ["duplication: skipped (no detector)"])
+
+    def test_duplication_probe_wired_into_both_ecosystems(self):
+        # AC1/AC2 — the shared duplication probe is referenced by BOTH
+        # ecosystems' advisory_probes lists.
+        for eco in self._h.ECOSYSTEMS:
+            names = [p.name for p in eco.advisory_probes]
+            self.assertIn("duplication", names,
+                          f"{eco.name} should run the duplication probe")
+
+
+# -------------------- WorkdirLifecycleTests --------------------
+
+
+class WorkdirLifecycleTests(unittest.TestCase):
+    """060-04 craft-review fix: a `needs_workdir` probe's temp dir is owned by
+    the runner (a `TemporaryDirectory`), so it is torn down on EVERY exit path —
+    a normal run AND a subprocess failure (the leak the original
+    summarizer-owned `finally` missed). Proven by globbing the `jig-jscpd-*`
+    temp dirs before/after."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _jscpd_temp_dirs(self):
+        return set(glob.glob(os.path.join(tempfile.gettempdir(), "jig-jscpd-*")))
+
+    def test_workdir_threaded_into_resolve_and_summarize(self):
+        # The runner creates a real temp dir and passes the SAME path to both
+        # resolve and summarize.
+        seen = {}
+        probe = self._h.AdvisoryProbe(
+            name="dup",
+            resolve=lambda t, w: (seen.__setitem__("resolve", w), ["echo"])[1],
+            summarize=lambda rc, o, e, w: (seen.__setitem__("summarize", w), "ok")[1],
+            needs_workdir=True,
+        )
+        with patch.object(self._h.subprocess, "run",
+                          return_value=MagicMock(returncode=0, stdout="", stderr="")):
+            lines = self._h._run_advisory_probes([probe], self.target)
+        self.assertEqual(lines, ["ok"])
+        self.assertIsNotNone(seen.get("resolve"))
+        self.assertEqual(seen["resolve"], seen["summarize"])
+
+    def test_workdir_cleaned_after_normal_run(self):
+        before = self._jscpd_temp_dirs()
+        probe = self._h.AdvisoryProbe(
+            name="dup",
+            resolve=lambda t, w: ["echo", "x"],
+            summarize=lambda rc, o, e, w: "line",
+            needs_workdir=True,
+        )
+        with patch.object(self._h.subprocess, "run",
+                          return_value=MagicMock(returncode=0, stdout="", stderr="")):
+            lines = self._h._run_advisory_probes([probe], self.target)
+        self.assertEqual(lines, ["line"])
+        self.assertEqual(before, self._jscpd_temp_dirs(),
+                         "needs_workdir temp dir must be cleaned after a normal run")
+
+    def test_workdir_cleaned_when_subprocess_raises(self):
+        # The leak path: subprocess.run raises AFTER the temp dir is created.
+        # The runner's TemporaryDirectory context must still tear it down, and
+        # the run must not crash (advisory best-effort).
+        before = self._jscpd_temp_dirs()
+        probe = self._h.AdvisoryProbe(
+            name="dup",
+            resolve=lambda t, w: ["jscpd"],
+            summarize=lambda rc, o, e, w: "should not appear",
+            skip_summary="dup: skipped",
+            needs_workdir=True,
+        )
+        with patch.object(self._h.subprocess, "run", side_effect=OSError("boom")):
+            lines = self._h._run_advisory_probes([probe], self.target)
+        self.assertEqual(lines, [], "a raising subprocess contributes nothing")
+        self.assertEqual(before, self._jscpd_temp_dirs(),
+                         "needs_workdir temp dir must be cleaned even when subprocess raises")
 
 
 if __name__ == "__main__":
