@@ -21,6 +21,7 @@ MANIFEST_PATH = REPO_ROOT / ".github" / ".release-please-manifest.json"
 PLUGIN_JSON_PATH = REPO_ROOT / ".claude-plugin" / "plugin.json"
 CODEX_PLUGIN_JSON_PATH = REPO_ROOT / ".codex-plugin" / "plugin.json"
 CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
+RELEASE_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +179,59 @@ class ChangelogSeedTests(unittest.TestCase):
     def test_changelog_has_changelog_heading(self):
         text = CHANGELOG_PATH.read_text()
         self.assertIn("# Changelog", text, "CHANGELOG.md must start with '# Changelog'")
+
+
+# ---------------------------------------------------------------------------
+# Slice 061-04 — release workflow builds, smoke-tests, and uploads BOTH
+# host-explicit zips, keeps the legacy jig-vX.Y.Z.zip one cycle as a
+# byte-identical Claude alias, and appends extract-then-add install notes.
+# ---------------------------------------------------------------------------
+
+
+class ReleaseWorkflowHostZipTests(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(
+            RELEASE_WORKFLOW_PATH.is_file(),
+            f"release.yml missing at {RELEASE_WORKFLOW_PATH}",
+        )
+        self.text = RELEASE_WORKFLOW_PATH.read_text()
+
+    def test_builds_both_hosts(self):
+        self.assertIn("--host claude", self.text)
+        self.assertIn("--host codex", self.text)
+
+    def test_smoke_tests_both_hosts(self):
+        # Each host appears with its own --smoke-test invocation.
+        self.assertIn("--smoke-test", self.text)
+        self.assertIn("jig-claude-v", self.text)
+        self.assertIn("jig-codex-v", self.text)
+
+    def test_uploads_both_host_zips(self):
+        self.assertIn("dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip", self.text)
+        self.assertIn("dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip", self.text)
+
+    def test_legacy_alias_copied_from_claude(self):
+        # Legacy host-neutral zip kept one cycle as a byte-identical Claude alias.
+        self.assertIn("jig-v${{ needs.release-please.outputs.version }}.zip", self.text)
+        # The alias is a `cp` from the Claude zip to the legacy name (the two
+        # paths may span continuation lines, so match across newlines).
+        self.assertRegex(
+            self.text,
+            r"(?s)cp\s+.*jig-claude-v\$\{\{ needs\.release-please\.outputs\.version \}\}\.zip"
+            r".*jig-v\$\{\{ needs\.release-please\.outputs\.version \}\}\.zip",
+        )
+
+    def test_release_notes_extract_then_add_language(self):
+        self.assertIn("extract-then-add", self.text)
+        # release-please notes must be appended, not overwritten.
+        self.assertIn("gh release view", self.text)
+        self.assertIn("gh release edit", self.text)
+
+    def test_release_notes_legacy_deprecation(self):
+        lowered = self.text.lower()
+        self.assertIn("deprecated", lowered)
+        # Codex zip must never be called a directly-installable plugin zip.
+        self.assertNotIn("directly-installable", lowered)
 
 
 if __name__ == "__main__":
