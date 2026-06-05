@@ -104,8 +104,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
 - Without `--dry-run` — runs `git push -u origin <branch>` followed by
   `gh pr create --title "<title>" --body-file <body-path>`.  Stops if
   push fails (gh is NOT called after push failure).  Title shape is
-  `feat(<skill>): <slice-label>`, with the `skill:` value pulled from
-  the spec's YAML frontmatter (plain `feat:` fallback otherwise).
+  `feat(<scope>): <subject>`: scope comes from a single `skill:`
+  frontmatter value or falls back to the spec directory slug, and subject
+  drops the numeric slice prefix so the PR-title workflow accepts it.
 - Push runs from the **current worktree** (not the main worktree root,
   since the feature branch is checked out here).
 - Never runs `gh pr merge` (printed as a post-landing suggestion only).
