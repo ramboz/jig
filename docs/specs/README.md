@@ -203,7 +203,7 @@
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-02 - committed Codex package peer | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-03 - host-package drift guard | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-04 - host-explicit release zips | **DONE** |  |
-| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-05 - symmetric install + scaffold docs | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-05 - symmetric install + scaffold docs | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-06 - Claude install verification | DRAFT |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-07 - Codex install verification | DRAFT |  |
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-01 — `refactor.py` core: new / triage / numbering / record / board / claim | DRAFT |  |

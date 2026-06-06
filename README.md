@@ -108,10 +108,19 @@ machinery lives** once it's installed. Full detail and how to choose in
 **1. Acquire the plugin** — puts the machinery under `${CLAUDE_PLUGIN_ROOT}`
 and makes the `/jig:*` commands available:
 
-| Source | How |
-|---|---|
-| **Marketplace** (Claude Code) | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` |
-| **Release zip** (Claude Desktop) | Download `jig-vX.Y.Z.zip` from the [latest release](https://github.com/ramboz/jig/releases/latest), then add it via Claude Desktop's plugin manager (**Settings → Plugins**). |
+| Host | Remote one-command install | Release zip |
+|---|---|---|
+| **Claude Code / Desktop** | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` (resolves to the committed `hosts/claude` package). | `jig-claude-vX.Y.Z.zip` — a **flat, drag-droppable** plugin. Download from the [latest release](https://github.com/ramboz/jig/releases/latest) and add it via Claude Desktop's plugin manager (**Settings → Plugins**). |
+| **Codex** | `codex plugin marketplace add hosts/codex` (the committed marketplace root, from a repo checkout or the extracted `jig-codex` zip) → `codex plugin add jig@jig`. Codex has **no bare-repo one-liner** like Claude's — its marketplace descriptor lives in the `hosts/codex` subtree, not the repo root. See [Codex Distribution](#codex-distribution) for the hook-trust + agent-install caveats. | `jig-codex-vX.Y.Z.zip` — a marketplace bundle with **no direct zip-drop install**: `unzip` it, then `codex plugin marketplace add <extracted-dir>` → `codex plugin add jig@jig` (extract-then-add). |
+
+The two release zips ship **different internal shapes** by design — the Claude
+package is a flat plugin (`.claude-plugin/plugin.json` at the package root)
+while the Codex package is **marketplace-wrapped**
+(`hosts/codex/.agents/plugins/marketplace.json` + `hosts/codex/plugins/jig/...`).
+See [Repository structure](#repository-structure-for-contributors) for how the
+two committed host packages sit beside the canonical source. The legacy
+host-neutral `jig-vX.Y.Z.zip` is kept one cycle only as a deprecated alias of
+the Claude zip; prefer the host-explicit names.
 
 Running jig from a source checkout (for hacking on jig itself): see
 [CONTRIBUTING § Local dev install](CONTRIBUTING.md#local-dev-install).
@@ -145,10 +154,17 @@ the *judgment skills you've already invested in*. Detail:
 
 jig now supports four distribution modes from the same source tree:
 **Claude scaffold**, **Claude plugin**, **Codex scaffold**, and **Codex plugin**.
-For editable Codex project-local machinery, run:
+For editable Codex project-local machinery, run the scaffold from the committed
+Codex host package (never the repo root):
 
 ```bash
-python3 skills/scaffold-init/scaffold.py --host codex <your-project>
+python3 hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex <your-project>
+```
+
+The equivalent Claude scaffold runs from the committed Claude host package:
+
+```bash
+python3 hosts/claude/skills/scaffold-init/scaffold.py <your-project>
 ```
 
 This produces `<your-project>/AGENTS.md`, `.codex/skills/jig-*/`,
@@ -158,19 +174,23 @@ workflow machinery editable in the project itself.
 
 ### Codex plugin (central install)
 
-Build the Codex-native plugin package from the shared source tree:
+The Codex install resolves against the **committed** Codex host package at
+`hosts/codex` (the marketplace root). Unlike Claude — whose repo-root
+`marketplace.json` lets `marketplace add ramboz/jig` resolve remotely — Codex's
+marketplace descriptor lives inside the `hosts/codex` subtree, not the repo
+root, so you point Codex at that package on disk: a repo checkout, or the
+extracted `jig-codex-vX.Y.Z.zip`. Because the package is committed, there is no
+build step:
 
 ```bash
-python3 scripts/build_codex_plugin.py --output-dir dist/codex-plugin/plugins/jig
-```
-
-The builder writes `dist/codex-plugin/.agents/plugins/marketplace.json`
-next to the plugin directory. Install that generated marketplace:
-
-```bash
-codex plugin marketplace add dist/codex-plugin
+codex plugin marketplace add hosts/codex   # the committed Codex marketplace root
 codex plugin add jig@jig
 ```
+
+`hosts/codex` is a **committed, source-derived build output** kept fresh by the
+drift guard, **not hand-edited** — see
+[Repository structure](#repository-structure-for-contributors). To rebuild or
+verify it, run `python3 scripts/build_host_packages.py [--check]`.
 
 After `codex plugin add`, start or restart Codex and open `/hooks` in the
 CLI. Codex requires non-managed command hooks, including plugin-bundled
@@ -196,8 +216,8 @@ addressed through the plugin root:
 python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" --install-codex-agents
 ```
 
-For a locally built package, the equivalent source-tree path is
-`dist/codex-plugin/plugins/jig/skills/scaffold-init/scaffold.py`. The command
+In the committed source tree, the equivalent path is
+`hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py`. The command
 defaults to `~/.codex/agents`. Use `--codex-agents-dir <dir>` to target
 another Codex agents directory, and `--force` only when replacing existing
 user-owned `jig-*.toml` files is intentional.
@@ -242,6 +262,19 @@ an isolated marketplace and temporary `CODEX_HOME`, confirms the plugin cache
 carries `agents/jig-*.toml`, and verifies whether Codex exposes those
 plugin-bundled templates as custom agents without running the explicit helper.
 
+### Verifying a host install
+
+Each host is verified **in its own environment** — one host's check does not
+prove the other installs and runs:
+
+- **Claude:** `python3 scripts/verify_install.py` confirms the install
+  footprint, and `python3 scripts/build_release_zip.py --host claude
+  --smoke-test <zip>` exercises the committed `hosts/claude` package. Spec
+  061-06 owns the full Claude install-verification slice.
+- **Codex:** `python3 scripts/codex_install_smoke.py` validates the committed
+  `hosts/codex` package and probes a live Codex CLI when present. Spec 061-07
+  owns the full Codex install-verification slice.
+
 ### From source (contributors)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
@@ -256,10 +289,20 @@ The `scaffold-init` skill will run and produce the docs/ scaffolding.
 
 ## Repository structure (for contributors)
 
+Three peers: the **canonical source root**, the committed **`hosts/claude`**
+package, and the committed **`hosts/codex`** package. The two host packages are
+**committed, source-derived build outputs** — kept fresh by the drift guard
+(`python3 scripts/build_host_packages.py [--check]`) and **NOT hand-edited**.
+The host packages have **different internal shapes**: Claude is a **flat**
+plugin (`.claude-plugin/plugin.json` at the package root) while Codex is
+**marketplace-wrapped** (`hosts/codex/.agents/plugins/marketplace.json` +
+`hosts/codex/plugins/jig/...`).
+
 ```
-.claude-plugin/plugin.json       # Claude plugin manifest
-.claude-plugin/marketplace.json  # Claude local dev marketplace descriptor
-.codex-plugin/plugin.json        # Codex plugin manifest
+# Canonical source root (dev tooling + the tree the host packages build from):
+.claude-plugin/plugin.json       # Claude plugin source manifest
+.claude-plugin/marketplace.json  # remote-install pointer → ./hosts/claude
+.codex-plugin/plugin.json        # Codex plugin source manifest
 skills/                          # Skill definitions (SKILL.md per skill)
 agents/                          # Subagent definitions
 hooks/                           # Hook configuration + Python scripts
@@ -269,6 +312,14 @@ docs/                            # Dev docs for jig itself (dogfooded workflow)
   specs/                         # Specs for jig's own features
   memory/                        # jig's own memory layer
   decisions/                     # Architectural decisions (ADRs)
+
+# Committed, drift-guarded host packages (built from source; NOT hand-edited):
+hosts/
+  claude/                        # COMMITTED flat Claude plugin package
+  codex/                         # COMMITTED marketplace-wrapped Codex package
+    .agents/plugins/marketplace.json
+    plugins/jig/                 # the Codex plugin tree
+dist/                            # gitignored — host-explicit release ZIPS ONLY
 ```
 
 ## Contributing
