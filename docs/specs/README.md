@@ -195,6 +195,10 @@
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-05 — `jig:refactor` skill + plugin wiring + workflow.md routing | DRAFT |  |
 | [063-scaffold-precondition-gate](063-scaffold-precondition-gate/spec.md) | 063-01 — classify-and-route-on-new | DRAFT |  |
 | [063-scaffold-precondition-gate](063-scaffold-precondition-gate/spec.md) | 063-02 — skill-step0-precondition | DRAFT |  |
+| [064-spec-frame-hardening](064-spec-frame-hardening/spec.md) | 🔬 01 — retro-frame-error-census | DRAFT |  |
+| [064-spec-frame-hardening](064-spec-frame-hardening/spec.md) | 02 — grounding-requirement | DRAFT |  |
+| [064-spec-frame-hardening](064-spec-frame-hardening/spec.md) | 03 — frame-critique-pass | DRAFT |  |
+| [064-spec-frame-hardening](064-spec-frame-hardening/spec.md) | 04 — derived-trigger | DRAFT |  |
 
 ## Deferred slices
 
