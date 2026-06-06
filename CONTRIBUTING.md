@@ -312,24 +312,33 @@ follow conventional-commit semantics organically.
 
 ### Building and smoke-testing a release zip locally
 
-The release workflow attaches a `jig-vX.Y.Z.zip` asset to every GitHub
-Release — this is the artifact end users install on Claude Desktop (see
-[README § Install shapes](README.md#install-shapes)). You can build and
-verify the same zip locally before pushing any change to the build
-script:
+The release workflow attaches **one host-explicit zip per host** —
+`jig-claude-vX.Y.Z.zip` (flat, drag-droppable) and `jig-codex-vX.Y.Z.zip`
+(extract-then-add marketplace bundle) — to every GitHub Release. Both are
+archived from the committed host packages under `hosts/` (see
+[README § Install shapes](README.md#install-shapes)). The build script now
+requires `--host`; you can build and verify either zip locally before pushing
+any change to it:
 
 ```bash
-# Build the zip (writes to ./dist/jig-v<version>.zip):
-python3 scripts/build_release_zip.py --version 1.0.0
+# Build the Claude zip (writes to ./dist/jig-claude-v<version>.zip):
+python3 scripts/build_release_zip.py --host claude --version 1.0.0
 
 # Extract + run verify_install against the contents in one step:
-python3 scripts/build_release_zip.py --smoke-test dist/jig-v1.0.0.zip
+python3 scripts/build_release_zip.py --host claude --smoke-test dist/jig-claude-v1.0.0.zip
+
+# Build the Codex zip (extract-then-add bundle; no direct zip-drop install):
+python3 scripts/build_release_zip.py --host codex --version 1.0.0
+python3 scripts/build_release_zip.py --host codex --smoke-test dist/jig-codex-v1.0.0.zip
 ```
 
-The smoke-test prints the same four `PASS marketplace / manifest / agents
-/ skills` lines you'd see from `verify_install.py` against the
-checked-out repo. The CI `package` job runs the equivalent steps in
-the release workflow.
+The Claude smoke-test prints the same `PASS marketplace / manifest / agents
+/ skills` lines you'd see from `verify_install.py`. The CI `package` job runs
+the equivalent steps in the release workflow. Because the committed `hosts/`
+packages are source-derived build outputs kept fresh by the drift guard
+(`python3 scripts/build_host_packages.py --check`) and **not hand-edited**,
+regenerate them with `python3 scripts/build_host_packages.py` after any source
+change rather than editing `hosts/` directly.
 
 ### Smoke-testing the Codex plugin package locally
 
