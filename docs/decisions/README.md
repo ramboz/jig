@@ -22,6 +22,9 @@
 - [ADR-0015: Worktree-aware number reservation — branch-routed reserve, detached worktree off main](adr-0015-worktree-aware-reservation.md) — [Spec 003-03](../specs/003-spec-workflow-promotion/spec.md) (spec numbers, `workflow.py new`) and [spec 028-01](../specs/028-parallel-session-locks/slice-01-adr-numbering-on-main.md) (ADR numbers, `adr.py new`) built reserve-on-`origin/main`: claim a sequential number by committing a stub and pushing it to `origin/main`, so parallel sessions cannot both grab the same `NNN`/`NNNN`. (2026-06-02, Accepted)
 - [ADR-0016: Parallel proportional bug-fix lifecycle](adr-0016-bug-fix-lifecycle.md) — Not all work in a jig project is spec-driven. (2026-06-03, Proposed)
 - [ADR-0017: Code-health as a scaffolded, language-detected capability](adr-0017-scaffolded-code-health.md) — jig has no code-health capability. (2026-06-04, Accepted)
+- [ADR-0019: Parallel proportional refactor / migration workflow](adr-0019-refactor-workflow.md) — jig is growing a small family of work-shaped lifecycles. (2026-06-05, Proposed)
+- [ADR-0020: Spec/ADR Frame-Hardening: Grounding + Adversarial Frame-Critique](adr-0020-spec-frame-hardening.md) — jig's reviewer subagents (compliance / craft / arch / code-health, per [ADR-0014](adr-0014-review-evidence-model.md)) all validate that an *implementation conforms to its spec/ADR*. (2026-06-06, Proposed)
+- [ADR-0021: Canonical lexicon home and project-glossary overlay](adr-0021-lexicon-home-and-overlay.md) — [Spec 065](../specs/065-lower-vocabulary-barrier/spec.md) lowers the vocabulary barrier for non-expert readers of jig artifacts. (2026-06-06, Proposed)
 
 ## Format
 
