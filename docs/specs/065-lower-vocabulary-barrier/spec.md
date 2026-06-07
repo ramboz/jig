@@ -80,6 +80,7 @@ the judgment-skill pattern is proven (`/jig:clarify`, `/jig:pr-review`), and
 | 065-02 | **Hook surfacing** — `jig-memory-scan.sh` injects the plain-language def of any lexicon term that appears in a prompt (bounded, one-line) | Interface |
 | 065-03 | **`/jig:explain` skill** — term mode (define a term) + artifact mode (junior-grade handholding walkthrough of a spec/ADR, auto-pulling linked refs), ephemeral output | Interface |
 | 065-04 | **Self-defining generation** — a soft authoring convention so new specs expand acronyms + link the lexicon on first use; forward-only | Rule |
+| 065-05 | **`/jig:explain` passage mode** — a third mode that explains a pasted snippet of jig output (neither a term nor a path), reusing the lexicon scan; turns the dead-end ambiguous-argument branch into a useful explanation | Interface |
 
 ## Design notes
 
@@ -134,6 +135,7 @@ the judgment-skill pattern is proven (`/jig:clarify`, `/jig:pr-review`), and
 - `slice-02-memory-scan-lexicon.md` — `jig-memory-scan.sh` surfaces plain-language defs for lexicon terms in a prompt (Interface; bounded, fail-open)
 - `slice-03-explain-skill.md` — `/jig:explain` term + artifact modes, ephemeral, defers to richer installed skill (Interface)
 - `slice-04-self-defining-generation.md` — soft authoring convention: new specs expand + link jargon on first use (Rule; forward-only)
+- `slice-05-passage-mode.md` — `/jig:explain` third mode: explain a pasted snippet of jig output (neither term nor path); reuses the lexicon scan, replaces the dead-end ambiguous-argument branch (Interface; added post-065-03 per usage)
 
 ## Open questions
 

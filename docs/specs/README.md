@@ -203,6 +203,7 @@
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-02 — Hook surfaces lexicon definitions | **DONE** |  |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-03 — `/jig:explain` skill (term + artifact modes) | **DONE** | `/jig:explain` = term + artifact modes, ephemeral (chat-only, no `--save`), judgment-only/no-`.py` (lookups via 065-01 loader), defers to richer installed plain-language/onboarding/walkthrough skill. |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-04 — Self-defining generation convention | DRAFT |  |
+| [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-05 — `/jig:explain` passage mode (explain a pasted snippet) | DRAFT |  |
 
 ## Deferred slices
 
