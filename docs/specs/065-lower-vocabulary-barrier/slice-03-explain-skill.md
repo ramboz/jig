@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [065-01]
-last_verified:
+last_verified: 2026-06-07
 arch_review: true  # adds a new public skill (a new external surface in the
 #                    plugin manifest + CLAUDE.md skills table).
 ---
@@ -56,16 +56,17 @@ not a unit test — the same accepted shape as every judgment-only jig skill
 (`/jig:clarify`, `/jig:pr-review`). Recorded in the spec's coverage summary._
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (manifest validation included).
-- [ ] Coverage: `validate_manifests.py` passes with the new skill; a test asserts
+- [x] All ACs pass; full test suite green (manifest validation included).
+- [x] Coverage: `validate_manifests.py` passes with the new skill; a test asserts
       the SKILL.md declares term + artifact modes, the ephemeral contract, and the
       deferral language; the CLAUDE.md skills-table row is present.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Arch (arch-review) pass run (slice declares `arch_review: true`); blockers addressed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Craft (pr-review) pass run; blockers addressed.
+- [x] Arch (arch-review) pass run (slice declares `arch_review: true`); blockers addressed.
+- [x] Deviation log produced under this slice heading.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred. (No decisions
+      deferred; one non-blocking follow-up noted in the deviation log.)
 
 **Anti-horizontal-phasing check:** After this slice, a junior can run
 `/jig:explain docs/specs/062-refactor-workflow/spec.md` and get a plain-language
@@ -74,13 +75,66 @@ stub.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated; Notes column records: `/jig:explain`
+- [x] `docs/specs/README.md` regenerated; Notes column records: `/jig:explain`
       = term + artifact modes, ephemeral, defers to richer installed skill.
-- [ ] `CLAUDE.md` hygiene per spec 025-01: add the `/jig:explain` row to the
+- [x] `CLAUDE.md` hygiene per spec 025-01: add the `/jig:explain` row to the
       Skills table; leave the Active-specs entry until the closing slice.
 
 ### Deviation log (after reconciliation)
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- **Deliverables.** `skills/explain/SKILL.md` (the judgment-skill prompt, no
+  `.py` helper) + `skills/explain/test_explain_skill_surface.py` (27 structural
+  surface tests). Registered across the three tier tables —
+  `skills/scaffold-init/scaffold.py` `_TIER_SKILLS["tier-1"]` (source of truth),
+  `scripts/install_contract.py` `EXPECTED_SKILLS`, `scripts/scaffold_contract.py`
+  `_TIER_SKILLS["tier-1"]` — plus the `/jig:explain` row in the root `CLAUDE.md`
+  Skills table.
+
+- **AC1 phrasing vs. jig's actual discovery mechanism (no behavior change).**
+  AC1 says the skill must be "listed in the plugin manifest (passing
+  `validate_manifests.py`)". jig does **not** enumerate skills in a manifest —
+  skills are directory-auto-discovered, and the install contract carries them via
+  `scaffold._TIER_SKILLS` (source of truth) + the two restated mirror tables
+  (`install_contract.EXPECTED_SKILLS`, `scaffold_contract._TIER_SKILLS`, pinned
+  equal by the consistency tests). `validate_manifests.py` validates the three
+  JSON manifests (plugin/marketplace/hooks — still passing) but does not list
+  skills. The implementation satisfies AC1's **intent** (registered +
+  discoverable, install contract carries it) through those real registration
+  surfaces; the test (`TierRegistrationTests`) asserts the actual surfaces, not a
+  literal manifest entry. Flagged independently by all three reviewers.
+
+- **Term-mode recipe made layout-agnostic (reconciliation fix).** All three
+  review passes raised the same non-blocking nit: the inline `python3 -c` lexicon
+  recipe in term mode hardcoded `sys.path.insert(0, 'skills/_common')` with the
+  scaffolded `.claude/skills/_common` path only in a prose aside — not
+  copy-paste-safe in a scaffolded project, and not auto-corrected by the 046-01
+  rewrite policer (which targets `${CLAUDE_PLUGIN_ROOT}/skills/...` helper paths,
+  not relative `python3 -c` snippets). Fixed during reconciliation: the recipe
+  now probes both `skills/_common` and `.claude/skills/_common` and inserts the
+  one that exists. Surface tests re-run green (27/27).
+
+- **Open, non-blocking follow-up (not deferred — no decision needed).** The
+  craft pass noted `TierRegistrationTests` mutate `sys.path` via `insert(0, …)`
+  without cleanup. Harmless for the current suite (the inserted dirs host
+  uniquely-named jig-internal modules), left as-is to match the existing
+  surface-test idiom; a future sweep could wrap them in `try/finally`. No
+  refinement-todo entry — it's a test-hygiene nicety, not an undefined decision.
+
+- **Pinned-tier-set guards + tier-inventory docs updated (by design).** Adding
+  `explain` to tier-1 tripped jig's deliberate "tier addition → update the
+  pinned set / docs" guards, all updated to include it:
+  `test_scaffold.TierSkillSetTests.test_tier_1_is_pinned` (`EXPECTED_TIER_1`) +
+  `test_migrate.TierUpgradeTests` (`TIER1`) pin the scaffolded/migrated tier-1
+  set; `test_product_vision_names_every_tier_skill` forced the
+  `docs/product-vision.md` Tier-1 inventory entry (#17) + its "7 Tier 0 + 10
+  Tier 1" headline count; `test_vision_elicitation_worked_example_tier_line_in_sync`
+  forced the same count + skill-list updates in
+  `skills/vision-elicitation/worked-example-jig.md`. These are exactly the
+  deliberate-update guards firing, distinct from the `TierRegistrationTests`
+  that pin the three source tables equal.
+
+- **All three review passes (compliance / craft / arch) returned `pass`**;
+  verdict artifacts recorded under `reviews/slice-03-{compliance,craft,arch}.md`;
+  reconciliation pass `pass` at `reviews/slice-03-reconciliation.md`.

@@ -201,7 +201,7 @@
 | [064-spec-frame-hardening](064-spec-frame-hardening/spec.md) | 04 — derived-trigger | DRAFT |  |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-01 — Lexicon foundation (shipped data + overlay loader) | **DONE** |  |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-02 — Hook surfaces lexicon definitions | **DONE** |  |
-| [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-03 — `/jig:explain` skill (term + artifact modes) | DRAFT |  |
+| [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-03 — `/jig:explain` skill (term + artifact modes) | **DONE** | `/jig:explain` = term + artifact modes, ephemeral (chat-only, no `--save`), judgment-only/no-`.py` (lookups via 065-01 loader), defers to richer installed plain-language/onboarding/walkthrough skill. |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-04 — Self-defining generation convention | DRAFT |  |
 
 ## Deferred slices

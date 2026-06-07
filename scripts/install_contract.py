@@ -66,6 +66,7 @@ EXPECTED_SKILLS: tuple[str, ...] = (
     "analyze",
     "security-review",
     "code-health",
+    "explain",
 )
 
 
