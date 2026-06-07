@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.12.0](https://github.com/ramboz/jig/compare/v1.11.0...v1.12.0) (2026-06-07)
+
+
+### Features
+
+* **065-01:** lexicon foundation — shipped lexicon + project-glossary overlay ([aa06bc3](https://github.com/ramboz/jig/commit/aa06bc3256b0b2286690288f97d8060f27f58977))
+* **065-02:** jig-memory-scan surfaces lexicon definitions ([5e79b43](https://github.com/ramboz/jig/commit/5e79b4339d0ab98843edf155c31614848ba6fcdc))
+* **065-03:** /jig:explain skill — term + artifact modes ([a319ba7](https://github.com/ramboz/jig/commit/a319ba7172a6c092ad810126281a4cdbd03b2327))
+* **065-04:** self-defining vocabulary convention — closes spec 065 ([d21401a](https://github.com/ramboz/jig/commit/d21401a046e79c51a590d9217fd5bde04b916892))
+* **065-05:** /jig:explain passage mode — explain a pasted snippet ([dd83c2d](https://github.com/ramboz/jig/commit/dd83c2dc11911a4f3dba5f422e93b56f9e85f753))
+
+
+### Documentation
+
+* accept ADR-0021 (lexicon home + overlay) ([4cf6089](https://github.com/ramboz/jig/commit/4cf60891083ee52b49dcb84a3cab52af05898e5c))
+* **refinement-todo:** park cross-spec sequencing affordance behind a 3-signal trigger ([ff661a9](https://github.com/ramboz/jig/commit/ff661a9bd3bcc6a4a9fe1afdbd9cae57f0992c7b))
+
 ## [1.11.0](https://github.com/ramboz/jig/compare/v1.10.0...v1.11.0) (2026-06-07)
 
 
