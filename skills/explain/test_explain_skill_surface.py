@@ -1,4 +1,16 @@
-"""Surface tests for skills/explain/SKILL.md (slice 065-03).
+"""Surface tests for skills/explain/SKILL.md (slices 065-03 + 065-05).
+
+Slice 065-05 adds the third "passage" mode and an explicit mode-precedence
+rule with two carve-outs (term-mode honesty; path-shaped-but-unresolvable →
+ask). Its structural ACs are pinned by `DescriptionTests` (passage mode +
+trigger phrases declared) and `PassageModeTests` (section present, precedence
++ both carve-outs documented, no-jig-vocabulary → generic, best-effort/
+no-fabricate provenance, never-invent extends to passage, no hard term cap,
+dead-end removed, two existing modes intact). The plain-language *quality* of
+a passage explanation stays a judgment, not unit-tested — the accepted gap
+inherited from 065-03.
+
+Original 065-03 scope:
 
 Pure-file inspection — no subprocess, no runner. Mirrors the surface-test
 pattern from skills/clarify/test_clarify_skill_surface.py and
@@ -107,6 +119,19 @@ class DescriptionTests(unittest.TestCase):
         # AC #1 — the two modes are named in the description.
         self.assertIn("term mode", self.normalized)
         self.assertIn("artifact mode", self.normalized)
+
+    def test_declares_passage_mode(self):
+        # 065-05 AC #1 — the third mode is named in the description.
+        self.assertIn("three modes", self.normalized)
+        self.assertIn("passage mode", self.normalized)
+
+    def test_passage_trigger_phrases(self):
+        # 065-05 — passage-mode auto-trigger phrases.
+        for phrase in ("what does this output mean", "explain this snippet"):
+            self.assertIn(
+                phrase, self.normalized,
+                f"description missing passage-mode trigger phrase: {phrase!r}",
+            )
 
     def test_declares_both_invocation_styles(self):
         # AC #1 — auto (trigger phrases) + explicit (`/jig:explain`).
@@ -312,6 +337,137 @@ class ClaudeMdRowTests(unittest.TestCase):
             r"\|\s*`/jig:explain`\s*\|",
             "root CLAUDE.md 'Skills in this repo' table must have a /jig:explain row",
         )
+
+
+class PassageModeTests(unittest.TestCase):
+    """Slice 065-05 — the third mode and its precedence carve-outs are
+    documented at the SKILL.md surface (the quality of a passage explanation is
+    judgment, not unit-tested — the accepted gap inherited from 065-03)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+        cls.body_norm = _normalize(cls.body)
+
+    def _h2_positions(self):
+        body = _strip_fenced_blocks(self.body)
+        return [(m.group(1).lower(), m.start())
+                for m in re.finditer(r"(?m)^##\s+(.+?)\s*$", body)]
+
+    def test_has_passage_mode_section(self):
+        # AC #1 — a "Passage mode" H2 section exists.
+        self.assertTrue(
+            any("passage mode" in h for h, _ in self._h2_positions()),
+            "missing 'Passage mode' H2 section",
+        )
+
+    def test_existing_two_modes_still_present(self):
+        # AC #6 — term + artifact sections survive the third-mode addition.
+        positions = self._h2_positions()
+        self.assertTrue(
+            any(h.strip().startswith("term mode") for h, _ in positions),
+            "Term mode section must still be present",
+        )
+        self.assertTrue(
+            any("artifact mode" in h for h, _ in positions),
+            "Artifact mode section must still be present",
+        )
+
+    def test_mode_precedence_documented(self):
+        # AC #2 — the resolution order is documented in one place.
+        self.assertIn("path", self.body_norm)
+        self.assertIn("artifact mode", self.body_norm)
+        self.assertIn("term mode", self.body_norm)
+        self.assertIn("passage mode", self.body_norm)
+        # The ordered form: path -> artifact ; key -> term ; otherwise -> passage.
+        self.assertTrue(
+            "exact / normalized lexicon key" in self.body_norm
+            or "normalized lexicon key" in self.body_norm,
+            "mode precedence must name the lexicon-key -> term-mode rule",
+        )
+
+    def test_term_honesty_carveout(self):
+        # AC #2 — an unknown single term still routes to term mode, not swallowed
+        # by passage mode. Pin the negation phrase itself (not a trivially-true
+        # `"not" in body` conjunct) so the assertion enforces the adjacency.
+        # Pin "silently absorbed into a passage-mode guess" — the phrase only
+        # appears inside the negated sentence ("is **not** silently absorbed…"),
+        # so it enforces the carve-out without tripping on the `**not**` bold
+        # markers `_normalize` leaves in place.
+        self.assertIn(
+            "silently absorbed into a passage-mode guess", self.body_norm,
+            "must document that an unknown short query is NOT absorbed into a "
+            "passage-mode guess (term-mode honesty carve-out)",
+        )
+
+    def test_path_disambiguation_carveout(self):
+        # AC #2 / clarify Q1 — a path-shaped-but-unresolvable argument asks the
+        # user rather than falling through to passage mode.
+        self.assertIn(
+            "looks like a repo file path", self.body_norm,
+            "must document the path-shaped-but-unresolvable case",
+        )
+        self.assertIn(
+            "ask the user", self.body_norm,
+            "path-shaped-but-unresolvable input must ASK the user (clarify Q1), "
+            "not silently route to passage mode",
+        )
+
+    def test_no_jig_vocabulary_explains_generically(self):
+        # AC #1 / clarify Q2 — a passage with no jig terms is explained
+        # generically rather than declined.
+        self.assertTrue(
+            "no jig vocabulary" in self.body_norm
+            or "no recognizable jig terms" in self.body_norm
+            or "no jig vocabulary at all" in self.body_norm,
+            "must document the no-jig-vocabulary case",
+        )
+        self.assertIn("generic", self.body_norm)
+
+    def test_provenance_best_effort_never_fabricated(self):
+        # AC #3 — best-effort source identification, never fabricated.
+        self.assertTrue(
+            "best-effort" in self.body_norm or "best effort" in self.body_norm,
+            "provenance must be framed as best-effort",
+        )
+        self.assertTrue(
+            "do not invent a source" in self.body_norm
+            or "never fabricated" in self.body_norm
+            or "not invent a source" in self.body_norm,
+            "must state the source is never fabricated",
+        )
+
+    def test_never_invent_extends_to_passage(self):
+        # AC #4 — the never-invent rule extends to unrecognized tokens in a
+        # passage.
+        self.assertIn("never-invent", self.body_norm)
+        self.assertTrue(
+            "flagged as unrecognized" in self.body_norm,
+            "unrecognized jig-shaped tokens in a passage must be flagged, not "
+            "given a fabricated meaning",
+        )
+
+    def test_no_silent_dead_end(self):
+        # AC #6 — the old bare "ambiguous -> say what you tried and stop"
+        # dead-end no longer stands alone; it is replaced by the passage route.
+        # Negative: the original dead-end phrasing (removed in 065-05) is gone.
+        self.assertNotIn(
+            "say what you tried (term lookup found nothing; no file at that "
+            "path) rather than guessing",
+            self.body_norm,
+        )
+        # Positive: the replacement is documented — there is explicitly no
+        # silent give-up branch any more.
+        self.assertTrue(
+            "no silent" in self.body_norm and "dead-end" in self.body_norm,
+            "must document that the ambiguous-argument dead-end is replaced by "
+            "the passage route (no silent give-up)",
+        )
+
+    def test_no_hard_term_cap(self):
+        # clarify Q4 — passage mode does not impose a hard cap on inline term
+        # definitions.
+        self.assertIn("no hard cap", self.body_norm)
 
 
 if __name__ == "__main__":

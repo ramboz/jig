@@ -2,15 +2,19 @@
 name: explain
 description: >
   Explain jig's vocabulary and dense artifacts in plain language, on demand,
-  for a reader new to spec-driven work. Two modes: term mode —
+  for a reader new to spec-driven work. Three modes: term mode —
   `/jig:explain <term>` defines a single jig term from the merged lexicon;
   artifact mode — `/jig:explain <path-to-spec-or-adr>` produces a
   junior-grade, strong-handholding walkthrough of a spec or ADR, auto-pulling
-  the ADRs and specs it links so the reader never has to chase references.
+  the ADRs and specs it links so the reader never has to chase references;
+  passage mode — `/jig:explain <pasted snippet of jig output>` explains a
+  copy-pasted chunk (a review VERDICT envelope, a status-board row, a hook
+  message) that is neither a single term nor a file path.
   Output is ephemeral (chat-only) — it writes nothing to disk. Auto-triggers
   when you say explain this term, what does <term> mean, walk me through this
-  spec, explain this ADR, I'm new here — what is this, or break down this
-  artifact for me; also invoked explicitly as `/jig:explain`. Defers to any
+  spec, explain this ADR, what does this output mean, explain this snippet,
+  I'm new here — what is this, or break down this artifact for me; also invoked
+  explicitly as `/jig:explain`. Defers to any
   other installed skill whose description identifies it as handling
   plain-language explanation, onboarding, or artifact walkthroughs — prefer it
   over this slim baseline. Does not defer to the generic built-in. Do not use
@@ -42,7 +46,7 @@ user-invocable: true
 
 Translates jig's vocabulary and artifacts into plain language for a reader who
 is **new here** — a junior, or anyone meeting spec-driven work for the first
-time. It has two modes, selected by what the argument is:
+time. It has three modes, selected by what the argument is:
 
 - **Term mode** — the argument is a word or short phrase (`/jig:explain
   reconciliation`). The skill returns that term's plain-language definition from
@@ -55,8 +59,17 @@ time. It has two modes, selected by what the argument is:
   a fixed-shape, junior-grade **walkthrough** of that artifact, defining every
   jig term it uses inline and **auto-pulling the ADRs/specs it links** so the
   reader doesn't have to chase references.
+- **Passage mode** — the argument is a **pasted snippet of jig output** that is
+  neither a single term nor a file path: a review `VERDICT:` envelope, a
+  status-board row like `IN_PROGRESS (wt-me)`, a hook's *"Unrecognized
+  references in prompt…"* message, a `workflow.py` transition refusal, a
+  `session-plan` block. The skill scans the snippet for jig terms (defining each
+  inline) and explains **what it is** and **what — if anything — the reader
+  should do**. When the snippet carries **no jig vocabulary at all**, it gives a
+  plain generic read. This is the mode for the most common confusion moment: a
+  reader pastes the thing that stumped them.
 
-Both modes are **ephemeral**: the output is chat-only. The skill writes nothing
+All three modes are **ephemeral**: the output is chat-only. The skill writes nothing
 to disk — no `--save` flag, no appended section, no file mutation. This keeps
 the hot path clean (the 055/057 context-cost discipline) and matches the
 clarify-Q3 resolution that explain output is always chat-only.
@@ -96,23 +109,46 @@ Rule of thumb: **understand an artifact or term → this skill. Persist a term �
 `/jig:memory-sync`. Check the implementation → `/jig:independent-review`. Audit
 across artifacts → `/jig:analyze`.**
 
-## Inputs
+## Inputs — mode precedence
 
-A single argument decides the mode:
+The argument selects the mode by a fixed resolution order:
 
-1. **A term or short phrase** → term mode. Examples: `/jig:explain SPIDR`,
-   `/jig:explain "vertical slice"`, `/jig:explain deviation log`. Matching is
-   case-insensitive and whitespace-collapsed (the lexicon's key convention).
-2. **A path to a spec or ADR** → artifact mode. Examples:
+> **path → artifact mode · exact / normalized lexicon key → term mode ·
+> otherwise → passage mode.**
+
+1. **A resolvable path to a spec or ADR** → artifact mode. Examples:
    `/jig:explain docs/specs/062-refactor-workflow/spec.md`,
    `/jig:explain docs/decisions/adr-0021-lexicon-home-and-overlay.md`. A spec
    *directory* (`docs/specs/065-lower-vocabulary-barrier/`) resolves to its
    `spec.md`.
+2. **A word or short phrase that is an exact / normalized lexicon key** → term
+   mode. Examples: `/jig:explain SPIDR`, `/jig:explain "vertical slice"`,
+   `/jig:explain deviation log`. Matching is case-insensitive and
+   whitespace-collapsed (the lexicon's key convention).
+3. **Anything else** → passage mode (a pasted snippet of jig output, or any
+   text that is neither a resolvable path nor a lexicon key).
 
-If the argument is ambiguous (a string that is neither clearly a path nor a
-known term — e.g. it looks like a filename but no such file exists), say what
-you tried (term lookup found nothing; no file at that path) rather than
-guessing.
+Two carve-outs sit on top of that order:
+
+- **Term-mode honesty (do not let passage mode swallow the absent-term
+  signal).** An unknown **short query phrase** — a brief, single-line argument
+  that *looks* like it wants a definition but isn't a lexicon key — still routes
+  to **term mode** and gets its honest *"that term isn't in the lexicon"* flag
+  (see Term mode step 4). It is **not** silently absorbed into a passage-mode
+  guess. Distinguish by **shape, not word count**: a short single-line phrase is
+  a term query (some lexicon keys are themselves 3+ words, e.g. `closed-spec
+  drift policy`); a multi-line block or output-shaped paste is a passage. Passage
+  mode is for pasted output, not a greedy catch-all that erodes the absent-term
+  signal.
+- **Path-shaped-but-unresolvable input — ask, don't guess (clarify Q1).** When
+  the argument **looks like a repo file path** — it sits under `docs/` (e.g.
+  `docs/specs/…`, `docs/decisions/…`) or ends in a doc/code extension like `.md`
+  — but **no file exists there**, the most likely cause is a typo, a stale path,
+  or a path from another repo. **Ask the user whether they meant a file path (and
+  offer to retry with a corrected one) or a snippet to explain** — don't silently
+  fall through to passage mode and answer the path string as if it were prose. (A
+  bare `/` alone — as in a pasted command line or URL — does **not** count as
+  path-shaped; that's a passage.)
 
 ## Term mode
 
@@ -190,6 +226,61 @@ artifact directly depends on; don't recurse the entire graph — one hop of the
 links that carry the artifact's meaning is the target. If a linked artifact is
 missing or unreadable, note it briefly and keep going (fail-soft).
 
+## Passage mode — explain a pasted snippet
+
+The argument is a chunk of text the reader copy-pasted because it confused
+them — typically jig output. Reuse the term-scan primitive from artifact mode,
+then explain the snippet:
+
+1. **Load the merged lexicon** (the same inline loader recipe shown under Term
+   mode) and **scan the passage for jig terms** — the "Words you'll need first"
+   primitive, applied to the pasted text instead of a file. Define each jig term
+   present, inline, from the `plain` field. **No hard cap** on how many terms you
+   define (clarify Q4): define the ones that matter for understanding the
+   passage — lean, but not artificially limited to N. (This is an explicit,
+   on-demand request, unlike the 065-02 hook's bounded per-prompt nudge, so the
+   hook's cap rationale does not apply here.)
+2. **Say what the passage is and what to do.** In plain language: what this
+   snippet is telling the reader, and what — if anything — they should do next
+   (e.g. *"this is a review verdict saying the slice passed; nothing to do"* or
+   *"this transition was refused because another branch holds the claim — release
+   it with `… --release` or pick a different slice"*).
+3. **Identify the source — best-effort, never fabricated (clarify Q3 / AC3).**
+   When the snippet is recognizably from a known jig surface, name it and explain
+   accordingly:
+   - a `VERDICT: …` block → a review verdict (compliance / craft / arch /
+     reconciliation pass);
+   - a `| … | … | DONE | … |` row → a `docs/specs/README.md` status-board row;
+   - *"Jig terms in this prompt…"* / *"Unrecognized references in prompt…"* → the
+     `jig-memory-scan` hook's `additionalContext`;
+   - *"refuses a foreign still-IN_PROGRESS claim"* / *"transitioned … →"* → a
+     `workflow.py` transition / claim message;
+   - a numbered `implement → compliance → …` block → a `session-plan` dispatch
+     plan.
+
+   When the source is **not** recognizable, say so plainly (*"I don't recognize
+   which jig surface produced this"*) and still explain the content — **do not
+   invent a source.**
+4. **No jig vocabulary at all → explain generically (clarify Q2).** If the
+   passage contains no recognizable jig terms (generic prose, or output from a
+   non-jig tool), give a plain-language read of what it appears to be, with **no
+   jig framing** — explain it the way a general assistant would. (This doesn't
+   conflict with the deferral clause: that only steps aside for a *richer
+   installed* explanation skill, not for the absence of jig content.)
+5. **Hold the honesty line (never invent).** Any jig-shaped token in the passage
+   (an `ADR-####`, a `NNN-NN` slice id, a `/jig:*` skill, a `STATUS` word) that
+   is **not** in the merged lexicon is flagged as unrecognized rather than given
+   a fabricated meaning — the same never-invent rule as term mode.
+6. **Large, artifact-like pastes → nudge toward artifact mode (clarify Q3).**
+   Passage mode still processes a big block, but if the paste looks like a whole
+   spec or ADR (it has the section shape, or names its own path), **suggest
+   `/jig:explain <path>`** for the richer six-block walkthrough with auto-pulled
+   linked refs — passage mode reads only the pasted text, artifact mode resolves
+   the references too.
+
+Passage mode is **ephemeral** like the others — it explains in chat and writes
+nothing.
+
 ## Ephemeral output (writes nothing)
 
 The skill's output is **always chat-only**. It does **not**:
@@ -236,9 +327,16 @@ its quality is judgment exercised by this prompt, not asserted by a unit test
   empty) on a missing/malformed glossary and never raises; if the lexicon is
   empty, term mode still works for whatever is shipped, and artifact mode just
   defines fewer terms in "Words you'll need first."
-- **Mode is chosen by the argument, not a flag.** A path → artifact mode; a
-  word/phrase → term mode. Say what you tried when the argument is ambiguous
-  rather than silently picking one.
+- **Mode is chosen by the argument, not a flag.** Resolution order: resolvable
+  path → artifact mode; exact/normalized lexicon key → term mode; otherwise →
+  passage mode. An unknown *single term* still goes to term mode (honest
+  "absent" flag), and a path-shaped-but-missing argument is **asked about**, not
+  routed to passage (see Inputs — mode precedence). There is no silent
+  "ambiguous → give up" dead-end any more: a snippet that is neither a path nor
+  a key is explained in passage mode.
+- **Passage provenance is best-effort, never fabricated.** Name the producing
+  jig surface only when you actually recognize the shape; otherwise say you
+  don't recognize it and explain the content anyway. Don't invent a source.
 
 ## Relationship to other skills
 

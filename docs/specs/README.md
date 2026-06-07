@@ -203,7 +203,7 @@
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-02 — Hook surfaces lexicon definitions | **DONE** |  |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-03 — `/jig:explain` skill (term + artifact modes) | **DONE** | `/jig:explain` = term + artifact modes, ephemeral (chat-only, no `--save`), judgment-only/no-`.py` (lookups via 065-01 loader), defers to richer installed plain-language/onboarding/walkthrough skill. |
 | [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-04 — Self-defining generation convention | DRAFT |  |
-| [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-05 — `/jig:explain` passage mode (explain a pasted snippet) | DRAFT |  |
+| [065-lower-vocabulary-barrier](065-lower-vocabulary-barrier/spec.md) | 065-05 — `/jig:explain` passage mode (explain a pasted snippet) | **DONE** | `/jig:explain` now has **three** modes — term + artifact + passage (snippet). Precedence: resolvable path→artifact / lexicon key→term / else→passage. Carve-outs: unknown short query→term (honest absent flag, not swallowed); path-shaped-but-unresolvable→ask the user (Q1). No-jig-vocab passage→explain generically (Q2); large artifact-like paste→nudge to artifact mode (Q3); no hard term cap (Q4). Best-effort/never-fabricated provenance. Ephemeral, judgment-only/no-`.py`. |
 
 ## Deferred slices
 

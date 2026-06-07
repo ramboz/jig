@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [065-01, 065-03]
-last_verified:
+last_verified: 2026-06-07
 arch_review: true  # changes the public skill's input contract — adds a third
 #                    mode and an explicit mode-precedence rule (a design-shaped
 #                    concern: the precedence must not erode term mode's honest
@@ -102,21 +102,23 @@ skill prompt, not a unit test — the same accepted shape as term + artifact mod
 and every judgment-only jig skill. Recorded in the spec's coverage summary._
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage: the passage-mode section is present; the mode
+- [x] All ACs pass; full test suite green (no regressions). (2363 tests, exit 0.)
+- [x] Implementer test coverage: the passage-mode section is present; the mode
       precedence + term-honesty carve-out + path-disambiguation carve-out (Q1) are
       documented; the no-jig-vocabulary → explain-generically behavior (Q2) is
       documented; best-effort/no-fabricate provenance is stated; never-invent
       extends to passage mode; no `explain.py`; ephemeral contract intact; term +
       artifact sections still present.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Arch (arch-review) pass run (slice declares `arch_review: true` — the mode
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Craft (pr-review) pass run; blockers addressed.
+- [x] Arch (arch-review) pass run (slice declares `arch_review: true` — the mode
       precedence is the load-bearing design call); blockers addressed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred. (No
+      decisions deferred; two accepted heuristic trade-offs named in the deviation
+      log, not refinement-todo items.)
 
 **Anti-horizontal-phasing check:** After this slice, a junior can paste a
 confusing chunk of jig output — a `VERDICT:` envelope, a status-board row, a hook
@@ -125,19 +127,66 @@ means and what to do: a complete, usable capability, not internal-only state.
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated; Notes column for the `/jig:explain`
+- [x] `docs/specs/README.md` regenerated; Notes column for the `/jig:explain`
       rows records: now **three** modes — term + artifact + passage (snippet),
       precedence path→artifact / key→term / else→passage, ephemeral, judgment-only.
-- [ ] `CLAUDE.md` hygiene per spec 025-01: update the `/jig:explain` Skills-table
+- [x] `CLAUDE.md` hygiene per spec 025-01: update the `/jig:explain` Skills-table
       row to name the third (passage) mode + the precedence rule. Leave spec 065's
       Active-specs entry until the closing slice (compress only when all
-      non-deferred 065 slices are DONE).
+      non-deferred 065 slices are DONE). _(065-04 still DRAFT — Active-specs entry
+      left for its close-out.)_
 
 ### Deviation log (after reconciliation)
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- **Deliverables.** Extended `skills/explain/SKILL.md` (no new skill, no new
+  registration surface — 065-03 already registered `/jig:explain`): added the
+  third **Passage mode** section, rewrote **Inputs** into an explicit
+  mode-precedence rule with the two carve-outs, added the passage-mode bullet to
+  "What this skill does", refreshed the frontmatter description ("three modes" +
+  two new trigger phrases), and updated the Gotchas. Extended
+  `skills/explain/test_explain_skill_surface.py` from 27 → 39 surface tests
+  (`DescriptionTests` passage assertions + a new `PassageModeTests` class). All
+  four clarify resolutions (Q1 path-ask, Q2 generic-on-no-jig-vocab, Q3
+  large-paste nudge, Q4 no-hard-cap) are reflected.
+
+- **Built to spec; no scope deviations.** The six ACs map 1:1 to the documented
+  surface; the implementation review (compliance) confirmed each.
+
+- **Reconciliation fixes folded back from the review passes (all three returned
+  `pass`):**
+  1. **Arch — term-honesty carve-out un-bounded from word count.** The draft
+     bounded the "still route to term mode" carve-out to "a one- or two-word
+     argument," but real lexicon keys are 3+ words (`closed-spec drift policy`,
+     `detect and drive`) — an unknown long phrase would have lost the honest
+     absent-term flag. Reworded to distinguish **by shape, not word count**: a
+     short single-line phrase is a term query; a multi-line / output-shaped paste
+     is a passage.
+  2. **Arch — path heuristic tightened.** The draft treated a bare `/` as
+     path-shaped, which would over-trigger the "did you mean a file?" prompt on
+     pasted command lines / URLs. Narrowed to "looks like a **repo** file path"
+     (under `docs/`, or a doc/code extension), with an explicit note that a bare
+     `/` alone is a passage.
+  3. **Craft — `test_term_honesty_carveout` strengthened.** Replaced a
+     trivially-true `"not" in body` conjunct with a pin on the distinctive
+     negation phrase `silently absorbed into a passage-mode guess` (chosen to
+     dodge the `**not**` bold markers `_normalize` leaves in place).
+  4. **Craft — test-module docstring** updated to cover 065-05 (was scoped to
+     065-03 only).
+  5. **Compliance — `test_no_silent_dead_end` strengthened.** Added a positive
+     assertion (the "no silent … dead-end" replacement is documented) alongside
+     the existing negative (the original dead-end phrasing — which *did* exist in
+     065-03's SKILL.md and was removed here — is gone). The compliance reviewer
+     read the now-edited file and mis-took the negative as vacuous; the positive
+     assertion removes the ambiguity.
+
+- **Accepted trade-offs (named per the arch pass; no code change needed,
+  consistent with the judgment-skill / best-effort framing).** (a) The
+  term-vs-passage boundary is shape-heuristic, not exhaustive; (b) the path
+  heuristic can still mildly over-trigger the disambiguation question on an
+  ambiguous string — asking is the safe default. Both are within the spec's
+  accepted "best-effort comprehension floor" stance.
 
 ## Clarifications
 
