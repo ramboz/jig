@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.11.0](https://github.com/ramboz/jig/compare/v1.10.0...v1.11.0) (2026-06-07)
+
+
+### Features
+
+* **code-health:** distinct code-health reviewer pass, gated (060-05) ([7c9468d](https://github.com/ramboz/jig/commit/7c9468d8ace210dad6b49b8ebd475e30306523f3))
+* **code-health:** dogfood a CI Ruff floor onto jig (060-02) ([091d9f7](https://github.com/ramboz/jig/commit/091d9f717ab71913f987ff926f5ed56ab8f5fc7b))
+* **code-health:** duplication dimension — native-first + npx jscpd fallback (060-04) ([de13966](https://github.com/ramboz/jig/commit/de1396672bd4a692837eb50b1d7282bff695daff))
+* **code-health:** jig:code-health skill + health.py — Python lint detect-and-drive (060-01) ([5a5bf45](https://github.com/ramboz/jig/commit/5a5bf451b93b9d5a6e9d8c411ac96496282bc91d))
+* **code-health:** table-driven multi-ecosystem health.py — Node + advisory complexity (060-03) ([e3162c9](https://github.com/ramboz/jig/commit/e3162c9266d351037d901e8919d478d2e2e0997b))
+* solo→team re-detection — memory-sync nudge + stale audit (spec 050) ([10fecbc](https://github.com/ramboz/jig/commit/10fecbc99ac27d113ac61a079b48d4d2046573f2))
+
+
+### Bug Fixes
+
+* **scaffold:** ship verifier modules in release zip so completion self-check runs ([3cde55a](https://github.com/ramboz/jig/commit/3cde55a7b48337b398e71fa671791490ecf9aec8))
+
+
+### Documentation
+
+* **060:** draft code-health-capability — ADR-0017 + 6 slices ([59f8acc](https://github.com/ramboz/jig/commit/59f8accaa0949074ae8ec813b19e80b05bd877d2))
+* **architecture:** correct hook count to 9 and refresh runtime wiring ([9ad139b](https://github.com/ramboz/jig/commit/9ad139bcdf753f4818ef455cafc2c5469e0ee635))
+* **decisions:** accept adr-0017 scaffolded code-health ([58b3cbc](https://github.com/ramboz/jig/commit/58b3cbcef72acc306eac19951c0672f864844804))
+* **decisions:** regen adr index — adr-0017 accepted ([ee7ec30](https://github.com/ramboz/jig/commit/ee7ec309bf6539258ec2e2552730608135ab1109))
+* **decisions:** reserve adr-0020-spec-frame-hardening ([d140d40](https://github.com/ramboz/jig/commit/d140d40c4e3084b6dc5c96445d772fbcdf13eb7f))
+* **decisions:** reserve adr-0021-lexicon-home-and-overlay ([e5d415a](https://github.com/ramboz/jig/commit/e5d415a58b03ad84aa44178aabecc205847bc48b))
+* draft ADR-0020 + spec 064 spec-frame-hardening ([d2b6184](https://github.com/ramboz/jig/commit/d2b61842628ac93ee807f42684fc5c98f5923ec8))
+* draft refactor/migration workflow — ADR-0019 + spec 062 ([6824cd1](https://github.com/ramboz/jig/commit/6824cd1d1d4007f3bac230012422c6414ea62511))
+* draft spec 065 (lower vocabulary barrier) + ADR-0021 ([02238e3](https://github.com/ramboz/jig/commit/02238e30a9f0ee729fd60cfe737a27cbabc272e3))
+* **prompts:** reframe scaffold + spec-loop as consecutive stages ([9e8fbb5](https://github.com/ramboz/jig/commit/9e8fbb5a61e4491b5e53ea327e7e303d917dfe5e))
+* **specs:** draft 063-scaffold-precondition-gate ([df16582](https://github.com/ramboz/jig/commit/df16582b70581e556312000e6b68e845353648f8))
+* **specs:** reserve 064-spec-frame-hardening ([4c4cc15](https://github.com/ramboz/jig/commit/4c4cc15ed729aa6f940118b8cdf0acd3403d48a7))
+* **specs:** reserve 065-lower-vocabulary-barrier ([2f393a6](https://github.com/ramboz/jig/commit/2f393a684825dc26484c48829a7296cc6c5ec4c1))
+
 ## [1.10.0](https://github.com/ramboz/jig/compare/v1.9.0...v1.10.0) (2026-06-04)
 
 
