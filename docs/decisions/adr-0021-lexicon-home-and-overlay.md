@@ -1,13 +1,13 @@
 ---
 dependencies: []
-last_verified: 2026-06-06
+last_verified: 2026-06-07
 ---
 
 # ADR-0021: Canonical lexicon home and project-glossary overlay
 
 ## Status
 
-Proposed (2026-06-06)
+Accepted (2026-06-07)
 
 ## Context
 
