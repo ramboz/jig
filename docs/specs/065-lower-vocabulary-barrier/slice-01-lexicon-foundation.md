@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: []
-last_verified:
+last_verified: 2026-06-07
 arch_review: true  # establishes the lexicon schema + overlay-merge contract that
 #                    three downstream consumers (hook, skill, generation) depend
 #                    on — a shared-module / public-data-shape decision.
@@ -17,9 +17,9 @@ Implements [ADR-0021](../../decisions/adr-0021-lexicon-home-and-overlay.md).
 **DoR:**
 - ✅ Lexicon format decided (structured JSON) and overlay rule decided
   (project glossary wins) — clarify Q1/Q2.
-- ⬜ [ADR-0021](../../decisions/adr-0021-lexicon-home-and-overlay.md) accepted
-  (currently Proposed) — it fixes the lexicon home + overlay-precedence contract
-  this slice implements.
+- ✅ [ADR-0021](../../decisions/adr-0021-lexicon-home-and-overlay.md) accepted
+  (2026-06-07) — it fixes the lexicon home + overlay-precedence contract this
+  slice implements.
 - ✅ `skills/_common/` exists as the home for shared stdlib-only helpers
   (`parsing.py`, `atomic_io.py`, …) and is copied by scaffold / `copy-machinery`.
 - ✅ `docs/memory/glossary.md` exists as the seed + the per-project overlay source.
@@ -58,17 +58,17 @@ Implements [ADR-0021](../../decisions/adr-0021-lexicon-home-and-overlay.md).
    new copy path.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture
+- [x] All ACs pass; full test suite green (no regressions). 21 tests; suite exit 0.
+- [x] Implementer test coverage exercises each AC with at least one fixture
       (override-wins, new-project-term, shipped-only, missing-glossary,
       malformed-glossary, schema-shape).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Arch (arch-review) pass run (slice declares `arch_review: true`); blockers addressed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Craft (pr-review) pass run; blockers addressed.
+- [x] Arch (arch-review) pass run (slice declares `arch_review: true`); blockers addressed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred. (None deferred beyond ADR-0021's recorded Option-B fallback.)
 
 **Anti-horizontal-phasing check:** After this slice, calling
 `lexicon.load(project_dir)` returns a usable, project-aware definition map — an
@@ -87,4 +87,57 @@ independently testable and queryable).
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+1. **What shipped.** Three files under `skills/_common/`: `lexicon.json` (17 seed
+   terms, each `short` + `plain`, several with `example` / `see_also`),
+   `lexicon.py` (stdlib-only loader: `load_shipped()` + `load(project_dir)`), and
+   `test_lexicon.py` (21 tests across the 5 AC classes). Implements ADR-0021
+   Option A. All ACs met; full suite green (exit 0); `uvx ruff` clean;
+   `spec_lint.py` + `validate_manifests.py` clean.
+
+2. **Design choices within spec latitude.** Term keys are lowercased +
+   whitespace-collapsed (`"spidr"`, `"vertical slice"`); the glossary↔lexicon
+   match is case-insensitive via the same `_term_key()`. Shipped JSON is resolved
+   relative to `__file__` (works under `sys.path` import, file-path import, the
+   `python3 -c` hook, and a scaffolded copy). The H2 parser is `^##(?!#)\s+…`
+   (H3+ contribute no override). Overlay entries store the single glossary
+   paragraph into **both** `short` and `plain` (a prose glossary carries one
+   definition, not the shipped two-tier split) — consistent with ADR-0021's
+   "first paragraph → definition" heuristic. AC5 ("travels as machinery") is
+   exercised by driving the real `scaffold._copy_skill_dir`, asserting
+   `lexicon.json` + `lexicon.py` land in the copy while `test_lexicon.py` is
+   excluded — no new copy path needed (`_common/` is copied wholesale).
+
+3. **Review findings folded in (reconciliation).** Three PASS verdicts
+   (compliance / craft / arch) recorded under `reviews/`. Two nits fixed here:
+   - **Arch (key-normalization, the substantive one).** jig's own glossary
+     headings `## Tier 0 / Tier 1 / Tier 2` and `## Scaffolded install / scaffold
+     mode` normalize to keys that did **not** match the shipped `"tier 0/1/2"` /
+     `"scaffolded install"`, so jig's glossary would *add a parallel key* instead
+     of overriding. Fixed by renaming the two compound shipped keys (and their
+     three `see_also` back-references) to match jig's canonical glossary
+     headings, restoring the dogfood invariant *"jig's committed glossary
+     idempotently overlays its lexicon."* Guarded by a new regression test
+     (`test_compound_heading_overrides_not_duplicates`).
+   - **Craft (`load_shipped()` encoding).** `read_text()` lacked `errors=`, so a
+     non-UTF-8 shipped file would raise `UnicodeDecodeError` (not caught by the
+     `OSError/ValueError` clause) — widening the "never raises" contract. Fixed
+     with `errors="replace"`, matching `load()`.
+
+4. **Documented, deliberately not changed.** (a) The overlay is a **whole-entry
+   replace** — on an overridden term the shipped `example` / `see_also` do not
+   survive; consumers must treat those fields as optional on overridden terms.
+   (b) Closed-ATX headings (`## Term ##`) capture a trailing `##` into the key —
+   cosmetic only; `glossary.md.template` prescribes open-ATX, so no AC is
+   affected. (c) `load_shipped()` returns `{}` if `lexicon.json` is
+   missing/corrupt rather than raising — an intentional degraded mode per the
+   never-raise contract.
+
+5. **Note for downstream consumers (065-02 / 065-03).** Key matching is
+   **spelling-exact** after lowercase + whitespace-collapse — a project
+   "override" lands only when its `## Heading` normalizes to the exact shipped
+   key. The Option-B structured-overlay fallback for the heuristic's fragility is
+   already recorded in ADR-0021's Open questions; no new `refinement-todo` entry
+   needed.
+
+6. **Plan adherence.** No scope deviations from the slice or ADR-0021. Nothing
+   deferred beyond the fallback already captured in ADR-0021.
