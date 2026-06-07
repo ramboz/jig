@@ -1885,6 +1885,13 @@ def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
         "skill:\n"
         "---\n"
         "\n"
+        # Spec 065-04 — self-defining vocabulary reminder, emitted into the
+        # spec stub so an author meets it where they write (reaches scaffolded
+        # projects, where the template file is not distributed).
+        "<!-- jig self-defining vocabulary (soft, forward-only): expand each "
+        "acronym on first use and link the term to docs/memory/glossary.md (or "
+        "jig's lexicon). See docs/workflow.md \"Self-defining vocabulary\". -->\n"
+        "\n"
         f"# Spec {num_str}: {title}\n"
         "\n"
         f"> Reserved on {today_iso} via `workflow.py new`. "
@@ -1920,9 +1927,16 @@ def _render_stub_slice(num_str: str, slice_num: str = "01",
         body = template_path.read_text()
     except OSError:
         # Inline fallback — keeps the helper functional even when the
-        # template file isn't on disk (e.g. minimal scaffold smoke tests).
+        # template file isn't on disk (e.g. minimal scaffold smoke tests, or a
+        # scaffolded project where the template is not distributed). Carries the
+        # spec 065-04 self-defining-vocabulary reminder so the author meets it
+        # here too, in parity with the on-disk slice-template.md.
         body = (
             "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n"
+            "\n<!-- jig self-defining vocabulary (soft, forward-only): expand "
+            "each acronym on first use and link the term to "
+            "docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "
+            "\"Self-defining vocabulary\". -->\n"
             "\n## Slice {{NUMBER}} — {{NAME}}\n\n"
             "**Goal:** _TBD_\n"
         )

@@ -5826,5 +5826,45 @@ class AgentReturnEnvelopeDocTests(unittest.TestCase):
         self.assertIn("not full logs", text.replace("-", " "))
 
 
+class SelfDefiningReminderInRenderersTests(unittest.TestCase):
+    """Spec 065-04 AC2(b): the self-defining-vocabulary reminder is emitted by
+    the DISTRIBUTED workflow.py renderers (`_render_stub_spec` and the inline
+    fallback inside `_render_stub_slice`), so an author in a scaffolded project
+    — where `templates/docs/specs/slice-template.md` is NOT copied and the
+    inline fallback is used — still meets the reminder where they write."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(REPO_ROOT / "skills" / "spec-workflow"))
+        import importlib
+        cls.workflow = importlib.import_module("workflow")
+
+    def test_spec_stub_carries_reminder(self):
+        text = self.workflow._render_stub_spec("099", "demo", "2026-06-07")
+        self.assertIn("self-defining vocabulary", text.lower())
+        self.assertIn("glossary.md", text)
+
+    def test_slice_inline_fallback_carries_reminder(self):
+        # Exercise the REAL OSError fallback branch (the path taken in a
+        # scaffolded project where templates/ is not distributed): patch
+        # Path.read_text to raise so _render_stub_slice falls back to its
+        # inline body, then assert that inline body carries the reminder.
+        from unittest import mock
+        with mock.patch.object(
+            self.workflow.Path, "read_text", side_effect=OSError("no template")
+        ):
+            text = self.workflow._render_stub_slice("099")
+        self.assertIn("self-defining vocabulary", text.lower())
+        self.assertIn("glossary.md", text)
+        # Sanity: substitutions still applied in the fallback path.
+        self.assertIn("099-01", text)
+
+    def test_on_disk_slice_template_renders_reminder(self):
+        # When the template IS reachable (jig tree), the rendered slice also
+        # carries the reminder (parity with the inline fallback).
+        text = self.workflow._render_stub_slice("099")
+        self.assertIn("self-defining vocabulary", text.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

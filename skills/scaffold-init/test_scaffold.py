@@ -2581,5 +2581,45 @@ class VersionProvenanceTests(unittest.TestCase):
         )
 
 
+class SelfDefiningConventionBlockTests(unittest.TestCase):
+    """Spec 065-04 AC3 — a fresh scaffold's docs/workflow.md carries the
+    marker-delimited self-defining-vocabulary convention block, written by the
+    shared `_ensure_self_defining_convention_block` helper (mirroring the
+    .gitignore secret floor)."""
+
+    BLOCK_BEGIN = "<!-- >>> jig self-defining-vocabulary >>> -->"
+    BLOCK_END = "<!-- <<< jig self-defining-vocabulary <<< -->"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-065-04-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_fresh_scaffold_has_convention_block(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        wf = self.target / "docs" / "workflow.md"
+        self.assertTrue(wf.is_file(), "docs/workflow.md must be scaffolded")
+        text = wf.read_text()
+        self.assertIn(self.BLOCK_BEGIN, text)
+        self.assertIn(self.BLOCK_END, text)
+        self.assertIn("Self-defining vocabulary", text)
+
+    def test_block_is_single_and_idempotent_on_reforce(self):
+        run_scaffold(self.target)
+        wf = self.target / "docs" / "workflow.md"
+        first = wf.read_text()
+        # exactly one block, no duplication
+        self.assertEqual(first.count(self.BLOCK_BEGIN), 1)
+        # a --force re-scaffold keeps it single (replace-in-place, no dupes)
+        result = run_scaffold_with_args(self.target, "--force")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertEqual(wf.read_text().count(self.BLOCK_BEGIN), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

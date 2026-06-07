@@ -371,6 +371,22 @@ in context and was re-read on every one of those turns.
   returned summary. The bulk reading happens once, in a disposable context;
   the orchestrator pays for the summary, not the corpus.
 
+<!-- >>> jig self-defining-vocabulary >>> -->
+## Self-defining vocabulary (authoring convention)
+
+**Soft, forward-only, not a gate.** When you author a spec or slice,
+expand each acronym on first use and link the term to the project
+glossary (`docs/memory/glossary.md`) or jig's lexicon, in plain words —
+so the *next* artifact is readable without a decoder ring. This stops
+the dense-jargon pile from growing; it does **not** retrofit existing
+specs, and **nothing lints or blocks a transition** on an undefined
+acronym (the barrier is lowered by convention, not enforced by a gate).
+
+On demand, `/jig:explain <term>` defines a single term and
+`/jig:explain <spec-or-adr-path>` walks a whole artifact through plain
+language — the back-catalogue escape hatch this convention complements.
+<!-- <<< jig self-defining-vocabulary <<< -->
+
 ## Hook strictness profiles
 
 > **Deferred** — see `docs/refinement-todo.md`. Plan: `minimal | standard | strict`, controlled via `SCAFFOLD_HOOK_PROFILE` env var. Not yet implemented.

@@ -2314,5 +2314,44 @@ class TierUpgradeTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
 
 
+class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
+    """Spec 065-04 AC3 — `migrate copy-machinery` refreshes the self-defining-
+    vocabulary convention block into an EXISTING project's docs/workflow.md
+    (the only path that reaches an already-scaffolded project — copy-machinery
+    does not otherwise touch docs/). Idempotent + non-clobbering, mirroring the
+    .gitignore secret-floor merge."""
+
+    BLOCK_BEGIN = "<!-- >>> jig self-defining-vocabulary >>> -->"
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-065-04-mig-"))
+        _seed_spec_driven_project(self.tmpdir)
+        # Give the seeded workflow.md some pre-existing custom content so we can
+        # assert copy-machinery preserves it (append, not clobber).
+        self.wf = self.tmpdir / "docs" / "workflow.md"
+        self.wf.write_text("# Workflow\n\nOur own house rules.\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_copy_machinery_appends_convention_block(self):
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        text = self.wf.read_text()
+        self.assertIn(self.BLOCK_BEGIN, text, "convention block not appended")
+        self.assertIn("Self-defining vocabulary", text)
+        # Pre-existing content preserved verbatim.
+        self.assertIn("Our own house rules.", text)
+
+    def test_copy_machinery_block_injection_is_idempotent(self):
+        run_migrate("copy-machinery", str(self.tmpdir))
+        once = self.wf.read_text()
+        r = run_migrate("copy-machinery", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        twice = self.wf.read_text()
+        self.assertEqual(once, twice, "second copy-machinery run must be a no-op")
+        self.assertEqual(twice.count(self.BLOCK_BEGIN), 1, "no duplicate block")
+
+
 if __name__ == "__main__":
     unittest.main()
