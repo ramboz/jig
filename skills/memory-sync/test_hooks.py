@@ -105,7 +105,16 @@ class MemoryScanHookTests(unittest.TestCase):
             check=True,
         )
         _, out = self._scan_output("tell me more about Quartzite")
-        self.assertIsNone(out, "term in glossary should be treated as known")
+        # As of slice 065-02 the lexicon overlay (AC #4) surfaces a glossary
+        # term's plain-language definition — so the hook is no longer silent
+        # here. Assert the def DID surface (guards against a vacuous pass if a
+        # future regression silenced both paths) AND that the unknown-reference
+        # surfacing still stays quiet for a known glossary term.
+        self.assertIsNotNone(out, "glossary term should now surface a lexicon def")
+        self.assertIn("a metamorphic rock", out["additionalContext"],
+                      "the glossary overlay def should be surfaced")
+        self.assertNotIn("Unrecognized references", out["additionalContext"],
+                         "glossary term must not be flagged as unknown")
 
     def test_flags_unknown_acronym(self):
         _, out = self._scan_output("can we add support for ZQRX in the parser?")
@@ -147,6 +156,130 @@ class MemoryScanHookTests(unittest.TestCase):
         self.assertIn("continue", out)
         self.assertIn("additionalContext", out)
         self.assertIsInstance(out["additionalContext"], str)
+
+
+class MemoryScanLexiconTests(unittest.TestCase):
+    """Slice 065-02: jig-memory-scan.sh surfaces plain-language definitions
+    of jig lexicon terms appearing in the prompt, via _common/lexicon.py."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-lex-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold_project(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _scan(self, prompt: str, env_overrides=None) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
+        if env_overrides:
+            env.update(env_overrides)
+        return subprocess.run(
+            ["bash", str(SCAN_HOOK)],
+            input=json.dumps({
+                "session_id": "test", "hook_event_name": "UserPromptSubmit",
+                "prompt": prompt, "cwd": str(self.target),
+            }),
+            capture_output=True, text=True, env=env,
+        )
+
+    def _scan_output(self, prompt: str, env_overrides=None):
+        result = self._scan(prompt, env_overrides)
+        self.assertEqual(result.returncode, 0, f"hook should never block; stderr: {result.stderr}")
+        if not result.stdout.strip():
+            return result.returncode, None
+        return result.returncode, json.loads(result.stdout)
+
+    def test_known_term_definition_surfaced(self):
+        """AC #1: a lexicon term in the prompt yields its short def."""
+        _, out = self._scan_output("how does reconciliation work in this project?")
+        self.assertIsNotNone(out, "lexicon term should surface a definition")
+        ctx = out["additionalContext"]
+        self.assertIn("reconciliation", ctx.lower())
+        # The short def text should appear.
+        self.assertIn("deviation log", ctx.lower())
+
+    def test_multiword_term_surfaced(self):
+        """AC #1: a multi-word key (vertical slice) matches as a phrase."""
+        _, out = self._scan_output("explain what a vertical slice is")
+        self.assertIsNotNone(out)
+        self.assertIn("vertical slice", out["additionalContext"].lower())
+
+    def test_acronym_term_case_insensitive(self):
+        """AC #1: SPIDR matches case-insensitively."""
+        _, out = self._scan_output("can you summarize the spidr techniques?")
+        self.assertIsNotNone(out)
+        self.assertIn("spidr", out["additionalContext"].lower())
+
+    def test_no_substring_match(self):
+        """AC #1: keys match on word/phrase boundaries, not substrings."""
+        # 'adr' must not match inside 'quadrant'; 'ac' must not match 'space'.
+        _, out = self._scan_output("draw a quadrant diagram in the space provided")
+        # No lexicon defs should be injected for substring-only hits.
+        if out is not None:
+            ctx = out["additionalContext"]
+            self.assertNotIn("Architecture Decision Record", ctx)
+            self.assertNotIn("Acceptance Criteria", ctx)
+
+    def test_composes_with_unknown_surfacing(self):
+        """AC #2: lexicon def and unknown-ref message coexist."""
+        _, out = self._scan_output(
+            "how does reconciliation interact with the ZQRX subsystem?")
+        self.assertIsNotNone(out)
+        ctx = out["additionalContext"]
+        self.assertIn("ZQRX", ctx, "unknown reference must still surface")
+        self.assertIn("reconciliation", ctx.lower(), "lexicon def must still surface")
+        self.assertTrue(out.get("continue"))
+
+    def test_unknown_behavior_unchanged_no_lexicon_match(self):
+        """AC #2: a prompt with only an unknown ref still surfaces it."""
+        _, out = self._scan_output("can we add support for ZQRX in the parser?")
+        self.assertIsNotNone(out)
+        self.assertIn("ZQRX", out["additionalContext"])
+
+    def test_capped_at_five(self):
+        """AC #3: at most 5 lexicon defs are emitted, in order of appearance."""
+        # Seven distinct lexicon terms in the prompt.
+        prompt = ("the reconciliation step, the deviation log, the dod, "
+                  "the dor, the hot cache, the dumb zone, and the spidr method")
+        _, out = self._scan_output(prompt)
+        self.assertIsNotNone(out)
+        ctx = out["additionalContext"]
+        # Count def lines: each def line begins with the term in our format.
+        def_lines = [ln for ln in ctx.splitlines() if ln.strip().startswith("- ")]
+        self.assertEqual(len(def_lines), 5,
+                         f"expected exactly 5 lexicon defs, got {len(def_lines)}:\n{ctx}")
+        # Order-of-appearance: reconciliation comes before spidr; spidr is 7th
+        # so it must be dropped.
+        self.assertIn("reconciliation", ctx.lower())
+        self.assertNotIn("story-splitting", ctx.lower(),
+                         "spidr (7th) should be dropped by the 5-cap")
+
+    def test_fail_open_broken_lexicon(self):
+        """AC #5: a broken lexicon import leaves exit 0 + unknowns intact."""
+        # Force the lexicon import to fail by pointing the resolver at a path
+        # whose lexicon module is broken. We simulate via a sabotaged copy.
+        broken = Path(self.tmpdir) / "broken_common"
+        broken.mkdir()
+        (broken / "lexicon.py").write_text("raise RuntimeError('boom')\n")
+        result = self._scan(
+            "how does reconciliation interact with the ZQRX subsystem?",
+            env_overrides={"JIG_LEXICON_COMMON_DIR": str(broken)},
+        )
+        self.assertEqual(result.returncode, 0, "broken lexicon must fail open (exit 0)")
+        # The prompt proceeds; unknown surfacing still works.
+        if result.stdout.strip():
+            out = json.loads(result.stdout)
+            self.assertIn("ZQRX", out["additionalContext"],
+                          "unknown surfacing must survive a broken lexicon")
+
+    def test_silent_when_no_terms(self):
+        """No lexicon term and no unknown ref → no output."""
+        _, out = self._scan_output("how do i write a simple loop")
+        self.assertIsNone(out)
 
 
 class TaskCaptureHookTests(unittest.TestCase):
