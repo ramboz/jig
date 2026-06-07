@@ -1496,8 +1496,25 @@ def main(argv: list[str]) -> int:
     # second definition of "a complete scaffold". A failed check makes the
     # exit status unmistakable (AC #4): we surface a non-zero exit so the
     # wizard never reports a silent partial scaffold as success.
+    #
+    # The verifier modules (verify_install + install_contract +
+    # scaffold_contract) live under `scripts/`, which is dev-only EXCEPT for
+    # these three — `build_release_zip.py::_INCLUDE_SCRIPT_FILES` re-includes
+    # them so they ship in the plugin install (they were absent before, which
+    # crashed this self-check on every packaged install). The import is still
+    # guarded: if a future packaging regression drops them, the *scaffold has
+    # already succeeded and printed* above — degrade to a one-line notice
+    # rather than crashing on the closing report. A genuine verification
+    # FAIL (verdict != 0) is NOT swallowed; only a missing verifier is.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-    import verify_install  # noqa: E402
+    try:
+        import verify_install  # noqa: E402
+    except ImportError:
+        print(
+            "note: scaffold-completion self-check skipped "
+            "(verifier not bundled in this install)"
+        )
+        return 0
 
     verdict = verify_install.run_completion_summary(
         target,

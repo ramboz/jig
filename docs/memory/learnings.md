@@ -377,3 +377,15 @@ Reaching for Claude Code's generic plan mode (a ~/.claude/plans/*.md file) for s
 
 ## Scaffold SKILL.md: 046-01 rewrites helper bash paths, NOT markdown doc-links
 When validating a scaffolded target (spec 047-02 AC #4), do NOT flag copied SKILL.md '../../docs/...' markdown links as broken. Spec 046-01's _rewrite_skill_md_paths rewrites only ${CLAUDE_PLUGIN_ROOT}/skills/<name>/ bash *helper* paths to local .claude paths — it deliberately leaves markdown doc-links pointing at source-plugin docs. A scaffolded SKILL.md lives at .claude/skills/jig-*/, so '../../docs/...' resolves to .claude/docs/... (absent); scanning those would false-fail every scaffold. So: scope the doc-link smoke check to the target's OWN docs (docs/**, CLAUDE.md) and check SKILL.md bodies only for broken helper *commands* (the load-bearing rewritten paths). The dangling SKILL.md doc-link is a known 046 non-rewrite (inbox follow-up).
+
+## Runtime code in dev-only `scripts/` is invisible to the release zip
+
+`build_release_zip.py`'s `_INCLUDE_ROOTS` ships only `.claude-plugin/agents/skills/hooks/templates` — top-level `scripts/` is dev-only and excluded. But scaffold-init's closing completion self-check (slice 048-06) imports `verify_install` (→ `install_contract` + `scaffold_contract`) from `<plugin-root>/scripts/` at install time. Result: every *packaged* plugin install (desktop-app zip / marketplace zip-release) scaffolded fine, printed `scaffolded …`, then crashed with `ModuleNotFoundError` on the closing report. A git-clone install (`~/.claude/plugins/marketplaces/jig/`, full tree) hid it — `scripts/` is present there, so it only bit zip installs.
+
+**Why no test caught it:** every test imported the verifier with the repo's `scripts/` on `sys.path`, and even the release-zip `smoke_test` imported `verify_install` from the *source repo*, not the *extracted* tree — so none simulated the packaged, `scripts`-less layout.
+
+**Fix (no spec — bug-shaped):** `_INCLUDE_SCRIPT_FILES` allowlists exactly the three runtime modules into the zip under their original `scripts/` path (dev tooling stays out); the import is guarded (degrade to a one-line note, never crash, but a genuine FAIL still surfaces); and `PackagedVerifierImportTests` extracts the built zip and imports the verifier from the *extracted* tree in a clean subprocess.
+
+**Generalizable lesson:** if a shipped component (skill/hook) imports a module at runtime, that module must live under a distributed root (`skills/`, `hooks/`, `agents/`, `templates/`) — or be explicitly allowlisted into the release. `scripts/` is dev-only. And package-footprint tests must exercise the *extracted artifact*, not the source repo, or they validate the wrong tree.
+
+Discovered: 2026-06-07, user-reported scaffold crash on a v1.10.0 zip install.

@@ -45,14 +45,36 @@ _INCLUDE_FILES: tuple[str, ...] = (
     "LICENSE",
 )
 
+# Individual files under `scripts/` that are RUNTIME (not dev-only) and so
+# must ship in the release zip. `scripts/` is otherwise excluded by virtue of
+# not being in `_INCLUDE_ROOTS` (it holds dev/CI tooling — build_release_zip,
+# run_tests, spec_lint, usage, validate_manifests — which has no place in a
+# user's plugin install). But scaffold-init's closing completion self-check
+# (slice 048-06) imports `verify_install` from `<plugin-root>/scripts/` at
+# runtime, and that module pulls in `install_contract` + `scaffold_contract`.
+# Without these three the self-check crashes on every plugin install (the
+# release zip never carried `scripts/`). They are pure-stdlib, check the
+# *target's* `.claude/` tree (nothing is copied into the user's repo — they
+# run from the plugin install dir), and ship under their original `scripts/`
+# path so the importing path in scaffold.py needs no change. This is an
+# allowlist on purpose: the dev-only scripts stay out, and the contract is
+# pinned by test_build_release_zip.py::test_runtime_scripts_only.
+_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
+    "scripts/verify_install.py",
+    "scripts/install_contract.py",
+    "scripts/scaffold_contract.py",
+)
+
 # Directories anywhere in the tree to skip outright. Limited to truly
 # defensive exclusions (caches, VCS artifacts) — top-level dev-only dirs
 # (`scripts/`, `docs/`, `.github/`, `.git/`, `.jig/`, `.claude/`) are
 # already excluded by virtue of not being listed in `_INCLUDE_ROOTS`,
-# so we don't need to name them here. Naming them would also exclude
-# nested same-named dirs that ARE runtime — e.g. `hooks/scripts/`
-# (the actual hook scripts) and `templates/docs/` (scaffold-init's
-# project template).
+# so we don't need to name them here (the three runtime modules under
+# `scripts/` that scaffold-init needs are re-included file-by-file via
+# `_INCLUDE_SCRIPT_FILES`; the rest of `scripts/` stays out). Naming them
+# here would also exclude nested same-named dirs that ARE runtime — e.g.
+# `hooks/scripts/` (the actual hook scripts) and `templates/docs/`
+# (scaffold-init's project template).
 _EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({
     "__pycache__",
     ".pytest_cache",
@@ -114,6 +136,14 @@ def _iter_files(source_root: Path) -> Iterable[Path]:
         file_path = source_root / file_name
         if file_path.is_file():
             yield Path(file_name)
+
+    # Runtime modules under scripts/ that scaffold-init imports at install
+    # time (see _INCLUDE_SCRIPT_FILES). Yielded individually so the rest of
+    # dev-only scripts/ stays out of the release.
+    for rel_name in _INCLUDE_SCRIPT_FILES:
+        file_path = source_root / rel_name
+        if file_path.is_file():
+            yield Path(rel_name)
 
 
 def _warn_missing_optional_files(source_root: Path, out) -> None:

@@ -157,9 +157,24 @@ class ExclusionTests(unittest.TestCase):
             f"zip must not contain test_*.py files; found {test_files!r}",
         )
 
-    def test_no_scripts_dir(self):
-        scripts_entries = [n for n in self.names if n.startswith("scripts/")]
-        self.assertEqual(scripts_entries, [])
+    def test_runtime_scripts_only(self):
+        """`scripts/` is dev-only EXCEPT for the three runtime modules
+        scaffold-init imports at install time (verify_install +
+        install_contract + scaffold_contract). The zip must carry exactly
+        those three under `scripts/` and none of the dev/CI tooling
+        (build_release_zip, run_tests, spec_lint, usage, validate_manifests).
+        Pins the `build_release_zip._INCLUDE_SCRIPT_FILES` allowlist so a
+        future dev script can't silently leak into the plugin install, and so
+        the runtime trio can't silently drop back out (the regression that
+        crashed scaffold-init's completion self-check on every packaged
+        install — it shipped no `scripts/` at all)."""
+        scripts_entries = {n for n in self.names if n.startswith("scripts/")}
+        expected = set(build_release_zip._INCLUDE_SCRIPT_FILES)
+        self.assertEqual(
+            scripts_entries, expected,
+            "zip's scripts/ entries must equal exactly the runtime trio; "
+            f"got {sorted(scripts_entries)!r}, expected {sorted(expected)!r}",
+        )
 
     def test_no_docs_dir(self):
         docs_entries = [n for n in self.names if n.startswith("docs/")]
@@ -386,6 +401,57 @@ class SmokeTestTests(unittest.TestCase):
         finally:
             sys.stdout = original
         self.assertEqual(code, 0, msg=captured.getvalue())
+
+
+class PackagedVerifierImportTests(unittest.TestCase):
+    """The scaffold-completion self-check (slice 048-06) imports
+    `verify_install` (which pulls in `install_contract` +
+    `scaffold_contract`) from `<plugin-root>/scripts/` at install time.
+    Before the `_INCLUDE_SCRIPT_FILES` fix the release zip carried no
+    `scripts/` at all, so that import crashed on every packaged plugin
+    install. The existing `smoke_test` imports the verifier from the SOURCE
+    repo, not the extracted tree, so it never exercised this path.
+
+    This test extracts the built zip and imports the verifier trio from the
+    EXTRACTED tree in a clean subprocess (no repo `scripts/` on `sys.path`),
+    reproducing exactly what scaffold.py does on a real plugin install."""
+
+    def test_verifier_imports_from_extracted_tree(self):
+        import subprocess
+
+        zip_path = _build_once()
+        self.addCleanup(zip_path.unlink, missing_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix="jig-pkg-verify-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp)
+
+        for rel in build_release_zip._INCLUDE_SCRIPT_FILES:
+            self.assertTrue(
+                (tmp / rel).is_file(),
+                f"runtime module {rel} missing from extracted plugin tree",
+            )
+
+        # Import in a subprocess with ONLY the extracted scripts/ dir on the
+        # path — mirrors scaffold.py inserting `<plugin-root>/scripts/` and
+        # importing verify_install on a packaged install. `-S`/clean env keep
+        # the repo's own modules off the path.
+        scripts_dir = tmp / "scripts"
+        snippet = (
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "import verify_install; "
+            "assert callable(verify_install.run_completion_summary)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", snippet, str(scripts_dir)],
+            cwd=str(tmp),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"verifier failed to import from packaged tree:\n{result.stderr}",
+        )
 
 
 class MissingLicenseWarningTests(unittest.TestCase):
