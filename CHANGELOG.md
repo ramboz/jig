@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.13.0](https://github.com/ramboz/jig/compare/v1.12.0...v1.13.0) (2026-06-08)
+
+
+### Features
+
+* **064-04:** derived frame_review trigger + close the session-plan dispatch gap ([c60f677](https://github.com/ramboz/jig/commit/c60f677db0057e644e91d226f452b0b3c98d1e24))
+* **064-05:** ADR-side frame-critique accept-gate — closes spec 064 ([e37b60b](https://github.com/ramboz/jig/commit/e37b60bd938652c38fff38c4994b02c346fa28ec))
+* **064:** spec/ADR frame-hardening — spike GO, grounding, frame-critique pass (spec-side) ([bcc4cc2](https://github.com/ramboz/jig/commit/bcc4cc2b36dc0732a66f4b0485895f4566feb2a3))
+
+
+### Documentation
+
+* add milestone roadmap (1.x on main, 2.0 multi-host on v2) ([#48](https://github.com/ramboz/jig/issues/48)) ([61d26b3](https://github.com/ramboz/jig/commit/61d26b347a4ac63dbc20687377b98a38c876c9b4))
+* add token-cost reduction principle to vision + README ([541e8ae](https://github.com/ramboz/jig/commit/541e8aecf109255af557ae98dd4e44ffec28eff1))
+* **memory:** consolidate spec-064 session learnings ([3a7d4f9](https://github.com/ramboz/jig/commit/3a7d4f99f0202be196e11f7348f52ab31e9c829a))
+* **refinement-todo:** park learning-loop idea as evidence-gated ([a583072](https://github.com/ramboz/jig/commit/a583072e95ddb73e393b0f3cad4a2161a5758dc6))
+
 ## [1.12.0](https://github.com/ramboz/jig/compare/v1.11.0...v1.12.0) (2026-06-07)
 
 
