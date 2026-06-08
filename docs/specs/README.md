@@ -207,7 +207,7 @@
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-04 - host-explicit release zips | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-05 - symmetric install + scaffold docs | **DONE** |  |
 | [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-06 - Claude install verification | **DONE** |  |
-| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-07 - Codex install verification | DRAFT |  |
+| [061-dual-host-plugin-artifacts](061-dual-host-plugin-artifacts/spec.md) | 061-07 - Codex install verification | **DONE** | Codex live smoke on 0.133.0 passed with isolated `CODEX_HOME` (9 pass / 0 unavailable / 0 fail); `jig-codex-v1.12.0.zip` extract-then-add archive smoke passed; docs + manifest state hooks must be trusted via `/hooks` before they run; focused 94 tests + full 2561-test suite green. |
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-01 — `refactor.py` core: new / triage / numbering / record / board / claim | DRAFT |  |
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-02 — pluggable-oracle teeth: baseline-before-edit + equivalence gates | DRAFT |  |
 | [062-refactor-workflow](062-refactor-workflow/spec.md) | 062-03 — review integration: refactor-review + craft + conditional security + conditional arch | DRAFT |  |
