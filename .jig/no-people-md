@@ -1,0 +1,3 @@
+# jig: suppress people.md team-context nudge (spec 050).
+# Presence of this file is the signal — delete it to re-enable the
+# memory-sync team-recheck nudge.
