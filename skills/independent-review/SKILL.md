@@ -136,6 +136,40 @@ when the slice changes module boundaries, public contracts, or
 architecture-shaped concerns. The slice template ships the field
 commented out as a discoverability nudge.
 
+### Frame-critique (adversarial pass — slice 064-03 / ADR-0020, on-demand)
+
+Unlike every other pass, frame-critique runs **PRE-implementation** — it
+gates the `DRAFT → READY_FOR_REVIEW` transition of a spec/slice (or, once
+[064-05](../../docs/specs/064-spec-frame-hardening/slice-05-adr-accept-gate.md)
+lands, an ADR at `adr.py accept`), before any code exists. Its job is
+**adversarial**, not conformance: a fresh reviewer hunts the single
+load-bearing assumption most likely to be **wrong** and argues why, so a
+bad *premise* is caught at authoring time (the cheapest point) rather than
+executed with discipline. It runs only when the artifact declares a truthy
+`frame_review` flag.
+
+```bash
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  frame-critique \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  "<deliverable-path>" ...)
+SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type)
+```
+
+Record the verdict as the `frame-critique` pass (below); the
+`READY_FOR_REVIEW` gate requires it iff `frame_review` is truthy
+(default-off artifacts transition freely). **Model policy (ADR-0020):**
+run frame-critique **equal-or-stronger** than the artifact's author —
+**never downgrade it for cost** (the one pass whose value is adversarial
+depth). 064-03 ships rung-1 (fresh-context subagent) independence;
+cross-model (rung-3) is deferred (`docs/refinement-todo.md`).
+
+> The flag is set by hand today. Slice 064-04 derives it mechanically from
+> the grounding output and surfaces the pass on the dispatch plan so it
+> isn't a dead loop.
+
 ### Reconciliation review
 
 After the deviation log subsection has been added under the slice in
@@ -159,7 +193,8 @@ verifies the deviation log matches reality.
 A review pass is durable evidence, not ephemeral chat. After a pass
 returns a verdict, record it as a file beside the slice it grades, at
 `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md` (ADR-0014 §1). The
-schema (`pass ∈ {compliance, craft, arch, reconciliation}`,
+schema (`pass ∈ {compliance, craft, arch, code-health, frame-critique,
+reconciliation}`,
 `verdict ∈ {pass, fail, needs-changes}`, plus `reviewer`, `reviewed_at`,
 `prompt_source`) lives in `skills/_common/review_evidence.py` so the
 slice 045-03 transition gate validates the same shape.

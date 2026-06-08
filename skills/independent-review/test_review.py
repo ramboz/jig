@@ -1262,6 +1262,186 @@ class ArchReviewSubagentTypeTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "general-purpose")
 
 
+class FrameCritiquePromptTests(unittest.TestCase):
+    """Slice 064-03 / ADR-0020 AC1: `review.py frame-critique <spec> <slice>
+    <deliverable>...` builds a self-contained ADVERSARIAL prompt that:
+      - directs the reviewer to find the single highest-risk load-bearing
+        assumption and argue why it could be wrong
+      - is explicitly NOT a conformance check / AC re-evaluation
+      - wraps output in the canonical VERDICT envelope
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-frame-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "064-03 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self, *extra_args: str):
+        result = run_review(
+            "frame-critique", str(self.spec), "064-03",
+            "skills/foo/foo.py", "skills/foo/test_foo.py", *extra_args,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result.stdout
+
+    def test_includes_standard_preamble(self):
+        prompt = self._prompt()
+        self.assertIn("You are an independent reviewer", prompt)
+        self.assertIn("seeing this work for the first time", prompt)
+
+    def test_lists_deliverable_paths_verbatim(self):
+        prompt = self._prompt()
+        self.assertIn("skills/foo/foo.py", prompt)
+        self.assertIn("skills/foo/test_foo.py", prompt)
+
+    # AC1 — adversarial: hunt the load-bearing assumption most likely wrong.
+    def test_directs_reviewer_to_attack_load_bearing_assumption(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)load-bearing assumption",
+            "frame-critique prompt must direct the reviewer at the "
+            "load-bearing assumption (064-03 AC1)",
+        )
+        self.assertRegex(
+            prompt, r"(?i)(most likely.*wrong|likely to be wrong|could be wrong)",
+            "frame-critique prompt must ask WHY the assumption could be wrong",
+        )
+
+    # AC1 — explicitly NOT a conformance check.
+    def test_explicitly_not_a_conformance_check(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)not\s+a\s+conformance\s+check",
+            "frame-critique prompt must say it is NOT a conformance check "
+            "(064-03 AC1)",
+        )
+        # And it must NOT re-evaluate ACs (that's the compliance pass).
+        self.assertNotRegex(
+            prompt, r"(?i)for\s+each\s+acceptance\s+criterion",
+            "frame-critique must not re-evaluate ACs — it hunts the frame",
+        )
+
+    # AC1 — distinct from arch-review/pr-review (adversarial framing).
+    def test_distinct_adversarial_framing_vs_conformance(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)adversarial",
+            "frame-critique must frame itself as the adversarial pass",
+        )
+        # It runs pre-implementation: assert it says so.
+        self.assertRegex(
+            prompt, r"(?i)(no implementation yet|before implementation|"
+                    r"pre-implementation)",
+            "frame-critique must state it runs before any implementation",
+        )
+
+    def test_includes_verdict_envelope(self):
+        prompt = self._prompt()
+        for marker in ("VERDICT", "REASONING", "SPECIFIC ISSUES"):
+            self.assertIn(marker, prompt,
+                          f"frame-critique missing envelope marker: {marker}")
+        self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    def test_includes_read_only_directive(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)do not\s+(?:write|modify|edit).+files?|read-only",
+        )
+
+    def test_includes_spec_path(self):
+        self.assertIn(str(self.spec), self._prompt())
+
+    def test_includes_slice_label(self):
+        self.assertIn("064-03", self._prompt())
+
+    # No richer-skill detection wired (no standard external equivalent).
+    def test_no_richer_skill_detection(self):
+        prompt = self._prompt()
+        self.assertNotRegex(
+            prompt, r"(?i)richer.*frame-critique.*installed",
+            "frame-critique must not detect a richer skill (none exists)",
+        )
+
+    def test_frame_critique_requires_at_least_one_deliverable(self):
+        result = run_review("frame-critique", str(self.spec), "064-03")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_frame_critique_refuses_missing_spec(self):
+        missing = Path(self.tmpdir) / "nope.md"
+        result = run_review("frame-critique", str(missing), "064-03", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    def test_frame_critique_refuses_unknown_slice(self):
+        result = run_review("frame-critique", str(self.spec), "999-99", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+
+class FrameCritiqueEvidenceRoundTripTests(unittest.TestCase):
+    """Slice 064-03 AC4: a frame-critique verdict round-trips through
+    record-review → file at reviews/slice-NN-frame-critique.md →
+    check-reviews --stage READY_FOR_REVIEW clears."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-frame-rt-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, spec, slice_frag, verdict):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review",
+             str(spec), slice_frag, "--pass", "frame-critique",
+             "--verdict", verdict, "--reviewer", "jig:reviewer",
+             "--prompt-source", "review.py frame-critique x"],
+            input="## VERDICT\n" + verdict + "\n", capture_output=True,
+            text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def _check(self, spec, slice_frag, stage="READY_FOR_REVIEW"):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "check-reviews",
+             str(spec), slice_frag, "--stage", stage],
+            capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def test_record_lands_at_frame_critique_path(self):
+        spec = _make_spec_with_slice(self.tmp / "064-a", "03", "foo",
+                                     frame_review=True)
+        r = self._record(spec, "0XX-03", "pass")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        f = spec.parent / "reviews" / "slice-03-frame-critique.md"
+        self.assertTrue(f.is_file(), f"missing evidence file: {f}")
+
+    def test_check_clears_after_passing_frame_verdict(self):
+        spec = _make_spec_with_slice(self.tmp / "064-b", "03", "foo",
+                                     frame_review=True)
+        self._record(spec, "0XX-03", "pass")
+        r = self._check(spec, "0XX-03")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def test_check_blocks_when_frame_missing(self):
+        spec = _make_spec_with_slice(self.tmp / "064-c", "03", "foo",
+                                     frame_review=True)
+        r = self._check(spec, "0XX-03")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("frame-critique", r.stderr)
+
+    def test_check_clears_when_unflagged(self):
+        # No frame_review flag → no required passes → clears freely.
+        spec = _make_spec_with_slice(self.tmp / "064-d", "03", "foo",
+                                     frame_review=False)
+        r = self._check(spec, "0XX-03")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+
 class CodeHealthPromptTests(unittest.TestCase):
     """Slice 060-05 AC1/AC2: `review.py code-health <spec> <slice>
     <deliverable>... [--summary-file PATH]` builds a self-contained prompt
@@ -1898,7 +2078,8 @@ class WorkflowMdMentionsSnapshotTests(unittest.TestCase):
 
 
 def _make_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
-                          *, arch_review: bool = False) -> Path:
+                          *, arch_review: bool = False,
+                          frame_review: bool = False) -> Path:
     """Create `spec_dir/spec.md` + a sibling `slice-NN-<slug>.md` file in
     a temp dir (NOT the real docs/specs/ tree). Returns the spec.md path."""
     spec_dir.mkdir(parents=True, exist_ok=True)
@@ -1909,6 +2090,8 @@ def _make_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
     fm = "---\nstatus: IN_PROGRESS\ndependencies: []\n"
     if arch_review:
         fm += "arch_review: true\n"
+    if frame_review:
+        fm += "frame_review: true\n"
     fm += "---\n"
     (spec_dir / f"slice-{slice_no}-{slug}.md").write_text(
         f"{fm}\n## Slice 0XX-{slice_no} — {slug}\n\n**Goal:** placeholder.\n"

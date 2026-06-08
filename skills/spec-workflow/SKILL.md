@@ -147,7 +147,27 @@ SKILL.md hand-off is the documented gate.
    DoR / AC / DoD / Close-out sections. Set `status: DRAFT` in the
    frontmatter. Legacy slices that use prose `**STATUS: DRAFT**` markers
    still work (lazy migration); no need to rewrite them.
-6. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
+6. **Ground your factual claims (spec 064-02 / ADR-0020 §1–§2).** Any
+   load-bearing factual claim about a *runnable* surface — library/API
+   capability, version/perf behavior, behavior of existing code — must be
+   backed by an **executed probe** (run the command, read the source /
+   `node_modules`) or a citation. Everything you cannot verify goes in the
+   spec stub's risk-gated `## Assumptions` section, marked explicitly — never
+   asserted as fact. This **makes mandatory + derived** the existing informal
+   "Current state (verified …)" discipline that the 064-01 retro found jig
+   already half-practices by hand: it was grounding-by-probe all along, just
+   reliant on author diligence. The `## Assumptions` you surface here has
+   downstream value — slice 064-04 derives the `frame_review` trigger
+   mechanically from it, so honest framing now is what decides later whether
+   the adversarial frame-critique pass fires. The section is risk-gated: write
+   "None" / omit when there are no unverified load-bearing assumptions; don't
+   pad with boilerplate. (For a worked example of marked assumptions plus
+   probe-grounded claims, see [ADR-0020](../../docs/decisions/adr-0020-spec-frame-hardening.md)
+   `## Assumptions` A1–A4 + `## Kill criteria`, and the
+   [spec 064-01 retro](../../docs/specs/064-spec-frame-hardening/retro.md),
+   which probe-verified its three most load-bearing claims before recording
+   them.)
+7. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
 
 ### Picking up a slice
 

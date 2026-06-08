@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 ---
 
@@ -60,10 +60,14 @@ draft objectives. **Not in this spec's scope.**
   assumptions) baked into the spec/ADR templates + author-step contract. This
   step *produces* the trigger signal.
 - **Interface** — 064-03: the `frame_review`-gated adversarial frame-critique
-  reviewer pass (`review.py frame-critique` + verdict artifact + gate wiring),
-  mirroring the ADR-0014 gated-pass pattern.
+  reviewer pass (`review.py frame-critique` + verdict artifact) + the **spec-side**
+  READY_FOR_REVIEW gate, mirroring the ADR-0014 gated-pass pattern.
 - **Rules** — 064-04: the **derived trigger** — author/`clarify` step sets
   `frame_review` mechanically from the grounding output per the ADR-0020 rule.
+- **Interface** — 064-05: the **ADR-side** gate at `adr.py accept` + an
+  ADR-appropriate evidence-artifact home (split from 064-03 on 2026-06-07 because
+  ADRs aren't slices and need a separate evidence subsystem; OQ2/OQ3 enforcement
+  for ADRs lands here).
 
 Each post-spike slice is independently landable and observable; none is pure
 intermediate state.
@@ -74,8 +78,9 @@ intermediate state.
 |---|---|---|---|
 | [🔬 064-01](slice-01-retro-frame-error-census.md) | retro-frame-error-census | DRAFT | **Gating spike.** Grounds ADR-0020 §A1 (kill criterion). Go/no-go for 02–04. |
 | [064-02](slice-02-grounding-requirement.md) | grounding-requirement | DRAFT | Probe-first claims + mark-assumptions in templates + author contract. Produces the trigger signal for 04. |
-| [064-03](slice-03-frame-critique-pass.md) | frame-critique-pass | DRAFT | `frame_review`-gated review pass at READY_FOR_REVIEW. Sibling of arch/code-health (ADR-0014). |
+| [064-03](slice-03-frame-critique-pass.md) | frame-critique-pass | DRAFT | `frame_review`-gated review pass + **spec-side** READY_FOR_REVIEW gate. Sibling of arch/code-health (ADR-0014). ADR-side gate split to 064-05. |
 | [064-04](slice-04-derived-trigger.md) | derived-trigger | DRAFT | Author/`clarify` sets `frame_review` mechanically from grounding output. |
+| [064-05](slice-05-adr-accept-gate.md) | adr-accept-gate | DRAFT | **ADR-side** gate at `adr.py accept` + ADR evidence-artifact home (ADRs aren't slices). Split from 064-03; enforces OQ2/OQ3 for ADRs. |
 
 ## Open questions
 

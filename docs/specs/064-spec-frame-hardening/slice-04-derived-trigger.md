@@ -1,19 +1,33 @@
 ---
 status: DRAFT
-dependencies: [adr-0020, slice-03]
+dependencies: [adr-0020, 064-03]
 last_verified:
 ---
 
-## Slice 04 — derived-trigger
+## Slice 064-04 — derived-trigger
 
 **Goal:** Make `frame_review` set itself — the spec-author / `clarify` step
 derives the flag mechanically from the grounding output (064-02), so the
 adversarial pass auto-triggers exactly when there is an unverified frame to
 attack and stays silent otherwise, with no per-author judgment call.
 
+> **Carried-forward from 064-03 arch review (2026-06-07):** this slice must also
+> **close the spawner/gate dispatch gap**. 064-03 added the READY_FOR_REVIEW
+> gate, but `session-plan` (`workflow.py session-plan`, 057-01) does **not** read
+> `frame_review` or emit a pre-implementation frame-critique phase — so a flagged
+> spec would hit a gate it was never dispatched to satisfy (the dead-loop ADR-0020
+> warns against). When this slice derives the flag, it must also surface the
+> frame-critique pass on the dispatch surface the orchestrator follows
+> (`session-plan` and/or the `clarify`/spec-author guidance) so the pass actually
+> fires. Add an AC + test for it.
+
 **DoR:**
-- ✅ 064-03 DONE (the pass exists to be triggered).
-- ✅ OQ3 resolved (whether ADRs are unconditionally default-on).
+- ⬜ 064-03 DONE (the pass exists to be triggered).
+- ✅ OQ3 resolved (2026-06-07): **ADRs always-on** (`frame_review: true`
+      unconditional — set mechanically for any ADR); **specs** get the derived
+      trigger this slice implements (flag set from the grounding output:
+      ≥1 unverified load-bearing assumption, OR new external dependency / asserted
+      external library/API/version/perf behavior). (ADR-0020 Amendments.)
 
 **Acceptance Criteria:**
 

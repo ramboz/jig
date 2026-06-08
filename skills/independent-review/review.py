@@ -42,6 +42,7 @@ Usage:
     python3 review.py reconciliation <spec.md> <slice-fragment>
     python3 review.py pr-review     <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py arch-review   <spec.md> <slice-fragment> <deliverable-path>...
+    python3 review.py frame-critique <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py code-health   <spec.md> <slice-fragment> <deliverable-path>...
                                     [--summary-file PATH]
     python3 review.py subagent-type
@@ -821,6 +822,118 @@ Tag every SPECIFIC ISSUES entry with one of `[blocker]` / `[nit]` /
 """
 
 
+# -------- frame-critique prompt (slice 064-03 / ADR-0020) --------
+
+
+_FRAME_CRITIQUE_OUTPUT_FORMAT = """\
+## Output (required — do not deviate)
+
+```
+VERDICT: pass | fail | needs-changes
+
+REASONING:
+<2-4 sentences: name the single highest-risk load-bearing assumption and
+ your overall assessment of how exposed the frame is>
+
+SPECIFIC ISSUES:
+- <the load-bearing assumption, stated plainly> — <a concrete, specific
+  argument for why it could be wrong, and what breaks downstream if it is>
+(state ONE primary assumption; add secondary ones only if genuinely
+ load-bearing — do not pad)
+```
+
+Be terse but specific. A `pass` here means the frame survives your
+strongest attack — NOT that it conforms to anything. (No
+reconciliation-notes section: this pass runs pre-implementation, before
+there is any implementation to reconcile.)"""
+
+
+def build_frame_critique_prompt(spec_path: Path, slice_label: str,
+                                deliverables: list) -> str:
+    """Construct the adversarial frame-critique prompt (slice 064-03 / ADR-0020).
+
+    UNLIKE every other review pass, this one gates the **pre-implementation**
+    READY_FOR_REVIEW stage (on the spec/ADR itself), where cost-of-error is
+    lowest — there is no implementation yet to conform to. It runs only when
+    the artifact declares `frame_review: true` (the derived trigger of slice
+    064-04: set when grounding leaves ≥1 unverified load-bearing assumption).
+
+    The reviewer's *only* job is ADVERSARIAL: find the single load-bearing
+    assumption in the spec/ADR most likely to be wrong and argue concretely
+    why — explicitly NOT a conformance check, NOT "does the implementation
+    match the spec." It hunts the FRAME, before any code exists. The
+    independence (rung-1 per ADR-0020 OQ4) comes from the fresh-context
+    subagent forcing a different stance than the author held.
+
+    MODEL POLICY (ADR-0020 Consequences / OQ4): this pass runs
+    **equal-or-stronger** than the artifact's author and must **NEVER be
+    downgraded for cost**. A weaker model can't out-think the frame it's
+    attacking, so the one pass whose value IS adversarial depth is the one
+    pass that must not be cheapened. 064-03 ships rung-1 (fresh-context
+    subagent) independence; cross-model (rung-3) routing is deferred
+    (`docs/refinement-todo.md`) and is intentionally NOT wired here.
+
+    Same read-only `reviewer` subagent + VERDICT envelope as the sibling
+    passes. NO richer-skill detection: there is no established "richer
+    frame-critique reviewer" skill category to defer to (unlike pr-review /
+    arch-review), so the builder is self-contained.
+
+    NOTE: like the other craft/arch passes, this builder does NOT append
+    `_principles_check_block()` — its scope is the single highest-risk
+    assumption, nothing else.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job
+
+You are running the **frame-critique pass** on **{slice_label}**. The
+artifact declared `frame_review: true` — meaning its grounding left at
+least one unverified load-bearing assumption worth an adversarial read.
+
+**There is NO implementation yet. This is NOT a conformance check.** Do
+NOT verify that any code matches the spec. Do NOT check acceptance
+criteria. Do NOT review craft or architecture. Every other pass does that
+work later — yours is the one pass that runs BEFORE implementation, when
+the cost of a wrong frame is lowest.
+
+Your *only* job is adversarial: **find the single load-bearing assumption
+in this spec/ADR that is most likely to be WRONG, and argue concretely why
+it could be wrong** — what evidence is missing, what alternative reading of
+reality the author did not consider, and what breaks downstream if the
+assumption fails. A load-bearing assumption is one the whole approach rests
+on: if it falls, the work is misdirected, not merely imperfect.
+
+Attack the frame, not the wording. You are trying to save the author from
+building the wrong thing — be the strongest skeptic they will face.
+
+## What to read (in this order)
+
+1. The artifact under critique — `{spec_path}`. Read **{slice_label}** and
+   its stated goal, grounding, and assumptions/kill-criteria (if present)
+   closely.
+2. The supporting material:
+{deliverable_lines}
+3. Any linked ADRs / specs / evidence the artifact relies on (read-only) —
+   verify whether the load-bearing claims are actually grounded or merely
+   asserted.
+
+{_PROHIBITIONS}
+## Evaluate (adversarial — hunt the frame, not conformance)
+
+- What is the single assumption this whole approach rests on?
+- Is that assumption GROUNDED (probed, cited, evidenced) or merely asserted?
+- What is the most plausible way reality differs from that assumption?
+- If the assumption is wrong, what downstream work is misdirected — and how
+  expensive is it to discover that AFTER implementation rather than now?
+- Did the author consider, and honestly rule out, the alternative framing?
+
+Concede a `pass` only if the frame survives your strongest attack.
+
+{_FRAME_CRITIQUE_OUTPUT_FORMAT}
+"""
+
+
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     """Construct the standard reconciliation-review prompt.
 
@@ -1067,6 +1180,18 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pa.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
 
+    # Slice 064-03: frame-critique pass — on-demand (gated by
+    # `frame_review: true`), adversarial, runs PRE-implementation at
+    # READY_FOR_REVIEW on the spec/ADR itself. Mirrors `arch-review`'s
+    # signature.
+    pfc = sub.add_parser(
+        "frame-critique",
+        help="construct an adversarial frame-critique prompt (pre-implementation)",
+    )
+    pfc.add_argument("spec", help="path to spec.md (or ADR)")
+    pfc.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pfc.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+
     # Slice 060-05: code-health pass — on-demand (gated by
     # `code_health_review: true`), mirrors `arch-review` plus a summary.
     # `health.py` is run by the spine; its tight summary is fed IN via
@@ -1137,9 +1262,11 @@ def _build_parser() -> argparse.ArgumentParser:
     pchk.add_argument("slice",
                       help="slice name or fragment (case-insensitive substring)")
     pchk.add_argument(
-        "--stage", default="REVIEWED", choices=["REVIEWED", "RECONCILED"],
+        "--stage", default="REVIEWED",
+        choices=["READY_FOR_REVIEW", "REVIEWED", "RECONCILED"],
         help="transition stage whose required passes to validate "
-             "(default: REVIEWED)",
+             "(READY_FOR_REVIEW gates frame-critique iff frame_review; "
+             "default: REVIEWED)",
     )
 
     pt = sub.add_parser(
@@ -1207,6 +1334,8 @@ def main(argv: list) -> int:
             prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "arch-review":
             prompt = build_arch_review_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "frame-critique":
+            prompt = build_frame_critique_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "code-health":
             summary = _read_summary(ns)
             prompt = build_code_health_review_prompt(

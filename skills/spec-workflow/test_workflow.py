@@ -1570,6 +1570,21 @@ class ReserveSpecTests(unittest.TestCase):
         self.assertIn("## Decomposition", text)
         self.assertIn("## Slices", text)
         self.assertIn("slice-01-tbd.md", text)
+        # Spec 064-02: risk-gated grounding/assumptions section, placed
+        # after ## Overview. The act of authoring surfaces the load-bearing
+        # assumptions that slice 064-04 derives its frame_review trigger from.
+        self.assertIn("## Assumptions", text)
+        # Placement: Assumptions sits between Overview and Decomposition.
+        self.assertLess(
+            text.index("## Overview"),
+            text.index("## Assumptions"),
+            "## Assumptions must follow ## Overview",
+        )
+        self.assertLess(
+            text.index("## Assumptions"),
+            text.index("## Decomposition"),
+            "## Assumptions must precede ## Decomposition",
+        )
         # AC #1: commit message
         commit_calls = [c for c in rec.calls
                         if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]
@@ -4881,6 +4896,7 @@ class _GateFixture(unittest.TestCase):
     def write_slice(self, status: str, *, slice_no: str = "01",
                     slug: str = "thing", arch_review: bool = False,
                     code_health_review: bool = False,
+                    frame_review: bool = False,
                     deviation_log: bool = False,
                     dod_lines: list = None,
                     label: str = None) -> None:
@@ -4893,6 +4909,8 @@ class _GateFixture(unittest.TestCase):
             fm.append("arch_review: true")
         if code_health_review:
             fm.append("code_health_review: true")
+        if frame_review:
+            fm.append("frame_review: true")
         fm.append("---")
         body = ["", f"## Slice {label}", "", "**Goal:** placeholder.", ""]
         if dod_lines:
@@ -4949,6 +4967,66 @@ class _GateFixture(unittest.TestCase):
         text = (self.spec_dir / f"slice-{slice_no}-{slug}.md").read_text()
         m = re.search(r"^status:\s*(\w+)", text, re.MULTILINE)
         return m.group(1) if m else "?"
+
+
+class TransitionReadyForReviewFrameGateTests(_GateFixture):
+    """Slice 064-03 / ADR-0020 AC3: READY_FOR_REVIEW is gated on the
+    frame-critique verdict IFF the slice declares `frame_review: true`.
+    Default-off slices transition freely (no regression for existing specs).
+    """
+
+    def test_flagged_slice_blocked_when_frame_missing(self):
+        self.write_slice("DRAFT", frame_review=True)
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_REVIEW", gate=True)
+        self.assertNotEqual(r.returncode, 0,
+                            f"frame_review: true with no verdict must block; "
+                            f"stderr={r.stderr}")
+        # Names the missing artifact + the record command (ADR-0014 AC3).
+        self.assertIn("frame-critique", r.stderr)
+        self.assertIn("record-review", r.stderr)
+        self.assertEqual(self._status_in_slice(), "DRAFT")
+
+    def test_flagged_slice_clears_with_passing_frame_verdict(self):
+        self.write_slice("DRAFT", frame_review=True)
+        self.write_evidence("frame-critique")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_REVIEW", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected READY_FOR_REVIEW to clear; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "READY_FOR_REVIEW")
+
+    def test_unflagged_slice_passes_freely(self):
+        # No frame_review flag → empty required set → no regression for the
+        # many existing specs that transition DRAFT → READY_FOR_REVIEW.
+        self.write_slice("DRAFT")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_REVIEW", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"unflagged slice must pass freely; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "READY_FOR_REVIEW")
+
+    def test_flagged_slice_bypassed_by_disabled_gate(self):
+        # JIG_REVIEW_EVIDENCE_GATE=0 skips the gate (deliberateness signal).
+        self.write_slice("DRAFT", frame_review=True)
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_REVIEW", gate=False)
+        self.assertEqual(r.returncode, 0,
+                         f"bypass must let it through; stderr={r.stderr}")
+        self.assertEqual(self._status_in_slice(), "READY_FOR_REVIEW")
+
+    def test_frame_critique_not_required_at_done(self):
+        # frame-critique is a ONE-TIME pre-implementation gate — NOT
+        # re-validated at DONE (only REVIEWED + RECONCILED sets are).
+        self.write_slice("RECONCILED", frame_review=True, deviation_log=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        self.write_evidence("reconciliation")
+        # No frame-critique verdict recorded — DONE must still clear.
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DONE", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"DONE must not require frame-critique; stderr={r.stderr}")
 
 
 class TransitionReviewedGateTests(_GateFixture):

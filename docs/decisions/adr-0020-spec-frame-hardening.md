@@ -1,13 +1,13 @@
 ---
 dependencies: [docs/decisions/adr-0011-spec-gate-model.md, docs/decisions/adr-0014-review-evidence-model.md, docs/decisions/adr-0002-rule-of-three-before-extraction.md]
-last_verified:
+last_verified: 2026-06-07
 ---
 
 # ADR-0020: Spec/ADR Frame-Hardening: Grounding + Adversarial Frame-Critique
 
 ## Status
 
-Proposed (2026-06-06)
+Accepted (2026-06-07)
 
 ## Context
 
@@ -208,10 +208,18 @@ assumptions section on every artifact.
 > rather than stated as fact.
 
 - **A1 — bad-frame errors recur in jig at a rate that justifies the machinery.**
-  *Unverified.* Evidence is two known instances (ADR-0011, spec 055), not a
-  systematic count; the user reports not noticing this much across ~60 specs.
-  **This is the single highest-risk assumption** and routes to the gating retro
-  (spec 064-01) before implementation proceeds.
+  ~~*Unverified.*~~ **RESOLVED (2026-06-07) — weakly confirmed → GO.** The gating
+  retro (spec 064-01; [census](../specs/064-spec-frame-hardening/retro.md))
+  examined 33 artifacts and found **4 catchable frame errors (~12%)**, 3 caught
+  late and 1 shipped-until-fixed, two of them in hard-to-reverse ADRs. The kill
+  criterion ("no catchable frame errors → shelve") is therefore **not** met. The
+  corpus is cleaner than this assumption feared (corroborating the user's "not
+  noticing this much"), and the retro **inverts the lever priority**:
+  grounding-by-probe is the load-bearing half (4/4 catchable), the
+  frame-critique pass the weaker, kill-criterion-watched bet (2/4 clean). Scope
+  (Option B) is unchanged; only emphasis shifts — 064-02 leads with grounding,
+  064-03 ships its pass default-off/gated as already designed. *(Original
+  unverified framing preserved above the strikethrough for the audit trail.)*
 - **A2 — a same-model adversarial pass catches a non-trivial fraction of frame
   errors despite shared blind spots.** *Unverified.* Plausible via stance-forcing
   + probe contact, but unquantified. The retro should sample whether an
@@ -273,3 +281,42 @@ assumptions section on every artifact.
    only (stance + probes + fresh context + human)? Current draft defers rung 3.
    *(See the separate model-routing follow-up in `docs/inbox.md` for the
    orthogonal "downgrade conformance passes to Sonnet for cost" question.)*
+
+## Amendments
+
+> Per [ADR-0010](adr-0010-amendment-scope-records-vs-live-prose.md): this ADR is
+> a closed (Accepted) record, so post-acceptance decision refinements are
+> recorded here rather than rewriting the prose above. The original Open
+> questions are preserved verbatim.
+
+**2026-06-07 — Open questions OQ1–OQ4 resolved with the human** (gating the
+064-03/04 implementation):
+
+- **OQ1 (retro depth) → stratified sample.** Resolved before the 064-01 spike;
+  the gating retro returned **GO** (see §A1 above + [retro.md](../specs/064-spec-frame-hardening/retro.md)).
+- **OQ2 (placement) → specs @ READY_FOR_REVIEW + ADRs @ `adr.py accept`.** Each
+  artifact's pre-commitment checkpoint (specs have an RFR lifecycle state; ADRs
+  do not — their pre-commitment moment is acceptance). One run per artifact, at
+  the cheapest catch point. The gate is a **soft / bypassable deliberateness
+  signal** (`JIG_REVIEW_EVIDENCE_GATE=0`, ADR-0011), not hard enforcement —
+  consistent with the other review-evidence gates (ADR-0014).
+- **OQ3 (ADR default) → ADRs always-on** (`frame_review: true` unconditionally);
+  specs stay derived from the unverified-assumption signal (064-04). Rationale:
+  ADRs are hard-to-reverse and rare (~20 in jig's life → always-on is cheap in
+  aggregate), and the 064-01 retro's two *clean* frame-critique wins were both
+  ADRs (ADR-0008, ADR-0011). Gating ADRs on a surfaced-assumption signal would
+  miss the exact ADR-0011 failure mode (a confidently-wrong frame that surfaces
+  *no* assumption to trigger on).
+- **OQ4 (generator independence) → ship rung-1, defer rung-3.** 064-03 ships
+  fresh-context-subagent independence (stance + probes + fresh context + human
+  read) and encodes the **equal-or-stronger model policy** (never downgrade the
+  critique for cost). Rung-3 (a genuinely different, non-Claude family) is
+  **deferred** to `docs/refinement-todo.md` with the documented revisit trigger
+  (it is also Option C precondition (b)); rung-2 collapses for an Opus author
+  (the only different Claude versions are weaker, which the policy forbids).
+
+These resolutions narrow 064-03/04 to scope; they do **not** change the core
+decision (Option B), only settle the deferred-to-human knobs. The 064-01 retro's
+emphasis (lead with grounding; frame-critique is the weaker, kill-criterion-
+watched bet) stands — these OQ answers keep frame-critique gated/default-off on
+specs and reserve always-on only for the low-volume, high-stakes ADR class.

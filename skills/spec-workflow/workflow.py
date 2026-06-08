@@ -541,13 +541,22 @@ def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
 # ---------- Slice 045-03: review-evidence transition gate (ADR-0014 §5) ----------
 
 # The states whose transitions are gated on review evidence (ADR-0014 §5).
-# REVIEWED → compliance+craft(+arch); RECONCILED → reconciliation + deviation
-# log; DONE → the full set re-validated (plus the existing dependency check).
-# Every OTHER target — DRAFT / READY_FOR_REVIEW / READY_FOR_IMPLEMENTATION /
-# IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT re-open, and the two review
-# back-edges (REVIEWED→IN_PROGRESS, RECONCILED→IN_PROGRESS) — relaxes or
-# advances status with nothing to gate and is left untouched (AC4).
-_EVIDENCE_GATED_STATES = ("REVIEWED", "RECONCILED", "DONE")
+# READY_FOR_REVIEW → frame-critique (iff `frame_review`); REVIEWED →
+# compliance+craft(+arch); RECONCILED → reconciliation + deviation log;
+# DONE → the REVIEWED + RECONCILED sets re-validated (plus the existing
+# dependency check) — frame-critique is NOT re-validated at DONE (one-time
+# pre-implementation gate). Every OTHER target — DRAFT /
+# READY_FOR_IMPLEMENTATION / IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT
+# re-open, and the two review back-edges (REVIEWED→IN_PROGRESS,
+# RECONCILED→IN_PROGRESS) — relaxes or advances status with nothing to gate
+# and is left untouched (AC4). An unflagged READY_FOR_REVIEW transition is
+# similarly free (empty required set).
+# Slice 064-03 / ADR-0020 added READY_FOR_REVIEW: it gates the
+# pre-implementation frame-critique pass iff the slice declares
+# `frame_review: true` (an unflagged slice yields an empty required set →
+# no gating, so existing specs transition DRAFT → READY_FOR_REVIEW freely).
+# This is the only PRE-implementation evidence gate.
+_EVIDENCE_GATED_STATES = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED", "DONE")
 
 # Falsey tokens that disable the gate via `JIG_REVIEW_EVIDENCE_GATE`. The
 # gate is ON by default; this is the documented bypass for a deliberate
@@ -589,6 +598,16 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
         return
 
     diagnostics: list = []
+    # READY_FOR_REVIEW-stage: the adversarial frame-critique pass, required
+    # iff the slice declares `frame_review: true` (slice 064-03 / ADR-0020).
+    # This is a ONE-TIME pre-implementation gate — deliberately NOT added to
+    # the DONE re-validation below (DONE re-runs REVIEWED + RECONCILED only;
+    # the frame is critiqued once, before code exists, not re-litigated at
+    # close). An unflagged slice yields an empty required set → no gating.
+    if new_status == "READY_FOR_REVIEW":
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "READY_FOR_REVIEW")
+        )
     # REVIEWED-stage evidence is required for REVIEWED and re-validated for
     # DONE (ADR-0014 §5: DONE re-runs REVIEWED + RECONCILED).
     if new_status in ("REVIEWED", "DONE"):
@@ -1900,6 +1919,19 @@ def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
         "## Overview\n"
         "\n"
         "_TBD_\n"
+        "\n"
+        # Spec 064-02 / ADR-0020 §1–§2 — risk-gated grounding/assumptions
+        # section. Makes jig's existing informal "Current state (verified …)"
+        # discipline mandatory + derived (064-01 retro): load-bearing factual
+        # claims about runnable surfaces must be probe-backed or marked here.
+        # Slice 064-04 derives the frame_review trigger from what lands here.
+        "## Assumptions\n"
+        "\n"
+        "_TBD — list load-bearing assumptions about runnable surfaces "
+        "(library/API capability, version/perf behavior, behavior of existing "
+        "code); probe-back (run it / cite source) or mark explicitly here. "
+        "Risk-gated: omit (or write \"None\") when there are no unverified "
+        "load-bearing assumptions — do not pad with boilerplate._\n"
         "\n"
         "## Decomposition\n"
         "\n"

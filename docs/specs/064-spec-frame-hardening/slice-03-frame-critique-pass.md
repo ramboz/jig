@@ -1,11 +1,11 @@
 ---
-status: DRAFT
-dependencies: [adr-0020, slice-02]
-last_verified:
+status: DONE
+dependencies: [adr-0020, 064-02]
+last_verified: 2026-06-08
 arch_review: true  # adds a public review-pass surface + gate wiring (ADR-0014)
 ---
 
-## Slice 03 — frame-critique-pass
+## Slice 064-03 — frame-critique-pass
 
 **Goal:** Add a `frame_review`-gated adversarial frame-critique review pass that,
 at READY_FOR_REVIEW, has a fresh reviewer hunt the single load-bearing
@@ -14,10 +14,26 @@ exactly mirroring the ADR-0014 gated-pass pattern.
 
 **DoR:**
 - ✅ 064-02 DONE (assumptions section exists to critique).
-- ✅ OQ2 (placement: READY_FOR_REVIEW only vs also at `adr.py accept`) and OQ3
-      (ADRs default-on vs gated) resolved with the human.
-- ✅ A4 confirmed by probe: `review.py` / `skills/_common/review_evidence.py`
-      extend to a fifth pass with low net-new surface.
+- ✅ OQ2 resolved (2026-06-07): **specs @ READY_FOR_REVIEW + ADRs @ `adr.py
+      accept`** — each artifact's pre-commitment checkpoint; soft/bypassable
+      deliberateness gate (ADR-0011), not hard enforcement. (ADR-0020 Amendments.)
+- ✅ OQ3 resolved (2026-06-07): **ADRs always-on** (`frame_review: true`
+      unconditional); specs derived from the unverified-assumption signal (064-04).
+- ✅ OQ4 resolved (2026-06-07): **ship rung-1** (fresh-context subagent + the
+      equal-or-stronger model policy, never downgrade for cost); **defer rung-3**
+      (non-Claude cross-model) → `docs/refinement-todo.md` with revisit trigger.
+- ✅ A4 confirmed by probe (2026-06-07): the prompt-builder + `PASSES` +
+      `frame_review` flag-reader mirror the arch (031-02) / code-health (060-05)
+      siblings at low surface (`build_frame_critique_prompt` ≈
+      `build_arch_review_prompt`; add `frame-critique` to
+      `review_evidence.PASSES`; `_frame_review_flag` ≈ `_arch_review_flag`).
+      **Placement nuance (genuinely new wiring):** existing gated passes sit at
+      the REVIEWED stage, but frame-critique gates *pre-implementation* — so
+      `workflow.py transition` must gate **READY_FOR_REVIEW** (a stage it does not
+      currently gate) on frame-critique iff `frame_review`. `required_passes`
+      grows a READY_FOR_REVIEW → (`frame-critique` iff flag) entry. *(The
+      ADR-side `adr.py accept` gate moved to [064-05](slice-05-adr-accept-gate.md)
+      — scope split 2026-06-07.)*
 
 **Acceptance Criteria:**
 
@@ -29,33 +45,41 @@ exactly mirroring the ADR-0014 gated-pass pattern.
    the `arch_review` / `code_health_review` truthy convention; `frame-critique`
    joins the `PASSES` set in `review_evidence.py`, and `record-review` /
    `check-reviews` handle it.
-3. **The pass is gated** — it is required by the relevant transition (per OQ2
-   placement) **iff** `frame_review` is truthy; default-off artifacts are
-   unaffected (existing specs/ADRs see no change). Provable by transitioning a
-   flagged vs unflagged artifact.
+3. **The pass is gated on the spec side** — a `READY_FOR_REVIEW` transition
+   requires the `frame-critique` verdict **iff** the slice/spec declares a truthy
+   `frame_review`; default-off artifacts are unaffected (existing specs see no
+   change). Provable by transitioning a flagged vs unflagged spec. *(Scope split,
+   2026-06-07: the **ADR-side** gate at `adr.py accept` + the ADR evidence-artifact
+   subsystem moved to **[064-05](slice-05-adr-accept-gate.md)** — ADRs aren't
+   slices, so they need a separate evidence home; keeping this slice a clean
+   spec-side vertical. The `review.py frame-critique` builder from AC1 already
+   works on an ADR deliverable path; only the ADR **gate enforcement** waits for
+   064-05.)*
 4. **A verdict artifact** is written at the ADR-0014 path/shape
-   (`reviews/...-frame-critique.md`) with the standard frontmatter + VERDICT
-   envelope.
+   (`reviews/slice-NN-frame-critique.md`) with the standard frontmatter + VERDICT
+   envelope (the existing slice-based `record-review` / `check-reviews` path).
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] New tests cover: prompt builder, flag recognition, gated/ungated
+- [x] All ACs pass; full test suite green (no regressions). (2412 OK, exit 0)
+- [x] New tests cover: prompt builder, flag recognition, gated/ungated
       transition behavior, verdict artifact round-trip.
-- [ ] `uvx ruff check .` clean + spec_lint + manifests + host-package drift
-      (full CI gate verified locally — implementer envs lack ruff).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed. **arch-review pass** (this slice has
+- [x] `uvx ruff check .` clean + spec_lint + manifests + code-health floor
+      (full CI gate verified locally — all four green).
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed. **arch-review pass** (this slice has
       `arch_review: true`).
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred (e.g.
-      cross-model frame-critique, OQ4).
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred (rung-3
+      cross-model frame-critique deferral added during OQ4 resolution).
 
 ### Close-out (post-DONE)
 
-- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
-- [ ] `independent-review` SKILL.md row + CLAUDE.md skills table updated to note
-      the `frame-critique` pass (mirroring how code-health 060-05 was recorded).
+- [x] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+- [x] `independent-review` SKILL.md (new "Frame-critique" section + pass-set
+      enumeration) + CLAUDE.md (Review-evidence-gate bullet PASSES + skills-table
+      `/jig:independent-review` row) updated to note the `frame-critique` pass
+      (mirroring how code-health 060-05 was recorded).
 
 **Anti-horizontal-phasing check:** After this slice, flagging an artifact
 `frame_review: true` and transitioning it yields an actual adversarial
@@ -66,4 +90,54 @@ the flag.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO at reconciliation._
+- **Scope split (decided up-front with the human, 2026-06-07):** the ADR-side
+  gate (`adr.py accept`) + ADR evidence-artifact home were split to a new slice
+  **[064-05](slice-05-adr-accept-gate.md)** because ADRs aren't slices and need a
+  separate evidence subsystem. This slice shipped the **spec-side** vertical
+  (pass builder + `frame_review` flag + READY_FOR_REVIEW gate + slice verdict
+  artifact). AC3/AC4 + the Decomposition were amended accordingly. The
+  `review.py frame-critique` *builder* already accepts an ADR deliverable path;
+  only the ADR *gate* waits for 064-05.
+- **Implementation mirrored the arch (031-02) / code-health (060-05) siblings**
+  exactly: `frame-critique` → `review_evidence.PASSES`; `required_passes` gained
+  a `frame_review` kwarg + a `READY_FOR_REVIEW` branch (empty unless flagged);
+  `_frame_review_flag` ≈ `_arch_review_flag`; `validate_evidence` reads the flag
+  itself (spawner/gate no-drift); `_EVIDENCE_GATED_STATES` gained
+  `READY_FOR_REVIEW`; `build_frame_critique_prompt` ≈ `build_arch_review_prompt`
+  but adversarial (find the riskiest load-bearing assumption, **not** conformance)
+  + the equal-or-stronger model-policy docstring (OQ4). No richer-skill detection
+  (no standard external "frame-critique" category).
+- **Pre-implementation gate is one-time** — deliberately NOT re-validated at DONE
+  (DONE re-runs REVIEWED + RECONCILED only). The frame is critiqued once, before
+  code exists. Documented in code + guarded by `test_frame_critique_not_required_at_done`.
+- **Craft nit fixed in reconciliation:** dropped the `RECONCILIATION NOTES:`
+  block from `_FRAME_CRITIQUE_OUTPUT_FORMAT` (odd for a pre-implementation pass
+  with nothing to reconcile); replaced with a one-line explanation. 178 review.py
+  tests still green.
+- **Arch CONCERN → deferred to 064-04 (recorded, not silent):** `session-plan`
+  (057-01 dispatch plan) reads `arch_review`/`code_health_review` but not
+  `frame_review`, and emits no pre-implementation frame-critique phase — so a
+  flagged spec would hit a gate it was never dispatched to satisfy (ADR-0020's
+  dead-loop risk). Closing this is now an explicit requirement on
+  [064-04](slice-04-derived-trigger.md) (note added to its Goal), where the flag
+  is derived and the dispatch surface is the natural place to surface the pass.
+  064-03's anti-horizontal check intentionally covers only the manual-flag /
+  manual-dispatch state (a flagged slice + a recorded verdict → gate clears).
+- **Test-runner-path artifact (not a regression):** running the test files via a
+  raw `cd skills && python3 -m unittest` yields `ModuleNotFoundError: No module
+  named 'skills'` (the tests use `import skills` as a namespace anchor — needs the
+  repo root on `sys.path`). The canonical `scripts/run_tests.py` runs green
+  (2412 tests OK, exit 0); run it from the repo root.
+- **Adjacent working-tree files are 064-02, not this slice:** `architect.md`,
+  `slice-template.md`, `adr-0000-template.md`, spec-workflow `SKILL.md`, and the
+  `_render_stub_spec` `## Assumptions` block are 064-02 deliverables (already
+  DONE + deviation-logged); they coexist in the uncommitted worktree. This slice
+  touched only `review_evidence.py`, `review.py`, `workflow.py` + their tests.
+- **CI gate verified locally:** `run_tests.py` (2412 OK), `spec_lint.py --all`,
+  `validate_manifests.py` (3/3), `health.py check .` (ruff floor) — all green.
+- **Deferrals recorded:** during the OQ4 resolution (earlier this session) a new
+  **rung-3 cross-model frame-critique** deferral entry was added to
+  `docs/refinement-todo.md` (with its revisit trigger), satisfying the DoD's
+  "refinement-todo updated if any decisions were deferred (e.g. cross-model
+  frame-critique, OQ4)". The only other follow-up — the `session-plan` dispatch
+  wiring — is carried on 064-04 (not a refinement-todo entry, it's in-spec).

@@ -11,6 +11,11 @@ last_verified:
      first use and link the term to docs/memory/glossary.md (or jig's lexicon).
      See docs/workflow.md "Self-defining vocabulary". -->
 
+<!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
+     runnable surfaces by probe first (run it / read source) or a citation,
+     else mark them as assumptions in the spec's `## Assumptions` section —
+     never assert an unverified claim as fact. -->
+
 ## Slice {{NUMBER}} — {{NAME}}
 
 **Goal:** _TODO: one-sentence statement of what this slice delivers.

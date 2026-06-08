@@ -26,12 +26,14 @@ from _common import review_evidence as ev  # noqa: E402
 
 def write_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
                           *, arch_review: bool = False,
-                          code_health_review: bool = False) -> Path:
+                          code_health_review: bool = False,
+                          frame_review: bool = False) -> Path:
     """Create `spec_dir/spec.md` + a sibling `slice-NN-<slug>.md` file.
 
-    Returns the spec.md path. The slice file carries `arch_review: true`
-    and/or `code_health_review: true` in its frontmatter when set, so
-    `required_passes` can be exercised against each shape.
+    Returns the spec.md path. The slice file carries `arch_review: true`,
+    `code_health_review: true`, and/or `frame_review: true` in its
+    frontmatter when set, so `required_passes` can be exercised against
+    each shape.
     """
     spec_dir.mkdir(parents=True, exist_ok=True)
     spec = spec_dir / "spec.md"
@@ -43,6 +45,8 @@ def write_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
         fm += "arch_review: true\n"
     if code_health_review:
         fm += "code_health_review: true\n"
+    if frame_review:
+        fm += "frame_review: true\n"
     fm += "---\n"
     slice_file = spec_dir / f"slice-{slice_no}-{slug}.md"
     slice_file.write_text(
@@ -96,10 +100,12 @@ def write_verdict_file(spec_dir: Path, slice_no: str, pass_name: str,
 
 class VocabularyTests(unittest.TestCase):
     def test_pass_vocabulary(self):
-        # Slice 060-05 added the gated `code-health` pass.
+        # Slice 060-05 added the gated `code-health` pass; slice 064-03
+        # added the gated, pre-implementation `frame-critique` pass.
         self.assertEqual(
             set(ev.PASSES),
-            {"compliance", "craft", "arch", "code-health", "reconciliation"},
+            {"compliance", "craft", "arch", "code-health", "reconciliation",
+             "frame-critique"},
         )
 
     def test_verdict_vocabulary(self):
@@ -145,6 +151,11 @@ class PathResolverTests(unittest.TestCase):
         # Slice 060-05: the code-health pass picks up the same path convention.
         p = ev.evidence_path(self.spec, "0XX-02", "code-health")
         self.assertEqual(p.name, "slice-02-code-health.md")
+
+    def test_frame_critique_path_filename(self):
+        # Slice 064-03: the frame-critique pass picks up the same convention.
+        p = ev.evidence_path(self.spec, "0XX-02", "frame-critique")
+        self.assertEqual(p.name, "slice-02-frame-critique.md")
 
     def test_unknown_pass_rejected(self):
         with self.assertRaises(ev.EvidenceError):
@@ -213,6 +224,29 @@ class RequiredPassesTests(unittest.TestCase):
         req = ev.required_passes("RECONCILED", arch_review=False,
                                  code_health_review=True)
         self.assertEqual(set(req), {"reconciliation"})
+
+    # Slice 064-03 / ADR-0020: the gated, pre-implementation frame-critique.
+    def test_frame_critique_in_passes(self):
+        self.assertIn("frame-critique", ev.PASSES)
+
+    def test_ready_for_review_requires_frame_when_flagged(self):
+        req = ev.required_passes("READY_FOR_REVIEW", arch_review=False,
+                                 frame_review=True)
+        self.assertEqual(set(req), {"frame-critique"})
+
+    def test_ready_for_review_empty_when_unflagged(self):
+        # The no-regression guarantee: an unflagged slice's
+        # DRAFT→READY_FOR_REVIEW has nothing to gate.
+        req = ev.required_passes("READY_FOR_REVIEW", arch_review=False)
+        self.assertEqual(req, ())
+
+    def test_reviewed_ignores_frame_flag(self):
+        # frame-critique is a READY_FOR_REVIEW-only pass — never required
+        # at REVIEWED even if the flag is set.
+        req = ev.required_passes("REVIEWED", arch_review=False,
+                                 frame_review=True)
+        self.assertNotIn("frame-critique", req)
+        self.assertEqual(set(req), {"compliance", "craft"})
 
 
 class ArchReviewTruthyTokenTests(unittest.TestCase):
@@ -363,11 +397,12 @@ class ValidateEvidenceTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _spec(self, slug, slice_no, *, arch_review=False,
-              code_health_review=False):
+              code_health_review=False, frame_review=False):
         spec_dir = self.tmp / slug
         return write_spec_with_slice(spec_dir, slice_no, "thing",
                                      arch_review=arch_review,
-                                     code_health_review=code_health_review)
+                                     code_health_review=code_health_review,
+                                     frame_review=frame_review)
 
     def test_reviewed_clears_when_compliance_and_craft_pass(self):
         spec = self._spec("045-a", "02")
@@ -458,6 +493,56 @@ class ValidateEvidenceTests(unittest.TestCase):
                 ev._code_health_review_flag(spec, "0XX-02"),
                 f"code_health_review: {tok!r} should not require code-health",
             )
+
+    # Slice 064-03 / ADR-0020: the gated, pre-implementation frame-critique
+    # at the READY_FOR_REVIEW stage.
+    def test_ready_for_review_blocks_when_frame_required_but_missing(self):
+        spec = self._spec("064-c", "02", frame_review=True)
+        diags = ev.validate_evidence(spec, "0XX-02", "READY_FOR_REVIEW")
+        self.assertTrue(
+            any("frame-critique" in d for d in diags),
+            f"frame_review: true → missing frame-critique must block: {diags}")
+
+    def test_ready_for_review_clears_with_frame_when_flagged_and_present(self):
+        spec = self._spec("064-d", "02", frame_review=True)
+        write_verdict_file(spec.parent, "02", "frame-critique", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "READY_FOR_REVIEW")
+        self.assertEqual(diags, [], f"expected clean, got: {diags}")
+
+    def test_ready_for_review_ignores_frame_when_not_flagged(self):
+        # No regression: an unflagged slice transitions freely (empty set).
+        spec = self._spec("064-e", "02", frame_review=False)
+        diags = ev.validate_evidence(spec, "0XX-02", "READY_FOR_REVIEW")
+        self.assertEqual(
+            diags, [], f"unflagged slice must not need frame-critique: {diags}")
+
+    def test_frame_review_flag_truthy_tokens(self):
+        for tok in ("true", "yes", "on", "1", "YES"):
+            spec = self._spec(f"064-flag-{tok}", "02")
+            slc = spec.parent / "slice-02-thing.md"
+            slc.write_text(
+                "---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                f"frame_review: {tok}\n---\n\n## Slice 0XX-02 — thing\n"
+            )
+            self.assertTrue(
+                ev._frame_review_flag(spec, "0XX-02"),
+                f"frame_review: {tok!r} should require frame-critique",
+            )
+        for tok in ("false", "no", "0"):
+            spec = self._spec(f"064-flag-neg-{tok}", "02")
+            slc = spec.parent / "slice-02-thing.md"
+            slc.write_text(
+                "---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                f"frame_review: {tok}\n---\n\n## Slice 0XX-02 — thing\n"
+            )
+            self.assertFalse(
+                ev._frame_review_flag(spec, "0XX-02"),
+                f"frame_review: {tok!r} should not require frame-critique",
+            )
+
+    def test_frame_review_flag_missing_returns_false(self):
+        spec = self._spec("064-flag-absent", "02")
+        self.assertFalse(ev._frame_review_flag(spec, "0XX-02"))
 
     def test_superseded_only_fail_blocks_with_actionable_diag(self):
         """ADR §3/§4: a required pass file that exists but is `fail` (not
