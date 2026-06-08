@@ -167,7 +167,26 @@ SKILL.md hand-off is the documented gate.
    [spec 064-01 retro](../../docs/specs/064-spec-frame-hardening/retro.md),
    which probe-verified its three most load-bearing claims before recording
    them.)
-7. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
+7. **Let the assumptions decide `frame_review` (spec 064-04 / ADR-0020).**
+   You are **not** asked "is frame-review needed?" — the `## Assumptions` you
+   just surfaced decide it, mechanically. Set the slice's `frame_review` flag
+   from `workflow.py frame-review-needed`:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+     frame-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"
+   ```
+
+   The rule is a derivation, not a judgment call: `true` iff the slice's
+   `## Assumptions` section carries ≥1 real (non-placeholder) assumption —
+   so honest framing in step 6 is exactly what fires (or silences) the
+   adversarial frame-critique pass. An inline-mirror / refactor slice with
+   no unverified assumptions (`## Assumptions` absent or just "None") stays
+   default-off. **ADRs are always-on** (OQ3): any ADR gets `frame_review:
+   true` unconditionally — the deriver returns `true` for any `adr-*.md`
+   path. When the value is `true`, set `frame_review: true` in the slice
+   frontmatter so the gate + `session-plan` dispatch the pass.
+8. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
 
 ### Picking up a slice
 

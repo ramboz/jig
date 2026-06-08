@@ -5944,5 +5944,333 @@ class SelfDefiningReminderInRenderersTests(unittest.TestCase):
         self.assertIn("self-defining vocabulary", text.lower())
 
 
+# ---------------------------------------------------------------------------
+# Slice 064-04 — derived frame_review trigger + dispatch-gap closure
+# ---------------------------------------------------------------------------
+
+
+class DeriveFrameReviewTests(unittest.TestCase):
+    """Slice 064-04 AC1/AC2: `derive_frame_review(spec_path, slice_fragment)`
+    derives whether `frame_review: true` should be set — it does NOT read an
+    existing flag. The rule (ADR-0020 Option B §3 + Amendments OQ3):
+
+    - ADR target (path under docs/decisions/adr-*.md) → True (always-on).
+    - else a spec/slice → True iff its `## Assumptions` section is present
+      AND carries >=1 real (non-placeholder) assumption.
+    - else → False.
+
+    Conservative + pure: any parse miss / empty / placeholder-only → False
+    (default-off, existing specs unaffected).
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-derive-frame-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.slice_file = self.tmpdir / "slice-04-derive.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, body: str) -> None:
+        self.slice_file.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 064-04 derive\n\n**Goal:** placeholder.\n\n" + body
+        )
+
+    # AC2 positive — a real `## Assumptions` bullet flips the trigger on.
+    def test_true_for_real_assumption_bullet(self):
+        self._write_slice(
+            "## Assumptions\n\n"
+            "- A1: the foo API returns a list (verified by running it).\n"
+        )
+        self.assertTrue(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    # AC2 positive (REALISTIC) — assumptions live in spec.md per 064-02 (the
+    # slice template only *points* at the spec's section). The trigger must
+    # read the SPEC-level `## Assumptions`, not only the slice's own.
+    def test_true_for_spec_level_assumption(self):
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n\n"
+            "## Assumptions\n\n"
+            "- A1: the bar lib supports streaming (assumed — not probed).\n\n"
+            "## Decomposition\n\n_TBD_\n"
+        )
+        # The slice itself carries NO `## Assumptions` (the realistic case).
+        self._write_slice("**Acceptance Criteria:**\n\n1. Does a thing.\n")
+        self.assertTrue(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    # AC2 negative — no `## Assumptions` section at all.
+    def test_false_when_section_absent(self):
+        self._write_slice("## Decomposition\n\nSPIDR.\n")
+        self.assertFalse(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    # AC2 negative — explicit "None" (the risk-gated empty marker).
+    def test_false_for_none_placeholder(self):
+        self._write_slice("## Assumptions\n\nNone\n")
+        self.assertFalse(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    def test_false_for_none_bullet(self):
+        self._write_slice("## Assumptions\n\n- None\n")
+        self.assertFalse(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    # Negative — the stub `_TBD_` / `_TODO_` italic placeholders.
+    def test_false_for_tbd_placeholder(self):
+        for ph in ("_TBD_", "_TODO_",
+                   "_TBD — list load-bearing assumptions; write \"None\"._"):
+            with self.subTest(ph=ph):
+                self._write_slice(f"## Assumptions\n\n{ph}\n")
+                self.assertFalse(
+                    _workflow.derive_frame_review(self.spec, "064-04"),
+                    f"placeholder {ph!r} must not trigger frame-review")
+
+    # Negative — heading present but body empty.
+    def test_false_for_empty_section(self):
+        self._write_slice("## Assumptions\n\n## Decomposition\n\nx\n")
+        self.assertFalse(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    # Section-reader edge — body stops at the next `## ` heading.
+    def test_section_body_bounded_by_next_heading(self):
+        self._write_slice(
+            "## Assumptions\n\n"
+            "- A1: real load-bearing assumption.\n\n"
+            "## Decomposition\n\n- not an assumption\n"
+        )
+        self.assertTrue(
+            _workflow.derive_frame_review(self.spec, "064-04"))
+
+    # Regression (064-04 craft review) — a REAL assumption that merely
+    # *begins* with a placeholder word must NOT be misclassified as a
+    # placeholder (the old first-token heuristic false-negatived these and
+    # silently suppressed the trigger).
+    def test_true_for_assumption_starting_with_placeholder_word(self):
+        for bullet in (
+            "- None of the dates are timezone-aware (assumed, not probed).",
+            "- TBD-style configs are validated at load (assumed).",
+            "- Todo items persist across restarts — unverified.",
+        ):
+            with self.subTest(bullet=bullet):
+                self._write_slice(f"## Assumptions\n\n{bullet}\n")
+                self.assertTrue(
+                    _workflow.derive_frame_review(self.spec, "064-04"),
+                    f"real assumption {bullet!r} must trigger frame-review")
+
+    # AC1 — ADR target is always-on (OQ3), regardless of assumptions.
+    def test_true_for_adr_path(self):
+        adr = self.tmpdir / "adr-0099-some-decision.md"
+        adr.write_text(
+            "---\nstatus: Proposed\n---\n\n# ADR-0099\n\n## Context\n\nx.\n")
+        # Path-based: ADR docs live under docs/decisions/adr-*.md. The
+        # deriver keys on the adr-*.md basename, so a sibling decisions path
+        # also resolves. We assert on the basename rule directly.
+        self.assertTrue(
+            _workflow.derive_frame_review(adr, "ADR-0099"))
+
+    def test_true_for_adr_path_in_decisions_dir(self):
+        decisions = self.tmpdir / "docs" / "decisions"
+        decisions.mkdir(parents=True)
+        adr = decisions / "adr-0099-some-decision.md"
+        adr.write_text("# ADR-0099\n\n## Context\n\nx.\n")
+        self.assertTrue(
+            _workflow.derive_frame_review(adr, "ADR-0099"))
+
+    # Conservative — a parse miss (bad slice) is surfaced as an error by the
+    # CLI but the helper itself raises (mirrors slice_needs_arch_review).
+    def test_raises_on_unknown_slice(self):
+        self._write_slice("## Assumptions\n\n- A1: real.\n")
+        with self.assertRaises(_workflow.WorkflowError):
+            _workflow.derive_frame_review(self.spec, "999-99 nonesuch")
+
+
+class FrameReviewNeededCLITests(unittest.TestCase):
+    """Slice 064-04 AC1/AC2/AC3: `workflow.py frame-review-needed
+    <spec.md> <slice-fragment>` prints the DERIVED value (true/false),
+    mirroring `arch-review-needed`'s CLI/exit-code shape (non-zero only
+    on slice-lookup failure)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-frame-needed-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.slice_file = self.tmpdir / "slice-04-derive.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, body: str) -> None:
+        self.slice_file.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 064-04 derive\n\n**Goal:** placeholder.\n\n" + body
+        )
+
+    def test_prints_true_for_real_assumption(self):
+        self._write_slice("## Assumptions\n\n- A1: a real assumption.\n")
+        r = run_workflow("frame-review-needed", str(self.spec), "064-04")
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "true")
+
+    def test_prints_false_for_no_assumptions(self):
+        self._write_slice("## Decomposition\n\nx.\n")
+        r = run_workflow("frame-review-needed", str(self.spec), "064-04")
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "false")
+
+    def test_stdout_only_clean_value(self):
+        self._write_slice("## Assumptions\n\n- A1: a real assumption.\n")
+        r = run_workflow("frame-review-needed", str(self.spec), "064-04")
+        self.assertIn(r.stdout, ("true\n", "true"))
+
+    def test_nonzero_exit_on_unknown_slice(self):
+        self._write_slice("## Assumptions\n\n- A1: real.\n")
+        r = run_workflow("frame-review-needed", str(self.spec), "no-such-slice")
+        self.assertNotEqual(r.returncode, 0)
+
+
+class SessionPlanFramePhaseTests(unittest.TestCase):
+    """Slice 064-04 Part B (carried-forward dispatch-gap closure): a slice
+    declaring `frame_review: true` gets a PRE-implementation `frame-critique`
+    phase emitted FIRST in its session-plan block; an unflagged slice does
+    not. Existing arch/code-health phase behavior is unchanged."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-frame-plan-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, fname: str, label: str, status: str = "DRAFT",
+                     frame_review: str = None, arch_review: str = None) -> None:
+        fm = [f"status: {status}", "dependencies: []", "last_verified:"]
+        if frame_review is not None:
+            fm.append(f"frame_review: {frame_review}")
+        if arch_review is not None:
+            fm.append(f"arch_review: {arch_review}")
+        block = "---\n" + "\n".join(fm) + "\n---\n\n"
+        (self.tmpdir / fname).write_text(
+            block + f"## Slice {label}\n\n**Goal:** placeholder.\n"
+        )
+
+    def _run(self):
+        return run_workflow("session-plan", str(self.spec))
+
+    def test_frame_phase_only_for_flagged_slice(self):
+        self._write_slice("slice-01-plain.md", "064-01 plain")
+        self._write_slice("slice-02-frame.md", "064-02 frame",
+                           frame_review="true")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        out = r.stdout
+        self.assertIn("frame-critique", out)
+        idx_plain = out.index("064-01 plain")
+        idx_frame = out.index("064-02 frame")
+        plain_block = out[idx_plain:idx_frame]
+        frame_block = out[idx_frame:]
+        self.assertNotIn("frame-critique", plain_block,
+                         "plain slice must NOT include the frame-critique phase")
+        self.assertIn("frame-critique", frame_block,
+                      "frame_review:true slice must include frame-critique")
+
+    def test_frame_phase_emitted_before_implement(self):
+        self._write_slice("slice-01-frame.md", "064-01 frame",
+                           frame_review="true")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        # Scope to the per-slice block (the preamble also says "implement").
+        out = r.stdout[r.stdout.index("064-01 frame"):]
+        self.assertIn("frame-critique", out)
+        self.assertIn("implement", out)
+        self.assertLess(out.index("frame-critique"), out.index("implement"),
+                        "frame-critique must precede implement (pre-impl gate)")
+
+    def test_frame_phase_notes_pre_implementation(self):
+        self._write_slice("slice-01-frame.md", "064-01 frame",
+                           frame_review="true")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        low = r.stdout.lower()
+        self.assertIn("frame_review", low)
+        self.assertTrue(
+            "pre-implementation" in low or "ready_for_review" in low,
+            "frame-critique note should signal it is the pre-impl gate")
+
+    def test_frame_phase_truthy_variations(self):
+        for truthy in ("yes", "True", "1", "on"):
+            with self.subTest(truthy=truthy):
+                self._write_slice("slice-01-frame.md", "064-01 frame",
+                                  frame_review=truthy)
+                r = self._run()
+                self.assertEqual(r.returncode, 0, msg=r.stderr)
+                self.assertIn("frame-critique", r.stdout)
+
+    # Regression — unflagged slice's existing output is unchanged (no
+    # frame-critique phase appears).
+    def test_unflagged_slice_has_no_frame_phase(self):
+        self._write_slice("slice-01-plain.md", "064-01 plain")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertNotIn("frame-critique", r.stdout)
+
+    # Regression — arch phase still fires independently of frame phase.
+    def test_arch_phase_unchanged_alongside_frame(self):
+        self._write_slice("slice-01-both.md", "064-01 both",
+                           frame_review="true", arch_review="true")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        out = r.stdout
+        self.assertIn("frame-critique", out)
+        self.assertIn("arch-review", out)
+        # frame is pre-implement; arch is post-craft → frame precedes arch.
+        self.assertLess(out.index("frame-critique"), out.index("arch-review"))
+
+
+class FrameReviewSkillDocTests(unittest.TestCase):
+    """Slice 064-04 AC3: SKILL.md '### Creating a new spec' frames
+    frame_review as a DERIVATION from the surfaced assumptions, not a
+    human 'is frame-review needed?' decision; mentions ADRs are always-on
+    and points at `frame-review-needed`."""
+
+    def setUp(self):
+        self.text = (REPO_ROOT / "skills" / "spec-workflow"
+                     / "SKILL.md").read_text()
+
+    def test_mentions_frame_review_derivation(self):
+        low = self.text.lower()
+        self.assertIn("frame_review", low)
+        self.assertIn("frame-review-needed", low)
+
+    def test_framed_as_derivation_not_decision(self):
+        low = self.text.lower()
+        # The contract must say the assumptions decide — not ask the author.
+        self.assertTrue(
+            "you are not asked" in low or "not a human" in low
+            or "the assumptions" in low and "decide" in low,
+            "SKILL.md must frame frame_review as derived, not a human call")
+
+    def test_mentions_adrs_always_on(self):
+        low = self.text.lower()
+        self.assertIn("adr", low)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -297,6 +297,123 @@ def slice_needs_code_health_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("code_health_review", ""))
 
 
+# ---------- derived frame_review trigger (slice 064-04 / ADR-0020) ----------
+
+# A `## Assumptions` bullet/line that is a placeholder rather than a real
+# assumption — the risk-gated "no unverified load-bearing assumptions" state.
+# Compared case-insensitively against the stripped, markdown-stripped content.
+# `None` is the canonical "no assumptions" marker (spec 064-02 template);
+# `_TBD_` / `_TODO_` are the italic stub placeholders the reservation stub /
+# slice template ship. Anything else (real prose) flips the trigger on.
+_FRAME_ASSUMPTION_PLACEHOLDERS = ("none", "tbd", "todo", "n/a", "na")
+
+_ADR_BASENAME_RE = re.compile(r"^adr-\d", re.IGNORECASE)
+
+
+def _extract_section_body(text: str, heading: str) -> str:
+    """Return the body of a `## <heading>` section — everything from after
+    the heading line up to (but not including) the next `## ` heading (or
+    EOF). Returns "" when the heading is absent. Pure / read-only.
+
+    Used by `derive_frame_review` to read the `## Assumptions` section. A
+    small local reader rather than a shared helper because it has exactly
+    one caller (ADR-0002: extract on the third)."""
+    m = re.search(r"(?m)^##[ \t]+" + re.escape(heading) + r"[ \t]*$", text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    nxt = re.search(r"(?m)^##[ \t]", rest)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def _assumptions_are_real(body: str) -> bool:
+    """True iff the `## Assumptions` section body carries >=1 real (non-
+    placeholder) assumption. Conservative: empty body, or a body whose only
+    meaningful content is a placeholder, returns False.
+
+    A line is a PLACEHOLDER iff (a) it is fully emphasis-wrapped — `_..._` /
+    `*...*` — i.e. the template guidance stub the spec/ADR ships
+    (`_TBD — list load-bearing assumptions ..._`, `- _TODO_`), OR (b) its
+    WHOLE content (ignoring a leading bullet + trailing punctuation) is a bare
+    placeholder token (`None` / `TBD` / `TODO` / `N/A`). Matching the *whole*
+    line — not just the first token — means a real assumption that merely
+    *begins* with a placeholder word ("None of the dates are tz-aware",
+    "TBD-style configs are validated") correctly counts as real (064-04
+    craft-review fix: the first-token heuristic false-negatived these and
+    silently suppressed the trigger — the exact failure 064 guards against)."""
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Strip a leading list-bullet marker.
+        line = re.sub(r"^[-*+]\s+", "", line).strip()
+        if not line:
+            continue
+        # (a) Fully emphasis-wrapped → template guidance stub, not a real
+        #     assumption.
+        if re.fullmatch(r"_.+_", line) or re.fullmatch(r"\*.+\*", line):
+            continue
+        # (b) Whole line is a bare placeholder token (trailing punctuation
+        #     tolerated) → "no assumptions".
+        token = line.strip("_*").strip().rstrip(".:;—- ").lower()
+        if token in _FRAME_ASSUMPTION_PLACEHOLDERS:
+            continue
+        # Anything else is a real, surfaced assumption.
+        return True
+    return False
+
+
+def derive_frame_review(spec_path, slice_fragment: str) -> bool:
+    """Slice 064-04 (AC1/AC2): DERIVE whether `frame_review: true` should be
+    set for a target — the mechanical, side-effect-free rule that makes the
+    adversarial frame-critique pass (064-03) auto-trigger exactly when there
+    is an unverified frame to attack. This DERIVES the flag; it does NOT read
+    an existing one (contrast `slice_needs_arch_review`, which reads).
+
+    The rule (ADR-0020 Option B §3 + Amendments OQ3, 2026-06-07):
+      - **ADR target** — the path basename matches `adr-*.md` (an ADR under
+        `docs/decisions/`): always-on (`True`). OQ3 resolved ADRs always
+        carry frame-review; encoded here even though the ADR-side accept-gate
+        is slice 064-05.
+      - **else a spec/slice**: `True` iff the **spec's** `## Assumptions`
+        section (in spec.md — where 064-02 places it; the slice template only
+        *points* at it) OR, defensively, the slice's own `## Assumptions`
+        section carries >=1 real (non-placeholder) assumption.
+        This is the mechanical link 064-02 set up: the act of grounding +
+        surfacing assumptions produces the trigger signal. The ADR-0020 rule
+        also names "introduces a new external dependency / asserts external
+        library/API/version/perf behavior" — but per the 064-02 contract
+        those claims LIVE in `## Assumptions`, so the assumptions-non-empty
+        check subsumes them. No fragile NLP external-dependency heuristic.
+      - **else**: `False`.
+
+    Conservative + pure (clarify-style): any parse miss / empty section /
+    placeholder-only body returns False — default-off, so existing specs are
+    unaffected. No file writes, no frontmatter mutation (stdout/return only,
+    like `session_plan`).
+
+    Raises WorkflowError on slice lookup failure for the spec/slice path
+    (mirrors `slice_needs_arch_review`) — the CLI surfaces it as a non-zero
+    exit. ADR targets short-circuit on the path basename before any slice
+    lookup (an ADR file is not a sliced spec)."""
+    p = Path(spec_path)
+    if _ADR_BASENAME_RE.match(p.name):
+        return True
+    # Validate the slice exists (CLI contract: raise on a bad fragment,
+    # mirroring slice_needs_arch_review); keep `loc` for the slice-level
+    # fallback below.
+    loc = load_slice(spec_path, slice_fragment)
+    # PRIMARY signal: the SPEC-level `## Assumptions` (spec 064-02 places it
+    # in spec.md; the slice template only *points* at it). The frame being
+    # critiqued is the spec's, so its load-bearing assumptions are spec-level.
+    spec_text = p.read_text(encoding="utf-8")
+    if _assumptions_are_real(_extract_section_body(spec_text, "Assumptions")):
+        return True
+    # DEFENSIVE fallback: a slice that carries its own `## Assumptions`.
+    section = loc.text[loc.start:loc.end]
+    return _assumptions_are_real(_extract_section_body(section, "Assumptions"))
+
+
 # ---------- session-plan: delegation-first dispatch plan (slice 057-01) ----------
 
 # The standard per-slice phase sequence. Each tuple is
@@ -324,6 +441,16 @@ _SESSION_PLAN_PHASES = (
     ("land", "dispatch", None, "jig:slice-land"),
 )
 
+# Slice 064-04: the conditional PRE-implementation frame-critique phase
+# (ADR-0020 Option B). Emitted as the FIRST phase, BEFORE `implement`, iff
+# the slice declares `frame_review: true` — the adversarial pass gates
+# DRAFT → READY_FOR_REVIEW (pre-implementation), so the orchestrator must
+# dispatch it before building. This closes the spawner/gate dispatch gap the
+# 064-03 arch review flagged (a flagged spec would otherwise hit a gate it
+# was never dispatched to satisfy — the dead-loop ADR-0020 warns against).
+_SESSION_PLAN_FRAME_PHASE = (
+    "frame-critique", "delegate", "reviewer", "jig:independent-review")
+
 _SESSION_PLAN_ARCH_PHASE = ("arch", "delegate", "reviewer", "arch-review")
 
 # Where the conditional arch phase slots into the sequence (after craft).
@@ -350,8 +477,17 @@ def _slice_status_from_section(section: str) -> str:
 def session_plan(spec_path: Path) -> str:
     """Slice 057-01: emit a deterministic, delegation-first dispatch plan
     for a spec — each non-DEFERRED slice mapped to its phase sequence
-    (implement → compliance → craft → [arch iff `arch_review: true`] →
-    reconcile → land) with the subagent type + skill for each phase.
+    ([frame-critique iff `frame_review: true`, PRE-implementation] →
+    implement → compliance → craft → [arch iff `arch_review: true`] →
+    [code-health iff `code_health_review: true`] → reconcile → land) with
+    the subagent type + skill for each phase.
+
+    The conditional frame-critique phase (slice 064-04 / ADR-0020) is
+    emitted FIRST, before `implement` — the adversarial pass gates
+    DRAFT → READY_FOR_REVIEW (pre-implementation), so the orchestrator
+    dispatches it before building. This closes the dispatch gap 064-03
+    flagged: a `frame_review: true` slice now surfaces its pass on the
+    dispatch surface the orchestrator follows.
 
     Pure function of the spec's slices + their frontmatter — no hidden
     state, no side effects on spec/slice files (clarify Q1/Q2: helper
@@ -368,7 +504,7 @@ def session_plan(spec_path: Path) -> str:
     # Enumerate slices via the shared dual-layout iterator, excluding
     # DEFERRED. `arch_review` is read per-slice from its frontmatter via
     # the shared truthy predicate (no hand-rolled truthiness).
-    planned = []  # list of (label, needs_arch, needs_code_health)
+    planned = []  # list of (label, needs_frame, needs_arch, needs_code_health)
     total = 0
     for loc in _iter_slices_common(spec_path):
         total += 1
@@ -377,10 +513,11 @@ def session_plan(spec_path: Path) -> str:
         if status == "DEFERRED":
             continue
         fm_fields, _ = _slice_frontmatter(section)
+        needs_frame = frontmatter_flag_truthy(fm_fields.get("frame_review", ""))
         needs_arch = frontmatter_flag_truthy(fm_fields.get("arch_review", ""))
         needs_code_health = frontmatter_flag_truthy(
             fm_fields.get("code_health_review", ""))
-        planned.append((loc.label, needs_arch, needs_code_health))
+        planned.append((loc.label, needs_frame, needs_arch, needs_code_health))
 
     lines = []
     lines.append(f"# Session plan — {spec_path}")
@@ -423,10 +560,19 @@ def session_plan(spec_path: Path) -> str:
             line += f"  {note}"
         return line
 
-    for label, needs_arch, needs_code_health in planned:
+    for label, needs_frame, needs_arch, needs_code_health in planned:
         lines.append(f"## Slice {label}")
         lines.append("")
         step = 1
+        # Slice 064-04: the conditional frame-critique phase is emitted FIRST,
+        # before `implement` — it gates DRAFT → READY_FOR_REVIEW (pre-impl).
+        if needs_frame:
+            fphase, fmode, factor, fskill = _SESSION_PLAN_FRAME_PHASE
+            lines.append(_render_phase(
+                step, fphase, fmode, factor, fskill,
+                note="(slice declares frame_review: true — PRE-implementation, "
+                     "gates READY_FOR_REVIEW)"))
+            step += 1
         for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
             lines.append(_render_phase(step, phase, mode, actor, skill))
             step += 1
@@ -2949,6 +3095,21 @@ def _build_parser() -> argparse.ArgumentParser:
     pch.add_argument("slice",
                      help="slice name or fragment (case-insensitive substring)")
 
+    # Slice 064-04: DERIVE (not read) whether the frame-critique pass should
+    # fire — the mechanical ADR-0020 trigger (ADRs always-on; specs iff the
+    # `## Assumptions` section carries >=1 real assumption). Mirrors
+    # `arch-review-needed`'s CLI/exit-code shape.
+    pfr = sub.add_parser(
+        "frame-review-needed",
+        help="print 'true' if the frame-critique pass should fire for this "
+             "target (ADR → always; spec/slice → iff `## Assumptions` carries "
+             ">=1 real assumption); 'false' otherwise — DERIVED, not read "
+             "(slice 064-04)",
+    )
+    pfr.add_argument("spec", help="path to spec.md (or an ADR path)")
+    pfr.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
     # Slice 057-01: delegation-first per-slice dispatch plan (stdout-only).
     psp = sub.add_parser(
         "session-plan",
@@ -3008,6 +3169,9 @@ def main(argv: list) -> int:
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "code-health-review-needed":
             needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "frame-review-needed":
+            needed = derive_frame_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "session-plan":
             sys.stdout.write(session_plan(Path(ns.spec)))
