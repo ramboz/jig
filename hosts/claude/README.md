@@ -51,7 +51,11 @@ not left as advice:
 - **The context window is working memory, not a storage buffer.** Irrelevant
   context degrades reasoning, so jig keeps a lean hot cache, loads deeper docs
   on demand, and delegates file-heavy reading to subagents that return only a
-  summary — and it *measures* the cost rather than guessing at it.
+  summary.
+- **Designed to reduce token cost.** Beyond keeping context lean for *quality*,
+  jig is built to keep token usage — and the bill — *down*: lean context,
+  file-heavy reading delegated to subagents, tight output. It also measures its
+  own spend rather than guessing at it.
 - **Review is the bottleneck.** Agents produce faster than review capacity
   grows, so jig won't let implementers grade their own homework: a fresh,
   read-only reviewer checks every slice against its spec, and the verdicts are
@@ -91,8 +95,9 @@ and runs a "scaffold complete and verified" check. Follow it with
 `/jig:vision-elicitation` to set the vision every later slice is judged
 against.
 
-**Copy-paste prompts** for scaffolding and for taking a spec from idea to
-landed live in the **[prompt cookbook](docs/prompts.md)**.
+**Copy-paste prompts** live in the **[prompt cookbook](docs/prompts.md)**, in
+the order you run them: scaffold the repo once, then repeat the idea-to-landed
+loop for every feature.
 
 ### Install shapes
 

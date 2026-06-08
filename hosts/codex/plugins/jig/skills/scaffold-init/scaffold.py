@@ -76,6 +76,7 @@ _TIER_SKILLS = {
         "analyze",
         "security-review",
         "code-health",  # spec 060 / ADR-0017 — Tier-1 detect-and-drive linter
+        "explain",  # spec 065-03 — on-demand vocabulary/artifact explainer
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }
@@ -1732,6 +1733,10 @@ def copy_machinery(plugin: Path, target: Path, *,
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
     _write_gitignore_secret_block(target)
+    # Spec 065-04: refresh the self-defining-vocabulary convention block into
+    # the project's docs/workflow.md (the only path that reaches an EXISTING
+    # project — copy-machinery does not otherwise touch docs/). Idempotent.
+    _ensure_self_defining_convention_block(target)
 
 
 def _specs_dir_has_content(target: Path) -> bool:
@@ -1876,6 +1881,89 @@ def _write_gitignore_secret_block(target: Path) -> None:
     else:
         sep = "\n\n"
     atomic_write_text(gitignore, existing + sep + block)
+
+
+# --- Self-defining-vocabulary convention block (spec 065-04) --------------
+#
+# A marker-delimited managed block injected into a project's
+# `docs/workflow.md`, mirroring the `.gitignore` secret-floor block above
+# (ADR-0013 precedent: a managed block written by BOTH `scaffold()` and
+# `copy_machinery()`). This is how the soft "self-defining vocabulary"
+# authoring convention reaches a project — including an already-scaffolded
+# one, on its next `copy-machinery` run (the live `docs/workflow.md` is not
+# otherwise touched by copy-machinery). The block is HTML-comment delimited
+# so the markers render invisibly in the doc.
+_WORKFLOW_BLOCK_BEGIN = "<!-- >>> jig self-defining-vocabulary >>> -->"
+_WORKFLOW_BLOCK_END = "<!-- <<< jig self-defining-vocabulary <<< -->"
+
+
+def _render_self_defining_block() -> str:
+    """Render the marker-delimited self-defining-vocabulary convention block
+    (spec 065-04 AC1/AC4). Soft, forward-only, explicitly NOT a gate."""
+    return "\n".join((
+        _WORKFLOW_BLOCK_BEGIN,
+        "## Self-defining vocabulary (authoring convention)",
+        "",
+        "**Soft, forward-only, not a gate.** When you author a spec or slice,",
+        "expand each acronym on first use and link the term to the project",
+        "glossary (`docs/memory/glossary.md`) or jig's lexicon, in plain words —",
+        "so the *next* artifact is readable without a decoder ring. This stops",
+        "the dense-jargon pile from growing; it does **not** retrofit existing",
+        "specs, and **nothing lints or blocks a transition** on an undefined",
+        "acronym (the barrier is lowered by convention, not enforced by a gate).",
+        "",
+        "On demand, `/jig:explain <term>` defines a single term and",
+        "`/jig:explain <spec-or-adr-path>` walks a whole artifact through plain",
+        "language — the back-catalogue escape hatch this convention complements.",
+        _WORKFLOW_BLOCK_END,
+        "",
+    ))
+
+
+def _ensure_self_defining_convention_block(target: Path) -> None:
+    """Create / append / replace-in-place the self-defining-vocabulary block in
+    `target/docs/workflow.md` (spec 065-04 AC3). Idempotent and
+    non-clobbering, mirroring `_write_gitignore_secret_block`:
+
+    - No `docs/workflow.md` → create it (parents included) with a minimal
+      header + the block.
+    - Exists without the markers → APPEND the block (one blank-line separator),
+      preserving every pre-existing line verbatim.
+    - Exists WITH the markers → REPLACE the delimited region in place, leaving
+      content before/after untouched (re-runs are no-ops once current).
+
+    Called by both `scaffold()` (fresh projects) and `copy_machinery()`
+    (existing projects' next copy-machinery / tier upgrade)."""
+    workflow = target / "docs" / "workflow.md"
+    block = _render_self_defining_block()
+
+    if not workflow.exists():
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(workflow, "# Workflow\n\n" + block)
+        return
+
+    existing = workflow.read_text()
+    begin = existing.find(_WORKFLOW_BLOCK_BEGIN)
+    if begin != -1:
+        end_marker = existing.find(_WORKFLOW_BLOCK_END, begin)
+        if end_marker != -1:
+            after = end_marker + len(_WORKFLOW_BLOCK_END)
+            if after < len(existing) and existing[after] == "\n":
+                after += 1
+            merged = existing[:begin] + block + existing[after:]
+            if merged != existing:
+                atomic_write_text(workflow, merged)
+            return
+        # Begin marker without a matching end — fall through and append a
+        # fresh, well-formed block rather than corrupt the half-block.
+
+    if existing.endswith("\n\n"):
+        sep = ""
+    elif existing.endswith("\n"):
+        sep = "\n"
+    else:
+        sep = "\n\n"
+    atomic_write_text(workflow, existing + sep + block)
 
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
@@ -2058,6 +2146,10 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # leaves a re-runnable partial state. Idempotent + append-not-clobber,
         # so --force re-scaffold and a pre-existing user .gitignore are safe.
         _write_gitignore_secret_block(target)
+        # Spec 065-04: --with-machinery gets the convention block via
+        # copy_machinery above; the --plugin-only path writes it here (the
+        # docs/workflow.md template was already rendered earlier in scaffold()).
+        _ensure_self_defining_convention_block(target)
 
     # 6. scaffold.json install-state manifest — the COMPLETION SENTINEL
     # (slice 032-02). Written LAST so a crash before this point leaves
@@ -2238,8 +2330,25 @@ def main(argv: list[str]) -> int:
     # second definition of "a complete scaffold". A failed check makes the
     # exit status unmistakable (AC #4): we surface a non-zero exit so the
     # wizard never reports a silent partial scaffold as success.
+    #
+    # The verifier modules (verify_install + install_contract +
+    # scaffold_contract) live under `scripts/`, which is dev-only EXCEPT for
+    # these three — `build_release_zip.py::_INCLUDE_SCRIPT_FILES` re-includes
+    # them so they ship in the plugin install (they were absent before, which
+    # crashed this self-check on every packaged install). The import is still
+    # guarded: if a future packaging regression drops them, the *scaffold has
+    # already succeeded and printed* above — degrade to a one-line notice
+    # rather than crashing on the closing report. A genuine verification
+    # FAIL (verdict != 0) is NOT swallowed; only a missing verifier is.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-    import verify_install  # noqa: E402
+    try:
+        import verify_install  # noqa: E402
+    except ImportError:
+        print(
+            "note: scaffold-completion self-check skipped "
+            "(verifier not bundled in this install)"
+        )
+        return 0
 
     verdict = verify_install.run_completion_summary(
         target,
