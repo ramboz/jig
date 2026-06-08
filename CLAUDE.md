@@ -58,6 +58,7 @@ column.)_
 | [docs/conventions.md](docs/conventions.md) | Skill/hook/agent authoring standards | Before writing any skill or hook |
 | [docs/decisions/](docs/decisions/) | ADR index | When recording or reading a hard-to-reverse decision |
 | [docs/specs/README.md](docs/specs/README.md) | Spec status board | To pick up next work |
+| [docs/roadmap.md](docs/roadmap.md) | Milestone overlay — which release each spec targets, which integration branch it's on (1.x on `main`; 2.0 multi-host on `v2`) | When orienting on release scope or where v2 work lives |
 | [docs/refinement-todo.md](docs/refinement-todo.md) | Deferred decisions | When hitting an undefined case |
 | [docs/memory/glossary.md](docs/memory/glossary.md) | Domain terms | When encountering unknown terms |
 | [docs/memory/learnings.md](docs/memory/learnings.md) | Dead ends and gotchas | Before repeating a mistake |

@@ -4,6 +4,10 @@
 > any time to sync with `docs/specs/*/spec.md`. The Notes column is preserved
 > across regen, so curate it freely.
 >
+> For the **milestone view** — which release each spec targets and which
+> integration branch it's built on — see [docs/roadmap.md](../roadmap.md). This
+> board is the per-slice source of truth; the roadmap is the overlay.
+>
 > A leading 🔬 in the Slice column flags slices marked `kind: spike` in their
 > frontmatter — timeboxed investigation, not feature work (see [SPIDR
 > primer](../spec-workflow/spidr-primer.md) and `skills/spec-workflow/SKILL.md`
