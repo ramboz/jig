@@ -7,6 +7,10 @@ last_verified:
 #                    # shaped concerns (triggers arch-review pass).
 ---
 
+<!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
+     first use and link the term to docs/memory/glossary.md (or jig's lexicon).
+     See docs/workflow.md "Self-defining vocabulary". -->
+
 ## Slice {{NUMBER}} — {{NAME}}
 
 **Goal:** _TODO: one-sentence statement of what this slice delivers.

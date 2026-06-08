@@ -9,7 +9,22 @@
 # - Strip URL hosts (https://Foo.com → " ")
 # - Strip absolute paths (/Users/Foo/Bar → " ")
 # - Skip COMMON acronyms (API, JSON, etc.)
-python3 -c "
+#
+# Lexicon surfacing (slice 065-02):
+# - In ADDITION to unknown-reference surfacing, inject the plain-language
+#   `short` definition of any jig lexicon term that appears in the prompt,
+#   resolved through skills/_common/lexicon.py (shipped + project glossary
+#   overlay). Bounded to 5, first-appearance order. Fully fail-open: any
+#   error in the lexicon path leaves the existing behavior intact.
+#
+# Resolve the directory this script lives in so the embedded Python can locate
+# skills/_common/lexicon.py whether jig runs as a plugin
+# (${CLAUDE_PLUGIN_ROOT}/hooks/scripts/) or a scaffolded install
+# (${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/) — the same idiom as
+# jig-context-check.sh. JIG_LEXICON_COMMON_DIR overrides it (test seam).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SCRIPT_DIR="$SCRIPT_DIR" python3 -c "
 import sys, json, os, re
 
 try:
@@ -47,6 +62,47 @@ try:
     unknowns = [c for c in candidates if c not in known and c not in COMMON]
     unknowns = list(dict.fromkeys(unknowns))
 
+    sections = []
+
+    # ----- Lexicon definitions (slice 065-02) ---------------------------
+    # Fully isolated + fail-open: any error here must not affect the existing
+    # unknown-reference surfacing below. Surfaces the plain-language 'short'
+    # def of any jig lexicon term in the (already-stripped) prompt, bounded to
+    # 5 in first-appearance order, resolved via skills/_common/lexicon.py.
+    try:
+        common_dir = os.environ.get('JIG_LEXICON_COMMON_DIR')
+        if not common_dir:
+            script_dir = os.environ.get('SCRIPT_DIR', '.')
+            common_dir = os.path.join(script_dir, '..', '..', 'skills', '_common')
+        if common_dir not in sys.path:
+            sys.path.insert(0, common_dir)
+        import lexicon as _lex
+        merged = _lex.load(project_dir)
+
+        haystack = prompt.lower()
+        hits = []
+        for key, entry in merged.items():
+            # Whole-word / whole-phrase match on a boundary, not a substring.
+            pattern = r'(?<![\w-])' + re.escape(key) + r'(?![\w-])'
+            m = re.search(pattern, haystack)
+            if not m:
+                continue
+            short = (entry or {}).get('short') if isinstance(entry, dict) else None
+            if short:
+                hits.append((m.start(), key, short))
+        # First-appearance order, then cap at 5.
+        hits.sort(key=lambda t: t[0])
+        hits = hits[:5]
+        if hits:
+            lines = ['Jig terms in this prompt (plain-language definitions):']
+            for _pos, key, short in hits:
+                lines.append(f'- {key}: {short}')
+            sections.append('\n'.join(lines))
+    except Exception:
+        # Never let the lexicon path break the hook or the unknown surfacing.
+        pass
+
+    # ----- Unknown-reference surfacing (slice 002-03, unchanged) --------
     if unknowns:
         refs = ', '.join(unknowns)
         msg = (
@@ -54,7 +110,10 @@ try:
             'If these are project-specific terms, ask the user once and persist the answer to '
             'CLAUDE.md (if high-frequency) or docs/memory/glossary.md (if niche).'
         )
-        print(json.dumps({'continue': True, 'additionalContext': msg}))
+        sections.append(msg)
+
+    if sections:
+        print(json.dumps({'continue': True, 'additionalContext': '\n\n'.join(sections)}))
 except Exception:
     pass
 "

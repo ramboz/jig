@@ -13,7 +13,8 @@ What this module owns (ADR-0014):
     from the resolved slice file's name (`slice-NN-*.md`), NOT from the
     caller's fragment — `evidence_path` resolves the slice first.
   - §1/§3 vocabularies: `PASSES` and `VERDICTS`.
-  - §5 transition map: `required_passes(stage, arch_review)`.
+  - §5 transition map:
+    `required_passes(stage, arch_review, code_health_review)`.
   - §2 schema: `parse_verdict_file(path)` checks the six required
     frontmatter fields and in-vocabulary `pass`/`verdict`.
   - §3 gate rule (uniform): an evidence file *clears* iff `verdict: pass`.
@@ -42,8 +43,10 @@ from _common.parsing import (
     parse_frontmatter,
 )
 
-# ADR-0014 §1: the four review passes, one verdict file per (slice, pass).
-PASSES = ("compliance", "craft", "arch", "reconciliation")
+# ADR-0014 §1: the review passes, one verdict file per (slice, pass).
+# Slice 060-05 added the on-demand `code-health` pass (gated by a slice's
+# `code_health_review: true` frontmatter flag, mirroring `arch`).
+PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation")
 
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
@@ -143,15 +146,20 @@ def evidence_path(spec_path, slice_fragment: str, pass_name: str) -> Path:
     return spec_dir / "reviews" / f"slice-{slice_no}-{pass_name}.md"
 
 
-def required_passes(stage: str, *, arch_review: bool) -> tuple:
+def required_passes(stage: str, *, arch_review: bool,
+                    code_health_review: bool = False) -> tuple:
     """Return the passes required to enter `stage` (ADR-0014 §5 map).
 
     - ``REVIEWED`` → ``compliance`` + ``craft`` (+ ``arch`` iff the slice
-      declared ``arch_review: true``).
+      declared ``arch_review: true``) (+ ``code-health`` iff the slice
+      declared ``code_health_review: true`` — slice 060-05).
     - ``RECONCILED`` → ``reconciliation``.
 
-    `arch_review` is honored only for the REVIEWED stage (arch is a
-    REVIEWED-stage pass). Raises `EvidenceError` for an unknown stage.
+    `arch_review` and `code_health_review` are honored only for the
+    REVIEWED stage (both are REVIEWED-stage passes). `code_health_review`
+    defaults False so every existing slice (no flag) is unaffected — the
+    code-health pass is opt-in, gated like arch. Raises `EvidenceError`
+    for an unknown stage.
 
     NOTE: the ``DONE`` re-validation (ADR-0014 §5) re-runs the REVIEWED +
     RECONCILED sets; that composition lives in the 045-03 gate, not here,
@@ -161,6 +169,8 @@ def required_passes(stage: str, *, arch_review: bool) -> tuple:
         passes = ["compliance", "craft"]
         if arch_review:
             passes.append("arch")
+        if code_health_review:
+            passes.append("code-health")
         return tuple(passes)
     if stage == "RECONCILED":
         return ("reconciliation",)
@@ -287,6 +297,28 @@ def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("arch_review", ""))
 
 
+def _code_health_review_flag(spec_path, slice_fragment: str) -> bool:
+    """Read the resolved slice's `code_health_review:` frontmatter flag
+    (slice 060-05). Mirrors `_arch_review_flag` exactly.
+
+    Returns True iff the slice declares a truthy `code_health_review`
+    token (`true`/`yes`/`on`/`1`, case-insensitive — the shared
+    `frontmatter_flag_truthy` predicate). Conservative: any miss (no
+    frontmatter, field absent, unrecognized value) returns False, so
+    every existing slice (no flag) stays unaffected — the code-health
+    pass is opt-in. Raises `EvidenceError` only when the slice itself
+    can't be resolved.
+    """
+    spec_path = Path(spec_path)
+    try:
+        loc = load_slice(spec_path, slice_fragment)
+    except SliceLookupError as exc:
+        raise EvidenceError(str(exc)) from exc
+    body = loc.text[loc.start:loc.end]
+    fields, _ = parse_frontmatter(body)
+    return frontmatter_flag_truthy(fields.get("code_health_review", ""))
+
+
 def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     """Validate the evidence set required to enter `stage` for one slice.
 
@@ -302,15 +334,17 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     Does NOT raise for an invalid slice target — that becomes the first
     diagnostic (so the gate can report it uniformly rather than crashing).
     """
-    # Resolve the arch flag + slice first; an unresolvable slice is a
-    # single actionable diagnostic, not an exception.
+    # Resolve the arch + code-health flags + slice first; an unresolvable
+    # slice is a single actionable diagnostic, not an exception.
     try:
         arch = _arch_review_flag(spec_path, slice_fragment)
+        code_health = _code_health_review_flag(spec_path, slice_fragment)
     except EvidenceError as exc:
         return [f"invalid slice target: {exc}"]
 
     try:
-        needed = required_passes(stage, arch_review=arch)
+        needed = required_passes(stage, arch_review=arch,
+                                 code_health_review=code_health)
     except EvidenceError as exc:
         return [str(exc)]
 
