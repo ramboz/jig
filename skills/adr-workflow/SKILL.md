@@ -100,6 +100,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" accept <NNNN>
 This flips `Proposed (date)` to `Accepted (date)`. Refuses if the Status is
 already Accepted (ADRs are immutable; supersede instead — see below).
 
+**Frame-critique gate (spec 064-05 / ADR-0020 OQ2/OQ3).** `accept` also gates
+the flip on a passing adversarial **frame-critique** verdict — the ADR's
+pre-commitment moment to catch a wrong premise (the ADR-0011 / ADR-0008 failure
+mode). It applies **iff** the ADR carries a truthy `frame_review` flag: `new`
+stamps `frame_review: true` on every ADR it creates (OQ3 — ADRs always-on), so
+new ADRs are gated; a legacy markerless Proposed ADR is grandfathered (no
+refusal). To clear it: build the prompt with `review.py frame-critique
+docs/decisions/adr-NNNN-*.md`, run a reviewer, then `review.py record-review
+--adr NNNN --pass frame-critique --verdict pass …` (writes
+`docs/decisions/reviews/adr-NNNN-frame-critique.md`). Soft / bypassable with
+`JIG_REVIEW_EVIDENCE_GATE=0` (a deliberateness signal, ADR-0011 — not human-only
+enforcement).
+
 ### 3. Supersede an Accepted ADR
 
 When a previously-Accepted decision is replaced by a newer one, **don't edit

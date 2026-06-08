@@ -1,13 +1,17 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: spec-workflow
 ---
 
 # Spec 064: Spec/ADR frame-hardening
 
 > Implements [ADR-0020](../../decisions/adr-0020-spec-frame-hardening.md).
-> **DRAFT — implementation gated on the 064-01 retro spike.** Filed to capture
-> the design discussion; do not implement slices 02+ until 064-01 returns *go*.
+> **DONE (2026-06-08).** The 064-01 retro spike returned **GO** (qualified;
+> ADR-0020 Accepted). All five slices shipped: grounding (02), the spec-side
+> frame-critique pass + READY_FOR_REVIEW gate (03), the derived trigger +
+> session-plan dispatch (04), and the ADR-side `adr.py accept` gate (05).
+> OQ1–OQ4 resolved (ADR-0020 `## Amendments`). Per-slice load-bearing invariants
+> live in the [status-board](../README.md) Notes column.
 
 ## Overview
 
@@ -76,16 +80,17 @@ intermediate state.
 
 | Slice | Title | Status | Notes |
 |---|---|---|---|
-| [🔬 064-01](slice-01-retro-frame-error-census.md) | retro-frame-error-census | DRAFT | **Gating spike.** Grounds ADR-0020 §A1 (kill criterion). Go/no-go for 02–04. |
-| [064-02](slice-02-grounding-requirement.md) | grounding-requirement | DRAFT | Probe-first claims + mark-assumptions in templates + author contract. Produces the trigger signal for 04. |
-| [064-03](slice-03-frame-critique-pass.md) | frame-critique-pass | DRAFT | `frame_review`-gated review pass + **spec-side** READY_FOR_REVIEW gate. Sibling of arch/code-health (ADR-0014). ADR-side gate split to 064-05. |
-| [064-04](slice-04-derived-trigger.md) | derived-trigger | DRAFT | Author/`clarify` sets `frame_review` mechanically from grounding output. |
-| [064-05](slice-05-adr-accept-gate.md) | adr-accept-gate | DRAFT | **ADR-side** gate at `adr.py accept` + ADR evidence-artifact home (ADRs aren't slices). Split from 064-03; enforces OQ2/OQ3 for ADRs. |
+| [🔬 064-01](slice-01-retro-frame-error-census.md) | retro-frame-error-census | **DONE** | **Gating spike → GO.** Grounded ADR-0020 §A1 (4 catchable frame errors / 33 artifacts; kill-criterion not met). |
+| [064-02](slice-02-grounding-requirement.md) | grounding-requirement | **DONE** | Probe-first claims + risk-gated `## Assumptions`/`## Kill criteria` in templates + author contract. Produces the trigger signal for 04. |
+| [064-03](slice-03-frame-critique-pass.md) | frame-critique-pass | **DONE** | `frame_review`-gated adversarial pass + **spec-side** READY_FOR_REVIEW gate. Sibling of arch/code-health (ADR-0014). ADR-side gate split to 064-05. |
+| [064-04](slice-04-derived-trigger.md) | derived-trigger | **DONE** | `derive_frame_review` + `frame-review-needed` from the spec's `## Assumptions`; `session_plan` dispatches the pass. |
+| [064-05](slice-05-adr-accept-gate.md) | adr-accept-gate | **DONE** | **ADR-side** gate at `adr.py accept` + ADR evidence home + `record-review --adr`. Enforces OQ2/OQ3 for ADRs (always-on + legacy grace). |
 
 ## Open questions
 
-Carried from [ADR-0020](../../decisions/adr-0020-spec-frame-hardening.md) Open
-questions (OQ1–OQ4): retro depth; frame-critique placement (READY_FOR_REVIEW
-only vs also at `adr.py accept`); whether ADRs default-on unconditionally; and
-whether cross-model frame-critique warrants a thin slice now. **Resolve OQ1
-before 064-01; OQ2–OQ4 before 064-03/04.**
+**All resolved** (see [ADR-0020](../../decisions/adr-0020-spec-frame-hardening.md)
+`## Amendments`, 2026-06-07): OQ1 retro depth → stratified sample (GO); OQ2
+placement → specs @ READY_FOR_REVIEW + ADRs @ `adr.py accept`; OQ3 → ADRs
+always-on (legacy markerless ADRs grandfathered); OQ4 → ship rung-1 (fresh-context
+subagent + equal-or-stronger model policy), defer rung-3 (non-Claude cross-model)
+to `docs/refinement-todo.md`.

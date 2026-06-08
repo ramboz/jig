@@ -9,6 +9,7 @@ Run from the repo root:
     python3 skills/_common/test_review_evidence.py
 """
 
+import os
 import sys
 import tempfile
 import unittest
@@ -602,6 +603,155 @@ class ValidateEvidenceTests(unittest.TestCase):
         diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
         self.assertTrue(any("record-review" in d for d in diags),
                         f"diagnostics should point at record-review: {diags}")
+
+
+class GateEnableTests(unittest.TestCase):
+    """Slice 064-05: the gate-enable predicate moved here from workflow.py
+    so the spec gate + the ADR gate read JIG_REVIEW_EVIDENCE_GATE
+    identically (ADR-0002 load-bearing-consistency)."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("JIG_REVIEW_EVIDENCE_GATE", None)
+
+    def tearDown(self):
+        os.environ.pop("JIG_REVIEW_EVIDENCE_GATE", None)
+        if self._saved is not None:
+            os.environ["JIG_REVIEW_EVIDENCE_GATE"] = self._saved
+
+    def test_enabled_by_default(self):
+        self.assertTrue(ev.evidence_gate_enabled())
+
+    def test_disable_tokens(self):
+        for token in ("0", "false", "off", "no", "FALSE", "Off", " no "):
+            os.environ["JIG_REVIEW_EVIDENCE_GATE"] = token
+            self.assertFalse(ev.evidence_gate_enabled(),
+                             f"{token!r} should disable the gate")
+
+    def test_other_values_keep_enabled(self):
+        for token in ("1", "true", "on", "yes", "anything"):
+            os.environ["JIG_REVIEW_EVIDENCE_GATE"] = token
+            self.assertTrue(ev.evidence_gate_enabled(),
+                            f"{token!r} should keep the gate enabled")
+
+
+class AdrEvidencePathTests(unittest.TestCase):
+    """Slice 064-05 AC #1: the ADR-side verdict file has a defined home."""
+
+    def test_path_lands_in_decisions_reviews(self):
+        p = ev.adr_evidence_path(Path("/x/docs/decisions"), "0020",
+                                 "frame-critique")
+        self.assertEqual(p.parent.name, "reviews")
+        self.assertEqual(p.parent.parent.name, "decisions")
+
+    def test_filename_carries_zero_padded_number_and_pass(self):
+        p = ev.adr_evidence_path(Path("/x/docs/decisions"), "20",
+                                 "frame-critique")
+        self.assertEqual(p.name, "adr-0020-frame-critique.md")
+
+    def test_unknown_pass_rejected(self):
+        with self.assertRaises(ev.EvidenceError):
+            ev.adr_evidence_path(Path("/x"), "0020", "smoke")
+
+
+class AdrRequiredFieldsTests(unittest.TestCase):
+    """Slice 064-05: ADR_REQUIRED_FIELDS mirrors REQUIRED_FIELDS but keys on
+    `adr` instead of `slice`; parse_verdict_file accepts the field set."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-adr-ev-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_adr_required_fields_shape(self):
+        self.assertEqual(ev.ADR_REQUIRED_FIELDS,
+                         ("adr", "pass", "verdict", "reviewer",
+                          "reviewed_at", "prompt_source"))
+        self.assertNotIn("slice", ev.ADR_REQUIRED_FIELDS)
+
+    def _write(self, **kw):
+        defaults = {
+            "adr": "0020", "pass": "frame-critique", "verdict": "pass",
+            "reviewer": "jig:reviewer",
+            "reviewed_at": "2026-06-08T00:00:00Z",
+            "prompt_source": "review.py frame-critique x",
+        }
+        defaults.update(kw)
+        lines = ["---"]
+        for k, v in defaults.items():
+            if v is not None:
+                lines.append(f"{k}: {v}")
+        lines.append("---")
+        lines.append("")
+        p = self.tmp / "adr-0020-frame-critique.md"
+        p.write_text("\n".join(lines) + "\n## VERDICT\npass\n")
+        return p
+
+    def test_well_formed_adr_verdict_clears(self):
+        p = self._write()
+        rec = ev.parse_verdict_file(p, required_fields=ev.ADR_REQUIRED_FIELDS)
+        self.assertTrue(rec.clears, rec.problems)
+
+    def test_missing_adr_field_reported(self):
+        p = self._write(adr=None)
+        rec = ev.parse_verdict_file(p, required_fields=ev.ADR_REQUIRED_FIELDS)
+        self.assertFalse(rec.clears)
+        self.assertTrue(any("'adr'" in pr for pr in rec.problems),
+                        rec.problems)
+
+    def test_default_field_set_unchanged(self):
+        """Backward-compat: default required_fields is still the slice set."""
+        # An ADR-keyed file is MISSING `slice` under the default field set.
+        p = self._write()
+        rec = ev.parse_verdict_file(p)  # default REQUIRED_FIELDS
+        self.assertFalse(rec.clears)
+        self.assertTrue(any("'slice'" in pr for pr in rec.problems),
+                        rec.problems)
+
+
+class ValidateAdrEvidenceTests(unittest.TestCase):
+    """Slice 064-05 AC #2 support: validate_adr_evidence clears on a passing
+    verdict, fails (named diagnostic) when absent / fail."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-adr-val-"))
+        self.dec = self.tmp / "docs" / "decisions"
+        (self.dec / "reviews").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _verdict(self, verdict="pass"):
+        (self.dec / "reviews" / "adr-0020-frame-critique.md").write_text(
+            "---\n"
+            "adr: 0020\n"
+            "pass: frame-critique\n"
+            f"verdict: {verdict}\n"
+            "reviewer: jig:reviewer\n"
+            "reviewed_at: 2026-06-08T00:00:00Z\n"
+            "prompt_source: review.py frame-critique x\n"
+            "---\n\n## VERDICT\n" + verdict + "\n"
+        )
+
+    def test_clears_on_passing_verdict(self):
+        self._verdict("pass")
+        diags = ev.validate_adr_evidence(self.dec, "0020", "frame-critique")
+        self.assertEqual(diags, [], diags)
+
+    def test_absent_artifact_reported(self):
+        diags = ev.validate_adr_evidence(self.dec, "0020", "frame-critique")
+        self.assertTrue(diags)
+        joined = "\n".join(diags)
+        self.assertIn("adr-0020-frame-critique.md", joined)
+        self.assertIn("record-review", joined)
+        self.assertIn("--adr", joined)
+
+    def test_fail_verdict_does_not_clear(self):
+        self._verdict("fail")
+        diags = ev.validate_adr_evidence(self.dec, "0020", "frame-critique")
+        self.assertTrue(diags)
 
 
 if __name__ == "__main__":

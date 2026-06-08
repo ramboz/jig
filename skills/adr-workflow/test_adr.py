@@ -383,6 +383,141 @@ class AcceptTests(unittest.TestCase):
         self.assertNotIn("last_verified: 2020-01-01", content)
 
 
+# ---------- Slice 064-05: frame-critique stamp + accept gate ----------
+
+
+def _write_proposed_adr_064(path: Path, number: str, slug: str, title: str,
+                            *, frame_review: bool = False) -> None:
+    """Proposed ADR seed for the gate tests. When `frame_review` is set, a
+    leading frontmatter block carries `frame_review: true` (mirroring what
+    `cmd_new` stamps); otherwise the file is markerless (legacy grace path)."""
+    body = (
+        f"# ADR-{number}: {title}\n\n"
+        f"## Status\n\nProposed ({TODAY})\n\n"
+        f"## Context\n\nSample.\n\n"
+        f"## Decision Options Considered\n\n_TODO_\n\n"
+        f"## Recommended Decision\n\n_TODO_\n\n"
+        f"## Consequences\n\n_TODO_\n\n"
+        f"## Open questions\n\nNone.\n"
+    )
+    if frame_review:
+        body = "---\nframe_review: true\n---\n" + body
+    path.write_text(body)
+
+
+def _write_adr_frame_verdict(adrs_dir: Path, number: str,
+                             verdict: str = "pass") -> None:
+    reviews = adrs_dir / "reviews"
+    reviews.mkdir(parents=True, exist_ok=True)
+    (reviews / f"adr-{number}-frame-critique.md").write_text(
+        "---\n"
+        f"adr: {number}\n"
+        "pass: frame-critique\n"
+        f"verdict: {verdict}\n"
+        "reviewer: jig:reviewer\n"
+        "reviewed_at: 2026-06-08T00:00:00Z\n"
+        "prompt_source: review.py frame-critique x\n"
+        "---\n\n## VERDICT\n" + verdict + "\n"
+    )
+
+
+class NewStampsFrameReviewTests(unittest.TestCase):
+    """Slice 064-05 (OQ3 — ADRs always-on): cmd_new / reserve_adr stamp
+    `frame_review: true` into the new ADR's frontmatter at creation."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-stamp-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_cmd_new_stamps_frame_review_true(self):
+        mod = _import_adr_module()
+        target = mod.cmd_new(self.adrs_dir, "stamped-decision", "")
+        content = target.read_text()
+        self.assertTrue(content.startswith("---\n"),
+                        "frame_review must be stamped in a leading "
+                        "frontmatter block")
+        self.assertIn("frame_review: true", content)
+        # Body intact below the block.
+        self.assertIn("# ADR-", content)
+
+
+class AcceptGateTests(unittest.TestCase):
+    """Slice 064-05 AC #2/#3: `adr.py accept` gates the Proposed→Accepted
+    flip on a passing frame-critique verdict for `frame_review: true` ADRs;
+    bypassable via JIG_REVIEW_EVIDENCE_GATE=0; legacy markerless ADRs are
+    not gated (grace path)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-gate-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _env_no_gate(self) -> dict:
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        env["JIG_REVIEW_EVIDENCE_GATE"] = "0"
+        return env
+
+    def test_gated_accept_refused_without_verdict(self):
+        _write_proposed_adr_064(self.adrs_dir / "adr-0020-gated.md",
+                                "0020", "gated", "Gated", frame_review=True)
+        result = run_adr("accept", "0020", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("adr-0020-frame-critique.md", result.stderr)
+        self.assertIn("record-review", result.stderr)
+        self.assertIn("--adr", result.stderr)
+        # Status untouched — refusal happens before the flip.
+        content = (self.adrs_dir / "adr-0020-gated.md").read_text()
+        self.assertIn(f"Proposed ({TODAY})", content)
+
+    def test_gated_accept_clears_with_passing_verdict(self):
+        _write_proposed_adr_064(self.adrs_dir / "adr-0020-gated.md",
+                                "0020", "gated", "Gated", frame_review=True)
+        _write_adr_frame_verdict(self.adrs_dir, "0020", "pass")
+        result = run_adr("accept", "0020", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = (self.adrs_dir / "adr-0020-gated.md").read_text()
+        self.assertIn(f"Accepted ({TODAY})", content)
+
+    def test_gated_accept_refused_with_failing_verdict(self):
+        _write_proposed_adr_064(self.adrs_dir / "adr-0020-gated.md",
+                                "0020", "gated", "Gated", frame_review=True)
+        _write_adr_frame_verdict(self.adrs_dir, "0020", "fail")
+        result = run_adr("accept", "0020", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+
+    def test_bypass_via_env_var(self):
+        _write_proposed_adr_064(self.adrs_dir / "adr-0020-gated.md",
+                                "0020", "gated", "Gated", frame_review=True)
+        result = subprocess.run(
+            [sys.executable, str(ADR_PY), "accept", "0020"],
+            capture_output=True, text=True, env=self._env_no_gate(),
+            cwd=str(self.tmpdir),
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = (self.adrs_dir / "adr-0020-gated.md").read_text()
+        self.assertIn(f"Accepted ({TODAY})", content)
+
+    def test_legacy_markerless_adr_accepts_freely(self):
+        """Grace path: a pre-existing Proposed ADR WITHOUT frame_review is
+        not gated — no false refusal."""
+        _write_proposed_adr_064(self.adrs_dir / "adr-0007-legacy.md",
+                                "0007", "legacy", "Legacy", frame_review=False)
+        result = run_adr("accept", "0007", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        content = (self.adrs_dir / "adr-0007-legacy.md").read_text()
+        self.assertIn(f"Accepted ({TODAY})", content)
+
+
 # ---------- IndexTests (AC #3) ----------
 
 class IndexTests(unittest.TestCase):

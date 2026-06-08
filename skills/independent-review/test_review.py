@@ -1442,6 +1442,45 @@ class FrameCritiqueEvidenceRoundTripTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
 
 
+class FrameCritiqueAdrCliTests(unittest.TestCase):
+    """Slice 064-05: `review.py frame-critique <adr-path>` (no slice) builds an
+    ADR frame-critique prompt — the command the accept-gate's refusal message
+    advertises. ADRs aren't sliced, so find_slice_label must be skipped."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-frame-adr-cli-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, *args):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "frame-critique", *args],
+            capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def test_builds_prompt_for_adr_target_without_slice(self):
+        adr = self.tmp / "adr-0099-some-decision.md"
+        adr.write_text("---\nstatus: Proposed\nframe_review: true\n---\n\n"
+                       "# ADR-0099\n\n## Context\n\nx.\n")
+        r = self._run(str(adr))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        # Adversarial framing + the ADR label, the ADR listed as deliverable.
+        self.assertIn("ADR-0099", r.stdout)
+        self.assertIn("frame-critique pass", r.stdout)
+        self.assertIn("adr-0099-some-decision.md", r.stdout)
+
+    def test_spec_target_without_slice_errors(self):
+        spec = self.tmp / "spec.md"
+        spec.write_text("---\nstatus: DRAFT\n---\n\n# Spec X\n\n"
+                        "## Slice 001-01 — a\n\n**Goal:** x.\n")
+        r = self._run(str(spec))  # no slice fragment, not an ADR
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("slice", r.stderr.lower())
+
+
 class CodeHealthPromptTests(unittest.TestCase):
     """Slice 060-05 AC1/AC2: `review.py code-health <spec> <slice>
     <deliverable>... [--summary-file PATH]` builds a self-contained prompt
@@ -2583,6 +2622,64 @@ class RicherSkillFileReadDispatchTests(unittest.TestCase):
             "a project-scope `.claude/skills` copy (possibly jig's own "
             "scaffolded baseline) must NOT be treated as a richer skill",
         )
+
+
+class RecordReviewAdrModeTests(unittest.TestCase):
+    """Slice 064-05 AC #1: `record-review --adr NNNN` writes an ADR-side
+    verdict at docs/decisions/reviews/adr-NNNN-<pass>.md keyed on `adr`
+    (no `slice` field), mutually exclusive with the spec+slice positionals."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-rec-adr-"))
+        (self.tmp / "docs" / "decisions").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, *args, summary="## VERDICT\npass\n"):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review", *args],
+            input=summary, capture_output=True, text=True, cwd=str(self.tmp),
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def _evidence_file(self):
+        return (self.tmp / "docs" / "decisions" / "reviews"
+                / "adr-0020-frame-critique.md")
+
+    def test_adr_verdict_lands_at_defined_path(self):
+        r = self._record("--adr", "0020", "--pass", "frame-critique",
+                         "--verdict", "pass", "--reviewer", "jig:reviewer",
+                         "--prompt-source", "review.py frame-critique x")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertTrue(self._evidence_file().is_file(),
+                        f"missing: {self._evidence_file()}")
+
+    def test_adr_verdict_keyed_on_adr_not_slice(self):
+        self._record("--adr", "20", "--pass", "frame-critique",
+                     "--verdict", "pass", "--reviewer", "jig:reviewer",
+                     "--prompt-source", "x")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence_file().read_text())
+        self.assertEqual(fields.get("adr"), "0020",
+                         "adr number must be zero-padded to 4 digits")
+        self.assertNotIn("slice", fields,
+                         "ADR verdict must NOT carry a `slice` field")
+        self.assertEqual(fields.get("pass"), "frame-critique")
+
+    def test_adr_and_spec_mutually_exclusive(self):
+        # Passing both a spec positional AND --adr → argparse error (exit 2).
+        spec = _make_spec_with_slice(self.tmp / "064-z", "05", "foo")
+        r = self._record(str(spec), "0XX-05", "--adr", "0020",
+                         "--pass", "frame-critique", "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "x")
+        self.assertEqual(r.returncode, 2, f"stdout: {r.stdout}")
+
+    def test_neither_spec_nor_adr_refused(self):
+        r = self._record("--pass", "frame-critique", "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "x")
+        self.assertEqual(r.returncode, 2, f"stdout: {r.stdout}")
 
 
 if __name__ == "__main__":

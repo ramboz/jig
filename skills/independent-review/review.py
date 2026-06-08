@@ -1065,9 +1065,72 @@ def _read_summary(args) -> str:
     return ""
 
 
+def _record_adr_review(args) -> int:
+    """Write an ADR-side verdict file for an (adr, pass) under
+    `docs/decisions/reviews/adr-NNNN-<pass>.md` (slice 064-05 / ADR-0020
+    OQ2). Mirrors the slice path but keys the frontmatter on `adr` instead
+    of `slice` (no `slice` field). Overwrites in place on re-record."""
+    if args.pass_name not in _evidence.PASSES:
+        sys.stderr.write(
+            f"unknown pass '{args.pass_name}'; expected one of "
+            f"{', '.join(_evidence.PASSES)}\n"
+        )
+        return 2
+    if args.verdict not in _evidence.VERDICTS:
+        sys.stderr.write(
+            f"unknown verdict '{args.verdict}'; expected one of "
+            f"{', '.join(_evidence.VERDICTS)}\n"
+        )
+        return 2
+
+    # ADRs live at docs/decisions/ relative to cwd (the project root),
+    # mirroring adr.py's accept/supersede dispatch.
+    decisions_dir = Path.cwd() / "docs" / "decisions"
+    try:
+        num = f"{int(args.adr):04d}"
+        out_path = _evidence.adr_evidence_path(decisions_dir, args.adr,
+                                               args.pass_name)
+        body = _read_summary(args)
+    except (ValueError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    # Frontmatter keyed on `adr` (ADR_REQUIRED_FIELDS) — no `slice` field.
+    frontmatter = (
+        "---\n"
+        f"adr: {num}\n"
+        f"pass: {args.pass_name}\n"
+        f"verdict: {args.verdict}\n"
+        f"reviewer: {args.reviewer}\n"
+        f"reviewed_at: {_now_iso8601()}\n"
+        f"prompt_source: {args.prompt_source}\n"
+        "---\n"
+    )
+    content = frontmatter + "\n" + body
+    if not content.endswith("\n"):
+        content += "\n"
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(out_path, content)
+    sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    return 0
+
+
 def record_review(args) -> int:
     """Write a verdict file for a (slice, pass). Overwrites in place on
     re-record (ADR-0014 §4 — git history is the audit trail, no append)."""
+    # Slice 064-05: ADR mode is mutually exclusive with spec+slice (enforced
+    # by the argparse mutually-exclusive group + the required-pair check
+    # below). ADRs aren't slices, so they take a separate path.
+    if getattr(args, "adr", None) is not None:
+        return _record_adr_review(args)
+
+    if not args.spec or not args.slice:
+        sys.stderr.write(
+            "record-review requires either a spec + slice pair or --adr NNNN\n"
+        )
+        return 2
+
     spec = Path(args.spec)
     if not spec.is_file():
         sys.stderr.write(f"spec not found: {spec}\n")
@@ -1188,9 +1251,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "frame-critique",
         help="construct an adversarial frame-critique prompt (pre-implementation)",
     )
-    pfc.add_argument("spec", help="path to spec.md (or ADR)")
-    pfc.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
-    pfc.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+    pfc.add_argument(
+        "spec",
+        help="path to spec.md, OR an ADR path (docs/decisions/adr-NNNN-*.md) "
+             "for an ADR frame-critique (slice 064-05)")
+    pfc.add_argument(
+        "slice", nargs="?", default=None,
+        help="slice name or fragment (omit for an ADR target — ADRs aren't "
+             "sliced)")
+    pfc.add_argument(
+        "deliverables", nargs="*",
+        help="one or more deliverable paths (defaults to the ADR itself for "
+             "an ADR target)")
 
     # Slice 060-05: code-health pass — on-demand (gated by
     # `code_health_review: true`), mirrors `arch-review` plus a summary.
@@ -1214,15 +1286,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="record a review verdict as durable slice evidence",
         description=(
             "Write a verdict file at "
-            "docs/specs/NNN-slug/reviews/slice-NN-<pass>.md (ADR-0014 §1). "
-            "Re-recording the same (slice, pass) overwrites in place — git "
-            "history is the audit trail (ADR-0014 §4). The freeform summary "
-            "body is read from --summary-file or stdin."
+            "docs/specs/NNN-slug/reviews/slice-NN-<pass>.md (ADR-0014 §1), "
+            "or — with --adr NNNN — at "
+            "docs/decisions/reviews/adr-NNNN-<pass>.md (ADR-0020 OQ2, the "
+            "ADR-side frame-critique evidence). Re-recording the same target "
+            "overwrites in place — git history is the audit trail (ADR-0014 "
+            "§4). The freeform summary body is read from --summary-file or "
+            "stdin."
         ),
     )
-    prec.add_argument("spec", help="path to spec.md")
-    prec.add_argument("slice",
-                      help="slice name or fragment (case-insensitive substring)")
+    # Slice 064-05: record-review takes EITHER a spec + slice pair (the
+    # slice-evidence path) OR --adr NNNN (the ADR-side frame-critique
+    # evidence path, ADR-0020 OQ2). The two targets are mutually exclusive:
+    # spec/slice are optional positionals, and --adr lives in a
+    # mutually-exclusive group with the spec positional so argparse rejects
+    # passing both. record_review() also checks the spec+slice pair is
+    # complete when --adr is absent.
+    target = prec.add_mutually_exclusive_group()
+    target.add_argument("spec", nargs="?", default=None, help="path to spec.md")
+    target.add_argument(
+        "--adr", default=None,
+        help="4-digit ADR number (record an ADR-side verdict at "
+             "docs/decisions/reviews/adr-NNNN-<pass>.md instead of a slice)",
+    )
+    prec.add_argument(
+        "slice", nargs="?", default=None,
+        help="slice name or fragment (case-insensitive substring); required "
+             "with a spec, omit with --adr",
+    )
     prec.add_argument(
         "--pass", dest="pass_name", required=True,
         choices=list(_evidence.PASSES),
@@ -1325,6 +1416,36 @@ def main(argv: list) -> int:
     if not spec.is_file():
         sys.stderr.write(f"spec not found: {spec}\n")
         return 2
+
+    # Slice 064-05: `frame-critique` accepts an ADR target (no slice). The
+    # accept-gate's refusal advertises `review.py frame-critique <adr>`, so an
+    # ADR is critiqued as its own deliverable — ADRs aren't sliced, so skip
+    # find_slice_label (which would die on the missing `## Slice` headings).
+    if ns.command == "frame-critique":
+        adr_m = re.match(r"(?i)^adr-(\d{1,4})\b", spec.name)
+        if adr_m:
+            adr_label = f"ADR-{int(adr_m.group(1)):04d}"
+            deliverables = ns.deliverables or [str(spec)]
+            try:
+                sys.stdout.write(
+                    build_frame_critique_prompt(spec, adr_label, deliverables))
+                return 0
+            except ReviewError as exc:
+                sys.stderr.write(f"{exc}\n")
+                return 2
+        # Spec target: slice + >=1 deliverable are both required (the
+        # argparse positionals were relaxed to optional only to permit the
+        # ADR form above, which defaults its deliverable to the ADR itself).
+        if ns.slice is None:
+            sys.stderr.write(
+                "frame-critique on a spec requires a <slice> fragment (or pass "
+                "an ADR path for an ADR frame-critique)\n")
+            return 2
+        if not ns.deliverables:
+            sys.stderr.write(
+                "frame-critique on a spec requires at least one deliverable "
+                "path\n")
+            return 2
 
     try:
         slice_label = find_slice_label(spec, ns.slice)

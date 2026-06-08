@@ -36,6 +36,7 @@ from _common.parsing import (
 )
 from _common.parsing import iter_slices as _iter_slices_common
 from _common.parsing import load_slice as _load_slice_common
+from _common.review_evidence import evidence_gate_enabled as _evidence_gate_enabled
 from _common.review_evidence import validate_evidence
 from _common.team_signal import team_context_drift
 
@@ -704,24 +705,14 @@ def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
 # This is the only PRE-implementation evidence gate.
 _EVIDENCE_GATED_STATES = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED", "DONE")
 
-# Falsey tokens that disable the gate via `JIG_REVIEW_EVIDENCE_GATE`. The
-# gate is ON by default; this is the documented bypass for a deliberate
-# actor / automation. Per ADR-0011 (cited by ADR-0014 §6), an in-process
-# gate sits inside the agent's trust boundary — it is a *deliberateness*
-# signal, not human-only enforcement — so an env-var escape hatch is
-# consistent with the model (cf. `JIG_CONVENTIONS_APPROVED`). The
+# The review-evidence gate enable/disable predicate is shared with the
+# ADR-side accept gate (slice 064-05): both read `JIG_REVIEW_EVIDENCE_GATE`
+# identically, so the predicate + its falsey-token set now live in
+# `_common.review_evidence` (single source — see that module's
+# `evidence_gate_enabled`). `_evidence_gate_enabled` is imported above as an
+# alias so the call sites + tests in this module are unchanged. The
 # dependency check on DONE is NOT part of the evidence gate and still runs
 # under the bypass.
-_GATE_DISABLE_VALUES = ("0", "false", "off", "no")
-
-
-def _evidence_gate_enabled() -> bool:
-    """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
-    is set to one of the falsey tokens (case-insensitive)."""
-    raw = os.environ.get("JIG_REVIEW_EVIDENCE_GATE")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in _GATE_DISABLE_VALUES
 
 
 def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,

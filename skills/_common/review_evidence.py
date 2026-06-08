@@ -35,6 +35,7 @@ already rejects.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from _common.parsing import (
@@ -67,10 +68,50 @@ REQUIRED_FIELDS = (
     "prompt_source",
 )
 
+# Slice 064-05 (ADR-0020 OQ2/OQ3): ADRs are NOT slices, so the ADR-side
+# frame-critique evidence file is keyed on `adr` (the 4-digit number)
+# instead of `slice`. Same six-field shape otherwise. The ADR gate lives
+# at `adr.py accept`; this is the only place the field set diverges.
+ADR_REQUIRED_FIELDS = (
+    "adr",
+    "pass",
+    "verdict",
+    "reviewer",
+    "reviewed_at",
+    "prompt_source",
+)
+
 # Command the diagnostics point at when evidence is missing/non-clearing
 # (ADR-0014 Consequences: "the gate names the missing artifact and the
 # command to produce it"). Kept as a constant so writer + gate agree.
 RECORD_CMD = "review.py record-review"
+
+# Falsey tokens that disable the review-evidence gate via
+# `JIG_REVIEW_EVIDENCE_GATE`. The gate is ON by default; this is the
+# documented bypass for a deliberate actor / automation. Per ADR-0011
+# (cited by ADR-0014 §6), an in-process gate sits inside the agent's trust
+# boundary — it is a *deliberateness* signal, not human-only enforcement —
+# so an env-var escape hatch is consistent with the model (cf.
+# `JIG_CONVENTIONS_APPROVED`).
+#
+# Slice 064-05: MOVED here from `workflow.py` (where it was
+# `_GATE_DISABLE_VALUES` / `_evidence_gate_enabled`). Both the spec-side
+# transition gate (`workflow.py`) and the ADR-side accept gate (`adr.py`)
+# are the SAME ADR-0011/0014 deliberateness signal and MUST read
+# `JIG_REVIEW_EVIDENCE_GATE` identically — a single source prevents drift.
+# This is the load-bearing-consistency case ADR-0002 calls out (two callers
+# that must not diverge), cohesive with this module's review-evidence home.
+# `workflow.py` keeps its `_evidence_gate_enabled` name as an alias.
+GATE_DISABLE_VALUES = ("0", "false", "off", "no")
+
+
+def evidence_gate_enabled() -> bool:
+    """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
+    is set to one of the falsey tokens (case-insensitive)."""
+    raw = os.environ.get("JIG_REVIEW_EVIDENCE_GATE")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in GATE_DISABLE_VALUES
 
 
 class EvidenceError(RuntimeError):
@@ -205,15 +246,20 @@ def verdict_clears(verdict: str) -> bool:
     return verdict == "pass"
 
 
-def parse_verdict_file(path) -> VerdictRecord:
+def parse_verdict_file(path, required_fields=REQUIRED_FIELDS) -> VerdictRecord:
     """Read and validate one verdict file.
 
     Checks (ADR-0014 §2/§3):
       - file exists and is readable;
       - has a frontmatter block;
-      - carries all six `REQUIRED_FIELDS`;
+      - carries all `required_fields`;
       - `pass` and `verdict` are in-vocabulary;
       - `verdict == pass` to clear.
+
+    `required_fields` defaults to the slice-evidence `REQUIRED_FIELDS`
+    (six fields keyed on `slice`) so existing callers are unaffected.
+    The ADR-side gate (slice 064-05) passes `ADR_REQUIRED_FIELDS` (keyed
+    on `adr` instead of `slice`).
 
     Returns a `VerdictRecord`. Never raises for content problems — every
     failure mode becomes a `problems` entry so callers can aggregate
@@ -242,12 +288,12 @@ def parse_verdict_file(path) -> VerdictRecord:
         problems.append(
             f"{path.name}: missing or malformed frontmatter block "
             f"(need a leading `---` … `---` block with "
-            f"{', '.join(REQUIRED_FIELDS)})"
+            f"{', '.join(required_fields)})"
         )
         # No fields to validate further.
         return VerdictRecord(path, fields, problems, False)
 
-    for key in REQUIRED_FIELDS:
+    for key in required_fields:
         val = fields.get(key)
         if val is None or (isinstance(val, str) and not val.strip()):
             problems.append(f"{path.name}: missing required field '{key}'")
@@ -409,4 +455,58 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
                     f"(produce with: {RECORD_CMD} <spec> {slice_fragment} "
                     f"--pass {pass_name} --verdict pass ...)"
                 )
+    return diagnostics
+
+
+# ---------------------------------------------------------------------------
+# ADR-side evidence (slice 064-05 / ADR-0020 OQ2/OQ3).
+#
+# ADRs are NOT slices, so the `reviews/slice-NN-<pass>.md` path under a
+# spec dir doesn't apply. The ADR-side frame-critique verdict lives under
+# `docs/decisions/reviews/adr-NNNN-<pass>.md`, mirroring the slice layout
+# one level up — a `reviews/` subdir beside the artifacts it judges. The
+# gate is enforced at `adr.py accept` (the ADR's pre-commitment moment),
+# not at a workflow transition.
+# ---------------------------------------------------------------------------
+
+
+def adr_evidence_path(decisions_dir, adr_num, pass_name: str) -> Path:
+    """Resolve the ADR verdict-file path for an (adr, pass).
+
+    Returns ``<decisions_dir>/reviews/adr-NNNN-<pass>.md`` with the ADR
+    number zero-padded to 4 digits (mirroring adr.py's `adr-NNNN-` file
+    convention). Raises `EvidenceError` for an unknown pass name.
+    """
+    if pass_name not in PASSES:
+        raise EvidenceError(
+            f"unknown pass '{pass_name}'; expected one of "
+            f"{', '.join(PASSES)}"
+        )
+    num = f"{int(adr_num):04d}"
+    return Path(decisions_dir) / "reviews" / f"adr-{num}-{pass_name}.md"
+
+
+def validate_adr_evidence(decisions_dir, adr_num, pass_name: str) -> list:
+    """Validate the ADR-side verdict file for an (adr, pass).
+
+    Returns a list of human-readable diagnostics; an empty list means the
+    verdict clears (exists, well-formed against `ADR_REQUIRED_FIELDS`, and
+    `verdict: pass`). Mirrors `validate_evidence`'s diagnostic style and
+    names the missing artifact + the command to produce it (ADR-0014
+    Consequences). The ADR gate (`adr.py accept`) calls this.
+    """
+    num = f"{int(adr_num):04d}"
+    try:
+        path = adr_evidence_path(decisions_dir, adr_num, pass_name)
+    except EvidenceError as exc:
+        return [str(exc)]
+    rec = parse_verdict_file(path, required_fields=ADR_REQUIRED_FIELDS)
+    diagnostics: list = []
+    if not rec.clears:
+        for problem in rec.problems:
+            diagnostics.append(
+                f"[{pass_name}] {problem} "
+                f"(produce with: {RECORD_CMD} --adr {num} "
+                f"--pass {pass_name} --verdict pass ...)"
+            )
     return diagnostics
