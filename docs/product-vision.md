@@ -192,6 +192,12 @@ reconciliation.
    directory where it can be read, modified, and extended. Plugin mode
    stays available for users who want it; scaffolded mode is the
    default because positioning matters.
+8. **Designed to reduce token cost.** Beyond keeping context below the
+   dumb zone for *quality* (principle #2), jig is built to keep token
+   usage — and the bill — *down*: it favors a lean context, delegates
+   file-heavy reading to subagents, and keeps output tight, so a session
+   costs less to run. jig also measures its own spend rather than guessing
+   at it. Mechanics and evidence live in the specs and ADRs.
 
 ## How new work enters jig
 
