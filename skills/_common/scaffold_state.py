@@ -23,26 +23,27 @@ What this module owns:
     non-goals: they have intentionally different semantics, and rewriting
     them is a separate behavior-change risk). This module therefore
     transiently duplicates scaffold-init's empty-dir-counting variant.
-  - `precondition_enabled()` — the `JIG_SCAFFOLD_PRECONDITION` bypass,
-    mirroring `review_evidence.evidence_gate_enabled()` (same
-    `{0,false,off,no}` vocabulary). Default = ON.
+  - `precondition_enabled()` — the `JIG_SCAFFOLD_PRECONDITION` bypass, backed
+    by the shared `_common.parsing.env_gate_enabled` (same opt-out predicate +
+    `{0,false,off,no}` vocabulary as `review_evidence.evidence_gate_enabled()`).
+    Default = ON.
 
 `_common` is a LEAF: this module imports only stdlib + the shared
-`GATE_DISABLE_VALUES` vocabulary from `_common.review_evidence`. It does
-NOT import from `skills/scaffold-init/` or any non-`_common` module.
+`env_gate_enabled` predicate from `_common.parsing`. It does NOT import from
+`skills/scaffold-init/` or any non-`_common` module.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-# Reuse the single bypass vocabulary so the spec-precondition gate and the
-# review-evidence gate can never drift on what "disabled" means
+# The shared opt-out env-gate predicate + falsey vocabulary live in
+# `_common.parsing` so the spec-precondition gate, the review-evidence gate,
+# and the two hook gates can never drift on what "disabled" means
 # ({0,false,off,no}, case-insensitive). ADR-0011: an in-process gate is a
 # deliberateness signal, not human-only enforcement, so an env escape hatch
 # is consistent (cf. `JIG_REVIEW_EVIDENCE_GATE` / `JIG_CONVENTIONS_APPROVED`).
-from _common.review_evidence import GATE_DISABLE_VALUES
+from _common.parsing import env_gate_enabled
 
 # Watermark embedded in jig's scaffolded CLAUDE.md template. Its presence
 # with `scaffold.json` ABSENT is the interrupted-scaffold case (a crashed
@@ -65,15 +66,13 @@ PRECONDITION_ENV = "JIG_SCAFFOLD_PRECONDITION"
 def precondition_enabled() -> bool:
     """The scaffold-precondition gate is enabled unless
     `JIG_SCAFFOLD_PRECONDITION` is set to one of the falsey tokens
-    (`0`/`false`/`off`/`no`, case-insensitive). Default = ON.
+    (`_common.parsing.ENV_FALSEY` — `0`/`false`/`off`/`no`, case-insensitive).
+    Default = ON.
 
-    Mirrors `review_evidence.evidence_gate_enabled()` exactly (shared
-    `GATE_DISABLE_VALUES`) — both are the same ADR-0011 deliberateness
-    signal."""
-    raw = os.environ.get(PRECONDITION_ENV)
-    if raw is None:
-        return True
-    return raw.strip().lower() not in GATE_DISABLE_VALUES
+    Backed by the shared `_common.parsing.env_gate_enabled` — the same opt-out
+    predicate behind `review_evidence.evidence_gate_enabled()`; both are the
+    same ADR-0011 deliberateness signal and read one vocabulary."""
+    return env_gate_enabled(PRECONDITION_ENV)
 
 
 def looks_spec_driven(project_dir: Path) -> bool:

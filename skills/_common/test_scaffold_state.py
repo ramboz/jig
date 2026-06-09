@@ -211,7 +211,8 @@ class ClassifyScaffoldStateTests(unittest.TestCase):
 
 class BypassTests(unittest.TestCase):
     """AC6: `JIG_SCAFFOLD_PRECONDITION` honors the {0,false,off,no}
-    vocabulary (mirrors review_evidence.GATE_DISABLE_VALUES). Default ON."""
+    vocabulary (the shared `_common.parsing.ENV_FALSEY`, via
+    `env_gate_enabled`). Default ON."""
 
     def setUp(self):
         self._saved = os.environ.pop("JIG_SCAFFOLD_PRECONDITION", None)

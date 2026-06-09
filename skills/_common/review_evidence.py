@@ -35,12 +35,12 @@ already rejects.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
+    env_gate_enabled,
     frontmatter_flag_truthy,
     load_slice,
     parse_frontmatter,
@@ -86,32 +86,21 @@ ADR_REQUIRED_FIELDS = (
 # command to produce it"). Kept as a constant so writer + gate agree.
 RECORD_CMD = "review.py record-review"
 
-# Falsey tokens that disable the review-evidence gate via
-# `JIG_REVIEW_EVIDENCE_GATE`. The gate is ON by default; this is the
-# documented bypass for a deliberate actor / automation. Per ADR-0011
-# (cited by ADR-0014 §6), an in-process gate sits inside the agent's trust
-# boundary — it is a *deliberateness* signal, not human-only enforcement —
-# so an env-var escape hatch is consistent with the model (cf.
-# `JIG_CONVENTIONS_APPROVED`).
-#
-# Slice 064-05: MOVED here from `workflow.py` (where it was
-# `_GATE_DISABLE_VALUES` / `_evidence_gate_enabled`). Both the spec-side
-# transition gate (`workflow.py`) and the ADR-side accept gate (`adr.py`)
-# are the SAME ADR-0011/0014 deliberateness signal and MUST read
-# `JIG_REVIEW_EVIDENCE_GATE` identically — a single source prevents drift.
-# This is the load-bearing-consistency case ADR-0002 calls out (two callers
-# that must not diverge), cohesive with this module's review-evidence home.
-# `workflow.py` keeps its `_evidence_gate_enabled` name as an alias.
-GATE_DISABLE_VALUES = ("0", "false", "off", "no")
-
-
 def evidence_gate_enabled() -> bool:
     """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
-    is set to one of the falsey tokens (case-insensitive)."""
-    raw = os.environ.get("JIG_REVIEW_EVIDENCE_GATE")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in GATE_DISABLE_VALUES
+    is set to one of the falsey tokens (`_common.parsing.ENV_FALSEY`,
+    case-insensitive). The gate is ON by default; this is the documented
+    bypass for a deliberate actor / automation. Per ADR-0011 (cited by
+    ADR-0014 §6), an in-process gate sits inside the agent's trust boundary —
+    a *deliberateness* signal, not human-only enforcement — so an env escape
+    hatch is consistent (cf. `JIG_CONVENTIONS_APPROVED`).
+
+    The falsey vocabulary + this opt-out logic live in `_common.parsing`
+    (`ENV_FALSEY` / `env_gate_enabled`) so every jig bypass gate reads one
+    source and cannot drift — the load-bearing-consistency case ADR-0002 calls
+    out. (`workflow.py` keeps `_evidence_gate_enabled` as an alias; the
+    ADR-side accept gate in `adr.py` reads the same function.)"""
+    return env_gate_enabled("JIG_REVIEW_EVIDENCE_GATE")
 
 
 class EvidenceError(RuntimeError):

@@ -51,7 +51,12 @@ def match_pattern(basename):
     return None, None
 
 try:
-    if os.environ.get('JIG_BOUNDARY_CHECK') == '0':
+    # Opt-out disable token. Mirrors _common/parsing.ENV_FALSEY
+    # ({0,false,off,no}) — kept inline (not imported) so this hook gains no
+    # _common-import failure mode; a source-inspection test pins the two token
+    # sets in sync. Widened from a bare '0' for cross-gate consistency; '0'
+    # still works (backward-compatible).
+    if (os.environ.get('JIG_BOUNDARY_CHECK') or '').strip().lower() in ('0', 'false', 'off', 'no'):
         sys.exit(0)
 
     data = json.load(sys.stdin)

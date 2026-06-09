@@ -1,5 +1,6 @@
 """Tests for skills/_common/parsing.py."""
 
+import os
 import shutil
 import sys
 import tempfile
@@ -8,11 +9,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from parsing import (
+    ENV_FALSEY,
     FRONTMATTER_TRUTHY,
     SliceLocation,
     SliceLookupError,
     check_deviation_log,
     clear_frontmatter_field,
+    env_flag_enabled,
+    env_gate_enabled,
     find_slice_file,
     find_slice_section,
     frontmatter_flag_truthy,
@@ -637,6 +641,94 @@ class CheckDeviationLogTests(unittest.TestCase):
     def test_requires_h3_not_h2(self):
         # An H2 `## Deviation log` is not the slice's deviation-log subsection.
         self.assertFalse(check_deviation_log("## Deviation log\n\nx\n"))
+
+
+class EnvGatePredicateTests(unittest.TestCase):
+    """The shared env-flag predicates that back jig's bypass gates
+    (env-bypass idiom unification). `env_gate_enabled` = opt-out (ON unless
+    falsey); `env_flag_enabled` = opt-in (OFF unless truthy)."""
+
+    _VAR = "JIG_TEST_ENV_GATE_PREDICATE"
+
+    def setUp(self):
+        self._saved = os.environ.pop(self._VAR, None)
+
+    def tearDown(self):
+        if self._saved is not None:
+            os.environ[self._VAR] = self._saved
+        else:
+            os.environ.pop(self._VAR, None)
+
+    # --- env_gate_enabled (opt-out: ON by default) ---
+    def test_gate_unset_is_enabled(self):
+        self.assertTrue(env_gate_enabled(self._VAR))
+
+    def test_gate_falsey_tokens_disable(self):
+        for tok in ENV_FALSEY:  # ("0", "false", "off", "no")
+            os.environ[self._VAR] = tok
+            self.assertFalse(env_gate_enabled(self._VAR), f"{tok!r} should disable")
+
+    def test_gate_falsey_is_case_and_whitespace_insensitive(self):
+        for tok in ("  OFF  ", "False", "NO", " 0 "):
+            os.environ[self._VAR] = tok
+            self.assertFalse(env_gate_enabled(self._VAR), f"{tok!r} should disable")
+
+    def test_gate_other_values_stay_enabled(self):
+        for tok in ("1", "true", "yes", "", "maybe"):
+            os.environ[self._VAR] = tok
+            self.assertTrue(env_gate_enabled(self._VAR), f"{tok!r} should keep on")
+
+    # --- env_flag_enabled (opt-in: OFF by default) ---
+    def test_flag_unset_is_disabled(self):
+        self.assertFalse(env_flag_enabled(self._VAR))
+
+    def test_flag_truthy_tokens_enable(self):
+        for tok in FRONTMATTER_TRUTHY:  # ("true", "yes", "on", "1")
+            os.environ[self._VAR] = tok
+            self.assertTrue(env_flag_enabled(self._VAR), f"{tok!r} should enable")
+
+    def test_flag_truthy_is_case_and_whitespace_insensitive(self):
+        for tok in ("  ON  ", "True", "YES", " 1 "):
+            os.environ[self._VAR] = tok
+            self.assertTrue(env_flag_enabled(self._VAR), f"{tok!r} should enable")
+
+    def test_flag_other_values_stay_disabled(self):
+        for tok in ("0", "false", "no", "", "maybe"):
+            os.environ[self._VAR] = tok
+            self.assertFalse(env_flag_enabled(self._VAR), f"{tok!r} should stay off")
+
+
+class HookGateVocabularyPinTests(unittest.TestCase):
+    """Pin the two `jig-*` hook gates' INLINE token sets to the canonical
+    `_common.parsing` vocabularies. The hooks deliberately mirror the literals
+    inline (rather than importing `_common`) so a load-bearing gate gains no
+    import-failure mode — but that duplication must not drift. This guards it
+    by source inspection (the same approach as scaffold_state's watermark pin).
+
+    `JIG_BOUNDARY_CHECK` (jig-boundary-change-warn.sh) mirrors ENV_FALSEY;
+    `JIG_CONVENTIONS_APPROVED` (jig-spec-gate.sh) mirrors FRONTMATTER_TRUTHY."""
+
+    _HOOKS = Path(__file__).resolve().parents[2] / "hooks" / "scripts"
+
+    def test_boundary_check_hook_carries_full_env_falsey_set(self):
+        src = (self._HOOKS / "jig-boundary-change-warn.sh").read_text()
+        self.assertIn("JIG_BOUNDARY_CHECK", src)
+        for tok in ENV_FALSEY:
+            self.assertIn(
+                f"'{tok}'", src,
+                f"jig-boundary-change-warn.sh is missing falsey token {tok!r} "
+                f"— it has drifted from _common.parsing.ENV_FALSEY",
+            )
+
+    def test_spec_gate_hook_carries_full_frontmatter_truthy_set(self):
+        src = (self._HOOKS / "jig-spec-gate.sh").read_text()
+        self.assertIn("JIG_CONVENTIONS_APPROVED", src)
+        for tok in FRONTMATTER_TRUTHY:
+            self.assertIn(
+                f"'{tok}'", src,
+                f"jig-spec-gate.sh is missing truthy token {tok!r} — it has "
+                f"drifted from _common.parsing.FRONTMATTER_TRUTHY",
+            )
 
 
 if __name__ == "__main__":
