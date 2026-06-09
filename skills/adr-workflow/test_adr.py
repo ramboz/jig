@@ -144,6 +144,10 @@ class NewTests(unittest.TestCase):
         self.adrs_dir = self.target / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
+        # Spec 066-01: the reserve path classifies scaffold-state. Drop the
+        # completion sentinel so these fixtures classify as `scaffolded` and
+        # proceed through the legacy reserve flow unchanged.
+        (self.target / "scaffold.json").write_text("{}\n")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -1419,6 +1423,11 @@ class ReserveAdrTests(unittest.TestCase):
         self.adrs_dir = self.target / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
+        # Spec 066-01: the reserve path classifies scaffold-state. Drop the
+        # completion sentinel so these fixtures classify as `scaffolded` and
+        # run the existing 028-01 reserve flow with identical observable
+        # output (AC4 no-regression).
+        (self.target / "scaffold.json").write_text("{}\n")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -1673,7 +1682,10 @@ class ReserveAdrTests(unittest.TestCase):
 
     # Refuse when docs/decisions/ absent (parity with workflow.py
     # missing-specs-dir refusal).
-    def test_new_refuses_when_decisions_dir_absent(self):
+    def test_new_refuses_when_unscaffolded(self):
+        # Spec 066-01: an empty (no scaffold.json, no spec-driven layout)
+        # project classifies as `greenfield` and is ROUTED to scaffold-init,
+        # replacing the old dead-end "docs/decisions/ not found" refusal.
         bare = Path(self.tmpdir) / "bare"
         bare.mkdir()
         rec = _SubprocessRecorder()
@@ -1686,7 +1698,13 @@ class ReserveAdrTests(unittest.TestCase):
                     title="", no_push=True, pr_mode=False,
                 )
         msg = str(ctx.exception)
-        self.assertIn("docs/decisions", msg)
+        self.assertIn("greenfield", msg.lower())
+        self.assertIn("/jig:scaffold-init", msg)
+        # No ADR file / reservation commit created on the refusal.
+        self.assertFalse(
+            (bare / "docs" / "decisions" / "adr-0001-validslug.md").exists())
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git commit", flat)
 
     # Slug-collision check fires AFTER fetch (so the collision view is
     # freshest) but BEFORE writing the new file.
@@ -1963,6 +1981,187 @@ class ReserveAdrTests(unittest.TestCase):
         self.assertIn("# ADR-0001: Custom Title Here", content)
 
 
+# ---------- ReserveAdrPreconditionRoutingTests (slice 066-01) ----------
+
+class ReserveAdrPreconditionRoutingTests(unittest.TestCase):
+    """Spec 066-01: `reserve_adr` (the `adr.py new` reserve path) replaces the
+    weak `docs/decisions/`-presence check with a three-way scaffold-state
+    classification that ROUTES — an `adoptable` project to /jig:migrate, a
+    `greenfield` one to /jig:scaffold-init — while a `scaffolded` project
+    (scaffold.json present) proceeds to the legacy reserve flow unchanged.
+    `JIG_SCAFFOLD_PRECONDITION` bypasses the classification entirely (ADR-0011
+    deliberateness gate). Mirrors ReserveSpecPreconditionRoutingTests in
+    test_workflow.py."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-adr-066-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        self.adrs_dir = self.target / "docs" / "decisions"
+        self._saved = os.environ.pop("JIG_SCAFFOLD_PRECONDITION", None)
+        self.addCleanup(lambda: shutil.rmtree(self.tmpdir, ignore_errors=True))
+
+        def _restore():
+            if self._saved is not None:
+                os.environ["JIG_SCAFFOLD_PRECONDITION"] = self._saved
+            else:
+                os.environ.pop("JIG_SCAFFOLD_PRECONDITION", None)
+        self.addCleanup(_restore)
+
+    def _make_greenfield(self):
+        # Empty project: no scaffold.json, no spec-driven layout, no
+        # docs/decisions/.
+        pass
+
+    def _make_adoptable(self):
+        # >=3 triggers, no scaffold.json, no jig watermark.
+        (self.target / "docs" / "specs").mkdir(parents=True)
+        (self.target / "docs" / "decisions").mkdir(parents=True)
+        (self.target / "docs" / "workflow.md").write_text("# wf\n")
+
+    def _make_scaffolded(self):
+        (self.target / "docs" / "decisions").mkdir(parents=True)
+        (self.target / "scaffold.json").write_text("{}\n")
+
+    # AC1 — adoptable → /jig:migrate, no ADR file, no reservation commit.
+    def test_adoptable_routes_to_migrate(self):
+        self._make_adoptable()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "validslug", project_dir=self.target,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("adoptable", msg.lower())
+        self.assertIn("/jig:migrate", msg)
+        # No ADR file created, no reservation commit.
+        self.assertFalse(
+            (self.adrs_dir / "adr-0001-validslug.md").exists())
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git commit", flat)
+
+    # AC1 — greenfield → /jig:scaffold-init, no ADR file, no reservation commit.
+    def test_greenfield_routes_to_scaffold_init(self):
+        self._make_greenfield()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "validslug", project_dir=self.target,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("greenfield", msg.lower())
+        self.assertIn("/jig:scaffold-init", msg)
+        self.assertFalse((self.target / "docs" / "decisions").exists())
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git commit", flat)
+
+    # Interrupted scaffold (jig watermark, no scaffold.json) → greenfield
+    # routing (scaffold-init recovery), even with >=3 triggers present.
+    def test_interrupted_scaffold_routes_to_scaffold_init(self):
+        (self.target / "CLAUDE.md").write_text(
+            "# Proj\n\n<!-- Generated by [jig] -->\n")
+        (self.target / "docs" / "specs").mkdir(parents=True)
+        (self.target / "docs" / "decisions").mkdir(parents=True)
+        (self.target / "docs" / "workflow.md").write_text("# wf\n")
+        (self.target / "docs" / "architecture.md").write_text("# arch\n")
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "validslug", project_dir=self.target,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("greenfield", msg.lower())
+        self.assertIn("/jig:scaffold-init", msg)
+
+    # AC4 — scaffolded → proceeds through the legacy reserve flow.
+    def test_scaffolded_proceeds_to_reserve(self):
+        self._make_scaffolded()
+        rec = _SubprocessRecorder()
+        # Stub the legacy preflight + commit path (branch==main, clean tree,
+        # github origin, add/commit succeed) — no remote calls for --no-push.
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "validslug", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # The legacy flow created the reservation stub ADR.
+        self.assertTrue(
+            (self.adrs_dir / "adr-0001-validslug.md").is_file())
+
+    # AC3 — bypass: JIG_SCAFFOLD_PRECONDITION=0 skips classification and
+    # runs the legacy flow even on a greenfield project (with docs/decisions/
+    # present so the legacy weak check passes).
+    def test_bypass_runs_legacy_flow_on_greenfield(self):
+        # Greenfield-ish but the legacy flow still needs docs/decisions/ to
+        # exist (the bypass restores *today's* behavior, including its own
+        # weak docs/decisions/ check). Provide docs/decisions/ — but NOT
+        # scaffold.json — so the legacy path runs without classification.
+        (self.target / "docs" / "decisions").mkdir(parents=True)
+        os.environ["JIG_SCAFFOLD_PRECONDITION"] = "0"
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _adr_mod.reserve_adr(
+                "validslug", project_dir=self.target,
+                title="", no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(
+            (self.adrs_dir / "adr-0001-validslug.md").is_file())
+
+    # AC3 — bypass with the legacy weak check still firing: docs/decisions/
+    # absent under bypass → the OLD dead-end refusal (preserves today's
+    # behavior exactly, no scaffold-state routing).
+    def test_bypass_preserves_legacy_weak_refusal(self):
+        os.environ["JIG_SCAFFOLD_PRECONDITION"] = "false"
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_adr_mod, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_adr_mod.AdrError) as ctx:
+                _adr_mod.reserve_adr(
+                    "validslug", project_dir=self.target,
+                    title="", no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        # Legacy message (not the scaffold-state routing message).
+        self.assertIn("docs/decisions", msg)
+        self.assertNotIn("/jig:scaffold-init", msg)
+        self.assertNotIn("/jig:migrate", msg)
+
+
 # ---------- ReserveAdrCLITests (CLI surface) ----------
 
 class ReserveAdrCLITests(unittest.TestCase):
@@ -1975,6 +2174,9 @@ class ReserveAdrCLITests(unittest.TestCase):
         self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
         self.adrs_dir.mkdir(parents=True)
         write_sample_readme(self.adrs_dir / "README.md")
+        # Spec 066-01: the reserve path classifies scaffold-state; the
+        # completion sentinel makes this CLI fixture classify as `scaffolded`.
+        (Path(self.tmpdir) / "scaffold.json").write_text("{}\n")
         _git_init_on_main(Path(self.tmpdir))
         env = {**os.environ,
                "GIT_AUTHOR_NAME": "Test",
@@ -2055,6 +2257,10 @@ class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
         dec.mkdir(parents=True)
         for name in ("adr-0001-alpha.md", "adr-0002-beta.md"):
             (dec / name).write_text(f"# {name}\n")
+        # Spec 066-01: the reserve path classifies scaffold-state. Seed the
+        # completion sentinel so the checked-out `self.feat` worktree (which
+        # is what `reserve_adr` classifies) reads as `scaffolded`.
+        (self.work / "scaffold.json").write_text("{}\n")
         self._git("add", "-A", cwd=self.work)
         self._git("commit", "-m", "seed adrs", cwd=self.work)
         self.origin = self.tmp / "origin.git"

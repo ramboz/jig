@@ -40,6 +40,34 @@ Consequences, Open questions).
 
 ### 1. Author a new ADR
 
+**Step 0 — confirm the project is scaffolded (spec 066 / ADR-0011).**
+BEFORE reserving an ADR number or drafting ANY `docs/decisions/` structure,
+confirm this project is a scaffolded jig project. If it isn't, **route — do
+not hand-roll directories**:
+
+- **Greenfield** (no jig structure yet) → tell the user to run
+  `/jig:scaffold-init`. It lays down conventions, templates, hooks, the
+  status board, and the `docs/decisions/` tree (with its README).
+- **Existing spec/`docs/decisions/` layout, but not jig-scaffolded** (no
+  `scaffold.json`) → tell the user to run `/jig:migrate`. It adopts the
+  existing layout into jig structure.
+
+You don't have to decide the state yourself: `adr.py new` (below)
+**classifies and routes** for you (spec 066-01) — a `scaffold.json`-bearing
+project proceeds; a greenfield project is refused naming
+`/jig:scaffold-init`; an adoptable spec-driven project is refused naming
+`/jig:migrate`. The deterministic gate and this human-readable precondition
+agree by construction, so **don't restate the detection heuristic here** —
+run the helper and let it route. (Bypass for a deliberate out-of-band flow:
+`JIG_SCAFFOLD_PRECONDITION=0`.)
+
+**The anti-pattern this step exists to kill:** an auto-triggered
+`adr-workflow` run improvising a loose `docs/decisions/` skeleton (folder +
+README, or just dropping an `adr-NNNN-*.md` into a hand-made directory)
+because `/jig:scaffold-init` was skipped. That produces a non-jig layout
+that then needs migrating — the ADR-side of the reported failure. When in
+doubt, route to setup first; never invent the structure by hand.
+
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" new <slug> \
   [--title "<Title>"] [--project-dir DIR] [--no-push | --pr]

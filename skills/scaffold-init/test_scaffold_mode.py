@@ -166,6 +166,45 @@ class WithMachineryTests(unittest.TestCase):
             "anti-pattern (063-02 AC3 propagates to the scaffold copy)",
         )
 
+    # ----- Spec 066-02 AC #5: ADR Step-0 precondition parity ----------------
+    def test_adr_workflow_scaffold_copy_carries_step0_precondition(self):
+        """Spec 066-02 AC #5 — the adr-workflow SKILL.md copied into a
+        scaffolded target carries the Step 0 scaffold-state precondition +
+        both routing targets, so the plugin and scaffolded prose can't
+        drift. adr-workflow is a Tier-1 skill (`_TIER_SKILLS["tier-1"]`)
+        and scaffold copies the live SKILL.md body (only path-substituted,
+        same as spec-workflow), so parity is structural; this test pins it
+        against silent regression. Mirrors the 063-02 spec-workflow parity
+        test above."""
+        copied = (
+            self.target / ".claude" / "skills"
+            / "jig-adr-workflow" / "SKILL.md"
+        )
+        self.assertTrue(copied.is_file(), f"missing copied SKILL.md: {copied}")
+        body = copied.read_text()
+        lower = body.lower()
+        self.assertIn(
+            "step 0", lower,
+            "scaffolded adr-workflow SKILL.md must carry the Step 0 "
+            "scaffold-state precondition (066-02 AC5)",
+        )
+        self.assertIn(
+            "/jig:scaffold-init", body,
+            "scaffolded adr-workflow SKILL.md must route greenfield to "
+            "/jig:scaffold-init",
+        )
+        self.assertIn(
+            "/jig:migrate", body,
+            "scaffolded adr-workflow SKILL.md must route existing layouts "
+            "to /jig:migrate",
+        )
+        self.assertIn(
+            "docs/decisions/", body,
+            "scaffolded adr-workflow SKILL.md must name the "
+            "docs/decisions/-skeleton anti-pattern (066-02 AC3 propagates "
+            "to the scaffold copy)",
+        )
+
     # ----- AC #8 (b) --------------------------------------------------------
     def test_b_every_plugin_root_skills_path_rewritten(self):
         """AC #8 (b) — every ${CLAUDE_PLUGIN_ROOT}/skills/ in any copied
