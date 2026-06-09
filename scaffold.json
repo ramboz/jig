@@ -1,0 +1,37 @@
+{
+  "jig_version": "1.13.0",
+  "timestamp": "2026-06-09",
+  "project_name": "jig",
+  "installed_tiers": [
+    "tier-0",
+    "tier-1"
+  ],
+  "installed_skills": [
+    "tier-0/scaffold-init",
+    "tier-0/memory-sync",
+    "tier-0/spec-workflow",
+    "tier-0/independent-review",
+    "tier-0/migrate",
+    "tier-0/vision-elicitation",
+    "tier-0/contracts",
+    "tier-1/adr-workflow",
+    "tier-1/tdd-loop",
+    "tier-1/slice-land",
+    "tier-1/pr-review",
+    "tier-1/arch-review",
+    "tier-1/clarify",
+    "tier-1/analyze",
+    "tier-1/security-review",
+    "tier-1/code-health",
+    "tier-1/explain"
+  ],
+  "scaffold_signals": {
+    "is_team": false,
+    "has_ci": true,
+    "has_tests": true,
+    "has_llm_agent_files": true
+  },
+  "hook_profile": "standard",
+  "scaffold_mode": "in-repo",
+  "note": "jig is the plugin SOURCE repo — self-hosting and spec-driven, but NOT produced by scaffold-init (it IS scaffold-init). This scaffold.json is the completion sentinel, hand-authored so jig dogfoods the marker it asks every jig project to carry and so spec 063's scaffold-precondition gate (classify_scaffold_state) treats the jig repo as `scaffolded` — letting `workflow.py new` proceed here instead of mis-routing jig to /jig:migrate. installed_tiers/installed_skills mirror jig's own tier inventory (_TIER_SKILLS); scaffold_mode 'in-repo' reflects that the machinery lives in this repo (under skills/, agents/, hooks/ at the root rather than .claude/). Pinned by JigSelfHostDogfoodTests in skills/_common/test_scaffold_state.py."
+}

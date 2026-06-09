@@ -271,5 +271,38 @@ class WatermarkDriftGuardTests(unittest.TestCase):
         )
 
 
+class JigSelfHostDogfoodTests(unittest.TestCase):
+    """Dogfood invariant: the jig repo itself must classify as `scaffolded`.
+
+    jig is the plugin SOURCE — self-hosting and spec-driven, but it was never
+    produced by scaffold-init (it IS scaffold-init). Spec 063's classifier
+    treats "spec-driven layout + no scaffold.json" as `adoptable`
+    (-> route to /jig:migrate). Without the completion sentinel, jig
+    self-classifies `adoptable` and `workflow.py new` REFUSES in the jig repo —
+    breaking jig's own spec reservation. That regression actually shipped (063
+    fixtures all carried scaffold.json; nothing pinned the real repo), and this
+    test is the guard so it can't recur: jig carries a real root `scaffold.json`
+    (dogfooding the sentinel it asks every project to have), so it classifies
+    `scaffolded` and `new` proceeds. See the spec-063 amendment.
+
+    Runs only in the jig source repo (test_*.py is not copied into scaffolded
+    targets), so REPO_ROOT is always the jig repo root."""
+
+    def test_jig_repo_root_has_scaffold_json(self):
+        self.assertTrue(
+            (REPO_ROOT / "scaffold.json").is_file(),
+            "jig repo root must carry a scaffold.json (the completion "
+            "sentinel) so it self-classifies as scaffolded — without it, "
+            "`workflow.py new` refuses in the jig repo (spec 063 regression).",
+        )
+
+    def test_jig_repo_root_classifies_scaffolded(self):
+        self.assertEqual(
+            scaffold_state.classify_scaffold_state(REPO_ROOT), "scaffolded",
+            "jig (the plugin source) must classify as `scaffolded` so "
+            "`workflow.py new` proceeds in the jig repo itself.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

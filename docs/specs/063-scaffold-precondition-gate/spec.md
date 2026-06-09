@@ -199,3 +199,28 @@ prose.
   spec-driven → route to migrate" refusal) — this spec gives the
   *reverse* door (spec-workflow → scaffold-init/migrate) the same
   routing courtesy.
+
+## Amendments
+
+> Post-DONE corrections per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+> The original spec above is preserved; dated entries below record reality.
+
+### 2026-06-09 — jig itself self-classified `adoptable` (regression) → jig now carries a `scaffold.json`
+
+Immediately after this spec landed, dogfooding surfaced a regression the
+review passes missed: **the jig repo itself had no root `scaffold.json`**, so
+`classify_scaffold_state(jig)` returned `adoptable` and `workflow.py new`
+**refused inside the jig repo**, mis-routing jig to `/jig:migrate` — breaking
+jig's own spec reservation. Every 063 test fixture had been given a
+`scaffold.json`, and none asserted that the *real* jig repo can still reserve a
+spec, so the gap shipped clean.
+
+**Fix (no classifier code change):** jig now carries a real root
+`scaffold.json` — dogfooding the completion sentinel it asks every jig project
+to have (jig is the plugin *source*; the `note` field records that it was not
+produced by scaffold-init). A new `JigSelfHostDogfoodTests` in
+`skills/_common/test_scaffold_state.py` pins the invariant (jig root has a
+`scaffold.json` **and** classifies `scaffolded`) so the regression cannot
+recur. The classifier's `scaffolded ⟺ scaffold.json` rule is unchanged; the
+alternative (special-casing the plugin source in the classifier) was rejected
+in favor of jig conforming to the sentinel like any jig project.
