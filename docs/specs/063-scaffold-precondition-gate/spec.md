@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
 ---
@@ -142,24 +142,25 @@ specs exist and degrade naturally).
 - **Auto-running scaffold-init or migrate.** The precondition routes and
   instructs; the user / orchestrator chooses to act (ADR-0011).
 
-## Open questions
+## Resolved decisions
 
-- **Bypass escape hatch.** Should `new` honor a
-  `JIG_SCAFFOLD_PRECONDITION=0` (also `false`/`off`/`no`) bypass,
-  mirroring `JIG_REVIEW_EVIDENCE_GATE` / `JIG_CONVENTIONS_APPROVED`?
-  Leaning **yes** for doctrine consistency (ADR-0011) and to keep a
-  deliberate-out-of-band path, even though reserving a spec in an
-  unscaffolded project is rarely sensible. _Resolve before 063-01._
-- **Definition of "scaffolded".** `scaffold.json` presence only, or also
-  accept a jig CLAUDE.md watermark as sufficient? Leaning
-  **`scaffold.json` only** (it is *the* completion sentinel; a watermark
-  without it is the interrupted-scaffold case → route to scaffold-init
-  recovery). _Resolve before 063-01._
-- **Shared-helper home + name.** `skills/_common/scaffold_state.py` with
+_(Were open questions; resolved 2026-06-08 before 063-01.)_
+
+- **Bypass escape hatch → YES.** `new` honors `JIG_SCAFFOLD_PRECONDITION=0`
+  (also `false`/`off`/`no`), mirroring `JIG_REVIEW_EVIDENCE_GATE` /
+  `JIG_CONVENTIONS_APPROVED`. Chosen for doctrine consistency (ADR-0011 —
+  a soft deliberateness gate, not human-only) and to keep a deliberate
+  out-of-band path. AC6 of 063-01 stands.
+- **Definition of "scaffolded" → `scaffold.json` only.** It is *the*
+  completion sentinel (written last per spec 032-02); a jig CLAUDE.md
+  watermark without it is the interrupted-scaffold case, which classifies
+  as `greenfield` so the user is routed to scaffold-init recovery (not
+  migrate). Encoded in AC1.
+- **Shared-helper home + name → `skills/_common/scaffold_state.py`** with
   `classify_scaffold_state(project_dir) -> Literal["scaffolded",
-  "adoptable", "greenfield"]`, exposing the shared trigger predicate the
-  classifier and (optionally, later) the two existing call sites can
-  use. _Confirm location/signature at plan time._
+  "adoptable", "greenfield"]`, exposing the shared ≥3-of-4 trigger
+  predicate the classifier consumes (and the two existing call sites
+  *may* later adopt — out of scope here per non-goals).
 
 ## Decomposition
 

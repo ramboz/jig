@@ -38,6 +38,8 @@ from _common.parsing import iter_slices as _iter_slices_common
 from _common.parsing import load_slice as _load_slice_common
 from _common.review_evidence import evidence_gate_enabled as _evidence_gate_enabled
 from _common.review_evidence import validate_evidence
+from _common.scaffold_state import classify_scaffold_state
+from _common.scaffold_state import precondition_enabled as _scaffold_precondition_enabled
 from _common.team_signal import team_context_drift
 
 VALID_STATUSES = (
@@ -2568,14 +2570,45 @@ def reserve_spec(slug: str, project_dir: Path,
     # cheapest failure to surface and shouldn't waste git invocations.
     _validate_slug(slug)
 
-    # AC #5 (specs-dir-absent) — the helper only makes sense inside a
-    # scaffolded jig project.
     specs_dir = project_dir / "docs" / "specs"
-    if not specs_dir.is_dir():
-        raise WorkflowError(
-            f"refusing: docs/specs/ not found under {project_dir} "
-            f"(not inside a scaffolded jig project)"
-        )
+
+    # Spec 063-01: scaffold-state PRECONDITION. Replaces the weak, dead-end
+    # `docs/specs/`-presence check with a three-way, scaffold.json-first
+    # classification that ROUTES an unscaffolded project to the right setup
+    # skill instead of refusing into a dead end (ADR-0011 / ADR-0013:
+    # route-don't-block; jig redirects, the user/agent acts — it never runs
+    # scaffold-init / migrate on the user's behalf).
+    #
+    # The bypass (`JIG_SCAFFOLD_PRECONDITION=0|false|off|no`) is a
+    # deliberateness signal, not human-only enforcement: when set it skips
+    # classification and preserves TODAY's behavior, including the legacy
+    # weak `docs/specs/`-absent refusal below.
+    if _scaffold_precondition_enabled():
+        state = classify_scaffold_state(project_dir)
+        if state == "greenfield":
+            raise WorkflowError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: greenfield — no scaffold.json and no "
+                f"spec-driven layout). Run `/jig:scaffold-init` to set jig "
+                f"up here first, then re-run `new`."
+            )
+        if state == "adoptable":
+            raise WorkflowError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: adoptable — a spec-driven layout exists "
+                f"but no scaffold.json). Run `/jig:migrate` to adopt it into "
+                f"jig first, then re-run `new`."
+            )
+        # state == "scaffolded": fall through to the existing reserve flow
+        # unchanged (number computation, stub write, commit, push routing).
+    else:
+        # Bypass active — preserve today's behavior, including the legacy
+        # weak refusal so a deliberate actor sees identical output.
+        if not specs_dir.is_dir():
+            raise WorkflowError(
+                f"refusing: docs/specs/ not found under {project_dir} "
+                f"(not inside a scaffolded jig project)"
+            )
 
     # Worktree-aware routing (prototype): the original flow below REQUIRES
     # being on `main` (it commits on local main, then pushes `origin main`).

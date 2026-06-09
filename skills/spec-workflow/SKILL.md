@@ -106,6 +106,33 @@ SKILL.md hand-off is the documented gate.
 
 ### Creating a new spec
 
+0. **Step 0 — confirm the project is scaffolded (spec 063 / ADR-0011).**
+   BEFORE reserving a number or drafting ANY `docs/specs/` or slice
+   structure, confirm this project is a scaffolded jig project. If it
+   isn't, **route — do not hand-roll directories**:
+   - **Greenfield** (no jig structure yet) → tell the user to run
+     `/jig:scaffold-init`. It lays down conventions, templates, hooks, the
+     status board, and a seed reference spec.
+   - **Existing spec/`slices/` layout, but not jig-scaffolded** (no
+     `scaffold.json`) → tell the user to run `/jig:migrate`. It adopts the
+     existing layout into jig structure.
+
+   You don't have to decide the state yourself: `workflow.py new` (step 2)
+   **classifies and routes** for you (spec 063-01) — a `scaffold.json`-bearing
+   project proceeds; a greenfield project is refused naming
+   `/jig:scaffold-init`; an adoptable spec-driven project is refused naming
+   `/jig:migrate`. The deterministic gate and this human-readable
+   precondition agree by construction, so **don't restate the detection
+   heuristic here** — run the helper and let it route. (Bypass for a
+   deliberate out-of-band flow: `JIG_SCAFFOLD_PRECONDITION=0`.)
+
+   **The anti-pattern this step exists to kill:** an auto-triggered
+   `spec-workflow` run improvising a loose `slices/` folder (or any ad-hoc
+   `docs/specs/` skeleton) because `/jig:scaffold-init` was skipped. That
+   produces a non-jig layout that then needs migrating — exactly the
+   reported failure. When in doubt, route to setup first; never invent the
+   structure by hand.
+
 1. Confirm the work needs a spec. Trivial fixes don't.
 2. **Reserve the next free number on origin/main:**
 

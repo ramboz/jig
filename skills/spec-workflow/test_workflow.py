@@ -1508,6 +1508,10 @@ class ReserveSpecTests(unittest.TestCase):
         # Build minimal scaffolding: docs/specs/ exists; a couple of
         # existing spec dirs so the next-number computation has signal.
         (self.target / "docs" / "specs").mkdir(parents=True)
+        # Spec 063-01: the scaffold-state precondition classifies on
+        # `scaffold.json` (the completion sentinel). A scaffolded project
+        # carries it, so `reserve_spec` proceeds to the legacy flow.
+        (self.target / "scaffold.json").write_text("{}\n")
 
     def tearDown(self):
         import shutil
@@ -1798,9 +1802,11 @@ class ReserveSpecTests(unittest.TestCase):
                               f"slug={slug!r}: error didn't name 'slug': "
                               f"{ctx.exception!r}")
 
-    # AC #5 — refuse when docs/specs/ absent.
+    # Spec 063-01 (supersedes the old "refuse when docs/specs/ absent"):
+    # a bare dir with no scaffold.json and no spec-driven layout is
+    # `greenfield` → route to /jig:scaffold-init (not a dead-end refusal).
     def test_new_refuses_when_specs_dir_absent(self):
-        # Build a fresh target without docs/specs
+        # Build a fresh target without docs/specs or scaffold.json.
         bare = Path(self.tmpdir) / "bare"
         bare.mkdir()
         rec = _SubprocessRecorder()
@@ -1813,7 +1819,12 @@ class ReserveSpecTests(unittest.TestCase):
                     no_push=True, pr_mode=False,
                 )
         msg = str(ctx.exception)
-        self.assertIn("docs/specs", msg)
+        # Names the detected state + the exact next command.
+        self.assertIn("greenfield", msg.lower())
+        self.assertIn("/jig:scaffold-init", msg)
+        # No reservation commit attempted.
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git commit", flat)
 
     # AC #3 — direct push succeeds; no fallback branch created.
     def test_new_direct_push_succeeds(self):
@@ -2173,6 +2184,9 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
         # Minimal git init so reserve_spec's stage+commit path doesn't
         # break — we mock subprocess anyway, but the dir must look git-like.
         (self.target / "docs/specs").mkdir(parents=True)
+        # Spec 063-01: scaffold.json sentinel → `reserve_spec` classifies as
+        # `scaffolded` and proceeds to the legacy reserve flow under test.
+        (self.target / "scaffold.json").write_text("{}\n")
 
     def tearDown(self):
         import shutil
@@ -2264,6 +2278,193 @@ class NewSpecScaffoldsFilePerSliceTests(unittest.TestCase):
         locs = list(iter_slices(spec_md))
         labels = [sl.label for sl in locs]
         self.assertIn("001-01 — tbd", labels)
+
+
+class ReserveSpecPreconditionRoutingTests(unittest.TestCase):
+    """Spec 063-01: `reserve_spec` replaces the weak `docs/specs/`-presence
+    check with a three-way scaffold-state classification that ROUTES — an
+    `adoptable` project to /jig:migrate, a `greenfield` one to
+    /jig:scaffold-init — while a `scaffolded` project (scaffold.json present)
+    proceeds to the legacy reserve flow unchanged. `JIG_SCAFFOLD_PRECONDITION`
+    bypasses the classification entirely (ADR-0011 deliberateness gate)."""
+
+    def setUp(self):
+        import shutil
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-063-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        self._saved = os.environ.pop("JIG_SCAFFOLD_PRECONDITION", None)
+        self.addCleanup(lambda: shutil.rmtree(self.tmpdir, ignore_errors=True))
+
+        def _restore():
+            if self._saved is not None:
+                os.environ["JIG_SCAFFOLD_PRECONDITION"] = self._saved
+            else:
+                os.environ.pop("JIG_SCAFFOLD_PRECONDITION", None)
+        self.addCleanup(_restore)
+
+    def _make_greenfield(self):
+        # Empty project: no scaffold.json, no spec-driven layout.
+        pass
+
+    def _make_adoptable(self):
+        # >=3 triggers, no scaffold.json, no jig watermark.
+        (self.target / "docs" / "specs").mkdir(parents=True)
+        (self.target / "docs" / "decisions").mkdir(parents=True)
+        (self.target / "docs" / "workflow.md").write_text("# wf\n")
+
+    def _make_scaffolded(self):
+        (self.target / "docs" / "specs").mkdir(parents=True)
+        (self.target / "scaffold.json").write_text("{}\n")
+
+    def _run_reserve(self):
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "validslug", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        return code, rec
+
+    # AC3 — adoptable → /jig:migrate, no reservation commit.
+    def test_adoptable_routes_to_migrate(self):
+        self._make_adoptable()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "validslug", project_dir=self.target,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("adoptable", msg.lower())
+        self.assertIn("/jig:migrate", msg)
+        # No directory created, no reservation commit.
+        self.assertFalse(
+            (self.target / "docs" / "specs" / "001-validslug").exists())
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git commit", flat)
+
+    # AC2 — greenfield → /jig:scaffold-init, no reservation commit.
+    def test_greenfield_routes_to_scaffold_init(self):
+        self._make_greenfield()
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "validslug", project_dir=self.target,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("greenfield", msg.lower())
+        self.assertIn("/jig:scaffold-init", msg)
+        self.assertFalse((self.target / "docs" / "specs").exists())
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git commit", flat)
+
+    # Interrupted scaffold (jig watermark, no scaffold.json) → greenfield
+    # routing (scaffold-init recovery), even with >=3 triggers present.
+    def test_interrupted_scaffold_routes_to_scaffold_init(self):
+        (self.target / "CLAUDE.md").write_text(
+            "# Proj\n\n<!-- Generated by [jig] -->\n")
+        (self.target / "docs" / "specs").mkdir(parents=True)
+        (self.target / "docs" / "decisions").mkdir(parents=True)
+        (self.target / "docs" / "workflow.md").write_text("# wf\n")
+        (self.target / "docs" / "architecture.md").write_text("# arch\n")
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "validslug", project_dir=self.target,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        self.assertIn("greenfield", msg.lower())
+        self.assertIn("/jig:scaffold-init", msg)
+
+    # AC4 — scaffolded → proceeds through the legacy reserve flow.
+    def test_scaffolded_proceeds_to_reserve(self):
+        self._make_scaffolded()
+        rec = _SubprocessRecorder()
+        # Stub the legacy preflight + commit path (branch==main, clean tree,
+        # github origin, add/commit succeed) — no remote calls for --no-push.
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "validslug", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        # The legacy flow created the reservation directory + stub.
+        self.assertTrue(
+            (self.target / "docs" / "specs" / "001-validslug" / "spec.md")
+            .is_file())
+
+    # AC6 — bypass: JIG_SCAFFOLD_PRECONDITION=0 skips classification and
+    # runs the legacy flow even on a greenfield project.
+    def test_bypass_runs_legacy_flow_on_greenfield(self):
+        # Greenfield but the legacy flow still needs docs/specs/ to exist
+        # (the bypass restores *today's* behavior, including its own weak
+        # docs/specs/ check). Provide docs/specs/ so the legacy path runs.
+        (self.target / "docs" / "specs").mkdir(parents=True)
+        os.environ["JIG_SCAFFOLD_PRECONDITION"] = "0"
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "symbolic-ref", "--short", "HEAD"),
+                 returncode=0, stdout="main\n")
+        rec.stub(_matches("git", "status", "--porcelain"),
+                 returncode=0, stdout="")
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "add"), returncode=0)
+        rec.stub(_matches("git", "commit"), returncode=0)
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            code = _workflow.reserve_spec(
+                "validslug", project_dir=self.target,
+                no_push=True, pr_mode=False,
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(
+            (self.target / "docs" / "specs" / "001-validslug" / "spec.md")
+            .is_file())
+
+    # AC6 — bypass with the legacy weak check still firing: docs/specs/
+    # absent under bypass → the OLD dead-end refusal (preserves today's
+    # behavior exactly, no scaffold-state routing).
+    def test_bypass_preserves_legacy_weak_refusal(self):
+        os.environ["JIG_SCAFFOLD_PRECONDITION"] = "false"
+        rec = _SubprocessRecorder()
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp_mod:
+            sp_mod.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.reserve_spec(
+                    "validslug", project_dir=self.target,
+                    no_push=True, pr_mode=False,
+                )
+        msg = str(ctx.exception)
+        # Legacy message (not the scaffold-state routing message).
+        self.assertIn("docs/specs", msg)
+        self.assertNotIn("/jig:scaffold-init", msg)
+        self.assertNotIn("/jig:migrate", msg)
 
 
 class MixedLayoutDependencyValidationTests(unittest.TestCase):
@@ -3821,6 +4022,9 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
         (self.target / "docs" / "specs").mkdir(parents=True)
+        # Spec 063-01: scaffold.json sentinel → `reserve_spec` classifies as
+        # `scaffolded` and proceeds to the legacy origin-aware reserve flow.
+        (self.target / "scaffold.json").write_text("{}\n")
 
     def tearDown(self):
         import shutil
@@ -5541,6 +5745,10 @@ class ReserveSpecFromLinkedWorktreeE2E(unittest.TestCase):
             d = self.work / "docs" / "specs" / name
             d.mkdir(parents=True)
             (d / "spec.md").write_text(f"# Spec {name}\n")
+        # Spec 063-01: the scaffold-state precondition classifies on the
+        # `scaffold.json` completion sentinel; a scaffolded project carries
+        # it, so `reserve_spec` proceeds to the worktree-aware reserve flow.
+        (self.work / "scaffold.json").write_text("{}\n")
         self._git("add", "-A", cwd=self.work)
         self._git("commit", "-m", "seed specs", cwd=self.work)
         self.origin = self.tmp / "origin.git"

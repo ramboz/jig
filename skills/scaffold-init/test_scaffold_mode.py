@@ -131,6 +131,41 @@ class WithMachineryTests(unittest.TestCase):
         )
         self.assertEqual(copied.read_text(), expected)
 
+    # ----- Spec 063-02 AC #5: Step-0 precondition parity --------------------
+    def test_spec_workflow_scaffold_copy_carries_step0_precondition(self):
+        """Spec 063-02 AC #5 — the SKILL.md copied into a scaffolded target
+        carries the Step 0 scaffold-state precondition + both routing
+        targets, so the plugin and scaffolded prose can't drift. scaffold
+        copies the live SKILL.md body (only path-substituted), so parity is
+        structural; this test pins it against silent regression."""
+        copied = (
+            self.target / ".claude" / "skills"
+            / "jig-spec-workflow" / "SKILL.md"
+        )
+        self.assertTrue(copied.is_file(), f"missing copied SKILL.md: {copied}")
+        body = copied.read_text()
+        lower = body.lower()
+        self.assertIn(
+            "step 0", lower,
+            "scaffolded spec-workflow SKILL.md must carry the Step 0 "
+            "scaffold-state precondition (063-02 AC5)",
+        )
+        self.assertIn(
+            "/jig:scaffold-init", body,
+            "scaffolded spec-workflow SKILL.md must route greenfield to "
+            "/jig:scaffold-init",
+        )
+        self.assertIn(
+            "/jig:migrate", body,
+            "scaffolded spec-workflow SKILL.md must route existing layouts "
+            "to /jig:migrate",
+        )
+        self.assertIn(
+            "slices/", body,
+            "scaffolded spec-workflow SKILL.md must name the loose-`slices/` "
+            "anti-pattern (063-02 AC3 propagates to the scaffold copy)",
+        )
+
     # ----- AC #8 (b) --------------------------------------------------------
     def test_b_every_plugin_root_skills_path_rewritten(self):
         """AC #8 (b) — every ${CLAUDE_PLUGIN_ROOT}/skills/ in any copied

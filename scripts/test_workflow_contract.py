@@ -173,5 +173,89 @@ class ScaffoldTemplateInheritsHonestFraming(unittest.TestCase):
         )
 
 
+class SpecWorkflowStep0Precondition(unittest.TestCase):
+    """Spec 063-02 — the `spec-workflow` SKILL.md "Creating a new spec"
+    flow gains a "Step 0: is this project scaffolded?" precondition that
+    routes to scaffold-init / migrate before any structure is created, so
+    an auto-triggered run can't improvise a loose `slices/` folder
+    (the reported failure). Guard test per AC4."""
+
+    def setUp(self) -> None:
+        self.text = _read(SPEC_WORKFLOW_SKILL)
+        # Isolate the "Creating a new spec" section so the assertions pin
+        # the precondition to that flow (not some unrelated mention of the
+        # routing skills elsewhere in the file).
+        start = self.text.find("### Creating a new spec")
+        self.assertNotEqual(
+            start, -1,
+            "SKILL.md lost its '### Creating a new spec' section heading",
+        )
+        nxt = self.text.find("\n### ", start + 1)
+        self.section = self.text[start:nxt] if nxt != -1 else self.text[start:]
+
+    def test_step0_precondition_present(self) -> None:
+        """AC1: the section opens with a scaffold-state precondition that
+        fires *before* reserving a number or drafting structure."""
+        lower = self.section.lower()
+        self.assertIn(
+            "step 0", lower,
+            "the 'Creating a new spec' flow must gain an explicit Step 0 "
+            "scaffold-state precondition (spec 063-02 AC1)",
+        )
+        self.assertIn(
+            "scaffold", lower,
+            "Step 0 must instruct confirming the project is scaffolded "
+            "before any docs/specs structure is created",
+        )
+
+    def test_routes_to_both_targets(self) -> None:
+        """AC1: an unscaffolded project routes to scaffold-init (greenfield)
+        or migrate (existing spec/slices layout) — both targets named."""
+        self.assertIn(
+            "/jig:scaffold-init", self.section,
+            "Step 0 must route a greenfield project to /jig:scaffold-init",
+        )
+        self.assertIn(
+            "/jig:migrate", self.section,
+            "Step 0 must route an existing-layout project to /jig:migrate",
+        )
+
+    def test_names_the_helper_no_duplicated_heuristic(self) -> None:
+        """AC2: the prose points at workflow.py new's own classify-and-route
+        (063-01) so prose + deterministic gate agree, and does NOT restate
+        the ≥3-of-4 trigger heuristic."""
+        self.assertIn(
+            "workflow.py", self.section,
+            "Step 0 must point at workflow.py new's own classify-and-route "
+            "(063-01) rather than duplicating the decision in prose",
+        )
+        # The trigger heuristic (≥3-of-4 markers) lives in the shared helper
+        # `scaffold_state.py`; restating it in prose is the AC2 anti-pattern.
+        lower = self.section.lower()
+        for forbidden in ("3-of-4", "3 of 4", "three-of-four", "three of four"):
+            self.assertNotIn(
+                forbidden, lower,
+                "Step 0 must NOT restate the trigger heuristic in prose "
+                "(AC2 — point at the helper, no duplicated logic)",
+            )
+
+    def test_names_the_loose_slices_anti_pattern(self) -> None:
+        """AC3: the guidance calls out the observed anti-pattern explicitly —
+        improvising a loose `slices/` folder when scaffold was skipped — and
+        says not to hand-roll directories."""
+        self.assertIn(
+            "slices/", self.section,
+            "Step 0 must name the observed loose-`slices/` anti-pattern so "
+            "the model recognizes and avoids it (AC3)",
+        )
+        lower = self.section.lower()
+        self.assertTrue(
+            "hand-roll" in lower or "hand-rolling" in lower
+            or "improvis" in lower,
+            "Step 0 must tell the orchestrator NOT to hand-roll / improvise "
+            "directories when scaffold was skipped (AC1/AC3)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
