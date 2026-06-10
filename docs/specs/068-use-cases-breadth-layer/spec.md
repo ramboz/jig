@@ -12,9 +12,12 @@ skill: vision-elicitation
 > enumerates intended user-facing behaviors, so behavior-dense projects have a
 > shared frame to anchor specs against instead of inventing each spec's slice of
 > the world ad hoc. Spans **vision-elicitation** (capture, slice 01),
-> **spec-workflow** (feed-forward + trace + coverage, slices 02–03), and reuses
-> **`/jig:analyze`** + the reconciliation reviewer ([ADR-0014](../../decisions/adr-0014-review-evidence-model.md))
-> for the coverage check. The mid-flight triage lifecycle (slice 04) is
+> **spec-workflow** (feed-forward + trace + coverage, slices 02–03). The coverage
+> check is a **deterministic project-wide query** surfaced at reconcile — **no new
+> reviewer subagent**, but **net-new (bounded) surface**, not free reuse: neither
+> one-spec-at-a-time **`/jig:analyze`** nor the per-slice reconciliation reviewer
+> ([ADR-0014](../../decisions/adr-0014-review-evidence-model.md)) has a project-wide
+> view today (ADR-0025 §A4). The mid-flight triage lifecycle (slice 04) is
 > **DEFERRED** by design (ADR-0025 Option C).
 
 ## Overview
@@ -57,8 +60,10 @@ modeling adds nothing (libraries, single-flow CLIs). Every mechanism is
   use cases (surface inference as a question instead).
 - Keep the use-case section **goal-level**, never spec-level — the vision must not
   bloat into a requirements doc.
-- Reuse existing machinery (vision section + elicitation wizard + reconciliation
-  reviewer / analyze) for low net-new surface.
+- Reuse existing **capture** machinery (vision section + elicitation wizard); add
+  only a **bounded, deterministic coverage query** for the audit step (no new
+  reviewer subagent) — neither `/jig:analyze` nor the per-slice reconciliation
+  reviewer has a project-wide view today (net-new bounded surface; ADR-0025 §A4).
 
 **Non-goals**
 - The **mid-flight blast-radius triage lifecycle** (DEFERRED — ADR-0025 Option C;
@@ -107,8 +112,10 @@ the user-facing surface, delivers observable value, not intermediate state):
   **trace link** to the use case(s) it serves. *Produces the link data slice 03
   audits.*
 - **Rules** — 068-03: the reconcile-phase **bidirectional coverage check**
-  (use-case→no-spec = gap; spec→no-use-case = creep), advisory by default,
-  reusing the reconciliation reviewer / `/jig:analyze`.
+  (use-case→no-spec = gap; spec→no-use-case = creep), advisory by default — a
+  **deterministic project-wide query** (no new reviewer subagent), but **net-new
+  bounded surface**: neither one-spec-at-a-time `/jig:analyze` nor the per-slice
+  reconciliation reviewer provides a project-wide view today (ADR-0025 §A4).
 - **Rules** — 068-04 (**DEFERRED**): the mid-flight blast-radius triage lifecycle
   (additive / conflicting / reframing; asymmetric default). Load-bearing on
   02–03's trace links being *real and populated*, and the thinnest-evidence part
