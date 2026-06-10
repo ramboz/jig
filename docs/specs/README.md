@@ -214,6 +214,10 @@
 | [067-reframe](067-reframe/spec.md) | 067-01 — The `/jig:reframe` skill: keystone ADR + dispositions | DRAFT |  |
 | [067-reframe](067-reframe/spec.md) | 067-02 — Retrofit spec drafts | DRAFT |  |
 | [067-reframe](067-reframe/spec.md) | 067-03 — The noticing nudge (standing practice) | DRAFT |  |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-01 — capture-and-vision-section | DRAFT |  |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-02 — feed-forward-and-trace-links | DRAFT |  |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-03 — reconcile-coverage-grounding | DRAFT |  |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | DEFERRED |  |
 
 ## Deferred slices
 
@@ -240,3 +244,4 @@
 | [033-host-adapter-portability](033-host-adapter-portability/spec.md) | 033-06 - codex-plugin-packaging | Codex scaffold mode has at least one successful real-project use, and a user asks for install-and-forget Codex plugin distribution. |
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | First number collision that slips past the |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-06 — Tier-2 scaffold-the-floor (opt-in) | Tier-1 (slices 01–05) has shipped and proven out on jig, **and** a user/project explicitly wants jig to *provision* a default code-health config rather than only drive an existing one. |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | (a) slice 02's trace links exist and are populated across a real spec corpus, AND (b) a genuine mid-flight use-case addition that intersects existing specs has been observed (a real conflict/reframe event), so the triage classifier can be validated against an actual case rather than an imagined one. Mirrors [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md) Option C's revisit trigger. |

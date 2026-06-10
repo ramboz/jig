@@ -27,6 +27,8 @@
 - [ADR-0021: Canonical lexicon home and project-glossary overlay](adr-0021-lexicon-home-and-overlay.md) — [Spec 065](../specs/065-lower-vocabulary-barrier/spec.md) lowers the vocabulary barrier for non-expert readers of jig artifacts. (2026-06-07, Accepted)
 - [ADR-0022: Pluggable oracle boundary — bind the lifecycle oracle to servo](adr-0022-pluggable-oracle-boundary.md) — jig now has a **family of three gated-evidence lifecycles**, all mirroring ADR-0014's transition-gate architecture and r… (2026-06-09, Proposed)
 - [ADR-0023: The lifecycle-family spine — shared contract and convergence rule for gated-evidence workflows](adr-0023-lifecycle-family-spine.md) — jig has organically grown a **family of work-shaped lifecycles**, each recorded in its own ADR, each independently re-de… (2026-06-09, Proposed)
+- [ADR-0024: Reframe on a load-bearing reference shift — a lightweight correction capability over the spine](adr-0024-reference-reframe.md) — jig is built to keep work **consistent with prior decisions**. (2026-06-09, Proposed)
+- [ADR-0025: Use cases as a first-class breadth layer](adr-0025-use-cases-breadth-layer.md) — jig's artifact stack runs **vision → spec → slice**. (2026-06-10, Accepted)
 
 ## Format
 
