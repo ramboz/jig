@@ -6,13 +6,13 @@ Covers slice 017-02 ACs:
 - AC #2 — questions.md exists with the Appendix A sections verbatim (12 from
           spec 017-02 + Section 13 added by spec 022-02 = 13 total)
 - AC #3 — both worked-example transcripts exist with required structure
-- AC #4 — jig worked example produces template-shaped output (the 9
+- AC #4 — jig worked example produces template-shaped output (the 10
           H2s from templates/docs/product-vision.md.template), with
           explicit acknowledgment of the divergence from the hand-
           seeded docs/product-vision.md (reword recorded in slice
           017-02 deviation log §1)
 - AC #5 — YarnFinder worked example produces template-shaped output
-          (same 9 H2s as AC #4 — the skill is template-driven), with
+          (same 10 H2s as AC #4 — the skill is template-driven), with
           YarnFinder's bespoke concepts (Data sourcing / Recommended
           slice order / prioritized backlog) mapped to template slots
 - AC #6 / #7 — first-run rendered output transitions markers correctly
@@ -47,12 +47,15 @@ VISION_TEMPLATE = REPO_ROOT / "templates" / "docs" / "product-vision.md.template
 # must match the *template* H2 structure, not the hand-seeded
 # docs/product-vision.md (which predates the template and uses bespoke
 # H2 names).
+# Slice 068-01 added "## Use cases" (after Scope) — the breadth-layer
+# capture section (ADR-0025).
 EXPECTED_TEMPLATE_H2S = [
     "Identity",
     "Target users",
     "Core problem",
     "Competitive landscape",
     "Scope",
+    "Use cases",
     "Stack",
     "Design principles & constraints",
     "How new work enters",
@@ -330,7 +333,7 @@ class WorkedExampleJigTests(unittest.TestCase):
 
     def test_output_matches_vision_template_h2s(self):
         # AC #4 (post-reword): output H2 structure matches the
-        # vision *template*'s 9 H2s (not the hand-seeded vision.md's
+        # vision *template*'s 10 H2s (not the hand-seeded vision.md's
         # bespoke H2 names). Each template H2 must appear in the
         # worked example as a rendered output marker.
         for h2 in EXPECTED_TEMPLATE_H2S:
@@ -719,6 +722,270 @@ class WorkedExampleRerunTests(unittest.TestCase):
             "worked-example-rerun.md must show hash update after refresh "
             "(017-03 AC #6)",
         )
+
+
+# ----------------------------------------------------------------------------
+# Slice 068-01: Use-cases breadth-layer capture (ADR-0025)
+# ----------------------------------------------------------------------------
+
+
+class UseCasesTemplateTests(unittest.TestCase):
+    """068-01 AC1 — the vision template carries a `## Use cases` H2 with the
+    standard unfilled marker + goal-level guidance ([actor] can [goal] form,
+    a concrete example, and a goal-level-not-spec-level caution)."""
+
+    UNFILLED_MARKER = "<!-- elicited: PENDING / status: unfilled -->"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = VISION_TEMPLATE.read_text() if VISION_TEMPLATE.is_file() else ""
+
+    def test_template_has_use_cases_h2(self):
+        self.assertRegex(
+            self.text, r"(?m)^## Use cases\s*$",
+            "templates/docs/product-vision.md.template must carry a "
+            "`## Use cases` H2 (068-01 AC1)",
+        )
+
+    def test_use_cases_section_has_unfilled_marker(self):
+        # The unfilled marker must be on the line(s) immediately after the
+        # `## Use cases` heading — same shape as every other slot.
+        pattern = re.compile(
+            rf"^## Use cases\s*\n+{re.escape(self.UNFILLED_MARKER)}",
+            flags=re.MULTILINE,
+        )
+        self.assertRegex(
+            self.text, pattern,
+            "the `## Use cases` section must open with the unfilled marker "
+            f"'{self.UNFILLED_MARKER}' (068-01 AC1)",
+        )
+
+    def test_use_cases_section_documents_actor_can_goal_form(self):
+        # Body must show the "[actor] can [goal]" goal-level form.
+        section = _use_cases_section(self.text)
+        self.assertRegex(
+            section, r"\[actor\].{0,10}can.{0,10}\[goal\]",
+            "the `## Use cases` section must document the "
+            "'[actor] can [goal]' form (068-01 AC1)",
+        )
+
+    def test_use_cases_section_has_concrete_example(self):
+        # Body must contain a concrete worked example of the form.
+        section = _use_cases_section(self.text)
+        self.assertRegex(
+            section.lower(), r"can\s+\w+",
+            "the `## Use cases` section must contain a concrete "
+            "'[actor] can [goal]' example (068-01 AC1)",
+        )
+
+    def test_use_cases_section_warns_goal_level_not_spec_level(self):
+        # Body must carry the explicit goal-level-not-spec-level caution.
+        section_lower = _use_cases_section(self.text).lower()
+        self.assertIn(
+            "goal-level", section_lower,
+            "the `## Use cases` section must caution 'goal-level' (068-01 AC1)",
+        )
+        self.assertIn(
+            "spec-level", section_lower,
+            "the `## Use cases` section must caution against 'spec-level' "
+            "entries (068-01 AC1)",
+        )
+
+
+class UseCasesCaptureContractTests(unittest.TestCase):
+    """068-01 AC2–AC5 — SKILL.md documents the conversational capture loop:
+    any-shape input + loop-to-exhaustion (AC2), a single confirm-gated
+    normalize pass (AC3), no silent inference (AC4), and the
+    overridable/skip + seed-not-grow framing (AC5)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+        cls.section = _skill_use_cases_section(cls.body)
+
+    def test_has_use_cases_section(self):
+        self.assertTrue(
+            self.section,
+            "SKILL.md body must contain a use-cases capture section "
+            "(068-01 AC2–AC5)",
+        )
+
+    # AC2 — any-shape input + loop to exhaustion
+    def test_documents_any_shape_input(self):
+        section_lower = self.section.lower()
+        self.assertTrue(
+            "incrementally" in section_lower or "incremental" in section_lower,
+            "use-cases capture must accept incrementally-entered behaviors "
+            "(068-01 AC2)",
+        )
+        self.assertTrue(
+            "bulk" in section_lower or "paste" in section_lower,
+            "use-cases capture must accept a bulk paste (068-01 AC2)",
+        )
+
+    def test_documents_loop_to_exhaustion(self):
+        section_lower = self.section.lower()
+        self.assertIn(
+            "anything else", section_lower,
+            "use-cases capture must loop on 'anything else?' (068-01 AC2)",
+        )
+        self.assertTrue(
+            "until" in section_lower and "done" in section_lower,
+            "use-cases capture must loop until the user signals done "
+            "(068-01 AC2)",
+        )
+
+    # AC3 — single normalize pass, confirm-gated before any write
+    def test_documents_single_normalize_pass(self):
+        section_lower = self.section.lower()
+        self.assertIn(
+            "normalize", section_lower,
+            "use-cases capture must document a normalize pass (068-01 AC3)",
+        )
+        # The normalize pass dedupes, splits compound entries, and rephrases
+        # to goal-level form.
+        for op in ("dedupe", "split", "goal-level"):
+            self.assertIn(
+                op, section_lower,
+                f"the normalize pass must document the '{op}' operation "
+                "(068-01 AC3)",
+            )
+
+    def test_documents_confirm_before_write_gate(self):
+        section_lower = self.section.lower()
+        self.assertIn(
+            "confirm", section_lower,
+            "use-cases capture must be confirm-gated (068-01 AC3)",
+        )
+        # Nothing is written until the user confirms; an edit round-trips.
+        self.assertTrue(
+            "nothing is written" in section_lower
+            or "not written" in section_lower
+            or "before any write" in section_lower
+            or "before writing" in section_lower,
+            "use-cases capture must state nothing is written before "
+            "confirmation (068-01 AC3)",
+        )
+        self.assertTrue(
+            "edit" in section_lower and "round-trip" in section_lower,
+            "use-cases capture must let an edit round-trip before write "
+            "(068-01 AC3)",
+        )
+
+    # AC4 — no silent inference
+    def test_documents_no_silent_inference(self):
+        section_lower = self.section.lower()
+        self.assertTrue(
+            "never" in section_lower
+            and ("infer" in section_lower or "auto-add" in section_lower),
+            "use-cases capture must state unstated use cases are never "
+            "inferred / auto-added (068-01 AC4)",
+        )
+        # A suspected candidate is surfaced as a question, added only on
+        # an explicit yes.
+        self.assertTrue(
+            "question" in section_lower,
+            "a suspected use case must be surfaced as a question "
+            "(068-01 AC4)",
+        )
+        self.assertTrue(
+            "explicit yes" in section_lower or "explicit confirmation" in section_lower
+            or "only on" in section_lower,
+            "a suspected use case must be added only on an explicit yes "
+            "(068-01 AC4)",
+        )
+
+    # AC5 — overridable (skip) + seed-not-grow scope note
+    def test_documents_skip_overridable(self):
+        section_lower = self.section.lower()
+        self.assertIn(
+            "skip", section_lower,
+            "use-cases capture must honor the per-section skip mechanic "
+            "(068-01 AC5)",
+        )
+
+    def test_documents_seed_not_grow_scope(self):
+        # The contract must note that additive GROWTH of the set is slice
+        # 02's scope, not slice 01's (068-01 AC5 note).
+        section_lower = self.section.lower()
+        self.assertIn(
+            "seed", section_lower,
+            "use-cases capture must frame the init capture as a seed "
+            "(068-01 AC5 note)",
+        )
+        self.assertTrue(
+            "068-02" in self.section or "slice 02" in section_lower,
+            "use-cases capture must note that growth is slice 02's scope "
+            "(068-01 AC5 note)",
+        )
+
+
+class UseCasesWorkedExampleTests(unittest.TestCase):
+    """068-01 AC2/AC3/AC4 — a worked example demonstrates the capture loop,
+    the normalize + confirm round-trip, and the no-infer question (not an
+    auto-fold). The yarnfinder worked example (behavior-dense consumer
+    product) carries the demonstration."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = WORKED_YARN.read_text() if WORKED_YARN.is_file() else ""
+        cls.lower = cls.text.lower()
+
+    def test_worked_example_shows_use_cases_capture(self):
+        self.assertIn(
+            "use case", self.lower,
+            "worked-example-yarnfinder.md must demonstrate use-cases "
+            "capture (068-01 AC2)",
+        )
+
+    def test_worked_example_renders_use_cases_section(self):
+        # The rendered output must include the `## Use cases` H2.
+        self.assertIn(
+            "## Use cases", self.text,
+            "worked-example-yarnfinder.md must show a rendered `## Use "
+            "cases` section (068-01 AC1/AC2)",
+        )
+
+    def test_worked_example_shows_normalize_and_confirm(self):
+        for cue in ("normalize", "confirm"):
+            self.assertIn(
+                cue, self.lower,
+                f"worked-example-yarnfinder.md must demonstrate '{cue}' "
+                "in the capture loop (068-01 AC3)",
+            )
+
+    def test_worked_example_shows_no_infer_question(self):
+        # The example must show a suspected behavior surfaced as a question
+        # (not auto-folded) and added only on an explicit yes.
+        self.assertRegex(
+            self.lower, r"didn'?t mention|you didn'?t|intentional\?",
+            "worked-example-yarnfinder.md must show a suspected use case "
+            "surfaced as a question, not an auto-fold (068-01 AC4)",
+        )
+
+
+def _section_after_h2(text: str, heading: str) -> str:
+    """Return the body of an H2 section (from the heading to the next
+    root-level H2 or EOF). Shared helper for the 068-01 template +
+    SKILL.md section assertions."""
+    pattern = re.compile(
+        rf"(?ms)^{re.escape(heading)}\s*$(.*?)(?=^## |\Z)",
+    )
+    m = pattern.search(text)
+    return m.group(1) if m else ""
+
+
+def _use_cases_section(template_text: str) -> str:
+    return _section_after_h2(template_text, "## Use cases")
+
+
+def _skill_use_cases_section(skill_body: str) -> str:
+    """The SKILL.md use-cases capture contract lives under a dedicated H2
+    (any heading containing 'use case', case-insensitive)."""
+    for m in re.finditer(r"(?mi)^(##\s+.*use case.*)$", skill_body):
+        heading = m.group(1).strip()
+        return _section_after_h2(skill_body, heading)
+    return ""
 
 
 if __name__ == "__main__":

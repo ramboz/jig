@@ -1276,12 +1276,15 @@ class VisionTemplateSlotsTests(unittest.TestCase):
     The skill that fills the slots is out of scope for 017-01.
     """
 
+    # Slice 068-01 added "## Use cases" (after Scope) — the breadth-layer
+    # capture section (ADR-0025). Count is now 10.
     EXPECTED_VISION_SECTIONS = [
         "Identity",
         "Target users",
         "Core problem",
         "Competitive landscape",
         "Scope",
+        "Use cases",
         "Stack",
         "Design principles & constraints",
         "How new work enters",
@@ -1326,7 +1329,8 @@ class VisionTemplateSlotsTests(unittest.TestCase):
             "templates/docs/product-vision.md.template must exist (slice 017-01 AC #1)",
         )
 
-    # AC #2: 9 H2 sections in exact order
+    # AC #2: 10 H2 sections in exact order (9 from slice 017-01 +
+    # "Use cases" added by slice 068-01).
     def test_product_vision_template_has_9_sections_in_order(self):
         body = self._read("templates/docs/product-vision.md.template")
         # match `## <heading>` but not deeper headings
@@ -1344,8 +1348,8 @@ class VisionTemplateSlotsTests(unittest.TestCase):
         # split by `## ` heading; first chunk is preamble, rest are sections
         chunks = re.split(r"^## ", body, flags=re.MULTILINE)[1:]
         self.assertEqual(
-            len(chunks), 9,
-            f"expected 9 sections, got {len(chunks)}",
+            len(chunks), 10,
+            f"expected 10 sections, got {len(chunks)}",
         )
         for chunk in chunks:
             heading_line, _, rest = chunk.partition("\n")
@@ -1523,7 +1527,8 @@ class VisionTemplateSlotsTests(unittest.TestCase):
                 f"scaffold.py exit nonzero: stderr={result.stderr}",
             )
 
-            # Vision side: 9 H2 sections in order.
+            # Vision side: 10 H2 sections in order (9 from slice 017-01 +
+            # "Use cases" added by slice 068-01).
             vision = target / "docs" / "product-vision.md"
             self.assertTrue(
                 vision.exists(),
@@ -1534,7 +1539,7 @@ class VisionTemplateSlotsTests(unittest.TestCase):
             headings = re.findall(r"^## (.+)$", vision_body, flags=re.MULTILINE)
             self.assertEqual(
                 headings, self.EXPECTED_VISION_SECTIONS,
-                f"scaffolded docs/product-vision.md must have 9 sections "
+                f"scaffolded docs/product-vision.md must have 10 sections "
                 f"in order; got {headings}",
             )
 

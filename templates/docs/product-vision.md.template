@@ -90,6 +90,26 @@
 - (non-goal 2)
 - (non-goal 3)
 
+## Use cases
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _The intended user-facing **behaviors** — the breadth frame specs anchor
+> against. Each entry is one **goal-level** behavior in the form
+> `"[actor] can [goal]"` — e.g. "a user can resume a draft offline",
+> "an admin can revoke a teammate's access". A seed, not the final set:
+> behaviors that surface later (while drafting specs) get added then._
+>
+> _**Goal-level, not spec-level.** Capture *what* the actor can do, never
+> *how* it's built. "A user can reset their password" is a use case;
+> "the reset-token table has a 24-hour TTL" is a spec detail — keep it out
+> of this section so the vision stays a breadth frame, not a requirements
+> doc._
+
+- (actor) can (goal)
+- (actor) can (goal)
+- (actor) can (goal)
+
 ## Stack
 
 <!-- elicited: PENDING / status: unfilled -->

@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: vision-elicitation
 ---
 
@@ -12,7 +12,7 @@ skill: vision-elicitation
 > enumerates intended user-facing behaviors, so behavior-dense projects have a
 > shared frame to anchor specs against instead of inventing each spec's slice of
 > the world ad hoc. Spans **vision-elicitation** (capture, slice 01),
-> **spec-workflow** (feed-forward + trace + coverage, slices 02–03). The coverage
+> **spec-workflow** (feed-forward + trace + grow + coverage, slices 02–03). The coverage
 > check is a **deterministic project-wide query** surfaced at reconcile — **no new
 > reviewer subagent**, but **net-new (bounded) surface**, not free reuse: neither
 > one-spec-at-a-time **`/jig:analyze`** nor the per-slice reconciliation reviewer
@@ -35,9 +35,13 @@ This spec adds a **use-case breadth layer**, per ADR-0025:
 1. **Capture at init** — a `## Use cases` section in the project vision, filled by
    a conversational capture loop (any-shape input → single normalize pass →
    human-confirm before write). Goal-level `"[actor] can [goal]"` entries only.
-2. **Feed forward + trace** — spec drafting reads the use-case section as framing,
-   and each spec records a machine-resolvable trace link to the use case(s) it
-   serves.
+   This is a **seed**, not the final set (behaviors aren't all knowable at init);
+   growing it is mechanism (2)'s job.
+2. **Feed forward + trace + grow** — spec drafting reads the use-case section as
+   framing, each spec records a machine-resolvable trace link to the use case(s) it
+   serves, and — because behaviors surface *while drafting specs* — a spec that
+   traces to an **uncaptured** behavior **prompts** an additive add to the vision,
+   closing the knowability-at-init gap *where behaviors actually surface*.
 3. **Reconcile coverage** — a bidirectional check flags use cases with no
    implementing spec (coverage gap) and specs with no parent use case (scope
    creep). It is a **deterministic cross-artifact query** surfaced at reconcile —
@@ -88,6 +92,29 @@ modeling adds nothing (libraries, single-flow CLIs). Every mechanism is
   app; not measured** (ADR-0025 §A1). The *gap* (scaffold never captured use
   cases) is verified; the *harm rate* is assumed. Mitigated by the
   overridable-default scoping + the kill criterion (ADR-0025).
+- **Load-bearing (thin evidence) — knowability at init:** the behaviors worth
+  capturing are **knowable and enumerable at init**, when `vision-elicitation`
+  runs, well enough to seed a useful anchor. This **sharpens ADR-0025 §A2** with a
+  *third, distinct* failure facet: §A2 names *too coarse* (grain) and
+  *doesn't-bind* (mechanical); this one is **incompleteness** rooted in *timing*.
+  The verified gap proves only that the scaffold never *asked* — not that asking
+  *at init* yields a reasonably-complete set, and jig's own wizard ("No prior
+  pitch. Start cold," `skills/vision-elicitation/SKILL.md`) testifies init is the
+  moment of *least* concrete behavior knowledge. **Mitigation — split across the
+  slices by design:** slice 01 captures only a **seed** (it does not assume init
+  completeness and adds no grow mechanism of its own); slice 02 then **grows** the
+  set *where behaviors actually surface* — at spec-drafting — by **prompting** an
+  additive add whenever a spec traces to an uncaptured behavior (068-02 AC5,
+  reusing slice 01's capture loop seeded with the existing entries). Growth is
+  therefore **triggered** (a spec-draft event), not merely reachable — which is why
+  the load-bearing thin-evidence assumption (*does prompting-at-spec-draft actually
+  get used and reduce incompleteness?*) and its `frame_review` now live on **slice
+  02**, not slice 01. **Discriminating signal** (so
+  the kill criterion can attribute cause, not just symptom): a thin/near-empty
+  section *despite* a filled-and-confirmed capture points to init-incompleteness
+  (an unused growth seam included); "100% coverage yet specs still diverge" points
+  to coarseness (§A2). Surfaced by slice 01's frame-critique — see
+  [reviews/slice-01-frame-critique.md](reviews/slice-01-frame-critique.md).
 - **Grounded by precedent (not assumed):** trace links can be machine-resolvable
   metadata — `dependencies:` frontmatter already resolves `NNN-MM` tokens for the
   DONE gate and `parsing.py` already parses list-valued frontmatter (slice 02).
@@ -105,12 +132,16 @@ the user-facing surface, delivers observable value, not intermediate state):
 
 - **Interface** — 068-01: the minimal capture surface — a `## Use cases` vision
   section + the conversational capture loop (any-shape input → single normalize
-  pass → confirm) in `vision-elicitation`. The **prerequisite**: nothing
-  downstream works without the section existing and being fillable.
-- **Rules** — 068-02: the spec-author contract gains a rule — spec drafting reads
-  the use-case section as framing, and each spec records a machine-resolvable
-  **trace link** to the use case(s) it serves. *Produces the link data slice 03
-  audits.*
+  pass → confirm) in `vision-elicitation`, capturing a **seed** set. The
+  **prerequisite**: nothing downstream works without the section existing and being
+  fillable. (No grow mechanism here by design — growth is 068-02's job, where
+  behaviors surface.)
+- **Rules** — 068-02: the spec-author contract gains rules — spec drafting reads
+  the use-case section as framing, each spec records a machine-resolvable **trace
+  link** to the use case(s) it serves, and a spec tracing to an **uncaptured**
+  behavior **prompts an additive grow** of the vision (the knowability-at-init
+  mitigation, *triggered* where behaviors surface — so this slice now carries
+  `frame_review` too). *Produces the link data slice 03 audits.*
 - **Rules** — 068-03: the reconcile-phase **bidirectional coverage check**
   (use-case→no-spec = gap; spec→no-use-case = creep), advisory by default — a
   **deterministic project-wide query** (no new reviewer subagent), but **net-new
@@ -130,8 +161,8 @@ analyze), so none of P/I/D/R is blocked by an unknown.
 
 | Slice | Title | Status | Notes |
 |---|---|---|---|
-| [068-01](slice-01-capture-and-vision-section.md) | capture-and-vision-section | **DRAFT** | Prerequisite. `## Use cases` vision section + conversational capture loop (normalize + confirm) in vision-elicitation. Goal-level only. `frame_review: true` (thin-evidence premise). |
-| [068-02](slice-02-feed-forward-and-trace-links.md) | feed-forward-and-trace-links | **DRAFT** | Spec drafting reads use cases as framing; each spec cites a machine-resolvable trace link. Reuses the `dependencies:`-style frontmatter shape. |
+| [068-01](slice-01-capture-and-vision-section.md) | capture-and-vision-section | **DONE** | Prerequisite. `## Use cases` vision section + conversational capture loop (normalize + confirm) in vision-elicitation. Goal-level only, **seed only** (no grow mechanism — that's 068-02). `frame_review: true` — passed (4-round iteration; grow moved to 02 per team decision). |
+| [068-02](slice-02-feed-forward-and-trace-links.md) | feed-forward-and-trace-links | **DRAFT** | Spec drafting reads use cases as framing; each spec cites a machine-resolvable trace link (reuses the `dependencies:`-style shape). **Also owns grow-on-discovery** — a spec tracing to an uncaptured behavior prompts an additive vision grow (knowability-at-init mitigation moved here from 01). `arch_review: true` + `frame_review: true`. |
 | [068-03](slice-03-reconcile-coverage-grounding.md) | reconcile-coverage-grounding | **DRAFT** | Bidirectional coverage at reconcile (gap + creep). Deterministic query — no new reviewer subagent — but net-new bounded surface (§A4). Advisory default (OQ3). |
 | [068-04](slice-04-mid-flight-triage.md) | mid-flight-triage | **DEFERRED** | Blast-radius triage lifecycle (ADR-0025 Option C). Documented, not built. Resolution trigger: trace links real + populated AND a genuine mid-flight conflict/reframe event observed. |
 
