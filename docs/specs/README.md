@@ -214,7 +214,7 @@
 | [067-reframe](067-reframe/spec.md) | 067-01 — The `/jig:reframe` skill: keystone ADR + dispositions | DRAFT |  |
 | [067-reframe](067-reframe/spec.md) | 067-02 — Retrofit spec drafts | DRAFT |  |
 | [067-reframe](067-reframe/spec.md) | 067-03 — The noticing nudge (standing practice) | DRAFT |  |
-| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-01 — capture-and-vision-section | DRAFT |  |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-01 — capture-and-vision-section | **DONE** |  |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-02 — feed-forward-and-trace-links | DRAFT |  |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-03 — reconcile-coverage-grounding | DRAFT |  |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | DEFERRED |  |

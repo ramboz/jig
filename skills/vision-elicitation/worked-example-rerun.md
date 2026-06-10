@@ -11,7 +11,7 @@
 >
 > **Setup.** Assume the user ran `/jig:vision-elicitation` once
 > (per the jig worked example). Their `docs/product-vision.md`
-> now has all 9 H2 sections marked `status: filled` with hashes:
+> now has all 10 H2 sections marked `status: filled` with hashes:
 >
 > ```markdown
 > ## Identity
@@ -111,7 +111,7 @@ the dumb zone, or hand-roll conventions in CLAUDE.md.
 The hash field is updated to the new digest; the date updates to
 today. Future re-runs will see this as the canonical body.
 
-### Sections 4–9 *(no manual edits)*
+### Sections 4–10 *(no manual edits)*
 
 Each section: hash matches → silent → move on.
 

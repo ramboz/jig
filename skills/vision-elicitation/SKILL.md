@@ -39,11 +39,14 @@ writes the captured answers into the elicitation slots that slice 017-01
 introduced (extended by slice 022-02 with Section 13 — Contract surfaces
 — feeding the `/jig:contracts` skill):
 
-- `docs/product-vision.md` — 9 H2 sections (Identity, Target users, Core
-  problem, Competitive landscape, Scope, Stack, Design principles &
+- `docs/product-vision.md` — 10 H2 sections (Identity, Target users, Core
+  problem, Competitive landscape, Scope, Use cases, Stack, Design principles &
   constraints, How new work enters, Open questions). Each section's
   `<!-- elicited: PENDING / status: unfilled -->` marker transitions
-  to `status: filled` (with today's ISO date) or `status: skipped`.
+  to `status: filled` (with today's ISO date) or `status: skipped`. The
+  **Use cases** section (added by slice 068-01 / ADR-0025) is filled by a
+  distinct **conversational capture loop**, not the rigid per-section Q&A —
+  see the [Use cases capture](#use-cases-capture) section below.
 - `docs/architecture.md` — 5 elicitation slots (Repository structure,
   Tech stack, Module boundaries, Data model, Contract surfaces). Same
   marker transition. Two sibling sections (Core architecture decisions,
@@ -179,6 +182,55 @@ Two narrow exceptions:
   enumerates 5 items in priority order, the skill writes them in that
   order. The skill never reprioritizes.
 
+## Use cases capture
+
+The **`## Use cases`** vision section (slice 068-01 / [ADR-0025](../../docs/decisions/adr-0025-use-cases-breadth-layer.md))
+captures the project's intended user-facing **behaviors** — the breadth frame
+specs later anchor against. Unlike the other slots, it is **not** filled by the
+rigid per-section Q&A above; it runs a short **conversational capture loop**,
+because behaviors come out unevenly (a few at a time, or one big paste) and need
+shaping before they land. The loop is **goal-level only** (`"[actor] can [goal]"`,
+never spec-level — see the section's own guidance) and has four steps:
+
+1. **Capture — any shape, loop to exhaustion.** Accept behaviors however the
+   user supplies them: typed in **incrementally** one at a time, OR pasted in
+   **bulk** as a list. After each batch, ask **"anything else?"** and keep
+   looping **until** the user signals **done**. Do not stop at the first answer;
+   do not cap the count.
+2. **Normalize — a single pass.** Run exactly **one** normalize pass over the
+   captured set: **dedupe** near-identical entries, **split** compound entries
+   ("search and filter results" → two behaviors), and rephrase each to the
+   **goal-level** `"[actor] can [goal]"` form. One pass — not an iterative
+   rewrite loop.
+3. **Confirm before any write — edit round-trips.** Present the normalized set
+   back to the user for **confirm/edit**. **Nothing is written** to the vision
+   `## Use cases` section **before** the user confirms. If the user edits the
+   set, re-present the edited list — the **edit round-trips** through confirm —
+   and write **only** once they confirm. On confirm, render the entries into the
+   section and flip the marker to `status: filled` (with hash).
+4. **No silent inference — ever.** A use case the user did **not** state is
+   **never** auto-added / inferred into the set. If you *suspect* an obvious
+   behavior is missing, surface it as a **question** — *"You didn't mention X —
+   intentional?"* — and add it **only on an explicit yes**. A "no" or silence
+   leaves it out. This is a hard rule: the section is the user's stated breadth,
+   not the skill's guess at it.
+
+**Seed, not the final set.** This init capture is deliberately a **seed** — it
+does not assume every behavior is knowable at init. *Additive growth* of the set
+as new behaviors surface while drafting specs is **slice 068-02's** scope, not
+slice 01's; this skill ships the initial capture only.
+
+**Overridable.** The `## Use cases` section is a normal vision slot: the
+per-section **skip** mechanic applies (skipping writes the `status: skipped`
+marker and leaves the section empty — valid for project classes where breadth
+modeling adds nothing, e.g. a single-flow CLI or a library), and the
+[Re-run protocol](#re-run-protocol)'s hash-based divergence detection applies to
+it on re-run like any other filled section. The capture loop above governs the
+**initial** capture session.
+
+The capture loop + normalize + confirm + the no-infer question are demonstrated
+end-to-end in [`worked-example-yarnfinder.md`](worked-example-yarnfinder.md).
+
 ## Worked examples
 
 Two annotated transcripts ship with this skill:
@@ -186,11 +238,11 @@ Two annotated transcripts ship with this skill:
 - [`worked-example-jig.md`](worked-example-jig.md) — runs the
   elicitation against jig's own pitch (the README's "what it does"
   + the audit-stage positioning recovery story). Produces
-  **template-shaped output** with the 9 H2s defined by
+  **template-shaped output** with the 10 H2s defined by
   `templates/docs/product-vision.md.template` (Identity / Target
-  users / Core problem / Competitive landscape / Scope / Stack /
-  Design principles & constraints / How new work enters / Open
-  questions). The worked example explicitly acknowledges the H2-name
+  users / Core problem / Competitive landscape / Scope / Use cases /
+  Stack / Design principles & constraints / How new work enters /
+  Open questions). The worked example explicitly acknowledges the H2-name
   divergence from the hand-seeded `docs/product-vision.md` (which
   predates the template and uses bespoke H2 names like "Vision
   statement" / "Future scope" / "References"). **The template is
