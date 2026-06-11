@@ -402,3 +402,14 @@ consumption.
   `tdd.py` for its stronger teeth.
 - **Does `servo` belong only in refactor/bug,** or also spec-workflow's DONE
   gate? Lean: refactor/bug first; spec later.
+- **Design-conformance is a concrete instance of the spec-DONE-gate question
+  above (added 2026-06-11).** Verifying a built UI matches its Claude Design
+  baseline (surfaced exploring SymPill — a jig-scaffolded Android/Compose app) is a
+  *spec-slice* DONE-gate oracle, not refactor/bug — so it instantiates "does
+  `servo` belong … also spec-workflow's DONE gate?". Its ladder splits: the
+  deterministic rungs (token-lint vs the design system; semantic UI assertions) are
+  an ordinary servo composite — or even a jig `tdd.py`/AC check — needing nothing
+  new; only the **visual** rung pulls this binding, and needs servo **ADR-0005
+  extended to multimodal eval input**. Still demand-gated (one exploratory
+  consumer, not the ≥-real trigger); captured as the first candidate consumer for
+  the spec-gate side. See jig inbox 2026-06-11.
