@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.14.0](https://github.com/ramboz/jig/compare/v1.13.0...v1.14.0) (2026-06-11)
+
+
+### Features
+
+* **063:** scaffold-precondition gate — route on new, not dead-end ([d1027fb](https://github.com/ramboz/jig/commit/d1027fb6aee9a883f4ed5cd2f34b037aa3506d4d))
+* **066:** scaffold-precondition gate for ADR creation (mirror of 063) ([0e551b1](https://github.com/ramboz/jig/commit/0e551b19820b34522efe07b9b218d81169ba6882))
+* **spec-workflow:** 068-02 — feed-forward + use-case trace links + grow-on-discovery ([22df91f](https://github.com/ramboz/jig/commit/22df91f3cf7499c943e41e7451805a3777fc6d7f))
+* **spec-workflow:** 068-03 — reconcile-phase use-case coverage check ([d9ded4b](https://github.com/ramboz/jig/commit/d9ded4b27e50cc43c5460f8bf2cd9afa3bd0b368))
+* **vision-elicitation:** spec 068 slice 01 — use-case capture-seed ([#50](https://github.com/ramboz/jig/issues/50)) ([53f09dc](https://github.com/ramboz/jig/commit/53f09dc4bdecc640da2b7d2f8eaac30787f10a04))
+
+
+### Bug Fixes
+
+* **063:** jig carries its own scaffold.json so `new` works in the jig repo ([15b3a98](https://github.com/ramboz/jig/commit/15b3a986f132946301dea90f557a400a46bc5e32))
+
+
+### Documentation
+
+* add ADR-0025 (Accepted) + spec 068 (use-cases breadth layer) — frame-critique passed ([8eb3c12](https://github.com/ramboz/jig/commit/8eb3c123376a75f0020df2608aaf03493f284798))
+* **decisions:** add ADR-0022 (oracle boundary, parked) + ADR-0023 (lifecycle spine) ([e1920e3](https://github.com/ramboz/jig/commit/e1920e3bfe8f47da5522822637bfd422b8dbdbe3))
+* **decisions:** add ADR-0024 (reference reframe, Proposed) — frame-critique passed ([496639e](https://github.com/ramboz/jig/commit/496639e2664270b06bc41615765607c75b243399))
+* **decisions:** reserve adr-0022-pluggable-oracle-boundary ([80d55af](https://github.com/ramboz/jig/commit/80d55afd245f425e8237fa9ceedf7662474e63a4))
+* **decisions:** reserve adr-0023-lifecycle-family-spine ([153ef63](https://github.com/ramboz/jig/commit/153ef631eb13873644b952f8c38fd9d48d3df494))
+* **inbox:** capture workspace-coexistence-map gap + validated four-layer positioning ([995f100](https://github.com/ramboz/jig/commit/995f100938d8b214c0f8a63b289e69e654052afd))
+* **memory:** capture ADR-0022/0023 learnings + lifecycle-spine hot-cache entry ([c03d4f3](https://github.com/ramboz/jig/commit/c03d4f3896d4f0ea42bc4fd58f866aee155aa4a3))
+* reconcile spec 068 §A4 framing + park detailed-use-case-MD design ([341a492](https://github.com/ramboz/jig/commit/341a49283bb853a8b51e4c2b9a2c7cf3d1f822cb))
+* regen status board + ADR index for ADR-0025 / spec 068 ([6919487](https://github.com/ramboz/jig/commit/691948709dfe536929ea8ad2409f0e8025d125f5))
+* **specs:** draft spec 067 (reframe) — /jig:reframe correction capability ([c531b45](https://github.com/ramboz/jig/commit/c531b45c53d32b97c52b088cc491601b4181b59a))
+
 ## [1.13.0](https://github.com/ramboz/jig/compare/v1.12.0...v1.13.0) (2026-06-08)
 
 
