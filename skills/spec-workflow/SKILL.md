@@ -29,6 +29,12 @@ user-invocable: true
 - Surfaces skill-routing observability via `workflow.py routing-stats [--days N]` —
   a read-only histogram of which skills fired (jig baseline vs. richer/"other"
   skill per category) from `.claude/skill-usage.jsonl` (slice 041-02).
+- Surfaces use-case coverage via `workflow.py coverage [--project-dir DIR]` — a
+  read-only, **advisory** (non-blocking), project-wide **bidirectional** check
+  (slice 068-03): a deterministic set-difference over the `use_cases:` trace
+  links that reports use cases with no implementing spec (coverage gap) and
+  specs citing no parent use case (scope creep). No-op when the project has no
+  `## Use cases` section.
 
 ## SPIDR splitting
 
@@ -610,6 +616,13 @@ status flip is allowed. Each item is a gate.
 - [ ] **Reconciliation review** — spawn a second reviewer subagent with a
       reconciliation-review prompt: are the doc changes faithful? Is the
       deviation log honest? Is scope appropriate (no scope creep in docs)?
+- [ ] **Use-case coverage (advisory)** — run `workflow.py coverage
+      [--project-dir DIR]` and review any **coverage gap** (a use case with no
+      implementing spec) or **scope creep** (a spec citing no resolvable use
+      case). **Non-blocking** — unlike the gates above, a finding here does
+      **not** block `RECONCILED` / `DONE` (ADR-0025 OQ3 / ADR-0011); it is the
+      reconcile-time backstop to slice 02's framing-time grow prompt. No-op
+      when the project has no `## Use cases` section.
 - [ ] **Commit** — only after all gates pass.
 
 ### Auditing staleness (`workflow.py stale`)

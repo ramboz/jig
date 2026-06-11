@@ -41,6 +41,11 @@ from _common.review_evidence import validate_evidence
 from _common.scaffold_state import classify_scaffold_state
 from _common.scaffold_state import precondition_enabled as _scaffold_precondition_enabled
 from _common.team_signal import team_context_drift
+from _common.use_cases import (
+    has_use_cases_section,
+    parse_use_cases,
+    resolve_use_cases,
+)
 
 VALID_STATUSES = (
     "DRAFT",
@@ -1841,6 +1846,164 @@ def amendment_digest(project_dir: Path) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+# ---------- Slice 068-03: bidirectional use-case coverage ----------
+#
+# The project-wide BACKSTOP to slice 02's framing-time grow prompt: a
+# DETERMINISTIC set-difference over slice 02's `use_cases:` trace links +
+# stable UC-N ids (no reviewer subagent — ADR-0025 §A4). Surfaced at the
+# reconcile checkpoint, ADVISORY by default (OQ3 / ADR-0011): it warns,
+# never gates RECONCILED / DONE. A fourth read-only project-wide query
+# sibling of `stale` / `routing-stats` / `amendment_digest` — same shape
+# (`--project-dir`, stdout, always exits 0).
+#
+# It lives here, NOT as a `/jig:analyze` extension: `/jig:analyze` is a
+# judgment-only skill with no `.py` helper, and a deterministic
+# set-difference has no home in an LLM-judgment surface. `workflow.py`
+# already hosts the read-only query family, so coverage joins it.
+#
+# Bidirectional (AC1):
+#   - coverage GAP  — a vision use case with no implementing spec.
+#   - scope CREEP   — a spec that cites no (resolvable) parent use case.
+# Plus a subordinate third honesty category: a spec citing a UC id absent
+# from the vision (unresolvable trace link). `resolve_use_cases` already
+# hands these over; dropping them silently would hide a data error.
+#
+# NO-OP STATE (load-bearing): a project whose vision has no `## Use cases`
+# section has not adopted the breadth layer (jig's own repo; opted-out
+# libraries / single-flow CLIs). It must emit a no-op note with ZERO
+# findings and exit 0 — never a finding, never non-zero.
+#
+# Computed from frontmatter `use_cases:` METADATA, not spec prose (AC2).
+
+
+def coverage(project_dir: Path) -> str:
+    """Render the bidirectional use-case coverage report to a string.
+
+    Read-only and ADVISORY (the caller always exits 0; a finding never
+    gates RECONCILED / DONE — ADR-0025 OQ3 / ADR-0011). Reuses slice 02's
+    `parse_use_cases` + `resolve_use_cases` (a deterministic set-difference,
+    not an LLM reviewer pass — AC4).
+
+    Algorithm:
+      1. No `docs/product-vision.md` → advisory 'skipped' note (no crash).
+      2. Vision has no `## Use cases` section → NO-OP note, zero findings.
+         (The breadth layer is not adopted — jig's own repo / opted-out
+         project classes. Load-bearing: must never emit findings.)
+      3. For each `docs/specs/*/spec.md`, read its `use_cases:` frontmatter
+         (a list; a bare or `[]` value means 'no citations'), resolve the
+         cited ids against the vision, and accumulate:
+           - covered ids (for the gap direction),
+           - scope-creep specs (cited nothing),
+           - unresolvable-citation specs (cited a UC absent from the vision).
+      4. Coverage gaps = vision use cases not in the covered set (document
+         order, rendered with id + goal text).
+    """
+    vision = project_dir / "docs" / "product-vision.md"
+    if not vision.is_file():
+        return (
+            "Use-case coverage (advisory, non-blocking) — skipped: "
+            f"{vision.as_posix()} not found. The bidirectional check needs "
+            "a project vision with a `## Use cases` section "
+            "(ADR-0025 / spec 068).\n"
+        )
+
+    vision_text = vision.read_text(encoding="utf-8")
+    if not has_use_cases_section(vision_text):
+        return (
+            "Use-case coverage (advisory, non-blocking) — no-op: the "
+            "use-case breadth layer is not adopted (no `## Use cases` "
+            "section in docs/product-vision.md). Coverage is a no-op here "
+            "(e.g. a library, a single-flow CLI, or jig's own repo). "
+            "ADR-0025 / spec 068-03.\n"
+        )
+
+    vision_ucs = parse_use_cases(vision_text)  # ordered {UC-id: goal}
+
+    covered: set = set()
+    scope_creep: list = []        # spec dirnames citing nothing
+    unresolvable: list = []       # (spec dirname, [bad UC ids])
+
+    specs_dir = project_dir / "docs" / "specs"
+    # Materialize once: the loop and the `n_specs` summary count share this
+    # list (a glob on a missing dir yields [], so no `is_dir()` guard is
+    # needed — n_specs is then 0).
+    spec_paths = sorted(specs_dir.glob("*/spec.md"))
+    for spec_md in spec_paths:
+        fields, _ = parse_frontmatter(spec_md.read_text(encoding="utf-8"))
+        raw = fields.get("use_cases")
+        # A bare `use_cases:` parses to "" and `use_cases: []` to [] — both
+        # mean "no citations". Only a real list carries cited ids.
+        cited = raw if isinstance(raw, list) else []
+        result = resolve_use_cases(cited, vision_text)
+        spec_name = spec_md.parent.name
+        if not cited:
+            scope_creep.append(spec_name)
+        covered.update(result.resolved)
+        if result.unresolvable:
+            unresolvable.append((spec_name, list(result.unresolvable)))
+
+    gaps = [(uc, goal) for uc, goal in vision_ucs.items()
+            if uc not in covered]
+
+    n_specs = len(spec_paths)
+
+    lines = [
+        "# Use-case coverage",
+        "",
+        "**ADVISORY (non-blocking).** A finding here does NOT block "
+        "RECONCILED / DONE (ADR-0025 OQ3 / ADR-0011); it is the "
+        "reconcile-time backstop to slice 02's framing-time grow prompt.",
+        "",
+    ]
+
+    if not gaps and not scope_creep and not unresolvable:
+        lines.append(
+            f"✓ coverage clean — all {len(vision_ucs)} use case(s) have an "
+            f"implementing spec, and all {n_specs} traced spec(s) resolve to "
+            "a stated use case."
+        )
+        return "\n".join(lines) + "\n"
+
+    # Direction 1 — coverage gaps (AC1).
+    lines.append("## Coverage gaps (use case → no implementing spec)")
+    if gaps:
+        for uc, goal in gaps:
+            lines.append(f"- {uc}: {goal}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    # Direction 2 — scope creep (AC1).
+    lines.append("## Scope creep (spec → no parent use case)")
+    if scope_creep:
+        for name in scope_creep:
+            lines.append(f"- docs/specs/{name}/spec.md")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    # Subordinate third category — dangling trace links (honesty; kept
+    # visually below the two headline directions). A spec citing a UC id
+    # absent from the vision: a data error, surfaced not silently dropped.
+    lines.append(
+        "## Unresolvable trace links (spec cites a use case absent from "
+        "the vision)"
+    )
+    if unresolvable:
+        for name, bad_ids in unresolvable:
+            lines.append(f"- docs/specs/{name}/spec.md: {', '.join(bad_ids)}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    lines.append(
+        f"Summary: {len(vision_ucs)} use case(s), {n_specs} spec(s) traced; "
+        f"{len(gaps)} gap(s) / {len(scope_creep)} orphan(s) / "
+        f"{len(unresolvable)} dangling."
+    )
+    return "\n".join(lines) + "\n"
+
+
 # ---------- Slice 003-03: reserve-spec-on-main ----------
 
 # Valid slug shape: starts with lowercase letter; lowercase letters,
@@ -3161,6 +3324,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pam.add_argument("--project-dir", default=".",
                      help="project root directory (default: cwd)")
+
+    # Slice 068-03: read-only, ADVISORY, project-wide bidirectional
+    # use-case coverage check — a deterministic set-difference over slice
+    # 02's `use_cases:` trace links. Reports coverage gaps (use case → no
+    # spec) and scope creep (spec → no use case). Never gates (exits 0);
+    # no-op when the vision has no `## Use cases` section.
+    pcov = sub.add_parser(
+        "coverage",
+        help="read-only, advisory, project-wide bidirectional use-case "
+             "coverage check: use cases with no implementing spec (gap) + "
+             "specs citing no parent use case (scope creep) (slice 068-03)",
+    )
+    pcov.add_argument("--project-dir", default=".",
+                      help="project root directory (default: cwd)")
     return p
 
 
@@ -3209,6 +3386,11 @@ def main(argv: list) -> int:
             sys.stdout.write(session_plan(Path(ns.spec)))
         elif ns.command == "amendments":
             sys.stdout.write(amendment_digest(Path(ns.project_dir)))
+        elif ns.command == "coverage":
+            # Advisory (slice 068-03): always exits 0 — never raise
+            # WorkflowError for a finding. Only a genuine error (e.g. an
+            # unreadable tree) falls through to the generic handler.
+            sys.stdout.write(coverage(Path(ns.project_dir)))
     except StatusBoardRaceError as exc:
         # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
         # Must be caught before the generic `WorkflowError → 2` handler so

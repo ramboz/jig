@@ -6492,5 +6492,226 @@ class FrameReviewSkillDocTests(unittest.TestCase):
         self.assertIn("adr", low)
 
 
+# ---------------------------------------------------------------------------
+# Slice 068-03 — reconcile-coverage-grounding (bidirectional coverage check)
+# ---------------------------------------------------------------------------
+
+
+class CoverageTests(unittest.TestCase):
+    """Slice 068-03: `workflow.py coverage` is a read-only, advisory,
+    project-wide BIDIRECTIONAL use-case coverage check — a deterministic
+    set-difference over slice 02's `use_cases:` trace links. It reports
+    use cases with no implementing spec (coverage GAP) and specs with no
+    parent use case (scope CREEP), is computed from frontmatter metadata
+    (not prose re-read), is no-op when the project has no `## Use cases`
+    section, and NEVER blocks (always exits 0). Sibling of `stale` /
+    `routing-stats` / `amendments`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-coverage-")
+        self.proj = Path(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write(self, rel: str, text: str) -> None:
+        p = self.proj / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    def _vision(self, body: str) -> None:
+        """Write docs/product-vision.md with the given trailing body."""
+        self._write("docs/product-vision.md",
+                    "# Vision\n\nIntro prose.\n\n" + body)
+
+    def _three_uc_vision(self) -> None:
+        self._vision(
+            "## Use cases\n\n"
+            "- UC-1: A crafter can search for a yarn by name\n"
+            "- UC-2: A crafter can save a project to their stash\n"
+            "- UC-3: A crafter can share a pattern with a friend\n"
+        )
+
+    def _spec(self, dirname: str, use_cases_line: str,
+              prose: str = "Spec body prose.") -> None:
+        """Write docs/specs/<dirname>/spec.md with a `use_cases:` line."""
+        self._write(
+            f"docs/specs/{dirname}/spec.md",
+            f"---\nstatus: DONE\n{use_cases_line}\n---\n\n"
+            f"# {dirname}\n\n## Overview\n\n{prose}\n",
+        )
+
+    # ---- AC1: bidirectional — gap AND scope-creep both surface --------------
+
+    def test_reports_gap_and_scope_creep_both_directions(self):
+        self._three_uc_vision()
+        # UC-1 cited (resolved); UC-2 cited by nobody (→ gap); UC-3 cited.
+        self._spec("100-search", "use_cases: [UC-1]")
+        self._spec("101-share", "use_cases: [UC-3]")
+        # Orphan spec: cites nothing → scope creep.
+        self._spec("102-internal-refactor", "use_cases: []")
+        report = _workflow.coverage(self.proj)
+        # Direction 1: coverage gap names UC-2 (uncited use case).
+        self.assertIn("UC-2", report)
+        self.assertIn("save a project to their stash", report,
+                      "gap must render the UC goal text, not just the id")
+        # Direction 2: scope creep names the orphan spec.
+        self.assertIn("102-internal-refactor", report)
+        # A covered use case (UC-1, UC-3) must NOT appear as a gap. Bound to
+        # the coverage-gap section, since the ids legitimately appear in the
+        # specs they resolve from elsewhere in the report.
+        low = report.lower()
+        gap_start = low.index("coverage gap")
+        gap_section = report[gap_start:]
+        for marker in ("scope creep", "unresolvable", "summary"):
+            if marker in gap_section.lower():
+                gap_section = gap_section[:gap_section.lower().index(marker)]
+                break
+        self.assertNotIn("UC-1", gap_section,
+                         "a covered use case must not be a coverage gap")
+        self.assertNotIn("UC-3", gap_section)
+
+    def test_both_finding_sections_present_in_report(self):
+        self._three_uc_vision()
+        self._spec("100-search", "use_cases: [UC-1]")
+        self._spec("102-internal-refactor", "use_cases: []")
+        report = _workflow.coverage(self.proj).lower()
+        self.assertIn("coverage gap", report)
+        self.assertIn("scope creep", report)
+
+    # ---- AC2: query (frontmatter), NOT prose re-read ------------------------
+
+    def test_scope_creep_from_metadata_not_prose(self):
+        """A spec whose PROSE mentions a use case but whose `use_cases:` list
+        is empty must still show as scope creep — proving the check reads the
+        link metadata (AC2), never the prose."""
+        self._three_uc_vision()
+        # Cover UC-2/UC-3 elsewhere so the only finding is the orphan.
+        self._spec("100-a", "use_cases: [UC-1, UC-2]")
+        self._spec("101-b", "use_cases: [UC-3]")
+        self._write(
+            "docs/specs/102-prose-only/spec.md",
+            "---\nstatus: DONE\nuse_cases: []\n---\n\n"
+            "# 102\n\n## Overview\n\nThis spec implements UC-1: search "
+            "for a yarn. It clearly serves a stated use case in prose.\n",
+        )
+        report = _workflow.coverage(self.proj)
+        self.assertIn("102-prose-only", report,
+                      "scope creep must be computed from `use_cases:` "
+                      "metadata, not prose mentions")
+
+    def test_bare_use_cases_key_counts_as_no_citation(self):
+        """A bare `use_cases:` (parses to '') is 'no citations', same as
+        `use_cases: []` — both → scope creep."""
+        self._three_uc_vision()
+        self._spec("100-a", "use_cases: [UC-1, UC-2, UC-3]")
+        self._write(
+            "docs/specs/103-bare/spec.md",
+            "---\nstatus: DONE\nuse_cases:\n---\n\n# 103\n\n## Overview\n\nx.\n",
+        )
+        report = _workflow.coverage(self.proj)
+        self.assertIn("103-bare", report)
+
+    # ---- AC3: advisory — CLI exits 0 even with findings ---------------------
+
+    def test_cli_exits_zero_with_findings(self):
+        self._three_uc_vision()
+        self._spec("100-search", "use_cases: [UC-1]")  # UC-2/UC-3 are gaps
+        self._spec("102-orphan", "use_cases: []")
+        r = run_workflow("coverage", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0,
+                         f"coverage is advisory; must exit 0. stderr: {r.stderr}")
+        self.assertIn("UC-2", r.stdout)
+        self.assertIn("102-orphan", r.stdout)
+
+    def test_report_banner_marks_advisory_nonblocking(self):
+        self._three_uc_vision()
+        self._spec("100-search", "use_cases: [UC-1]")
+        report = _workflow.coverage(self.proj).lower()
+        self.assertIn("advisory", report)
+        self.assertTrue(
+            "non-blocking" in report or "does not block" in report
+            or "never blocks" in report,
+            "report must state it is non-blocking",
+        )
+
+    # ---- AC4 / honesty: unresolvable citations are reported -----------------
+
+    def test_reports_unresolvable_trace_link(self):
+        """A spec citing UC-9 (absent from the vision) is a dangling link —
+        surfaced as a distinct, minor third category, never silently dropped."""
+        self._three_uc_vision()
+        self._spec("100-search", "use_cases: [UC-1, UC-2, UC-3]")  # cover all
+        self._spec("104-typo", "use_cases: [UC-9]")
+        report = _workflow.coverage(self.proj)
+        self.assertIn("UC-9", report)
+        self.assertIn("104-typo", report)
+        self.assertIn("unresolvable", report.lower())
+
+    def test_unresolvable_spec_not_also_scope_creep(self):
+        """A spec that DOES cite (even a bad id) is not 'no parent use case' —
+        it cited one, it just doesn't resolve. It must read as unresolvable,
+        not scope creep."""
+        self._three_uc_vision()
+        self._spec("100-search", "use_cases: [UC-1, UC-2, UC-3]")
+        self._spec("104-typo", "use_cases: [UC-9]")
+        report = _workflow.coverage(self.proj)
+        creep_section = ""
+        low = report.lower()
+        if "scope creep" in low:
+            start = low.index("scope creep")
+            creep_section = report[start:]
+            # bound to the next section heading if present
+            for marker in ("unresolvable", "summary", "✓"):
+                if marker in creep_section.lower():
+                    creep_section = creep_section[
+                        :creep_section.lower().index(marker)]
+                    break
+        self.assertNotIn("104-typo", creep_section,
+                         "a spec that cited a (bad) id is unresolvable, "
+                         "not scope creep")
+
+    # ---- NO_SECTION no-op (the jig-self / opted-out case) -------------------
+
+    def test_no_use_cases_section_is_noop(self):
+        """A vision with NO `## Use cases` section → no-op note, ZERO
+        findings, exit 0. This is exactly jig's own repo and opted-out
+        project classes (libraries / single-flow CLIs)."""
+        self._vision("## Some other section\n\nNot use cases.\n")
+        self._spec("100-x", "use_cases: []")  # would be creep IF adopted
+        report = _workflow.coverage(self.proj)
+        low = report.lower()
+        self.assertIn("no-op", low.replace("noop", "no-op"))
+        self.assertNotIn("coverage gap", low)
+        self.assertNotIn("scope creep", low)
+        self.assertNotIn("100-x", report)
+        r = run_workflow("coverage", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def test_absent_vision_file_is_skipped(self):
+        """No docs/product-vision.md at all → advisory 'skipped' note, no
+        crash, exit 0."""
+        self._spec("100-x", "use_cases: [UC-1]")
+        report = _workflow.coverage(self.proj)
+        self.assertIn("vision", report.lower())
+        r = run_workflow("coverage", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    # ---- Clean case: every UC covered + every spec resolvable ---------------
+
+    def test_clean_when_fully_covered(self):
+        self._three_uc_vision()
+        self._spec("100-search", "use_cases: [UC-1]")
+        self._spec("101-stash", "use_cases: [UC-2]")
+        self._spec("102-share", "use_cases: [UC-3]")
+        report = _workflow.coverage(self.proj)
+        self.assertIn("✓", report)  # ✓ clean marker
+        self.assertIn("clean", report.lower())
+        # A clean report still exits 0 via the CLI.
+        r = run_workflow("coverage", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+
 if __name__ == "__main__":
     unittest.main()
