@@ -28,127 +28,23 @@ import json
 import sys
 import zipfile
 from pathlib import Path
-from typing import Iterable
 
-# Files / directories to include in the zip, relative to the source root.
-# Directories are walked recursively; individual files are copied as-is.
-_INCLUDE_ROOTS: tuple[str, ...] = (
-    ".claude-plugin",
-    "agents",
-    "skills",
-    "hooks",
-    "templates",
-)
-
-_INCLUDE_FILES: tuple[str, ...] = (
-    "README.md",
-    "LICENSE",
-)
-
-# Individual files under `scripts/` that are RUNTIME (not dev-only) and so
-# must ship in the release zip. `scripts/` is otherwise excluded by virtue of
-# not being in `_INCLUDE_ROOTS` (it holds dev/CI tooling — build_release_zip,
-# run_tests, spec_lint, usage, validate_manifests — which has no place in a
-# user's plugin install). But scaffold-init's closing completion self-check
-# (slice 048-06) imports `verify_install` from `<plugin-root>/scripts/` at
-# runtime, and that module pulls in `install_contract` + `scaffold_contract`.
-# Without these three the self-check crashes on every plugin install (the
-# release zip never carried `scripts/`). They are pure-stdlib, check the
-# *target's* `.claude/` tree (nothing is copied into the user's repo — they
-# run from the plugin install dir), and ship under their original `scripts/`
-# path so the importing path in scaffold.py needs no change. This is an
-# allowlist on purpose: the dev-only scripts stay out, and the contract is
-# pinned by test_build_release_zip.py::test_runtime_scripts_only.
-_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
-    "scripts/verify_install.py",
-    "scripts/install_contract.py",
-    "scripts/scaffold_contract.py",
-)
-
-# Directories anywhere in the tree to skip outright. Limited to truly
-# defensive exclusions (caches, VCS artifacts) — top-level dev-only dirs
-# (`scripts/`, `docs/`, `.github/`, `.git/`, `.jig/`, `.claude/`) are
-# already excluded by virtue of not being listed in `_INCLUDE_ROOTS`,
-# so we don't need to name them here (the three runtime modules under
-# `scripts/` that scaffold-init needs are re-included file-by-file via
-# `_INCLUDE_SCRIPT_FILES`; the rest of `scripts/` stays out). Naming them
-# here would also exclude nested same-named dirs that ARE runtime — e.g.
-# `hooks/scripts/` (the actual hook scripts) and `templates/docs/`
-# (scaffold-init's project template).
-_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    # `fixtures/` is reserved as test-data (spec 035): any-depth match
-    # per Q1, no escape hatch per Q4. Future skills needing runtime
-    # sample data must use a different name (`samples/`, `examples/`,
-    # `data/`, etc.).
-    "fixtures",
-})
-
-# File-name patterns to skip (matched against the basename).
-_EXCLUDE_FILE_SUFFIXES: tuple[str, ...] = (
-    ".pyc",
-)
-
-_EXCLUDE_FILE_NAMES: frozenset[str] = frozenset({
-    ".DS_Store",
-})
-
-
-def _is_excluded_dir(name: str) -> bool:
-    return name in _EXCLUDE_DIR_NAMES
-
-
-def _is_excluded_file(name: str) -> bool:
-    if name in _EXCLUDE_FILE_NAMES:
-        return True
-    if name.startswith("test_") and name.endswith(".py"):
-        return True
-    for suffix in _EXCLUDE_FILE_SUFFIXES:
-        if name.endswith(suffix):
-            return True
-    return False
-
-
-def _iter_files(source_root: Path) -> Iterable[Path]:
-    """Yield every file path (relative to source_root) destined for the zip.
-
-    Walks each entry in `_INCLUDE_ROOTS` recursively, skipping excluded
-    directories/files. Also yields the top-level `_INCLUDE_FILES` if present.
-    """
-    for root_name in _INCLUDE_ROOTS:
-        root_dir = source_root / root_name
-        if not root_dir.is_dir():
-            continue
-        for path in root_dir.rglob("*"):
-            if path.is_dir():
-                continue
-            # Skip if any parent directory along the relative path is excluded.
-            rel = path.relative_to(source_root)
-            if any(_is_excluded_dir(part) for part in rel.parts[:-1]):
-                continue
-            if _is_excluded_file(rel.name):
-                continue
-            yield rel
-
-    for file_name in _INCLUDE_FILES:
-        file_path = source_root / file_name
-        if file_path.is_file():
-            yield Path(file_name)
-
-    # Runtime modules under scripts/ that scaffold-init imports at install
-    # time (see _INCLUDE_SCRIPT_FILES). Yielded individually so the rest of
-    # dev-only scripts/ stays out of the release.
-    for rel_name in _INCLUDE_SCRIPT_FILES:
-        file_path = source_root / rel_name
-        if file_path.is_file():
-            yield Path(rel_name)
+# The release-zip file set (include roots/files, the runtime `scripts/*.py`
+# allowlist, and the exclusion rules) lives in `install_contract.py` — the
+# single validator-facing source of truth (spec 069-01). The builder consumes
+# its `iter_release_files` enumerator instead of restating its own constants,
+# so the build-time and verify-time definitions cannot drift. Imported the
+# same way `verify_install.py` imports it: the script's own directory is on
+# `sys.path` so a plain `import install_contract` resolves whether this module
+# is run as a script (`sys.path[0]` is the script dir) or imported by a test
+# (which inserts `scripts/` first).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import install_contract  # noqa: E402
 
 
 def _warn_missing_optional_files(source_root: Path, out) -> None:
     """Emit a warning per missing top-level file that the AC marks optional."""
-    for file_name in _INCLUDE_FILES:
+    for file_name in install_contract.RELEASE_INCLUDE_FILES:
         if not (source_root / file_name).is_file():
             out.write(
                 f"WARN: optional file {file_name!r} not found at source root; "
@@ -234,7 +130,12 @@ def build(
     _warn_missing_optional_files(source_root, out)
 
     # Collect + sort all entries up-front so the zip layout is deterministic.
-    entries = sorted(_iter_files(source_root), key=lambda p: p.as_posix())
+    # The include/exclude rules come from install_contract (single source of
+    # truth) — the builder owns no parallel list.
+    entries = sorted(
+        install_contract.iter_release_files(source_root),
+        key=lambda p: p.as_posix(),
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:

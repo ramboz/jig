@@ -349,6 +349,105 @@ def is_excluded_release_path(rel_path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Included-path set (release-zip contract) + builder-facing enumerator
+# ---------------------------------------------------------------------------
+#
+# This module is the single source of truth for the release-zip file set:
+# the EXCLUDE side above (`is_excluded_release_path`) and the INCLUDE side
+# here. `build_release_zip.py` consumes `iter_release_files` instead of
+# restating its own include/exclude constants (spec 069-01), so there is one
+# definition the builder and the verify-time smoke test share.
+
+# Files / directories to include in the zip, relative to the source root.
+# Directories are walked recursively; individual files are copied as-is.
+RELEASE_INCLUDE_ROOTS: tuple[str, ...] = (
+    ".claude-plugin",
+    "agents",
+    "skills",
+    "hooks",
+    "templates",
+)
+
+RELEASE_INCLUDE_FILES: tuple[str, ...] = (
+    "README.md",
+    "LICENSE",
+)
+
+# Individual files under `scripts/` that are RUNTIME (not dev-only) and so
+# must ship in the release zip. `scripts/` is otherwise excluded by virtue of
+# not being in `RELEASE_INCLUDE_ROOTS` (it holds dev/CI tooling —
+# build_release_zip, run_tests, spec_lint, usage, validate_manifests — which
+# has no place in a user's plugin install). But scaffold-init's closing
+# completion self-check (slice 048-06) imports `verify_install` from
+# `<plugin-root>/scripts/` at runtime, and that module pulls in
+# `install_contract` + `scaffold_contract`. Without these three the
+# self-check crashes on every plugin install (the release zip never carried
+# `scripts/`). They are pure-stdlib, check the *target's* `.claude/` tree
+# (nothing is copied into the user's repo — they run from the plugin install
+# dir), and ship under their original `scripts/` path so the importing path
+# in scaffold.py needs no change. This is an allowlist on purpose: the
+# dev-only scripts stay out, and the contract is pinned by
+# test_build_release_zip.py::test_runtime_scripts_only.
+RELEASE_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
+    "scripts/verify_install.py",
+    "scripts/install_contract.py",
+    "scripts/scaffold_contract.py",
+)
+
+# (The directory-name exclusions live in `_EXCLUDED_DIR_NAMES` above. They are
+# limited to truly defensive exclusions — caches, VCS artifacts — plus the
+# reserved `fixtures/` name: top-level dev-only dirs (`scripts/`, `docs/`,
+# `.github/`, `.git/`, `.jig/`, `.claude/`) are already excluded by virtue of
+# not being listed in `RELEASE_INCLUDE_ROOTS`, so we don't name them in the
+# dir-name set — the three runtime modules under `scripts/` that scaffold-init
+# needs are re-included file-by-file via `RELEASE_INCLUDE_SCRIPT_FILES`; the
+# rest of `scripts/` stays out. Naming the top-level dirs in the dir-name set
+# would also exclude nested same-named dirs that ARE runtime — e.g.
+# `hooks/scripts/` (the actual hook scripts) and `templates/docs/`
+# (scaffold-init's project template). `fixtures/` is reserved as test-data
+# (spec 035): any-depth match per Q1, no escape hatch per Q4 — future skills
+# needing runtime sample data must use a different name (`samples/`,
+# `examples/`, `data/`, etc.).)
+
+
+def iter_release_files(source_root: Path) -> Iterable[Path]:
+    """Yield every file path (relative to source_root) destined for the zip.
+
+    Walks each entry in `RELEASE_INCLUDE_ROOTS` recursively, skipping any path
+    excluded by `is_excluded_release_path` (the single exclusion rule). Then
+    yields the present top-level `RELEASE_INCLUDE_FILES` and the runtime
+    `scripts/*.py` modules in `RELEASE_INCLUDE_SCRIPT_FILES`.
+
+    Pure / stdlib-only / side-effect-free: it only reads the source tree and
+    yields relative POSIX-style `Path`s (matches the rest of this module).
+    """
+    for root_name in RELEASE_INCLUDE_ROOTS:
+        root_dir = source_root / root_name
+        if not root_dir.is_dir():
+            continue
+        for path in root_dir.rglob("*"):
+            if path.is_dir():
+                continue
+            rel = path.relative_to(source_root)
+            if is_excluded_release_path(rel.as_posix()):
+                continue
+            yield rel
+
+    for file_name in RELEASE_INCLUDE_FILES:
+        file_path = source_root / file_name
+        if file_path.is_file():
+            yield Path(file_name)
+
+    # Runtime modules under scripts/ that scaffold-init imports at install
+    # time (see RELEASE_INCLUDE_SCRIPT_FILES). Yielded individually so the
+    # rest of dev-only scripts/ stays out of the release.
+    for rel_name in RELEASE_INCLUDE_SCRIPT_FILES:
+        file_path = source_root / rel_name
+        if file_path.is_file():
+            yield Path(rel_name)
+
+
+# ---------------------------------------------------------------------------
 # Skill / agent presence helpers (operate on a plugin root)
 # ---------------------------------------------------------------------------
 

@@ -13,7 +13,13 @@ Covers the plugin/release install contract as data + pure helpers:
 Plus the two consistency tests the restate-with-pointer convention requires:
   - EXPECTED_SKILLS == union of scaffold._TIER_SKILLS.
   - REQUIRED_AGENTS == verify_install._REQUIRED_AGENTS.
-  - the restated exclusion rules match build_release_zip's predicates.
+
+As of spec 069-01 this module also OWNS the release-zip file set (include
+roots/files + the runtime-scripts allowlist) and a pure `iter_release_files`
+enumerator the builder consumes — so the former
+`test_exclusion_predicate_matches_build_release_zip` guard (which pinned a
+duplicate list in build_release_zip equal to this one) is gone: there is no
+second copy left to keep in sync.
 """
 
 import json
@@ -24,7 +30,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import build_release_zip  # noqa: E402
 import install_contract  # noqa: E402
 import verify_install  # noqa: E402
 
@@ -72,37 +77,133 @@ class ContractConsistencyTests(unittest.TestCase):
             verify_install._REQUIRED_AGENTS,
         )
 
-    def test_exclusion_predicate_matches_build_release_zip(self):
-        """The restated exclusion rules agree with build_release_zip's
-        per-file/per-dir predicates across the *full* excluded set — this
-        slice is about drift-proofing, so sample the real constant rather
-        than a hand-picked subset."""
-        # The restated dir-name set must equal build_release_zip's, not just
-        # overlap on a couple of sampled names.
+
+# ---------------------------------------------------------------------------
+# Spec 069-01 — install_contract now OWNS the release-zip file set (include
+# roots/files + the runtime-scripts allowlist) and a pure enumerator the
+# builder consumes. These tests pin the include-side data + exercise the
+# enumerator against a synthesized source tree (AC #1 / AC #4 entry-set
+# stability), without a brittle full-namelist golden constant.
+# ---------------------------------------------------------------------------
+
+
+class ReleaseFileSetTests(unittest.TestCase):
+    def test_include_side_data_present(self):
+        """The contract owns the include roots, top-level include files, and
+        the runtime `scripts/*.py` allowlist as module-level data."""
         self.assertEqual(
-            install_contract._EXCLUDED_DIR_NAMES,
-            build_release_zip._EXCLUDE_DIR_NAMES,
-            "install_contract._EXCLUDED_DIR_NAMES drifted from "
-            "build_release_zip._EXCLUDE_DIR_NAMES",
+            install_contract.RELEASE_INCLUDE_ROOTS,
+            (".claude-plugin", "agents", "skills", "hooks", "templates"),
         )
-        # ...and the predicate agrees behaviourally for every excluded dir
-        # (covers .pytest_cache / .mypy_cache, not just fixtures/__pycache__).
-        for d in build_release_zip._EXCLUDE_DIR_NAMES:
-            self.assertTrue(
-                install_contract.is_excluded_release_path(f"skills/x/{d}/y.txt")
-            )
-            self.assertTrue(build_release_zip._is_excluded_dir(d))
-        # File patterns.
-        for f in ("test_foo.py", "x.pyc", ".DS_Store"):
-            self.assertTrue(
-                install_contract.is_excluded_release_path(f"skills/x/{f}")
-            )
-            self.assertTrue(build_release_zip._is_excluded_file(f))
-        # A normal runtime file is excluded by neither.
-        self.assertFalse(
-            install_contract.is_excluded_release_path("skills/x/runtime.py")
+        self.assertEqual(
+            install_contract.RELEASE_INCLUDE_FILES,
+            ("README.md", "LICENSE"),
         )
-        self.assertFalse(build_release_zip._is_excluded_file("runtime.py"))
+        self.assertEqual(
+            install_contract.RELEASE_INCLUDE_SCRIPT_FILES,
+            (
+                "scripts/verify_install.py",
+                "scripts/install_contract.py",
+                "scripts/scaffold_contract.py",
+            ),
+        )
+
+    def test_iter_release_files_is_pure(self):
+        """The enumerator must not mutate or create anything on disk — it
+        only reads the source tree and yields relative Paths (matches the
+        module's stdlib-only, side-effect-free style)."""
+        tmp = Path(tempfile.mkdtemp(prefix="jig-069-pure-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        (tmp / "skills" / "demo").mkdir(parents=True)
+        (tmp / "skills" / "demo" / "SKILL.md").write_text("# x\n")
+        before = sorted(p.relative_to(tmp).as_posix() for p in tmp.rglob("*"))
+        list(install_contract.iter_release_files(tmp))
+        after = sorted(p.relative_to(tmp).as_posix() for p in tmp.rglob("*"))
+        self.assertEqual(before, after, "iter_release_files must not touch disk")
+
+
+class IterReleaseFilesEntrySetTests(unittest.TestCase):
+    """Spec 069-01 (AC #1 / AC #4): the enumerator includes representative
+    runtime files + the runtime-scripts allowlist and excludes representative
+    junk (test_*.py, __pycache__, *.pyc, fixtures/, .DS_Store) — a
+    non-brittle stability check over a synthesized source tree rather than a
+    full-namelist golden that would break on every skill edit."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-069-iter-"))
+        # An included root with runtime + junk content.
+        skill = self.tmp / "skills" / "demo-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# kept\n")
+        (skill / "runtime.py").write_text("# kept\n")
+        (skill / "test_demo.py").write_text("# junk\n")
+        (skill / "module.pyc").write_text("junk\n")
+        (skill / ".DS_Store").write_text("junk\n")
+        cache = skill / "__pycache__"
+        cache.mkdir()
+        (cache / "x.pyc").write_text("junk\n")
+        fixtures = skill / "fixtures"
+        fixtures.mkdir()
+        (fixtures / "case.txt").write_text("junk\n")
+        # A non-included top-level dir must be ignored outright.
+        docs = self.tmp / "docs"
+        docs.mkdir()
+        (docs / "x.md").write_text("not shipped\n")
+        # Top-level include file present, plus the runtime-scripts allowlist.
+        (self.tmp / "README.md").write_text("readme\n")
+        scripts = self.tmp / "scripts"
+        scripts.mkdir()
+        for rel in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
+            (self.tmp / rel).write_text("# runtime module\n")
+        # A dev-only script that must NOT ship.
+        (scripts / "run_tests.py").write_text("# dev only\n")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _rels(self) -> set[str]:
+        return {p.as_posix() for p in install_contract.iter_release_files(self.tmp)}
+
+    def test_includes_representative_runtime_files(self):
+        rels = self._rels()
+        self.assertIn("skills/demo-skill/SKILL.md", rels)
+        self.assertIn("skills/demo-skill/runtime.py", rels)
+        self.assertIn("README.md", rels)
+
+    def test_yields_runtime_scripts_allowlist(self):
+        rels = self._rels()
+        for allowed in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
+            self.assertIn(allowed, rels)
+        # ...and only the allowlisted scripts, never dev-only tooling.
+        self.assertNotIn("scripts/run_tests.py", rels)
+
+    def test_excludes_representative_junk(self):
+        rels = self._rels()
+        offenders = sorted(
+            r for r in rels if install_contract.is_excluded_release_path(r)
+        )
+        self.assertEqual(
+            offenders, [],
+            f"iter_release_files yielded excluded path(s): {offenders!r}",
+        )
+        # Spell out the categories so a regression names the culprit.
+        self.assertNotIn("skills/demo-skill/test_demo.py", rels)
+        self.assertNotIn("skills/demo-skill/module.pyc", rels)
+        self.assertNotIn("skills/demo-skill/.DS_Store", rels)
+        self.assertNotIn("skills/demo-skill/__pycache__/x.pyc", rels)
+        self.assertFalse(any("fixtures" in Path(r).parts for r in rels))
+
+    def test_ignores_non_included_top_level_dirs(self):
+        rels = self._rels()
+        self.assertFalse(any(r.startswith("docs/") for r in rels))
+
+    def test_skips_missing_optional_include_file(self):
+        # LICENSE is absent in the synthesized tree; the enumerator must not
+        # yield it (it yields only present top-level include files).
+        rels = self._rels()
+        self.assertNotIn("LICENSE", rels)
 
 
 # ---------------------------------------------------------------------------

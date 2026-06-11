@@ -1591,9 +1591,10 @@ def main(argv: list[str]) -> int:
     #
     # The verifier modules (verify_install + install_contract +
     # scaffold_contract) live under `scripts/`, which is dev-only EXCEPT for
-    # these three — `build_release_zip.py::_INCLUDE_SCRIPT_FILES` re-includes
-    # them so they ship in the plugin install (they were absent before, which
-    # crashed this self-check on every packaged install). The import is still
+    # these three — `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` lists them
+    # and the release builder's `iter_release_files` enumerator ships them in
+    # the plugin install (they were absent before, which crashed this
+    # self-check on every packaged install). The import is still
     # guarded: if a future packaging regression drops them, the *scaffold has
     # already succeeded and printed* above — degrade to a one-line notice
     # rather than crashing on the closing report. A genuine verification

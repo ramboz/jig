@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: release-pipeline
 tier: release infrastructure
 adr_required: false

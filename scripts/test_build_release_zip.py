@@ -163,13 +163,14 @@ class ExclusionTests(unittest.TestCase):
         install_contract + scaffold_contract). The zip must carry exactly
         those three under `scripts/` and none of the dev/CI tooling
         (build_release_zip, run_tests, spec_lint, usage, validate_manifests).
-        Pins the `build_release_zip._INCLUDE_SCRIPT_FILES` allowlist so a
-        future dev script can't silently leak into the plugin install, and so
-        the runtime trio can't silently drop back out (the regression that
+        Pins the `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` allowlist
+        (spec 069-01 re-homed it from build_release_zip) so a future dev
+        script can't silently leak into the plugin install, and so the
+        runtime trio can't silently drop back out (the regression that
         crashed scaffold-init's completion self-check on every packaged
         install — it shipped no `scripts/` at all)."""
         scripts_entries = {n for n in self.names if n.startswith("scripts/")}
-        expected = set(build_release_zip._INCLUDE_SCRIPT_FILES)
+        expected = set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES)
         self.assertEqual(
             scripts_entries, expected,
             "zip's scripts/ entries must equal exactly the runtime trio; "
@@ -407,7 +408,7 @@ class PackagedVerifierImportTests(unittest.TestCase):
     """The scaffold-completion self-check (slice 048-06) imports
     `verify_install` (which pulls in `install_contract` +
     `scaffold_contract`) from `<plugin-root>/scripts/` at install time.
-    Before the `_INCLUDE_SCRIPT_FILES` fix the release zip carried no
+    Before the runtime-scripts-allowlist fix the release zip carried no
     `scripts/` at all, so that import crashed on every packaged plugin
     install. The existing `smoke_test` imports the verifier from the SOURCE
     repo, not the extracted tree, so it never exercised this path.
@@ -426,7 +427,7 @@ class PackagedVerifierImportTests(unittest.TestCase):
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(tmp)
 
-        for rel in build_release_zip._INCLUDE_SCRIPT_FILES:
+        for rel in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
             self.assertTrue(
                 (tmp / rel).is_file(),
                 f"runtime module {rel} missing from extracted plugin tree",
@@ -487,11 +488,12 @@ class MissingLicenseWarningTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Slice 035-01 — exclude-fixtures-from-installs. `_iter_files` must skip
-# any directory named `fixtures` at any depth under the included roots
-# (matches the `__pycache__` semantics already in place). Test data
-# lives at `skills/migrate/fixtures/` today; the rule generalizes for
-# any future skill that grows a fixtures tree.
+# Slice 035-01 — exclude-fixtures-from-installs. The release-file enumerator
+# (`install_contract.iter_release_files`, re-homed from build_release_zip in
+# spec 069-01) must skip any directory named `fixtures` at any depth under
+# the included roots (matches the `__pycache__` semantics already in place).
+# Test data lives at `skills/migrate/fixtures/` today; the rule generalizes
+# for any future skill that grows a fixtures tree.
 # ---------------------------------------------------------------------------
 
 
@@ -515,14 +517,14 @@ class FixturesExclusionAgainstRealSourceTests(unittest.TestCase):
 
 
 class FixturesExclusionAtAnyDepthTests(unittest.TestCase):
-    """AC #3 — `_iter_files` skips `fixtures/` directories nested below
-    the skill root, not just at the top of a skill subtree. Uses a
-    synthesized source tree so the test does not depend on the
-    repo's current skill layout."""
+    """AC #3 — `install_contract.iter_release_files` skips `fixtures/`
+    directories nested below the skill root, not just at the top of a skill
+    subtree. Uses a synthesized source tree so the test does not depend on
+    the repo's current skill layout."""
 
     def setUp(self):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-035-01-zip-"))
-        # Minimum surface that `_iter_files` walks: one of the included
+        # Minimum surface that the enumerator walks: one of the included
         # roots populated with a skill-shaped subtree. We use `skills/`
         # since the real bug is on that root.
         skill = self.tmpdir / "skills" / "demo-skill"
@@ -547,12 +549,15 @@ class FixturesExclusionAtAnyDepthTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_iter_files_skips_fixtures_at_any_depth(self):
-        rels = [p.as_posix() for p in build_release_zip._iter_files(self.tmpdir)]
+        rels = [
+            p.as_posix()
+            for p in install_contract.iter_release_files(self.tmpdir)
+        ]
         offenders = [r for r in rels if "fixtures" in Path(r).parts]
         self.assertEqual(
             offenders, [],
-            "_iter_files must skip every `fixtures/` dir at any depth under "
-            f"the skill subtree; found {offenders!r}",
+            "iter_release_files must skip every `fixtures/` dir at any depth "
+            f"under the skill subtree; found {offenders!r}",
         )
         # Sanity — non-fixtures siblings still flow through.
         self.assertIn("skills/demo-skill/SKILL.md", rels)
