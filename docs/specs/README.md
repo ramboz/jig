@@ -215,7 +215,7 @@
 | [067-reframe](067-reframe/spec.md) | 067-02 — Retrofit spec drafts | DRAFT |  |
 | [067-reframe](067-reframe/spec.md) | 067-03 — The noticing nudge (standing practice) | DRAFT |  |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-01 — capture-and-vision-section | **DONE** |  |
-| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-02 — feed-forward-and-trace-links | DRAFT |  |
+| [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-02 — feed-forward-and-trace-links | **DONE** | Spec drafting reads `## Use cases` as framing (spec-workflow SKILL.md step 1a); specs cite `use_cases: [UC-N]` (machine-resolvable via `_common/use_cases.py`; rides the generic flow-list parser, no field-specific code). **Grow-on-discovery**: a spec reaching draft with empty/absent/unresolvable `use_cases:` trips a **mechanical** cite/grow/decline prompt — keyed to the deterministic `classify_spec` predicate (reachable in the gap case, NOT voluntary self-report); grow reuses slice 01's capture loop with goal-level grain + near-duplicate→cite guards. **`no_section` = no-op** (jig's own repo / layer-not-adopted unaffected — checked first). `UC-N` append-only (`next_use_case_id` = max+1). Soft/advisory (ADR-0011). Frame-critique: 3-round (caught trigger-unreachability + grow-quality-invisibility pre-impl). `use_cases.py` API (`parse_use_cases`/`resolve_use_cases`) shaped for slice 03's coverage reuse. +47 tests. |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-03 — reconcile-coverage-grounding | DRAFT |  |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | DEFERRED |  |
 

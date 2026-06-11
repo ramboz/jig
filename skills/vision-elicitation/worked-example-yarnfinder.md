@@ -262,7 +262,10 @@ designers help crafters elsewhere."*
 
 The skill applies the edit and **re-presents** the list (the edit
 **round-trips** through confirm). **User confirms.** *Now* — and only now — the
-skill writes the section.
+skill writes the section, **assigning each entry the next free `UC-N` id** as
+it renders (this is the first capture, so the ids run `UC-1`…`UC-4`). The ids
+are append-only — a later grow pass (slice 068-02) keeps `UC-1`…`UC-4` stable
+and assigns `UC-5` to the next behavior.
 
 **Step 4 — No silent inference.** The skill suspects an obvious missing
 behavior but does **not** auto-add it — it asks:
@@ -279,14 +282,16 @@ the user said yes, it would have been added — only on the explicit yes.)
 
 <!-- elicited: 2026-05-15 / status: filled -->
 
-- A crafter can search for a yarn by name
-- A crafter can see regional matches ranked by closeness
-- A crafter can filter matches by any region
-- A crafter can open a retailer link for a match
+- UC-1: A crafter can search for a yarn by name
+- UC-2: A crafter can see regional matches ranked by closeness
+- UC-3: A crafter can filter matches by any region
+- UC-4: A crafter can open a retailer link for a match
 ```
 
-Note the section is **goal-level** — no entry names a table, an endpoint, or a
-scoring weight (those are spec-level, kept out per the section's guidance). And
+Each entry carries a stable `UC-N` id (append-only) so a spec can cite it in
+`use_cases:` and the trace link resolves (slice 068-02). Note the section is
+**goal-level** — no entry names a table, an endpoint, or a scoring weight
+(those are spec-level, kept out per the section's guidance). And
 it is a **seed**: community-contribution behaviors (v2) were deliberately left
 out here and will be **added while drafting those specs** — that additive growth
 is slice 068-02's job, not this capture session's.

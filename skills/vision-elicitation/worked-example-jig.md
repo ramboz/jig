@@ -260,11 +260,14 @@ one normalize pass, surfaces one no-infer question, and writes only on confirm.
 
 <!-- elicited: 2026-05-15 / status: filled -->
 
-- A developer can scaffold jig into a fresh project
-- A developer can author a spec slice through its lifecycle
-- A developer can run an independent review pass on a finished slice
-- A developer can migrate an existing spec-driven repo onto jig
+- UC-1: A developer can scaffold jig into a fresh project
+- UC-2: A developer can author a spec slice through its lifecycle
+- UC-3: A developer can run an independent review pass on a finished slice
+- UC-4: A developer can migrate an existing spec-driven repo onto jig
 ```
+
+Each entry carries a stable `UC-N` id (append-only) — a spec then records which
+use case it serves in its `use_cases:` frontmatter (slice 068-02).
 
 ### Section 6 — Repository structure *(feeds architecture.md)*
 

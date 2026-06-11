@@ -964,6 +964,66 @@ class UseCasesWorkedExampleTests(unittest.TestCase):
         )
 
 
+# ----------------------------------------------------------------------------
+# Slice 068-02: stable UC-N id on each use-case entry (ADR-0025 / AC3)
+# ----------------------------------------------------------------------------
+
+# A rendered `## Use cases` bullet carrying a stable id: `- UC-1: <goal>`.
+_UC_BULLET_RE = re.compile(r"(?m)^\s*-\s+UC-\d+\s*:\s+\S")
+
+
+class UseCasesIdFormatTests(unittest.TestCase):
+    """068-02 AC3 — use-case entries carry a stable `UC-N` id so a spec's
+    `use_cases:` trace link can resolve against them. The template guidance
+    documents the id form; both worked examples render `- UC-N: ...` bullets.
+
+    The slice-01 *slice file* is a closed DONE record (not edited — ADR-0010);
+    the template + SKILL.md + worked examples are LIVE operational prose,
+    corrected inline."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.template = (
+            VISION_TEMPLATE.read_text() if VISION_TEMPLATE.is_file() else ""
+        )
+        cls.yarn = WORKED_YARN.read_text() if WORKED_YARN.is_file() else ""
+        cls.jig = WORKED_JIG.read_text() if WORKED_JIG.is_file() else ""
+
+    def test_template_guidance_documents_uc_n_id_form(self):
+        # The `## Use cases` guidance must show the `UC-N` id form so an
+        # author writes resolvable entries.
+        section = _use_cases_section(self.template)
+        self.assertRegex(
+            section, r"UC-\d|UC-N",
+            "the `## Use cases` template guidance must document the `UC-N` "
+            "stable-id form (068-02 AC3)",
+        )
+
+    def test_template_placeholder_bullets_show_uc_n(self):
+        # The placeholder entry rows must model the id prefix, not bare
+        # `(actor) can (goal)` — so a filled section carries resolvable ids.
+        section = _use_cases_section(self.template)
+        self.assertRegex(
+            section, _UC_BULLET_RE,
+            "the `## Use cases` template must model `- UC-N: ...` entry rows "
+            "(068-02 AC3)",
+        )
+
+    def test_yarnfinder_worked_example_renders_uc_n_bullets(self):
+        self.assertRegex(
+            self.yarn, _UC_BULLET_RE,
+            "worked-example-yarnfinder.md's rendered `## Use cases` block "
+            "must carry `- UC-N: ...` ids (068-02 AC3)",
+        )
+
+    def test_jig_worked_example_renders_uc_n_bullets(self):
+        self.assertRegex(
+            self.jig, _UC_BULLET_RE,
+            "worked-example-jig.md's rendered `## Use cases` block must "
+            "carry `- UC-N: ...` ids (068-02 AC3)",
+        )
+
+
 def _section_after_h2(text: str, heading: str) -> str:
     """Return the body of an H2 section (from the heading to the next
     root-level H2 or EOF). Shared helper for the 068-01 template +

@@ -1559,8 +1559,8 @@ class ReserveSpecTests(unittest.TestCase):
         spec_md = spec_dir / "spec.md"
         self.assertTrue(spec_md.is_file())
         text = spec_md.read_text()
-        # AC #2: frontmatter
-        self.assertIn("---\nstatus: DRAFT\nskill:\n---", text)
+        # AC #2: frontmatter (spec 068-02 added the `use_cases:` trace field).
+        self.assertIn("---\nstatus: DRAFT\nskill:\nuse_cases: []\n---", text)
         # AC #2: title-cased header
         self.assertIn("# Spec 016: Parallel-worktree collision", text)
         # AC #2: today's date in the reservation line
@@ -1589,6 +1589,18 @@ class ReserveSpecTests(unittest.TestCase):
             text.index("## Decomposition"),
             "## Assumptions must precede ## Decomposition",
         )
+        # Spec 068-02 AC2: the spec stub carries an (empty) `use_cases:` trace
+        # field in its frontmatter, the `dependencies:`-style flow-list shape
+        # parse_frontmatter already parses. Empty by default (AC4: soft — an
+        # empty trace field is non-erroring and trips the AC5 grow prompt).
+        self.assertIn("use_cases: []", text,
+                      "spec stub must seed an empty use_cases: trace field")
+        # `_common` is importable because loading `_workflow` (spec_from_file
+        # _location, above) ran workflow.py's `sys.path.insert(skills/)`.
+        from _common.parsing import parse_frontmatter as _pf
+        fm, _ = _pf(text)
+        self.assertEqual(fm.get("use_cases"), [],
+                         "use_cases: must round-trip through parse_frontmatter")
         # AC #1: commit message
         commit_calls = [c for c in rec.calls
                         if len(c) >= 2 and c[0] == "git" and c[1] == "commit"]

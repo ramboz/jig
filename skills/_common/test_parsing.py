@@ -209,6 +209,37 @@ class SetFrontmatterFieldTests(unittest.TestCase):
         self.assertEqual(once, twice)
 
 
+class UseCasesFrontmatterRoundTripTests(unittest.TestCase):
+    """Spec 068-02 AC2: the `use_cases:` trace field round-trips through the
+    generic frontmatter machinery — no field-specific parse code needed (the
+    `dependencies:`-style flow-list shape already works). Per conventions, the
+    new field rides the existing generic parser; this test pins that."""
+
+    def test_use_cases_flow_list_parses(self):
+        text = "---\nstatus: DRAFT\nuse_cases: [UC-1, UC-3]\n---\nBody.\n"
+        fields, _ = parse_frontmatter(text)
+        self.assertEqual(fields["use_cases"], ["UC-1", "UC-3"])
+
+    def test_empty_use_cases_list_parses_to_empty(self):
+        text = "---\nstatus: DRAFT\nuse_cases: []\n---\nBody.\n"
+        fields, _ = parse_frontmatter(text)
+        self.assertEqual(fields["use_cases"], [])
+
+    def test_set_then_parse_round_trips(self):
+        text = "---\nstatus: DRAFT\n---\nBody.\n"
+        new = set_frontmatter_field(text, "use_cases", ["UC-2", "UC-5"])
+        fields, _ = parse_frontmatter(new)
+        self.assertEqual(fields["use_cases"], ["UC-2", "UC-5"])
+        # UC-N ids are slug-safe → serialized unquoted (the flow-list shape).
+        self.assertIn("use_cases: [UC-2, UC-5]", new)
+
+    def test_set_empty_list_round_trips(self):
+        text = "---\nstatus: DRAFT\n---\nBody.\n"
+        new = set_frontmatter_field(text, "use_cases", [])
+        fields, _ = parse_frontmatter(new)
+        self.assertEqual(fields["use_cases"], [])
+
+
 class ClearFrontmatterFieldTests(unittest.TestCase):
     """Slice 049-01: idempotent removal of a single frontmatter field."""
 

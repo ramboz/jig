@@ -134,6 +134,16 @@ SKILL.md hand-off is the documented gate.
    structure by hand.
 
 1. Confirm the work needs a spec. Trivial fixes don't.
+1a. **Read the vision `## Use cases` section as framing — before drafting
+   (spec 068-02 / [ADR-0025](../../docs/decisions/adr-0025-use-cases-breadth-layer.md)).**
+   If the project's `docs/product-vision.md` carries a `## Use cases` section
+   (the breadth-layer behaviors captured at init), **read it first** as framing
+   context for this spec — *which captured behavior does this work serve?* The
+   section is the shared frame specs anchor against; reading it before you draft
+   is what keeps behavior-dense projects from each spec inventing its own slice
+   of the world. (If there is **no** `## Use cases` section, the layer isn't
+   adopted for this project — skip this step; nothing here applies.) You record
+   the answer as a trace link in the spec's `use_cases:` frontmatter (step 2a).
 2. **Reserve the next free number on origin/main:**
 
    ```bash
@@ -164,6 +174,50 @@ SKILL.md hand-off is the documented gate.
    (the number is local-view and may collide at merge — treat it as
    provisional); `--pr` to skip the direct-push attempt on
    protection-locked main.
+2a. **Record the use-case trace link — and grow the vision on discovery
+   (spec 068-02 / [ADR-0025](../../docs/decisions/adr-0025-use-cases-breadth-layer.md)).**
+   The stub seeds an empty `use_cases:` frontmatter list. Fill it with the
+   `UC-N` id(s) (from the vision `## Use cases` section, step 1a) this spec
+   serves — the `dependencies:`-style flow-list shape, e.g.
+   `use_cases: [UC-1, UC-3]`. This is the machine-resolvable trace link the
+   reconcile-phase coverage check (slice 03) reads.
+
+   **The discipline is soft — an empty/absent `use_cases:` never blocks a
+   transition (AC4 / [ADR-0011](../../docs/decisions/adr-0011-spec-gate-model.md)).
+   But it is not silent.** The trigger is **mechanical and deterministic** — the
+   `classify_spec` predicate in
+   [`skills/_common/use_cases.py`](../_common/use_cases.py) computes one of
+   `no_section` / `empty` / `resolved` / `unresolvable` for this spec — **not** a
+   voluntary "is this new?" self-report. **Whenever `classify_spec` returns `empty`
+   or `unresolvable`** (the spec cites nothing, or cites a `UC-N` with no match
+   in the vision) at draft/framing, surface a **three-path prompt** — every path
+   is **one step** and **none blocks drafting**:
+
+   - **(a) cite an existing use case** — this spec serves a behavior already in
+     the vision: put its `UC-N` id(s) in `use_cases:`. Done.
+   - **(b) grow the vision** — this spec serves a behavior **not yet captured**:
+     **reuse `vision-elicitation`'s capture loop, seeded with the existing
+     entries** (so the author sees the current set), → normalize → **confirm**,
+     then **write additively** (append, never discard-and-replace) and **assign
+     the next free `UC-N`** (`use_cases.next_use_case_id` allocates `max + 1`;
+     retired numbers are never reused). The **confirm step guards grow quality**
+     so a reachable trigger can't silently bloat the section: **(i)** enforce
+     **goal-level grain** — reject spec-shaped / requirements-level phrasing,
+     re-running slice 01's normalize (`"[actor] can [goal]"`); **(ii)** run a
+     **near-duplicate check** against the seeded existing entries
+     (`use_cases.is_near_duplicate`) — on an apparent match, **route back to
+     path (a)-cite** rather than minting a duplicate. Then record the new id in
+     `use_cases:`.
+   - **(c) decline** — legitimately untraced (infra / refactor / no user-facing
+     behavior) or defer: leave `use_cases: []`. The vision is unchanged, and any
+     resulting gap is slice 03's advisory coverage backstop. No-op.
+
+   **CRITICAL — the no-section no-op.** When `classify_spec` returns `no_section`
+   (the project has **no** `## Use cases` section — the breadth layer is **not
+   adopted**, e.g. jig's own repo), **the prompt is suppressed entirely**:
+   nothing prompts and nothing errors. A project with specs but no use-case
+   layer is wholly unaffected. The trigger fires **only** on `empty` /
+   `unresolvable`, which presuppose the section exists.
 3. Create `docs/specs/NNN-<slug>/{spec.md,plan.md,tasks.md}` with the conventional
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers

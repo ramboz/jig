@@ -39,9 +39,11 @@ This spec adds a **use-case breadth layer**, per ADR-0025:
    growing it is mechanism (2)'s job.
 2. **Feed forward + trace + grow** — spec drafting reads the use-case section as
    framing, each spec records a machine-resolvable trace link to the use case(s) it
-   serves, and — because behaviors surface *while drafting specs* — a spec that
-   traces to an **uncaptured** behavior **prompts** an additive add to the vision,
-   closing the knowability-at-init gap *where behaviors actually surface*.
+   serves, and — because behaviors surface *while drafting specs* — a spec reaching
+   draft with an **empty/absent/unresolvable** trace field **prompts** an additive
+   add to the vision (the trigger is the **deterministic empty-field state**,
+   reachable in the gap case — not voluntary self-report), closing the
+   knowability-at-init gap *where behaviors actually surface*.
 3. **Reconcile coverage** — a bidirectional check flags use cases with no
    implementing spec (coverage gap) and specs with no parent use case (scope
    creep). It is a **deterministic cross-artifact query** surfaced at reconcile —
@@ -103,18 +105,42 @@ modeling adds nothing (libraries, single-flow CLIs). Every mechanism is
   moment of *least* concrete behavior knowledge. **Mitigation — split across the
   slices by design:** slice 01 captures only a **seed** (it does not assume init
   completeness and adds no grow mechanism of its own); slice 02 then **grows** the
-  set *where behaviors actually surface* — at spec-drafting — by **prompting** an
-  additive add whenever a spec traces to an uncaptured behavior (068-02 AC5,
-  reusing slice 01's capture loop seeded with the existing entries). Growth is
-  therefore **triggered** (a spec-draft event), not merely reachable — which is why
-  the load-bearing thin-evidence assumption (*does prompting-at-spec-draft actually
-  get used and reduce incompleteness?*) and its `frame_review` now live on **slice
-  02**, not slice 01. **Discriminating signal** (so
-  the kill criterion can attribute cause, not just symptom): a thin/near-empty
-  section *despite* a filled-and-confirmed capture points to init-incompleteness
-  (an unused growth seam included); "100% coverage yet specs still diverge" points
-  to coarseness (§A2). Surfaced by slice 01's frame-critique — see
-  [reviews/slice-01-frame-critique.md](reviews/slice-01-frame-critique.md).
+  set *where behaviors actually surface* — at spec-drafting — by **prompting**
+  (cite / grow / decline) whenever a spec reaches draft with an
+  **empty/absent/unresolvable** trace field (068-02 AC5, reusing slice 01's
+  capture loop seeded with the existing entries). The trigger is a **deterministic
+  predicate over the trace field — reachable in the gap case the author actually
+  produces (an empty field), not a voluntary self-report**: a trigger keyed only to
+  a self-inflicted unresolvable id or a volunteered "this is new" would sit inert on
+  exactly the gaps it must catch. Growth is therefore **mechanically triggered**,
+  not merely reachable — so the load-bearing thin-evidence assumption is **no longer
+  "does the trigger fire?"** (it fires mechanically) but a **two-part
+  uptake-and-quality bet:** ***when prompted at the empty-field state, do authors
+  (1) choose grow/cite often enough — vs. reflexively declining under depth-first
+  context pressure — and (2) when they grow, write goal-level, non-duplicate entries
+  rather than spec-shaped restatements — enough to actually reduce incompleteness
+  without feeding §A2 coarseness?*** Part (2) is mitigated *at the point of growth*
+  by AC5(b)'s confirm-step guard (goal-level grain + near-duplicate → route-to-cite),
+  so a reachable trigger cannot silently bloat the section. This two-part bet and its
+  `frame_review` now live on **slice 02**, not slice 01. **Discriminating signals**
+  (so the kill criterion can attribute cause, not just symptom — note "trigger never
+  fired" is now mechanically impossible for an empty field):
+  *(i)* a section that **stays thin despite many specs hitting the empty-field
+  prompt** (high *decline* rate on specs that do serve behavior) ⇒ §A2's
+  **"doesn't-bind"** facet (authors declining mechanically under context pressure);
+  *(ii)* a section that **grows, but with entries that each map 1:1 to exactly one
+  spec, or sit textually near a sibling** ⇒ a **grow-quality** failure (spec-shaped /
+  duplicate) feeding §A2 **coarseness** — the facet the count-up/decline-low signals
+  would otherwise misread as success, now made *visible* via slice 03's coverage data
+  (a use case implemented by exactly one spec) plus the section text;
+  *(iii)* "100% coverage yet specs still diverge" ⇒ **coarseness** at the grain level
+  (§A2). All three are observable post-ship from slice 03's coverage query + git
+  history of the section (use-case count *and shape* vs. spec count), no new
+  instrumentation. Surfaced by slice 01's frame-critique — see
+  [reviews/slice-01-frame-critique.md](reviews/slice-01-frame-critique.md); the
+  trigger-reachability and grow-quality sharpenings above were driven by slice 02's
+  3-round frame-critique — see
+  [reviews/slice-02-frame-critique.md](reviews/slice-02-frame-critique.md).
 - **Grounded by precedent (not assumed):** trace links can be machine-resolvable
   metadata — `dependencies:` frontmatter already resolves `NNN-MM` tokens for the
   DONE gate and `parsing.py` already parses list-valued frontmatter (slice 02).
@@ -138,10 +164,12 @@ the user-facing surface, delivers observable value, not intermediate state):
   behaviors surface.)
 - **Rules** — 068-02: the spec-author contract gains rules — spec drafting reads
   the use-case section as framing, each spec records a machine-resolvable **trace
-  link** to the use case(s) it serves, and a spec tracing to an **uncaptured**
-  behavior **prompts an additive grow** of the vision (the knowability-at-init
-  mitigation, *triggered* where behaviors surface — so this slice now carries
-  `frame_review` too). *Produces the link data slice 03 audits.*
+  link** to the use case(s) it serves, and a spec whose trace field is left
+  **empty/absent/unresolvable** trips a **mechanical grow prompt** (cite / grow /
+  decline) — the knowability-at-init mitigation, *triggered by the deterministic
+  empty-field state* so it is reachable in the gap case, not reliant on voluntary
+  self-report (so this slice now carries `frame_review` too). *Produces the link
+  data slice 03 audits.*
 - **Rules** — 068-03: the reconcile-phase **bidirectional coverage check**
   (use-case→no-spec = gap; spec→no-use-case = creep), advisory by default — a
   **deterministic project-wide query** (no new reviewer subagent), but **net-new
@@ -162,7 +190,7 @@ analyze), so none of P/I/D/R is blocked by an unknown.
 | Slice | Title | Status | Notes |
 |---|---|---|---|
 | [068-01](slice-01-capture-and-vision-section.md) | capture-and-vision-section | **DONE** | Prerequisite. `## Use cases` vision section + conversational capture loop (normalize + confirm) in vision-elicitation. Goal-level only, **seed only** (no grow mechanism — that's 068-02). `frame_review: true` — passed (4-round iteration; grow moved to 02 per team decision). |
-| [068-02](slice-02-feed-forward-and-trace-links.md) | feed-forward-and-trace-links | **DRAFT** | Spec drafting reads use cases as framing; each spec cites a machine-resolvable trace link (reuses the `dependencies:`-style shape). **Also owns grow-on-discovery** — a spec tracing to an uncaptured behavior prompts an additive vision grow (knowability-at-init mitigation moved here from 01). `arch_review: true` + `frame_review: true`. |
+| [068-02](slice-02-feed-forward-and-trace-links.md) | feed-forward-and-trace-links | **DRAFT** | Spec drafting reads use cases as framing; each spec cites a machine-resolvable trace link (reuses the `dependencies:`-style shape). **Also owns grow-on-discovery** — a spec with an empty/absent/unresolvable trace field trips a *mechanical* grow prompt (cite / grow / decline), reachable in the gap case (knowability-at-init mitigation moved here from 01; trigger sharpened by 02's frame-critique). `arch_review: true` + `frame_review: true`. |
 | [068-03](slice-03-reconcile-coverage-grounding.md) | reconcile-coverage-grounding | **DRAFT** | Bidirectional coverage at reconcile (gap + creep). Deterministic query — no new reviewer subagent — but net-new bounded surface (§A4). Advisory default (OQ3). |
 | [068-04](slice-04-mid-flight-triage.md) | mid-flight-triage | **DEFERRED** | Blast-radius triage lifecycle (ADR-0025 Option C). Documented, not built. Resolution trigger: trace links real + populated AND a genuine mid-flight conflict/reframe event observed. |
 

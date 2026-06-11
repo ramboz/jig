@@ -2041,6 +2041,14 @@ def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
         "---\n"
         "status: DRAFT\n"
         "skill:\n"
+        # Spec 068-02 / ADR-0025 — the use-case trace link. A flow-list of
+        # `UC-N` ids (the vision's `## Use cases` section) this spec serves,
+        # the same `dependencies:`-style shape `parsing.py` already parses.
+        # Seeded EMPTY: soft/advisory (AC4 — never blocks a transition), and
+        # the empty state is exactly what trips the AC5 cite/grow/decline
+        # framing prompt at draft time. Leave `[]` when this spec serves no
+        # captured behavior (infra/refactor) or the layer isn't adopted.
+        "use_cases: []\n"
         "---\n"
         "\n"
         # Spec 065-04 — self-defining vocabulary reminder, emitted into the

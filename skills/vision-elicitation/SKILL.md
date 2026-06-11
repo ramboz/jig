@@ -207,7 +207,12 @@ never spec-level — see the section's own guidance) and has four steps:
    `## Use cases` section **before** the user confirms. If the user edits the
    set, re-present the edited list — the **edit round-trips** through confirm —
    and write **only** once they confirm. On confirm, render the entries into the
-   section and flip the marker to `status: filled` (with hash).
+   section **each prefixed with a stable `UC-N` id** (a plain integer — `UC-1`,
+   `UC-2`, … — assigned in order on this first capture) and flip the marker to
+   `status: filled` (with hash). The id is **append-only**: a later grow pass
+   (slice 068-02) keeps the existing ids stable and assigns the next free
+   number, never renumbering or reusing one. The id is what a spec's
+   `use_cases:` trace link resolves against.
 4. **No silent inference — ever.** A use case the user did **not** state is
    **never** auto-added / inferred into the set. If you *suspect* an obvious
    behavior is missing, surface it as a **question** — *"You didn't mention X —
