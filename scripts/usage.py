@@ -367,15 +367,20 @@ def sum_usage(records: list) -> dict:
         usage = msg.get("usage")
         if not isinstance(usage, dict):
             continue
+        token_values = {
+            f: int(usage.get(f, 0))
+            for f in _USAGE_FIELDS
+            if isinstance(usage.get(f, 0), (int, float))
+        }
+        if sum(token_values.values()) <= 0:
+            continue
         model = msg.get("model") or "unknown"
         models.add(model)
         slot = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
         for f in _USAGE_FIELDS:
-            val = usage.get(f, 0)
-            if not isinstance(val, (int, float)):
-                continue
-            totals[f] += int(val)
-            slot[f] += int(val)
+            val = token_values.get(f, 0)
+            totals[f] += val
+            slot[f] += val
     totals["models"] = sorted(models)
     totals["per_model"] = per_model
     return totals
@@ -406,17 +411,22 @@ def sum_subagent_usage(records: list) -> dict:
         usage = msg.get("usage")
         if not isinstance(usage, dict):
             continue
+        token_values = {
+            f: int(usage.get(f, 0))
+            for f in _USAGE_FIELDS
+            if isinstance(usage.get(f, 0), (int, float))
+        }
+        if sum(token_values.values()) <= 0:
+            continue
         model = msg.get("model") or "unknown"
         agent = rec.get("attributionAgent") or "unknown"
         mslot = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
         tslot = by_type.setdefault(agent, {f: 0 for f in _USAGE_FIELDS})
         for f in _USAGE_FIELDS:
-            val = usage.get(f, 0)
-            if not isinstance(val, (int, float)):
-                continue
-            totals[f] += int(val)
-            mslot[f] += int(val)
-            tslot[f] += int(val)
+            val = token_values.get(f, 0)
+            totals[f] += val
+            mslot[f] += val
+            tslot[f] += val
     totals["per_model"] = per_model
     totals["by_type"] = by_type
     return totals
@@ -500,16 +510,21 @@ def apply_rates(per_model: dict, rates: dict):
     matched = False
     unmatched = []
     for model, toks in per_model.items():
+        model_tokens = sum(int(toks.get(f, 0)) for f in _USAGE_FIELDS)
+        if model_tokens <= 0:
+            continue
         rate = rates.get(model)
         if rate is None:
             unmatched.append(model)
             continue
         matched = True
-        total += rate * sum(int(toks.get(f, 0)) for f in _USAGE_FIELDS)
+        total += rate * model_tokens
     if not matched:
+        if not unmatched:
+            return 0.0, "no token usage"
         return None, (
             "ccusage has no rate for "
-            + (", ".join(sorted(per_model)) or "the attributed model(s)")
+            + (", ".join(sorted(unmatched)) or "the attributed model(s)")
         )
     return total, ("partial: no rate for " + ", ".join(unmatched)) if unmatched else None
 
@@ -564,6 +579,96 @@ class Report:
     @property
     def combined_total_tokens(self) -> int:
         return self.total_tokens + self.subagent_total_tokens
+
+
+@dataclass
+class TopRow:
+    spec: str
+    session_count: int = 0
+    marker_session_count: int = 0
+    heuristic_session_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    subagent_input_tokens: int = 0
+    subagent_output_tokens: int = 0
+    subagent_cache_read_tokens: int = 0
+    subagent_cache_creation_tokens: int = 0
+    orchestrator_turns: int = 0
+    subagent_turns: int = 0
+    peak_cache_read_tokens: int = 0
+    models: set = field(default_factory=set)
+    subagent_by_type: dict = field(default_factory=dict)
+
+    @property
+    def total_tokens(self) -> int:
+        return (self.input_tokens + self.output_tokens
+                + self.cache_read_tokens + self.cache_creation_tokens)
+
+    @property
+    def subagent_total_tokens(self) -> int:
+        return (self.subagent_input_tokens + self.subagent_output_tokens
+                + self.subagent_cache_read_tokens
+                + self.subagent_cache_creation_tokens)
+
+    @property
+    def combined_total_tokens(self) -> int:
+        return self.total_tokens + self.subagent_total_tokens
+
+    @property
+    def combined_cache_read_tokens(self) -> int:
+        return self.cache_read_tokens + self.subagent_cache_read_tokens
+
+    @property
+    def combined_output_tokens(self) -> int:
+        return self.output_tokens + self.subagent_output_tokens
+
+    @property
+    def combined_cache_creation_tokens(self) -> int:
+        return (self.cache_creation_tokens
+                + self.subagent_cache_creation_tokens)
+
+    @property
+    def combined_input_tokens(self) -> int:
+        return self.input_tokens + self.subagent_input_tokens
+
+
+@dataclass
+class TopReport:
+    rows: list
+    session_count: int = 0
+    attributed_session_count: int = 0
+    unattributed_session_count: int = 0
+    empty_session_count: int = 0
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(r.combined_input_tokens for r in self.rows)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(r.combined_output_tokens for r in self.rows)
+
+    @property
+    def cache_read_tokens(self) -> int:
+        return sum(r.combined_cache_read_tokens for r in self.rows)
+
+    @property
+    def cache_creation_tokens(self) -> int:
+        return sum(r.combined_cache_creation_tokens for r in self.rows)
+
+    @property
+    def orchestrator_tokens(self) -> int:
+        return sum(r.total_tokens for r in self.rows)
+
+    @property
+    def subagent_tokens(self) -> int:
+        return sum(r.subagent_total_tokens for r in self.rows)
+
+    @property
+    def combined_total_tokens(self) -> int:
+        return self.orchestrator_tokens + self.subagent_tokens
 
 
 def _spec_number(spec: str) -> str:
@@ -713,6 +818,92 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     return rep
 
 
+def _usage_turns_and_peak(records: list) -> tuple:
+    """Return ``(turn_count, peak_cache_read_tokens)`` for assistant records
+    carrying ``message.usage``. Used by the top rollup to expose spec 057's
+    measured levers (turn count + peak context) without changing the per-spec
+    report shape.
+    """
+    turns = 0
+    peak = 0
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            continue
+        usage = msg.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        turns += 1
+        val = usage.get("cache_read_input_tokens")
+        if isinstance(val, int) and not isinstance(val, bool) and val > peak:
+            peak = val
+    return turns, peak
+
+
+def build_top_report(projects_dir: Path, encoded_prefix: str) -> TopReport:
+    """Build a read-only all-spec rollup from the same transcript substrate as
+    ``report``. The rows are sorted by combined orchestrator+subagent tokens,
+    descending, with spec number as the deterministic tie-breaker.
+    """
+    rows = {}
+    summary = TopReport(rows=[])
+
+    for session_path in find_sessions(projects_dir, encoded_prefix):
+        summary.session_count += 1
+        records = read_session(session_path)
+        if not records:
+            summary.empty_session_count += 1
+            continue
+        spec_num, method = attribute_session(records)
+        if spec_num is None:
+            summary.unattributed_session_count += 1
+            continue
+
+        summary.attributed_session_count += 1
+        row = rows.setdefault(spec_num, TopRow(spec=spec_num))
+        row.session_count += 1
+        if method == "marker":
+            row.marker_session_count += 1
+        else:
+            row.heuristic_session_count += 1
+
+        sums = sum_usage(records)
+        row.input_tokens += sums["input_tokens"]
+        row.output_tokens += sums["output_tokens"]
+        row.cache_read_tokens += sums["cache_read_input_tokens"]
+        row.cache_creation_tokens += sums["cache_creation_input_tokens"]
+        row.models.update(sums["models"])
+        turns, peak = _usage_turns_and_peak(records)
+        row.orchestrator_turns += turns
+        row.peak_cache_read_tokens = max(row.peak_cache_read_tokens, peak)
+
+        for agent_path in find_subagent_files(session_path):
+            agent_records = read_session(agent_path)
+            if not agent_records:
+                continue
+            asums = sum_subagent_usage(agent_records)
+            row.subagent_input_tokens += asums["input_tokens"]
+            row.subagent_output_tokens += asums["output_tokens"]
+            row.subagent_cache_read_tokens += asums["cache_read_input_tokens"]
+            row.subagent_cache_creation_tokens += \
+                asums["cache_creation_input_tokens"]
+            turns, _peak = _usage_turns_and_peak(agent_records)
+            row.subagent_turns += turns
+            for agent, slot in asums["by_type"].items():
+                prior = row.subagent_by_type.setdefault(
+                    agent, {f: 0 for f in _USAGE_FIELDS})
+                for f in _USAGE_FIELDS:
+                    prior[f] += int(slot.get(f, 0))
+
+    summary.rows = sorted(
+        rows.values(),
+        key=lambda r: (-r.combined_total_tokens, r.spec),
+    )
+    return summary
+
+
 def _merge_per_model(*maps) -> dict:
     """Sum several ``{model: {<usage fields>}}`` maps into one (for the
     combined orchestrator+subagent cost)."""
@@ -825,6 +1016,90 @@ def render(rep: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _pct(part: int, total: int) -> str:
+    if total <= 0:
+        return "0.0%"
+    return f"{(part / total) * 100:.1f}%"
+
+
+def render_top(rep: TopReport, limit: int = 10) -> str:
+    lines = []
+    lines.append("## Token usage top specs")
+    lines.append("")
+    lines.append(f"  Sessions scanned:       {_fmt(rep.session_count)}")
+    lines.append(f"  Attributed sessions:    {_fmt(rep.attributed_session_count)}")
+    lines.append(f"  Unattributed sessions:  {_fmt(rep.unattributed_session_count)}")
+    lines.append(f"  Empty sessions:         {_fmt(rep.empty_session_count)}")
+    lines.append(f"  Specs attributed:       {_fmt(len(rep.rows))}")
+    lines.append("")
+
+    lines.append("CATEGORY TOTALS (attributed sessions)")
+    total = rep.combined_total_tokens
+    lines.append(
+        f"  input_tokens:           {_fmt(rep.input_tokens)} "
+        f"({_pct(rep.input_tokens, total)})"
+    )
+    lines.append(
+        f"  output_tokens:          {_fmt(rep.output_tokens)} "
+        f"({_pct(rep.output_tokens, total)})"
+    )
+    lines.append(
+        f"  cache_read_tokens:      {_fmt(rep.cache_read_tokens)} "
+        f"({_pct(rep.cache_read_tokens, total)})"
+    )
+    lines.append(
+        f"  cache_creation_tokens:  {_fmt(rep.cache_creation_tokens)} "
+        f"({_pct(rep.cache_creation_tokens, total)})"
+    )
+    lines.append("  ------------------------")
+    lines.append(f"  combined_total_tokens:  {_fmt(total)}")
+    lines.append("")
+
+    lines.append("DIMENSION TOTALS")
+    lines.append(
+        f"  orchestrator_tokens:    {_fmt(rep.orchestrator_tokens)} "
+        f"({_pct(rep.orchestrator_tokens, total)})"
+    )
+    lines.append(
+        f"  subagent_tokens:        {_fmt(rep.subagent_tokens)} "
+        f"({_pct(rep.subagent_tokens, total)})"
+    )
+    lines.append("")
+
+    rows = rep.rows[:max(0, limit)]
+    lines.append(f"TOP SPECS (by combined tokens, limit {len(rows)})")
+    if not rep.rows:
+        lines.append("  No attributed specs with token usage.")
+        return "\n".join(lines) + "\n"
+    if not rows:
+        lines.append("  No rows shown (limit 0).")
+        return "\n".join(lines) + "\n"
+    header = (
+        "  spec  sessions  attribution  combined     orch         sub"
+        "          cache_read   output       orch_turns  sub_turns  peak_cR"
+    )
+    lines.append(header)
+    for row in rows:
+        attr = f"{row.marker_session_count}m/{row.heuristic_session_count}h"
+        lines.append(
+            f"  {row.spec:<4}  {row.session_count:>8}  {attr:>11}  "
+            f"{_fmt(row.combined_total_tokens):>11}  "
+            f"{_fmt(row.total_tokens):>11}  "
+            f"{_fmt(row.subagent_total_tokens):>11}  "
+            f"{_fmt(row.combined_cache_read_tokens):>11}  "
+            f"{_fmt(row.combined_output_tokens):>10}  "
+            f"{_fmt(row.orchestrator_turns):>10}  "
+            f"{_fmt(row.subagent_turns):>9}  "
+            f"{_fmt(row.peak_cache_read_tokens):>7}"
+        )
+    lines.append("")
+    lines.append(
+        "Note: top is token-only; run `usage.py report <spec>` for ccusage "
+        "$ estimates. Attribution is marker count / heuristic count."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _append_framing(lines: list, rep: Report) -> None:
     lines.append(
         "Note: the $ figure is an ESTIMATE — notional under subscription "
@@ -879,6 +1154,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-ccusage", action="store_true",
         help="skip ccusage entirely; show '$: unavailable'",
     )
+
+    top = sub.add_parser(
+        "top",
+        help="rank attributed specs by combined orchestrator+subagent tokens",
+    )
+    top.add_argument(
+        "--limit", type=int, default=10, metavar="N",
+        help="number of specs to show (default: 10)",
+    )
+    top.add_argument(
+        "--projects-dir", default=None, metavar="PATH",
+        help="override the ~/.claude/projects root (testing seam)",
+    )
+    top.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to derive the encoded prefix",
+    )
     return p
 
 
@@ -906,7 +1198,7 @@ def main(argv: list) -> int:
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    if ns.command != "report":
+    if ns.command not in ("report", "top"):
         parser.print_help(sys.stderr)
         return 2
 
@@ -914,6 +1206,12 @@ def main(argv: list) -> int:
                     else default_projects_dir())
     root = ns.main_root if ns.main_root else main_root()
     encoded_prefix = encode_cwd(root)
+
+    if ns.command == "top":
+        top = build_top_report(projects_dir, encoded_prefix)
+        sys.stdout.write(render_top(top, limit=ns.limit))
+        return 0
+
     runner = _make_ccusage_runner(ns)
 
     rep = build_report(

@@ -480,6 +480,30 @@ class CcusageApplicationTests(_TreeMixin, unittest.TestCase):
         self.assertIn("055", out)
         self.assertIn("$", out)
 
+    def test_zero_token_model_does_not_create_partial_note(self):
+        # Real transcripts can carry synthetic/summary records with a model
+        # name but zero usage. They must not create "partial: no rate for ..."
+        # noise when all positive-token models have rates.
+        per_model = {
+            "<synthetic>": _usage(),
+            "claude-opus-4-8": _usage(inp=100),
+        }
+        rates = {"claude-opus-4-8": 0.01}
+        cost, note = uu.apply_rates(per_model, rates)
+        self.assertAlmostEqual(cost, 1.0, places=6)
+        self.assertIsNone(note)
+
+    def test_zero_token_model_is_not_reported_as_seen_model(self):
+        recs = [
+            _assistant_record("<synthetic>", _usage(), MAIN_CWD,
+                              session="zero"),
+            _assistant_record("claude-opus-4-8", _usage(inp=1), MAIN_CWD,
+                              session="real"),
+        ]
+        sums = uu.sum_usage(recs)
+        self.assertEqual(sums["models"], ["claude-opus-4-8"])
+        self.assertNotIn("<synthetic>", sums["per_model"])
+
 
 class CcusagePartialRateTests(unittest.TestCase):
     """Two attributed models, but ccusage prices only one of them. The priced
@@ -922,6 +946,71 @@ class ReadOnlyTests(_TreeMixin, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Top rollup — all-spec ranking from the same transcript substrate
+# ---------------------------------------------------------------------------
+
+class TopReportTests(_TreeMixin, unittest.TestCase):
+
+    def test_top_report_scans_and_ranks_specs_once(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        self.assertEqual(top.session_count, 3)
+        self.assertEqual(top.attributed_session_count, 3)
+        self.assertEqual(top.unattributed_session_count, 0)
+        self.assertEqual(top.empty_session_count, 0)
+
+        # Session C (spec 042) has the huge 9999s, so it ranks above 055.
+        self.assertEqual([r.spec for r in top.rows], ["042", "055"])
+        self.assertEqual(top.rows[0].combined_total_tokens, 9999 * 4)
+        self.assertEqual(top.rows[1].combined_total_tokens,
+                         16 + 160 + 1800 + 340)
+
+    def test_top_report_category_totals(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        self.assertEqual(top.input_tokens, 10015)
+        self.assertEqual(top.output_tokens, 10159)
+        self.assertEqual(top.cache_read_tokens, 11799)
+        self.assertEqual(top.cache_creation_tokens, 10339)
+        self.assertEqual(top.combined_total_tokens, 42312)
+        # No nested subagents in this fixture: everything is orchestrator.
+        self.assertEqual(top.orchestrator_tokens, 42312)
+        self.assertEqual(top.subagent_tokens, 0)
+
+    def test_top_report_counts_turns_and_peak_context(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        by_spec = {r.spec: r for r in top.rows}
+        self.assertEqual(by_spec["055"].orchestrator_turns, 3)
+        self.assertEqual(by_spec["055"].peak_cache_read_tokens, 1000)
+        self.assertEqual(by_spec["055"].marker_session_count, 0)
+        self.assertEqual(by_spec["055"].heuristic_session_count, 2)
+
+    def test_render_top_shows_totals_and_limit(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        out = uu.render_top(top, limit=1)
+        self.assertIn("CATEGORY TOTALS", out)
+        self.assertIn("TOP SPECS", out)
+        self.assertIn("042", out)
+        self.assertNotIn("055", out)
+        self.assertTrue(_shows_number(out, 42312), msg=out)
+
+
+class TopReportSubagentTests(_SubagentTreeMixin, unittest.TestCase):
+
+    def test_top_report_includes_subagent_tokens_and_turns(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        self.assertEqual(len(top.rows), 1)
+        row = top.rows[0]
+        self.assertEqual(row.spec, "099")
+        self.assertEqual(row.total_tokens, 3700)
+        self.assertEqual(row.subagent_total_tokens, 1232)
+        self.assertEqual(row.combined_total_tokens, 4932)
+        self.assertEqual(row.orchestrator_turns, 1)
+        self.assertEqual(row.subagent_turns, 3)
+        self.assertEqual(row.peak_cache_read_tokens, 3000)
+        self.assertIn("jig:reviewer", row.subagent_by_type)
+        self.assertIn("jig:implementer", row.subagent_by_type)
+
+
+# ---------------------------------------------------------------------------
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
 
@@ -1013,6 +1102,20 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("unavailable", result.stdout.lower())
         self.assertTrue(_shows_number(result.stdout, 1800), msg=result.stdout)
+
+    def test_cli_top_runs_with_overrides(self):
+        result = _run_usage(
+            "top",
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--limit", "1",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("TOP SPECS", result.stdout)
+        self.assertIn("042", result.stdout)
+        self.assertNotIn("055", result.stdout)
+        self.assertTrue(_shows_number(result.stdout, 42312),
+                        msg=result.stdout)
 
 
 # ---------------------------------------------------------------------------
