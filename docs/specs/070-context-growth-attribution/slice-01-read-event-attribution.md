@@ -1,5 +1,5 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: []
 last_verified: 2026-06-12
 # arch_review: true  # set to true when this slice changes module
