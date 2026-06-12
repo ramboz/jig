@@ -7,8 +7,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-telemetry.sh",
-            "async": true,
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: record task telemetry"
           }
         ]
       },
@@ -18,8 +18,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-skill-trace.sh",
-            "async": true,
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: record skill usage"
           }
         ]
       },
@@ -29,12 +29,14 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-spec-gate.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: enforce spec gate"
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-secret-scan.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: scan for secrets"
           }
         ]
       },
@@ -44,7 +46,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: check context budget"
           }
         ]
       }
@@ -56,12 +59,14 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-post-edit-verify.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: verify edit landed"
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-boundary-change-warn.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: warn on boundary changes"
           }
         ]
       }
@@ -72,7 +77,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: check context budget"
           }
         ]
       }
@@ -83,7 +89,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-memory-scan.sh",
-            "timeout": 10
+            "timeout": 10,
+            "statusMessage": "jig: scan memory references"
           }
         ]
       },
@@ -92,7 +99,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "jig: check context budget"
           }
         ]
       }
@@ -103,7 +111,8 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-task-capture.sh",
-            "timeout": 10
+            "timeout": 10,
+            "statusMessage": "jig: capture follow-up tasks"
           }
         ]
       }

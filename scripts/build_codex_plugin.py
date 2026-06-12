@@ -141,6 +141,19 @@ def _copy_skills(source_root: Path, output_dir: Path) -> None:
                 dst.write_bytes(entry.read_bytes())
 
 
+def _write_codex_hooks(source_root: Path, output_dir: Path) -> None:
+    source_hooks = source_root / "hooks" / "hooks.json"
+    if not source_hooks.is_file():
+        return
+    hooks = json.loads(source_hooks.read_text())
+    dst = output_dir / "hooks" / "hooks.json"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(
+        json.dumps(scaffold_mod.render_codex_plugin_hooks(hooks), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _render_codex_agent_templates(source_root: Path, output_dir: Path) -> None:
     agents_src = source_root / "agents"
     agents_dst = output_dir / "agents"
@@ -256,6 +269,7 @@ def build(source_root: Path, output_dir: Path) -> int:
         if src.is_dir():
             _copy_tree(src, output_dir / root_name)
 
+    _write_codex_hooks(source_root, output_dir)
     _copy_skills(source_root, output_dir)
     _render_codex_agent_templates(source_root, output_dir)
 

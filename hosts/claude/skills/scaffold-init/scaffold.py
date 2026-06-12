@@ -1367,6 +1367,71 @@ def _rewrite_hook_command(command: str) -> str:
                            _PROJECT_HOOK_SCRIPT_PREFIX)
 
 
+_CODEX_HOOK_STATUS_MESSAGES = {
+    "jig-boundary-change-warn.sh": "jig: warn on boundary changes",
+    "jig-context-check.sh": "jig: check context budget",
+    "jig-memory-scan.sh": "jig: scan memory references",
+    "jig-post-edit-verify.sh": "jig: verify edit landed",
+    "jig-secret-scan.sh": "jig: scan for secrets",
+    "jig-skill-trace.sh": "jig: record skill usage",
+    "jig-spec-gate.sh": "jig: enforce spec gate",
+    "jig-task-capture.sh": "jig: capture follow-up tasks",
+    "jig-telemetry.sh": "jig: record task telemetry",
+}
+
+
+def _codex_hook_status_message(command: str) -> str:
+    match = re.search(r"(jig-[A-Za-z0-9-]+\.sh)", command)
+    if not match:
+        return "jig: run hook"
+    script = match.group(1)
+    if script in _CODEX_HOOK_STATUS_MESSAGES:
+        return _CODEX_HOOK_STATUS_MESSAGES[script]
+    stem = script.removeprefix("jig-").removesuffix(".sh").replace("-", " ")
+    return f"jig: {stem}"
+
+
+def _build_codex_hooks_from_source(source: dict, command_rewriter=None) -> dict:
+    """Render source hooks into Codex-compatible hook entries.
+
+    The canonical hook source is still Claude-compatible, where async command
+    hooks are valid. Codex currently skips handlers with ``async: true`` and
+    renders unnamed handlers as "Hook N", so the Codex adapter strips async
+    metadata and supplies stable status messages for command hooks.
+    """
+    if command_rewriter is None:
+        command_rewriter = lambda command: command
+
+    out: dict = {}
+    for event, entries in (source.get("hooks") or {}).items():
+        new_entries = []
+        for entry in entries:
+            new_inner = []
+            for h in entry.get("hooks", []):
+                rewritten = dict(h)
+                rewritten.pop("async", None)
+                command = rewritten.get("command")
+                if isinstance(command, str):
+                    rewritten["command"] = command_rewriter(command)
+                    rewritten.setdefault(
+                        "statusMessage",
+                        _codex_hook_status_message(rewritten["command"]),
+                    )
+                new_inner.append(rewritten)
+            new_entry = {}
+            if "matcher" in entry:
+                new_entry["matcher"] = entry["matcher"]
+            new_entry["hooks"] = new_inner
+            new_entries.append(new_entry)
+        out[event] = new_entries
+    return out
+
+
+def render_codex_plugin_hooks(source: dict) -> dict:
+    """Render a Codex plugin ``hooks/hooks.json`` payload from source hooks."""
+    return {"hooks": _build_codex_hooks_from_source(source)}
+
+
 def _build_jig_hook_entries(plugin: Path) -> dict:
     """Read `plugin/hooks/hooks.json` and produce a dict keyed by event name
     of hook entries with:
@@ -1562,25 +1627,10 @@ def _check_codex_hooks_safety(target: Path, *, force: bool = False) -> None:
 
 def _build_codex_hook_entries(plugin: Path) -> dict:
     source = json.loads((plugin / "hooks" / "hooks.json").read_text())
-    out: dict = {}
-    for event, entries in (source.get("hooks") or {}).items():
-        new_entries = []
-        for entry in entries:
-            new_inner = []
-            for h in entry.get("hooks", []):
-                rewritten = dict(h)
-                if "command" in rewritten:
-                    rewritten["command"] = CodexScaffoldRenderer.rewrite_hook_command(
-                        rewritten["command"]
-                    )
-                new_inner.append(rewritten)
-            new_entry = {}
-            if "matcher" in entry:
-                new_entry["matcher"] = entry["matcher"]
-            new_entry["hooks"] = new_inner
-            new_entries.append(new_entry)
-        out[event] = new_entries
-    return out
+    return _build_codex_hooks_from_source(
+        source,
+        command_rewriter=CodexScaffoldRenderer.rewrite_hook_command,
+    )
 
 
 def _copy_codex_hooks_and_register(plugin: Path, target: Path, *,

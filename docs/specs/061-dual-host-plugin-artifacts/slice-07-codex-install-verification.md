@@ -1,7 +1,7 @@
 ---
 status: DONE
 dependencies: ["061-01", "061-02", "061-03", "061-04", "061-05", "061-06"]
-last_verified: 2026-06-08
+last_verified: 2026-06-12
 ---
 
 ## Slice 061-07 - Codex install verification
@@ -91,6 +91,15 @@ The original spec is preserved above. Implementation notes:
   `longDescription` also says to review and trust bundled hooks via `/hooks`
   before they run. This is important: before trust, Codex can load the plugin
   skills but skips jig's hook gates.
+
+- **RC hook metadata follow-up.** During local RC validation on 2026-06-12,
+  Codex loaded the plugin but warned that async command hooks are unsupported
+  and showed unnamed `/hooks` rows as `Hook 1`, `Hook 2`, etc. The Codex
+  renderer now adapts source hooks before package/scaffold output: it strips
+  `async` from Codex hook definitions and adds stable `statusMessage` labels
+  such as `jig: record task telemetry`. The canonical source hooks and Claude
+  package keep their async metadata; Codex package smoke validation now fails
+  if a command hook declares `async` or omits `statusMessage`.
 
 - **Codex release archive verified separately.** Built
   `/private/tmp/jig-v2-review.9kAkux/jig-codex-v1.12.0.zip` with

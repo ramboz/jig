@@ -1332,6 +1332,22 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertTrue(payload.get("metadata", {}).get("managed_by_jig"))
         self.assertEqual(sorted(payload["hooks"].keys()), sorted(EXPECTED_HOOK_EVENTS))
 
+        handlers = [
+            hook
+            for entries in payload["hooks"].values()
+            for entry in entries
+            for hook in entry.get("hooks", [])
+        ]
+        self.assertGreater(len(handlers), 0)
+        for hook in handlers:
+            self.assertNotIn("async", hook)
+            self.assertIn("statusMessage", hook)
+            self.assertTrue(hook["statusMessage"].startswith("jig: "))
+        self.assertIn(
+            "jig: record task telemetry",
+            {hook["statusMessage"] for hook in handlers},
+        )
+
         text = hooks_path.read_text()
         self.assertNotIn("CLAUDE_PLUGIN_ROOT", text)
         self.assertNotIn("CLAUDE_PROJECT_DIR", text)
