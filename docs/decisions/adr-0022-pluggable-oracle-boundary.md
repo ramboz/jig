@@ -33,6 +33,17 @@ are implemented (a consumer exists), or (c) servo spec 006 ships (the eval/AC
 backing lands). Until then, ADR-0019's schema-only deferral stands. The body
 below is the design as drafted; treat its value claims as *prospective*.
 
+**Note (2026-06-12) — the spec-gate Open Question was resolved separately.** The
+third Open Question below (*does `servo` belong in spec-workflow's gate?*) was
+answered independently of Option D by [spec 071](../specs/071-design-review-pass/spec.md):
+a generic, attest-only **`design_review`** review pass on the existing ADR-0014
+rails — a reviewer attests an external eval's frozen verdict; jig never
+machine-reads servo's exit code, never re-derives the score, and gains no servo
+coupling. That is the *loosest* possible integration, and it is the live answer
+to ADR-0019's OQ2 ("how thin is attest-only?"): **as thin as a review pass.**
+**Option D itself (the tight exit-code binding for bug/refactor, §2–§5) remains
+PARKED** on the demand trigger above — spec 071 deliberately did not build it.
+
 ## Context
 
 jig now has a **family of three gated-evidence lifecycles**, all mirroring
@@ -401,7 +412,18 @@ consumption.
   both must pass — and per Consequences, the deterministic floor stays on
   `tdd.py` for its stronger teeth.
 - **Does `servo` belong only in refactor/bug,** or also spec-workflow's DONE
-  gate? Lean: refactor/bug first; spec later.
+  gate? — **RESOLVED (2026-06-12, [spec 071](../specs/071-design-review-pass/spec.md)).**
+  Yes for spec-workflow — but via the *loosest* path, not Option D's machine
+  binding: a generic, attest-only **`design_review`** review pass on the existing
+  ADR-0014 rails (a `reviews/slice-NN-design-review.md` verdict). A read-only
+  reviewer attests the external eval's frozen verdict (e.g. servo's
+  `.servo/design-eval/` composite ≥ threshold, non-stale, `env_error` ≠ pass) and
+  records pass/fail; jig never machine-reads servo's exit code, never re-derives
+  the score, and gains no servo discovery/coupling for the spec gate. This
+  answers ADR-0019's OQ2 ("how thin is attest-only for the eval oracle?")
+  empirically — **as thin as a review pass.** Option D's tight bug/refactor
+  exit-code binding (§2–§5) stays PARKED on its own demand trigger; spec 071
+  deliberately did not build it.
 - **Design-conformance is a concrete instance of the spec-DONE-gate question
   above (added 2026-06-11).** Verifying a built UI matches its Claude Design
   baseline (surfaced exploring SymPill — a jig-scaffolded Android/Compose app) is a
@@ -412,4 +434,9 @@ consumption.
   new; only the **visual** rung pulls this binding, and needs servo **ADR-0005
   extended to multimodal eval input**. Still demand-gated (one exploratory
   consumer, not the ≥-real trigger); captured as the first candidate consumer for
-  the spec-gate side. See jig inbox 2026-06-11.
+  the spec-gate side. See jig inbox 2026-06-11. — **RESOLVED 2026-06-12 (spec
+  071):** the spec-gate side shipped as the attest-only `design_review` pass (see
+  the resolved Open Question above); its first real consumer is food-log's servo
+  design-fidelity eval. The **visual** rung still needs servo **ADR-0005 extended
+  to multimodal input**, but the jig-side spec-gate *integration* is no longer
+  demand-gated — it rides the generic review-evidence rails, no servo coupling.

@@ -28,13 +28,14 @@ from _common import review_evidence as ev  # noqa: E402
 def write_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
                           *, arch_review: bool = False,
                           code_health_review: bool = False,
-                          frame_review: bool = False) -> Path:
+                          frame_review: bool = False,
+                          design_review: bool = False) -> Path:
     """Create `spec_dir/spec.md` + a sibling `slice-NN-<slug>.md` file.
 
     Returns the spec.md path. The slice file carries `arch_review: true`,
-    `code_health_review: true`, and/or `frame_review: true` in its
-    frontmatter when set, so `required_passes` can be exercised against
-    each shape.
+    `code_health_review: true`, `frame_review: true`, and/or
+    `design_review: true` in its frontmatter when set, so `required_passes`
+    can be exercised against each shape.
     """
     spec_dir.mkdir(parents=True, exist_ok=True)
     spec = spec_dir / "spec.md"
@@ -48,6 +49,8 @@ def write_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
         fm += "code_health_review: true\n"
     if frame_review:
         fm += "frame_review: true\n"
+    if design_review:
+        fm += "design_review: true\n"
     fm += "---\n"
     slice_file = spec_dir / f"slice-{slice_no}-{slug}.md"
     slice_file.write_text(
@@ -102,11 +105,12 @@ def write_verdict_file(spec_dir: Path, slice_no: str, pass_name: str,
 class VocabularyTests(unittest.TestCase):
     def test_pass_vocabulary(self):
         # Slice 060-05 added the gated `code-health` pass; slice 064-03
-        # added the gated, pre-implementation `frame-critique` pass.
+        # added the gated, pre-implementation `frame-critique` pass; slice
+        # 071-01 added the gated, attest-only `design-review` pass.
         self.assertEqual(
             set(ev.PASSES),
             {"compliance", "craft", "arch", "code-health", "reconciliation",
-             "frame-critique"},
+             "frame-critique", "design-review"},
         )
 
     def test_verdict_vocabulary(self):
@@ -157,6 +161,11 @@ class PathResolverTests(unittest.TestCase):
         # Slice 064-03: the frame-critique pass picks up the same convention.
         p = ev.evidence_path(self.spec, "0XX-02", "frame-critique")
         self.assertEqual(p.name, "slice-02-frame-critique.md")
+
+    def test_design_review_path_filename(self):
+        # Slice 071-01: the design-review pass picks up the same convention.
+        p = ev.evidence_path(self.spec, "0XX-02", "design-review")
+        self.assertEqual(p.name, "slice-02-design-review.md")
 
     def test_unknown_pass_rejected(self):
         with self.assertRaises(ev.EvidenceError):
@@ -249,6 +258,32 @@ class RequiredPassesTests(unittest.TestCase):
         self.assertNotIn("frame-critique", req)
         self.assertEqual(set(req), {"compliance", "craft"})
 
+    # Slice 071-01: the gated, attest-only design-review pass (mirrors arch).
+    def test_design_review_in_passes(self):
+        self.assertIn("design-review", ev.PASSES)
+
+    def test_reviewed_adds_design_review_when_flagged(self):
+        req = ev.required_passes("REVIEWED", arch_review=False,
+                                 design_review=True)
+        self.assertEqual(set(req), {"compliance", "craft", "design-review"})
+
+    def test_reviewed_omits_design_review_by_default(self):
+        # Default design_review=False → existing slices unaffected.
+        req = ev.required_passes("REVIEWED", arch_review=False)
+        self.assertNotIn("design-review", req)
+
+    def test_reviewed_adds_arch_and_design_review(self):
+        req = ev.required_passes("REVIEWED", arch_review=True,
+                                 design_review=True)
+        self.assertEqual(set(req),
+                         {"compliance", "craft", "arch", "design-review"})
+
+    def test_reconciled_ignores_design_review_flag(self):
+        # design-review is a REVIEWED-stage pass; never enters RECONCILED.
+        req = ev.required_passes("RECONCILED", arch_review=False,
+                                 design_review=True)
+        self.assertEqual(set(req), {"reconciliation"})
+
 
 class ArchReviewTruthyTokenTests(unittest.TestCase):
     """`_arch_review_flag` must accept the same truthy set as
@@ -292,6 +327,63 @@ class ArchReviewTruthyTokenTests(unittest.TestCase):
                 ev._arch_review_flag(spec, "0XX-03"),
                 f"arch_review: {tok!r} should not require arch evidence",
             )
+
+
+class DesignReviewTruthyTokenTests(unittest.TestCase):
+    """Slice 071-01: `_design_review_flag` must accept the same truthy set
+    as `workflow.py:slice_needs_design_review` (`true`/`yes`/`on`/`1`,
+    case-insensitive) — the same drift guard the arch pass has, so a slice
+    authored `design_review: yes` both triggers the design-review pass in
+    the orchestrator AND is required by the gate at REVIEWED."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-ev-design-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _spec_with_design_value(self, value: str) -> Path:
+        spec_dir = self.tmp / f"070-design-{value or 'empty'}"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "spec.md").write_text(
+            "---\nstatus: IN_PROGRESS\n---\n\n# Spec\n")
+        fm = (
+            "---\nstatus: IN_PROGRESS\ndependencies: []\n"
+            f"design_review: {value}\n---\n"
+        )
+        (spec_dir / "slice-03-thing.md").write_text(
+            f"{fm}\n## Slice 0XX-03 — thing\n\n**Goal:** x.\n"
+        )
+        return spec_dir / "spec.md"
+
+    def test_permissive_truthy_tokens_require_design_review(self):
+        for tok in ("true", "yes", "on", "1", "YES", "On", "TRUE"):
+            spec = self._spec_with_design_value(tok)
+            self.assertTrue(
+                ev._design_review_flag(spec, "0XX-03"),
+                f"design_review: {tok!r} should require design-review evidence",
+            )
+
+    def test_non_truthy_values_do_not_require_design_review(self):
+        for tok in ("false", "no", "maybe", "0"):
+            spec = self._spec_with_design_value(tok)
+            self.assertFalse(
+                ev._design_review_flag(spec, "0XX-03"),
+                f"design_review: {tok!r} should not require design-review",
+            )
+
+    def test_missing_field_returns_false(self):
+        spec_dir = self.tmp / "070-design-absent"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "spec.md").write_text(
+            "---\nstatus: IN_PROGRESS\n---\n\n# Spec\n")
+        (spec_dir / "slice-03-thing.md").write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\n---\n"
+            "\n## Slice 0XX-03 — thing\n\n**Goal:** x.\n"
+        )
+        self.assertFalse(
+            ev._design_review_flag(spec_dir / "spec.md", "0XX-03"))
 
 
 # ---------------------------------------------------------------------------
@@ -398,12 +490,14 @@ class ValidateEvidenceTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _spec(self, slug, slice_no, *, arch_review=False,
-              code_health_review=False, frame_review=False):
+              code_health_review=False, frame_review=False,
+              design_review=False):
         spec_dir = self.tmp / slug
         return write_spec_with_slice(spec_dir, slice_no, "thing",
                                      arch_review=arch_review,
                                      code_health_review=code_health_review,
-                                     frame_review=frame_review)
+                                     frame_review=frame_review,
+                                     design_review=design_review)
 
     def test_reviewed_clears_when_compliance_and_craft_pass(self):
         spec = self._spec("045-a", "02")
@@ -494,6 +588,43 @@ class ValidateEvidenceTests(unittest.TestCase):
                 ev._code_health_review_flag(spec, "0XX-02"),
                 f"code_health_review: {tok!r} should not require code-health",
             )
+
+    # Slice 071-01: the gated, attest-only design-review pass in
+    # validate_evidence — mirrors arch at the REVIEWED stage.
+    def test_reviewed_blocks_when_design_review_required_but_missing(self):
+        spec = self._spec("070-c", "02", design_review=True)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertTrue(
+            any("design-review" in d for d in diags),
+            f"design_review: true → missing design-review must block: {diags}")
+
+    def test_reviewed_clears_with_design_review_when_flagged_and_present(self):
+        spec = self._spec("070-d", "02", design_review=True)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        write_verdict_file(spec.parent, "02", "design-review", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertEqual(diags, [], f"expected clean, got: {diags}")
+
+    def test_reviewed_ignores_design_review_when_not_flagged(self):
+        # Back-compat: a slice WITHOUT the flag never requires design-review.
+        spec = self._spec("070-e", "02", design_review=False)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertEqual(
+            diags, [],
+            f"unflagged slice must not need design-review: {diags}")
+
+    def test_reconciled_ignores_design_review_flag(self):
+        # design-review is a REVIEWED-stage pass; the RECONCILED set only
+        # needs reconciliation even when the slice is flagged.
+        spec = self._spec("070-f", "02", design_review=True)
+        write_verdict_file(spec.parent, "02", "reconciliation", verdict="pass")
+        diags = ev.validate_evidence(spec, "0XX-02", "RECONCILED")
+        self.assertEqual(diags, [], f"expected clean, got: {diags}")
 
     # Slice 064-03 / ADR-0020: the gated, pre-implementation frame-critique
     # at the READY_FOR_REVIEW stage.

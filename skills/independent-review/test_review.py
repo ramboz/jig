@@ -1442,6 +1442,214 @@ class FrameCritiqueEvidenceRoundTripTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
 
 
+class DesignReviewPromptTests(unittest.TestCase):
+    """Slice 071-01 AC1: `review.py design-review <spec> <slice>
+    <deliverable>...` builds a self-contained, ATTEST-ONLY prompt that:
+      - tells the reviewer it is seeing the work for the first time
+      - cites the deliverable file paths verbatim
+      - directs the reviewer to LOCATE and READ the external design-fidelity
+        eval evidence (frozen config threshold + ledger composite)
+      - directs the reviewer to ATTEST (do not re-derive): confirm the eval
+        actually RAN, is NON-STALE, is HONEST (env_error ≠ pass / ≠ 0.0),
+        composite >= the eval's own threshold — and RECORD that verdict
+      - explicitly forbids re-running / re-deriving / re-judging the eval
+        (servo runs/scores; jig attests — ADR-0022 honesty boundary)
+      - wraps output in the canonical VERDICT envelope
+      - does NOT detect a richer external skill (no such category exists)
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-design-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "071-01 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self, *extra_args: str):
+        result = run_review(
+            "design-review", str(self.spec), "071-01",
+            "skills/foo/foo.py", "skills/foo/test_foo.py", *extra_args,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result.stdout
+
+    def test_includes_standard_preamble(self):
+        prompt = self._prompt()
+        self.assertIn("You are an independent reviewer", prompt)
+        self.assertIn("seeing this work for the first time", prompt)
+
+    def test_lists_deliverable_paths_verbatim(self):
+        prompt = self._prompt()
+        self.assertIn("skills/foo/foo.py", prompt)
+        self.assertIn("skills/foo/test_foo.py", prompt)
+
+    # AC1 — attest-only: explicitly NOT re-derive / re-run / re-judge.
+    def test_instructs_not_to_re_derive_the_eval(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)attest",
+            "design-review prompt must frame itself as ATTEST-only (071-01)",
+        )
+        self.assertRegex(
+            prompt, r"(?i)(do not|must not|never)\s+re-?(derive|run|judge|score)",
+            "design-review prompt must instruct the reviewer NOT to "
+            "re-derive / re-run / re-judge the eval (071-01 / ADR-0022)",
+        )
+
+    # AC1 — directs the reviewer at the external eval evidence.
+    def test_points_at_external_eval_evidence(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)design-fidelity",
+            "design-review prompt must point at the design-fidelity eval",
+        )
+        self.assertRegex(
+            prompt, r"(?i)(ledger|composite|threshold)",
+            "design-review prompt must name the eval's ledger / composite / "
+            "threshold evidence (071-01 AC1)",
+        )
+
+    # AC1 — honesty: env_error / infra failure is NOT a pass and NOT 0.0.
+    def test_honesty_env_error_not_a_pass(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)env_error",
+            "design-review prompt must call out that an env_error / infra "
+            "failure is NOT a pass (071-01 AC1 honesty)",
+        )
+
+    # AC1 — non-stale: frozen definition unchanged.
+    def test_non_stale_frozen_definition(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)(non-stale|frozen|unchanged)",
+            "design-review prompt must require the eval definition be "
+            "frozen / non-stale (071-01 AC1)",
+        )
+
+    def test_includes_verdict_envelope(self):
+        prompt = self._prompt()
+        # Distinct, observable attest-only buckets (071-01 AC1): summary /
+        # eval-ran / non-stale / threshold-met / verdict.
+        for marker in ("VERDICT", "SUMMARY", "EVAL-RAN", "NON-STALE",
+                       "THRESHOLD-MET"):
+            self.assertIn(marker, prompt,
+                          f"design-review missing envelope marker: {marker}")
+        self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    def test_includes_read_only_directive(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt, r"(?i)do not\s+(?:write|modify|edit).+files?|read-only",
+        )
+
+    def test_does_not_re_evaluate_acceptance_criteria(self):
+        prompt = self._prompt()
+        self.assertNotRegex(
+            prompt, r"(?i)for\s+each\s+acceptance\s+criterion",
+            "design-review attests an eval verdict — it does not re-walk ACs",
+        )
+
+    def test_includes_spec_path(self):
+        self.assertIn(str(self.spec), self._prompt())
+
+    def test_includes_slice_label(self):
+        self.assertIn("071-01", self._prompt())
+
+    # AC1 — no richer-skill detection (no standard external category).
+    def test_no_richer_skill_detection(self):
+        prompt = self._prompt()
+        self.assertNotRegex(
+            prompt, r"(?i)richer.*design-review.*installed",
+            "design-review must not detect a richer skill (none exists) — it "
+            "attests jig's own eval evidence",
+        )
+
+    def test_design_review_requires_at_least_one_deliverable(self):
+        result = run_review("design-review", str(self.spec), "071-01")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_design_review_refuses_missing_spec(self):
+        missing = Path(self.tmpdir) / "nope.md"
+        result = run_review("design-review", str(missing), "071-01", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+    def test_design_review_refuses_unknown_slice(self):
+        result = run_review("design-review", str(self.spec), "999-99", "x.py")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+
+
+class DesignReviewEvidenceRoundTripTests(unittest.TestCase):
+    """Slice 071-01 AC4: a design-review verdict round-trips through
+    record-review → file at reviews/slice-NN-design-review.md →
+    check-reviews --stage REVIEWED clears (and re-validates at DONE)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-design-rt-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, spec, slice_frag, pass_name, verdict):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review",
+             str(spec), slice_frag, "--pass", pass_name,
+             "--verdict", verdict, "--reviewer", "jig:reviewer",
+             "--prompt-source", "review.py design-review x"],
+            input="## VERDICT\n" + verdict + "\n", capture_output=True,
+            text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def _check(self, spec, slice_frag, stage="REVIEWED"):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "check-reviews",
+             str(spec), slice_frag, "--stage", stage],
+            capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def test_record_review_accepts_design_review_pass(self):
+        # AC2: --pass choices come from _evidence.PASSES, so design-review
+        # is accepted automatically.
+        spec = _make_spec_with_slice(self.tmp / "070-a", "01", "foo",
+                                     design_review=True)
+        r = self._record(spec, "0XX-01", "design-review", "pass")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        f = spec.parent / "reviews" / "slice-01-design-review.md"
+        self.assertTrue(f.is_file(), f"missing evidence file: {f}")
+
+    def test_check_blocks_when_design_review_missing(self):
+        spec = _make_spec_with_slice(self.tmp / "070-b", "01", "foo",
+                                     design_review=True)
+        self._record(spec, "0XX-01", "compliance", "pass")
+        self._record(spec, "0XX-01", "craft", "pass")
+        r = self._check(spec, "0XX-01")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("design-review", r.stderr)
+
+    def test_check_clears_after_passing_design_verdict(self):
+        spec = _make_spec_with_slice(self.tmp / "070-c", "01", "foo",
+                                     design_review=True)
+        self._record(spec, "0XX-01", "compliance", "pass")
+        self._record(spec, "0XX-01", "craft", "pass")
+        self._record(spec, "0XX-01", "design-review", "pass")
+        r = self._check(spec, "0XX-01")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def test_check_clears_when_unflagged(self):
+        spec = _make_spec_with_slice(self.tmp / "070-d", "01", "foo",
+                                     design_review=False)
+        self._record(spec, "0XX-01", "compliance", "pass")
+        self._record(spec, "0XX-01", "craft", "pass")
+        r = self._check(spec, "0XX-01")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+
 class FrameCritiqueAdrCliTests(unittest.TestCase):
     """Slice 064-05: `review.py frame-critique <adr-path>` (no slice) builds an
     ADR frame-critique prompt — the command the accept-gate's refusal message
@@ -2118,7 +2326,8 @@ class WorkflowMdMentionsSnapshotTests(unittest.TestCase):
 
 def _make_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
                           *, arch_review: bool = False,
-                          frame_review: bool = False) -> Path:
+                          frame_review: bool = False,
+                          design_review: bool = False) -> Path:
     """Create `spec_dir/spec.md` + a sibling `slice-NN-<slug>.md` file in
     a temp dir (NOT the real docs/specs/ tree). Returns the spec.md path."""
     spec_dir.mkdir(parents=True, exist_ok=True)
@@ -2131,6 +2340,8 @@ def _make_spec_with_slice(spec_dir: Path, slice_no: str, slug: str,
         fm += "arch_review: true\n"
     if frame_review:
         fm += "frame_review: true\n"
+    if design_review:
+        fm += "design_review: true\n"
     fm += "---\n"
     (spec_dir / f"slice-{slice_no}-{slug}.md").write_text(
         f"{fm}\n## Slice 0XX-{slice_no} — {slug}\n\n**Goal:** placeholder.\n"

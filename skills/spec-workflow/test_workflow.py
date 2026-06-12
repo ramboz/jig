@@ -3728,6 +3728,61 @@ class SliceNeedsCodeHealthReviewTests(unittest.TestCase):
                              f"{tok!r} should be truthy")
 
 
+class SliceNeedsDesignReviewTests(unittest.TestCase):
+    """Slice 071-01: `workflow.py design-review-needed` mirrors
+    `arch-review-needed`, reading the slice's `design_review:` frontmatter
+    flag and defaulting to false when absent (back-compat — every existing
+    slice has no flag)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-design-needed-"))
+        self.spec = self.tmpdir / "spec.md"
+        self.slice_file = self.tmpdir / "slice-01-design.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, fm_extra: str) -> None:
+        self.slice_file.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n"
+            f"{fm_extra}---\n\n## Slice 071-01 alpha\n\n**Goal:** x.\n"
+        )
+
+    def _run(self):
+        return run_workflow("design-review-needed", str(self.spec), "071-01")
+
+    def test_false_when_absent(self):
+        self._write_slice("")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "false")
+
+    def test_true_when_set(self):
+        self._write_slice("design_review: true\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "true")
+
+    def test_false_when_explicit_false(self):
+        self._write_slice("design_review: false\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertEqual(r.stdout.strip(), "false")
+
+    def test_truthy_variations(self):
+        for tok in ("yes", "True", "1", "on"):
+            self._write_slice(f"design_review: {tok}\n")
+            r = self._run()
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip(), "true",
+                             f"{tok!r} should be truthy")
+
+
 class SliceTemplateArchReviewHintTests(unittest.TestCase):
     """Slice 031-02 AC #1 + AC #6: the slice template at
     `templates/docs/specs/slice-template.md` ships the `arch_review:`
@@ -3778,6 +3833,35 @@ class SliceTemplateArchReviewHintTests(unittest.TestCase):
             "the `arch_review:` hint must explain when to set it "
             "(031-02 AC #1: module boundaries / public contracts / "
             "architecture-shaped concerns)",
+        )
+
+    # Slice 071-01: the design_review flag hint mirrors the arch_review one.
+    def test_template_has_design_review_hint_in_frontmatter_block(self):
+        m = re.match(r"---\n(.*?)\n---", self.text, re.DOTALL)
+        self.assertIsNotNone(m, "slice template must start with frontmatter")
+        fm = m.group(1)
+        self.assertIn(
+            "design_review:", fm,
+            "`design_review:` hint must be in the leading frontmatter "
+            "block (071-01)",
+        )
+        # The hint must be commented out — search for `# design_review:`.
+        self.assertRegex(
+            fm,
+            r"#\s*design_review:",
+            "the `design_review:` hint must be commented out (071-01: "
+            "existing slices without the field are unaffected)",
+        )
+
+    def test_template_explains_when_to_set_design_review(self):
+        # The one-line guide must mention the design-fidelity eval / attest.
+        m = re.match(r"---\n(.*?)\n---", self.text, re.DOTALL)
+        fm = m.group(1)
+        self.assertRegex(
+            fm,
+            r"(?is)design_review:.*(?:design-fidelity|eval|attest)",
+            "the `design_review:` hint must explain when to set it "
+            "(071-01: UI gated by an external design-fidelity eval)",
         )
 
 
