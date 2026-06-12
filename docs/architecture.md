@@ -162,7 +162,7 @@ Interface contracts between these modules are deliberately deferred — today's 
 Jig is a workflow layer, not a data application (per [product-vision.md](product-vision.md) non-goals). Relevant on-disk state is small:
 
 - `.jig/scaffold.json` — install manifest: which tiers chosen, when, by which jig version (per [ADR-0001](decisions/adr-0001-scaffold-stable.md))
-- `.claude/skill-usage.jsonl` — append-only log written by `jig-telemetry.sh` (Task spawns) and `jig-skill-trace.sh` (Skill invocations; `event: skill_invoked`); read via [docs/skill-routing-verification.md](skill-routing-verification.md). Histogram consumer is `workflow.py routing-stats` (slice 041-02)
+- `.claude/skill-usage.jsonl` — append-only log written by `jig-telemetry.sh` (Task spawns; `event: task_spawned`, with optional `phase`/`spec`/`slice`) and `jig-skill-trace.sh` (Skill invocations; `event: skill_invoked`); read via [docs/skill-routing-verification.md](skill-routing-verification.md). Histogram consumer is `workflow.py routing-stats` (slice 041-02)
 - `docs/specs/**/spec.md` — the only project-level state jig owns; everything else lives in the dev's repo, owned by the dev
 
 ## Contract surfaces

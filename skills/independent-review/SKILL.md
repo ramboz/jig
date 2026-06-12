@@ -50,6 +50,23 @@ tool restrictions and persistent system rules.
 
 ## How to use
 
+### Task telemetry tags
+
+When you feed a `review.py` prompt to the `Task` tool, prefix the prompt with
+the compact attribution tags that `jig-telemetry.sh` records:
+
+```text
+[jig:phase=<phase>] [jig:spec=NNN] [jig:slice=NNN-NN]
+
+<review.py prompt body>
+```
+
+Use `compliance` for `review.py implementation`, `craft` for `pr-review`,
+`arch` for `arch-review`, `code-health` for `code-health`,
+`frame-critique` for frame critique, and `reconciliation` for
+reconciliation review. These tags make later token reports price the workflow
+phase, not just the subagent type.
+
 ### Implementation review
 
 After the implementer has written the deliverable to disk:
@@ -64,12 +81,13 @@ SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type implementation)
 ```
 
-Then feed `$PROMPT` to the `Task` tool with `subagent_type: "$SUBAGENT"`.
-The helper resolves `$SUBAGENT` deterministically — `reviewer` when jig is
-installed as a plugin (the real filesystem-based agent is reachable),
-`general-purpose` when running from source. Wait for the verdict. Address
-any `fail`/`needs-changes` findings; rerun the helper + Task as needed
-until `pass`.
+Then feed `[jig:phase=compliance] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to the `Task` tool with
+`subagent_type: "$SUBAGENT"`. The helper resolves `$SUBAGENT`
+deterministically — `reviewer` when jig is installed as a plugin (the real
+filesystem-based agent is reachable), `general-purpose` when running from
+source. Wait for the verdict. Address any `fail`/`needs-changes` findings;
+rerun the helper + Task as needed until `pass`.
 
 ### Pr-review (craft pass — slice 031-01)
 
@@ -85,14 +103,15 @@ SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type pr-review)
 ```
 
-Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
-points the reviewer at the most-specific `pr-review` SKILL.md reachable
-in the environment — Claude's skill router resolves user > project >
-`jig:pr-review` precedence via the skill description hints. The pass
-returns the canonical four output buckets (scope / blockers / nits /
-strengths) wrapped in the same verdict envelope as the compliance
-pass. SPECIFIC ISSUES entries are tagged `[blocker]` / `[nit]` /
-`[strength]`; only `[blocker]` entries block the REVIEWED transition.
+Feed `[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT` to
+`Task` with `subagent_type: "$SUBAGENT"`. The prompt points the reviewer at
+the most-specific `pr-review` SKILL.md reachable in the environment —
+Claude's skill router resolves user > project > `jig:pr-review` precedence
+via the skill description hints. The pass returns the canonical four output
+buckets (scope / blockers / nits / strengths) wrapped in the same verdict
+envelope as the compliance pass. SPECIFIC ISSUES entries are tagged
+`[blocker]` / `[nit]` / `[strength]`; only `[blocker]` entries block the
+REVIEWED transition.
 
 ### Arch-review (architecture pass — slice 031-02, on-demand)
 
@@ -122,14 +141,14 @@ if [ "$NEED_ARCH" = "true" ]; then
 fi
 ```
 
-When `$NEED_ARCH` is `true`, feed `$PROMPT` to `Task` with
-`subagent_type: "$SUBAGENT"`. The prompt routes via the same
-prose-based dispatch as `pr-review` to the most-specific `arch-review`
-SKILL.md reachable. The pass returns the canonical four arch output
-buckets (summary / strengths / concerns / open questions). Tag and
-block semantics match the craft pass: `[blocker]` entries block the
-REVIEWED transition; `[nit]` entries and `needs-changes` become
-reconciliation-log items.
+When `$NEED_ARCH` is `true`, feed `[jig:phase=arch] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`. The prompt routes via the same prose-based
+dispatch as `pr-review` to the most-specific `arch-review` SKILL.md
+reachable. The pass returns the canonical four arch output buckets (summary /
+strengths / concerns / open questions). Tag and block semantics match the
+craft pass: `[blocker]` entries block the REVIEWED transition; `[nit]`
+entries and `needs-changes` become reconciliation-log items.
 
 Slice authors set `arch_review: true` in the slice file's frontmatter
 when the slice changes module boundaries, public contracts, or
@@ -158,6 +177,10 @@ SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type)
 ```
 
+Feed `[jig:phase=frame-critique] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`.
+
 Record the verdict as the `frame-critique` pass (below); the
 `READY_FOR_REVIEW` gate requires it iff `frame_review` is truthy
 (default-off artifacts transition freely). **Model policy (ADR-0020):**
@@ -184,9 +207,10 @@ SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type reconciliation)
 ```
 
-Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
-explicitly tells the reviewer NOT to re-evaluate against ACs — it only
-verifies the deviation log matches reality.
+Feed `[jig:phase=reconciliation] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`. The prompt explicitly tells the reviewer NOT to
+re-evaluate against ACs — it only verifies the deviation log matches reality.
 
 ### Recording and checking review evidence (slice 045-02)
 

@@ -19,7 +19,9 @@ hook (`hooks/scripts/jig-skill-trace.sh`) logs every Skill-tool invocation —
 including auto-triggered ones — to `.claude/skill-usage.jsonl`:
 
 `.claude/skill-usage.jsonl` is **shared** with `jig-telemetry.sh` (which logs
-`Task` spawns with no `skill_name`), so filter on the `skill_invoked` event:
+`Task` spawns as `event: task_spawned`, optionally with `phase`, `spec`, and
+`slice` when the Task prompt carries `[jig:...]` tags), so filter on the
+`skill_invoked` event:
 
 ```bash
 # after asking for a review, read which skill actually fired:

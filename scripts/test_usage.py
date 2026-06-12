@@ -369,6 +369,20 @@ class TokenSumTests(_TreeMixin, unittest.TestCase):
         self.assertEqual(rep.session_count, 2)  # sessA + sessB, NOT sessC
         self.assertEqual(rep.models, ["claude-opus-4-8"])
 
+    def test_report_counts_orchestrator_turns_and_peak_cache_read(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        self.assertEqual(rep.orchestrator_turns, 3)
+        self.assertEqual(rep.peak_cache_read_tokens, 1000)
+
+    def test_render_report_shows_turns_and_peak_cache_read(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        out = uu.render(rep)
+        self.assertIn("turns", out)
+        self.assertIn("peak_cache_read_tokens", out)
+        self.assertTrue(_shows_number(out, 1000), msg=out)
+
     def test_noise_spec_not_summed(self):
         # The 042 session's huge 9999s must not leak into the 055 totals.
         rep = uu.build_report(spec="055", projects_dir=self.projects,
@@ -503,6 +517,16 @@ class CcusageApplicationTests(_TreeMixin, unittest.TestCase):
         sums = uu.sum_usage(recs)
         self.assertEqual(sums["models"], ["claude-opus-4-8"])
         self.assertNotIn("<synthetic>", sums["per_model"])
+
+    def test_zero_token_usage_does_not_count_as_turn_or_peak(self):
+        zero = _assistant_record("<synthetic>", _usage(), MAIN_CWD,
+                                 session="zero")
+        real = _assistant_record("claude-opus-4-8",
+                                 _usage(inp=1, cache_read=20),
+                                 MAIN_CWD, session="real")
+        turns, peak = uu._usage_turns_and_peak([zero, real])
+        self.assertEqual(turns, 1)
+        self.assertEqual(peak, 20)
 
 
 class CcusagePartialRateTests(unittest.TestCase):
@@ -764,6 +788,7 @@ class SubagentSumTests(_SubagentTreeMixin, unittest.TestCase):
         self.assertEqual(rep.subagent_cache_read_tokens, 1100)
         self.assertEqual(rep.subagent_cache_creation_tokens, 11)
         self.assertEqual(rep.subagent_total_tokens, 11 + 110 + 1100 + 11)
+        self.assertEqual(rep.subagent_turns, 3)
 
     def test_orchestrator_sums_unchanged_by_subagents(self):
         # The flat-session (056-01) sums must NOT absorb subagent tokens.
@@ -1011,6 +1036,80 @@ class TopReportSubagentTests(_SubagentTreeMixin, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Compaction threshold comparison — read-only what-if over cache_read peaks
+# ---------------------------------------------------------------------------
+
+class CompactThresholdReportTests(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-compact-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+        _write_session(
+            self.projects, ENC_MAIN, "compact",
+            [
+                _user_record(MAIN_CWD,
+                             "Work on specs/090-compact-thresholds spec 090.",
+                             session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=40),
+                                  MAIN_CWD, session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=60),
+                                  MAIN_CWD, session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=70),
+                                  MAIN_CWD, session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=80),
+                                  MAIN_CWD, session="compact"),
+            ],
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_compact_threshold_report_counts_crossing_turns(self):
+        reports = uu.build_compact_threshold_reports(
+            specs=["090"],
+            projects_dir=self.projects,
+            encoded_prefix=ENC_MAIN,
+            thresholds=[0.60, 0.65, 0.75],
+            window_tokens=100,
+        )
+        rep = reports[0]
+        self.assertEqual(rep.session_count, 1)
+        self.assertEqual(rep.orchestrator_turns, 4)
+        self.assertEqual(rep.orchestrator_tokens, 40 + 60 + 70 + 80 + 4)
+        self.assertEqual(rep.peak_cache_read_tokens, 80)
+
+        by_threshold = {row.threshold: row for row in rep.thresholds}
+        self.assertEqual(by_threshold[0.60].crossing_turns, 3)
+        self.assertEqual(by_threshold[0.60].sessions_crossed, 1)
+        self.assertEqual(by_threshold[0.60].first_crossing_turn, 2)
+        self.assertEqual(by_threshold[0.65].crossing_turns, 2)
+        self.assertEqual(by_threshold[0.65].first_crossing_turn, 3)
+        self.assertEqual(by_threshold[0.75].crossing_turns, 1)
+        self.assertEqual(by_threshold[0.75].first_crossing_turn, 4)
+
+    def test_render_compact_threshold_report(self):
+        reports = uu.build_compact_threshold_reports(
+            specs=["090"],
+            projects_dir=self.projects,
+            encoded_prefix=ENC_MAIN,
+            thresholds=[0.60, 0.75],
+            window_tokens=100,
+        )
+        out = uu.render_compact_thresholds(reports)
+        self.assertIn("Compaction threshold comparison", out)
+        self.assertIn("SPEC 090", out)
+        self.assertIn("0.60", out)
+        self.assertIn("0.75", out)
+        self.assertIn("turns_at_or_above", out)
+
+
+# ---------------------------------------------------------------------------
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
 
@@ -1116,6 +1215,32 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertNotIn("055", result.stdout)
         self.assertTrue(_shows_number(result.stdout, 42312),
                         msg=result.stdout)
+
+    def test_cli_report_require_marker_runs(self):
+        result = _run_usage(
+            "report", "055",
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--no-ccusage",
+            "--require-marker",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("No marker-attributed sessions", result.stdout)
+        self.assertIn("Heuristic sessions skipped", result.stdout)
+
+    def test_cli_compact_thresholds_runs_with_overrides(self):
+        result = _run_usage(
+            "compact-thresholds", "055",
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--window-tokens", "1000",
+            "--thresholds", "0.60,0.75",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Compaction threshold comparison", result.stdout)
+        self.assertIn("SPEC 055", result.stdout)
+        self.assertIn("0.60", result.stdout)
+        self.assertIn("Peak cache_read", result.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -1269,6 +1394,36 @@ class MarkerAttributionTests(_MarkerTreeMixin, unittest.TestCase):
         # The counts surface in the output (1 marker, 1 heuristic).
         self.assertIn("1", uu.render(rep))
 
+    def test_require_marker_filters_heuristic_sessions(self):
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None,
+                              require_marker=True)
+        self.assertEqual(rep.session_count, 1)
+        self.assertEqual(rep.marker_session_count, 1)
+        self.assertEqual(rep.heuristic_session_count, 0)
+        self.assertEqual(rep.skipped_heuristic_session_count, 1)
+        # Only the marker session's 10/20/30/40 tokens remain.
+        self.assertEqual(rep.input_tokens, 10)
+        self.assertEqual(rep.output_tokens, 20)
+        self.assertEqual(rep.cache_read_tokens, 30)
+        self.assertEqual(rep.cache_creation_tokens, 40)
+
+    def test_require_marker_render_shows_skipped_heuristic_count(self):
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None,
+                              require_marker=True)
+        out = uu.render(rep).lower()
+        self.assertIn("marker required", out)
+        self.assertIn("heuristic skipped", out)
+
+    def test_top_require_marker_filters_heuristic_sessions(self):
+        top = uu.build_top_report(self.projects, self.prefix,
+                                  require_marker=True)
+        self.assertEqual(top.attributed_session_count, 1)
+        self.assertEqual(top.skipped_heuristic_session_count, 1)
+        self.assertEqual([r.spec for r in top.rows], ["070"])
+        self.assertEqual(top.rows[0].combined_total_tokens, 10 + 20 + 30 + 40)
+
 
 class AllMarkerNoHeuristicFlagTests(unittest.TestCase):
     """When every attributed session has a marker, the report should say so
@@ -1339,6 +1494,16 @@ class MarkerFallbackRegressionTests(_TreeMixin, unittest.TestCase):
                               encoded_prefix=ENC_MAIN, ccusage_runner=None)
         out = uu.render(rep).lower()
         self.assertIn("heuristic", out)
+
+    def test_require_marker_on_heuristic_only_fixture_reports_skipped(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None,
+                              require_marker=True)
+        self.assertEqual(rep.session_count, 0)
+        self.assertEqual(rep.skipped_heuristic_session_count, 2)
+        out = uu.render(rep).lower()
+        self.assertIn("no marker-attributed sessions", out)
+        self.assertIn("heuristic sessions skipped", out)
 
 
 if __name__ == "__main__":

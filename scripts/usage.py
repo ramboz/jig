@@ -65,6 +65,8 @@ token breakdowns still print and the $ lines read "unavailable".
 Usage
 -----
     python3 scripts/usage.py report <spec> [options]
+    python3 scripts/usage.py top [options]
+    python3 scripts/usage.py compact-thresholds <spec> [<spec> ...] [options]
 
     <spec>                A spec number (e.g. ``055``) or slug
                           (e.g. ``055-token-usage-tracking``).
@@ -77,6 +79,11 @@ Options
     --ccusage-json PATH   Read a pre-captured ``ccusage --json`` payload from a
                           file instead of shelling out (offline / testing).
     --no-ccusage          Skip ccusage entirely; print "$: unavailable".
+    --require-marker      Include only exact ``.jig/spec-ref`` attributions;
+                          useful for future A/B comparisons.
+    compact-thresholds    Read-only what-if: count historical orchestrator
+                          turns crossing alternate ``cache_read`` thresholds
+                          (default 0.60, 0.65, 0.75 of a 200k-token window).
 
 Read-only: this tool never writes or deletes anything. The only network access
 is the optional ``npx ccusage`` call (suppressed by --ccusage-json/--no-ccusage).
@@ -345,6 +352,50 @@ _USAGE_FIELDS = (
     "cache_creation_input_tokens",
 )
 
+DEFAULT_TOKEN_WINDOW_TOKENS = 200_000
+
+
+def _usage_token_values(usage: dict) -> dict:
+    """Return normalized integer token values for the usage fields."""
+    values = {}
+    for field in _USAGE_FIELDS:
+        raw = usage.get(field, 0)
+        if isinstance(raw, bool):
+            values[field] = 0
+        elif isinstance(raw, (int, float)):
+            values[field] = int(raw)
+        else:
+            values[field] = 0
+    return values
+
+
+def _usage_total(values: dict) -> int:
+    return sum(int(values.get(field, 0)) for field in _USAGE_FIELDS)
+
+
+def _iter_positive_usage(records: list):
+    """Yield ``(record, message, token_values)`` for assistant usage turns
+    with at least one positive token. Synthetic zero-token turns are ignored
+    consistently by summing, turn counts, peaks, and threshold reports.
+    """
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("type") not in (None, "assistant"):
+            # Only assistant turns carry message.usage we count. User/system/
+            # summary records have no billable usage.
+            continue
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            continue
+        usage = msg.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        token_values = _usage_token_values(usage)
+        if _usage_total(token_values) <= 0:
+            continue
+        yield rec, msg, token_values
+
 
 def sum_usage(records: list) -> dict:
     """Sum the four orchestrator usage fields across assistant records that
@@ -356,29 +407,12 @@ def sum_usage(records: list) -> dict:
     totals = {f: 0 for f in _USAGE_FIELDS}
     per_model = {}
     models = set()
-    for rec in records:
-        if rec.get("type") not in (None, "assistant"):
-            # Only orchestrator assistant turns carry message.usage we count.
-            # (User/system/summary records have no usage.)
-            continue
-        msg = rec.get("message")
-        if not isinstance(msg, dict):
-            continue
-        usage = msg.get("usage")
-        if not isinstance(usage, dict):
-            continue
-        token_values = {
-            f: int(usage.get(f, 0))
-            for f in _USAGE_FIELDS
-            if isinstance(usage.get(f, 0), (int, float))
-        }
-        if sum(token_values.values()) <= 0:
-            continue
+    for _rec, msg, token_values in _iter_positive_usage(records):
         model = msg.get("model") or "unknown"
         models.add(model)
         slot = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
         for f in _USAGE_FIELDS:
-            val = token_values.get(f, 0)
+            val = token_values[f]
             totals[f] += val
             slot[f] += val
     totals["models"] = sorted(models)
@@ -402,28 +436,13 @@ def sum_subagent_usage(records: list) -> dict:
     totals = {f: 0 for f in _USAGE_FIELDS}
     per_model = {}
     by_type = {}
-    for rec in records:
-        if rec.get("type") not in (None, "assistant"):
-            continue
-        msg = rec.get("message")
-        if not isinstance(msg, dict):
-            continue
-        usage = msg.get("usage")
-        if not isinstance(usage, dict):
-            continue
-        token_values = {
-            f: int(usage.get(f, 0))
-            for f in _USAGE_FIELDS
-            if isinstance(usage.get(f, 0), (int, float))
-        }
-        if sum(token_values.values()) <= 0:
-            continue
+    for rec, msg, token_values in _iter_positive_usage(records):
         model = msg.get("model") or "unknown"
         agent = rec.get("attributionAgent") or "unknown"
         mslot = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
         tslot = by_type.setdefault(agent, {f: 0 for f in _USAGE_FIELDS})
         for f in _USAGE_FIELDS:
-            val = token_values.get(f, 0)
+            val = token_values[f]
             totals[f] += val
             mslot[f] += val
             tslot[f] += val
@@ -542,11 +561,15 @@ class Report:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     session_count: int = 0
+    orchestrator_turns: int = 0
+    peak_cache_read_tokens: int = 0
     # Attribution-confidence split (slice 056-03): how many attributed
     # sessions came from the exact `.jig/spec-ref` marker vs. the content
     # heuristic. marker + heuristic == session_count.
     marker_session_count: int = 0
     heuristic_session_count: int = 0
+    marker_required: bool = False
+    skipped_heuristic_session_count: int = 0
     models: list = field(default_factory=list)
     per_model: dict = field(default_factory=dict)
     cost_usd: float = None
@@ -557,6 +580,7 @@ class Report:
     subagent_output_tokens: int = 0
     subagent_cache_read_tokens: int = 0
     subagent_cache_creation_tokens: int = 0
+    subagent_turns: int = 0
     subagent_per_model: dict = field(default_factory=dict)
     subagent_by_type: dict = field(default_factory=dict)
     subagent_cost_usd: float = None
@@ -641,6 +665,8 @@ class TopReport:
     attributed_session_count: int = 0
     unattributed_session_count: int = 0
     empty_session_count: int = 0
+    marker_required: bool = False
+    skipped_heuristic_session_count: int = 0
 
     @property
     def input_tokens(self) -> int:
@@ -671,6 +697,35 @@ class TopReport:
         return self.orchestrator_tokens + self.subagent_tokens
 
 
+@dataclass
+class CompactThresholdRow:
+    threshold: float
+    crossing_turns: int = 0
+    sessions_crossed: int = 0
+    first_crossing_turn: int = None
+
+
+@dataclass
+class CompactThresholdSpecReport:
+    spec: str
+    window_tokens: int
+    thresholds: list
+    session_count: int = 0
+    marker_session_count: int = 0
+    heuristic_session_count: int = 0
+    marker_required: bool = False
+    skipped_heuristic_session_count: int = 0
+    orchestrator_turns: int = 0
+    orchestrator_tokens: int = 0
+    peak_cache_read_tokens: int = 0
+
+    @property
+    def peak_ratio(self) -> float:
+        if self.window_tokens <= 0:
+            return 0.0
+        return self.peak_cache_read_tokens / self.window_tokens
+
+
 def _spec_number(spec: str) -> str:
     """Normalize a spec argument (number or slug) to a three-digit number.
 
@@ -685,7 +740,8 @@ def _spec_number(spec: str) -> str:
 
 
 def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
-                 ccusage_runner=run_ccusage_npx) -> Report:
+                 ccusage_runner=run_ccusage_npx,
+                 require_marker: bool = False) -> Report:
     """Build a per-spec usage report: measured orchestrator (flat sessions)
     + measured subagent (nested transcripts) token totals and $ costs, plus
     their combined total (= the true per-spec cost).
@@ -708,6 +764,7 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     """
     target = _spec_number(spec)
     rep = Report(spec=target)
+    rep.marker_required = require_marker
 
     # Attribute sessions, keeping the session PATH so we can locate each
     # session's nested subagent transcripts (slice 056-02). Slice 056-03:
@@ -716,12 +773,16 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     attributed = []
     marker_count = 0
     heuristic_count = 0
+    skipped_heuristic = 0
     for session_path in find_sessions(projects_dir, encoded_prefix):
         records = read_session(session_path)
         if not records:
             continue
         spec_num, method = attribute_session(records)
         if spec_num == target:
+            if require_marker and method != "marker":
+                skipped_heuristic += 1
+                continue
             attributed.append((session_path, records))
             if method == "marker":
                 marker_count += 1
@@ -741,6 +802,9 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
         rep.cache_read_tokens += sums["cache_read_input_tokens"]
         rep.cache_creation_tokens += sums["cache_creation_input_tokens"]
         models.update(sums["models"])
+        turns, peak = _usage_turns_and_peak(records)
+        rep.orchestrator_turns += turns
+        rep.peak_cache_read_tokens = max(rep.peak_cache_read_tokens, peak)
         for model, slot in sums["per_model"].items():
             agg = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
             for f in _USAGE_FIELDS:
@@ -759,6 +823,8 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
             rep.subagent_cache_read_tokens += asums["cache_read_input_tokens"]
             rep.subagent_cache_creation_tokens += \
                 asums["cache_creation_input_tokens"]
+            turns, _peak = _usage_turns_and_peak(agent_records)
+            rep.subagent_turns += turns
             for model, slot in asums["per_model"].items():
                 agg = sub_per_model.setdefault(
                     model, {f: 0 for f in _USAGE_FIELDS})
@@ -773,6 +839,7 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     rep.session_count = len(attributed)
     rep.marker_session_count = marker_count
     rep.heuristic_session_count = heuristic_count
+    rep.skipped_heuristic_session_count = skipped_heuristic
     rep.models = sorted(models)
     rep.per_model = per_model
     rep.subagent_per_model = sub_per_model
@@ -820,35 +887,26 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
 
 def _usage_turns_and_peak(records: list) -> tuple:
     """Return ``(turn_count, peak_cache_read_tokens)`` for assistant records
-    carrying ``message.usage``. Used by the top rollup to expose spec 057's
-    measured levers (turn count + peak context) without changing the per-spec
-    report shape.
+    carrying positive ``message.usage``. Used by report/top/threshold rollups
+    to expose spec 057's measured levers (turn count + peak context) without
+    letting zero-token synthetic records inflate the counters.
     """
     turns = 0
     peak = 0
-    for rec in records:
-        if not isinstance(rec, dict):
-            continue
-        msg = rec.get("message")
-        if not isinstance(msg, dict):
-            continue
-        usage = msg.get("usage")
-        if not isinstance(usage, dict):
-            continue
+    for _rec, _msg, token_values in _iter_positive_usage(records):
         turns += 1
-        val = usage.get("cache_read_input_tokens")
-        if isinstance(val, int) and not isinstance(val, bool) and val > peak:
-            peak = val
+        peak = max(peak, token_values["cache_read_input_tokens"])
     return turns, peak
 
 
-def build_top_report(projects_dir: Path, encoded_prefix: str) -> TopReport:
+def build_top_report(projects_dir: Path, encoded_prefix: str,
+                     require_marker: bool = False) -> TopReport:
     """Build a read-only all-spec rollup from the same transcript substrate as
     ``report``. The rows are sorted by combined orchestrator+subagent tokens,
     descending, with spec number as the deterministic tie-breaker.
     """
     rows = {}
-    summary = TopReport(rows=[])
+    summary = TopReport(rows=[], marker_required=require_marker)
 
     for session_path in find_sessions(projects_dir, encoded_prefix):
         summary.session_count += 1
@@ -859,6 +917,9 @@ def build_top_report(projects_dir: Path, encoded_prefix: str) -> TopReport:
         spec_num, method = attribute_session(records)
         if spec_num is None:
             summary.unattributed_session_count += 1
+            continue
+        if require_marker and method != "marker":
+            summary.skipped_heuristic_session_count += 1
             continue
 
         summary.attributed_session_count += 1
@@ -902,6 +963,77 @@ def build_top_report(projects_dir: Path, encoded_prefix: str) -> TopReport:
         key=lambda r: (-r.combined_total_tokens, r.spec),
     )
     return summary
+
+
+def build_compact_threshold_reports(specs: list, projects_dir: Path,
+                                    encoded_prefix: str, thresholds: list,
+                                    window_tokens: int =
+                                    DEFAULT_TOKEN_WINDOW_TOKENS,
+                                    require_marker: bool = False) -> list:
+    """Build read-only what-if reports for alternate active-compaction bands.
+
+    Each row answers: for this spec's attributed orchestrator turns, how many
+    turns had ``cache_read_input_tokens`` at or above ``threshold * window``?
+    This does not simulate post-/compact cache drops; it measures historical
+    crossings from the transcript facts, which is enough to pick candidate
+    thresholds for a controlled A/B run.
+    """
+    normalized = [_spec_number(s) for s in specs]
+    reports = {
+        spec: CompactThresholdSpecReport(
+            spec=spec,
+            window_tokens=window_tokens,
+            thresholds=[CompactThresholdRow(t) for t in thresholds],
+            marker_required=require_marker,
+        )
+        for spec in normalized
+    }
+
+    for session_path in find_sessions(projects_dir, encoded_prefix):
+        records = read_session(session_path)
+        if not records:
+            continue
+        spec_num, method = attribute_session(records)
+        if spec_num not in reports:
+            continue
+        rep = reports[spec_num]
+        if require_marker and method != "marker":
+            rep.skipped_heuristic_session_count += 1
+            continue
+
+        rep.session_count += 1
+        if method == "marker":
+            rep.marker_session_count += 1
+        else:
+            rep.heuristic_session_count += 1
+
+        sums = sum_usage(records)
+        rep.orchestrator_tokens += sum(int(sums.get(f, 0))
+                                       for f in _USAGE_FIELDS)
+
+        turn_index = 0
+        crossed_in_session = {row.threshold: False
+                              for row in rep.thresholds}
+        for _rec, _msg, token_values in _iter_positive_usage(records):
+            turn_index += 1
+            rep.orchestrator_turns += 1
+            cache_read = token_values["cache_read_input_tokens"]
+            rep.peak_cache_read_tokens = max(
+                rep.peak_cache_read_tokens, cache_read)
+            ratio = cache_read / window_tokens if window_tokens > 0 else 0
+            for row in rep.thresholds:
+                if ratio >= row.threshold:
+                    row.crossing_turns += 1
+                    crossed_in_session[row.threshold] = True
+                    if (row.first_crossing_turn is None
+                            or turn_index < row.first_crossing_turn):
+                        row.first_crossing_turn = turn_index
+
+        for row in rep.thresholds:
+            if crossed_in_session[row.threshold]:
+                row.sessions_crossed += 1
+
+    return [reports[spec] for spec in normalized]
 
 
 def _merge_per_model(*maps) -> dict:
@@ -954,10 +1086,20 @@ def render(rep: Report) -> str:
                  f"(orchestrator + subagent)")
     lines.append("")
     if rep.session_count == 0:
-        lines.append(
-            f"No sessions attributed to spec {rep.spec} "
-            f"(no spec-path mentions found in any transcript)."
-        )
+        if rep.marker_required:
+            lines.append(
+                f"No marker-attributed sessions found for spec {rep.spec}."
+            )
+            if rep.skipped_heuristic_session_count:
+                lines.append(
+                    f"  Heuristic sessions skipped: "
+                    f"{rep.skipped_heuristic_session_count}"
+                )
+        else:
+            lines.append(
+                f"No sessions attributed to spec {rep.spec} "
+                f"(no spec-path mentions found in any transcript)."
+            )
         lines.append("")
         lines.append("  Total tokens: 0")
         lines.append("  $ estimate:   n/a")
@@ -967,6 +1109,11 @@ def render(rep: Report) -> str:
 
     lines.append(f"  Sessions:               {rep.session_count}")
     lines.append(f"  Models:                 {', '.join(rep.models) or 'unknown'}")
+    if rep.marker_required:
+        lines.append("  Marker required:        yes")
+        lines.append(
+            f"  Heuristic skipped:      {rep.skipped_heuristic_session_count}"
+        )
     # Slice 056-03: surface attribution confidence — how many sessions were
     # mapped exactly (by the `.jig/spec-ref` marker) vs. heuristically (the
     # dominant content-mention guess). The lower-confidence caveat is shown
@@ -985,6 +1132,10 @@ def render(rep: Report) -> str:
 
     # --- Orchestrator (flat sessions, 056-01) -----------------------------
     lines.append("ORCHESTRATOR (flat sessions, measured)")
+    lines.append(f"  turns:                  {_fmt(rep.orchestrator_turns)}")
+    lines.append(
+        f"  peak_cache_read_tokens: {_fmt(rep.peak_cache_read_tokens)}"
+    )
     _token_block(lines, rep.input_tokens, rep.output_tokens,
                  rep.cache_read_tokens, rep.cache_creation_tokens,
                  rep.total_tokens)
@@ -993,6 +1144,7 @@ def render(rep: Report) -> str:
 
     # --- Subagent (nested transcripts, 056-02) ----------------------------
     lines.append("SUBAGENT (nested transcripts, measured)")
+    lines.append(f"  turns:                  {_fmt(rep.subagent_turns)}")
     _token_block(lines, rep.subagent_input_tokens, rep.subagent_output_tokens,
                  rep.subagent_cache_read_tokens,
                  rep.subagent_cache_creation_tokens,
@@ -1030,6 +1182,12 @@ def render_top(rep: TopReport, limit: int = 10) -> str:
     lines.append(f"  Attributed sessions:    {_fmt(rep.attributed_session_count)}")
     lines.append(f"  Unattributed sessions:  {_fmt(rep.unattributed_session_count)}")
     lines.append(f"  Empty sessions:         {_fmt(rep.empty_session_count)}")
+    if rep.marker_required:
+        lines.append("  Marker required:        yes")
+        lines.append(
+            f"  Heuristic skipped:      "
+            f"{_fmt(rep.skipped_heuristic_session_count)}"
+        )
     lines.append(f"  Specs attributed:       {_fmt(len(rep.rows))}")
     lines.append("")
 
@@ -1100,6 +1258,59 @@ def render_top(rep: TopReport, limit: int = 10) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_compact_thresholds(reports: list) -> str:
+    lines = []
+    lines.append("## Compaction threshold comparison")
+    lines.append("")
+    for idx, rep in enumerate(reports):
+        if idx:
+            lines.append("")
+        lines.append(f"SPEC {rep.spec}")
+        lines.append(f"  Sessions:               {_fmt(rep.session_count)}")
+        if rep.marker_required:
+            lines.append("  Marker required:        yes")
+            lines.append(
+                f"  Heuristic skipped:      "
+                f"{_fmt(rep.skipped_heuristic_session_count)}"
+            )
+        lines.append(
+            f"  Attribution:            {rep.marker_session_count} by marker "
+            f"(exact), {rep.heuristic_session_count} by heuristic"
+        )
+        lines.append(f"  Window tokens:          {_fmt(rep.window_tokens)}")
+        lines.append(f"  Orchestrator turns:     {_fmt(rep.orchestrator_turns)}")
+        lines.append(f"  Orchestrator tokens:    {_fmt(rep.orchestrator_tokens)}")
+        lines.append(
+            f"  Peak cache_read:        "
+            f"{_fmt(rep.peak_cache_read_tokens)} "
+            f"({_pct(rep.peak_cache_read_tokens, rep.window_tokens)})"
+        )
+        if rep.session_count == 0:
+            lines.append("  No attributed sessions to compare.")
+            continue
+        lines.append("")
+        lines.append(
+            "  threshold  turns_at_or_above  sessions_crossed  first_turn"
+        )
+        for row in rep.thresholds:
+            first = (str(row.first_crossing_turn)
+                     if row.first_crossing_turn is not None else "-")
+            lines.append(
+                f"  {row.threshold:>8.2f}  "
+                f"{_fmt(row.crossing_turns):>17}  "
+                f"{_fmt(row.sessions_crossed):>16}  "
+                f"{first:>10}"
+            )
+    lines.append("")
+    lines.append(
+        "Note: this is a read-only what-if over historical orchestrator turns. "
+        "It counts positive-token turns whose cache_read_input_tokens crossed "
+        "threshold * window_tokens; it does not simulate cache drops after "
+        "/compact."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _append_framing(lines: list, rep: Report) -> None:
     lines.append(
         "Note: the $ figure is an ESTIMATE — notional under subscription "
@@ -1154,6 +1365,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-ccusage", action="store_true",
         help="skip ccusage entirely; show '$: unavailable'",
     )
+    rep.add_argument(
+        "--require-marker", action="store_true",
+        help="only include sessions attributed by exact .jig/spec-ref marker",
+    )
 
     top = sub.add_parser(
         "top",
@@ -1171,7 +1386,63 @@ def _build_parser() -> argparse.ArgumentParser:
         "--main-root", default=None, metavar="PATH",
         help="override the repo main root used to derive the encoded prefix",
     )
+    top.add_argument(
+        "--require-marker", action="store_true",
+        help="only include sessions attributed by exact .jig/spec-ref marker",
+    )
+
+    compact = sub.add_parser(
+        "compact-thresholds",
+        help="compare what-if active-compaction thresholds for one or more "
+             "specs",
+    )
+    compact.add_argument(
+        "specs", nargs="+",
+        help="spec number(s) or slug(s), e.g. 055 057-token-budget",
+    )
+    compact.add_argument(
+        "--thresholds", default="0.60,0.65,0.75",
+        help="comma-separated threshold fractions (default: 0.60,0.65,0.75)",
+    )
+    compact.add_argument(
+        "--window-tokens", type=int, default=DEFAULT_TOKEN_WINDOW_TOKENS,
+        metavar="N",
+        help=f"context window token budget (default: "
+             f"{DEFAULT_TOKEN_WINDOW_TOKENS})",
+    )
+    compact.add_argument(
+        "--projects-dir", default=None, metavar="PATH",
+        help="override the ~/.claude/projects root (testing seam)",
+    )
+    compact.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to derive the encoded prefix",
+    )
+    compact.add_argument(
+        "--require-marker", action="store_true",
+        help="only include sessions attributed by exact .jig/spec-ref marker",
+    )
     return p
+
+
+def _parse_thresholds(raw: str) -> list:
+    thresholds = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            val = float(part)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"invalid threshold {part!r}") from exc
+        if not 0 < val <= 1:
+            raise argparse.ArgumentTypeError(
+                f"threshold must be in (0, 1], got {part!r}")
+        thresholds.append(val)
+    if not thresholds:
+        raise argparse.ArgumentTypeError("at least one threshold is required")
+    return sorted(set(thresholds))
 
 
 def _make_ccusage_runner(ns):
@@ -1198,7 +1469,7 @@ def main(argv: list) -> int:
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    if ns.command not in ("report", "top"):
+    if ns.command not in ("report", "top", "compact-thresholds"):
         parser.print_help(sys.stderr)
         return 2
 
@@ -1208,8 +1479,29 @@ def main(argv: list) -> int:
     encoded_prefix = encode_cwd(root)
 
     if ns.command == "top":
-        top = build_top_report(projects_dir, encoded_prefix)
+        top = build_top_report(projects_dir, encoded_prefix,
+                               require_marker=ns.require_marker)
         sys.stdout.write(render_top(top, limit=ns.limit))
+        return 0
+
+    if ns.command == "compact-thresholds":
+        if ns.window_tokens <= 0:
+            sys.stderr.write("usage.py: error: --window-tokens must be > 0\n")
+            return 2
+        try:
+            thresholds = _parse_thresholds(ns.thresholds)
+        except argparse.ArgumentTypeError as exc:
+            sys.stderr.write(f"usage.py: error: {exc}\n")
+            return 2
+        reports = build_compact_threshold_reports(
+            specs=ns.specs,
+            projects_dir=projects_dir,
+            encoded_prefix=encoded_prefix,
+            thresholds=thresholds,
+            window_tokens=ns.window_tokens,
+            require_marker=ns.require_marker,
+        )
+        sys.stdout.write(render_compact_thresholds(reports))
         return 0
 
     runner = _make_ccusage_runner(ns)
@@ -1219,6 +1511,7 @@ def main(argv: list) -> int:
         projects_dir=projects_dir,
         encoded_prefix=encoded_prefix,
         ccusage_runner=runner,
+        require_marker=ns.require_marker,
     )
     sys.stdout.write(render(rep))
     return 0
