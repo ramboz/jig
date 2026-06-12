@@ -358,19 +358,19 @@ DEFAULT_TOKEN_WINDOW_TOKENS = 200_000
 def _usage_token_values(usage: dict) -> dict:
     """Return normalized integer token values for the usage fields."""
     values = {}
-    for field in _USAGE_FIELDS:
-        raw = usage.get(field, 0)
+    for f in _USAGE_FIELDS:
+        raw = usage.get(f, 0)
         if isinstance(raw, bool):
-            values[field] = 0
+            values[f] = 0
         elif isinstance(raw, (int, float)):
-            values[field] = int(raw)
+            values[f] = int(raw)
         else:
-            values[field] = 0
+            values[f] = 0
     return values
 
 
 def _usage_total(values: dict) -> int:
-    return sum(int(values.get(field, 0)) for field in _USAGE_FIELDS)
+    return sum(int(values.get(f, 0)) for f in _USAGE_FIELDS)
 
 
 def _iter_positive_usage(records: list):
