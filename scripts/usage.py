@@ -67,6 +67,7 @@ Usage
     python3 scripts/usage.py report <spec> [options]
     python3 scripts/usage.py top [options]
     python3 scripts/usage.py compact-thresholds <spec> [<spec> ...] [options]
+    python3 scripts/usage.py read-attribution [options]
 
     <spec>                A spec number (e.g. ``055``) or slug
                           (e.g. ``055-token-usage-tracking``).
@@ -84,6 +85,8 @@ Options
     compact-thresholds    Read-only what-if: count historical orchestrator
                           turns crossing alternate ``cache_read`` thresholds
                           (default 0.60, 0.65, 0.75 of a 200k-token window).
+    read-attribution      Summarize `.claude/context-growth-read-events.jsonl`
+                          by spec/session.
 
 Read-only: this tool never writes or deletes anything. The only network access
 is the optional ``npx ccusage`` call (suppressed by --ccusage-json/--no-ccusage).
@@ -131,6 +134,10 @@ def main_root() -> str:
 
 def default_projects_dir() -> Path:
     return Path.home() / ".claude" / "projects"
+
+
+READ_ATTRIBUTION_LOG = "context-growth-read-events.jsonl"
+READ_ATTRIBUTION_BYTES_PER_TOKEN = 4
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +733,43 @@ class CompactThresholdSpecReport:
         return self.peak_cache_read_tokens / self.window_tokens
 
 
+@dataclass
+class ReadPathSummary:
+    file_path: str
+    count: int = 0
+    total_known_size_bytes: int = 0
+
+
+@dataclass
+class ReadAttributionRow:
+    spec: str
+    session_id: str
+    counts: dict = field(default_factory=lambda: {"large": 0, "duplicate": 0})
+    total_known_size_bytes: int = 0
+    top_paths: list = field(default_factory=list)
+    _path_stats: dict = field(default_factory=dict, repr=False)
+
+    @property
+    def event_count(self) -> int:
+        return int(self.counts.get("large", 0)) + int(
+            self.counts.get("duplicate", 0))
+
+    @property
+    def estimated_tokens(self) -> int:
+        return self.total_known_size_bytes // READ_ATTRIBUTION_BYTES_PER_TOKEN
+
+
+@dataclass
+class ReadAttributionReport:
+    log_path: Path
+    rows: list = field(default_factory=list)
+    scanned_event_count: int = 0
+    included_event_count: int = 0
+    malformed_line_count: int = 0
+    skipped_unattributed_event_count: int = 0
+    require_marker: bool = False
+
+
 def _spec_number(spec: str) -> str:
     """Normalize a spec argument (number or slug) to a three-digit number.
 
@@ -1036,6 +1080,96 @@ def build_compact_threshold_reports(specs: list, projects_dir: Path,
     return [reports[spec] for spec in normalized]
 
 
+def _read_known_size(event: dict):
+    size = event.get("size_bytes")
+    if isinstance(size, bool):
+        return None
+    if isinstance(size, (int, float)) and size >= 0:
+        return int(size)
+    return None
+
+
+def _read_attribution_sort_key(row: ReadAttributionRow):
+    # Attributed specs first, then the empty/unattributed bucket.
+    spec_key = row.spec if row.spec else "zzz-unattributed"
+    return (spec_key, row.session_id)
+
+
+def build_read_attribution_report(log_path: Path,
+                                  require_marker: bool = False
+                                  ) -> ReadAttributionReport:
+    """Build a read-only report from the read-nudge context-growth log.
+
+    The hook writes metadata-only JSONL events under `.claude/`. This parser is
+    deliberately tolerant: malformed lines are counted and skipped, missing
+    files simply produce an empty report, and unknown event shapes are ignored.
+    """
+    log_path = Path(log_path)
+    report = ReadAttributionReport(
+        log_path=log_path,
+        require_marker=require_marker,
+    )
+    rows = {}
+
+    try:
+        fh = log_path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return report
+
+    with fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                report.malformed_line_count += 1
+                continue
+            if not isinstance(event, dict):
+                report.malformed_line_count += 1
+                continue
+            if event.get("event") != "read_nudge":
+                continue
+            kind = event.get("kind")
+            if kind not in ("large", "duplicate"):
+                continue
+
+            report.scanned_event_count += 1
+            spec = str(event.get("spec") or "")
+            if require_marker and not spec:
+                report.skipped_unattributed_event_count += 1
+                continue
+
+            session_id = str(event.get("session_id") or "unknown")
+            row = rows.setdefault(
+                (spec, session_id),
+                ReadAttributionRow(spec=spec, session_id=session_id),
+            )
+            row.counts[kind] = int(row.counts.get(kind, 0)) + 1
+
+            size = _read_known_size(event)
+            if size is not None:
+                row.total_known_size_bytes += size
+
+            file_path = str(event.get("file_path") or "")
+            if file_path:
+                path_summary = row._path_stats.setdefault(
+                    file_path, ReadPathSummary(file_path=file_path))
+                path_summary.count += 1
+                if size is not None:
+                    path_summary.total_known_size_bytes += size
+            report.included_event_count += 1
+
+    for row in rows.values():
+        row.top_paths = sorted(
+            row._path_stats.values(),
+            key=lambda p: (-p.count, -p.total_known_size_bytes, p.file_path),
+        )
+    report.rows = sorted(rows.values(), key=_read_attribution_sort_key)
+    return report
+
+
 def _merge_per_model(*maps) -> dict:
     """Sum several ``{model: {<usage fields>}}`` maps into one (for the
     combined orchestrator+subagent cost)."""
@@ -1311,6 +1445,63 @@ def render_compact_thresholds(reports: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_read_attribution(rep: ReadAttributionReport, limit: int = 50) -> str:
+    lines = []
+    lines.append("## Read attribution")
+    lines.append("")
+    lines.append(f"  Log:                    {rep.log_path}")
+    lines.append(f"  Events scanned:         {_fmt(rep.scanned_event_count)}")
+    lines.append(f"  Events included:        {_fmt(rep.included_event_count)}")
+    if rep.require_marker:
+        lines.append("  Marker required:        yes")
+        lines.append(
+            f"  Skipped unattributed:   "
+            f"{_fmt(rep.skipped_unattributed_event_count)}"
+        )
+    if rep.malformed_line_count:
+        lines.append(
+            f"  Malformed lines:        {_fmt(rep.malformed_line_count)}"
+        )
+    lines.append("")
+
+    rows = rep.rows[:max(0, limit)]
+    lines.append(f"BY SPEC / SESSION (limit {len(rows)})")
+    if not rep.rows:
+        lines.append("  No read-attribution events found.")
+        return "\n".join(lines) + "\n"
+    if not rows:
+        lines.append("  No rows shown (limit 0).")
+        return "\n".join(lines) + "\n"
+
+    header = (
+        "  spec            session  events  counts               known_bytes"
+        "  est_tokens  top_paths"
+    )
+    lines.append(header)
+    for row in rows:
+        spec = row.spec or "(unattributed)"
+        counts = (
+            f"large={int(row.counts.get('large', 0))} "
+            f"duplicate={int(row.counts.get('duplicate', 0))}"
+        )
+        top = ", ".join(
+            f"{p.file_path} ({p.count})" for p in row.top_paths[:3]
+        ) or "-"
+        lines.append(
+            f"  {spec:<15} {row.session_id:<8} "
+            f"{_fmt(row.event_count):>6}  {counts:<20} "
+            f"{_fmt(row.total_known_size_bytes):>11}  "
+            f"{_fmt(row.estimated_tokens):>10}  {top}"
+        )
+    lines.append("")
+    lines.append(
+        f"Note: estimated tokens use "
+        f"{READ_ATTRIBUTION_BYTES_PER_TOKEN} bytes/token. The log is "
+        "metadata-only: file paths, sizes, thresholds, and attribution fields."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _append_framing(lines: list, rep: Report) -> None:
     lines.append(
         "Note: the $ figure is an ESTIMATE — notional under subscription "
@@ -1422,6 +1613,27 @@ def _build_parser() -> argparse.ArgumentParser:
         "--require-marker", action="store_true",
         help="only include sessions attributed by exact .jig/spec-ref marker",
     )
+
+    read_attr = sub.add_parser(
+        "read-attribution",
+        help="summarize context-growth read-nudge telemetry by spec/session",
+    )
+    read_attr.add_argument(
+        "--log", default=None, metavar="PATH",
+        help="override the read-attribution JSONL log path",
+    )
+    read_attr.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to locate the default log",
+    )
+    read_attr.add_argument(
+        "--require-marker", action="store_true",
+        help="only include events attributed by exact .jig/spec-ref marker",
+    )
+    read_attr.add_argument(
+        "--limit", type=int, default=50, metavar="N",
+        help="number of spec/session rows to show (default: 50)",
+    )
     return p
 
 
@@ -1469,14 +1681,26 @@ def main(argv: list) -> int:
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    if ns.command not in ("report", "top", "compact-thresholds"):
+    if ns.command not in ("report", "top", "compact-thresholds",
+                          "read-attribution"):
         parser.print_help(sys.stderr)
         return 2
 
-    projects_dir = (Path(ns.projects_dir) if ns.projects_dir
-                    else default_projects_dir())
     root = ns.main_root if ns.main_root else main_root()
     encoded_prefix = encode_cwd(root)
+
+    if ns.command == "read-attribution":
+        log_path = (Path(ns.log) if ns.log
+                    else Path(root) / ".claude" / READ_ATTRIBUTION_LOG)
+        rep = build_read_attribution_report(
+            log_path,
+            require_marker=ns.require_marker,
+        )
+        sys.stdout.write(render_read_attribution(rep, limit=ns.limit))
+        return 0
+
+    projects_dir = (Path(ns.projects_dir) if ns.projects_dir
+                    else default_projects_dir())
 
     if ns.command == "top":
         top = build_top_report(projects_dir, encoded_prefix,

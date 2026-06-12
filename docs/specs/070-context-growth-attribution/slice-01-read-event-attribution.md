@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-06-12
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -55,15 +55,15 @@ orchestrator reads likely contributed to context growth.
    totals from a fixture log.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 
 ### Close-out (post-DONE)
@@ -93,5 +93,30 @@ happened during the spec, instead of only seeing the downstream cache-read bill.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+1. **Approach matched the planned shape.** The implementation kept the
+   existing `PreToolUse(Read)` nudge behavior and added durable metadata by
+   returning the full read decision from `read_nudge_event_for_turn`, while
+   preserving `read_nudge_for_turn` as a compatibility wrapper. The hook
+   appends a bounded `.claude/context-growth-read-events.jsonl` event only
+   when a duplicate or large-read nudge fires.
+2. **Telemetry is metadata-only and marker-based.** The new
+   `hooks/scripts/lib/read_attribution.py` helper records event kind, path,
+   size/threshold/ranged metadata, session id, source hook, and exact
+   `.jig/spec-ref` attribution when present. Missing or malformed markers stay
+   unattributed; no heuristic was added to the hook path.
+3. **Reviewer finding folded back in.** The first compliance pass found that
+   malformed JSON stdin could default into the `SessionStart` path and emit an
+   unrelated warning. The hook now exits silently for malformed or non-dict
+   JSON input, and a regression test covers the warning-producing
+   `SessionStart` case.
+4. **Report surface added as a dedicated subcommand.** `scripts/usage.py`
+   gained `read-attribution`, with a default log path under the repo's
+   `.claude/`, a `--log` testing seam, `--require-marker`, and row limiting.
+   The parser is tolerant of missing files, malformed lines, and unknown event
+   shapes.
+5. **Verification.** Focused runs passed:
+   `python3 hooks/scripts/test_jig_context_check.py` (50 tests),
+   `python3 hooks/scripts/lib/test_context_fill.py` (93 tests), and
+   `python3 scripts/test_usage.py` (86 tests). Full suite passed with
+   `python3 scripts/run_tests.py` (2632 tests, 3 skipped). No decisions were
+   deferred, so `docs/refinement-todo.md` did not need an update.

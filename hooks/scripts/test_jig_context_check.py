@@ -264,6 +264,21 @@ class HookRobustnessTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
 
+    def test_garbage_payload_stays_silent_even_when_sessionstart_would_warn(self):
+        """AC #5: malformed stdin must not default into SessionStart and emit
+        unrelated additionalContext warnings."""
+        cfg = {"mcpServers": {f"srv{i}": {"command": "echo"} for i in range(10)}}
+        (self.target / ".mcp.json").write_text(json.dumps(cfg))
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
+        result = subprocess.run(
+            ["bash", str(HOOK)],
+            input="not-json-at-all",
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
     def test_missing_project_dir_still_exits_zero(self):
         """Hook tolerates a missing CLAUDE_PROJECT_DIR."""
         env = {k: v for k, v in os.environ.items()
@@ -585,6 +600,14 @@ def run_hook_read(
     )
 
 
+def read_growth_events(project_dir: Path) -> list:
+    log = project_dir / ".claude" / "context-growth-read-events.jsonl"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()
+            if line.strip()]
+
+
 class ReadOnceHookTests(unittest.TestCase):
     """Slice 055-03 — the PreToolUse(Read) branch. Synthetic Read tool_use
     fixtures (Clarification Q4): first read of a path → silent; second read
@@ -705,6 +728,138 @@ class ReadOnceHookTests(unittest.TestCase):
                        env={"JIG_READ_LEAN_BYTES": "100"})
         self.assertEqual(r.returncode, 0)
         self.assertIsNone(parse_or_none(r))
+
+
+class ReadAttributionTelemetryTests(unittest.TestCase):
+    """Slice 070-01 — durable, bounded read-nudge telemetry.
+
+    The existing nudge behavior stays unchanged, but a duplicate-read or
+    large-whole-file nudge appends one metadata-only JSONL event under
+    .claude/ for later usage.py reporting.
+    """
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="jig-070-01-"))
+        self.project = self.base / "project"
+        self.project.mkdir()
+        self.state = self.base / "state"
+        self.state.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def _read(self, file_path, *, session_id="s", extra=None, env=None):
+        tool_input = {"file_path": file_path}
+        if extra:
+            tool_input.update(extra)
+        return run_hook_read(
+            self.project, tool_input, session_id=session_id,
+            env_overrides=env, tmpdir=self.state,
+        )
+
+    def _bigfile(self, name="big.py", size=500, body_char="x") -> Path:
+        path = self.project / name
+        path.write_text(body_char * size)
+        return path
+
+    def test_large_whole_file_nudge_logs_one_bounded_event(self):
+        big = self._bigfile(size=500, body_char="q")
+        result = self._read(str(big), session_id="large",
+                            env={"JIG_READ_LEAN_BYTES": "100"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(parse_or_none(result))
+
+        events = read_growth_events(self.project)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(
+            set(event),
+            {
+                "timestamp", "session_id", "event", "kind", "file_path",
+                "size_bytes", "threshold_bytes", "ranged", "spec", "slice",
+                "source_hook",
+            },
+        )
+        self.assertEqual(event["session_id"], "large")
+        self.assertEqual(event["event"], "read_nudge")
+        self.assertEqual(event["kind"], "large")
+        self.assertEqual(event["file_path"], str(big))
+        self.assertEqual(event["size_bytes"], 500)
+        self.assertEqual(event["threshold_bytes"], 100)
+        self.assertFalse(event["ranged"])
+        self.assertEqual(event["spec"], "")
+        self.assertEqual(event["slice"], "")
+        self.assertEqual(event["source_hook"], "jig-context-check")
+        blob = json.dumps(event)
+        self.assertNotIn("Read-lean nudge", blob)
+        self.assertNotIn("q" * 20, blob)
+
+    def test_duplicate_read_nudge_logs_one_event(self):
+        path = self.project / "small.py"
+        path.write_text("print('hello')\n")
+        first = self._read(str(path), session_id="dup")
+        self.assertIsNone(parse_or_none(first))
+
+        second = self._read(str(path), session_id="dup")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIsNotNone(parse_or_none(second))
+        events = read_growth_events(self.project)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["kind"], "duplicate")
+        self.assertEqual(event["file_path"], str(path))
+        self.assertEqual(event["size_bytes"], path.stat().st_size)
+        self.assertEqual(event["threshold_bytes"], 64 * 1024)
+        self.assertFalse(event["ranged"])
+        self.assertNotIn("Read-once nudge", json.dumps(event))
+
+    def test_marker_attribution_is_recorded_from_project_spec_ref(self):
+        marker_dir = self.project / ".jig"
+        marker_dir.mkdir()
+        (marker_dir / "spec-ref").write_text("spec=070\nslice=070-01\n")
+        big = self._bigfile(size=250)
+
+        result = self._read(str(big), session_id="marked",
+                            env={"JIG_READ_LEAN_BYTES": "100"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        event = read_growth_events(self.project)[0]
+        self.assertEqual(event["spec"], "070")
+        self.assertEqual(event["slice"], "070-01")
+
+    def test_missing_or_malformed_marker_leaves_attribution_empty(self):
+        missing = self._bigfile(name="missing.py", size=250)
+        self._read(str(missing), session_id="missing",
+                   env={"JIG_READ_LEAN_BYTES": "100"})
+        missing_event = read_growth_events(self.project)[0]
+        self.assertEqual(missing_event["spec"], "")
+        self.assertEqual(missing_event["slice"], "")
+
+        other_project = self.base / "malformed-project"
+        other_project.mkdir()
+        (other_project / ".jig").mkdir()
+        (other_project / ".jig" / "spec-ref").write_text(
+            "spec: 070\nslice nope\n")
+        bad_big = other_project / "bad.py"
+        bad_big.write_text("x" * 250)
+        result = run_hook_read(
+            other_project, {"file_path": str(bad_big)},
+            session_id="malformed",
+            env_overrides={"JIG_READ_LEAN_BYTES": "100"},
+            tmpdir=self.state,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        malformed_event = read_growth_events(other_project)[0]
+        self.assertEqual(malformed_event["spec"], "")
+        self.assertEqual(malformed_event["slice"], "")
+
+    def test_logging_failure_preserves_nudge_behavior(self):
+        (self.project / ".claude").write_text("not a directory")
+        big = self._bigfile(size=500)
+        result = self._read(str(big), session_id="fail-open",
+                            env={"JIG_READ_LEAN_BYTES": "100"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(parse_or_none(result))
 
 
 class PreToolUseNonReadNoRegressionTests(unittest.TestCase):

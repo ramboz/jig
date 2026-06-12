@@ -81,14 +81,14 @@ if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
 try:
-    # Read + parse the hook input once. Both events tolerate garbage stdin:
-    # a parse failure leaves an empty payload and the script stays silent.
+    # Read + parse the hook input once. Garbage stdin is malformed hook input:
+    # stay silent rather than defaulting into SessionStart.
     try:
         payload = json.loads(sys.stdin.read() or '{}')
         if not isinstance(payload, dict):
-            payload = {}
+            sys.exit(0)
     except Exception:
-        payload = {}
+        sys.exit(0)
     event = payload.get('hook_event_name', 'SessionStart')
 
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
@@ -102,17 +102,25 @@ try:
         # the new state, and return the nudge text or None. Never blocks.
         try:
             if payload.get('tool_name') == 'Read':
-                from lib.context_fill import read_nudge_for_turn
+                from lib.context_fill import read_nudge_event_for_turn
                 tool_input = payload.get('tool_input') or {}
                 if not isinstance(tool_input, dict):
                     tool_input = {}
                 file_path = tool_input.get('file_path') or ''
                 session_id = payload.get('session_id') or 'default'
                 state_dir = os.environ.get('TMPDIR') or '/tmp'
-                nudge = read_nudge_for_turn(
+                decision = read_nudge_event_for_turn(
                     file_path, tool_input, session_id, state_dir)
-                if nudge:
-                    print(json.dumps({'continue': True, 'additionalContext': nudge}))
+                if decision:
+                    try:
+                        from lib.read_attribution import append_read_nudge_event
+                        append_read_nudge_event(project_dir, session_id, decision)
+                    except Exception:
+                        pass
+                    print(json.dumps({
+                        'continue': True,
+                        'additionalContext': decision['text'],
+                    }))
         except Exception:
             # The read nudge must never block the tool call — swallow.
             pass

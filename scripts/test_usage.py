@@ -169,6 +169,18 @@ def _write_subagents(projects_dir: Path, encoded_cwd: str, session_id: str,
     return p
 
 
+def _write_read_events(log_path: Path, events: list):
+    """Write a synthetic context-growth read-attribution JSONL log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w") as fh:
+        for event in events:
+            if isinstance(event, str):
+                fh.write(event + "\n")
+            else:
+                fh.write(json.dumps(event) + "\n")
+    return log_path
+
+
 # Encoded-cwd dir names for a fake repo at /Users/me/Projects/demo, with a
 # worktree at /Users/me/Projects/demo/.claude/worktrees/foo.
 MAIN_CWD = "/Users/me/Projects/demo"
@@ -1110,6 +1122,117 @@ class CompactThresholdReportTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Slice 070-01 — read-attribution context-growth report
+# ---------------------------------------------------------------------------
+
+class ReadAttributionReportTests(unittest.TestCase):
+    """Fixture tests for the metadata-only read-nudge JSONL log emitted by
+    jig-context-check.sh. The report groups by spec/session and can filter to
+    exact marker-attributed events only.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-read-attr-"))
+        self.log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        self.events = [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/big.py",
+                "size_bytes": 400,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:01:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "duplicate",
+                "file_path": "/repo/big.py",
+                "size_bytes": 400,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:02:00Z",
+                "session_id": "sessB",
+                "event": "read_nudge",
+                "kind": "duplicate",
+                "file_path": "/repo/unknown.py",
+                "threshold_bytes": 65536,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:03:00Z",
+                "session_id": "sessU",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/unattributed.py",
+                "size_bytes": 120,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "",
+                "slice": "",
+                "source_hook": "jig-context-check",
+            },
+            "not-json",
+        ]
+        _write_read_events(self.log, self.events)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_build_read_attribution_report_groups_by_spec_session(self):
+        rep = uu.build_read_attribution_report(self.log)
+        self.assertEqual(rep.scanned_event_count, 4)
+        self.assertEqual(rep.malformed_line_count, 1)
+        rows = {(r.spec, r.session_id): r for r in rep.rows}
+
+        row = rows[("070", "sessA")]
+        self.assertEqual(row.counts["large"], 1)
+        self.assertEqual(row.counts["duplicate"], 1)
+        self.assertEqual(row.total_known_size_bytes, 800)
+        self.assertEqual(row.estimated_tokens, 200)
+        self.assertEqual(row.top_paths[0].file_path, "/repo/big.py")
+        self.assertEqual(row.top_paths[0].count, 2)
+
+        sess_b = rows[("070", "sessB")]
+        self.assertEqual(sess_b.counts["duplicate"], 1)
+        self.assertEqual(sess_b.total_known_size_bytes, 0)
+
+    def test_read_attribution_require_marker_filters_unattributed_events(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        self.assertEqual(rep.scanned_event_count, 4)
+        self.assertEqual(rep.included_event_count, 3)
+        self.assertEqual(rep.skipped_unattributed_event_count, 1)
+        self.assertEqual({r.spec for r in rep.rows}, {"070"})
+        self.assertNotIn("", {r.spec for r in rep.rows})
+
+    def test_render_read_attribution_report_shows_totals(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        out = uu.render_read_attribution(rep)
+        self.assertIn("Read attribution", out)
+        self.assertIn("070", out)
+        self.assertIn("sessA", out)
+        self.assertIn("large=1", out)
+        self.assertIn("duplicate=1", out)
+        self.assertTrue(_shows_number(out, 800), msg=out)
+        self.assertTrue(_shows_number(out, 200), msg=out)
+
+
+# ---------------------------------------------------------------------------
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
 
@@ -1241,6 +1364,48 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertIn("SPEC 055", result.stdout)
         self.assertIn("0.60", result.stdout)
         self.assertIn("Peak cache_read", result.stdout)
+
+    def test_cli_read_attribution_runs_with_log_override(self):
+        log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_read_events(log, [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/big.py",
+                "size_bytes": 400,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:01:00Z",
+                "session_id": "sessU",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/unattributed.py",
+                "size_bytes": 120,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "",
+                "slice": "",
+                "source_hook": "jig-context-check",
+            },
+        ])
+        result = _run_usage(
+            "read-attribution",
+            "--log", str(log),
+            "--require-marker",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Read attribution", result.stdout)
+        self.assertIn("070", result.stdout)
+        self.assertIn("large=1", result.stdout)
+        self.assertIn("Skipped unattributed", result.stdout)
+        self.assertNotIn("unattributed.py", result.stdout)
 
 
 # ---------------------------------------------------------------------------
