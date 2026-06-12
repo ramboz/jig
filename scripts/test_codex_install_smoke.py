@@ -79,6 +79,30 @@ class CodexSmokeStaticTests(unittest.TestCase):
             0,
         )
 
+    def test_codex_hook_validator_rejects_async_or_unnamed_hooks(self):
+        hooks = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-telemetry.sh"
+                                ),
+                                "async": True,
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        problems = codex_install_smoke._validate_codex_hooks(hooks)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("async" in problem for problem in problems))
+        self.assertTrue(any("statusMessage" in problem for problem in problems))
+
     def test_missing_codex_cli_is_unavailable_not_silent_pass(self):
         results = codex_install_smoke.run_smoke(
             source_root=REPO_ROOT,

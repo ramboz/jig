@@ -44,6 +44,15 @@ def _build_codex_plugin_dir() -> Path:
     return plugin_dir
 
 
+def _hook_handlers(data: dict) -> list[dict]:
+    return [
+        hook
+        for entries in data.get("hooks", {}).values()
+        for entry in entries
+        for hook in entry.get("hooks", [])
+    ]
+
+
 class CodexPluginManifestTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads(CODEX_MANIFEST.read_text())
@@ -111,6 +120,29 @@ class CodexPluginRuntimeTests(unittest.TestCase):
         self.assertTrue(
             all("${CLAUDE_PLUGIN_ROOT}/hooks/scripts/" in command for command in commands),
             "Codex plugin hooks rely on Codex's CLAUDE_PLUGIN_ROOT compatibility env",
+        )
+
+    def test_committed_codex_hooks_are_codex_runtime_compatible(self):
+        data = json.loads(
+            (
+                REPO_ROOT
+                / "hosts"
+                / "codex"
+                / "plugins"
+                / "jig"
+                / "hooks"
+                / "hooks.json"
+            ).read_text()
+        )
+        handlers = _hook_handlers(data)
+        self.assertGreater(len(handlers), 0)
+        for hook in handlers:
+            self.assertNotIn("async", hook)
+            self.assertIn("statusMessage", hook)
+            self.assertTrue(hook["statusMessage"].startswith("jig: "))
+        self.assertIn(
+            "jig: record task telemetry",
+            {hook["statusMessage"] for hook in handlers},
         )
 
     def test_canonical_agent_prompts_are_bundled_once(self):
@@ -191,6 +223,18 @@ class CodexPluginBuilderTests(unittest.TestCase):
             "agents/reviewer.md",
         ):
             self.assertTrue((self.plugin_dir / rel).is_file(), rel)
+
+    def test_builder_renders_codex_compatible_hook_metadata(self):
+        data = json.loads((self.plugin_dir / "hooks" / "hooks.json").read_text())
+        handlers = _hook_handlers(data)
+        self.assertGreater(len(handlers), 0)
+        for hook in handlers:
+            self.assertNotIn("async", hook)
+            self.assertIn("statusMessage", hook)
+            self.assertTrue(hook["statusMessage"].startswith("jig: "))
+        messages = {hook["statusMessage"] for hook in handlers}
+        self.assertIn("jig: record skill usage", messages)
+        self.assertIn("jig: record task telemetry", messages)
 
     def test_builder_renders_codex_agent_toml_templates(self):
         agent = self.plugin_dir / "agents" / "jig-reviewer.toml"

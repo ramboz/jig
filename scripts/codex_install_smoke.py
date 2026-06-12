@@ -170,6 +170,34 @@ def _validate_codex_marketplace(marketplace_root: Path, plugin_dir: Path) -> lis
     return problems
 
 
+def _validate_codex_hooks(hooks: dict) -> list[str]:
+    problems: list[str] = []
+    for event, entries in (hooks.get("hooks") or {}).items():
+        if not isinstance(entries, list):
+            continue
+        for entry_idx, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                continue
+            inner = entry.get("hooks")
+            if not isinstance(inner, list):
+                continue
+            for hook_idx, hook in enumerate(inner):
+                if not isinstance(hook, dict) or hook.get("type") != "command":
+                    continue
+                location = f"hooks.{event}[{entry_idx}].hooks[{hook_idx}]"
+                if "async" in hook:
+                    problems.append(
+                        f"{location}: Codex command hooks must not declare async"
+                    )
+                status_message = hook.get("statusMessage")
+                if not isinstance(status_message, str) or not status_message.strip():
+                    problems.append(
+                        f"{location}: command hook must include non-empty "
+                        "statusMessage"
+                    )
+    return problems
+
+
 def _validate_generated_package(plugin_dir: Path, marketplace_root: Path) -> SmokeResult:
     problems: list[str] = []
 
@@ -186,6 +214,7 @@ def _validate_generated_package(plugin_dir: Path, marketplace_root: Path) -> Smo
         problems.extend(
             install_contract.validate_hooks(hooks, plugin_dir / "hooks" / "scripts")
         )
+        problems.extend(_validate_codex_hooks(hooks))
 
     problems.extend(install_contract.missing_skills(plugin_dir))
     problems.extend(_validate_codex_marketplace(marketplace_root, plugin_dir))
@@ -382,6 +411,7 @@ def _validate_live_hook_config(installed_root: Path | None) -> SmokeResult:
     problems = install_contract.validate_hooks(
         hooks, installed_root / "hooks" / "scripts"
     )
+    problems.extend(_validate_codex_hooks(hooks))
     if problems:
         return SmokeResult("codex-hook-config", FAIL, "; ".join(problems))
     count = len(install_contract.parse_hook_script_names(hooks))
