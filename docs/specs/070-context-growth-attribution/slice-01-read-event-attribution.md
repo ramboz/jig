@@ -16,24 +16,43 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 070-01 — tbd
+## Slice 070-01 — read-event attribution
 
-**Goal:** _TODO: one-sentence statement of what this slice delivers.
-End-to-end value in a single vertical slice (anti-horizontal-phasing
-check below)._
+**Goal:** Turn the existing read-once/read-lean nudges into durable, spec-aware
+telemetry and expose a `usage.py` report that shows which large or duplicate
+orchestrator reads likely contributed to context growth.
 
 **DoR:**
-- ✅ _TODO: list the prerequisites that must hold before this slice
-  becomes `READY_FOR_IMPLEMENTATION` — upstream slices done, helpers
-  in place, fixtures/data available, etc._
+
+- ✅ Spec 055's `PreToolUse(Read)` hook is present and tested.
+- ✅ Spec 056's `usage.py` transcript attribution is present.
+- ✅ Spec 070's `.jig/spec-ref` marker-required hygiene is accepted for
+  future comparisons; historical heuristic data can remain approximate.
 
 **Acceptance Criteria:**
 
-1. **_TODO: first AC._** Sharp, testable, observable from outside the
-   helper (CLI output, file mutation, exit code, log line). Avoid
-   "code is clean" / "tests pass" framings — those belong in the DoD.
-2. _TODO: second AC._
-3. _TODO: third AC._
+1. **Read events are logged.** When `jig-context-check.sh`'s
+   `PreToolUse(Read)` branch produces a duplicate-read or large whole-file
+   nudge, it appends one JSONL event to a gitignored context-growth log under
+   `.claude/`. The event includes `timestamp`, `session_id`, `event`,
+   `kind` (`duplicate` or `large`), `file_path`, `size_bytes` when known,
+   `threshold_bytes`, `ranged`, `spec`, `slice`, and `source_hook`.
+2. **Logging is fail-open and bounded.** Any logging failure leaves the
+   original nudge behavior unchanged and exits 0. Events must not include file
+   contents or the full nudge text; path + metadata only.
+3. **Spec attribution is exact when possible.** The logger reads
+   `.jig/spec-ref` from `CLAUDE_PROJECT_DIR` and records `spec` / `slice` when
+   present. Missing or malformed markers leave those fields empty rather than
+   falling back to a heuristic inside the hook.
+4. **Read attribution report exists.** `usage.py` gains a read-attribution
+   report surface (subcommand or an explicitly named mode) that summarizes the
+   context-growth log by spec/session, with counts by `kind`, total known
+   `size_bytes`, estimated tokens, and top file paths. It supports
+   `--require-marker` so A/B comparisons can exclude unattributed events.
+5. **Tests cover the end-to-end path.** Synthetic hook payloads prove large and
+   duplicate reads append bounded events, malformed input stays silent, marker
+   attribution is recorded, and the `usage.py` report renders the expected
+   totals from a fixture log.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
@@ -46,36 +65,6 @@ check below)._
 - [ ] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
-
-### For `kind: spike` slices
-
-When the slice's frontmatter has `kind: spike`, the body carries four
-extra labelled blocks alongside the standard Goal / DoR / AC / DoD
-scaffolding. Spike slices are timeboxed investigation, not feature
-work — they reduce an unknown before committing to a design.
-
-```markdown
-**Question:** _One sentence stating the open question. Set at DRAFT._
-
-**Time-box:** _Explicit budget — e.g., "1 day", "4 hours". Set at DRAFT._
-
-**Findings:** _Bullet evidence collected during the spike. Filled
-during IN_PROGRESS._
-
-**Outcome:** _One of: `ADR-NNNN created` / `spec NNN-NN unblocked` /
-`abandoned (reason)`. Multiple outcomes separated by `;`
-(e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE._
-```
-
-`spec_lint.py` validates the `kind:` enum (allowed values: `spike`,
-`feature`) and soft-warns when a `kind: spike` slice is missing any of
-the four labels. Mid-flight spikes legitimately have empty Findings /
-Outcome, so this is a warning, not a hard error.
-
-See `skills/spec-workflow/SKILL.md` (Spike slices subsection) and
-`docs/spec-workflow/spidr-primer.md` for the always-nested rule (spike
-slices live inside a real spec, never as standalone `docs/spikes/`
-artifacts) and the abandoned-outcome manual-reshape failure mode.
 
 ### Close-out (post-DONE)
 
@@ -96,10 +85,9 @@ from the count.
       the entry. If this slice introduces a new skill, add or
       update its row in the Skills table.
 
-**Anti-horizontal-phasing check:** _TODO: in one sentence, describe
-the end-to-end observable value a user gets after this slice lands.
-If the answer is "intermediate state for the next slice," the slice
-is mis-shaped — re-split._
+**Anti-horizontal-phasing check:** After this slice lands, a user can run a
+report after a session and see which large/duplicate orchestrator reads
+happened during the spec, instead of only seeing the downstream cache-read bill.
 
 ### Deviation log (after reconciliation)
 
