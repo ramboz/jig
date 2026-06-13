@@ -5,6 +5,8 @@ last_verified:
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
+# design_review: true  # set true when this slice ships UI gated by an external
+#                      # design-fidelity eval (attest-only; ADR-0014/0022).
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on

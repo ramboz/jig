@@ -305,6 +305,28 @@ def slice_needs_code_health_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("code_health_review", ""))
 
 
+def slice_needs_design_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares
+    `design_review: true` (slice 071-01; mirrors `slice_needs_arch_review`
+    exactly).
+
+    Drives the orchestrator's decision to spawn the on-demand, attest-only
+    design-review pass (a read-only reviewer ATTESTS the external
+    design-fidelity eval's frozen verdict — ADR-0022), and keeps the
+    spawner in lock-step with the evidence gate's reader
+    (`review_evidence._design_review_flag`) via the same shared
+    `frontmatter_flag_truthy` predicate. Defaults to False on any miss (no
+    frontmatter, field absent, non-truthy value) so every existing slice
+    (no flag) is unaffected — the pass is opt-in/gated.
+
+    Layout-aware via `load_slice`; raises WorkflowError on slice lookup
+    failures, like `slice_needs_arch_review`.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("design_review", ""))
+
+
 # ---------- derived frame_review trigger (slice 064-04 / ADR-0020) ----------
 
 # A `## Assumptions` bullet/line that is a placeholder rather than a real
@@ -440,6 +462,9 @@ def derive_frame_review(spec_path, slice_fragment: str) -> bool:
 # The code-health phase is likewise conditional (emitted iff the slice
 # declares `code_health_review: true` — slice 060-05); it is inserted
 # after the arch phase (or after craft when no arch) and before reconcile.
+# The design-review phase is likewise conditional (emitted iff the slice
+# declares `design_review: true` — slice 071-01); the attest-only pass is
+# inserted after the code-health phase and before reconcile.
 _SESSION_PLAN_PHASES = (
     ("implement", "delegate", "implementer", None),
     ("compliance", "delegate", "reviewer", "jig:independent-review"),
@@ -468,6 +493,14 @@ _SESSION_PLAN_ARCH_AFTER = "craft"
 # the craft block (and after arch, since arch is emitted first).
 _SESSION_PLAN_CODE_HEALTH_PHASE = (
     "code-health", "delegate", "reviewer", "jig:code-health")
+
+# The conditional design-review phase (slice 071-01). The attest-only pass
+# runs via jig:independent-review (a read-only `reviewer` subagent attesting
+# the external design-fidelity eval's frozen verdict — never re-deriving it,
+# the ADR-0022 honesty boundary). Slots in after the code-health phase and
+# before reconcile.
+_SESSION_PLAN_DESIGN_REVIEW_PHASE = (
+    "design-review", "delegate", "reviewer", "jig:independent-review")
 
 
 def _slice_status_from_section(section: str) -> str:
@@ -512,7 +545,9 @@ def session_plan(spec_path: Path) -> str:
     # Enumerate slices via the shared dual-layout iterator, excluding
     # DEFERRED. `arch_review` is read per-slice from its frontmatter via
     # the shared truthy predicate (no hand-rolled truthiness).
-    planned = []  # list of (label, needs_frame, needs_arch, needs_code_health)
+    # list of (label, needs_frame, needs_arch, needs_code_health,
+    #          needs_design)
+    planned = []
     total = 0
     for loc in _iter_slices_common(spec_path):
         total += 1
@@ -525,7 +560,10 @@ def session_plan(spec_path: Path) -> str:
         needs_arch = frontmatter_flag_truthy(fm_fields.get("arch_review", ""))
         needs_code_health = frontmatter_flag_truthy(
             fm_fields.get("code_health_review", ""))
-        planned.append((loc.label, needs_frame, needs_arch, needs_code_health))
+        needs_design = frontmatter_flag_truthy(
+            fm_fields.get("design_review", ""))
+        planned.append((loc.label, needs_frame, needs_arch, needs_code_health,
+                        needs_design))
 
     lines = []
     lines.append(f"# Session plan — {spec_path}")
@@ -568,7 +606,8 @@ def session_plan(spec_path: Path) -> str:
             line += f"  {note}"
         return line
 
-    for label, needs_frame, needs_arch, needs_code_health in planned:
+    for label, needs_frame, needs_arch, needs_code_health, needs_design \
+            in planned:
         lines.append(f"## Slice {label}")
         lines.append("")
         step = 1
@@ -585,8 +624,9 @@ def session_plan(spec_path: Path) -> str:
             lines.append(_render_phase(step, phase, mode, actor, skill))
             step += 1
             if phase == _SESSION_PLAN_ARCH_AFTER:
-                # arch first (when declared), then code-health — both
-                # conditional, both slotted between craft and reconcile.
+                # arch first (when declared), then code-health, then
+                # design-review — all conditional, all slotted between
+                # craft and reconcile.
                 if needs_arch:
                     aphase, amode, aactor, askill = _SESSION_PLAN_ARCH_PHASE
                     lines.append(_render_phase(
@@ -599,6 +639,14 @@ def session_plan(spec_path: Path) -> str:
                     lines.append(_render_phase(
                         step, cphase, cmode, cactor, cskill,
                         note="(slice declares code_health_review: true)"))
+                    step += 1
+                if needs_design:
+                    dphase, dmode, dactor, dskill = \
+                        _SESSION_PLAN_DESIGN_REVIEW_PHASE
+                    lines.append(_render_phase(
+                        step, dphase, dmode, dactor, dskill,
+                        note="(slice declares design_review: true — "
+                             "attest-only)"))
                     step += 1
         lines.append("")
 
@@ -3290,6 +3338,16 @@ def _build_parser() -> argparse.ArgumentParser:
     pch.add_argument("slice",
                      help="slice name or fragment (case-insensitive substring)")
 
+    # Slice 071-01: design-review-pass gating mirror of arch-review-needed.
+    pdr = sub.add_parser(
+        "design-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`design_review: true`; 'false' otherwise (slice 071-01)",
+    )
+    pdr.add_argument("spec", help="path to spec.md")
+    pdr.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
     # Slice 064-04: DERIVE (not read) whether the frame-critique pass should
     # fire — the mechanical ADR-0020 trigger (ADRs always-on; specs iff the
     # `## Assumptions` section carries >=1 real assumption). Mirrors
@@ -3378,6 +3436,9 @@ def main(argv: list) -> int:
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "code-health-review-needed":
             needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "design-review-needed":
+            needed = slice_needs_design_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "frame-review-needed":
             needed = derive_frame_review(Path(ns.spec), ns.slice)

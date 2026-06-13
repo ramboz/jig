@@ -42,11 +42,12 @@ Usage:
     python3 review.py reconciliation <spec.md> <slice-fragment>
     python3 review.py pr-review     <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py arch-review   <spec.md> <slice-fragment> <deliverable-path>...
+    python3 review.py design-review <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py frame-critique <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py code-health   <spec.md> <slice-fragment> <deliverable-path>...
                                     [--summary-file PATH]
     python3 review.py subagent-type
-        {implementation|reconciliation|pr-review|arch-review|code-health}
+        {implementation|reconciliation|pr-review|arch-review|design-review|code-health}
 """
 
 from __future__ import annotations
@@ -934,6 +935,127 @@ Concede a `pass` only if the frame survives your strongest attack.
 """
 
 
+# -------- design-review prompt (slice 071-01 / ADR-0022) --------
+
+
+_DESIGN_REVIEW_OUTPUT_FORMAT = """\
+## Output (required — do not deviate)
+
+```
+VERDICT: pass | fail | needs-changes
+
+SUMMARY:
+<1-2 sentences: which eval you attested, where its evidence lives, and your
+ overall attestation>
+
+EVAL-RAN:
+<did the eval actually run? cite the ledger/run entry you read. An
+ env_error / infra failure is NOT "ran" — it is a fail, never a pass and
+ never a 0.0 composite>
+
+NON-STALE:
+<is the eval's frozen definition (config/threshold) unchanged since it ran?
+ cite what you compared>
+
+THRESHOLD-MET:
+<is the latest composite >= the eval's OWN declared threshold? quote both
+ the composite and the threshold>
+```
+
+Be terse but specific. A `pass` means you ATTESTED an honest, non-stale,
+threshold-meeting eval verdict — NOT that you re-scored anything. (No
+reconciliation-notes section: you record an attestation, you do not judge
+craft.)"""
+
+
+def build_design_review_prompt(spec_path: Path, slice_label: str,
+                               deliverables: list) -> str:
+    """Construct the ATTEST-ONLY design-review prompt (slice 071-01 / ADR-0022).
+
+    The orchestrator runs this pass AFTER the compliance + craft (+ arch +
+    code-health) passes, but ONLY when the slice's frontmatter declares
+    `design_review: true` (queried via `workflow.py design-review-needed`).
+    It gates the REVIEWED transition exactly like `arch` — but its JOB is
+    fundamentally different from every other pass.
+
+    HONESTY BOUNDARY (ADR-0022): the external eval (e.g. servo's
+    design-fidelity oracle) is the thing that RUNS and SCORES the UI against
+    a frozen design definition. This pass does NOT re-run, re-derive, or
+    re-judge that score. The read-only `reviewer` subagent's *only* job is to
+    ATTEST jig's own recorded eval evidence: locate it, confirm the eval
+    actually RAN, is NON-STALE (its frozen definition is unchanged), is
+    HONEST (an `env_error` / infra failure is NOT a pass and NOT a 0.0
+    composite), and that the latest composite clears the eval's OWN declared
+    threshold — then RECORD that verdict. servo runs and scores; jig attests.
+
+    NO richer-skill detection (unlike pr-review / arch-review): there is no
+    established external "design-review" skill category to defer to — this
+    pass attests jig's OWN eval evidence, so the builder is self-contained.
+
+    NOTE: like the other craft/arch passes, this builder does NOT append
+    `_principles_check_block()` — its scope is the attestation, nothing else.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job — ATTEST (do not re-derive)
+
+You are running the **design-review pass** on slice **{slice_label}**. The
+slice declared `design_review: true` — meaning it ships UI gated by an
+external, non-deterministic **design-fidelity eval** (e.g. servo's oracle).
+
+**Your only job is to ATTEST the eval's frozen verdict — NOT to produce
+it.** The eval is the thing that RUNS the UI and SCORES it against a frozen
+design definition. You are read-only and you must **NOT re-run, re-derive,
+re-score, or re-judge** the eval. servo runs and scores; jig attests. That
+is the honesty boundary (ADR-0022): re-deriving the score here would
+launder a non-deterministic judgment into a deterministic-looking gate.
+
+Confirm — by READING the recorded eval evidence — that:
+
+1. **It RAN.** The eval actually executed and produced a verdict. An
+   `env_error` / infra / harness failure is **NOT a pass** and **NOT a
+   0.0** — it is a fail, because no honest score exists.
+2. **It is NON-STALE.** The eval's frozen definition (its config + the
+   threshold it was frozen with) is unchanged since the recorded run — the
+   composite you are reading is for THIS frozen definition, not an older one.
+3. **It MET its threshold.** The latest composite score is **>= the eval's
+   OWN declared threshold** (read both from the eval's frozen config — do
+   not invent a threshold).
+
+If all three hold, RECORD a `pass`. If any fails — or you cannot locate /
+read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
+
+## What to read (in this order)
+
+1. The eval evidence the slice points at — the project's external
+   design-fidelity oracle. Look for a frozen eval definition + a results
+   ledger, e.g. under `.servo/design-eval/` (the frozen config with its
+   threshold, and `ledger.jsonl`'s latest composite), or whatever
+   equivalent eval verdict location the slice/spec names. Read the frozen
+   THRESHOLD and the latest COMPOSITE.
+2. The spec — `{spec_path}`. Read slice **{slice_label}** only to learn
+   WHERE the eval evidence lives and what it gates — do NOT re-evaluate the
+   acceptance criteria (that's the compliance pass's job) and do NOT review
+   craft (that's the craft pass's job).
+3. The deliverables, for context on what UI the eval judged:
+{deliverable_lines}
+
+{_PROHIBITIONS}
+## Attest (read the evidence — do not re-derive it)
+
+- Did the eval actually RUN, or is the latest entry an `env_error` / infra
+  failure masquerading as a result? (infra failure ≠ pass ≠ 0.0)
+- Is the frozen eval definition (config + threshold) UNCHANGED since the
+  recorded composite — i.e. is the verdict non-stale?
+- Is the latest composite **>= the eval's own declared threshold**?
+- Record the verdict. Do NOT re-run the eval, do NOT recompute the
+  composite, do NOT substitute your own aesthetic judgment for the eval's.
+
+{_DESIGN_REVIEW_OUTPUT_FORMAT}
+"""
+
+
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     """Construct the standard reconciliation-review prompt.
 
@@ -1280,6 +1402,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="path to the health.py summary text (default: read stdin)",
     )
 
+    # Slice 071-01: design-review pass — on-demand (gated by
+    # `design_review: true`), ATTEST-ONLY. Mirrors `arch-review`'s
+    # signature; the reviewer attests an external design-fidelity eval's
+    # frozen verdict, never re-derives it (ADR-0022).
+    pdr = sub.add_parser(
+        "design-review",
+        help="construct an attest-only design-review prompt (ADR-0022)",
+    )
+    pdr.add_argument("spec", help="path to spec.md")
+    pdr.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pdr.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+
     # Slice 045-02: record a durable verdict file for a (slice, pass).
     prec = sub.add_parser(
         "record-review",
@@ -1367,7 +1501,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument(
         "mode",
         choices=["implementation", "reconciliation", "pr-review",
-                 "arch-review", "code-health"],
+                 "arch-review", "design-review", "code-health"],
         help=(
             "review mode (currently informational — every mode returns the "
             "same name; the choice exists for forward compatibility)"
@@ -1455,6 +1589,8 @@ def main(argv: list) -> int:
             prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "arch-review":
             prompt = build_arch_review_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "design-review":
+            prompt = build_design_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "frame-critique":
             prompt = build_frame_critique_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "code-health":

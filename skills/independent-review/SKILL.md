@@ -42,6 +42,20 @@ every slice may run:
   architecture-shaped concerns; the slice template at
   `templates/docs/specs/slice-template.md` ships the field commented
   out as a discoverability nudge.
+- **Design-review (attest-only pass — on-demand)** — slice 071-01 /
+  ADR-0022. After the craft (+ arch) passes, the orchestrator queries the
+  slice's `design_review:` flag via `workflow.py design-review-needed`;
+  when `true`, it runs an **attest-only** pass: the read-only reviewer
+  attests an external, non-deterministic design-fidelity eval's frozen
+  verdict (e.g. servo's `.servo/design-eval/` composite ≥ its own
+  threshold, non-stale, `env_error` ≠ pass) and records pass/fail — it
+  never re-runs or re-derives the score (servo runs/scores, jig attests).
+  Gates REVIEWED like arch. Authors set `design_review: true` when the
+  slice ships UI gated by an external design-fidelity eval — and the slice
+  body must point at **where the eval evidence lives** (the frozen config +
+  threshold and the results ledger), since the reviewer can only attest a
+  verdict it can locate; with no pointer it has nothing to read and records
+  a `fail`.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -188,6 +202,39 @@ run frame-critique **equal-or-stronger** than the artifact's author —
 **never downgrade it for cost** (the one pass whose value is adversarial
 depth). 064-03 ships rung-1 (fresh-context subagent) independence;
 cross-model (rung-3) is deferred (`docs/refinement-todo.md`).
+
+### Design-review (attest-only pass — slice 071-01 / ADR-0022, on-demand)
+
+Unlike every other pass, design-review produces no judgment of its own — it
+**attests** an *external, non-deterministic* eval's frozen verdict. The eval
+(e.g. servo's design-fidelity oracle) is the thing that RUNS the UI and SCORES
+it against a frozen design definition; this pass's read-only reviewer confirms,
+by reading the recorded eval evidence, that the eval actually **RAN**, is
+**NON-STALE** (its frozen config/threshold unchanged since the run), is
+**HONEST** (an `env_error` / infra failure is **not** a pass and **not** a
+0.0), and that the latest composite is **≥ the eval's own declared threshold** —
+then RECORDS that verdict. It **never re-runs, re-derives, or re-judges** the
+score: servo runs and scores, jig attests (the ADR-0022 honesty boundary). It
+runs only when the slice declares a truthy `design_review` flag, and gates
+REVIEWED exactly like `arch`.
+
+```bash
+PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  design-review \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  "<deliverable-path>" ...)
+```
+
+Record the verdict as the `design-review` pass; the `REVIEWED` gate requires it
+iff `design_review` is truthy (default-off slices transition freely). Although
+the shared envelope offers `pass | fail | needs-changes`, an attestation is
+binary — the recorded eval verdict either attests (honest, non-stale, meets its
+threshold) or it does not — so this pass meaningfully emits only `pass` / `fail`
+(the gate clears on `pass` and blocks on either of the others). **No
+richer-skill detection** — there is no external "design-review" skill category;
+the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
+(servo design-fidelity eval).
 
 > The flag is set by hand today. Slice 064-04 derives it mechanically from
 > the grounding output and surfaces the pass on the dispatch plan so it
