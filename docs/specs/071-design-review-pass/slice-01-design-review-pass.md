@@ -48,15 +48,18 @@ ADR-0022 OQ2: attest-only, schema-only, no bespoke servo interface.
    envelope (the existing slice-based `record-review` / `check-reviews` path).
 
 **DoD:**
-- [x] All ACs pass; full test suite green — `scripts/run_tests.py` (uv 3.12):
-      **2635 tests, 2 failures**, both the pre-existing/environmental
-      `ReserveSpec/AdrFromLinkedWorktreeE2E` git-stderr-wording E2Es (this git
-      emits `'main' is already checked out at …` vs the asserted `already used
-      by worktree`) — unrelated to this slice's code path.
+- [x] All ACs pass; the new tests and the affected suites are green —
+      `scripts/run_tests.py` (uv 3.12). The only failures are pre-existing,
+      environmental E2Es in the git-reservation / linked-worktree area
+      (`ReserveSpec` / `AdrFromLinkedWorktreeE2E` / `NewSpecScaffoldsFilePerSlice`);
+      **which subset fails is machine-dependent** — it turns on the local git's
+      stderr wording and the sandbox's `origin` setup — so the exact count/names
+      are not load-bearing. None touch this slice's code path, and this change
+      adds **zero new failures**.
 - [x] New tests cover: prompt builder text (attest-only, "do NOT re-derive"),
       flag truthy-token recognition, gated/ungated REVIEWED transition, verdict
       artifact round-trip — mirroring the arch (031-02) / frame (064-03) tests.
-- [x] `uvx ruff check` clean on changed files + `spec_lint.py` clean on the 070
+- [x] `uvx ruff check` clean on changed files + `spec_lint.py` clean on the 071
       spec. (manifests: n/a — no manifest surface touched.)
 - [x] design-review recorded where the **live** pass set lives —
       `review_evidence.PASSES` comment + CLAUDE.md PASSES enumeration +
@@ -113,7 +116,8 @@ The original spec is preserved above. Implementation notes:
 - **Runtime:** `scripts/run_tests.py` + the jig helpers require Python ≥3.10;
   this machine's system `python3` is 3.9.6 (produces spurious `zip()` / scaffold
   errors). Ran the suite via `~/.local/bin/uv run --python 3.12`; under 3.12 only
-  the 2 environmental git-wording E2E failures remain.
+  the pre-existing, environmental git-reservation / linked-worktree E2E failures
+  remain (the failing subset is machine-dependent — see the DoD note).
 - **jig-main is not a git repo** in this workspace — these changes are edited in
   place and need **upstreaming** to the real jig repo separately (alongside the
   Phase-4 servo `capture.mjs` fix and the Phase-6-prep servo `score.py` CLI

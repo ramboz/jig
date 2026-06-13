@@ -51,7 +51,11 @@ every slice may run:
   threshold, non-stale, `env_error` ≠ pass) and records pass/fail — it
   never re-runs or re-derives the score (servo runs/scores, jig attests).
   Gates REVIEWED like arch. Authors set `design_review: true` when the
-  slice ships UI gated by an external design-fidelity eval.
+  slice ships UI gated by an external design-fidelity eval — and the slice
+  body must point at **where the eval evidence lives** (the frozen config +
+  threshold and the results ledger), since the reviewer can only attest a
+  verdict it can locate; with no pointer it has nothing to read and records
+  a `fail`.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -223,7 +227,11 @@ PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
 ```
 
 Record the verdict as the `design-review` pass; the `REVIEWED` gate requires it
-iff `design_review` is truthy (default-off slices transition freely). **No
+iff `design_review` is truthy (default-off slices transition freely). Although
+the shared envelope offers `pass | fail | needs-changes`, an attestation is
+binary — the recorded eval verdict either attests (honest, non-stale, meets its
+threshold) or it does not — so this pass meaningfully emits only `pass` / `fail`
+(the gate clears on `pass` and blocks on either of the others). **No
 richer-skill detection** — there is no external "design-review" skill category;
 the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
 (servo design-fidelity eval).

@@ -34,6 +34,12 @@ servo's `.servo/install.json` (auto-discovery, composite re-read, threshold
 sync). ADR-0019's revisit trigger stands — "≥2 eval-oracle refactors where the
 attest-only posture proves too loose." This slice ships the loose, generic pass.
 
+**Also out of scope:** *lower-is-better* evals. The attest prompt assumes a
+higher-is-better composite (it attests `composite ≥ threshold`), which fits the
+design-fidelity first consumer. An eval scored as a distance/error metric (lower
+is better) would need a direction-aware comparison — a new slice when such a
+consumer appears, not a generalization paid for up front.
+
 ## Slices
 
 | Slice | Title | Status |
