@@ -1232,6 +1232,121 @@ class ReadAttributionReportTests(unittest.TestCase):
         self.assertTrue(_shows_number(out, 200), msg=out)
 
 
+class HookInjectionAttributionReportTests(unittest.TestCase):
+    """Slice 070-02: the same context-growth report includes
+    additionalContext injection events grouped by hook/spec/session.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-hook-attr-"))
+        self.log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_read_events(self.log, [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/big.py",
+                "size_bytes": 800,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:01:00Z",
+                "session_id": "sessA",
+                "event": "additional_context",
+                "kind": "memory_terms",
+                "source_hook": "jig-memory-scan",
+                "hook_event_name": "UserPromptSubmit",
+                "bytes": 120,
+                "estimated_tokens": 30,
+                "spec": "070",
+                "slice": "070-02",
+            },
+            {
+                "timestamp": "2026-06-12T12:02:00Z",
+                "session_id": "sessA",
+                "event": "additional_context",
+                "kind": "memory_terms",
+                "source_hook": "jig-memory-scan",
+                "hook_event_name": "UserPromptSubmit",
+                "bytes": 80,
+                "estimated_tokens": 20,
+                "spec": "070",
+                "slice": "070-02",
+            },
+            {
+                "timestamp": "2026-06-12T12:03:00Z",
+                "session_id": "sessB",
+                "event": "additional_context",
+                "kind": "task_capture",
+                "source_hook": "jig-task-capture",
+                "hook_event_name": "Stop",
+                "bytes": 100,
+                "estimated_tokens": 25,
+                "spec": "070",
+                "slice": "070-02",
+            },
+            {
+                "timestamp": "2026-06-12T12:04:00Z",
+                "session_id": "sessU",
+                "event": "additional_context",
+                "kind": "boundary_change",
+                "source_hook": "jig-boundary-change-warn",
+                "hook_event_name": "PostToolUse",
+                "bytes": 44,
+                "estimated_tokens": 11,
+                "spec": "",
+                "slice": "",
+            },
+        ])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_build_report_groups_hook_injections_by_hook_spec_session(self):
+        rep = uu.build_read_attribution_report(self.log)
+        self.assertEqual(rep.hook_injection_event_count, 4)
+        self.assertEqual(rep.total_context_growth_bytes, 1144)
+        rows = {
+            (r.spec, r.session_id, r.source_hook): r
+            for r in rep.hook_injection_rows
+        }
+
+        memory = rows[("070", "sessA", "jig-memory-scan")]
+        self.assertEqual(memory.event_count, 2)
+        self.assertEqual(memory.total_bytes, 200)
+        self.assertEqual(memory.estimated_tokens, 50)
+        self.assertEqual(memory.kind_counts["memory_terms"], 2)
+        self.assertAlmostEqual(memory.share, 200 / 1144)
+
+        task = rows[("070", "sessB", "jig-task-capture")]
+        self.assertEqual(task.event_count, 1)
+        self.assertEqual(task.hook_event_names, ["Stop"])
+
+    def test_hook_injection_require_marker_filters_unattributed_events(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        self.assertEqual(rep.hook_injection_event_count, 4)
+        self.assertEqual(rep.included_hook_injection_event_count, 3)
+        self.assertEqual(rep.skipped_unattributed_event_count, 1)
+        self.assertNotIn("", {r.spec for r in rep.hook_injection_rows})
+
+    def test_render_report_shows_hook_injection_totals_and_share(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        out = uu.render_read_attribution(rep)
+        self.assertIn("Hook injections", out)
+        self.assertIn("jig-memory-scan", out)
+        self.assertIn("jig-task-capture", out)
+        self.assertTrue(_shows_number(out, 200), msg=out)
+        self.assertTrue(_shows_number(out, 50), msg=out)
+        self.assertIn("18.2%", out)
+        self.assertNotIn("jig-boundary-change-warn", out)
+
+
 # ---------------------------------------------------------------------------
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
@@ -1406,6 +1521,28 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertIn("large=1", result.stdout)
         self.assertIn("Skipped unattributed", result.stdout)
         self.assertNotIn("unattributed.py", result.stdout)
+
+    def test_cli_read_attribution_shows_hook_injections(self):
+        log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_read_events(log, [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "additional_context",
+                "kind": "post_edit_verify",
+                "source_hook": "jig-post-edit-verify",
+                "hook_event_name": "PostToolUse",
+                "bytes": 160,
+                "estimated_tokens": 40,
+                "spec": "070",
+                "slice": "070-02",
+            },
+        ])
+        result = _run_usage("read-attribution", "--log", str(log))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Hook injections", result.stdout)
+        self.assertIn("jig-post-edit-verify", result.stdout)
+        self.assertIn("post_edit_verify=1", result.stdout)
 
 
 # ---------------------------------------------------------------------------

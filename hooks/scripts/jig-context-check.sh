@@ -113,8 +113,15 @@ try:
                     file_path, tool_input, session_id, state_dir)
                 if decision:
                     try:
-                        from lib.read_attribution import append_read_nudge_event
+                        from lib.read_attribution import (
+                            append_additional_context_event,
+                            append_read_nudge_event,
+                        )
                         append_read_nudge_event(project_dir, session_id, decision)
+                        append_additional_context_event(
+                            project_dir, session_id, event,
+                            'jig-context-check', 'read_nudge',
+                            decision['text'])
                     except Exception:
                         pass
                     print(json.dumps({
@@ -136,6 +143,13 @@ try:
             state_dir = os.environ.get('TMPDIR') or '/tmp'
             nudge = growth_nudge_for_turn(transcript_path, session_id, state_dir)
             if nudge:
+                try:
+                    from lib.read_attribution import append_additional_context_event
+                    append_additional_context_event(
+                        project_dir, session_id, event,
+                        'jig-context-check', 'context_growth', nudge)
+                except Exception:
+                    pass
                 print(json.dumps({'continue': True, 'additionalContext': nudge}))
         except Exception:
             # The growth nudge must never block the turn — swallow silently.
@@ -189,7 +203,15 @@ try:
             pass
 
         if warnings:
-            print(json.dumps({'continue': True, 'additionalContext': '\n\n'.join(warnings)}))
+            nudge = '\n\n'.join(warnings)
+            try:
+                from lib.read_attribution import append_additional_context_event
+                append_additional_context_event(
+                    project_dir, payload.get('session_id') or 'default', event,
+                    'jig-context-check', 'context_check', nudge)
+            except Exception:
+                pass
+            print(json.dumps({'continue': True, 'additionalContext': nudge}))
 except Exception:
     pass
 "

@@ -113,7 +113,19 @@ try:
         sections.append(msg)
 
     if sections:
-        print(json.dumps({'continue': True, 'additionalContext': '\n\n'.join(sections)}))
+        msg = '\n\n'.join(sections)
+        try:
+            script_dir = os.environ.get('SCRIPT_DIR', '.')
+            if script_dir not in sys.path:
+                sys.path.insert(0, script_dir)
+            from lib.read_attribution import append_additional_context_event
+            append_additional_context_event(
+                project_dir, data.get('session_id') or 'default',
+                data.get('hook_event_name') or 'UserPromptSubmit',
+                'jig-memory-scan', 'memory_terms', msg)
+        except Exception:
+            pass
+        print(json.dumps({'continue': True, 'additionalContext': msg}))
 except Exception:
     pass
 "

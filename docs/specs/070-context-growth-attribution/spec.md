@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: context-cost-discipline
 use_cases: []
 ---

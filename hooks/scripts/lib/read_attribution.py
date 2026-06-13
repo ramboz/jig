@@ -1,4 +1,4 @@
-"""Fail-open read-nudge attribution logging for jig-context-check.sh."""
+"""Fail-open context-growth attribution logging for hook scripts."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 READ_ATTRIBUTION_LOG = "context-growth-read-events.jsonl"
+BYTES_PER_TOKEN = 4
 
 _SPEC_RE = re.compile(r"(?m)^\s*spec\s*=\s*(\d{1,3})\s*$")
 _SLICE_RE = re.compile(r"(?m)^\s*slice\s*=\s*(\d{1,3})-(\d{1,2})\s*$")
@@ -62,6 +63,50 @@ def append_read_nudge_event(project_dir, session_id, decision) -> None:
             size = None
         if isinstance(size, (int, float)) and size >= 0:
             event["size_bytes"] = int(size)
+
+        log_dir = project / ".claude"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with (log_dir / READ_ATTRIBUTION_LOG).open(
+            "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, sort_keys=True) + "\n")
+    except Exception:
+        pass
+
+
+def append_additional_context_event(
+    project_dir,
+    session_id,
+    hook_event_name,
+    source_hook,
+    kind,
+    additional_context,
+) -> None:
+    """Append one bounded JSONL event for an `additionalContext` injection.
+
+    The event records only metadata and size. It deliberately never stores the
+    injected body, prompt, or file contents. Best effort by design: all errors
+    are swallowed so telemetry can never suppress the hook's original output.
+    """
+    try:
+        project = Path(project_dir)
+        spec, slice_id = read_spec_ref(project)
+        if not isinstance(additional_context, str):
+            additional_context = str(additional_context or "")
+        byte_count = len(additional_context.encode("utf-8"))
+        event = {
+            "timestamp": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+            "session_id": session_id or "default",
+            "event": "additional_context",
+            "kind": kind or "",
+            "source_hook": source_hook or "",
+            "hook_event_name": hook_event_name or "",
+            "bytes": byte_count,
+            "estimated_tokens": byte_count // BYTES_PER_TOKEN,
+            "spec": spec,
+            "slice": slice_id,
+        }
 
         log_dir = project / ".claude"
         log_dir.mkdir(parents=True, exist_ok=True)

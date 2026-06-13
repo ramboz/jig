@@ -86,7 +86,9 @@ Options
                           turns crossing alternate ``cache_read`` thresholds
                           (default 0.60, 0.65, 0.75 of a 200k-token window).
     read-attribution      Summarize `.claude/context-growth-read-events.jsonl`
-                          by spec/session.
+                          by spec/session for read events and by
+                          hook/spec/session for `additionalContext`
+                          injections.
 
 Read-only: this tool never writes or deletes anything. The only network access
 is the optional ``npx ccusage`` call (suppressed by --ccusage-json/--no-ccusage).
@@ -760,13 +762,34 @@ class ReadAttributionRow:
 
 
 @dataclass
+class HookInjectionAttributionRow:
+    spec: str
+    session_id: str
+    source_hook: str
+    kind_counts: dict = field(default_factory=dict)
+    total_bytes: int = 0
+    estimated_tokens: int = 0
+    hook_event_names: list = field(default_factory=list)
+    _hook_event_name_set: set = field(default_factory=set, repr=False)
+    share: float = 0.0
+
+    @property
+    def event_count(self) -> int:
+        return sum(int(v) for v in self.kind_counts.values())
+
+
+@dataclass
 class ReadAttributionReport:
     log_path: Path
     rows: list = field(default_factory=list)
+    hook_injection_rows: list = field(default_factory=list)
     scanned_event_count: int = 0
     included_event_count: int = 0
+    hook_injection_event_count: int = 0
+    included_hook_injection_event_count: int = 0
     malformed_line_count: int = 0
     skipped_unattributed_event_count: int = 0
+    total_context_growth_bytes: int = 0
     require_marker: bool = False
 
 
@@ -1089,20 +1112,34 @@ def _read_known_size(event: dict):
     return None
 
 
+def _nonnegative_int_or_none(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value >= 0:
+        return int(value)
+    return None
+
+
 def _read_attribution_sort_key(row: ReadAttributionRow):
     # Attributed specs first, then the empty/unattributed bucket.
     spec_key = row.spec if row.spec else "zzz-unattributed"
     return (spec_key, row.session_id)
 
 
+def _hook_injection_sort_key(row: HookInjectionAttributionRow):
+    spec_key = row.spec if row.spec else "zzz-unattributed"
+    return (spec_key, row.session_id, row.source_hook)
+
+
 def build_read_attribution_report(log_path: Path,
                                   require_marker: bool = False
                                   ) -> ReadAttributionReport:
-    """Build a read-only report from the read-nudge context-growth log.
+    """Build a read-only report from the context-growth attribution log.
 
-    The hook writes metadata-only JSONL events under `.claude/`. This parser is
-    deliberately tolerant: malformed lines are counted and skipped, missing
-    files simply produce an empty report, and unknown event shapes are ignored.
+    Hooks write metadata-only read-nudge and additionalContext events under
+    `.claude/`. This parser is deliberately tolerant: malformed lines are
+    counted and skipped, missing files simply produce an empty report, and
+    unknown event shapes are ignored.
     """
     log_path = Path(log_path)
     report = ReadAttributionReport(
@@ -1110,6 +1147,7 @@ def build_read_attribution_report(log_path: Path,
         require_marker=require_marker,
     )
     rows = {}
+    hook_rows = {}
 
     try:
         fh = log_path.open("r", encoding="utf-8", errors="replace")
@@ -1129,37 +1167,75 @@ def build_read_attribution_report(log_path: Path,
             if not isinstance(event, dict):
                 report.malformed_line_count += 1
                 continue
-            if event.get("event") != "read_nudge":
-                continue
-            kind = event.get("kind")
-            if kind not in ("large", "duplicate"):
-                continue
+            event_name = event.get("event")
+            if event_name == "read_nudge":
+                kind = event.get("kind")
+                if kind not in ("large", "duplicate"):
+                    continue
 
-            report.scanned_event_count += 1
-            spec = str(event.get("spec") or "")
-            if require_marker and not spec:
-                report.skipped_unattributed_event_count += 1
-                continue
+                report.scanned_event_count += 1
+                spec = str(event.get("spec") or "")
+                if require_marker and not spec:
+                    report.skipped_unattributed_event_count += 1
+                    continue
 
-            session_id = str(event.get("session_id") or "unknown")
-            row = rows.setdefault(
-                (spec, session_id),
-                ReadAttributionRow(spec=spec, session_id=session_id),
-            )
-            row.counts[kind] = int(row.counts.get(kind, 0)) + 1
+                session_id = str(event.get("session_id") or "unknown")
+                row = rows.setdefault(
+                    (spec, session_id),
+                    ReadAttributionRow(spec=spec, session_id=session_id),
+                )
+                row.counts[kind] = int(row.counts.get(kind, 0)) + 1
 
-            size = _read_known_size(event)
-            if size is not None:
-                row.total_known_size_bytes += size
-
-            file_path = str(event.get("file_path") or "")
-            if file_path:
-                path_summary = row._path_stats.setdefault(
-                    file_path, ReadPathSummary(file_path=file_path))
-                path_summary.count += 1
+                size = _read_known_size(event)
                 if size is not None:
-                    path_summary.total_known_size_bytes += size
-            report.included_event_count += 1
+                    row.total_known_size_bytes += size
+                    report.total_context_growth_bytes += size
+
+                file_path = str(event.get("file_path") or "")
+                if file_path:
+                    path_summary = row._path_stats.setdefault(
+                        file_path, ReadPathSummary(file_path=file_path))
+                    path_summary.count += 1
+                    if size is not None:
+                        path_summary.total_known_size_bytes += size
+                report.included_event_count += 1
+                continue
+
+            if event_name == "additional_context":
+                report.hook_injection_event_count += 1
+                spec = str(event.get("spec") or "")
+                if require_marker and not spec:
+                    report.skipped_unattributed_event_count += 1
+                    continue
+
+                session_id = str(event.get("session_id") or "unknown")
+                source_hook = str(event.get("source_hook") or "unknown")
+                row = hook_rows.setdefault(
+                    (spec, session_id, source_hook),
+                    HookInjectionAttributionRow(
+                        spec=spec,
+                        session_id=session_id,
+                        source_hook=source_hook,
+                    ),
+                )
+                kind = str(event.get("kind") or "unknown")
+                row.kind_counts[kind] = int(row.kind_counts.get(kind, 0)) + 1
+                hook_event_name = str(event.get("hook_event_name") or "")
+                if (hook_event_name
+                        and hook_event_name not in row._hook_event_name_set):
+                    row._hook_event_name_set.add(hook_event_name)
+                    row.hook_event_names.append(hook_event_name)
+
+                byte_count = _nonnegative_int_or_none(event.get("bytes")) or 0
+                row.total_bytes += byte_count
+                report.total_context_growth_bytes += byte_count
+                est = _nonnegative_int_or_none(event.get("estimated_tokens"))
+                row.estimated_tokens += (
+                    est if est is not None
+                    else byte_count // READ_ATTRIBUTION_BYTES_PER_TOKEN
+                )
+                report.included_hook_injection_event_count += 1
+                continue
 
     for row in rows.values():
         row.top_paths = sorted(
@@ -1167,6 +1243,11 @@ def build_read_attribution_report(log_path: Path,
             key=lambda p: (-p.count, -p.total_known_size_bytes, p.file_path),
         )
     report.rows = sorted(rows.values(), key=_read_attribution_sort_key)
+    if report.total_context_growth_bytes > 0:
+        for row in hook_rows.values():
+            row.share = row.total_bytes / report.total_context_growth_bytes
+    report.hook_injection_rows = sorted(
+        hook_rows.values(), key=_hook_injection_sort_key)
     return report
 
 
@@ -1452,6 +1533,17 @@ def render_read_attribution(rep: ReadAttributionReport, limit: int = 50) -> str:
     lines.append(f"  Log:                    {rep.log_path}")
     lines.append(f"  Events scanned:         {_fmt(rep.scanned_event_count)}")
     lines.append(f"  Events included:        {_fmt(rep.included_event_count)}")
+    lines.append(
+        f"  Hook injections scanned: {_fmt(rep.hook_injection_event_count)}"
+    )
+    lines.append(
+        f"  Hook injections incl.:  "
+        f"{_fmt(rep.included_hook_injection_event_count)}"
+    )
+    lines.append(
+        f"  Context-growth bytes:   "
+        f"{_fmt(rep.total_context_growth_bytes)}"
+    )
     if rep.require_marker:
         lines.append("  Marker required:        yes")
         lines.append(
@@ -1468,36 +1560,63 @@ def render_read_attribution(rep: ReadAttributionReport, limit: int = 50) -> str:
     lines.append(f"BY SPEC / SESSION (limit {len(rows)})")
     if not rep.rows:
         lines.append("  No read-attribution events found.")
-        return "\n".join(lines) + "\n"
-    if not rows:
+    elif not rows:
         lines.append("  No rows shown (limit 0).")
-        return "\n".join(lines) + "\n"
+    else:
+        header = (
+            "  spec            session  events  counts               known_bytes"
+            "  est_tokens  top_paths"
+        )
+        lines.append(header)
+        for row in rows:
+            spec = row.spec or "(unattributed)"
+            counts = (
+                f"large={int(row.counts.get('large', 0))} "
+                f"duplicate={int(row.counts.get('duplicate', 0))}"
+            )
+            top = ", ".join(
+                f"{p.file_path} ({p.count})" for p in row.top_paths[:3]
+            ) or "-"
+            lines.append(
+                f"  {spec:<15} {row.session_id:<8} "
+                f"{_fmt(row.event_count):>6}  {counts:<20} "
+                f"{_fmt(row.total_known_size_bytes):>11}  "
+                f"{_fmt(row.estimated_tokens):>10}  {top}"
+            )
 
-    header = (
-        "  spec            session  events  counts               known_bytes"
-        "  est_tokens  top_paths"
-    )
-    lines.append(header)
-    for row in rows:
-        spec = row.spec or "(unattributed)"
-        counts = (
-            f"large={int(row.counts.get('large', 0))} "
-            f"duplicate={int(row.counts.get('duplicate', 0))}"
+    lines.append("")
+    hook_rows = rep.hook_injection_rows[:max(0, limit)]
+    lines.append(f"HOOK INJECTIONS BY HOOK / SPEC / SESSION (limit {len(hook_rows)})")
+    if not rep.hook_injection_rows:
+        lines.append("  No Hook injections found.")
+    elif not hook_rows:
+        lines.append("  No rows shown (limit 0).")
+    else:
+        header = (
+            "  source_hook                spec            session  events"
+            "  kinds                 bytes  est_tokens  share  hook_events"
         )
-        top = ", ".join(
-            f"{p.file_path} ({p.count})" for p in row.top_paths[:3]
-        ) or "-"
-        lines.append(
-            f"  {spec:<15} {row.session_id:<8} "
-            f"{_fmt(row.event_count):>6}  {counts:<20} "
-            f"{_fmt(row.total_known_size_bytes):>11}  "
-            f"{_fmt(row.estimated_tokens):>10}  {top}"
-        )
+        lines.append(header)
+        for row in hook_rows:
+            spec = row.spec or "(unattributed)"
+            kinds = " ".join(
+                f"{kind}={int(count)}"
+                for kind, count in sorted(row.kind_counts.items())
+            ) or "-"
+            hook_events = ",".join(row.hook_event_names) or "-"
+            lines.append(
+                f"  {row.source_hook:<26} {spec:<15} {row.session_id:<8} "
+                f"{_fmt(row.event_count):>6}  {kinds:<20} "
+                f"{_fmt(row.total_bytes):>7}  "
+                f"{_fmt(row.estimated_tokens):>10}  "
+                f"{row.share * 100:>5.1f}%  {hook_events}"
+            )
     lines.append("")
     lines.append(
         f"Note: estimated tokens use "
         f"{READ_ATTRIBUTION_BYTES_PER_TOKEN} bytes/token. The log is "
-        "metadata-only: file paths, sizes, thresholds, and attribution fields."
+        "metadata-only: file paths, sizes, thresholds, injected-context "
+        "byte counts, and attribution fields."
     )
     return "\n".join(lines) + "\n"
 
@@ -1616,7 +1735,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     read_attr = sub.add_parser(
         "read-attribution",
-        help="summarize context-growth read-nudge telemetry by spec/session",
+        help="summarize context-growth read-nudge and additionalContext "
+             "telemetry",
     )
     read_attr.add_argument(
         "--log", default=None, metavar="PATH",

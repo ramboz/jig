@@ -13,8 +13,14 @@
 #   - MultiEdit: each edit checked individually.
 #   - Bounded to 64KB total read per file (10MB files don't full-file-read).
 #   - Opt-out: JIG_POST_EDIT_VERIFY=0.
-python3 -c "
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SCRIPT_DIR="$SCRIPT_DIR" python3 -c "
 import sys, json, os
+
+script_dir = os.environ.get('SCRIPT_DIR', '.')
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
 
 MAX_READ = 65536
 WRITE_PREFIX = 200
@@ -100,6 +106,15 @@ try:
 
     if warnings:
         msg = ' | '.join(warnings)
+        try:
+            from lib.read_attribution import append_additional_context_event
+            append_additional_context_event(
+                os.environ.get('CLAUDE_PROJECT_DIR', '.'),
+                data.get('session_id') or 'default',
+                data.get('hook_event_name') or 'PostToolUse',
+                'jig-post-edit-verify', 'post_edit_verify', msg)
+        except Exception:
+            pass
         print(json.dumps({'continue': True, 'additionalContext': msg}))
 except SystemExit:
     raise

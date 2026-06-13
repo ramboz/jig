@@ -608,6 +608,13 @@ def read_growth_events(project_dir: Path) -> list:
             if line.strip()]
 
 
+def read_nudge_growth_events(project_dir: Path) -> list:
+    return [
+        event for event in read_growth_events(project_dir)
+        if event.get("event") == "read_nudge"
+    ]
+
+
 class ReadOnceHookTests(unittest.TestCase):
     """Slice 055-03 — the PreToolUse(Read) branch. Synthetic Read tool_use
     fixtures (Clarification Q4): first read of a path → silent; second read
@@ -770,7 +777,7 @@ class ReadAttributionTelemetryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIsNotNone(parse_or_none(result))
 
-        events = read_growth_events(self.project)
+        events = read_nudge_growth_events(self.project)
         self.assertEqual(len(events), 1)
         event = events[0]
         self.assertEqual(
@@ -804,7 +811,7 @@ class ReadAttributionTelemetryTests(unittest.TestCase):
         second = self._read(str(path), session_id="dup")
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIsNotNone(parse_or_none(second))
-        events = read_growth_events(self.project)
+        events = read_nudge_growth_events(self.project)
         self.assertEqual(len(events), 1)
         event = events[0]
         self.assertEqual(event["kind"], "duplicate")
@@ -823,7 +830,7 @@ class ReadAttributionTelemetryTests(unittest.TestCase):
         result = self._read(str(big), session_id="marked",
                             env={"JIG_READ_LEAN_BYTES": "100"})
         self.assertEqual(result.returncode, 0, result.stderr)
-        event = read_growth_events(self.project)[0]
+        event = read_nudge_growth_events(self.project)[0]
         self.assertEqual(event["spec"], "070")
         self.assertEqual(event["slice"], "070-01")
 
@@ -831,7 +838,7 @@ class ReadAttributionTelemetryTests(unittest.TestCase):
         missing = self._bigfile(name="missing.py", size=250)
         self._read(str(missing), session_id="missing",
                    env={"JIG_READ_LEAN_BYTES": "100"})
-        missing_event = read_growth_events(self.project)[0]
+        missing_event = read_nudge_growth_events(self.project)[0]
         self.assertEqual(missing_event["spec"], "")
         self.assertEqual(missing_event["slice"], "")
 
@@ -849,7 +856,7 @@ class ReadAttributionTelemetryTests(unittest.TestCase):
             tmpdir=self.state,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        malformed_event = read_growth_events(other_project)[0]
+        malformed_event = read_nudge_growth_events(other_project)[0]
         self.assertEqual(malformed_event["spec"], "")
         self.assertEqual(malformed_event["slice"], "")
 
