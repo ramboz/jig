@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.15.0](https://github.com/ramboz/jig/compare/v1.14.0...v1.15.0) (2026-06-13)
+
+
+### Features
+
+* **review:** add attest-only design_review pass (spec 071) ([#52](https://github.com/ramboz/jig/issues/52)) ([1d23958](https://github.com/ramboz/jig/commit/1d23958f0d0edf3a48d76efe52fec02929e01fa7))
+* **usage:** add attribution levers ([ab95b6b](https://github.com/ramboz/jig/commit/ab95b6bbbb8290cada5e87405202af8ca7e4a603))
+* **usage:** add token usage top rollup ([2761a71](https://github.com/ramboz/jig/commit/2761a71a5960f1adde66de05781b4d90d1965fac))
+
+
+### Bug Fixes
+
+* **usage:** rename loop var shadowing dataclasses.field import ([a273c11](https://github.com/ramboz/jig/commit/a273c1141774df21969ba71b9c81b840c5ed0396))
+
+
+### Documentation
+
+* capture design-conformance / visual-oracle thread (inbox + ADR-0022) ([61872cb](https://github.com/ramboz/jig/commit/61872cb739a5c1fd7ab1f4843151a78844065354))
+* **specs:** add DRAFT spec 069 — builder-consumes-install-contract ([8d36f0b](https://github.com/ramboz/jig/commit/8d36f0b435247415d8b576e2f3cfb6c62e59e98f))
+* **specs:** reserve 070-context-growth-attribution ([e6c6a40](https://github.com/ramboz/jig/commit/e6c6a4023408e95a3f477b5c536038ba1a8fc2ed))
+
 ## [1.14.0](https://github.com/ramboz/jig/compare/v1.13.0...v1.14.0) (2026-06-11)
 
 
