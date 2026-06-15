@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: slice-land
 use_cases: []
 ---
@@ -150,10 +150,30 @@ separable pull-hint dependency.
    hasn't scaffolded *this* project gets the gentle nudge (README honored).
    **Alternative if plugin-detection proves unreliable:** drop 072-02 and
    instead soften servo's README to "planned." Decide at READY_FOR_REVIEW.
+   **→ RESOLVED (human, 2026-06-15): YES — nudge when servo is available
+   and the project is unscaffolded.** The §5 reversal for the slice-land
+   surface is approved *in principle*. But the "only when the plugin is
+   detectably installed" mechanism is unworkable (Q2 spike) — so the nudge
+   is reconciled with §5 via a **reciprocal servo-side "available"
+   breadcrumb** (a host-agnostic marker servo writes; jig reads it), not
+   plugin auto-detection.
 2. **servo-plugin detection mechanism** (the Assumptions risk). Probe a
    sibling of `CLAUDE_PLUGIN_ROOT`? Read a marketplace manifest? If no
    reliable signal exists, 072-02's fallback is silence. May warrant a
    `kind: spike` inside 072-02.
+   **→ RESOLVED by spike [072-03](slice-03-servo-plugin-detection-spike.md)
+   (2026-06-15): NO-GO on plugin auto-detection.** No signal is at once
+   documented/supported, install-method-robust, host-agnostic,
+   subprocess-free, and boundary-respecting: `installed_plugins.json` is an
+   undocumented internal that misses local-clone servo (incl. the user's
+   own setup), `CLAUDE_PLUGIN_ROOT` names only jig's own dir,
+   `claude plugin list` is a subprocess (AC5), and a `plugin.json` dependency
+   would force servo on every jig user. **Chosen direction (human): a
+   reciprocal servo-side breadcrumb** — servo writes a host-agnostic
+   "available" marker that jig's `land.py` reads (servo-available AND no
+   project `.servo/` → nudge). This is a **cross-repo dependency** (a
+   reciprocal servo-side ADR, already named in ADR-0022 Scope); 072-02 is
+   reshaped around it and **blocked** until servo emits the marker.
 3. **Nag-avoidance for 072-02.** A suggestion on *every* land would be
    noise. Lean: opt-out marker + fire only when the slice has real tests
    (skip doc-only slices, mirroring `prepare`'s own test-warn path).
@@ -171,16 +191,21 @@ present-vs-absent path.
 - **072-01** is the ADR-0022-§5-aligned, low-risk core (mention servo only
   when its infra is *present*) and is implementation-ready. It alone makes
   servo's README claim true for the present case and closes the phantom
-  coupling.
-- **072-02** is the contested, plugin-detection-dependent extension (the
-  "missing-infra" suggestion). It reverses ADR-0022 §5 for the slice-land
-  surface and depends on an unproven probe, so it stays goals-level pending
-  the two open decisions (Q1, Q2) and carries `frame_review: true`.
+  coupling. **DONE (2026-06-15).**
+- **072-03** (`kind: spike`) settled Q2: can `land.py` reliably detect the
+  servo *plugin*? **NO-GO** — see the spike's Outcome. **DONE (2026-06-15).**
+- **072-02** is the "missing-infra" suggestion. Q1 approved the nudge, but
+  the spike disproved plugin auto-detection — so 072-02 is **reshaped** off
+  a reciprocal servo-side "available" breadcrumb (host-agnostic, servo
+  writes / jig reads) and is **blocked on that cross-repo contract** (a
+  reciprocal servo-side ADR). Stays DRAFT until servo emits the marker;
+  retains `frame_review: true`.
 
 ## Slices
 
-- [072-01 — present-infra-hint](slice-01-present-infra-hint.md) — DRAFT (implementation-ready)
-- [072-02 — unscaffolded-suggestion](slice-02-unscaffolded-suggestion.md) — DRAFT (goals-level; decision-gated)
+- [072-01 — present-infra-hint](slice-01-present-infra-hint.md) — **DONE**
+- [072-03 — servo-plugin-detection-spike](slice-03-servo-plugin-detection-spike.md) — 🔬 **DONE** (Q2 → NO-GO on plugin auto-detection; direction: reciprocal servo signal)
+- [072-02 — unscaffolded-suggestion](slice-02-unscaffolded-suggestion.md) — DRAFT (reshaped off a reciprocal servo breadcrumb; blocked on the cross-repo servo-side contract)
 
 ## References
 

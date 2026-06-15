@@ -60,6 +60,18 @@ is untouched and stays PARKED** — its demand trigger (≥2 real eval refactors
 consumers (`bug.py`/`refactor.py`) remain unmet; spec 072 builds the discovery
 pull-hint, not the oracle binding.
 
+**Note (2026-06-15) — the present-case pull-hint shipped ([spec 072-01](../specs/072-servo-pull-hint/spec.md)
+DONE).** `land.py prepare` now trails a soft, never-gating, **filesystem-only**
+servo advisory when the target has `.servo/` scaffolded (`install.json`/`oracle.sh`):
+it points at servo's post-`ADR-0008` `/goal`-driven/Routine loop and names a
+resumable `.servo/runs/<id>/state.json` when one exists, stays **silent when servo
+is absent** (§5's "absent → no mention" + the supervised-default boundary), and makes
+**no servo invocation** (no subprocess, no autonomy primitive). This makes servo's
+README pull-hint claim true for the present case and **closes the phantom coupling**.
+**072-02** (the missing-infra suggestion, which would reverse §5 for the slice-land
+surface) stays DRAFT/decision-gated on Open Questions 1–2. **Option D's tight
+bug/refactor exit-code binding (§2–§5) is untouched and stays PARKED.**
+
 ## Context
 
 jig now has a **family of three gated-evidence lifecycles**, all mirroring
@@ -346,7 +358,11 @@ servo.
   git-rebase recovery message). The coupling that exists today is **one-way**:
   servo→jig (`tdd.py detect` reuse, servo ADR-0001). The jig→servo pull-hint is
   a *planned reciprocal* described by servo's README, and building it is part
-  of activating this ADR.
+  of activating this ADR. **Update (2026-06-15): the present-case half is now
+  implemented** — [spec 072-01](../specs/072-servo-pull-hint/spec.md) (DONE)
+  ships the `.servo/`-present advisory in `land.py prepare`, making servo's
+  README claim true for the present case. The missing-infra half (072-02) stays
+  deferred/decision-gated; the Option-D oracle binding (§2–§5) remains unbuilt.
 - **The demand trigger (ADR-0019: ≥2 real eval refactors straining
   attest-only) is unmet.** No such case is recorded; this is the primary
   reason for the PARKED status.
@@ -380,13 +396,14 @@ dispatch) plus the not-yet-built jig→servo pull-hint.
 - **The whole ADR is parked** on the demand trigger / a consumer / servo 006
   (see Status).
 - **Build the jig→servo `slice-land` pull-hint** — the planned reciprocal
-  servo's README asserts. **Now being built as
-  [spec 072](../specs/072-servo-pull-hint/spec.md)** (072-01 present-case
-  advisory pointing at the post-`ADR-0008` artifact shape, implementation-ready;
-  072-02 missing-case suggestion, decision-gated on §5 — see Open Questions).
-  Advisory text only — distinct from, and not a prerequisite of, §5's
-  oracle-binding *discovery* (offering `servo` as an oracle value in
-  bug/refactor records), which stays parked with the rest of Option D.
+  servo's README asserts. **[Spec 072-01](../specs/072-servo-pull-hint/spec.md)
+  DONE (2026-06-15)**: the present-case advisory in `land.py prepare` points at
+  the post-`ADR-0008` artifact shape (the phantom coupling is closed for the
+  present case). **072-02** (missing-case suggestion) stays DRAFT/decision-gated
+  on §5 — see Open Questions. Advisory text only — distinct from, and not a
+  prerequisite of, §5's oracle-binding *discovery* (offering `servo` as an
+  oracle value in bug/refactor records), which stays parked with the rest of
+  Option D.
 - **Extract a shared `_common/lifecycle.py` transition-gate engine** across
   `spec-workflow` / `bug.py` / `refactor.py` (ADR-0002 / ADR-0003
   rule-of-three) — governed by ADR-0023; triggered by the third concrete
@@ -394,6 +411,11 @@ dispatch) plus the not-yet-built jig→servo pull-hint.
 - **spec-workflow ACs → `/servo:spec-oracle` evidence overlay** — tracks servo
   006.
 - **A reciprocal servo-side ADR** — servo's call; noted for coordination.
+  **Now the chosen path for spec 072-02 (2026-06-15):** jig spike 072-03 found
+  servo-*plugin* auto-detection unworkable, so the "missing-infra" nudge is
+  reshaped onto a host-agnostic **"servo-available" breadcrumb** servo writes
+  and `land.py` reads (servo owns the format, mirroring servo ADR-0004's
+  `.servo/runs/*` contract). 072-02 is blocked until servo emits it.
 - **Go-live / production-readiness checklist** — a milestone-level DoD over
   this boundary, not part of this ADR.
 

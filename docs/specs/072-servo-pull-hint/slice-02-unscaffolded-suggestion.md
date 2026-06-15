@@ -1,51 +1,63 @@
 ---
 status: DRAFT
-dependencies: [072-01]
+dependencies: [072-01, 072-03]
 frame_review: true
 last_verified:
 ---
 
 ## Slice 072-02 — unscaffolded-suggestion
 
-> **Goals-level / decision-gated.** This slice is intentionally *not*
-> implementation-ready. It carries two unresolved decisions (spec Open
-> Questions 1 & 2) and a `frame_review: true` flag because it reverses a
-> recorded decision (ADR-0022 §5's "absent → no mention") for the
-> slice-land surface. Do **not** transition past DRAFT until Q1 and Q2 are
-> resolved at the spec's READY_FOR_REVIEW.
+> **Reshaped + blocked on a cross-repo dependency (2026-06-15).** Q1 and Q2
+> are resolved (see spec Open Questions): Q1 — *yes*, nudge when servo is
+> available and the project is unscaffolded; Q2 — spike
+> [072-03](slice-03-servo-plugin-detection-spike.md) found servo-*plugin*
+> auto-detection **unworkable**, so the trigger is reshaped onto a
+> **reciprocal servo-side "available" breadcrumb** (servo writes a
+> host-agnostic marker; jig reads it). This slice now **depends on that
+> servo-side contract existing** (a reciprocal servo-side ADR — see ADR-0022
+> Scope). Keep `frame_review: true`: it still reverses ADR-0022 §5's
+> "absent → no mention" for the slice-land surface. Do **not** transition
+> past DRAFT until the servo-side breadcrumb contract is defined + emitted.
 
-**Goal:** When servo's *plugin* is available but the target project is
-*not* servo-scaffolded (no `.servo/`), `land.py prepare` emits a single,
-gentle, opt-out-able suggestion to run `/servo:scaffold-init` for
-oracle-gated / headless iteration — making servo's README "emit … when
-servo-style infrastructure is missing" claim true **without** advertising
-servo to users who don't have it installed. Builds on 072-01's detection,
-opt-out, and never-gate scaffolding.
+**Goal:** When a **reciprocal servo-side "available" breadcrumb** indicates
+servo is set up on this machine **but the target project is *not*
+servo-scaffolded** (no `.servo/`), `land.py prepare` emits a single, gentle,
+opt-out-able suggestion to run `/servo:scaffold-init` for oracle-gated /
+headless iteration — making servo's README "emit … when servo-style
+infrastructure is missing" claim true **without** advertising servo to users
+who don't have it. Reads the breadcrumb only (filesystem, no subprocess);
+builds on 072-01's `.servo/` probe, `.jig/no-servo-hint` opt-out, and
+never-gate scaffolding.
 
 **DoR:**
 - ✅ 072-01 landed — the advisory section, `.jig/no-servo-hint` opt-out,
   never-gate posture, and filesystem-only detection all exist.
-- ⛔ **OPEN (Q2):** a reliable way for `land.py` to detect servo *plugin*
-  availability (distinct from the per-project `.servo/`). `CLAUDE_PLUGIN_ROOT`
-  points at jig's own plugin dir; the sibling-plugin layout is
-  install-method-dependent. If no reliable signal exists, the slice's
-  fallback is **silence** — and the slice may collapse into "soften servo's
-  README instead." A `kind: spike` may be warranted to settle this first.
-- ⛔ **OPEN (Q1):** the ADR-0022 §5 reversal decision — does jig mention
-  servo when its per-project infra is *absent* (but the plugin is present)?
-  The frame-critique pass (this slice's `frame_review`) is the place to
-  pressure-test it.
+- ✅ **Q1 resolved (human, 2026-06-15):** yes — nudge when servo is available
+  and the project is unscaffolded (the §5 reversal is approved in principle).
+- ✅ **Q2 resolved by spike [072-03](slice-03-servo-plugin-detection-spike.md):**
+  plugin auto-detection is NO-GO; the trigger is a reciprocal servo-side
+  breadcrumb instead.
+- ⛔ **OPEN (cross-repo):** the **servo-side breadcrumb contract** — a
+  host-agnostic location + format servo writes at install/scaffold time and
+  jig agrees to read — **does not exist yet.** Per the coupling precedent
+  (the writer owns the contract; cf. servo ADR-0004 for `.servo/runs/*`),
+  this is a **reciprocal servo-side ADR** in the servo repo. Until servo
+  emits the marker, this slice has nothing reliable to read and stays
+  blocked. (Tracked in `docs/inbox.md`.)
 
-**Acceptance Criteria (provisional — subject to Q1/Q2 resolution):**
+**Acceptance Criteria (provisional — subject to the servo-side breadcrumb
+contract + the frame-critique pass):**
 
 1. **Fires only on the precise state.** A `/servo:scaffold-init`
-   suggestion appears **iff** the servo plugin is detectably installed
-   **AND** `.servo/` is absent at the target **AND** `.jig/no-servo-hint`
-   is absent.
-2. **No advertising to non-servo users.** When the servo plugin is **not**
-   detectable, `prepare` stays silent about servo (no funnel into autonomy
-   for the supervised-default user). This is the reconciliation of
-   ADR-0022 §5 with servo's README.
+   suggestion appears **iff** the reciprocal servo-side "available"
+   breadcrumb is present **AND** `.servo/` is absent at the target **AND**
+   `.jig/no-servo-hint` is absent.
+2. **No advertising to non-servo users.** When the breadcrumb is **absent**
+   (servo not set up on this machine), `prepare` stays silent about servo
+   (no funnel into autonomy for the supervised-default user). This is the
+   reconciliation of ADR-0022 §5 with servo's README. The breadcrumb fires
+   even for a **local-clone** servo user (the gap that sank plugin
+   auto-detection — spike 072-03).
 3. **Gentle, single, never-gating.** At most one advisory line naming
    `/servo:scaffold-init`; never adds a blocker; never changes the exit
    code; honored by the `.jig/no-servo-hint` opt-out.
@@ -53,9 +65,9 @@ opt-out, and never-gate scaffolding.
    slices (no test runner detected — mirrors `prepare`'s existing
    test-warn path), so it surfaces only where servo's oracle would
    plausibly help.
-5. **Still no servo invocation.** Detection of plugin availability is
-   read-only (filesystem / manifest read); no `servo:*` command, no
-   autonomy primitive, is ever run.
+5. **Still no servo invocation.** Reading the breadcrumb is read-only
+   (a filesystem `stat`/read); no `servo:*` command, no `claude` subprocess,
+   no autonomy primitive, is ever run.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
