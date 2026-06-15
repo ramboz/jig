@@ -44,6 +44,22 @@ to ADR-0019's OQ2 ("how thin is attest-only?"): **as thin as a review pass.**
 **Option D itself (the tight exit-code binding for bug/refactor, §2–§5) remains
 PARKED** on the demand trigger above — spec 071 deliberately did not build it.
 
+**Note (2026-06-13) — servo rebased; the separable `slice-land` pull-hint is now
+being built (spec 072).** servo's `ADR-0008` (*rebase agent-loop onto
+/goal+/background+Routines*) was Accepted 2026-06-12, retiring the hand-rolled
+loop — so the long-planned jig→servo `slice-land` pull-hint (the reciprocal
+servo's README asserts as *"the entirety of the coupling"* but jig never built;
+see Scope + Assumptions) now has a stable, current artifact shape to point at.
+That *separable* dependency is being built under
+[spec 072](../specs/072-servo-pull-hint/spec.md) as **advisory text only** (a
+filesystem probe in `land.py prepare`; no servo invocation, no exit-code read) —
+even looser than spec 071's `design_review` pass. Its re-engagement is sanctioned
+by this ADR's own Status triggers (servo 006 DONE; a built consumer in
+`/servo:design-eval`). **Option D's tight bug/refactor exit-code binding (§2–§5)
+is untouched and stays PARKED** — its demand trigger (≥2 real eval refactors) and
+consumers (`bug.py`/`refactor.py`) remain unmet; spec 072 builds the discovery
+pull-hint, not the oracle binding.
+
 ## Context
 
 jig now has a **family of three gated-evidence lifecycles**, all mirroring
@@ -363,8 +379,14 @@ dispatch) plus the not-yet-built jig→servo pull-hint.
 
 - **The whole ADR is parked** on the demand trigger / a consumer / servo 006
   (see Status).
-- **Build the jig→servo `slice-land` pull-hint** (the planned reciprocal that
-  does not yet exist) — a prerequisite of §5 discovery.
+- **Build the jig→servo `slice-land` pull-hint** — the planned reciprocal
+  servo's README asserts. **Now being built as
+  [spec 072](../specs/072-servo-pull-hint/spec.md)** (072-01 present-case
+  advisory pointing at the post-`ADR-0008` artifact shape, implementation-ready;
+  072-02 missing-case suggestion, decision-gated on §5 — see Open Questions).
+  Advisory text only — distinct from, and not a prerequisite of, §5's
+  oracle-binding *discovery* (offering `servo` as an oracle value in
+  bug/refactor records), which stays parked with the rest of Option D.
 - **Extract a shared `_common/lifecycle.py` transition-gate engine** across
   `spec-workflow` / `bug.py` / `refactor.py` (ADR-0002 / ADR-0003
   rule-of-three) — governed by ADR-0023; triggered by the third concrete
