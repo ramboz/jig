@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 READ_ATTRIBUTION_LOG = "context-growth-read-events.jsonl"
