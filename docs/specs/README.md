@@ -224,7 +224,7 @@
 | [071-design-review-pass](071-design-review-pass/spec.md) | 071-01 — design-review-pass | **DONE** |  |
 | [072-servo-pull-hint](072-servo-pull-hint/spec.md) | 072-01 — present-infra-hint | DRAFT |  |
 | [072-servo-pull-hint](072-servo-pull-hint/spec.md) | 072-02 — unscaffolded-suggestion | DRAFT |  |
-| [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-01 — reader honors frontmatter status | DRAFT |  |
+| [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-01 — reader honors frontmatter status | **DONE** |  |
 | [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-02 — writer stamps frontmatter status | DRAFT |  |
 
 ## Deferred slices

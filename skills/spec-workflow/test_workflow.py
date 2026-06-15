@@ -1496,6 +1496,155 @@ def _matches_full(*tokens):
     return _m
 
 
+class LookupAdrAcceptedTests(unittest.TestCase):
+    """Slice 073-01 / ADR-0026: `_lookup_adr_accepted` resolves an ADR's
+    status frontmatter-first, prose-fallback, with `Superseded` treated as
+    NOT accepted in BOTH paths (fixes the prose-only bug where a superseded
+    ADR — e.g. adr-0002 / adr-0008 — read as satisfied)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-adrstatus-")
+        self.decisions = Path(self.tmpdir) / "docs" / "decisions"
+        self.decisions.mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_adr(self, num: str, slug: str, text: str) -> Path:
+        path = self.decisions / f"adr-{num}-{slug}.md"
+        path.write_text(text)
+        return path
+
+    # --- AC1: frontmatter status: Accepted → satisfied (no prose consult) ---
+    def test_frontmatter_accepted_satisfied(self):
+        self._write_adr(
+            "0100", "fm-accepted",
+            "---\nstatus: Accepted\n---\n\n# ADR-0100\n\n## Status\n\n"
+            "Accepted (2026-06-15)\n\n## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0100")
+        self.assertTrue(ok, f"expected satisfied; reason={reason}")
+
+    def test_frontmatter_accepted_ignores_absent_prose_status(self):
+        # Frontmatter wins: even with NO prose `## Status` section, an
+        # `status: Accepted` frontmatter is satisfied (no prose consult).
+        self._write_adr(
+            "0101", "fm-accepted-no-prose",
+            "---\nstatus: Accepted\n---\n\n# ADR-0101\n\n## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0101")
+        self.assertTrue(ok, f"expected satisfied; reason={reason}")
+
+    # --- AC2: frontmatter Superseded / Proposed → not satisfied ---
+    def test_frontmatter_superseded_not_satisfied_names_superseder(self):
+        self._write_adr(
+            "0102", "fm-superseded",
+            "---\nstatus: Superseded\n---\n\n# ADR-0102\n\n## Status\n\n"
+            "Accepted (2026-01-01)\n\n"
+            "Superseded by [ADR-0200](./adr-0200-newer.md) (2026-06-15)\n\n"
+            "## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0102")
+        self.assertFalse(ok)
+        # Names the superseder pulled from the prose `Superseded by` line.
+        self.assertIn("0200", reason)
+
+    def test_frontmatter_superseded_no_prose_line_generic_reason(self):
+        # Superseded in frontmatter but no prose `Superseded by` line → still
+        # not satisfied, with a generic superseded reason.
+        self._write_adr(
+            "0103", "fm-superseded-bare",
+            "---\nstatus: Superseded\n---\n\n# ADR-0103\n\n## Status\n\n"
+            "Accepted (2026-01-01)\n\n## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0103")
+        self.assertFalse(ok)
+        self.assertIn("supersed", reason.lower())
+
+    def test_frontmatter_proposed_not_satisfied_names_state(self):
+        self._write_adr(
+            "0104", "fm-proposed",
+            "---\nstatus: Proposed\n---\n\n# ADR-0104\n\n## Status\n\n"
+            "Proposed (2026-06-15)\n\n## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0104")
+        self.assertFalse(ok)
+        self.assertIn("Proposed", reason)
+
+    # --- AC3: no frontmatter status → prose fallback, plain Accepted ---
+    def test_no_frontmatter_status_prose_accepted_satisfied(self):
+        # Legacy shape: frontmatter present but no `status:` field; prose
+        # `Accepted (date)` only → satisfied via the unchanged prose scan.
+        self._write_adr(
+            "0105", "prose-accepted",
+            "---\ndependencies: []\nlast_verified: 2026-06-15\n---\n\n"
+            "# ADR-0105\n\n## Status\n\nAccepted (2026-06-15)\n\n"
+            "## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0105")
+        self.assertTrue(ok, f"expected satisfied; reason={reason}")
+
+    def test_no_frontmatter_block_at_all_prose_accepted_satisfied(self):
+        # Truly frontmatter-less ADR → prose fallback still applies.
+        self._write_adr(
+            "0106", "no-frontmatter",
+            "# ADR-0106\n\n## Status\n\nAccepted (2026-06-15)\n\n"
+            "## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0106")
+        self.assertTrue(ok, f"expected satisfied; reason={reason}")
+
+    # --- AC4: prose fallback recognizes Superseded (the bug fix) ---
+    def test_prose_fallback_superseded_with_accepted_line_not_satisfied(self):
+        # Mirrors real adr-0002 / adr-0008: no frontmatter `status:`, prose
+        # `## Status` has BOTH `Accepted (date)` AND `Superseded by …`. The
+        # old reader matched `^Accepted` and wrongly passed; now → not
+        # satisfied, reason names the superseder.
+        self._write_adr(
+            "0107", "prose-superseded",
+            "---\ndependencies: []\nlast_verified: 2026-06-15\n---\n\n"
+            "# ADR-0107\n\n## Status\n\nAccepted (2026-01-01)\n\n"
+            "Superseded by [ADR-0210](./adr-0210-replacement.md) (2026-06-15)\n\n"
+            "## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0107")
+        self.assertFalse(ok, "superseded prose ADR must NOT be satisfied")
+        self.assertIn("0210", reason)
+
+    # --- AC5: diagnostic parity — reasons name the ADR file ---
+    def test_reason_names_adr_file_frontmatter_superseded(self):
+        path = self._write_adr(
+            "0108", "fm-superseded-named",
+            "---\nstatus: Superseded\n---\n\n# ADR-0108\n\n## Status\n\n"
+            "Accepted (2026-01-01)\n\n"
+            "Superseded by [ADR-0220](./adr-0220-x.md) (2026-06-15)\n\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0108")
+        self.assertFalse(ok)
+        self.assertIn(path.name, reason)
+
+    def test_reason_names_adr_file_frontmatter_proposed(self):
+        path = self._write_adr(
+            "0109", "fm-proposed-named",
+            "---\nstatus: Proposed\n---\n\n# ADR-0109\n\n## Status\n\n"
+            "Proposed (2026-06-15)\n\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0109")
+        self.assertFalse(ok)
+        self.assertIn(path.name, reason)
+
+    def test_reason_names_adr_file_prose_superseded(self):
+        path = self._write_adr(
+            "0110", "prose-superseded-named",
+            "# ADR-0110\n\n## Status\n\nAccepted (2026-01-01)\n\n"
+            "Superseded by [ADR-0230](./adr-0230-y.md) (2026-06-15)\n\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0110")
+        self.assertFalse(ok)
+        self.assertIn(path.name, reason)
+
+
 class ReserveSpecTests(unittest.TestCase):
     """Slice 003-03: `workflow.py new <slug>` reserves the next free
     spec number by committing — and by default pushing — a stub

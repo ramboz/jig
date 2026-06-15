@@ -721,23 +721,82 @@ def _lookup_slice_status(specs_dir: Path, fragment: str,
 
 
 def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
-    """Find docs/decisions/adr-<num>-*.md and verify its `## Status`
-    section says Accepted. Returns (ok, reason)."""
+    """Find docs/decisions/adr-<num>-*.md and verify it is Accepted for
+    dependency purposes. Returns (ok, reason).
+
+    Resolution is **frontmatter-first, prose-fallback** (ADR-0026):
+
+      1. If the ADR's frontmatter carries a `status:` field, it is
+         canonical — satisfied iff `status == "Accepted"` (exact,
+         case-sensitive). `Superseded` / `Proposed` / anything else →
+         not satisfied, with a human-readable reason naming the state
+         (and, for `Superseded`, the superseder pulled from the prose
+         `Superseded by` line when present). The prose `^Accepted` scan
+         is NOT consulted in this branch.
+      2. If there is no frontmatter `status:` field (every legacy ADR
+         authored before ADR-0026), fall back to the existing prose
+         `## Status` scan — but treat a `Superseded by` line in that
+         section as NOT accepted even when an `Accepted (date)` line is
+         also present (fixes the prose-only bug on e.g. adr-0002 /
+         adr-0008, where `supersede` leaves the `Accepted` line in
+         place). Only when there is no `Superseded by` line does the
+         `^Accepted` check decide.
+
+    `Superseded`-detection is a minimal inline `Superseded by` line
+    check — NOT a lift of adr.py's `_classify_status`. Per jig's
+    rule-of-three extraction convention (ADR-0002) this reader is only
+    the second place needing prose Superseded-vs-Accepted logic;
+    extraction waits for a third caller.
+    """
     if not decisions_dir.is_dir():
         return False, "docs/decisions/ not found"
     candidates = sorted(decisions_dir.glob(f"adr-{num}-*.md"))
     if not candidates:
         return False, "ADR file not found under docs/decisions/"
+    name = candidates[0].name
     adr_text = candidates[0].read_text()
+
+    # Isolate the prose `## Status` section once (used by both branches:
+    # the frontmatter branch reads the `Superseded by` superseder from it,
+    # the prose branch decides on it).
     sm = re.search(r"(?m)^##\s+Status\s*$", adr_text)
-    if not sm:
-        return False, f"{candidates[0].name} has no '## Status' section"
-    rest = adr_text[sm.end():]
-    nxt = re.search(r"(?m)^##\s", rest)
-    section = rest[: nxt.start()] if nxt else rest
+    if sm:
+        rest = adr_text[sm.end():]
+        nxt = re.search(r"(?m)^##\s", rest)
+        section = rest[: nxt.start()] if nxt else rest
+    else:
+        section = None
+
+    # Pull the superseder (e.g. `ADR-0200`) from a prose `Superseded by`
+    # line when one is present, so the not-satisfied reason can name it.
+    superseder = None
+    if section is not None:
+        sup = re.search(
+            r"(?im)^Superseded\s+by\s+\[(ADR-\d{1,4})\]", section
+        )
+        if sup:
+            superseder = sup.group(1)
+
+    # (1) Frontmatter-first: when `status:` is present, it is canonical.
+    fields, _ = parse_frontmatter(adr_text)
+    if "status" in fields:
+        status = fields["status"]
+        if status == "Accepted":
+            return True, "accepted"
+        if status == "Superseded":
+            if superseder:
+                return False, f"{name} is Superseded by {superseder}"
+            return False, f"{name} is Superseded"
+        return False, f"{name} is {status} (not Accepted)"
+
+    # (2) Prose fallback (legacy ADRs with no frontmatter `status:`).
+    if section is None:
+        return False, f"{name} has no '## Status' section"
+    if superseder:
+        return False, f"{name} is Superseded by {superseder}"
     if re.search(r"(?m)^Accepted\b", section):
         return True, "accepted"
-    return False, f"{candidates[0].name} is not Accepted"
+    return False, f"{name} is not Accepted"
 
 
 # ---------- Slice 045-03: review-evidence transition gate (ADR-0014 §5) ----------
