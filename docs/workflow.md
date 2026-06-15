@@ -61,6 +61,16 @@ still `IN_PROGRESS`, naming the holder. The claim is **local by default**;
 `REVIEWED` and on any back-transition; `--release --reason "<why>"`
 force-clears a stale claim and logs it to the slice's `## Release log`.
 
+**Worktree baseline (suggestion).** Reservations from `workflow.py new` and
+`--push` slice claims land on `origin/main` but don't advance your local
+`main`, so a worktree forked from a stale local `main` silently misses
+already-shipped work. If you work in worktrees, set `worktree.baseRef:
+"fresh"` in `~/.claude/settings.json` so Claude Code forks each one from
+`origin/HEAD` (the remote tip your own pushes keep current) rather than local
+`main`. Mechanism, verification, and fallback:
+[memory/learnings.md](memory/learnings.md) → "Worktrees fork off stale local
+`main`".
+
 ## SPIDR splitting
 
 All specs are SPIDR-split before implementation begins:
