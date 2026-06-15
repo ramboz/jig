@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
-dependencies: [adr-0014, adr-0022]
-last_verified: 2026-06-12
+status: DONE
+dependencies: [adr-0014]
+last_verified: 2026-06-15
 arch_review: true  # adds a public review-pass surface + gate wiring (ADR-0014)
 ---
 
@@ -70,10 +70,14 @@ ADR-0022 OQ2: attest-only, schema-only, no bespoke servo interface.
       pass is the integration; Option D stays parked).
 - [x] The *why* is captured by this spec + ADR-0022's resolved OQ (not an
       ADR-0014 edit).
-- [ ] Formal REVIEWED gate (compliance/craft/arch verdicts on THIS slice) — the
-      remaining lifecycle ceremony; out of Phase-5 scope (which was to build the
-      pass), left for the orchestrator to run.
-- [ ] Deviation log produced under this slice heading.
+- [x] Formal REVIEWED gate (compliance/craft/arch verdicts on THIS slice) —
+      recorded **retroactively** 2026-06-15 after the work was found merged
+      (PR #52) while still IN_PROGRESS with no evidence. Three independent
+      read-only `jig:reviewer` passes (compliance/craft/arch) all `pass`;
+      evidence at `reviews/slice-01-{compliance,craft,arch}.md`; gate cleared
+      IN_PROGRESS → REVIEWED.
+- [x] Deviation log produced under this slice heading (see below; extended at
+      the 2026-06-15 reconciliation).
 
 **Anti-horizontal-phasing check:** After this slice, flagging a slice
 `design_review: true` and transitioning it to REVIEWED requires — and a recorded
@@ -122,6 +126,45 @@ The original spec is preserved above. Implementation notes:
   place and need **upstreaming** to the real jig repo separately (alongside the
   Phase-4 servo `capture.mjs` fix and the Phase-6-prep servo `score.py` CLI
   transport on the servo side).
+  **UPDATE 2026-06-15:** the upstreaming happened — this code merged to the jig
+  repo as PR #52 (commit `1d23958`). The note above is preserved as the original
+  implementation record; it no longer describes current state.
 - **First consumer:** food-log slice 002-01 (servo design-fidelity eval) — a
   slice there can now set `design_review: true` and the REVIEWED gate will
   require an attested `reviews/slice-NN-design-review.md` verdict.
+
+#### Reconciliation addendum — 2026-06-15 (retroactive close-out)
+
+This slice was found **merged (PR #52) while still IN_PROGRESS with no review
+evidence on disk** — it never went through jig's lifecycle gate because the work
+was authored in a vendored jig copy (servo/food-log workspace) and upstreamed via
+a manual PR, a path that bypasses both the ADR-0014 transition gate and the
+`land.py` readiness gate (root-cause diagnosis captured in the user's memory note
+`jig-review-gate-offpath-bypass`; the out-of-band CI/branch-protection prevention
+fix is parked pending user direction). Closed out properly here:
+
+- **Three independent review passes** (compliance/craft/arch, all `pass`) recorded
+  at `reviews/slice-01-{compliance,craft,arch}.md`; gate cleared IN_PROGRESS →
+  REVIEWED → RECONCILED → DONE.
+- **Nit-fixes applied at reconciliation** (surfaced by those passes):
+  1. `skills/independent-review/SKILL.md` — corrected a blockquote copied from
+     frame-critique that wrongly claimed slice 064-04 derives `design_review`
+     "mechanically". `design_review` is **hand-set** (no derive trigger, unlike
+     `frame_review`); the caveat now says so.
+  2. `skills/spec-workflow/test_workflow.py` — added the `design_review` kwarg to
+     `_GateFixture.write_slice` and a blocked/clears/ignores **REVIEWED-gate test
+     triad** for `design-review` (mirroring the arch / code-health siblings).
+     This makes AC#2's "gated/ungated REVIEWED transition" coverage claim
+     **literally true** (it was only transitively covered before) and satisfies
+     AC3's "provable by transitioning a flagged vs unflagged slice".
+- **Parked nit:** the four near-identical `_*_review_flag` helpers — parametrize
+  on the fifth gated pass (`docs/refinement-todo.md`).
+- **Dependency correction (for DONE):** the frontmatter `dependencies:` was
+  `[adr-0014, adr-0022]`, which blocked DONE because **ADR-0022 is deliberately
+  PARKED** (Proposed, frame-critique `needs-changes`, ahead of demand). But
+  ADR-0022's own body states this slice's integration question was *"answered
+  independently of Option D … on the existing ADR-0014 rails"* — so 071-01's
+  load-bearing dependency is **ADR-0014** (the review-evidence model it extends),
+  and ADR-0022 is *resolved-by* this slice (OQ2), **not** depended-on. Corrected
+  to `dependencies: [adr-0014]`. This fixes a mis-modeled dependency; it does not
+  bypass any review gate. ADR-0022 stays parked under its own demand triggers.

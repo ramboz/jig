@@ -236,9 +236,11 @@ richer-skill detection** — there is no external "design-review" skill category
 the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
 (servo design-fidelity eval).
 
-> The flag is set by hand today. Slice 064-04 derives it mechanically from
-> the grounding output and surfaces the pass on the dispatch plan so it
-> isn't a dead loop.
+> The `design_review` flag is set **by hand** on a slice/spec whose deliverable
+> is validated by an external design-fidelity eval — there is **no** mechanical
+> derivation (unlike `frame_review`, which slice 064-04 derives from the spec's
+> grounding). Once set, `workflow.py session-plan` surfaces the pass on the
+> dispatch plan so it isn't a dead loop.
 
 ### Reconciliation review
 

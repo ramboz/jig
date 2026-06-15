@@ -5197,6 +5197,7 @@ class _GateFixture(unittest.TestCase):
                     slug: str = "thing", arch_review: bool = False,
                     code_health_review: bool = False,
                     frame_review: bool = False,
+                    design_review: bool = False,
                     deviation_log: bool = False,
                     dod_lines: list = None,
                     label: str = None) -> None:
@@ -5211,6 +5212,8 @@ class _GateFixture(unittest.TestCase):
             fm.append("code_health_review: true")
         if frame_review:
             fm.append("frame_review: true")
+        if design_review:
+            fm.append("design_review: true")
         fm.append("---")
         body = ["", f"## Slice {label}", "", "**Goal:** placeholder.", ""]
         if dod_lines:
@@ -5464,6 +5467,39 @@ class TransitionReviewedGateTests(_GateFixture):
                          "REVIEWED", gate=True)
         self.assertEqual(r.returncode, 0,
                          f"code-health should not be required; stderr={r.stderr}")
+
+    # --- design-review: required only when flagged (slice 071-01 / ADR-0022) ---
+    def test_reviewed_blocked_when_design_flagged_but_missing(self):
+        self.write_slice("IN_PROGRESS", design_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        # design-review evidence absent though the slice declares the flag.
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("design-review", r.stderr.lower())
+        self.assertEqual(self._status_in_slice(), "IN_PROGRESS")
+
+    def test_reviewed_clears_when_design_flagged_and_present(self):
+        self.write_slice("IN_PROGRESS", design_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        self.write_evidence("design-review")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"expected REVIEWED to clear; stderr={r.stderr}")
+
+    def test_reviewed_ignores_design_when_not_flagged(self):
+        # BACK-COMPAT: a slice WITHOUT design_review must NOT suddenly require
+        # a design-review verdict.
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertEqual(r.returncode, 0,
+                         f"design-review should not be required; stderr={r.stderr}")
 
 
 class TransitionReconciledGateTests(_GateFixture):
