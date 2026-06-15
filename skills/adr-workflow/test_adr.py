@@ -37,6 +37,18 @@ def _import_adr_module():
     return mod
 
 
+def _import_workflow_module():
+    """Load spec-workflow/workflow.py as a module so slice 073-02's
+    end-to-end test (AC #6) can call the reader `_lookup_adr_accepted`
+    directly. Mirrors `_import_adr_module`'s importlib pattern."""
+    import importlib.util
+    workflow_py = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
+    spec = importlib.util.spec_from_file_location("workflow", workflow_py)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def run_adr(*args: str, cwd: Path = None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
@@ -1143,6 +1155,157 @@ class IndexSupersededTests(unittest.TestCase):
         self.assertIn("(adr-0001-old.md)", content)
 
 
+# ---------- Slice 073-02: writer stamps frontmatter status (ADR-0026) -------
+
+
+def _frontmatter_status(text: str) -> str:
+    """Read the frontmatter `status:` field value from an ADR's text, or
+    '' when absent. Local mirror of the reader's parse so these tests pin
+    the on-disk frontmatter independently of workflow.py."""
+    mod = _import_adr_module()
+    fields, _ = mod._parse_frontmatter(text)
+    return fields.get("status", "")
+
+
+class WriterStampsFrontmatterStatusTests(unittest.TestCase):
+    """Slice 073-02 (ADR-0026): `adr.py` writes a canonical `status:`
+    frontmatter field in lockstep with the prose `## Status` line on
+    new / accept / supersede.
+
+    `cmd_accept` / `cmd_supersede` need no git, so they run in a bare temp
+    dir. `cmd_new` is the no-git scaffolder. The frame-critique accept-gate
+    (spec 064-05) is cleared by recording a passing verdict for ADRs created
+    via `cmd_new` (which stamp `frame_review: true`)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-fmstatus-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        self.adr = _import_adr_module()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ---- AC #1: new stamps `status: Proposed` ----
+
+    def test_new_stamps_status_proposed_in_frontmatter(self):
+        """A freshly created ADR carries frontmatter `status: Proposed`
+        (inherited from the template) alongside the prose Proposed line."""
+        target = self.adr.cmd_new(self.adrs_dir, "fresh-decision", "")
+        content = target.read_text()
+        self.assertEqual(_frontmatter_status(content), "Proposed",
+                         "new ADR must carry frontmatter status: Proposed")
+        # Prose line and the existing frame_review stamp coexist.
+        self.assertIn(f"Proposed ({TODAY})", content)
+        self.assertIn("frame_review: true", content)
+
+    # ---- AC #2: accept sets `status: Accepted` ----
+
+    def test_accept_sets_status_accepted_in_frontmatter(self):
+        """`accept` sets frontmatter `status: Accepted` in the same write
+        that flips the prose to `Accepted (date)`."""
+        target = self.adr.cmd_new(self.adrs_dir, "to-accept", "")
+        number = self.adr._parse_adr_number(target.name)
+        _write_adr_frame_verdict(self.adrs_dir, f"{number:04d}", "pass")
+        self.adr.cmd_accept(self.adrs_dir, f"{number:04d}")
+        content = target.read_text()
+        self.assertEqual(_frontmatter_status(content), "Accepted")
+
+    # ---- AC #3: supersede sets `status: Superseded` on the OLD ADR only ----
+
+    def test_supersede_sets_status_superseded_on_old_only(self):
+        """`supersede` sets the OLD ADR's frontmatter `status: Superseded`;
+        the NEW (superseding) ADR retains `status: Accepted`."""
+        old, new = self._two_accepted_adrs()
+        old_path, new_path = self.adr.cmd_supersede(
+            self.adrs_dir, old, new)
+        self.assertEqual(_frontmatter_status(old_path.read_text()),
+                         "Superseded",
+                         "old ADR frontmatter must become Superseded")
+        self.assertEqual(_frontmatter_status(new_path.read_text()),
+                         "Accepted",
+                         "new (superseding) ADR retains Accepted")
+
+    # ---- AC #5: synchronized-write lock (regression guard) ----
+
+    def test_supersede_frontmatter_and_prose_cannot_diverge(self):
+        """ADR-0026 sync-lock: after supersede, the OLD ADR has BOTH
+        frontmatter `status: Superseded` AND the prose `Superseded by` line
+        — they cannot diverge."""
+        old, new = self._two_accepted_adrs()
+        old_path, _ = self.adr.cmd_supersede(self.adrs_dir, old, new)
+        content = old_path.read_text()
+        self.assertEqual(_frontmatter_status(content), "Superseded")
+        self.assertRegex(
+            content,
+            rf"Superseded by \[ADR-{new}\]\(\./adr-{new}-[^)]+\) \({TODAY}\)",
+            "prose Superseded-by line must accompany frontmatter Superseded",
+        )
+
+    def test_accept_frontmatter_and_prose_cannot_diverge(self):
+        """ADR-0026 sync-lock (mirror): after accept, the ADR has BOTH
+        frontmatter `status: Accepted` AND the prose `Accepted (date)`."""
+        target = self.adr.cmd_new(self.adrs_dir, "sync-accept", "")
+        number = self.adr._parse_adr_number(target.name)
+        _write_adr_frame_verdict(self.adrs_dir, f"{number:04d}", "pass")
+        self.adr.cmd_accept(self.adrs_dir, f"{number:04d}")
+        content = target.read_text()
+        self.assertEqual(_frontmatter_status(content), "Accepted")
+        self.assertIn(f"Accepted ({TODAY})", content)
+
+    # ---- AC #6: end-to-end through 073-01's reader (frontmatter) ----
+
+    def test_end_to_end_resolves_through_reader_from_frontmatter(self):
+        """created → accepted → superseded resolves correctly through
+        073-01's `_lookup_adr_accepted` *from frontmatter*: satisfied after
+        accept, not satisfied after supersede."""
+        workflow = _import_workflow_module()
+
+        # Create + accept the OLD ADR.
+        old_target = self.adr.cmd_new(self.adrs_dir, "e2e-old", "")
+        old_num = f"{self.adr._parse_adr_number(old_target.name):04d}"
+        _write_adr_frame_verdict(self.adrs_dir, old_num, "pass")
+        self.adr.cmd_accept(self.adrs_dir, old_num)
+
+        # After accept: reader (frontmatter-first) says satisfied.
+        ok, reason = workflow._lookup_adr_accepted(self.adrs_dir, old_num)
+        self.assertTrue(ok, f"expected accepted; reason={reason!r}")
+
+        # Need a second Accepted ADR to supersede with.
+        new_target = self.adr.cmd_new(self.adrs_dir, "e2e-new", "")
+        new_num = f"{self.adr._parse_adr_number(new_target.name):04d}"
+        _write_adr_frame_verdict(self.adrs_dir, new_num, "pass")
+        self.adr.cmd_accept(self.adrs_dir, new_num)
+
+        # Supersede the old by the new.
+        self.adr.cmd_supersede(self.adrs_dir, old_num, new_num)
+
+        # After supersede: reader says NOT satisfied for the old ADR.
+        ok, reason = workflow._lookup_adr_accepted(self.adrs_dir, old_num)
+        self.assertFalse(ok, "superseded ADR must not resolve as accepted")
+        self.assertIn("Superseded", reason)
+        # The superseding ADR itself still resolves as accepted.
+        ok_new, _ = workflow._lookup_adr_accepted(self.adrs_dir, new_num)
+        self.assertTrue(ok_new, "the superseding ADR remains accepted")
+
+    # ---- fixtures ----
+
+    def _two_accepted_adrs(self) -> tuple:
+        """Create two ADRs via cmd_new, clear each frame-critique gate, and
+        accept both. Returns (old_number, new_number) as zero-padded strings.
+        Uses the real new→accept path so the frontmatter status the reader
+        sees is exactly what the writer produces."""
+        old_target = self.adr.cmd_new(self.adrs_dir, "old-decision", "")
+        new_target = self.adr.cmd_new(self.adrs_dir, "new-decision", "")
+        old = f"{self.adr._parse_adr_number(old_target.name):04d}"
+        new = f"{self.adr._parse_adr_number(new_target.name):04d}"
+        for num in (old, new):
+            _write_adr_frame_verdict(self.adrs_dir, num, "pass")
+            self.adr.cmd_accept(self.adrs_dir, num)
+        return old, new
+
+
 # ---------- Supersede SKILL.md surface (slice 005-02 AC #5) ----------
 
 
@@ -1240,6 +1403,18 @@ class SkillSurfaceTests(unittest.TestCase):
         ):
             self.assertIn(header, content,
                           f"template missing section header: {header}")
+
+    def test_template_frontmatter_carries_status_proposed(self):
+        """Slice 073-02 AC #4 (ADR-0026): the ADR template's frontmatter
+        block carries `status: Proposed`, so new ADRs inherit it at render
+        time (closing the docs/conventions.md:67 drift). Asserted inside the
+        leading `---`…`---` block, not merely present somewhere in the file."""
+        content = TEMPLATE.read_text()
+        fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
+        self.assertIsNotNone(
+            fm_match, "template must open with a `---` frontmatter block")
+        self.assertIn("status: Proposed", fm_match.group(1),
+                      "template frontmatter must carry `status: Proposed`")
 
 
 # ---------- Inbox 2026-05-12: abbreviation handling in _extract_description ----
