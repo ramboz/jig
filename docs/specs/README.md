@@ -227,6 +227,9 @@
 | [072-servo-pull-hint](072-servo-pull-hint/spec.md) | 🔬 072-03 — servo-plugin-detection-spike | **DONE** | Spike settling Q2: **NO-GO on servo-*plugin* auto-detection** from `land.py`. No signal is at once documented/supported, install-method-robust, host-agnostic, subprocess-free, and boundary-respecting (`installed_plugins.json` undocumented + misses local-clone servo incl. the user's own; `CLAUDE_PLUGIN_ROOT`=jig's own dir; `claude plugin list`=subprocess; `plugin.json` dep would force servo on all jig users). Reviewer corroborated the local-clone gap against the live registry. Direction (human): reciprocal servo-side breadcrumb (reshapes 072-02). |
 | [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-01 — reader honors frontmatter status | **DONE** |  |
 | [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-02 — writer stamps frontmatter status | **DONE** | ADR-0026: ADR `status:` is canonical in frontmatter. `adr.py` new/accept/supersede stamp it (Proposed/Accepted/old→Superseded) **in the same single atomic write** as the prose `## Status` mutation — no second write pass (the drift vector). Template carries `status: Proposed`. **No backfill**: legacy ADRs (no `status:`, e.g. adr-0026 itself) grandfather via the reader's prose fallback (073-01). |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-01 - phase-mode vocabulary and docs | DEFERRED |  |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-02 - session-plan mode hints | DEFERRED |  |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | DEFERRED |  |
 
 ## Deferred slices
 
@@ -254,3 +257,6 @@
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | First number collision that slips past the |
 | [060-code-health-capability](060-code-health-capability/spec.md) | 060-06 — Tier-2 scaffold-the-floor (opt-in) | Tier-1 (slices 01–05) has shipped and proven out on jig, **and** a user/project explicitly wants jig to *provision* a default code-health config rather than only drive an existing one. |
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | (a) slice 02's trace links exist and are populated across a real spec corpus, AND (b) a genuine mid-flight use-case addition that intersects existing specs has been observed (a real conflict/reframe event), so the triage classifier can be validated against an actual case rather than an imagined one. Mirrors [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md) Option C's revisit trigger. |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-01 - phase-mode vocabulary and docs | Resume when Codex host-adapter work from spec 033 is |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-02 - session-plan mode hints | Resume after 074-01 lands and a concrete host adapter |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | Resume when spec 033's Codex scaffold/plugin slices |
