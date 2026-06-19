@@ -149,7 +149,7 @@ $ python3 -c "import sys; sys.path.insert(0, 'skills/_common'); \
 001-05 — cdp-fulfilment-router-puppeteer-measurement-runner
 001-06 — cwv-oracle-verdict-assembly-evidence-payload-feedback-endpoint
 
-$ python3 scripts/spec_lint.py docs/specs/001-m1-eds-thin-e2e/spec.md
+$ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py" docs/specs/001-m1-eds-thin-e2e/spec.md
 ...
 ✓ No AC contradictions detected.
 ✓ No AC contradictions detected.

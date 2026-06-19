@@ -9,7 +9,7 @@ description: >
   cross-artifact alignment, find drift in this spec, or audit this spec
   for principle violations. Do not use for: pre-DRAFT ambiguity scanning
   (use `/jig:clarify` instead); structural frontmatter or slice-numbering
-  validation (use `scripts/spec_lint.py` instead); spec-compliance review
+  validation (use `spec_lint.py` instead); spec-compliance review
   of a finished slice (use `/jig:independent-review` instead).
 user-invocable: true
 ---
@@ -62,13 +62,13 @@ the right one:
   READY_FOR_REVIEW; reach for this skill once the spec body is stable
   enough to cross-check against ADRs, architecture.md, and the
   principles list.
-- **`scripts/spec_lint.py`** — structural linter (frontmatter shape,
+- **`spec_lint.py`** — structural linter (frontmatter shape,
   slice numbering, file naming). Lint is **structural**; this skill is
   **semantic**. Lint catches "slice file missing `status:` frontmatter";
   this skill catches "slice contradicts ADR-0003" or "spec proposes a
   fourth subagent type". The two layers are complementary — run
-  `scripts/spec_lint.py` first to fix structural issues, then run this
-  skill to find semantic drift.
+  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py"` first to fix
+  structural issues, then run this skill to find semantic drift.
 - **`/jig:independent-review`** — sibling skill for **spec-vs-implementation
   reviews**. Independent-review reads a finished slice's deliverables
   and verifies they meet the ACs. This skill reads the spec body and
@@ -85,7 +85,7 @@ the right one:
   reach for this skill while the spec body is being authored or
   refined.
 
-Rule of thumb: **draft a spec → `/jig:clarify`. Structural lint → `scripts/spec_lint.py`.
+Rule of thumb: **draft a spec → `/jig:clarify`. Structural lint → `spec_lint.py`.
 Cross-artifact drift → this skill. Review the implementation → `/jig:independent-review`.
 Review the PR diff → `/jig:pr-review`.**
 
@@ -367,7 +367,7 @@ _Scanned 2026-MM-DD; <N> findings._
   drift across artifacts that should already be aligned. The two
   compose: run `/jig:clarify` early in DRAFT, run this skill before
   or during READY_FOR_REVIEW.
-- **`scripts/spec_lint.py`** — structural lint (frontmatter shape,
+- **`spec_lint.py`** — structural lint (frontmatter shape,
   slice numbering, file naming). Complementary, not overlapping.
   Lint catches "slice file missing `status:` frontmatter"; this
   skill catches "slice contradicts ADR-0003". Run lint first to
