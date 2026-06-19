@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-06-19
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -46,16 +46,19 @@ consuming project can actually run the lint the workflow tells it to run.
    project, relative to the project CWD) is unchanged.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; touched test modules + `spec_lint.py --all` + ruff
+      green on Python 3.14 (full suite not run on system 3.9 per the known
+      `zip(strict=)` gotcha — see Deviation log §5).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+      deferred during implementation. (N/A — out-of-scope find logged to
+      `docs/inbox.md`, no refinement-todo decision deferred.)
 
 ### Close-out (post-DONE)
 
@@ -75,5 +78,43 @@ that resolves — an end-to-end win, not just "the file is present."
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+1. **Plan adherence.** Implemented exactly as planned: `"scripts/spec_lint.py"`
+   added to `RELEASE_INCLUDE_SCRIPT_FILES` (AC1), a `test_spec_lint_shipped`
+   regression test in `scripts/test_build_release_zip.py` that goes red without
+   the entry (AC2), and `skills/migrate/SKILL.md:415` rewritten to
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py" …` with the
+   project-relative argument unchanged (AC3).
+
+2. **In-scope extras (comment accuracy).** Two comment-only edits beyond the
+   slice's named files kept the contract description honest now the allowlist
+   grew from three to four: the `RELEASE_INCLUDE_SCRIPT_FILES` comment in
+   `scripts/install_contract.py` (correctly noting spec_lint is pure-stdlib and
+   does NOT import `_common`, unlike the verifier trio), and a "these three" →
+   "allowlisted runtime modules" comment in `skills/scaffold-init/scaffold.py`.
+   `test_install_contract.py`'s allowlist pin was extended with the new entry.
+   No behavior change.
+
+3. **Reviewer findings folded in.** Compliance: pass, no issues. Craft: pass,
+   no blockers, two nits. Nit (a) — stale "runtime trio" wording in
+   `test_build_release_zip.py` (assertion message + a docstring line) now the
+   allowlist is four — **fixed in reconciliation** (lines 185/192 reworded to
+   "allowlisted modules" / "the RELEASE_INCLUDE_SCRIPT_FILES allowlist"). The
+   reconciliation review then caught a third stale "trio": the
+   `PackagedVerifierImportTests` docstring (~line 432) said "imports the verifier
+   trio", but that test's presence loop iterates the full (now-four)
+   `RELEASE_INCLUDE_SCRIPT_FILES` — so it was reworded to "asserts every
+   allowlisted module is present, and imports the verifier". Nit (b) —
+   `skills/migrate/SKILL.md:418`'s
+   `status-board` invocation uses a bare repo-relative path with the *same*
+   consuming-project resolvability gap — is a broader latent bug outside 075's
+   spec_lint reference inventory; **logged to `docs/inbox.md`** (2026-06-19,
+   `shipped-skills/bare-path-invocations`) rather than scope-crept here.
+
+4. **Architecture / conventions impact.** None — a one-line allowlist addition
+   plus reference fixes; no module boundaries or public contracts changed, no
+   ADR warranted.
+
+5. **Verification.** Touched test modules + `spec_lint.py --all` + `ruff`
+   green (see slice DoD). Full suite not run on the wrong Python (system 3.9
+   yields spurious `zip(strict=)` reds per the known gotcha); the implementer
+   verified on Python 3.14.

@@ -373,25 +373,37 @@ RELEASE_INCLUDE_FILES: tuple[str, ...] = (
     "LICENSE",
 )
 
-# Individual files under `scripts/` that are RUNTIME (not dev-only) and so
-# must ship in the release zip. `scripts/` is otherwise excluded by virtue of
-# not being in `RELEASE_INCLUDE_ROOTS` (it holds dev/CI tooling —
-# build_release_zip, run_tests, spec_lint, usage, validate_manifests — which
-# has no place in a user's plugin install). But scaffold-init's closing
-# completion self-check (slice 048-06) imports `verify_install` from
-# `<plugin-root>/scripts/` at runtime, and that module pulls in
-# `install_contract` + `scaffold_contract`. Without these three the
-# self-check crashes on every plugin install (the release zip never carried
-# `scripts/`). They are pure-stdlib, check the *target's* `.claude/` tree
-# (nothing is copied into the user's repo — they run from the plugin install
-# dir), and ship under their original `scripts/` path so the importing path
-# in scaffold.py needs no change. This is an allowlist on purpose: the
-# dev-only scripts stay out, and the contract is pinned by
+# Individual files under `scripts/` that must ship in the release zip.
+# `scripts/` is otherwise excluded by virtue of not being in
+# `RELEASE_INCLUDE_ROOTS` (it holds dev/CI tooling — build_release_zip,
+# run_tests, usage, validate_manifests — which has no place in a user's
+# plugin install). Two reasons land specific scripts here:
+#
+#   1. The runtime trio — `verify_install` + `install_contract` +
+#      `scaffold_contract`. scaffold-init's closing completion self-check
+#      (slice 048-06) imports `verify_install` from `<plugin-root>/scripts/`
+#      at runtime, and that module pulls in the other two. Without all three
+#      the self-check crashes on every plugin install (the release zip never
+#      carried `scripts/`). They check the *target's* `.claude/` tree
+#      (nothing is copied into the user's repo — they run from the plugin
+#      install dir).
+#   2. The spec-lint validator — `spec_lint` (slice 075-01). Several shipped
+#      skills (migrate, analyze) instruct the agent to run it as part of the
+#      spec-driven workflow, so it must resolve at
+#      `${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py` in a consuming project.
+#      Unlike the runtime trio it is pure-stdlib (argparse/re/sys/pathlib
+#      only — it does NOT import `_common`), so it ships with zero
+#      dependency drag.
+#
+# All ship under their original `scripts/` path so the importing path in
+# scaffold.py needs no change. This is an allowlist on purpose: the dev-only
+# scripts stay out, and the contract is pinned by
 # test_build_release_zip.py::test_runtime_scripts_only.
 RELEASE_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
     "scripts/verify_install.py",
     "scripts/install_contract.py",
     "scripts/scaffold_contract.py",
+    "scripts/spec_lint.py",
 )
 
 # (The directory-name exclusions live in `_EXCLUDED_DIR_NAMES` above. They are
@@ -399,9 +411,10 @@ RELEASE_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
 # reserved `fixtures/` name: top-level dev-only dirs (`scripts/`, `docs/`,
 # `.github/`, `.git/`, `.jig/`, `.claude/`) are already excluded by virtue of
 # not being listed in `RELEASE_INCLUDE_ROOTS`, so we don't name them in the
-# dir-name set — the three runtime modules under `scripts/` that scaffold-init
-# needs are re-included file-by-file via `RELEASE_INCLUDE_SCRIPT_FILES`; the
-# rest of `scripts/` stays out. Naming the top-level dirs in the dir-name set
+# dir-name set — the allowlisted modules under `scripts/` that the plugin
+# needs at runtime are re-included file-by-file via
+# `RELEASE_INCLUDE_SCRIPT_FILES`; the rest of `scripts/` stays out. Naming the
+# top-level dirs in the dir-name set
 # would also exclude nested same-named dirs that ARE runtime — e.g.
 # `hooks/scripts/` (the actual hook scripts) and `templates/docs/`
 # (scaffold-init's project template). `fixtures/` is reserved as test-data

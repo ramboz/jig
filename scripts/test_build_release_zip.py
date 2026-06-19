@@ -136,6 +136,19 @@ class InclusionTests(unittest.TestCase):
     def test_readme_present(self):
         self.assertIn("README.md", self.names)
 
+    def test_spec_lint_shipped(self):
+        """Slice 075-01 (AC #1 / AC #2): the dev-only spec-lint validator is
+        re-included in the release so the shipped migrate/analyze references
+        to it resolve in a consuming project (the original leak: skills told
+        the agent to run a script the plugin never shipped). Removing
+        `scripts/spec_lint.py` from `RELEASE_INCLUDE_SCRIPT_FILES` turns this
+        red."""
+        self.assertIn(
+            "scripts/spec_lint.py", self.names,
+            "release zip must ship scripts/spec_lint.py so the migrate/"
+            "analyze skill references to it resolve in a consuming project",
+        )
+
 
 # ---------------------------------------------------------------------------
 # AC #5 (e)–(f): explicit exclusions
@@ -158,22 +171,25 @@ class ExclusionTests(unittest.TestCase):
         )
 
     def test_runtime_scripts_only(self):
-        """`scripts/` is dev-only EXCEPT for the three runtime modules
-        scaffold-init imports at install time (verify_install +
-        install_contract + scaffold_contract). The zip must carry exactly
-        those three under `scripts/` and none of the dev/CI tooling
-        (build_release_zip, run_tests, spec_lint, usage, validate_manifests).
+        """`scripts/` is dev-only EXCEPT for the allowlisted modules: the
+        three runtime modules scaffold-init imports at install time
+        (verify_install + install_contract + scaffold_contract) plus the
+        pure-stdlib spec_lint validator the migrate/analyze skills tell the
+        agent to run (slice 075-01). The zip must carry exactly the
+        `RELEASE_INCLUDE_SCRIPT_FILES` set under `scripts/` and none of the
+        dev/CI tooling (build_release_zip, run_tests, usage,
+        validate_manifests).
         Pins the `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` allowlist
         (spec 069-01 re-homed it from build_release_zip) so a future dev
         script can't silently leak into the plugin install, and so the
-        runtime trio can't silently drop back out (the regression that
+        allowlisted modules can't silently drop back out (the regression that
         crashed scaffold-init's completion self-check on every packaged
         install — it shipped no `scripts/` at all)."""
         scripts_entries = {n for n in self.names if n.startswith("scripts/")}
         expected = set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES)
         self.assertEqual(
             scripts_entries, expected,
-            "zip's scripts/ entries must equal exactly the runtime trio; "
+            "zip's scripts/ entries must equal exactly the RELEASE_INCLUDE_SCRIPT_FILES allowlist; "
             f"got {sorted(scripts_entries)!r}, expected {sorted(expected)!r}",
         )
 
@@ -413,7 +429,8 @@ class PackagedVerifierImportTests(unittest.TestCase):
     install. The existing `smoke_test` imports the verifier from the SOURCE
     repo, not the extracted tree, so it never exercised this path.
 
-    This test extracts the built zip and imports the verifier trio from the
+    This test extracts the built zip, asserts every allowlisted
+    `scripts/` module is present, and imports the verifier from the
     EXTRACTED tree in a clean subprocess (no repo `scripts/` on `sys.path`),
     reproducing exactly what scaffold.py does on a real plugin install."""
 

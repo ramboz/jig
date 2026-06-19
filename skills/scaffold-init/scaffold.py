@@ -1591,7 +1591,8 @@ def main(argv: list[str]) -> int:
     #
     # The verifier modules (verify_install + install_contract +
     # scaffold_contract) live under `scripts/`, which is dev-only EXCEPT for
-    # these three — `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` lists them
+    # the allowlisted runtime modules —
+    # `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` lists this verifier trio
     # and the release builder's `iter_release_files` enumerator ships them in
     # the plugin install (they were absent before, which crashed this
     # self-check on every packaged install). The import is still
