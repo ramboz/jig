@@ -132,7 +132,7 @@ project-scoped-wins precedence; jig introduces no new arbiter.
 
 *Roster:*
 - `implementer`: TDD discipline, writes deliverables
-- `reviewer`: read-only, fresh context per review. Fires 1–3 times per slice under the multi-perspective post-implementation flow: once for compliance, once for craft (`pr-review`), and once for arch (`arch-review`) when the slice's frontmatter declares `arch_review: true`. Reused as the agent shape for all three passes — no `pr-reviewer` or `arch-reviewer` agent.
+- `reviewer`: read-only, fresh context per review. Fires once per review pass under the multi-perspective flow — always compliance + craft (`pr-review`) + reconciliation, plus the frontmatter-gated passes: arch (`arch_review: true`), code-health (`code_health_review: true`, spec 060-05), design-review (`design_review: true`, spec 071-01, REVIEWED stage), and frame-critique (`frame_review: true`, spec 064-03, the PRE-implementation READY_FOR_REVIEW gate). Reused as the agent shape for every pass — no per-pass `pr-reviewer` / `arch-reviewer` agent. The verdicts are durable evidence artifacts that gate the next transition ([ADR-0014](decisions/adr-0014-review-evidence-model.md)).
 - `architect`: rare, ADR-style output
 
 As of [spec 011-01 (plugin-self-install)](specs/011-plugin-self-install/spec.md),
@@ -144,6 +144,18 @@ as a Claude Code plugin (the bundled `jig` marketplace — renamed from
 `reviewer` deterministically when installed and degrades to
 `general-purpose` when running from source.
 
+### Decisions made since (pointers, not re-derivations)
+
+The decisions above are the original load-bearing spine through ~spec 016.
+Several structural decisions have landed since; rather than restate each, this
+section points at the canonical ADRs (see the [ADR index](decisions/) for the
+full set, currently through ADR-0027):
+
+- **Review-evidence gate** — [ADR-0014](decisions/adr-0014-review-evidence-model.md): review verdicts are durable artifacts under `docs/specs/NNN-slug/reviews/` that gate REVIEWED / RECONCILED / DONE transitions.
+- **Lifecycle-family spine** — [ADR-0023](decisions/adr-0023-lifecycle-family-spine.md): spec-workflow, bug-fix, and refactor are one governed family sharing a C1–C7 gated-evidence contract.
+- **Pluggable-oracle boundary** — [ADR-0022](decisions/adr-0022-pluggable-oracle-boundary.md): the attest-only seam between jig and an external eval (e.g. servo), where jig attests a frozen verdict rather than re-deriving it.
+- **Security floor** — [ADR-0013](decisions/adr-0013-security-floor-policy.md): the 5-part defense-in-depth floor every scaffolded project gets.
+
 ## Module boundaries
 
 Six top-level concerns, named in [product-vision.md § Core features](product-vision.md#core-features-prioritized) at the vision layer:
@@ -152,7 +164,8 @@ Six top-level concerns, named in [product-vision.md § Core features](product-vi
 - `agents/` — three subagent definitions (`implementer` / `reviewer` / `architect`)
 - `hooks/` — deterministic spine (`hooks.json` + Python 3 scripts under `hooks/scripts/`)
 - `templates/` — source templates that `scaffold-init` copies into new projects (CLAUDE.md, docs/, brief)
-- `scripts/` — Python helpers invoked by skills, one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py`, `land.py`, `migrate.py`, `scaffold.py`, plus `usage.py` (per-spec token/cost reporting, spec 056)
+- skill helpers — Python helpers live **next to the skill that owns them** (`skills/<name>/*.py`), one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py` (+ `quality.py`), `land.py`, `migrate.py`, `scaffold.py` (+ `stocktake.py`), `health.py` (code-health, spec 060), and `memory.py`. Shared stdlib-only helpers live in `skills/_common/` (`parsing.py`, `review_evidence.py`, `lexicon.py`, `team_signal.py`, `use_cases.py`, `scaffold_state.py`, `atomic_io.py`)
+- `scripts/` — top-level repo tooling, not skill helpers: `usage.py` (per-spec token/cost reporting, spec 056), `verify_install.py`, `spec_lint.py`, `validate_manifests.py`, `build_release_zip.py`, the `*_contract.py` builders, and `run_tests.py`
 - `.claude-plugin/` — plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
 
 Interface contracts between these modules are deliberately deferred — today's coupling is read-only and one-directional (skills read templates; helpers read specs; hooks read events; nothing writes across the module boundary). Will tighten when the first bidirectional case appears.
@@ -177,4 +190,3 @@ _Self-coherence note (spec 022-02): this slot exists so the `/jig:independent-re
 
 - `SubagentStart` hook event: documented in changelog (v2.0.43) but absent from official plugin docs. Deferred — see `docs/refinement-todo.md`.
 - Hook strictness profiles (`SCAFFOLD_HOOK_PROFILE`): deferred — unread env var is worse than no env var.
-- Does the `additionalContext` format differ between `UserPromptSubmit` and `Stop` hooks? Verify during implementation of 002-03.

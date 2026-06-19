@@ -2,7 +2,7 @@
 >
 > This document captures *why* jig exists, *for whom*, and *with what
 > principles*. Architectural mechanics live in [architecture.md](architecture.md).
-> Update via reconciliation, or via `/jig:vision-elicit` once spec 017 lands.
+> Update via reconciliation, or via `/jig:vision-elicitation` (shipped in spec 017).
 
 # Vision: jig
 
@@ -64,11 +64,11 @@ repo, then gets out of the way"* — toward an install-and-forget plugin
 where the machinery lives under `${CLAUDE_PLUGIN_ROOT}` and stays
 opaque to the dev. **The dev should own and extend the scaffolding,
 not depend on a plugin runtime they can't see.** [Spec 016](specs/016-scaffold-mode/spec.md)
-ships dual-mode install (plugin OR scaffolded-in-repo) to recover
-that framing; this spec (017) closes the second half by adding
-content-guidance at init time so a new project leaves the wizard with
-a real vision + architecture seed, not three "Deferred — no signal"
-stanzas.
+shipped dual-mode install (plugin OR scaffolded-in-repo) to recover
+that framing, and [spec 017](specs/017-vision-elicitation/spec.md)
+closed the second half by adding content-guidance at init time so a
+new project leaves the wizard with a real vision + architecture seed,
+not three "Deferred — no signal" stanzas.
 
 ## Competitive landscape
 
@@ -127,8 +127,10 @@ user signal yet. Tier 2 stays empty until pain is reported.
 
 ### MVP scope (already shipped)
 
-Tier 0 + Tier 1 are both **effectively complete** as of 2026-05-18.
-See [docs/specs/README.md](specs/README.md) for the status board.
+Tier 0 + Tier 1 are both **complete** — all 17 skills ship today
+(the original floor plus later Tier 1 additions: `code-health`,
+`explain`, and the rest). See [docs/specs/README.md](specs/README.md)
+for the live status board.
 
 ### Out of scope (deliberately)
 
@@ -223,8 +225,11 @@ real pain.
 Track in [docs/specs/README.md](specs/README.md) and
 [docs/refinement-todo.md](refinement-todo.md). High-level horizon:
 
-- **Spec 017 (this spec) ships** → scaffold-init produces a real
-  vision + architecture seed at install time.
+- **Multi-host portability** — a host-adapter layer beyond Claude Code
+  ([spec 033](specs/033-host-adapter-portability/spec.md)) and a
+  multi-repo federation tier ([spec 034](specs/034-federation-tier/spec.md)),
+  tracked on the 2.0 milestone (`v2` branch per
+  [docs/roadmap.md](roadmap.md)); on the roadmap, not shipped today.
 - **Tier 2 stays empty** until `local-dev-parity` (or another
   candidate) gets a real user signal.
 - **`contracts` skill stays a deliberate stub** ([ADR-0002](decisions/adr-0002-contracts-stays-deferred.md))
