@@ -230,7 +230,8 @@
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-01 - phase-mode vocabulary and docs | DEFERRED |  |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-02 - session-plan mode hints | DEFERRED |  |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | DEFERRED |  |
-| [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-01 — tbd | DRAFT |  |
+| [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-01 — ship spec_lint and fix the runnable reference | DRAFT |  |
+| [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-02 — normalize remaining shipped references | DRAFT |  |
 
 ## Deferred slices
 
