@@ -6,7 +6,7 @@ use_cases: []
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on first use and link the term to docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "Self-defining vocabulary". -->
 
-# Spec 074: Spec-lint-shipped-reference leak
+# Spec 075: Spec-lint-shipped-reference leak
 
 > Reserved on 2026-06-19 via `workflow.py new`. Body to be drafted in a feature branch.
 
@@ -24,4 +24,4 @@ _TBD — SPIDR analysis. See SKILL.md for the five axes (Spike / Paths / Interfa
 
 ## Slices
 
-- [074-01 — tbd](slice-01-tbd.md)
+- [075-01 — tbd](slice-01-tbd.md)
