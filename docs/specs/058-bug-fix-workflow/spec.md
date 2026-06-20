@@ -41,6 +41,29 @@ This spec adds **`jig:bug-fix`** — a first-class workflow (peer to
 See ADR-0016 for the full decision (gate table, record schema, reuse
 map, deferral note).
 
+## Priority trigger
+
+**Trigger met on 2026-06-20.** A retrospective pass over prior specs found
+at least six strong cases that would have been better represented as
+bug-fix records than full specs if `jig:bug-fix` had existed:
+
+- [019 — land deviation-log tolerance](../019-land-deviation-log-tolerance/spec.md)
+- [035 — fixture exclusion](../035-fixture-exclusion/spec.md)
+- [037 — git origin safety](../037-git-origin-safety/spec.md)
+- [039 — review queue cleanup](../039-review-queue-cleanup/spec.md)
+- [040 — isolation honesty](../040-isolation-honesty/spec.md)
+- [075 — spec-lint shipped reference leak](../075-spec-lint-shipped-reference-leak/spec.md)
+
+Probable-but-escalation-shaped examples include [063](../063-scaffold-precondition-gate/spec.md),
+[066](../066-adr-scaffold-precondition-gate/spec.md), and
+[081](../081-main-worktree-sync-on-landing/spec.md): each starts from a
+bug-shaped invariant failure but may still escalate when the fix introduces
+new routing or landing semantics.
+
+This is enough evidence to prioritize spec 058 as actionable workflow debt:
+the missing middle path is no longer hypothetical, and the expected payoff is
+reduced spec ceremony for observed defect-shaped work.
+
 ## Decomposition
 
 **SPIDR analysis:**
