@@ -258,6 +258,7 @@
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-02 - Claude Code adapter activation | DRAFT |  |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-03 - Codex adapter activation | DEFERRED |  |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-04 - usage attribution digest | DRAFT |  |
+| [081-main-worktree-sync-on-landing](081-main-worktree-sync-on-landing/spec.md) | 081-01 — post-land main worktree sync | DRAFT |  |
 
 ## Deferred slices
 
