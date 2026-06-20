@@ -232,7 +232,7 @@
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | DEFERRED |  |
 | [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-01 — ship spec_lint and fix the runnable reference | **DONE** |  |
 | [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-02 — normalize remaining shipped references | **DONE** |  |
-| [076-lean-primer](076-lean-primer/spec.md) | 076-01 — relocate + compress the Hot Cache | DRAFT |  |
+| [076-lean-primer](076-lean-primer/spec.md) | 076-01 — relocate + compress the Hot Cache | **DONE** | `CLAUDE.md` 109L/27.8KB → 65L/7.1KB. **Budget guard** `scripts/test_lean_primer.py`: ≤70 lines AND ≤14336 bytes (spec-055 dumb-zone) — keep it green. Definitional Hot-Cache bodies + the `## Skills in this repo` table (host injects skills each session) relocated to `docs/memory/glossary.md`, resolvable via `/jig:explain`; **behavioral guards stay inline as full directives** (pinned by `KEEP_INLINE_MARKERS` — a relocated guard stops guarding, `/jig:explain` is pull). Frame-critique (4 rounds) caught the false "AGENTS.md is the lean target" premise → absolute budget instead; AGENTS.md sync = 076-02 on `v2`. |
 | [076-lean-primer](076-lean-primer/spec.md) | 076-02 — lean template + primer sync | DRAFT |  |
 | [077-type-check-floor](077-type-check-floor/spec.md) | 077-01 — pyright advisory probe | DRAFT |  |
 | [077-type-check-floor](077-type-check-floor/spec.md) | 077-02 — jig self typed baseline | DRAFT |  |

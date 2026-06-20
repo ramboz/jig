@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 use_cases: []
 ---
@@ -33,10 +33,24 @@ paragraph with embedded links. It contradicts jig's own thesis:
   touches that subsystem — which is exactly what `/jig:explain` + the
   lexicon (spec 065) already serve on demand.
 
-The tell: the repo's `AGENTS.md` (Codex variant) is already the lean
-shape — a short glossary that *points to* `docs/memory/glossary.md`
-instead of inlining ADR prose. jig already authored the tip-#23-correct
-primer; `CLAUDE.md` is the one out of policy.
+The relocation targets already exist and are real: `docs/memory/glossary.md`
+(the project glossary overlay) and `_common/lexicon.json` (the shipped
+lexicon), both reachable on demand via `/jig:explain` (spec 065, DONE).
+The Hot Cache re-describes much of what those surfaces already hold —
+plus a `## Skills in this repo` table that re-states the per-skill
+descriptions the host already injects into context every session. That is
+exactly the EngTip #23 anti-pattern.
+
+> **Frame correction (2026-06-19).** The DRAFT spec claimed "the repo's
+> `AGENTS.md` (Codex variant) is already the lean shape" and treated it as
+> the budget anchor. That was false: there is **no `AGENTS.md` in this
+> repo** — the canonical `AGENTS.md` primer is [spec 033-02], still DRAFT
+> (v2 / multi-host work). The `AGENTS.md` ⇄ `CLAUDE.md` sync (slice 02) is
+> therefore handled on the **`v2` branch** when that lands; on this branch
+> 076 leans `CLAUDE.md` against an absolute budget (see slice-01 AC #4),
+> not against a non-existent file.
+
+[spec 033-02]: ../033-host-adapter-portability/slice-02-agents-md-canonical-primer.md
 
 **End state:** `CLAUDE.md`'s Hot Cache is a compressed index — always-on
 facts kept as one-line claims + links; definitional bodies relocated to
@@ -45,21 +59,39 @@ facts kept as one-line claims + links; definitional bodies relocated to
 
 ## Assumptions
 
-None load-bearing — this builds entirely on shipped surfaces (spec 055,
-057, 065 are all DONE; the lexicon loader and `/jig:explain` exist). The
-classification of "always-on vs. on-demand" is judgment, executed in
-slice 01, not an unverified runnable-surface claim.
+The shipped-surface premises are grounded, not assumed: spec 055/057/065
+are DONE and the lexicon loader + `/jig:explain` were probed live.
+
+The **one load-bearing assumption** (named after frame-critique flagged the
+original "None load-bearing" as the classification's own blind spot): that
+the always-on-vs-on-demand split correctly identifies *every* behavioral
+guard. A behavioral guard is push (the agent obeys it unprompted); the
+glossary is pull (`/jig:explain` only helps a reader who already suspects a
+term). **If a load-bearing guard is mis-binned as on-demand, it silently
+stops guarding** — the exact regression class CLAUDE.md exists to prevent
+(e.g. re-proposing parked work, rebasing v2 instead of merging).
+*Mitigation (two layers, honestly scoped — neither is a completeness
+proof):* (1) **primary** — slice 01's AC #1 classification rule makes the
+guard-vs-definition test explicit, applied when authoring / `memory-sync`-ing
+the primer and enforced by review; (2) **backstop** — AC #5's test pins each
+*known* guard inline as its **full directive** (not a weak word), so a future
+edit that relocates a known directive fails CI. The backstop is a whitelist:
+it cannot prove an *unlisted* guard wasn't relocated — that residual risk is
+carried by layer (1) + review, not by the test.
 
 ## Clarifications
 
 - **Depth (resolved 2026-06-19):** drive to DRAFT spec.md + SPIDR slice
   files; implementation in a later session.
-- **Always-on budget (open — for slice 01):** set a concrete line/token
-  cap on `CLAUDE.md` so the guard is testable, not aesthetic. Tie it to
-  the spec-055 "dumb zone" framing. Candidate: parity with `AGENTS.md`.
-- **`CLAUDE.md` ⇄ `AGENTS.md` relationship (open — for slice 02):** two
-  hand-edited files, one generated from the other, or kept in lockstep by
-  `memory-sync`? They drift today. Slice 02 decides.
+- **Always-on budget (resolved 2026-06-19):** **≤ 70 lines / ≤ 14KB** for
+  `CLAUDE.md` — roughly half the DRAFT-time 109 lines / 27.8KB, tied to
+  spec-055's "dumb zone" framing (keep the always-loaded primer small).
+  The `AGENTS.md`-parity candidate was dropped because `AGENTS.md` does
+  not exist on this branch (see the frame correction above).
+- **`CLAUDE.md` ⇄ `AGENTS.md` relationship (deferred to slice 02 on
+  `v2`):** `AGENTS.md` ships with spec 033-02 on the `v2` branch; the
+  sync-model decision and its drift guard belong there, not on this
+  branch. Slice 02 is parked until v2 carries `AGENTS.md`.
 - **Keep-inline candidates (guidance):** active-work routing (v2 branch),
   the PARKED-don't-re-propose guards, and the do-not-modify-`conventions.md`
   constraint are plausibly every-turn. Everything *definitional* is
@@ -70,7 +102,9 @@ slice 01, not an unverified runnable-surface claim.
 SPIDR — primarily a **Data** split: the change re-partitions *where each
 fact lives* (always-on primer vs. on-demand glossary), driven by a
 classification rule. Not a Spike (no unknown to reduce); the lean target
-shape already exists in `AGENTS.md`.
+shape is an absolute budget (≤70 lines / ≤14KB), not a calibration against
+another file (`AGENTS.md` does not exist on this branch — see the frame
+correction in the Overview).
 
 - **076-01 (relocate + compress):** classify every Hot Cache entry, move
   definitional bodies to `glossary.md` / `lexicon.json`, compress

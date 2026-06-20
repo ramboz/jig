@@ -113,7 +113,7 @@ synchronization surface (e.g. `.git/jig-locks/` for file locks shared
 across parallel sessions; see slice 028-02).
 
 ## Closed-spec drift
-When a closed (DONE or SUPERSEDED) spec's prose no longer matches reality because the code/process evolved around it. Governed by [ADR-0008](../decisions/adr-0008-closed-spec-drift-policy.md): default to a `## Amendments` section appended to the drifted artifact; escalate to a new ADR (or superseding spec) when the delta is decision content (a contract, interface, or behavior the spec committed to). Scope: DONE and SUPERSEDED specs plus load-bearing skill/router prose. Excludes IN_PROGRESS, REVIEWED, RECONCILED, DEFERRED.
+When a closed (DONE or SUPERSEDED) spec's prose no longer matches reality because the code/process evolved around it. Governed by [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md) (which supersedes [ADR-0008](../decisions/adr-0008-closed-spec-drift-policy.md)): closed records (DONE / SUPERSEDED specs + slices) get a `## Amendments` section preserving the original; live operational prose (SKILL.md, `docs/workflow.md`, README) is corrected **inline** (git = audit trail); a new ADR is required when the delta is decision content. Scope excludes IN_PROGRESS, REVIEWED, RECONCILED, DEFERRED.
 
 ## ## Amendments section
 The dated-entry append-only section ADR-0008 establishes for correcting drift in closed specs and load-bearing skill/router prose. One H2 `## Amendments` block at the end of the drifted artifact; each entry is `### YYYY-MM-DD — <one-line summary>` heading + body explaining what changed and why + a link to the slice/ADR/PR that caused the drift. In-body edits to the original prose remain forbidden. Mirrors deviation-log discipline.
@@ -132,3 +132,55 @@ jig's adversarial, PRE-implementation review pass (spec 064 / ADR-0020): a fresh
 
 ## test-scope taxonomy
 EngTip #21's five test *types*, distinguished by **scope** (how much of the system each exercises), used as a shared vocabulary so "do we have enough tests?" becomes answerable. (1) **Unit** — a single operation in a single component; fast, hermetic, dependencies doubled. (2) **Component** — multiple operations within one component, verifying its invariants as a stateful whole. (3) **Seam-integration** — exactly one component against exactly one real dependency across a boundary, verifying the doubled contract actually holds (the type most often missing). (4) **System-integration** — several components together (service + DB + downstream). (5) **End-to-end** — a full user journey across the stack; highest fidelity, poorest at localizing failure. The point isn't a coverage number (gameable) but a checklist for finding gaps and assigning ownership. jig currently tracks *artifact* coverage (`workflow.py coverage`, use-cases), not test-scope coverage — parked as an [inbox](../inbox.md) item, not a spec, pending a real escaped defect. See [eng-tips brief-03](../external-review/eng-tips-2026-06/brief-03-test-type-taxonomy.md).
+
+<!-- Relocated from the CLAUDE.md Hot Cache by spec 076-01 (lean primer):
+     dense decision-summary prose moved off the always-loaded path and
+     reachable on demand via /jig:explain (merged-lexicon overlay). -->
+
+## Lifecycle-family spine
+
+[ADR-0023](../decisions/adr-0023-lifecycle-family-spine.md) — spec-workflow, `jig:bug-fix` ([ADR-0016](../decisions/adr-0016-bug-fix-lifecycle.md)), and `jig:refactor` ([ADR-0019](../decisions/adr-0019-refactor-workflow.md)) are one gated-evidence lifecycle family sharing a C1–C7 spine contract; the shared code is extracted to `_common/lifecycle.py` only at the *third* concrete `transition` (today only `workflow.py` exists; bug/refactor are Proposed). The pluggable-oracle boundary to servo ([ADR-0022](../decisions/adr-0022-pluggable-oracle-boundary.md), clause C5) is PARKED — don't re-propose it without a real eval case, a servo spec 006, or a built consumer.
+
+## Spec-gate model
+
+[ADR-0011](../decisions/adr-0011-spec-gate-model.md) — `jig-spec-gate.sh` is a *deliberateness* gate on `docs/conventions.md` edits (`JIG_CONVENTIONS_APPROVED=1` bypass satisfiable by any shell incl. the agent), **not** human-only enforcement — real control is out-of-band (CODEOWNERS / CI / branch-protection). The policy "human approval to change conventions.md" stays; the gate is jig-layout-specific (`JIG_GATED_FILES` deferred).
+
+## Security floor
+
+[ADR-0013](../decisions/adr-0013-security-floor-policy.md) / [spec 052](../specs/052-security-scaffold/spec.md) — every scaffolded/migrated project gets a 5-part floor: `.gitignore` secret patterns + the agent-time `jig-secret-scan.sh` PreToolUse hook (`JIG_SECRET_SCAN_APPROVED=1` bypass, fails open) + conservative `permissions.deny` defaults + a `## Security (MUST)` CLAUDE.md block + the slim `jig:security-review` skill. Defense-in-depth, not a firewall (mirrors ADR-0011); flows to existing projects via `migrate copy-machinery`, asserted by `scripts/verify_install.py`.
+
+## Review-evidence gate
+
+[ADR-0014](../decisions/adr-0014-review-evidence-model.md) (spec 045) — durable verdict artifacts at `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md` (body = the VERDICT envelope); `review.py record-review` writes, `check-reviews` validates. `workflow.py transition` gates READY_FOR_REVIEW (frame-critique iff `frame_review`), REVIEWED (compliance+craft, +arch/+code-health/+design-review iff their flags), RECONCILED (reconciliation verdict + deviation log), DONE (re-validates the set + dep-check) — each clears iff `verdict: pass`. Bypass `JIG_REVIEW_EVIDENCE_GATE=0` (deliberateness, not human-only). Shared schema/validator `skills/_common/review_evidence.py` (`PASSES` = compliance/craft/arch/code-health/reconciliation/frame-critique/design-review; `validate_evidence` reads the gating flags itself so spawner+gate can't drift); flag-truthy set in `skills/_common/parsing.py`. arch/code-health/design (REVIEWED) + frame-critique (READY_FOR_REVIEW) gate on per-slice flags (default-off). Frame-critique = adversarial PRE-implementation hardening (spec 064 / [ADR-0020](../decisions/adr-0020-spec-frame-hardening.md)); also gates `adr.py accept` (064-05, ADR evidence at `docs/decisions/reviews/adr-NNNN-<pass>.md`); rung-3 cross-model critique deferred. Design-review = attest-only external-eval pass (spec 071 / [ADR-0022](../decisions/adr-0022-pluggable-oracle-boundary.md)).
+
+## Worktree-aware reservation
+
+[ADR-0015](../decisions/adr-0015-worktree-aware-reservation.md) / [spec 051](../specs/051-worktree-aware-reservation/spec.md) (051-03 land-guardrail DEFERRED) — `workflow.py new` / `adr.py new` route on the current branch: on `main` the proven in-place flow; off `main` push-mode builds the reservation commit in an ephemeral detached worktree at `origin/main` and pushes BY SHA from `project_dir` (pushing from the temp worktree breaks relative-`origin` repos), torn down in `finally`. Off `main` `--no-push` = pathspec-scoped provisional commit on the current branch. Caller's branch/cwd/tree never touched; inline-mirrored across both helpers. Best-effort serialization; durable land-time backstop is the deferred 051-03.
+
+## Context-cost discipline
+
+[spec 055](../specs/055-context-cost-discipline/spec.md) — orchestrator context is the expensive real estate (cost ≈ context-size × turns; in-session *growth*, not the primer, is the cost). Four soft mechanisms: (01) delegate file-heavy reads to a read-only subagent, keep the summary; (02) growth nudge `jig-context-check.sh` (`JIG_CONTEXT_GROWTH_WARN_PCT`); (03) read-once/lean `PreToolUse(Read)` (`JIG_READ_LEAN_BYTES`); (04) verbose-Bash results-not-logs. Guidance in [docs/workflow.md](../workflow.md#context-cost-discipline); same place as the Dumb-zone quality argument.
+
+## Thin-orchestrator
+
+[spec 057](../specs/057-thin-orchestrator/spec.md) — follow-on to spec 055: cost is two knobs — turn count (r=0.92) + peak context (r=0.96) — plus output volume (~22%, 5×-priced); cache-TTL and model-downgrade were falsified as levers. Three soft mechanisms, one per knob: (01) `workflow.py session-plan <spec.md>` emits a per-slice DELEGATE-vs-ORCHESTRATOR dispatch plan; (02) `JIG_CONTEXT_COMPACT_PCT` (0.75) escalates the context-check nudge to a compact/handoff prompt (never runs `/compact`); (03) lean-output conventions in `agents/implementer.md`/`reviewer.md`. jig recommends, the user/harness acts.
+
+## Token-usage tracking
+
+[spec 056](../specs/056-token-usage-tracking/spec.md) — `scripts/usage.py report <spec>` prints per-spec orchestrator/subagent/combined token totals (measured from transcript `message.usage`) + a ccusage-priced `$` estimate (price via `npx ccusage`, never hand-roll rates — Opus hand-rolled ran ~3× high). Attribution prefers the exact `.jig/spec-ref` marker (stamped by `transition … IN_PROGRESS`, gitignored), falls back to a content heuristic (flagged lower-confidence). Measures the lever 055 optimizes.
+
+## Slice-claim on IN_PROGRESS
+
+[spec 049](../specs/049-slice-claim-on-in-progress/spec.md) / [ADR-0015](../decisions/adr-0015-worktree-aware-reservation.md) lineage — `transition <slice> IN_PROGRESS` stamps `claimed_by:` (branch name or `JIG_CLAIM_ID`) on a file-per-slice slice and refuses a foreign still-IN_PROGRESS claim; board renders `IN_PROGRESS (<claimed_by>)`. Claim is LOCAL by default (offline-friendly); `--push`/`--pr` reserve it on `origin/main` via the uniform ephemeral detached-worktree. Cleared on REVIEWED / back-transition; `--release --reason "<why>"` force-clears + logs `## Release log`. Frontmatter-only.
+
+## Solo→team re-detection
+
+[spec 050](../specs/050-solo-team-redetection/spec.md) — the team signal (≥2 mailmap-normalized git authors, monorepo-guarded) is re-evaluated after init: `memory.py team-check` (memory-sync's final step) nudges [y]/[n]/[never] to bootstrap `people.md`, and `workflow.py stale` surfaces it as a `category: team-context` row (read-only, stays exit-0). Opt-out = tracked `.jig/no-people-md` (written by `scaffold-init --solo` only). Shared logic in `skills/_common/team_signal.py` (`team_context_drift()` predicate).
+
+## Vocabulary barrier / lexicon
+
+[spec 065](../specs/065-lower-vocabulary-barrier/spec.md) / [ADR-0021](../decisions/adr-0021-lexicon-home-and-overlay.md) — jig explains its own jargon on demand, off the hot path. One canonical lexicon (`_common/lexicon.json` + loader `_common/lexicon.py` merging the project `glossary.md` overlay, project wins) feeds the `jig-memory-scan` hook (just-in-time defs), the `/jig:explain` skill (term/artifact/passage modes, ephemeral), and the self-defining-vocabulary convention (managed block in `docs/workflow.md`). Nothing definitional injected into always-loaded `CLAUDE.md` (respects 055/057).
+
+## Status board
+
+[docs/specs/README.md](../specs/README.md), regenerated by `workflow.py status-board`; the Notes column is preserved across regen and carries per-slice load-bearing invariants. Renders a 🔬 prefix on `kind: spike` rows and `IN_PROGRESS (<claimed_by>)` on claimed slices.
