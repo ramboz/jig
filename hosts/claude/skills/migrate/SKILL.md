@@ -308,14 +308,14 @@ What it does:
 4. Generates or merges host hook registration. `--host claude` uses
    `.claude/settings.json`, with per-entry `metadata.managed_by_jig:
    true` markers. `--host codex` uses `.codex/hooks.json`, with a
-   top-level jig-managed metadata marker.
+   schema-clean top-level `hooks` object.
 
 Subsequent runs are idempotent: re-running `copy-machinery` overwrites
 the copied files in place and updates jig-managed hook registration. On
 `--host claude`, non-jig hooks in `.claude/settings.json` survive
 untouched. On `--host codex`, jig-managed `.codex/hooks.json` is
 regenerated as a whole because Codex hook registration is a single file
-with top-level jig metadata.
+and jig ownership is detected from generated jig hook command paths.
 
 ### Refusal: unmanaged hooks
 
@@ -324,8 +324,8 @@ If the host hook configuration already exists and is not jig-managed,
 `UnmanagedHooksError` refuse-message to stderr — no filesystem writes
 occur. For `--host claude`, this means `.claude/settings.json` has
 hooks under `hooks.<event>` but none carry the `managed_by_jig` marker.
-For `--host codex`, this means `.codex/hooks.json` exists without top-level
-`metadata.managed_by_jig: true`. This matches the same safety stance
+For `--host codex`, this means `.codex/hooks.json` exists and does not look
+like a jig-generated hook config. This matches the same safety stance
 `scaffold-init` enforces.
 
 The documented escape is `--force`:

@@ -1171,6 +1171,30 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertEqual(manifest.get("host_renderer"), "codex")
         self.assertEqual(manifest.get("scaffold_mode"), "in-repo")
 
+    def test_committed_codex_host_package_scaffold_runs(self):
+        script = (
+            REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "skills"
+            / "scaffold-init" / "scaffold.py"
+        )
+        r = subprocess.run(
+            ["python3", str(script), "--host", "codex", str(self.target)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
+
+        payload = json.loads((self.target / ".codex" / "hooks.json").read_text())
+        self.assertEqual(set(payload), {"hooks"})
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        package_manifest = json.loads(
+            (
+                REPO_ROOT / "hosts" / "codex" / "plugins" / "jig"
+                / ".codex-plugin" / "plugin.json"
+            ).read_text()
+        )
+        self.assertEqual(manifest["jig_version"], package_manifest["version"])
+
     def test_codex_skills_are_rewritten_to_project_runtime_paths(self):
         r = self._run_codex_scaffold()
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
@@ -1329,7 +1353,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
 
         hooks_path = self.target / ".codex" / "hooks.json"
         payload = json.loads(hooks_path.read_text())
-        self.assertTrue(payload.get("metadata", {}).get("managed_by_jig"))
+        self.assertEqual(set(payload), {"hooks"})
         self.assertEqual(sorted(payload["hooks"].keys()), sorted(EXPECTED_HOOK_EVENTS))
 
         handlers = [
@@ -1382,6 +1406,47 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
             list((self.target / ".codex").glob("hooks/scripts/jig-*.sh")),
             [],
         )
+
+    def test_codex_accepts_schema_clean_generated_hooks_on_rerun(self):
+        hooks_path = self.target / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        hooks_path.write_text(json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Read",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "${CODEX_PROJECT_DIR:-$PWD}/.codex/"
+                                    "hooks/scripts/jig-context-check.sh"
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+        }, indent=2) + "\n")
+
+        scaffold_mod._check_codex_hooks_safety(self.target)
+
+    def test_codex_accepts_legacy_metadata_marker_for_repair(self):
+        hooks_path = self.target / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True)
+        hooks_path.write_text(json.dumps({
+            "metadata": {"managed_by_jig": True},
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Read",
+                        "hooks": [{"type": "command", "command": "./old.sh"}],
+                    }
+                ]
+            }
+        }, indent=2) + "\n")
+
+        scaffold_mod._check_codex_hooks_safety(self.target)
 
 
 class ScaffoldCompletionMarkerTests(unittest.TestCase):

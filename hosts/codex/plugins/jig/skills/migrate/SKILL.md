@@ -295,13 +295,13 @@ What it does:
 2. Copies non-discoverable helper aliases under `.codex/skills/<name>/` so peer helper imports continue to resolve without duplicate discoverable skills.
 3. Copies Codex agents into `.codex/agents/jig-*.toml`.
 4. Copies hook scripts into `.codex/hooks/scripts/`, pinning each script's mode to `0o755`.
-5. Generates or merges Codex hook registration in `.codex/hooks.json`, with a top-level jig-managed metadata marker.
+5. Generates or merges Codex hook registration in `.codex/hooks.json` using Codex's native top-level `hooks` schema.
 
 Subsequent runs are idempotent: re-running `copy-machinery` overwrites copied runtime files in place and regenerates jig-managed `.codex/hooks.json` as a whole.
 
 ### Refusal: unmanaged hooks
 
-If `.codex/hooks.json` already exists without top-level `metadata.managed_by_jig: true`, `copy-machinery` exits non-zero (exit code 3) and emits the `UnmanagedHooksError` refuse-message to stderr — no filesystem writes occur. This matches the same safety stance `scaffold-init` enforces.
+If `.codex/hooks.json` already exists and does not look like a jig-generated file, `copy-machinery` exits non-zero (exit code 3) and emits the `UnmanagedHooksError` refuse-message to stderr — no filesystem writes occur. This matches the same safety stance `scaffold-init` enforces.
 
 The documented escape is `--force`:
 

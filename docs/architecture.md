@@ -321,9 +321,11 @@ itself a structured merge surface. Today that means Claude hook entries inside
 replace its own hook registrations without clobbering user-owned hooks. The
 file-level source/hash record for `.claude/settings.json` still lives in
 `scaffold.json`. Codex hook registration is generated as a whole
-`.codex/hooks.json` file with top-level `metadata: {managed_by_jig: true}`;
-scaffold refuses to overwrite an existing unmarked Codex hook config unless
-the user passes `--force`.
+`.codex/hooks.json` file using Codex's native top-level `hooks` schema;
+scaffold treats generated jig command paths under
+`.codex/hooks/scripts/jig-*.sh` as the overwrite-safety marker and refuses
+to overwrite an existing unrecognized Codex hook config unless the user passes
+`--force`.
 
 On a force re-run, scaffold checks manifest hashes before writing. Untouched
 managed files may be regenerated; edited managed files cause a clear refusal

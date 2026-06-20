@@ -104,32 +104,37 @@ def plugin_root(host: str = "claude") -> Path:
 
 
 class PluginManifestError(RuntimeError):
-    """Raised when `.claude-plugin/plugin.json` cannot yield a release version
+    """Raised when no host plugin manifest can yield a release version
     (absent, malformed JSON, or missing/empty `version`). Slice 046-02 reads
-    the scaffold's recorded `jig_version` from this manifest — the single
-    source of truth — so a bad manifest must fail loudly rather than let
-    scaffold output record an invented version."""
+    the scaffold's recorded `jig_version` from the package manifest — the
+    single source of truth — so a bad manifest must fail loudly rather than
+    let scaffold output record an invented version."""
 
 
 def _read_plugin_version(plugin: Path) -> str:
-    """Return the release version from `plugin/.claude-plugin/plugin.json`.
+    """Return the release version from the package's host manifest.
 
     This is the canonical source for `scaffold.json.jig_version` (spec 046,
-    AC #1) — no production code hard-codes the release version. Raises
-    `PluginManifestError`, naming the manifest path and the problem, when the
-    manifest is absent, is malformed JSON, or lacks a non-empty `version`.
-    Callers read this before the first scaffold file write so a bad manifest
-    fails fast and leaves no partial scaffold (AC #3)."""
-    manifest_path = plugin / ".claude-plugin" / "plugin.json"
-    try:
-        raw = manifest_path.read_text()
-    except FileNotFoundError as exc:
+    AC #1) — no production code hard-codes the release version. Source and
+    Claude packages carry `.claude-plugin/plugin.json`; Codex packages carry
+    `.codex-plugin/plugin.json`. Raises `PluginManifestError`, naming the
+    manifest path and the problem, when no manifest is present, the selected
+    manifest is malformed JSON, or it lacks a non-empty `version`. Callers
+    read this before the first scaffold file write so a bad manifest fails
+    fast and leaves no partial scaffold (AC #3)."""
+    candidates = [
+        plugin / ".claude-plugin" / "plugin.json",
+        plugin / ".codex-plugin" / "plugin.json",
+    ]
+    manifest_path = next((path for path in candidates if path.is_file()), None)
+    if manifest_path is None:
+        choices = " or ".join(str(path) for path in candidates)
         raise PluginManifestError(
-            f"plugin manifest not found: {manifest_path} — cannot derive the "
-            "jig version for scaffold metadata."
-        ) from exc
+            f"plugin manifest not found: {choices} — cannot derive the jig "
+            "version for scaffold metadata."
+        )
     try:
-        manifest = json.loads(raw)
+        manifest = json.loads(manifest_path.read_text())
     except json.JSONDecodeError as exc:
         raise PluginManifestError(
             f"plugin manifest {manifest_path} is not valid JSON: {exc}"
@@ -1016,8 +1021,8 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             "4. Copies hook scripts into `.codex/hooks/scripts/`, pinning "
             "each script's mode to `0o755`.\n"
             "5. Generates or merges Codex hook registration in "
-            "`.codex/hooks.json`, with a top-level jig-managed metadata "
-            "marker.\n\n"
+            "`.codex/hooks.json` using Codex's native top-level `hooks` "
+            "schema.\n\n"
             "Subsequent runs are idempotent: re-running `copy-machinery` "
             "overwrites copied runtime files in place and regenerates "
             "jig-managed `.codex/hooks.json` as a whole.\n\n",
@@ -1025,11 +1030,11 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         out = re.sub(
             r"If the host hook configuration already exists.*?"
             r"`scaffold-init` enforces\.",
-            "If `.codex/hooks.json` already exists without top-level "
-            "`metadata.managed_by_jig: true`, `copy-machinery` exits "
-            "non-zero (exit code 3) and emits the `UnmanagedHooksError` "
-            "refuse-message to stderr — no filesystem writes occur. This "
-            "matches the same safety stance `scaffold-init` enforces.",
+            "If `.codex/hooks.json` already exists and does not look like "
+            "a jig-generated file, `copy-machinery` exits non-zero (exit "
+            "code 3) and emits the `UnmanagedHooksError` refuse-message to "
+            "stderr — no filesystem writes occur. This matches the same "
+            "safety stance `scaffold-init` enforces.",
             out,
             flags=re.DOTALL,
         )
@@ -1617,11 +1622,49 @@ def _check_codex_hooks_safety(target: Path, *, force: bool = False) -> None:
         ) from exc
     if force:
         return
-    if (existing.get("metadata") or {}).get("managed_by_jig"):
+    if _is_codex_hooks_jig_managed(existing):
         return
     raise UnmanagedHooksError(
         f"{hooks_path} already exists and is not jig-managed. Pass --force "
         "to replace it, or move/merge the file first."
+    )
+
+
+def _iter_codex_hook_commands(config: dict) -> list[str]:
+    commands: list[str] = []
+    for entries in (config.get("hooks") or {}).values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for hook in entry.get("hooks") or []:
+                if not isinstance(hook, dict):
+                    continue
+                command = hook.get("command")
+                if isinstance(command, str):
+                    commands.append(command)
+    return commands
+
+
+def _is_codex_hooks_jig_managed(config: dict) -> bool:
+    """Return whether an existing `.codex/hooks.json` is safe to replace.
+
+    Codex rejects unknown top-level fields in `.codex/hooks.json`, so scaffold
+    mode cannot carry a top-level `metadata.managed_by_jig` marker. The
+    compatibility-safe marker is the generated command shape: every command
+    points at jig's project-local `.codex/hooks/scripts/jig-*.sh` dispatch
+    path. Legacy RC files that already have the unsupported metadata marker
+    still count as managed so a re-run can repair them.
+    """
+    if (config.get("metadata") or {}).get("managed_by_jig"):
+        return True
+    commands = _iter_codex_hook_commands(config)
+    if not commands:
+        return False
+    return all(
+        re.search(r"\.codex/hooks/scripts/jig-[A-Za-z0-9-]+\.sh\b", command)
+        for command in commands
     )
 
 
@@ -1662,10 +1705,7 @@ def _copy_codex_hooks_and_register(plugin: Path, target: Path, *,
         raw_hooks.parent.mkdir(parents=True, exist_ok=True)
         raw_hooks.write_bytes(source_hooks.read_bytes())
 
-    payload = {
-        "metadata": {"managed_by_jig": True},
-        "hooks": _build_codex_hook_entries(plugin),
-    }
+    payload = {"hooks": _build_codex_hook_entries(plugin)}
     hooks_path = target / ".codex" / "hooks.json"
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(hooks_path, json.dumps(payload, indent=2) + "\n")
