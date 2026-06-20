@@ -95,18 +95,15 @@ class ReleasePleaseManifestTests(unittest.TestCase):
         )
         version = self.manifest["."]
         self.assertIsInstance(version, str)
-        # Loose semver shape: N.N.N (no pre-release / build identifiers
-        # expected during normal operation).
-        parts = version.split(".")
-        self.assertEqual(
-            len(parts), 3,
+        # Loose SemVer shape: N.N.N, optionally with prerelease/build metadata
+        # for manually-cut release candidates on long-lived branches.
+        import re
+
+        self.assertRegex(
+            version,
+            r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$",
             f"manifest version for '.' must be semver-shaped (got {version!r})",
         )
-        for part in parts:
-            self.assertTrue(
-                part.isdigit(),
-                f"manifest version components must be digits (got {version!r})",
-            )
 
     def test_manifest_seed_below_release_as_target(self):
         # During the v1.0.0 bootstrap window, the manifest seed (the

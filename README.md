@@ -343,6 +343,7 @@ ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
 state, see the **[status board](docs/specs/README.md)**.
 
 **Supported today:** Claude Code and Codex in scaffold and plugin shapes from
-the shared source tree. Codex role prompts are bundled as prompt source; TOML
-custom-agent discovery remains a tracked follow-up in
-[spec 033](docs/specs/033-host-adapter-portability/spec.md).
+the shared source tree. Codex role prompts are bundled as prompt source, rendered
+to TOML for scaffold mode, and installable for plugin users via the explicit
+Codex agent helper; plugin-native Codex custom-agent discovery remains the
+tracked follow-up in [spec 033](docs/specs/033-host-adapter-portability/spec.md).

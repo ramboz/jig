@@ -1,7 +1,7 @@
 {
   "name": "jig",
   "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for Claude Code",
-  "version": "1.15.0",
+  "version": "2.0.0-rc.1",
   "author": {
     "name": "ramboz"
   }
