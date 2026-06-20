@@ -232,6 +232,14 @@
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | DEFERRED |  |
 | [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-01 — ship spec_lint and fix the runnable reference | **DONE** |  |
 | [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-02 — normalize remaining shipped references | **DONE** |  |
+| [076-lean-primer](076-lean-primer/spec.md) | 076-01 — relocate + compress the Hot Cache | DRAFT |  |
+| [076-lean-primer](076-lean-primer/spec.md) | 076-02 — lean template + primer sync | DRAFT |  |
+| [077-type-check-floor](077-type-check-floor/spec.md) | 077-01 — pyright advisory probe | DRAFT |  |
+| [077-type-check-floor](077-type-check-floor/spec.md) | 077-02 — jig self typed baseline | DRAFT |  |
+| [078-gate-bypass-telemetry](078-gate-bypass-telemetry/spec.md) | 078-01 — emit bypass events | DRAFT |  |
+| [078-gate-bypass-telemetry](078-gate-bypass-telemetry/spec.md) | 078-02 — gate-stats digest | DRAFT |  |
+| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-01 — workflow.md index guidance | DRAFT |  |
+| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | DRAFT |  |
 
 ## Deferred slices
 

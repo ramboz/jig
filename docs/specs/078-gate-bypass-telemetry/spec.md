@@ -1,6 +1,6 @@
 ---
 status: DRAFT
-skill:
+skill: spec-workflow
 use_cases: []
 ---
 
@@ -8,20 +8,67 @@ use_cases: []
 
 # Spec 078: Gate-bypass telemetry
 
-> Reserved on 2026-06-19 via `workflow.py new`. Body to be drafted in a feature branch.
+> Source: [eng-tips self-audit brief-04](../../external-review/eng-tips-2026-06/brief-04-gate-bypass-telemetry.md)
+> (EngTip #19 "Don't Be a Hero", #20 "AI, Authorship, and
+> Accountability"). Reserved 2026-06-19 via `workflow.py new`.
 
 ## Overview
 
-_TBD_
+jig's gates are, per ADR-0011, **deliberateness signals, not human-only
+enforcement** — each carries an env-var escape (`JIG_REVIEW_EVIDENCE_GATE=0`,
+`JIG_SECRET_SCAN_APPROVED=1`, `JIG_CONVENTIONS_APPROVED=1`). This framing
+is honest, but the escapes are **un-instrumented**: when a gate is
+bypassed, nothing is logged. So a maintainer can't tell after the fact
+that a slice reached DONE with the evidence gate off, and nobody can
+answer "how often is each gate bypassed?" — exactly the data that tells
+you whether a gate earns its keep or is pure friction. A bypass that
+leaves no trace is the EngTip #19 "silent heroics" failure mode.
+
+jig already has the infrastructure: `jig-telemetry`, the skill-routing
+trace (`.claude/skill-usage.jsonl`, spec 041), and `workflow.py
+routing-stats` as a read-only histogram surface. A bypass event is a
+natural sibling.
+
+**End state:** each gate emits one structured, content-free event when it
+honors its override (gate name, env var, timestamp, branch/spec-ref),
+fail-open, to the existing local gitignored telemetry sink; a read-only
+digest prints per-gate bypass counts over `--days N`.
 
 ## Assumptions
 
-_TBD — list load-bearing assumptions about runnable surfaces (library/API capability, version/perf behavior, behavior of existing code); probe-back (run it / cite source) or mark explicitly here. Risk-gated: omit (or write "None") when there are no unverified load-bearing assumptions — do not pad with boilerplate._
+- **The existing telemetry sink/format can carry a new event type**
+  without disrupting `routing-stats` readers. *Probe-back in slice 01*
+  against `jig-telemetry` + `.claude/skill-usage.jsonl` before reusing it;
+  if reuse is awkward, a sibling JSONL is acceptable (same pattern).
+- **spec 056's `.jig/spec-ref` marker** is available for attribution
+  (working-tree-local, gitignored). Used best-effort; absence must not
+  block the emit.
+
+## Clarifications
+
+- **Depth (resolved 2026-06-19):** spec.md + SPIDR slice files now.
+- **Gates in scope for v1 (resolved):** start with the **review-evidence
+  gate** (highest value) and the **conventions spec-gate** (directly
+  answers the parent brief-08 open question — "is the gate catching
+  anything?"). Secret-scan + context bands follow.
+- **Event vs. counter (guidance):** per-event append (matches the JSONL
+  pattern); aggregate at read time in the digest.
+- **No fail-closed (hard rule):** a telemetry write failure must never
+  block the underlying operation — the gate already decided to allow it.
 
 ## Decomposition
 
-_TBD — SPIDR analysis. See SKILL.md for the five axes (Spike / Paths / Interfaces / Data / Rules)._
+SPIDR — primarily a **Data** split (a new event record + its read-only
+aggregation), with a **Path** seam (the bypass code path in each gate).
+
+- **078-01 (emit):** add the bypass event at the override point of the
+  review-evidence gate + conventions spec-gate; reuse the telemetry sink;
+  fail-open; gitignored; content-free. Delivers an auditable trail today.
+- **078-02 (digest):** a read-only per-gate bypass histogram over `--days
+  N` (extend `routing-stats` or a sibling `gate-stats`), so "is this gate
+  deadweight?" becomes answerable.
 
 ## Slices
 
-- [078-01 — tbd](slice-01-tbd.md)
+- [078-01 — emit bypass events](slice-01-bypass-event-emit.md)
+- [078-02 — gate-stats digest](slice-02-gate-stats-digest.md)
