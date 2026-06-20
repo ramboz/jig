@@ -27,6 +27,7 @@ import tomllib
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_codex_plugin  # noqa: E402
+import install_contract  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -91,6 +92,16 @@ class CodexCommittedPackageBuildTests(unittest.TestCase):
             "agents/reviewer.md",
         ):
             self.assertTrue((self.plugin_dir / rel).is_file(), rel)
+
+    def test_payload_has_runtime_scripts_allowlist(self):
+        scripts = {
+            p.relative_to(self.plugin_dir).as_posix()
+            for p in (self.plugin_dir / "scripts").glob("*.py")
+        }
+        self.assertEqual(
+            scripts,
+            set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES),
+        )
 
     # AC #2 — generated role-agent TOML
     def test_payload_has_role_agent_toml(self):

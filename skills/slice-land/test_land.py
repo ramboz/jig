@@ -2116,5 +2116,241 @@ class ExecuteDirectDryRunNoFetchTests(unittest.TestCase):
                          "dry-run must not call `git fetch`")
 
 
+# ==================== servo pull-hint tests (slice 072-01) ====================
+
+
+class ServoAdvisoryTests(unittest.TestCase):
+    """Spec 072-01 — soft, non-gating, filesystem-probed servo advisory.
+
+    The advisory trails `prepare`'s readiness report when `.servo/` is
+    scaffolded in the target root, points at servo's current (post-ADR-0008)
+    `/goal`-driven / Routine-triggerable shape, names a resumable paused run
+    when one exists, stays silent when servo is absent, honours the
+    `.jig/no-servo-hint` opt-out, never changes the exit code, and runs no
+    subprocess.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-land-servo-")
+        self.target = Path(self.tmpdir)
+        self.spec = self.target / "spec.md"
+        # A synthetic spec whose PATH and CONTENT contain NO "servo"
+        # substring, so the AC2 "zero servo in output" assertion is
+        # meaningful. _spec_with_slice uses skill `foo` and a label with
+        # no "servo" in it.
+        self.spec.write_text(
+            _spec_with_slice("072-01 — present-infra-hint", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _scaffold_servo(self, manifest: bool = True, oracle: bool = False):
+        """Create a `.servo/` dir signalled by install.json and/or oracle.sh."""
+        servo = self.target / ".servo"
+        servo.mkdir(parents=True, exist_ok=True)
+        if manifest:
+            (servo / "install.json").write_text("{}\n")
+        if oracle:
+            (servo / "oracle.sh").write_text("#!/bin/sh\nexit 0\n")
+        return servo
+
+    def _add_paused_run(self, run_id: str = "abc123"):
+        """Create a `.servo/runs/<id>/state.json` paused-run fixture."""
+        run_dir = self.target / ".servo" / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        state = run_dir / "state.json"
+        state.write_text('{"status": "paused"}\n')
+        return state
+
+    def _run(self):
+        return run_land("prepare", str(self.spec), "072-01",
+                        "--target", str(self.target), cwd=self.target)
+
+    # ---- AC1: advisory appears when .servo/ is present ----
+
+    def test_advisory_present_with_install_json(self):
+        """`.servo/install.json` present → a `## servo` advisory section
+        appears after the gating checks."""
+        self._scaffold_servo(manifest=True, oracle=False)
+        result = self._run()
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+        out = result.stdout
+        self.assertIn("## servo", out)
+        # Advisory trails the gating checks.
+        self.assertLess(out.index("## Readiness checks"), out.index("## servo"),
+                        "advisory must trail the readiness checks")
+
+    def test_advisory_present_with_oracle_sh(self):
+        """`.servo/oracle.sh` present (no install.json) → advisory appears."""
+        self._scaffold_servo(manifest=False, oracle=True)
+        result = self._run()
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+        self.assertIn("## servo", result.stdout)
+
+    # ---- AC2: silent when servo is absent ----
+
+    def test_silent_when_servo_absent(self):
+        """No `.servo/` → no advisory and no `servo` substring at all
+        (case-insensitive). ADR-0022 §5 absent → no mention."""
+        # No _scaffold_servo call: .servo/ does not exist.
+        result = self._run()
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+        self.assertNotIn("## servo", result.stdout)
+        self.assertNotIn("servo", result.stdout.lower(),
+                         "no servo mention may appear when .servo/ is absent")
+
+    # ---- AC3: points at the current artifact shape ----
+
+    def test_advisory_names_goal_driven_loop_no_hand_rolled(self):
+        """Advisory names servo's `/goal`-driven, Routine-triggerable loop
+        and never says 'hand-rolled'."""
+        self._scaffold_servo()
+        out = self._run().stdout
+        lower = out.lower()
+        self.assertIn("/goal", out)
+        self.assertIn("routine", lower)
+        self.assertNotIn("hand-rolled", lower,
+                         "advisory must not name the retired hand-rolled loop")
+
+    def test_advisory_names_paused_run_with_path(self):
+        """With a `.servo/runs/<id>/state.json` present, advisory names
+        resuming a paused run AND references the path."""
+        self._scaffold_servo()
+        self._add_paused_run("abc123")
+        out = self._run().stdout
+        lower = out.lower()
+        self.assertIn("resume", lower, "advisory must mention resuming a run")
+        # References the run state path (relative form).
+        self.assertIn(".servo/runs/abc123/state.json", out)
+
+    def test_advisory_omits_resume_line_when_no_runs(self):
+        """`.servo/` present but no runs → advisory omits the resume line
+        (no 'resume' mention, no state.json path)."""
+        self._scaffold_servo()
+        out = self._run().stdout
+        self.assertIn("## servo", out)
+        self.assertNotIn("resume", out.lower(),
+                         "no resume line when there is no paused run")
+        self.assertNotIn("state.json", out)
+
+    def test_advisory_picks_most_recent_run(self):
+        """With several paused runs, advisory references the most recently
+        modified one (by mtime)."""
+        import os as _os
+        import time as _time
+        self._scaffold_servo()
+        old = self._add_paused_run("old-run")
+        new = self._add_paused_run("new-run")
+        # Make `old` older and `new` newer, unambiguously.
+        now = _time.time()
+        _os.utime(old, (now - 1000, now - 1000))
+        _os.utime(new, (now, now))
+        out = self._run().stdout
+        self.assertIn(".servo/runs/new-run/state.json", out)
+        self.assertNotIn("old-run", out,
+                         "advisory should reference only the most recent run")
+
+    # ---- AC4: never gates (identical exit code, output differs only by advisory) ----
+
+    def test_identical_exit_code_present_vs_absent(self):
+        """Same spec/slice, `.servo/` present vs absent → identical exit
+        code; output differs only by the advisory text."""
+        absent = self._run()
+        self._scaffold_servo()
+        present = self._run()
+        self.assertEqual(absent.returncode, present.returncode,
+                         "advisory must not change the exit code")
+        # Present output == absent output + the advisory section appended.
+        self.assertTrue(present.stdout.startswith(absent.stdout.rstrip("\n")),
+                        "advisory must only ADD to the report, not alter it")
+        self.assertNotIn("## servo", absent.stdout)
+        self.assertIn("## servo", present.stdout)
+
+    def test_advisory_adds_no_blockers_line(self):
+        """The advisory never introduces a `## Blockers` section."""
+        self._scaffold_servo()
+        out = self._run().stdout
+        self.assertNotIn("## Blockers", out)
+
+    # ---- AC5: filesystem-only detection, no subprocess ----
+
+    def test_servo_detection_makes_no_subprocess_calls(self):
+        """servo detection + render runs no subprocess. Patch
+        `subprocess.run` to count calls during the servo code path only,
+        proving detection adds no new subprocess calls beyond the existing
+        tdd.py/git ones."""
+        from unittest.mock import patch
+        self._scaffold_servo()
+        self._add_paused_run("abc123")
+        # Call the render helper directly with subprocess wholly stubbed:
+        # any subprocess use inside detection/render raises.
+        sentinel = {"n": 0}
+
+        def boom(*a, **kw):
+            sentinel["n"] += 1
+            raise AssertionError("servo detection must not call subprocess")
+
+        with patch.object(_land.subprocess, "run", side_effect=boom):
+            advisory = _land.render_servo_advisory(self.target)
+        self.assertEqual(sentinel["n"], 0)
+        self.assertIn("## servo", advisory)
+        self.assertIn(".servo/runs/abc123/state.json", advisory)
+
+    # ---- AC6: opt-out honoured ----
+
+    def test_opt_out_marker_suppresses_advisory(self):
+        """`.jig/no-servo-hint` at the target root suppresses the advisory
+        even when `.servo/` is present."""
+        self._scaffold_servo()
+        self._add_paused_run("abc123")
+        jig = self.target / ".jig"
+        jig.mkdir(parents=True, exist_ok=True)
+        (jig / "no-servo-hint").write_text("")  # contents ignored
+        result = self._run()
+        self.assertEqual(result.returncode, 0,
+                         f"stderr: {result.stderr}\nstdout: {result.stdout}")
+        self.assertNotIn("## servo", result.stdout)
+        self.assertNotIn("servo", result.stdout.lower(),
+                         "opt-out must suppress all servo mention")
+
+    def test_opt_out_marker_contents_ignored(self):
+        """Marker presence is the only state read; its contents don't
+        matter (non-empty contents still suppress)."""
+        self._scaffold_servo()
+        jig = self.target / ".jig"
+        jig.mkdir(parents=True, exist_ok=True)
+        (jig / "no-servo-hint").write_text("anything at all\n")
+        self.assertEqual(_land.render_servo_advisory(self.target), "")
+
+    # ---- Edge case: doc-only slice (no test runner) still renders ----
+
+    def test_doc_only_slice_still_renders_advisory(self):
+        """A doc-only slice (no test runner → tdd.py warns) still gets the
+        advisory rendered consistently when `.servo/` is present."""
+        self._scaffold_servo()
+        result = self._run()
+        # tmpdir target has no test signals → Tests row is `[?]` (warn).
+        self.assertRegex(result.stdout, r"(?m)^- \[\?\] Tests")
+        self.assertIn("## servo", result.stdout)
+
+    # ---- Helper-level unit checks ----
+
+    def test_render_helper_returns_empty_when_absent(self):
+        """`render_servo_advisory` returns "" when `.servo/` is absent."""
+        self.assertEqual(_land.render_servo_advisory(self.target), "")
+
+    def test_render_helper_nonempty_when_present(self):
+        """`render_servo_advisory` returns a non-empty `## servo` block
+        when `.servo/` is present."""
+        self._scaffold_servo()
+        advisory = _land.render_servo_advisory(self.target)
+        self.assertIn("## servo", advisory)
+        self.assertNotIn("hand-rolled", advisory.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

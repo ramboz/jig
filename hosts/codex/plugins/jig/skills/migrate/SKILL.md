@@ -405,7 +405,7 @@ For each migration, in order:
      [print(l.label) for l in iter_slices('docs/specs/NNN-mM-slug/spec.md')]"
 
    # Lint walks all slices, no AC contradictions
-   python3 scripts/spec_lint.py docs/specs/NNN-mM-slug/spec.md
+   python3 "${PLUGIN_ROOT}/scripts/spec_lint.py" docs/specs/NNN-mM-slug/spec.md
 
    # Status board generates the table
    python3 skills/spec-workflow/workflow.py status-board <project-dir>

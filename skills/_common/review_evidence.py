@@ -52,8 +52,13 @@ from _common.parsing import (
 # Slice 064-03 added the on-demand `frame-critique` pass (gated by a slice's
 # `frame_review: true` flag) — unlike the others it gates the
 # READY_FOR_REVIEW (pre-implementation) stage, not REVIEWED (ADR-0020).
+# Slice 071-01 added the on-demand, attest-only `design-review` pass (gated
+# by a slice's `design_review: true` flag, mirroring `arch` at REVIEWED): a
+# read-only reviewer ATTESTS an external non-deterministic eval's frozen
+# verdict (servo's design-fidelity composite) — never re-deriving the score
+# (the honesty boundary, ADR-0022).
 PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation",
-          "frame-critique")
+          "frame-critique", "design-review")
 
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
@@ -184,7 +189,8 @@ def evidence_path(spec_path, slice_fragment: str, pass_name: str) -> Path:
 
 def required_passes(stage: str, *, arch_review: bool,
                     code_health_review: bool = False,
-                    frame_review: bool = False) -> tuple:
+                    frame_review: bool = False,
+                    design_review: bool = False) -> tuple:
     """Return the passes required to enter `stage` (ADR-0014 §5 map).
 
     - ``READY_FOR_REVIEW`` → ``frame-critique`` iff the slice/spec
@@ -193,16 +199,18 @@ def required_passes(stage: str, *, arch_review: bool,
       frame-critique runs before any code exists.
     - ``REVIEWED`` → ``compliance`` + ``craft`` (+ ``arch`` iff the slice
       declared ``arch_review: true``) (+ ``code-health`` iff the slice
-      declared ``code_health_review: true`` — slice 060-05).
+      declared ``code_health_review: true`` — slice 060-05) (+
+      ``design-review`` iff the slice declared ``design_review: true`` —
+      slice 071-01).
     - ``RECONCILED`` → ``reconciliation``.
 
-    `arch_review` / `code_health_review` are honored only for REVIEWED,
-    `frame_review` only for READY_FOR_REVIEW (each is a stage-specific
-    pass). All three flag kwargs default False so every existing slice
-    (no flag) is unaffected — the frame-critique, arch, and code-health
-    passes are all opt-in gates. An unflagged READY_FOR_REVIEW yields an
-    EMPTY tuple → no gating (existing specs transition freely). Raises
-    `EvidenceError` for an unknown stage.
+    `arch_review` / `code_health_review` / `design_review` are honored
+    only for REVIEWED, `frame_review` only for READY_FOR_REVIEW (each is a
+    stage-specific pass). All four flag kwargs default False so every
+    existing slice (no flag) is unaffected — the frame-critique, arch,
+    code-health, and design-review passes are all opt-in gates. An
+    unflagged READY_FOR_REVIEW yields an EMPTY tuple → no gating (existing
+    specs transition freely). Raises `EvidenceError` for an unknown stage.
 
     NOTE: the ``DONE`` re-validation (ADR-0014 §5) re-runs the REVIEWED +
     RECONCILED sets; that composition lives in the 045-03 gate, not here,
@@ -217,6 +225,8 @@ def required_passes(stage: str, *, arch_review: bool,
             passes.append("arch")
         if code_health_review:
             passes.append("code-health")
+        if design_review:
+            passes.append("design-review")
         return tuple(passes)
     if stage == "RECONCILED":
         return ("reconciliation",)
@@ -393,6 +403,30 @@ def _frame_review_flag(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("frame_review", ""))
 
 
+def _design_review_flag(spec_path, slice_fragment: str) -> bool:
+    """Read the resolved slice's `design_review:` frontmatter flag
+    (slice 071-01). Mirrors `_arch_review_flag` exactly.
+
+    Returns True iff the slice declares a truthy `design_review` token
+    (`true`/`yes`/`on`/`1`, case-insensitive — the shared
+    `frontmatter_flag_truthy` predicate, same source as
+    `workflow.py:slice_needs_design_review`). Conservative: any miss (no
+    frontmatter, field absent, unrecognized value) returns False, so every
+    existing slice (no flag) stays unaffected — the design-review pass is
+    opt-in. This is the no-drift invariant: the gate reads the flag itself
+    (the same flag the orchestrator reads to spawn the pass). Raises
+    `EvidenceError` only when the slice itself can't be resolved.
+    """
+    spec_path = Path(spec_path)
+    try:
+        loc = load_slice(spec_path, slice_fragment)
+    except SliceLookupError as exc:
+        raise EvidenceError(str(exc)) from exc
+    body = loc.text[loc.start:loc.end]
+    fields, _ = parse_frontmatter(body)
+    return frontmatter_flag_truthy(fields.get("design_review", ""))
+
+
 def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     """Validate the evidence set required to enter `stage` for one slice.
 
@@ -408,8 +442,8 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     Does NOT raise for an invalid slice target — that becomes the first
     diagnostic (so the gate can report it uniformly rather than crashing).
     """
-    # Resolve the arch + code-health + frame flags + slice first; an
-    # unresolvable slice is a single actionable diagnostic, not an
+    # Resolve the arch + code-health + frame + design flags + slice first;
+    # an unresolvable slice is a single actionable diagnostic, not an
     # exception. Reading the flags HERE (rather than in the caller) keeps
     # the spawner and the gate from drifting — the same per-stage flag
     # determines both what runs and what the gate requires.
@@ -417,13 +451,15 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
         arch = _arch_review_flag(spec_path, slice_fragment)
         code_health = _code_health_review_flag(spec_path, slice_fragment)
         frame = _frame_review_flag(spec_path, slice_fragment)
+        design = _design_review_flag(spec_path, slice_fragment)
     except EvidenceError as exc:
         return [f"invalid slice target: {exc}"]
 
     try:
         needed = required_passes(stage, arch_review=arch,
                                  code_health_review=code_health,
-                                 frame_review=frame)
+                                 frame_review=frame,
+                                 design_review=design)
     except EvidenceError as exc:
         return [str(exc)]
 

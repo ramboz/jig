@@ -119,9 +119,25 @@ class ClaudeZipShapeTests(unittest.TestCase):
     def test_readme_present(self):
         self.assertIn("README.md", self.names)
 
+    def test_runtime_scripts_allowlist_present(self):
+        """The committed Claude package carries only runtime scripts.
+
+        Main's release contract re-includes the verifier trio plus
+        spec_lint.py under scripts/. In v2 those files must be present in the
+        committed host package before build_release_zip archives it.
+        """
+        scripts_entries = {n for n in self.names if n.startswith("scripts/")}
+        expected = set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES)
+        self.assertEqual(
+            scripts_entries,
+            expected,
+            "Claude zip's scripts/ entries must exactly match the runtime allowlist; "
+            f"got {sorted(scripts_entries)!r}, expected {sorted(expected)!r}",
+        )
+
     def test_dev_only_files_absent(self):
-        # The committed Claude package is runtime-only: no scripts/docs/tests.
-        for prefix in ("scripts/", "docs/", ".github/", ".codex-plugin/"):
+        # The committed Claude package is runtime-only: no docs/tests/dev dirs.
+        for prefix in ("docs/", ".github/", ".codex-plugin/"):
             offenders = [n for n in self.names if n.startswith(prefix)]
             self.assertEqual(
                 offenders, [], f"Claude zip must exclude {prefix}; found {offenders!r}"
@@ -408,5 +424,55 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=captured.getvalue())
 
 
+class PackagedVerifierImportTests(unittest.TestCase):
+    """The scaffold-completion self-check (slice 048-06) imports
+    `verify_install` (which pulls in `install_contract` +
+    `scaffold_contract`) from `<plugin-root>/scripts/` at install time.
+    Before the runtime-scripts-allowlist fix the release zip carried no
+    `scripts/` at all, so that import crashed on every packaged plugin
+    install. The existing `smoke_test` imports the verifier from the SOURCE
+    repo, not the extracted tree, so it never exercised this path.
+
+    This test extracts the built zip, asserts every allowlisted
+    `scripts/` module is present, and imports the verifier from the
+    EXTRACTED tree in a clean subprocess (no repo `scripts/` on `sys.path`),
+    reproducing exactly what scaffold.py does on a real plugin install."""
+
+    def test_verifier_imports_from_extracted_tree(self):
+        import subprocess
+
+        zip_path, _ = _build_once("claude", _CLAUDE_VERSION)
+        self.addCleanup(shutil.rmtree, zip_path.parent, ignore_errors=True)
+        tmp = Path(tempfile.mkdtemp(prefix="jig-pkg-verify-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp)
+
+        for rel in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
+            self.assertTrue(
+                (tmp / rel).is_file(),
+                f"runtime module {rel} missing from extracted plugin tree",
+            )
+
+        # Import in a subprocess with ONLY the extracted scripts/ dir on the
+        # path — mirrors scaffold.py inserting `<plugin-root>/scripts/` and
+        # importing verify_install on a packaged install. `-S`/clean env keep
+        # the repo's own modules off the path.
+        scripts_dir = tmp / "scripts"
+        snippet = (
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "import verify_install; "
+            "assert callable(verify_install.run_completion_summary)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", snippet, str(scripts_dir)],
+            cwd=str(tmp),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"verifier failed to import from packaged tree:\n{result.stderr}",
+        )
 if __name__ == "__main__":
     unittest.main()

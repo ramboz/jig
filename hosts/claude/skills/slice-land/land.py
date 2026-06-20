@@ -27,6 +27,9 @@ Exit codes:
 prepare: does NOT mutate git state. Mode-specific next-steps appear as
   suggested commands the user copy-pastes. The only write is the PR body
   file (mode=pr). Read-only `git rev-parse --abbrev-ref HEAD` is permitted.
+  A soft, never-gating servo advisory (spec 072-01) may trail the report
+  when `.servo/` is present in the target — filesystem-probed only (no
+  subprocess), opt-out via `.jig/no-servo-hint`; it never alters the exit code.
 
 execute --mode direct: DOES mutate git state. Runs `git checkout main`,
   `git merge <branch> --ff-only`, `git push origin main`. Guards: refuses if
@@ -489,6 +492,85 @@ def render_pr_body(slice_label: str, spec_path: Path, goal: str,
     )
 
 
+# ---------- servo pull-hint (spec 072-01) ----------
+#
+# A soft, never-gating, filesystem-only advisory that trails the readiness
+# report when servo (jig's autonomous sibling plugin) is scaffolded into the
+# target. ADR-0022 §5: mention servo ONLY when its infra is present — a jig
+# user who never installed servo sees nothing. The hint points at servo's
+# current post-ADR-0008 shape (a /goal-driven, Routine-triggerable loop) and
+# names a resumable paused run when one exists. It runs NO subprocess and
+# never invokes any servo:* command (the supervised-default boundary that is
+# the reason servo is a separate plugin). Opt-out: `.jig/no-servo-hint`
+# (parity with `.jig/no-people-md`, spec 050).
+
+
+# servo's durable per-project manifest / oracle (servo architecture.md):
+# either signals a scaffolded `.servo/`.
+_SERVO_PRESENCE_SIGNALS = ("install.json", "oracle.sh")
+# servo's opt-out marker, mirroring `.jig/no-people-md` (spec 050).
+_SERVO_HINT_OPT_OUT = (".jig", "no-servo-hint")
+
+
+def _servo_present(target: Path) -> bool:
+    """Filesystem-only probe: servo is scaffolded iff `<target>/.servo/`
+    contains `install.json` OR `oracle.sh`. No subprocess."""
+    servo_dir = target / ".servo"
+    return any((servo_dir / name).exists() for name in _SERVO_PRESENCE_SIGNALS)
+
+
+def _servo_hint_opted_out(target: Path) -> bool:
+    """True iff the `.jig/no-servo-hint` marker exists at the target root.
+    Presence is the only state read; contents are ignored."""
+    return (target / _SERVO_HINT_OPT_OUT[0] / _SERVO_HINT_OPT_OUT[1]).exists()
+
+
+def _latest_paused_run(target: Path) -> Path:
+    """Return the most recently modified `.servo/runs/*/state.json`, or None
+    when there are no paused runs. Filesystem-only (glob + stat); no
+    subprocess."""
+    runs = list((target / ".servo" / "runs").glob("*/state.json"))
+    if not runs:
+        return None
+    return max(runs, key=lambda p: p.stat().st_mtime)
+
+
+def render_servo_advisory(target: Path) -> str:
+    """Render the trailing `## servo` advisory section, or "" when servo is
+    absent or the hint is opted out.
+
+    Filesystem-only (no subprocess). Points at servo's current
+    (`/goal`-driven, Routine-triggerable) shape and, when a paused run exists
+    at `.servo/runs/<id>/state.json`, names it as resumable (referencing the
+    relative path; the most recently modified run when several exist).
+    Advisory-only — jig runs no servo command."""
+    if _servo_hint_opted_out(target) or not _servo_present(target):
+        return ""
+
+    lines = [
+        "## servo",
+        "",
+        "servo is scaffolded here (`.servo/` present). This is an advisory "
+        "only — jig runs no servo command.",
+        "",
+        "Continue autonomously with servo's current `/goal`-driven, "
+        "Routine-triggerable loop (servo `ADR-0008`).",
+    ]
+
+    run_state = _latest_paused_run(target)
+    if run_state is not None:
+        try:
+            rel = run_state.relative_to(target)
+        except ValueError:
+            rel = run_state
+        lines.append("")
+        lines.append(
+            f"A paused run exists — resume it from `{rel}`."
+        )
+
+    return "\n".join(lines)
+
+
 # ---------- main pipeline ----------
 
 
@@ -565,6 +647,16 @@ def prepare(spec_path: Path, slice_fragment: str,
             # never in a sibling slice file — derive from spec_path directly.
             scope = _pr_title_scope(spec_path)
             parts.append(render_next_steps_pr(branch, pr_body_path, label, scope))
+
+    # Spec 072-01 — soft, never-gating servo advisory. Appended AFTER
+    # `has_blocker` is computed (purely from `checks`) and AFTER the
+    # mode block, so it can never alter the exit code (AC4). Filesystem
+    # probe of the target only (AC5); silent when servo is absent or the
+    # `.jig/no-servo-hint` opt-out is set (AC2/AC6).
+    servo_advisory = render_servo_advisory(target or Path.cwd())
+    if servo_advisory:
+        parts.append("")
+        parts.append(servo_advisory)
 
     report = "\n".join(parts) + "\n"
     return report, (1 if has_blocker else 0)

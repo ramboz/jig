@@ -1,5 +1,10 @@
 ---
 status: DRAFT
+# use_cases: the UC-N id(s) from docs/product-vision.md's `## Use cases`
+# section that this spec serves (spec 068-02 / ADR-0025), e.g. [UC-1, UC-3].
+# Soft/advisory — leave [] when this spec serves no captured behavior, or
+# when the project hasn't adopted the use-case layer. Empty is fine.
+use_cases: []
 ---
 
 # Spec 002: First spec — replace me

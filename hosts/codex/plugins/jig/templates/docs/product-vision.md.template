@@ -90,6 +90,34 @@
 - (non-goal 2)
 - (non-goal 3)
 
+## Use cases
+
+<!-- elicited: PENDING / status: unfilled -->
+
+> _The intended user-facing **behaviors** — the breadth frame specs anchor
+> against. Each entry is one **goal-level** behavior in the form
+> `UC-N: "[actor] can [goal]"` — e.g. "UC-1: a user can resume a draft
+> offline", "UC-2: an admin can revoke a teammate's access". A seed, not the
+> final set: behaviors that surface later (while drafting specs) get added
+> then._
+>
+> _**Each entry carries a stable `UC-N` id** (a plain integer, like a spec's
+> `NNN`). The id is **append-only** — assign the next free number when you add
+> a behavior, and **never renumber or reuse** one (a deleted `UC-2` stays
+> retired). A spec records which use case(s) it serves by listing those ids in
+> its `use_cases:` frontmatter (slice 068-02), so the id must stay stable for
+> the trace link to resolve._
+>
+> _**Goal-level, not spec-level.** Capture *what* the actor can do, never
+> *how* it's built. "A user can reset their password" is a use case;
+> "the reset-token table has a 24-hour TTL" is a spec detail — keep it out
+> of this section so the vision stays a breadth frame, not a requirements
+> doc._
+
+- UC-1: (actor) can (goal)
+- UC-2: (actor) can (goal)
+- UC-3: (actor) can (goal)
+
 ## Stack
 
 <!-- elicited: PENDING / status: unfilled -->

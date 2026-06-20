@@ -608,6 +608,14 @@ def _read_is_ranged(tool_input) -> bool:
     return tool_input.get("offset") is not None or tool_input.get("limit") is not None
 
 
+def _safe_stat_size(file_path) -> "int | None":
+    """Return a file's byte size, or ``None`` when it cannot be statted."""
+    try:
+        return Path(file_path).stat().st_size
+    except Exception:
+        return None
+
+
 def evaluate_read(file_path, tool_input, seen_paths, nudged_paths) -> "dict":
     """Decide whether the read-once / read-lean nudge should fire for this
     ``Read`` tool call.
@@ -638,6 +646,10 @@ def evaluate_read(file_path, tool_input, seen_paths, nudged_paths) -> "dict":
             "text":         str | None,       # the nudge body, or None
             "seen_paths":   list[str],        # next seen state to persist
             "nudged_paths": list[str],        # next nudged state to persist
+            "file_path":    str,              # target path for telemetry
+            "size_bytes":   int | None,       # stat size when known
+            "threshold_bytes": int,           # effective large-read threshold
+            "ranged":       bool,             # offset/limit was supplied?
         }
 
     Semantics:
@@ -655,11 +667,17 @@ def evaluate_read(file_path, tool_input, seen_paths, nudged_paths) -> "dict":
     """
     seen = list(seen_paths or [])
     nudged = list(nudged_paths or [])
+    threshold = _resolve_read_lean_bytes()
+    ranged = _read_is_ranged(tool_input)
+    size = _safe_stat_size(file_path) if file_path else None
 
     if not file_path:
         return {
             "nudge": False, "kind": None, "text": None,
             "seen_paths": seen, "nudged_paths": nudged,
+            "file_path": file_path,
+            "size_bytes": size, "threshold_bytes": threshold,
+            "ranged": ranged,
         }
 
     already_seen = file_path in seen
@@ -676,32 +694,42 @@ def evaluate_read(file_path, tool_input, seen_paths, nudged_paths) -> "dict":
             "text": duplicate_read_nudge_text(file_path),
             "seen_paths": next_seen,
             "nudged_paths": nudged + [file_path],
+            "file_path": file_path,
+            "size_bytes": size,
+            "threshold_bytes": threshold,
+            "ranged": ranged,
         }
     if already_seen:
         # Seen + already nudged → silent (at most once per path).
         return {
             "nudge": False, "kind": None, "text": None,
             "seen_paths": next_seen, "nudged_paths": nudged,
+            "file_path": file_path,
+            "size_bytes": size, "threshold_bytes": threshold,
+            "ranged": ranged,
         }
 
     # ----- First read: large whole-file check (AC #3) ---------------------
-    if not _read_is_ranged(tool_input):
-        try:
-            size = Path(file_path).stat().st_size
-        except Exception:
-            size = -1
-        if size >= _resolve_read_lean_bytes():
+    if not ranged:
+        if size is not None and size >= threshold:
             return {
                 "nudge": True,
                 "kind": "large",
                 "text": large_read_nudge_text(file_path, size),
                 "seen_paths": next_seen,
                 "nudged_paths": nudged,
+                "file_path": file_path,
+                "size_bytes": size,
+                "threshold_bytes": threshold,
+                "ranged": ranged,
             }
 
     return {
         "nudge": False, "kind": None, "text": None,
         "seen_paths": next_seen, "nudged_paths": nudged,
+        "file_path": file_path,
+        "size_bytes": size, "threshold_bytes": threshold,
+        "ranged": ranged,
     }
 
 
@@ -745,14 +773,14 @@ def _write_read_state(state_path: Path, seen_paths, nudged_paths) -> None:
         pass
 
 
-def read_nudge_for_turn(file_path, tool_input, session_id, state_dir) -> "str | None":
+def read_nudge_event_for_turn(file_path, tool_input, session_id, state_dir) -> "dict | None":
     """Top-level orchestration for the PreToolUse(Read) read-once/read-lean
-    nudge.
+    nudge, returning the full decision metadata when a nudge fires.
 
     Loads the per-session seen/nudged path state → evaluates → persists the
-    new state → returns the nudge text, or ``None`` when nothing should fire.
-    Never raises: any failure path returns ``None`` so the hook stays silent
-    and non-blocking.
+    new state → returns the nudge decision dict, or ``None`` when nothing
+    should fire. Never raises: any failure path returns ``None`` so the hook
+    stays silent and non-blocking.
 
     Deferred-by-design (mirrors the growth-nudge helper): the per-session
     state file is left to the OS tmp-reaper rather than self-cleaned (tiny
@@ -770,7 +798,16 @@ def read_nudge_for_turn(file_path, tool_input, session_id, state_dir) -> "str | 
             _write_read_state(state_path, decision["seen_paths"],
                               decision["nudged_paths"])
         if decision["nudge"] and decision["text"]:
-            return decision["text"]
+            return decision
         return None
     except Exception:
         return None
+
+
+def read_nudge_for_turn(file_path, tool_input, session_id, state_dir) -> "str | None":
+    """Compatibility wrapper returning only the nudge text."""
+    decision = read_nudge_event_for_turn(file_path, tool_input,
+                                         session_id, state_dir)
+    if decision:
+        return decision.get("text")
+    return None

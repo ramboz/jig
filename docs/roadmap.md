@@ -29,6 +29,14 @@ thin-orchestrator discipline ([spec 055](specs/055-context-cost-discipline/spec.
 - **Latest release:** 1.12.0
 - **Status:** ongoing — new single-host capability work continues to land here.
 
+| Spec | Theme | Version fit |
+|------|-------|-------------|
+| [055 — context-cost discipline](specs/055-context-cost-discipline/spec.md) / [057 — thin-orchestrator](specs/057-thin-orchestrator/spec.md) | Keep Claude Code sessions lean: delegate file-heavy reads, compact before dumb-zone growth, and bound subagent/output envelopes. | Shipped in 1.x; remains the cost model every later host adapter must preserve. |
+| [065 — lower-vocabulary barrier](specs/065-lower-vocabulary-barrier/spec.md) | Explain jig terms on demand without bloating the always-loaded primer. | Shipped in 1.x; applies to all future hosts through generated prose. |
+| [077 — type-check floor](specs/077-type-check-floor/spec.md) | Add a Python type-check advisory probe to code-health, then hold jig itself to a typed baseline. | 1.x quality-floor work; not blocked on multi-host support. |
+| [078 — gate-bypass telemetry](specs/078-gate-bypass-telemetry/spec.md) | Instrument deliberate gate overrides so soft gates stay auditable. | 1.x observability work; later hosts should preserve the same event semantics. |
+| [079 — semantic-index guidance](specs/079-semantic-index-guidance/spec.md) | Document when to reach for an installed semantic/code index without adding a new always-loaded surface. | Shipped in 1.x; its passive guidance feeds the v2 auto-activation work. |
+
 ### 2.0 — Multi-host portability _(in progress · integration branch `v2`)_
 
 Decouple jig's workflow model from any one LLM harness. One canonical source
@@ -43,6 +51,8 @@ packaging and install paths.
 | Spec | Theme | Status on `v2` |
 |------|-------|----------------|
 | [033 — host-adapter-portability](specs/033-host-adapter-portability/spec.md) | Host-adapter architecture; Codex scaffold + plugin packaging + TOML custom-agent adapter | IN_PROGRESS — 033-06/07 DONE, 033-05 deferred, 033-01..04 drafted |
+| [074 — host-native phase modes](specs/074-host-native-phase-modes/spec.md) | Map jig phases onto Claude/Codex planning and implementation modes without making host mode state a lifecycle gate. | DRAFT — resumes with concrete host-adapter work |
+| [080 — semantic-index auto-activation](specs/080-semantic-index-auto-activation/spec.md) | Provider-neutral semantic-index activation contract, plus Claude and Codex adapter materialization so `scout daemon start` / `scout attach` become transparent after opt-in. | DRAFT / DEFERRED split — contract + Claude path drafted; Codex slice deferred until 033-05/06 resumes |
 | 059 — codex-port-polish _(on `v2`)_ | Parity polish after the core port: host-aware migrate, hook-trust onboarding, install smoke, override deferral, role-capability dogfood | **DONE** (all slices) |
 | 061 — dual-host-plugin-artifacts _(on `v2`)_ | Symmetric Claude + Codex plugin packages, drift guard, host-explicit release zips (ADR-0018) | IN_PROGRESS — 061-01..05 DONE, 061-06/07 (install verification) drafted |
 

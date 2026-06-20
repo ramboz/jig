@@ -297,8 +297,10 @@ SKILL.md hand-off is the documented gate.
    `transition <spec> <slice> READY_FOR_IMPLEMENTATION --release --reason
    "<why>"` (clears `claimed_by:`, logs to the slice's `## Release log`).
 3. Fill in / refresh `plan.md` and `tasks.md` for the slice.
-4. Spawn the `implementer` subagent with the spec path. Implementer writes the
-   deliverable to disk (TDD — failing tests first).
+4. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
+   with `[jig:phase=implementation] [jig:spec=NNN] [jig:slice=NNN-NN]` so
+   `jig-telemetry.sh` can attribute implementation-phase cost. Implementer
+   writes the deliverable to disk (TDD — failing tests first).
 
 ### After implementation
 
@@ -362,6 +364,12 @@ The orchestrator runs the passes in this order:
    and recommends gating it like arch-review — so it defaults off and slice
    authors opt in with `code_health_review: true`. The evidence file is
    `reviews/slice-NN-code-health.md`.
+
+When spawning any reviewer Task above, prefix the Task prompt with telemetry
+tags before the `review.py` body: `[jig:phase=<phase>] [jig:spec=NNN]
+[jig:slice=NNN-NN]`. Use `compliance` for `review.py implementation`,
+`craft` for `pr-review`, `arch` for `arch-review`, `code-health` for
+`code-health`, and `reconciliation` for the final reconciliation review.
 
 **Block rule for the REVIEWED transition.** All required passes
 (compliance + craft, plus arch when `arch_review: true`, plus code-health
@@ -433,7 +441,8 @@ PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   "<deliverable-path-1>" ...)
 SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type implementation)
-# … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+# … feed "[jig:phase=compliance] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+# … to Task with subagent_type: $SUBAGENT, wait for pass …
 
 # Craft pass (always)
 PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
@@ -441,7 +450,8 @@ PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   "<deliverable-path-1>" ...)
 SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type pr-review)
-# … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+# … feed "[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+# … to Task with subagent_type: $SUBAGENT, wait for pass …
 
 # Arch pass (only when slice frontmatter has `arch_review: true`)
 # IMPORTANT: capture the helper exit code — a non-zero exit means the
@@ -459,7 +469,8 @@ if [ "$NEED_ARCH" = "true" ]; then
     "<deliverable-path-1>" ...)
   SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
     subagent-type arch-review)
-  # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+  # … feed "[jig:phase=arch] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+  # … to Task with subagent_type: $SUBAGENT, wait for pass …
 fi
 
 # Code-health pass (only when slice frontmatter has `code_health_review: true`)
@@ -481,7 +492,8 @@ if [ "$NEED_CH" = "true" ]; then
     "<deliverable-path-1>" ... --summary-file /tmp/health-summary.txt)
   SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
     subagent-type code-health)
-  # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+  # … feed "[jig:phase=code-health] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+  # … to Task with subagent_type: $SUBAGENT, wait for pass …
 fi
 ```
 
@@ -614,8 +626,10 @@ status flip is allowed. Each item is a gate.
       is the audit trail. New ADR (or superseding spec) only for
       decision-content changes.
 - [ ] **Reconciliation review** — spawn a second reviewer subagent with a
-      reconciliation-review prompt: are the doc changes faithful? Is the
-      deviation log honest? Is scope appropriate (no scope creep in docs)?
+      reconciliation-review prompt prefixed by
+      `[jig:phase=reconciliation] [jig:spec=NNN] [jig:slice=NNN-NN]`: are the
+      doc changes faithful? Is the deviation log honest? Is scope appropriate
+      (no scope creep in docs)?
 - [ ] **Use-case coverage (advisory)** — run `workflow.py coverage
       [--project-dir DIR]` and review any **coverage gap** (a use case with no
       implementing spec) or **scope creep** (a spec citing no resolvable use

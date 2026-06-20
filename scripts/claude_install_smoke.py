@@ -6,7 +6,7 @@ The Claude-side sibling of `codex_install_smoke.py`. It proves the committed
 and run correctly, independent of Codex:
 
   - the committed package is Claude-shaped (validates via install_contract,
-    plus a guard that no dev-only dirs — scripts/docs/tests — leak in);
+    plus a guard that no dev-only dirs — docs/tests — leak in);
   - the repo-root `.claude-plugin/marketplace.json` resolves the `jig` plugin to
     `hosts/claude` (NOT `path: "."`);
   - the built release zip extracts to the expected FLAT Claude shape and passes
@@ -50,9 +50,11 @@ PASS = "PASS"
 FAIL = "FAIL"
 UNAVAILABLE = "UNAVAILABLE"
 
-# Dev-only directories that must never appear inside a runtime Claude package
-# (the committed hosts/claude/ tree is runtime-only — AC1).
-_DEV_ONLY_DIRS: tuple[str, ...] = ("scripts", "docs", "tests")
+# Dev-only directories that must never appear inside a runtime Claude package.
+# `scripts/` is intentionally not listed: the runtime allowlist
+# (`verify_install`, `install_contract`, `scaffold_contract`, `spec_lint`) ships
+# there so packaged scaffold checks and shipped skill references resolve.
+_DEV_ONLY_DIRS: tuple[str, ...] = ("docs", "tests")
 
 _SURFACE_UNAVAILABLE_MARKERS = (
     "unrecognized subcommand",

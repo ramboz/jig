@@ -19,8 +19,9 @@
 > prescribes bespoke vision sections (Vision statement / Target
 > users / Core problem / Competitive landscape summary / prioritized
 > backlog / MVP scope / Future scope / Data sourcing / Recommended
-> slice order). These map to the **template's 9 H2s**, not the other
-> way around. This worked example shows the mapping inline.
+> slice order). These map to the **template's 10 H2s** (incl. the
+> `## Use cases` breadth section), not the other way around. This
+> worked example shows the mapping inline.
 
 ## Concept-to-template mapping (the load-bearing piece)
 
@@ -41,6 +42,10 @@ YarnFinder's CLAUDE.md names 9 sections it wants in product-vision.md:
 This mapping is the **answer to AC #5**: the elicitation skill does
 not produce YarnFinder's bespoke H2 names — it produces the template
 H2s, with YarnFinder's content distributed into the appropriate slots.
+(The 10th template H2, `## Use cases`, has no YarnFinder-named concept to
+map from — like `## Stack` / `## Design principles` / `## Open questions`
+it is filled by its own elicitation: the **Use cases capture loop**,
+demonstrated below.)
 
 ## The 12-section walk-through
 
@@ -202,6 +207,94 @@ Features 1-4 only (database + similarity + region filter + basic UI).
 "Future scope" + "Recommended slice order" all live inside the
 template's `## Scope` bucket. The Tiers/phases H3 absorbs the
 recommended slice order — that's the mapping AC #5 prescribes.
+
+### Use cases capture *(conversational loop — slice 068-01)*
+
+> **This is the load-bearing 068-01 demonstration.** After Scope, the skill
+> fills the `## Use cases` section with a **conversational capture loop**, not
+> the rigid per-section Q&A. YarnFinder is behavior-dense (a consumer product),
+> so it stresses the loop well. The four steps below show **any-shape capture +
+> loop to exhaustion**, a **single normalize pass**, **confirm-before-write with
+> an edit round-trip**, and the **no-silent-inference question**.
+
+**Step 1 — Capture (any shape, loop to exhaustion).**
+
+**Skill:** *"List the user-facing behaviors — what can someone actually do with
+YarnFinder? Type them one at a time or paste a list; goal-level, `[actor] can
+[goal]`."*
+
+**User pastes a bulk list:**
+- a crafter can search for a yarn by name
+- a crafter can see regional matches ranked by closeness
+- a crafter can filter matches to their own country
+
+**Skill asks:** *"Anything else?"*
+
+**User (incrementally):** *"a crafter can open a retailer link for a match"*
+
+**Skill asks again:** *"Anything else?"*
+
+**User:** *"a crafter can search for a yarn and filter by region in one step —
+done."*
+
+The skill **loops on "anything else?" until the user signals done** — accepting
+both the bulk paste and the later incremental additions.
+
+**Step 2 — Normalize (a single pass).** The skill runs **one** normalize pass:
+
+- **Dedupe:** the last entry ("search … and filter by region in one step")
+  duplicates the existing search + filter behaviors — folded out.
+- **Split compound:** none remaining after the dedupe (the compound entry was
+  the duplicate).
+- **Rephrase to goal-level:** all already in `"[actor] can [goal]"` form.
+
+**Step 3 — Confirm before any write (edit round-trips).** The skill presents the
+normalized set — **nothing is written yet**:
+
+> *Normalized use cases (confirm / edit / skip):*
+> 1. a crafter can search for a yarn by name
+> 2. a crafter can see regional matches ranked by closeness
+> 3. a crafter can filter matches to their own country
+> 4. a crafter can open a retailer link for a match
+
+**User edits:** *"Make #3 'filter matches by any region', not just their own —
+designers help crafters elsewhere."*
+
+The skill applies the edit and **re-presents** the list (the edit
+**round-trips** through confirm). **User confirms.** *Now* — and only now — the
+skill writes the section, **assigning each entry the next free `UC-N` id** as
+it renders (this is the first capture, so the ids run `UC-1`…`UC-4`). The ids
+are append-only — a later grow pass (slice 068-02) keeps `UC-1`…`UC-4` stable
+and assigns `UC-5` to the next behavior.
+
+**Step 4 — No silent inference.** The skill suspects an obvious missing
+behavior but does **not** auto-add it — it asks:
+
+> *"You didn't mention contributing a yarn to the database — intentional? (y/n)"*
+
+**User:** *"No, that's v2 — leave it out."* The skill **does not add it**. (Had
+the user said yes, it would have been added — only on the explicit yes.)
+
+**Skill renders into `## Use cases`** (on confirm):
+
+```markdown
+## Use cases
+
+<!-- elicited: 2026-05-15 / status: filled -->
+
+- UC-1: A crafter can search for a yarn by name
+- UC-2: A crafter can see regional matches ranked by closeness
+- UC-3: A crafter can filter matches by any region
+- UC-4: A crafter can open a retailer link for a match
+```
+
+Each entry carries a stable `UC-N` id (append-only) so a spec can cite it in
+`use_cases:` and the trace link resolves (slice 068-02). Note the section is
+**goal-level** — no entry names a table, an endpoint, or a scoring weight
+(those are spec-level, kept out per the section's guidance). And
+it is a **seed**: community-contribution behaviors (v2) were deliberately left
+out here and will be **added while drafting those specs** — that additive growth
+is slice 068-02's job, not this capture session's.
 
 ### Section 6 — Repository structure *(feeds architecture.md)*
 
@@ -393,11 +486,14 @@ serving as a pointer).
 
 ## Result: rendered docs/product-vision.md
 
-Same 9 H2s as jig's worked example (Identity / Target users / Core
-problem / Competitive landscape / Scope / Stack / Design principles
-& constraints / How new work enters / Open questions) — the
+Same 10 H2s as jig's worked example (Identity / Target users / Core
+problem / Competitive landscape / Scope / Use cases / Stack / Design
+principles & constraints / How new work enters / Open questions) — the
 elicitation skill produces template-shaped output regardless of
-project shape. YarnFinder's bespoke concepts (Data sourcing,
+project shape. The `## Use cases` section is filled by the
+conversational capture loop demonstrated above (any-shape capture →
+single normalize pass → confirm-before-write → no silent inference).
+YarnFinder's bespoke concepts (Data sourcing,
 Recommended slice order, prioritized backlog, Future scope) all
 land in the appropriate template slots per the mapping table at
 the top of this file.

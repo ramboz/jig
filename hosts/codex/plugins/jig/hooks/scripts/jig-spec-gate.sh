@@ -41,7 +41,12 @@ try:
             or resolved == os.path.join('docs', 'conventions.md')):
         sys.exit(0)
 
-    if os.environ.get('JIG_CONVENTIONS_APPROVED') == '1':
+    # Opt-in approval token. Mirrors _common/parsing.FRONTMATTER_TRUTHY
+    # ({1,true,yes,on}) — kept inline (not imported) so this load-bearing gate
+    # gains no _common-import failure mode; a source-inspection test pins the
+    # two token sets in sync. Widened from a bare '1' for cross-gate
+    # consistency; '1' still works (backward-compatible).
+    if (os.environ.get('JIG_CONVENTIONS_APPROVED') or '').strip().lower() in ('1', 'true', 'yes', 'on'):
         sys.exit(0)
 
     sys.stderr.write(

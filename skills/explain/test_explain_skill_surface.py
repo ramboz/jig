@@ -320,8 +320,14 @@ class TierRegistrationTests(unittest.TestCase):
 
 
 class ClaudeMdRowTests(unittest.TestCase):
-    """AC #1 / DoD — the root CLAUDE.md 'Skills in this repo' table carries a
-    row for /jig:explain."""
+    """AC #1 / DoD — the root CLAUDE.md keeps /jig:explain discoverable.
+
+    Spec 076-01 (lean primer) replaced the heavy per-skill 'Skills in this
+    repo' table with a short pointer (the host already surfaces every skill
+    with its description each session). The original DoD asserted a table row;
+    post-076 the surviving, still-true invariant is that the primer still names
+    /jig:explain in its skills pointer, so the on-demand explainer stays
+    discoverable from the always-loaded file."""
 
     @classmethod
     def setUpClass(cls):
@@ -330,12 +336,12 @@ class ClaudeMdRowTests(unittest.TestCase):
     def test_claude_md_exists(self):
         self.assertTrue(ROOT_CLAUDE_MD.is_file(), f"missing {ROOT_CLAUDE_MD}")
 
-    def test_explain_row_present(self):
-        # A table row begins `| `/jig:explain` |` — match the skill cell.
-        self.assertRegex(
-            self.text,
-            r"\|\s*`/jig:explain`\s*\|",
-            "root CLAUDE.md 'Skills in this repo' table must have a /jig:explain row",
+    def test_explain_discoverable(self):
+        # Post-076 the table is gone; /jig:explain must still be named in the
+        # primer's 'Skills in this repo' pointer.
+        self.assertIn(
+            "/jig:explain", self.text,
+            "root CLAUDE.md must keep /jig:explain discoverable (spec 076-01)",
         )
 
 

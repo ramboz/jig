@@ -137,6 +137,10 @@ def _render_adr_content(template_text: str, number: str, title: str,
     content = content.replace(PLACEHOLDER_TITLE, title)
     content = content.replace(PLACEHOLDER_DATE, today_iso)
     content = _set_frontmatter_field(content, "frame_review", "true")
+    # Slice 073-02 (ADR-0026): `status: Proposed` is NOT stamped here — it
+    # comes from the template's frontmatter, so a new ADR inherits it in the
+    # same single atomic write as the prose `Proposed (date)` line. (Contrast
+    # `frame_review`, stamped above because the 064-02 template omits it.)
     return content
 
 
@@ -966,6 +970,10 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
     # at the single point where an ADR becomes decision-of-record. Adds
     # the frontmatter block if absent; updates the field if present.
     new_text = _set_frontmatter_field(new_text, "last_verified", _today())
+    # Slice 073-02 (ADR-0026): stamp the canonical `status: Accepted`
+    # frontmatter field in the SAME atomic write that flips the prose to
+    # `Accepted (date)`, so frontmatter and prose cannot diverge.
+    new_text = _set_frontmatter_field(new_text, "status", "Accepted")
     atomic_write_text(adr_path, new_text)
     return adr_path
 
@@ -1110,6 +1118,14 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     new_old_text = (
         old_text[:old_status_end] + new_old_body + old_text[old_section_end:]
     )
+    # Slice 073-02 (ADR-0026): stamp the OLD ADR's canonical
+    # `status: Superseded` frontmatter field in the SAME atomic write that
+    # appends the prose `Superseded by …` line — sync-locked so prose and
+    # frontmatter cannot diverge. The NEW (superseding) ADR's status is NOT
+    # touched here: it retains `status: Accepted` (new-style ADRs carry it
+    # from `accept`; legacy ones grandfather via the reader's prose
+    # fallback). No backfill (ADR-0026 Open question).
+    new_old_text = _set_frontmatter_field(new_old_text, "status", "Superseded")
 
     new_new_body = _insert_after_accepted(new_body, supersedes_line)
     if new_new_body == new_body:

@@ -91,11 +91,11 @@ class CommittedPackageTests(unittest.TestCase):
 
     def test_dev_dirs_in_package_fail(self):
         tree = _claude_shaped_tree(self.tmp / "pkg")
-        (tree / "scripts").mkdir()
-        (tree / "scripts" / "x.py").write_text("x")
+        (tree / "docs").mkdir()
+        (tree / "docs" / "x.md").write_text("x")
         result = claude_install_smoke._validate_committed_package(tree)
         self.assertEqual(result.status, claude_install_smoke.FAIL)
-        self.assertIn("scripts", result.message)
+        self.assertIn("docs", result.message)
 
     def test_real_committed_package_passes(self):
         result = claude_install_smoke._validate_committed_package(

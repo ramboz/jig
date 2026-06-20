@@ -18,8 +18,14 @@
 #   - Crash posture: silent `except Exception: pass`. No stderr writes
 #     (Clarification Q2).
 #   - Opt-out: JIG_BOUNDARY_CHECK=0.
-python3 -c "
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SCRIPT_DIR="$SCRIPT_DIR" python3 -c "
 import sys, json, os, fnmatch
+
+script_dir = os.environ.get('SCRIPT_DIR', '.')
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
 
 # (pattern, tool-mention, surface-label) — order matters: more specific
 # patterns first (e.g., *.schema.json before bare json fallbacks). All
@@ -51,7 +57,12 @@ def match_pattern(basename):
     return None, None
 
 try:
-    if os.environ.get('JIG_BOUNDARY_CHECK') == '0':
+    # Opt-out disable token. Mirrors _common/parsing.ENV_FALSEY
+    # ({0,false,off,no}) — kept inline (not imported) so this hook gains no
+    # _common-import failure mode; a source-inspection test pins the two token
+    # sets in sync. Widened from a bare '0' for cross-gate consistency; '0'
+    # still works (backward-compatible).
+    if (os.environ.get('JIG_BOUNDARY_CHECK') or '').strip().lower() in ('0', 'false', 'off', 'no'):
         sys.exit(0)
 
     data = json.load(sys.stdin)
@@ -81,6 +92,15 @@ try:
         f'surface-appropriate breaking-change tool: {tool}. '
         f'This nudge is informational, not a gate.'
     )
+    try:
+        from lib.read_attribution import append_additional_context_event
+        append_additional_context_event(
+            os.environ.get('CLAUDE_PROJECT_DIR', '.'),
+            data.get('session_id') or 'default',
+            data.get('hook_event_name') or 'PostToolUse',
+            'jig-boundary-change-warn', 'boundary_change', msg)
+    except Exception:
+        pass
     print(json.dumps({'continue': True, 'additionalContext': msg}))
 except SystemExit:
     raise

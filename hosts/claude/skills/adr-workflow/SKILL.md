@@ -20,13 +20,20 @@ Codifies the ADR lifecycle that ADR-0001 and ADR-0002 were written by hand to
 exercise. Five deterministic operations:
 
 - **`new`** — scaffold `docs/decisions/adr-NNNN-<slug>.md` from the template, with
-  auto-numbering and a slug-collision check.
+  auto-numbering and a slug-collision check. The scaffold carries
+  `status: Proposed` in frontmatter (from the template) alongside the prose
+  `Proposed (date)` line (spec 073-02 / ADR-0026).
 - **`accept`** — flip Status from `Proposed (YYYY-MM-DD)` to
-  `Accepted (YYYY-MM-DD)`. Atomic write.
+  `Accepted (YYYY-MM-DD)`, and stamp the canonical `status: Accepted`
+  frontmatter field in the **same** atomic write (spec 073-02 / ADR-0026 —
+  frontmatter is the canonical status home; prose and frontmatter cannot
+  diverge).
 - **`supersede`** — append `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (date)`
   to an Accepted ADR's Status block and `Supersedes ADR-NNNN` to the replacement's
-  Status block. This is the **one** edit allowed on an immutable ADR per the
-  Nygard convention. Atomic write on both files.
+  Status block, and stamp the **old** ADR's `status: Superseded` frontmatter field
+  in the same atomic write (the replacement retains `status: Accepted`). This is
+  the **one** edit allowed on an immutable ADR per the Nygard convention. Atomic
+  write on both files.
 - **`index`** — regenerate the `## Index` section of `docs/decisions/README.md`
   from the actual ADR files present. Idempotent.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
@@ -39,6 +46,34 @@ Consequences, Open questions).
 ## How to use
 
 ### 1. Author a new ADR
+
+**Step 0 — confirm the project is scaffolded (spec 066 / ADR-0011).**
+BEFORE reserving an ADR number or drafting ANY `docs/decisions/` structure,
+confirm this project is a scaffolded jig project. If it isn't, **route — do
+not hand-roll directories**:
+
+- **Greenfield** (no jig structure yet) → tell the user to run
+  `/jig:scaffold-init`. It lays down conventions, templates, hooks, the
+  status board, and the `docs/decisions/` tree (with its README).
+- **Existing spec/`docs/decisions/` layout, but not jig-scaffolded** (no
+  `scaffold.json`) → tell the user to run `/jig:migrate`. It adopts the
+  existing layout into jig structure.
+
+You don't have to decide the state yourself: `adr.py new` (below)
+**classifies and routes** for you (spec 066-01) — a `scaffold.json`-bearing
+project proceeds; a greenfield project is refused naming
+`/jig:scaffold-init`; an adoptable spec-driven project is refused naming
+`/jig:migrate`. The deterministic gate and this human-readable precondition
+agree by construction, so **don't restate the detection heuristic here** —
+run the helper and let it route. (Bypass for a deliberate out-of-band flow:
+`JIG_SCAFFOLD_PRECONDITION=0`.)
+
+**The anti-pattern this step exists to kill:** an auto-triggered
+`adr-workflow` run improvising a loose `docs/decisions/` skeleton (folder +
+README, or just dropping an `adr-NNNN-*.md` into a hand-made directory)
+because `/jig:scaffold-init` was skipped. That produces a non-jig layout
+that then needs migrating — the ADR-side of the reported failure. When in
+doubt, route to setup first; never invent the structure by hand.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" new <slug> \
@@ -97,8 +132,23 @@ Once the prose is settled and the human (or the workflow gate) approves:
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" accept <NNNN>
 ```
 
-This flips `Proposed (date)` to `Accepted (date)`. Refuses if the Status is
-already Accepted (ADRs are immutable; supersede instead — see below).
+This flips `Proposed (date)` to `Accepted (date)` and stamps the canonical
+`status: Accepted` frontmatter field in the same atomic write (spec 073-02 /
+ADR-0026). Refuses if the Status is already Accepted (ADRs are immutable;
+supersede instead — see below).
+
+**Frame-critique gate (spec 064-05 / ADR-0020 OQ2/OQ3).** `accept` also gates
+the flip on a passing adversarial **frame-critique** verdict — the ADR's
+pre-commitment moment to catch a wrong premise (the ADR-0011 / ADR-0008 failure
+mode). It applies **iff** the ADR carries a truthy `frame_review` flag: `new`
+stamps `frame_review: true` on every ADR it creates (OQ3 — ADRs always-on), so
+new ADRs are gated; a legacy markerless Proposed ADR is grandfathered (no
+refusal). To clear it: build the prompt with `review.py frame-critique
+docs/decisions/adr-NNNN-*.md`, run a reviewer, then `review.py record-review
+--adr NNNN --pass frame-critique --verdict pass …` (writes
+`docs/decisions/reviews/adr-NNNN-frame-critique.md`). Soft / bypassable with
+`JIG_REVIEW_EVIDENCE_GATE=0` (a deliberateness signal, ADR-0011 — not human-only
+enforcement).
 
 ### 3. Supersede an Accepted ADR
 
@@ -118,6 +168,9 @@ Both ADRs must already be Accepted. The helper:
   ADR's `## Status` block,
 - preserves both `Accepted (date)` lines (this is the one edit allowed on
   an immutable ADR per the Nygard convention),
+- stamps the **old** ADR's `status: Superseded` frontmatter field in the same
+  atomic write (the replacement keeps `status: Accepted`) — spec 073-02 /
+  ADR-0026, so a dependency on a superseded ADR correctly fails,
 - writes both files atomically.
 
 Refuses (exit 2) if either ADR is Proposed (accept it first), if either

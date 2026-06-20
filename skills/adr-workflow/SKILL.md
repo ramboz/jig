@@ -20,13 +20,20 @@ Codifies the ADR lifecycle that ADR-0001 and ADR-0002 were written by hand to
 exercise. Five deterministic operations:
 
 - **`new`** — scaffold `docs/decisions/adr-NNNN-<slug>.md` from the template, with
-  auto-numbering and a slug-collision check.
+  auto-numbering and a slug-collision check. The scaffold carries
+  `status: Proposed` in frontmatter (from the template) alongside the prose
+  `Proposed (date)` line (spec 073-02 / ADR-0026).
 - **`accept`** — flip Status from `Proposed (YYYY-MM-DD)` to
-  `Accepted (YYYY-MM-DD)`. Atomic write.
+  `Accepted (YYYY-MM-DD)`, and stamp the canonical `status: Accepted`
+  frontmatter field in the **same** atomic write (spec 073-02 / ADR-0026 —
+  frontmatter is the canonical status home; prose and frontmatter cannot
+  diverge).
 - **`supersede`** — append `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (date)`
   to an Accepted ADR's Status block and `Supersedes ADR-NNNN` to the replacement's
-  Status block. This is the **one** edit allowed on an immutable ADR per the
-  Nygard convention. Atomic write on both files.
+  Status block, and stamp the **old** ADR's `status: Superseded` frontmatter field
+  in the same atomic write (the replacement retains `status: Accepted`). This is
+  the **one** edit allowed on an immutable ADR per the Nygard convention. Atomic
+  write on both files.
 - **`index`** — regenerate the `## Index` section of `docs/decisions/README.md`
   from the actual ADR files present. Idempotent.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
@@ -125,8 +132,10 @@ Once the prose is settled and the human (or the workflow gate) approves:
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" accept <NNNN>
 ```
 
-This flips `Proposed (date)` to `Accepted (date)`. Refuses if the Status is
-already Accepted (ADRs are immutable; supersede instead — see below).
+This flips `Proposed (date)` to `Accepted (date)` and stamps the canonical
+`status: Accepted` frontmatter field in the same atomic write (spec 073-02 /
+ADR-0026). Refuses if the Status is already Accepted (ADRs are immutable;
+supersede instead — see below).
 
 **Frame-critique gate (spec 064-05 / ADR-0020 OQ2/OQ3).** `accept` also gates
 the flip on a passing adversarial **frame-critique** verdict — the ADR's
@@ -159,6 +168,9 @@ Both ADRs must already be Accepted. The helper:
   ADR's `## Status` block,
 - preserves both `Accepted (date)` lines (this is the one edit allowed on
   an immutable ADR per the Nygard convention),
+- stamps the **old** ADR's `status: Superseded` frontmatter field in the same
+  atomic write (the replacement keeps `status: Accepted`) — spec 073-02 /
+  ADR-0026, so a dependency on a superseded ADR correctly fails,
 - writes both files atomically.
 
 Refuses (exit 2) if either ADR is Proposed (accept it first), if either

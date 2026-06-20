@@ -169,6 +169,18 @@ def _write_subagents(projects_dir: Path, encoded_cwd: str, session_id: str,
     return p
 
 
+def _write_read_events(log_path: Path, events: list):
+    """Write a synthetic context-growth read-attribution JSONL log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w") as fh:
+        for event in events:
+            if isinstance(event, str):
+                fh.write(event + "\n")
+            else:
+                fh.write(json.dumps(event) + "\n")
+    return log_path
+
+
 # Encoded-cwd dir names for a fake repo at /Users/me/Projects/demo, with a
 # worktree at /Users/me/Projects/demo/.claude/worktrees/foo.
 MAIN_CWD = "/Users/me/Projects/demo"
@@ -369,6 +381,20 @@ class TokenSumTests(_TreeMixin, unittest.TestCase):
         self.assertEqual(rep.session_count, 2)  # sessA + sessB, NOT sessC
         self.assertEqual(rep.models, ["claude-opus-4-8"])
 
+    def test_report_counts_orchestrator_turns_and_peak_cache_read(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        self.assertEqual(rep.orchestrator_turns, 3)
+        self.assertEqual(rep.peak_cache_read_tokens, 1000)
+
+    def test_render_report_shows_turns_and_peak_cache_read(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        out = uu.render(rep)
+        self.assertIn("turns", out)
+        self.assertIn("peak_cache_read_tokens", out)
+        self.assertTrue(_shows_number(out, 1000), msg=out)
+
     def test_noise_spec_not_summed(self):
         # The 042 session's huge 9999s must not leak into the 055 totals.
         rep = uu.build_report(spec="055", projects_dir=self.projects,
@@ -479,6 +505,40 @@ class CcusageApplicationTests(_TreeMixin, unittest.TestCase):
         out = uu.render(rep)
         self.assertIn("055", out)
         self.assertIn("$", out)
+
+    def test_zero_token_model_does_not_create_partial_note(self):
+        # Real transcripts can carry synthetic/summary records with a model
+        # name but zero usage. They must not create "partial: no rate for ..."
+        # noise when all positive-token models have rates.
+        per_model = {
+            "<synthetic>": _usage(),
+            "claude-opus-4-8": _usage(inp=100),
+        }
+        rates = {"claude-opus-4-8": 0.01}
+        cost, note = uu.apply_rates(per_model, rates)
+        self.assertAlmostEqual(cost, 1.0, places=6)
+        self.assertIsNone(note)
+
+    def test_zero_token_model_is_not_reported_as_seen_model(self):
+        recs = [
+            _assistant_record("<synthetic>", _usage(), MAIN_CWD,
+                              session="zero"),
+            _assistant_record("claude-opus-4-8", _usage(inp=1), MAIN_CWD,
+                              session="real"),
+        ]
+        sums = uu.sum_usage(recs)
+        self.assertEqual(sums["models"], ["claude-opus-4-8"])
+        self.assertNotIn("<synthetic>", sums["per_model"])
+
+    def test_zero_token_usage_does_not_count_as_turn_or_peak(self):
+        zero = _assistant_record("<synthetic>", _usage(), MAIN_CWD,
+                                 session="zero")
+        real = _assistant_record("claude-opus-4-8",
+                                 _usage(inp=1, cache_read=20),
+                                 MAIN_CWD, session="real")
+        turns, peak = uu._usage_turns_and_peak([zero, real])
+        self.assertEqual(turns, 1)
+        self.assertEqual(peak, 20)
 
 
 class CcusagePartialRateTests(unittest.TestCase):
@@ -740,6 +800,7 @@ class SubagentSumTests(_SubagentTreeMixin, unittest.TestCase):
         self.assertEqual(rep.subagent_cache_read_tokens, 1100)
         self.assertEqual(rep.subagent_cache_creation_tokens, 11)
         self.assertEqual(rep.subagent_total_tokens, 11 + 110 + 1100 + 11)
+        self.assertEqual(rep.subagent_turns, 3)
 
     def test_orchestrator_sums_unchanged_by_subagents(self):
         # The flat-session (056-01) sums must NOT absorb subagent tokens.
@@ -922,6 +983,371 @@ class ReadOnlyTests(_TreeMixin, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Top rollup — all-spec ranking from the same transcript substrate
+# ---------------------------------------------------------------------------
+
+class TopReportTests(_TreeMixin, unittest.TestCase):
+
+    def test_top_report_scans_and_ranks_specs_once(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        self.assertEqual(top.session_count, 3)
+        self.assertEqual(top.attributed_session_count, 3)
+        self.assertEqual(top.unattributed_session_count, 0)
+        self.assertEqual(top.empty_session_count, 0)
+
+        # Session C (spec 042) has the huge 9999s, so it ranks above 055.
+        self.assertEqual([r.spec for r in top.rows], ["042", "055"])
+        self.assertEqual(top.rows[0].combined_total_tokens, 9999 * 4)
+        self.assertEqual(top.rows[1].combined_total_tokens,
+                         16 + 160 + 1800 + 340)
+
+    def test_top_report_category_totals(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        self.assertEqual(top.input_tokens, 10015)
+        self.assertEqual(top.output_tokens, 10159)
+        self.assertEqual(top.cache_read_tokens, 11799)
+        self.assertEqual(top.cache_creation_tokens, 10339)
+        self.assertEqual(top.combined_total_tokens, 42312)
+        # No nested subagents in this fixture: everything is orchestrator.
+        self.assertEqual(top.orchestrator_tokens, 42312)
+        self.assertEqual(top.subagent_tokens, 0)
+
+    def test_top_report_counts_turns_and_peak_context(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        by_spec = {r.spec: r for r in top.rows}
+        self.assertEqual(by_spec["055"].orchestrator_turns, 3)
+        self.assertEqual(by_spec["055"].peak_cache_read_tokens, 1000)
+        self.assertEqual(by_spec["055"].marker_session_count, 0)
+        self.assertEqual(by_spec["055"].heuristic_session_count, 2)
+
+    def test_render_top_shows_totals_and_limit(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        out = uu.render_top(top, limit=1)
+        self.assertIn("CATEGORY TOTALS", out)
+        self.assertIn("TOP SPECS", out)
+        self.assertIn("042", out)
+        self.assertNotIn("055", out)
+        self.assertTrue(_shows_number(out, 42312), msg=out)
+
+
+class TopReportSubagentTests(_SubagentTreeMixin, unittest.TestCase):
+
+    def test_top_report_includes_subagent_tokens_and_turns(self):
+        top = uu.build_top_report(self.projects, ENC_MAIN)
+        self.assertEqual(len(top.rows), 1)
+        row = top.rows[0]
+        self.assertEqual(row.spec, "099")
+        self.assertEqual(row.total_tokens, 3700)
+        self.assertEqual(row.subagent_total_tokens, 1232)
+        self.assertEqual(row.combined_total_tokens, 4932)
+        self.assertEqual(row.orchestrator_turns, 1)
+        self.assertEqual(row.subagent_turns, 3)
+        self.assertEqual(row.peak_cache_read_tokens, 3000)
+        self.assertIn("jig:reviewer", row.subagent_by_type)
+        self.assertIn("jig:implementer", row.subagent_by_type)
+
+
+# ---------------------------------------------------------------------------
+# Compaction threshold comparison — read-only what-if over cache_read peaks
+# ---------------------------------------------------------------------------
+
+class CompactThresholdReportTests(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-compact-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+        _write_session(
+            self.projects, ENC_MAIN, "compact",
+            [
+                _user_record(MAIN_CWD,
+                             "Work on specs/090-compact-thresholds spec 090.",
+                             session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=40),
+                                  MAIN_CWD, session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=60),
+                                  MAIN_CWD, session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=70),
+                                  MAIN_CWD, session="compact"),
+                _assistant_record("claude-opus-4-8",
+                                  _usage(inp=1, cache_read=80),
+                                  MAIN_CWD, session="compact"),
+            ],
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_compact_threshold_report_counts_crossing_turns(self):
+        reports = uu.build_compact_threshold_reports(
+            specs=["090"],
+            projects_dir=self.projects,
+            encoded_prefix=ENC_MAIN,
+            thresholds=[0.60, 0.65, 0.75],
+            window_tokens=100,
+        )
+        rep = reports[0]
+        self.assertEqual(rep.session_count, 1)
+        self.assertEqual(rep.orchestrator_turns, 4)
+        self.assertEqual(rep.orchestrator_tokens, 40 + 60 + 70 + 80 + 4)
+        self.assertEqual(rep.peak_cache_read_tokens, 80)
+
+        by_threshold = {row.threshold: row for row in rep.thresholds}
+        self.assertEqual(by_threshold[0.60].crossing_turns, 3)
+        self.assertEqual(by_threshold[0.60].sessions_crossed, 1)
+        self.assertEqual(by_threshold[0.60].first_crossing_turn, 2)
+        self.assertEqual(by_threshold[0.65].crossing_turns, 2)
+        self.assertEqual(by_threshold[0.65].first_crossing_turn, 3)
+        self.assertEqual(by_threshold[0.75].crossing_turns, 1)
+        self.assertEqual(by_threshold[0.75].first_crossing_turn, 4)
+
+    def test_render_compact_threshold_report(self):
+        reports = uu.build_compact_threshold_reports(
+            specs=["090"],
+            projects_dir=self.projects,
+            encoded_prefix=ENC_MAIN,
+            thresholds=[0.60, 0.75],
+            window_tokens=100,
+        )
+        out = uu.render_compact_thresholds(reports)
+        self.assertIn("Compaction threshold comparison", out)
+        self.assertIn("SPEC 090", out)
+        self.assertIn("0.60", out)
+        self.assertIn("0.75", out)
+        self.assertIn("turns_at_or_above", out)
+
+
+# ---------------------------------------------------------------------------
+# Slice 070-01 — read-attribution context-growth report
+# ---------------------------------------------------------------------------
+
+class ReadAttributionReportTests(unittest.TestCase):
+    """Fixture tests for the metadata-only read-nudge JSONL log emitted by
+    jig-context-check.sh. The report groups by spec/session and can filter to
+    exact marker-attributed events only.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-read-attr-"))
+        self.log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        self.events = [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/big.py",
+                "size_bytes": 400,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:01:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "duplicate",
+                "file_path": "/repo/big.py",
+                "size_bytes": 400,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:02:00Z",
+                "session_id": "sessB",
+                "event": "read_nudge",
+                "kind": "duplicate",
+                "file_path": "/repo/unknown.py",
+                "threshold_bytes": 65536,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:03:00Z",
+                "session_id": "sessU",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/unattributed.py",
+                "size_bytes": 120,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "",
+                "slice": "",
+                "source_hook": "jig-context-check",
+            },
+            "not-json",
+        ]
+        _write_read_events(self.log, self.events)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_build_read_attribution_report_groups_by_spec_session(self):
+        rep = uu.build_read_attribution_report(self.log)
+        self.assertEqual(rep.scanned_event_count, 4)
+        self.assertEqual(rep.malformed_line_count, 1)
+        rows = {(r.spec, r.session_id): r for r in rep.rows}
+
+        row = rows[("070", "sessA")]
+        self.assertEqual(row.counts["large"], 1)
+        self.assertEqual(row.counts["duplicate"], 1)
+        self.assertEqual(row.total_known_size_bytes, 800)
+        self.assertEqual(row.estimated_tokens, 200)
+        self.assertEqual(row.top_paths[0].file_path, "/repo/big.py")
+        self.assertEqual(row.top_paths[0].count, 2)
+
+        sess_b = rows[("070", "sessB")]
+        self.assertEqual(sess_b.counts["duplicate"], 1)
+        self.assertEqual(sess_b.total_known_size_bytes, 0)
+
+    def test_read_attribution_require_marker_filters_unattributed_events(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        self.assertEqual(rep.scanned_event_count, 4)
+        self.assertEqual(rep.included_event_count, 3)
+        self.assertEqual(rep.skipped_unattributed_event_count, 1)
+        self.assertEqual({r.spec for r in rep.rows}, {"070"})
+        self.assertNotIn("", {r.spec for r in rep.rows})
+
+    def test_render_read_attribution_report_shows_totals(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        out = uu.render_read_attribution(rep)
+        self.assertIn("Read attribution", out)
+        self.assertIn("070", out)
+        self.assertIn("sessA", out)
+        self.assertIn("large=1", out)
+        self.assertIn("duplicate=1", out)
+        self.assertTrue(_shows_number(out, 800), msg=out)
+        self.assertTrue(_shows_number(out, 200), msg=out)
+
+
+class HookInjectionAttributionReportTests(unittest.TestCase):
+    """Slice 070-02: the same context-growth report includes
+    additionalContext injection events grouped by hook/spec/session.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-hook-attr-"))
+        self.log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_read_events(self.log, [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/big.py",
+                "size_bytes": 800,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:01:00Z",
+                "session_id": "sessA",
+                "event": "additional_context",
+                "kind": "memory_terms",
+                "source_hook": "jig-memory-scan",
+                "hook_event_name": "UserPromptSubmit",
+                "bytes": 120,
+                "estimated_tokens": 30,
+                "spec": "070",
+                "slice": "070-02",
+            },
+            {
+                "timestamp": "2026-06-12T12:02:00Z",
+                "session_id": "sessA",
+                "event": "additional_context",
+                "kind": "memory_terms",
+                "source_hook": "jig-memory-scan",
+                "hook_event_name": "UserPromptSubmit",
+                "bytes": 80,
+                "estimated_tokens": 20,
+                "spec": "070",
+                "slice": "070-02",
+            },
+            {
+                "timestamp": "2026-06-12T12:03:00Z",
+                "session_id": "sessB",
+                "event": "additional_context",
+                "kind": "task_capture",
+                "source_hook": "jig-task-capture",
+                "hook_event_name": "Stop",
+                "bytes": 100,
+                "estimated_tokens": 25,
+                "spec": "070",
+                "slice": "070-02",
+            },
+            {
+                "timestamp": "2026-06-12T12:04:00Z",
+                "session_id": "sessU",
+                "event": "additional_context",
+                "kind": "boundary_change",
+                "source_hook": "jig-boundary-change-warn",
+                "hook_event_name": "PostToolUse",
+                "bytes": 44,
+                "estimated_tokens": 11,
+                "spec": "",
+                "slice": "",
+            },
+        ])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_build_report_groups_hook_injections_by_hook_spec_session(self):
+        rep = uu.build_read_attribution_report(self.log)
+        self.assertEqual(rep.hook_injection_event_count, 4)
+        self.assertEqual(rep.total_context_growth_bytes, 1144)
+        rows = {
+            (r.spec, r.session_id, r.source_hook): r
+            for r in rep.hook_injection_rows
+        }
+
+        memory = rows[("070", "sessA", "jig-memory-scan")]
+        self.assertEqual(memory.event_count, 2)
+        self.assertEqual(memory.total_bytes, 200)
+        self.assertEqual(memory.estimated_tokens, 50)
+        self.assertEqual(memory.kind_counts["memory_terms"], 2)
+        self.assertAlmostEqual(memory.share, 200 / 1144)
+
+        task = rows[("070", "sessB", "jig-task-capture")]
+        self.assertEqual(task.event_count, 1)
+        self.assertEqual(task.hook_event_names, ["Stop"])
+
+    def test_hook_injection_require_marker_filters_unattributed_events(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        self.assertEqual(rep.hook_injection_event_count, 4)
+        self.assertEqual(rep.included_hook_injection_event_count, 3)
+        self.assertEqual(rep.skipped_unattributed_event_count, 1)
+        self.assertNotIn("", {r.spec for r in rep.hook_injection_rows})
+
+    def test_render_report_shows_hook_injection_totals_and_share(self):
+        rep = uu.build_read_attribution_report(self.log, require_marker=True)
+        out = uu.render_read_attribution(rep)
+        self.assertIn("Hook injections", out)
+        self.assertIn("jig-memory-scan", out)
+        self.assertIn("jig-task-capture", out)
+        self.assertTrue(_shows_number(out, 200), msg=out)
+        self.assertTrue(_shows_number(out, 50), msg=out)
+        self.assertIn("18.2%", out)
+        self.assertNotIn("jig-boundary-change-warn", out)
+
+
+# ---------------------------------------------------------------------------
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
 
@@ -1013,6 +1439,110 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("unavailable", result.stdout.lower())
         self.assertTrue(_shows_number(result.stdout, 1800), msg=result.stdout)
+
+    def test_cli_top_runs_with_overrides(self):
+        result = _run_usage(
+            "top",
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--limit", "1",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("TOP SPECS", result.stdout)
+        self.assertIn("042", result.stdout)
+        self.assertNotIn("055", result.stdout)
+        self.assertTrue(_shows_number(result.stdout, 42312),
+                        msg=result.stdout)
+
+    def test_cli_report_require_marker_runs(self):
+        result = _run_usage(
+            "report", "055",
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--no-ccusage",
+            "--require-marker",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("No marker-attributed sessions", result.stdout)
+        self.assertIn("Heuristic sessions skipped", result.stdout)
+
+    def test_cli_compact_thresholds_runs_with_overrides(self):
+        result = _run_usage(
+            "compact-thresholds", "055",
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--window-tokens", "1000",
+            "--thresholds", "0.60,0.75",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Compaction threshold comparison", result.stdout)
+        self.assertIn("SPEC 055", result.stdout)
+        self.assertIn("0.60", result.stdout)
+        self.assertIn("Peak cache_read", result.stdout)
+
+    def test_cli_read_attribution_runs_with_log_override(self):
+        log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_read_events(log, [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/big.py",
+                "size_bytes": 400,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "070",
+                "slice": "070-01",
+                "source_hook": "jig-context-check",
+            },
+            {
+                "timestamp": "2026-06-12T12:01:00Z",
+                "session_id": "sessU",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/unattributed.py",
+                "size_bytes": 120,
+                "threshold_bytes": 100,
+                "ranged": False,
+                "spec": "",
+                "slice": "",
+                "source_hook": "jig-context-check",
+            },
+        ])
+        result = _run_usage(
+            "read-attribution",
+            "--log", str(log),
+            "--require-marker",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Read attribution", result.stdout)
+        self.assertIn("070", result.stdout)
+        self.assertIn("large=1", result.stdout)
+        self.assertIn("Skipped unattributed", result.stdout)
+        self.assertNotIn("unattributed.py", result.stdout)
+
+    def test_cli_read_attribution_shows_hook_injections(self):
+        log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_read_events(log, [
+            {
+                "timestamp": "2026-06-12T12:00:00Z",
+                "session_id": "sessA",
+                "event": "additional_context",
+                "kind": "post_edit_verify",
+                "source_hook": "jig-post-edit-verify",
+                "hook_event_name": "PostToolUse",
+                "bytes": 160,
+                "estimated_tokens": 40,
+                "spec": "070",
+                "slice": "070-02",
+            },
+        ])
+        result = _run_usage("read-attribution", "--log", str(log))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Hook injections", result.stdout)
+        self.assertIn("jig-post-edit-verify", result.stdout)
+        self.assertIn("post_edit_verify=1", result.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -1166,6 +1696,36 @@ class MarkerAttributionTests(_MarkerTreeMixin, unittest.TestCase):
         # The counts surface in the output (1 marker, 1 heuristic).
         self.assertIn("1", uu.render(rep))
 
+    def test_require_marker_filters_heuristic_sessions(self):
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None,
+                              require_marker=True)
+        self.assertEqual(rep.session_count, 1)
+        self.assertEqual(rep.marker_session_count, 1)
+        self.assertEqual(rep.heuristic_session_count, 0)
+        self.assertEqual(rep.skipped_heuristic_session_count, 1)
+        # Only the marker session's 10/20/30/40 tokens remain.
+        self.assertEqual(rep.input_tokens, 10)
+        self.assertEqual(rep.output_tokens, 20)
+        self.assertEqual(rep.cache_read_tokens, 30)
+        self.assertEqual(rep.cache_creation_tokens, 40)
+
+    def test_require_marker_render_shows_skipped_heuristic_count(self):
+        rep = uu.build_report(spec="070", projects_dir=self.projects,
+                              encoded_prefix=self.prefix, ccusage_runner=None,
+                              require_marker=True)
+        out = uu.render(rep).lower()
+        self.assertIn("marker required", out)
+        self.assertIn("heuristic skipped", out)
+
+    def test_top_require_marker_filters_heuristic_sessions(self):
+        top = uu.build_top_report(self.projects, self.prefix,
+                                  require_marker=True)
+        self.assertEqual(top.attributed_session_count, 1)
+        self.assertEqual(top.skipped_heuristic_session_count, 1)
+        self.assertEqual([r.spec for r in top.rows], ["070"])
+        self.assertEqual(top.rows[0].combined_total_tokens, 10 + 20 + 30 + 40)
+
 
 class AllMarkerNoHeuristicFlagTests(unittest.TestCase):
     """When every attributed session has a marker, the report should say so
@@ -1236,6 +1796,16 @@ class MarkerFallbackRegressionTests(_TreeMixin, unittest.TestCase):
                               encoded_prefix=ENC_MAIN, ccusage_runner=None)
         out = uu.render(rep).lower()
         self.assertIn("heuristic", out)
+
+    def test_require_marker_on_heuristic_only_fixture_reports_skipped(self):
+        rep = uu.build_report(spec="055", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None,
+                              require_marker=True)
+        self.assertEqual(rep.session_count, 0)
+        self.assertEqual(rep.skipped_heuristic_session_count, 2)
+        out = uu.render(rep).lower()
+        self.assertIn("no marker-attributed sessions", out)
+        self.assertIn("heuristic sessions skipped", out)
 
 
 if __name__ == "__main__":

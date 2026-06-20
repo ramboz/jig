@@ -7,9 +7,10 @@ Covers:
     (agents/, skills/, hooks/, templates/, .claude-plugin/plugin.json,
     README/LICENSE when present), reusing the release-zip runtime
     include/exclude set rather than restating it.
-  - AC #2: the package is runtime-only — excludes scripts/, docs/, .github/,
-    tests, fixtures, caches; preserves nested runtime paths (hooks/scripts/,
-    templates/docs/); does NOT contain .claude-plugin/marketplace.json or any
+  - AC #2: the package is runtime-only — excludes docs/, .github/, tests,
+    fixtures, caches, and dev scripts; includes only the runtime scripts
+    allowlist; preserves nested runtime paths (hooks/scripts/, templates/docs/);
+    does NOT contain .claude-plugin/marketplace.json or any
     .codex-plugin/ content.
   - AC #3: the root marketplace pointer resolves to ./hosts/claude.
   - AC #4: build safety mirrors Codex (refuse unsafe output dirs; atomic
@@ -66,8 +67,18 @@ class ClaudePackageContentsTests(unittest.TestCase):
 
     # AC #2 — runtime-only excludes
     def test_excludes_source_only_top_level_dirs(self):
-        for root in ("scripts", "docs", ".github"):
+        for root in ("docs", ".github"):
             self.assertFalse((self.out_dir / root).exists(), root)
+
+    def test_copies_only_runtime_scripts_allowlist(self):
+        scripts = {
+            p.relative_to(self.out_dir).as_posix()
+            for p in (self.out_dir / "scripts").glob("*.py")
+        }
+        self.assertEqual(
+            scripts,
+            set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES),
+        )
 
     def test_excludes_codex_plugin_content(self):
         self.assertFalse((self.out_dir / ".codex-plugin").exists())
@@ -233,7 +244,14 @@ class CommittedClaudePackageTests(unittest.TestCase):
         )
         self.assertFalse((pkg / ".codex-plugin").exists())
         self.assertFalse((pkg / ".claude-plugin" / "marketplace.json").exists())
-        self.assertFalse((pkg / "scripts").exists())
+        scripts = {
+            p.relative_to(pkg).as_posix()
+            for p in (pkg / "scripts").glob("*.py")
+        }
+        self.assertEqual(
+            scripts,
+            set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES),
+        )
         self.assertEqual(install_contract.validate_claude_package(pkg), [])
 
 

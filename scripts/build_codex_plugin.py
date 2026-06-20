@@ -22,8 +22,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "skills" / "scaffold-init"))
 
+import install_contract  # noqa: E402
 import scaffold as scaffold_mod  # noqa: E402
 
 _ROOT_DIRS: tuple[str, ...] = (
@@ -277,6 +279,13 @@ def build(source_root: Path, output_dir: Path) -> int:
         src = source_root / file_name
         if src.is_file():
             (output_dir / file_name).write_bytes(src.read_bytes())
+
+    for file_name in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
+        src = source_root / file_name
+        if src.is_file():
+            dst = output_dir / file_name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(src.read_bytes())
 
     _write_marketplace(output_dir)
     return 0

@@ -33,6 +33,45 @@ are implemented (a consumer exists), or (c) servo spec 006 ships (the eval/AC
 backing lands). Until then, ADR-0019's schema-only deferral stands. The body
 below is the design as drafted; treat its value claims as *prospective*.
 
+**Note (2026-06-12) — the spec-gate Open Question was resolved separately.** The
+third Open Question below (*does `servo` belong in spec-workflow's gate?*) was
+answered independently of Option D by [spec 071](../specs/071-design-review-pass/spec.md):
+a generic, attest-only **`design_review`** review pass on the existing ADR-0014
+rails — a reviewer attests an external eval's frozen verdict; jig never
+machine-reads servo's exit code, never re-derives the score, and gains no servo
+coupling. That is the *loosest* possible integration, and it is the live answer
+to ADR-0019's OQ2 ("how thin is attest-only?"): **as thin as a review pass.**
+**Option D itself (the tight exit-code binding for bug/refactor, §2–§5) remains
+PARKED** on the demand trigger above — spec 071 deliberately did not build it.
+
+**Note (2026-06-13) — servo rebased; the separable `slice-land` pull-hint is now
+being built (spec 072).** servo's `ADR-0008` (*rebase agent-loop onto
+/goal+/background+Routines*) was Accepted 2026-06-12, retiring the hand-rolled
+loop — so the long-planned jig→servo `slice-land` pull-hint (the reciprocal
+servo's README asserts as *"the entirety of the coupling"* but jig never built;
+see Scope + Assumptions) now has a stable, current artifact shape to point at.
+That *separable* dependency is being built under
+[spec 072](../specs/072-servo-pull-hint/spec.md) as **advisory text only** (a
+filesystem probe in `land.py prepare`; no servo invocation, no exit-code read) —
+even looser than spec 071's `design_review` pass. Its re-engagement is sanctioned
+by this ADR's own Status triggers (servo 006 DONE; a built consumer in
+`/servo:design-eval`). **Option D's tight bug/refactor exit-code binding (§2–§5)
+is untouched and stays PARKED** — its demand trigger (≥2 real eval refactors) and
+consumers (`bug.py`/`refactor.py`) remain unmet; spec 072 builds the discovery
+pull-hint, not the oracle binding.
+
+**Note (2026-06-15) — the present-case pull-hint shipped ([spec 072-01](../specs/072-servo-pull-hint/spec.md)
+DONE).** `land.py prepare` now trails a soft, never-gating, **filesystem-only**
+servo advisory when the target has `.servo/` scaffolded (`install.json`/`oracle.sh`):
+it points at servo's post-`ADR-0008` `/goal`-driven/Routine loop and names a
+resumable `.servo/runs/<id>/state.json` when one exists, stays **silent when servo
+is absent** (§5's "absent → no mention" + the supervised-default boundary), and makes
+**no servo invocation** (no subprocess, no autonomy primitive). This makes servo's
+README pull-hint claim true for the present case and **closes the phantom coupling**.
+**072-02** (the missing-infra suggestion, which would reverse §5 for the slice-land
+surface) stays DRAFT/decision-gated on Open Questions 1–2. **Option D's tight
+bug/refactor exit-code binding (§2–§5) is untouched and stays PARKED.**
+
 ## Context
 
 jig now has a **family of three gated-evidence lifecycles**, all mirroring
@@ -319,7 +358,11 @@ servo.
   git-rebase recovery message). The coupling that exists today is **one-way**:
   servo→jig (`tdd.py detect` reuse, servo ADR-0001). The jig→servo pull-hint is
   a *planned reciprocal* described by servo's README, and building it is part
-  of activating this ADR.
+  of activating this ADR. **Update (2026-06-15): the present-case half is now
+  implemented** — [spec 072-01](../specs/072-servo-pull-hint/spec.md) (DONE)
+  ships the `.servo/`-present advisory in `land.py prepare`, making servo's
+  README claim true for the present case. The missing-infra half (072-02) stays
+  deferred/decision-gated; the Option-D oracle binding (§2–§5) remains unbuilt.
 - **The demand trigger (ADR-0019: ≥2 real eval refactors straining
   attest-only) is unmet.** No such case is recorded; this is the primary
   reason for the PARKED status.
@@ -352,8 +395,15 @@ dispatch) plus the not-yet-built jig→servo pull-hint.
 
 - **The whole ADR is parked** on the demand trigger / a consumer / servo 006
   (see Status).
-- **Build the jig→servo `slice-land` pull-hint** (the planned reciprocal that
-  does not yet exist) — a prerequisite of §5 discovery.
+- **Build the jig→servo `slice-land` pull-hint** — the planned reciprocal
+  servo's README asserts. **[Spec 072-01](../specs/072-servo-pull-hint/spec.md)
+  DONE (2026-06-15)**: the present-case advisory in `land.py prepare` points at
+  the post-`ADR-0008` artifact shape (the phantom coupling is closed for the
+  present case). **072-02** (missing-case suggestion) stays DRAFT/decision-gated
+  on §5 — see Open Questions. Advisory text only — distinct from, and not a
+  prerequisite of, §5's oracle-binding *discovery* (offering `servo` as an
+  oracle value in bug/refactor records), which stays parked with the rest of
+  Option D.
 - **Extract a shared `_common/lifecycle.py` transition-gate engine** across
   `spec-workflow` / `bug.py` / `refactor.py` (ADR-0002 / ADR-0003
   rule-of-three) — governed by ADR-0023; triggered by the third concrete
@@ -361,6 +411,11 @@ dispatch) plus the not-yet-built jig→servo pull-hint.
 - **spec-workflow ACs → `/servo:spec-oracle` evidence overlay** — tracks servo
   006.
 - **A reciprocal servo-side ADR** — servo's call; noted for coordination.
+  **Now the chosen path for spec 072-02 (2026-06-15):** jig spike 072-03 found
+  servo-*plugin* auto-detection unworkable, so the "missing-infra" nudge is
+  reshaped onto a host-agnostic **"servo-available" breadcrumb** servo writes
+  and `land.py` reads (servo owns the format, mirroring servo ADR-0004's
+  `.servo/runs/*` contract). 072-02 is blocked until servo emits it.
 - **Go-live / production-readiness checklist** — a milestone-level DoD over
   this boundary, not part of this ADR.
 
@@ -401,7 +456,18 @@ consumption.
   both must pass — and per Consequences, the deterministic floor stays on
   `tdd.py` for its stronger teeth.
 - **Does `servo` belong only in refactor/bug,** or also spec-workflow's DONE
-  gate? Lean: refactor/bug first; spec later.
+  gate? — **RESOLVED (2026-06-12, [spec 071](../specs/071-design-review-pass/spec.md)).**
+  Yes for spec-workflow — but via the *loosest* path, not Option D's machine
+  binding: a generic, attest-only **`design_review`** review pass on the existing
+  ADR-0014 rails (a `reviews/slice-NN-design-review.md` verdict). A read-only
+  reviewer attests the external eval's frozen verdict (e.g. servo's
+  `.servo/design-eval/` composite ≥ threshold, non-stale, `env_error` ≠ pass) and
+  records pass/fail; jig never machine-reads servo's exit code, never re-derives
+  the score, and gains no servo discovery/coupling for the spec gate. This
+  answers ADR-0019's OQ2 ("how thin is attest-only for the eval oracle?")
+  empirically — **as thin as a review pass.** Option D's tight bug/refactor
+  exit-code binding (§2–§5) stays PARKED on its own demand trigger; spec 071
+  deliberately did not build it.
 - **Design-conformance is a concrete instance of the spec-DONE-gate question
   above (added 2026-06-11).** Verifying a built UI matches its Claude Design
   baseline (surfaced exploring SymPill — a jig-scaffolded Android/Compose app) is a
@@ -412,4 +478,9 @@ consumption.
   new; only the **visual** rung pulls this binding, and needs servo **ADR-0005
   extended to multimodal eval input**. Still demand-gated (one exploratory
   consumer, not the ≥-real trigger); captured as the first candidate consumer for
-  the spec-gate side. See jig inbox 2026-06-11.
+  the spec-gate side. See jig inbox 2026-06-11. — **RESOLVED 2026-06-12 (spec
+  071):** the spec-gate side shipped as the attest-only `design_review` pass (see
+  the resolved Open Question above); its first real consumer is food-log's servo
+  design-fidelity eval. The **visual** rung still needs servo **ADR-0005 extended
+  to multimodal input**, but the jig-side spec-gate *integration* is no longer
+  demand-gated — it rides the generic review-evidence rails, no servo coupling.

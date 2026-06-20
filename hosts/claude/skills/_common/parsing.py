@@ -39,6 +39,7 @@ error type (WorkflowError / ReviewError / LandError) so CLI messages
 keep their original prefix.
 """
 
+import os
 import re
 from collections import namedtuple
 from pathlib import Path
@@ -64,6 +65,50 @@ def frontmatter_flag_truthy(value) -> bool:
     if not isinstance(value, str):
         return False
     return value.strip().lower() in FRONTMATTER_TRUTHY
+
+
+# Falsey tokens for an opt-OUT env *gate* (the gate is ON by default; setting
+# the var to one of these disables it). The companion of FRONTMATTER_TRUTHY
+# (the opt-IN truthy set), promoted here for the same reason: every jig env
+# bypass gate must read ONE documented vocabulary and cannot drift. Lives in
+# `parsing.py` (the generic concern), not a feature module.
+#
+# History: this set was `GATE_DISABLE_VALUES` in `review_evidence.py` (spec
+# 064-05, when only the review-evidence gate used it). Promoted here once a
+# 3rd/4th consumer appeared — `scaffold_state` (063/066) plus the two hook
+# gates — exactly the rule-of-three promotion FRONTMATTER_TRUTHY itself had
+# (045-03). The two `jig-*` hook scripts mirror these literals inline (they
+# stay import-free so a load-bearing gate gains no _common-import failure
+# mode); a source-inspection test pins them to this set so they cannot drift.
+ENV_FALSEY = ("0", "false", "off", "no")
+
+
+def env_gate_enabled(name: str) -> bool:
+    """An opt-OUT env gate: enabled (True) unless `name` is set to a falsey
+    token (`ENV_FALSEY`, case-insensitive, whitespace-trimmed). Unset → True.
+
+    The shared backing for `JIG_REVIEW_EVIDENCE_GATE`,
+    `JIG_SCAFFOLD_PRECONDITION`, and (mirrored inline) `JIG_BOUNDARY_CHECK` —
+    ADR-0011 deliberateness gates that are ON by default with a documented
+    env escape hatch."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ENV_FALSEY
+
+
+def env_flag_enabled(name: str) -> bool:
+    """An opt-IN env flag: True iff `name` is set to a truthy token
+    (`FRONTMATTER_TRUTHY`, case-insensitive, whitespace-trimmed). Unset →
+    False.
+
+    The shared backing for `JIG_CONVENTIONS_APPROVED` (mirrored inline in the
+    spec-gate hook) — the inverse polarity of `env_gate_enabled`: an action is
+    *approved* only when the operator deliberately opts in."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return False
+    return raw.strip().lower() in FRONTMATTER_TRUTHY
 
 
 # Slice 007-01 introduced this `### Deviation log` heading-presence check in

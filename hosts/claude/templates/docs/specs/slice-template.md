@@ -5,11 +5,18 @@ last_verified:
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
+# design_review: true  # set true when this slice ships UI gated by an external
+#                      # design-fidelity eval (attest-only; ADR-0014/0022).
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
      first use and link the term to docs/memory/glossary.md (or jig's lexicon).
      See docs/workflow.md "Self-defining vocabulary". -->
+
+<!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
+     runnable surfaces by probe first (run it / read source) or a citation,
+     else mark them as assumptions in the spec's `## Assumptions` section —
+     never assert an unverified claim as fact. -->
 
 ## Slice {{NUMBER}} — {{NAME}}
 

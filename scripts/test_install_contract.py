@@ -112,6 +112,7 @@ class ReleaseFileSetTests(unittest.TestCase):
                 "scripts/verify_install.py",
                 "scripts/install_contract.py",
                 "scripts/scaffold_contract.py",
+                "scripts/spec_lint.py",
             ),
         )
 

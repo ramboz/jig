@@ -39,8 +39,13 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
+from _common.parsing import frontmatter_flag_truthy as _frontmatter_flag_truthy
+from _common.parsing import parse_frontmatter as _parse_frontmatter
 from _common.parsing import set_frontmatter_field as _set_frontmatter_field
+from _common.scaffold_state import classify_scaffold_state
+from _common.scaffold_state import precondition_enabled as _scaffold_precondition_enabled
 
 
 class AdrError(RuntimeError):
@@ -120,10 +125,22 @@ def _check_slug_collision(existing: list, slug: str) -> None:
 def _render_adr_content(template_text: str, number: str, title: str,
                         today_iso: str) -> str:
     """Apply the three template placeholders. Shared by `cmd_new` and
-    `reserve_adr` so the rendered shape stays consistent across both."""
+    `reserve_adr` so the rendered shape stays consistent across both.
+
+    Slice 064-05 (ADR-0020 OQ3 — ADRs always-on): stamp `frame_review: true`
+    into the new ADR's frontmatter at creation. The ADR template (064-02)
+    doesn't carry the flag; every newly-created ADR gets it here so the
+    `adr.py accept` gate (gated on a truthy `frame_review`) always applies
+    going forward. Legacy ADRs without the marker are NOT gated (the grace
+    path)."""
     content = template_text.replace(PLACEHOLDER_NUMBER, number)
     content = content.replace(PLACEHOLDER_TITLE, title)
     content = content.replace(PLACEHOLDER_DATE, today_iso)
+    content = _set_frontmatter_field(content, "frame_review", "true")
+    # Slice 073-02 (ADR-0026): `status: Proposed` is NOT stamped here — it
+    # comes from the template's frontmatter, so a new ADR inherits it in the
+    # same single atomic write as the prose `Proposed (date)` line. (Contrast
+    # `frame_review`, stamped above because the 064-02 template omits it.)
     return content
 
 
@@ -437,6 +454,11 @@ def _reserve_local_on_current_branch(slug: str, project_dir: Path,
     target = adrs_dir / f"adr-{number}-{slug}.md"
     if target.exists():
         raise AdrError(f"target already exists: {target}")
+    # Spec 066-01: the scaffold-state precondition replaced the top-level
+    # `adrs_dir.is_dir()` guard, so ensure docs/decisions/ exists before the
+    # atomic write (a scaffold.json-bearing project need not already have it;
+    # mirrors the detached-worktree path's mkdir).
+    adrs_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_text(target, content)
     rel_path = f"docs/decisions/adr-{number}-{slug}.md"
     rc, _out, err = _run(["git", "add", rel_path], cwd=project_dir)
@@ -646,14 +668,51 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     # workflow.py 003-03 AC #5).
     _validate_slug(slug)
 
-    # docs/decisions/ must exist — parity with workflow.py's docs/specs/
-    # guard.
     adrs_dir = project_dir / "docs" / "decisions"
-    if not adrs_dir.is_dir():
-        raise AdrError(
-            f"refusing: docs/decisions/ not found under {project_dir} "
-            f"(not inside a scaffolded jig project)"
-        )
+
+    # Spec 066-01: scaffold-state PRECONDITION (the ADR-creation sibling of
+    # 063-01's spec-creation gate). Replaces the weak, dead-end
+    # `docs/decisions/`-presence check with the three-way, scaffold.json-first
+    # classification that ROUTES an unscaffolded project to the right setup
+    # skill instead of refusing into a dead end (ADR-0011 / ADR-0013:
+    # route-don't-block; jig redirects, the user/agent acts — it never runs
+    # scaffold-init / migrate on the user's behalf). `project_dir` is the repo
+    # root the reserve flow already threads (for `_refuse_if_dirty` etc.); the
+    # shared classifier reads its `scaffold.json` sentinel + trigger predicate.
+    #
+    # Consumes the 063-01 helper UNCHANGED (no second classifier, no
+    # trigger-counting here — spec 066 non-goal). The bypass
+    # (`JIG_SCAFFOLD_PRECONDITION=0|false|off|no`) is a deliberateness signal,
+    # not human-only enforcement: when set it skips classification and
+    # preserves TODAY's behavior, including the legacy weak
+    # `docs/decisions/`-absent refusal below. One env var governs both the
+    # spec (063) and ADR (066) doors.
+    if _scaffold_precondition_enabled():
+        state = classify_scaffold_state(project_dir)
+        if state == "greenfield":
+            raise AdrError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: greenfield — no scaffold.json and no "
+                f"spec-driven layout). Run `/jig:scaffold-init` to set jig "
+                f"up here first, then re-run `new`."
+            )
+        if state == "adoptable":
+            raise AdrError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: adoptable — a spec-driven layout exists "
+                f"but no scaffold.json). Run `/jig:migrate` to adopt it into "
+                f"jig first, then re-run `new`."
+            )
+        # state == "scaffolded": fall through to the existing reserve flow
+        # unchanged (number computation, stub write, commit, push routing).
+    else:
+        # Bypass active — preserve today's behavior, including the legacy
+        # weak refusal so a deliberate actor sees identical output.
+        if not adrs_dir.is_dir():
+            raise AdrError(
+                f"refusing: docs/decisions/ not found under {project_dir} "
+                f"(not inside a scaffolded jig project)"
+            )
 
     # Worktree-aware routing (prototype): the original flow below REQUIRES
     # being on `main`. A linked worktree can't check out `main`, so route
@@ -713,6 +772,11 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     target = adrs_dir / f"adr-{number}-{slug}.md"
     if target.exists():  # Defensive — auto-num should have prevented this.
         raise AdrError(f"target already exists: {target}")
+    # Spec 066-01: the scaffold-state precondition replaced the top-level
+    # `adrs_dir.is_dir()` guard, so ensure docs/decisions/ exists before the
+    # atomic write (a scaffold.json-bearing project need not already have it;
+    # mirrors the detached-worktree path's mkdir).
+    adrs_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_text(target, content)
 
     # Stage + commit locally.
@@ -824,9 +888,57 @@ _STATUS_PROPOSED_RE = re.compile(
 )
 
 
+def _gate_frame_critique(adrs_dir: Path, adr_path: Path, number: str) -> None:
+    """Slice 064-05 (ADR-0020 OQ2/OQ3): gate the Proposed→Accepted flip on a
+    passing `frame-critique` verdict — the ADR's pre-commitment moment.
+
+    Soft / bypassable deliberateness signal (ADR-0011), mirroring
+    `workflow.py`'s transition gate: it shares the SAME enable predicate
+    (`evidence_gate_enabled`, reading `JIG_REVIEW_EVIDENCE_GATE`).
+
+    Grace path (DoD): gate ONLY when the ADR's frontmatter carries a truthy
+    `frame_review` flag. New ADRs always carry it (stamped at creation by
+    `_render_adr_content`), so OQ3 always-on holds going forward; a
+    pre-existing/legacy Proposed ADR without the marker is NOT gated — no
+    false refusal.
+
+    Raises `AdrError` naming the missing/non-clearing artifact + how to
+    produce it when gated and the evidence does not clear.
+    """
+    fm, _ = _parse_frontmatter(adr_path.read_text())
+    if not _frontmatter_flag_truthy(fm.get("frame_review", "")):
+        return  # legacy / unflagged ADR — grace path, no gate.
+    if not _evidence.evidence_gate_enabled():
+        return  # deliberate bypass via JIG_REVIEW_EVIDENCE_GATE=0.
+
+    diagnostics = _evidence.validate_adr_evidence(
+        adrs_dir, number, "frame-critique"
+    )
+    if diagnostics:
+        num = f"{int(number):04d}"
+        joined = "\n  - ".join(diagnostics)
+        raise AdrError(
+            f"refusing to accept ADR {adr_path.name}: the frame-critique "
+            f"evidence does not clear (ADR-0020 OQ2 — ADRs gate at accept):\n"
+            f"  - {joined}\n"
+            f"Expected a passing verdict at "
+            f"docs/decisions/reviews/adr-{num}-frame-critique.md. To produce "
+            f"it: build the prompt via `review.py frame-critique "
+            f"docs/decisions/{adr_path.name}`, run a reviewer, then `review.py "
+            f"record-review --adr {num} --pass frame-critique --verdict pass "
+            f"--reviewer <who> --prompt-source <cmd>`. Bypass with "
+            f"JIG_REVIEW_EVIDENCE_GATE=0 (deliberateness signal, ADR-0011)."
+        )
+
+
 def cmd_accept(adrs_dir: Path, number: str) -> Path:
     """Flip the Status from Proposed → Accepted (today's date)."""
     adr_path = _find_adr_by_number(adrs_dir, number)
+
+    # Slice 064-05: gate the flip on a passing frame-critique verdict BEFORE
+    # touching the Status (so a refusal leaves the ADR untouched).
+    _gate_frame_critique(adrs_dir, adr_path, number)
+
     text = adr_path.read_text()
 
     # Scope the search to the `## Status` section only.
@@ -858,6 +970,10 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
     # at the single point where an ADR becomes decision-of-record. Adds
     # the frontmatter block if absent; updates the field if present.
     new_text = _set_frontmatter_field(new_text, "last_verified", _today())
+    # Slice 073-02 (ADR-0026): stamp the canonical `status: Accepted`
+    # frontmatter field in the SAME atomic write that flips the prose to
+    # `Accepted (date)`, so frontmatter and prose cannot diverge.
+    new_text = _set_frontmatter_field(new_text, "status", "Accepted")
     atomic_write_text(adr_path, new_text)
     return adr_path
 
@@ -1002,6 +1118,14 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     new_old_text = (
         old_text[:old_status_end] + new_old_body + old_text[old_section_end:]
     )
+    # Slice 073-02 (ADR-0026): stamp the OLD ADR's canonical
+    # `status: Superseded` frontmatter field in the SAME atomic write that
+    # appends the prose `Superseded by …` line — sync-locked so prose and
+    # frontmatter cannot diverge. The NEW (superseding) ADR's status is NOT
+    # touched here: it retains `status: Accepted` (new-style ADRs carry it
+    # from `accept`; legacy ones grandfather via the reader's prose
+    # fallback). No backfill (ADR-0026 Open question).
+    new_old_text = _set_frontmatter_field(new_old_text, "status", "Superseded")
 
     new_new_body = _insert_after_accepted(new_body, supersedes_line)
     if new_new_body == new_body:

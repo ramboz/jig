@@ -159,7 +159,7 @@ class DescriptionTests(unittest.TestCase):
             "structural frontmatter or slice-numbering validation",
             self.normalized,
         )
-        self.assertIn("use `scripts/spec_lint.py` instead", self.normalized)
+        self.assertIn("use `spec_lint.py` instead", self.normalized)
         # (c) spec-compliance review routes to /jig:independent-review.
         self.assertIn(
             "spec-compliance review of a finished slice",
@@ -172,7 +172,7 @@ class DescriptionTests(unittest.TestCase):
         # independent-review all named as explicit alternatives.
         for slash in (
             "/jig:clarify",
-            "scripts/spec_lint.py",
+            "spec_lint.py",
             "/jig:independent-review",
         ):
             self.assertIn(
@@ -323,7 +323,7 @@ class BodyTests(unittest.TestCase):
         body_lower = self.body.lower()
         for slash in (
             "/jig:clarify",
-            "scripts/spec_lint.py",
+            "spec_lint.py",
             "/jig:independent-review",
             "/jig:pr-review",
         ):
@@ -615,6 +615,31 @@ class NoPyHelperTests(unittest.TestCase):
             py_file.is_file(),
             f"spec Non-goals: skills/analyze/analyze.py must not exist "
             f"(found at {py_file})",
+        )
+
+
+class SpecLintReferenceShapeTests(unittest.TestCase):
+    """Spec 075-02 — every `scripts/spec_lint.py` reference in SKILL.md must
+    be the resolvable plugin-root form (`${CLAUDE_PLUGIN_ROOT}/scripts/...`),
+    never the bare relative `scripts/spec_lint.py` that does not resolve from
+    a consuming project's CWD. The bare *tool name* `spec_lint.py` (no path)
+    is allowed for purely descriptive mentions. This is the file-local guard
+    against a regression to the bad relative path (the slice's AC4 grep is the
+    cross-surface backstop; this pins the analyze SKILL specifically)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SKILL_MD.read_text() if SKILL_MD.is_file() else ""
+
+    def test_no_bare_relative_scripts_path(self):
+        bare = self.text.count("scripts/spec_lint.py")
+        plugin_root = self.text.count("${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py")
+        self.assertEqual(
+            bare, plugin_root,
+            "every `scripts/spec_lint.py` in SKILL.md must be the plugin-root "
+            f"form; found {bare} occurrence(s) of `scripts/spec_lint.py` but "
+            f"only {plugin_root} carry the ${{CLAUDE_PLUGIN_ROOT}} prefix — a "
+            "bare relative path would not resolve in a consuming project",
         )
 
 

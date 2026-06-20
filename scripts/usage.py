@@ -65,6 +65,9 @@ token breakdowns still print and the $ lines read "unavailable".
 Usage
 -----
     python3 scripts/usage.py report <spec> [options]
+    python3 scripts/usage.py top [options]
+    python3 scripts/usage.py compact-thresholds <spec> [<spec> ...] [options]
+    python3 scripts/usage.py read-attribution [options]
 
     <spec>                A spec number (e.g. ``055``) or slug
                           (e.g. ``055-token-usage-tracking``).
@@ -77,6 +80,15 @@ Options
     --ccusage-json PATH   Read a pre-captured ``ccusage --json`` payload from a
                           file instead of shelling out (offline / testing).
     --no-ccusage          Skip ccusage entirely; print "$: unavailable".
+    --require-marker      Include only exact ``.jig/spec-ref`` attributions;
+                          useful for future A/B comparisons.
+    compact-thresholds    Read-only what-if: count historical orchestrator
+                          turns crossing alternate ``cache_read`` thresholds
+                          (default 0.60, 0.65, 0.75 of a 200k-token window).
+    read-attribution      Summarize `.claude/context-growth-read-events.jsonl`
+                          by spec/session for read events and by
+                          hook/spec/session for `additionalContext`
+                          injections.
 
 Read-only: this tool never writes or deletes anything. The only network access
 is the optional ``npx ccusage`` call (suppressed by --ccusage-json/--no-ccusage).
@@ -124,6 +136,10 @@ def main_root() -> str:
 
 def default_projects_dir() -> Path:
     return Path.home() / ".claude" / "projects"
+
+
+READ_ATTRIBUTION_LOG = "context-growth-read-events.jsonl"
+READ_ATTRIBUTION_BYTES_PER_TOKEN = 4
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +361,50 @@ _USAGE_FIELDS = (
     "cache_creation_input_tokens",
 )
 
+DEFAULT_TOKEN_WINDOW_TOKENS = 200_000
+
+
+def _usage_token_values(usage: dict) -> dict:
+    """Return normalized integer token values for the usage fields."""
+    values = {}
+    for f in _USAGE_FIELDS:
+        raw = usage.get(f, 0)
+        if isinstance(raw, bool):
+            values[f] = 0
+        elif isinstance(raw, (int, float)):
+            values[f] = int(raw)
+        else:
+            values[f] = 0
+    return values
+
+
+def _usage_total(values: dict) -> int:
+    return sum(int(values.get(f, 0)) for f in _USAGE_FIELDS)
+
+
+def _iter_positive_usage(records: list):
+    """Yield ``(record, message, token_values)`` for assistant usage turns
+    with at least one positive token. Synthetic zero-token turns are ignored
+    consistently by summing, turn counts, peaks, and threshold reports.
+    """
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("type") not in (None, "assistant"):
+            # Only assistant turns carry message.usage we count. User/system/
+            # summary records have no billable usage.
+            continue
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            continue
+        usage = msg.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        token_values = _usage_token_values(usage)
+        if _usage_total(token_values) <= 0:
+            continue
+        yield rec, msg, token_values
+
 
 def sum_usage(records: list) -> dict:
     """Sum the four orchestrator usage fields across assistant records that
@@ -356,26 +416,14 @@ def sum_usage(records: list) -> dict:
     totals = {f: 0 for f in _USAGE_FIELDS}
     per_model = {}
     models = set()
-    for rec in records:
-        if rec.get("type") not in (None, "assistant"):
-            # Only orchestrator assistant turns carry message.usage we count.
-            # (User/system/summary records have no usage.)
-            continue
-        msg = rec.get("message")
-        if not isinstance(msg, dict):
-            continue
-        usage = msg.get("usage")
-        if not isinstance(usage, dict):
-            continue
+    for _rec, msg, token_values in _iter_positive_usage(records):
         model = msg.get("model") or "unknown"
         models.add(model)
         slot = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
         for f in _USAGE_FIELDS:
-            val = usage.get(f, 0)
-            if not isinstance(val, (int, float)):
-                continue
-            totals[f] += int(val)
-            slot[f] += int(val)
+            val = token_values[f]
+            totals[f] += val
+            slot[f] += val
     totals["models"] = sorted(models)
     totals["per_model"] = per_model
     return totals
@@ -397,26 +445,16 @@ def sum_subagent_usage(records: list) -> dict:
     totals = {f: 0 for f in _USAGE_FIELDS}
     per_model = {}
     by_type = {}
-    for rec in records:
-        if rec.get("type") not in (None, "assistant"):
-            continue
-        msg = rec.get("message")
-        if not isinstance(msg, dict):
-            continue
-        usage = msg.get("usage")
-        if not isinstance(usage, dict):
-            continue
+    for rec, msg, token_values in _iter_positive_usage(records):
         model = msg.get("model") or "unknown"
         agent = rec.get("attributionAgent") or "unknown"
         mslot = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
         tslot = by_type.setdefault(agent, {f: 0 for f in _USAGE_FIELDS})
         for f in _USAGE_FIELDS:
-            val = usage.get(f, 0)
-            if not isinstance(val, (int, float)):
-                continue
-            totals[f] += int(val)
-            mslot[f] += int(val)
-            tslot[f] += int(val)
+            val = token_values[f]
+            totals[f] += val
+            mslot[f] += val
+            tslot[f] += val
     totals["per_model"] = per_model
     totals["by_type"] = by_type
     return totals
@@ -500,16 +538,21 @@ def apply_rates(per_model: dict, rates: dict):
     matched = False
     unmatched = []
     for model, toks in per_model.items():
+        model_tokens = sum(int(toks.get(f, 0)) for f in _USAGE_FIELDS)
+        if model_tokens <= 0:
+            continue
         rate = rates.get(model)
         if rate is None:
             unmatched.append(model)
             continue
         matched = True
-        total += rate * sum(int(toks.get(f, 0)) for f in _USAGE_FIELDS)
+        total += rate * model_tokens
     if not matched:
+        if not unmatched:
+            return 0.0, "no token usage"
         return None, (
             "ccusage has no rate for "
-            + (", ".join(sorted(per_model)) or "the attributed model(s)")
+            + (", ".join(sorted(unmatched)) or "the attributed model(s)")
         )
     return total, ("partial: no rate for " + ", ".join(unmatched)) if unmatched else None
 
@@ -527,11 +570,15 @@ class Report:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     session_count: int = 0
+    orchestrator_turns: int = 0
+    peak_cache_read_tokens: int = 0
     # Attribution-confidence split (slice 056-03): how many attributed
     # sessions came from the exact `.jig/spec-ref` marker vs. the content
     # heuristic. marker + heuristic == session_count.
     marker_session_count: int = 0
     heuristic_session_count: int = 0
+    marker_required: bool = False
+    skipped_heuristic_session_count: int = 0
     models: list = field(default_factory=list)
     per_model: dict = field(default_factory=dict)
     cost_usd: float = None
@@ -542,6 +589,7 @@ class Report:
     subagent_output_tokens: int = 0
     subagent_cache_read_tokens: int = 0
     subagent_cache_creation_tokens: int = 0
+    subagent_turns: int = 0
     subagent_per_model: dict = field(default_factory=dict)
     subagent_by_type: dict = field(default_factory=dict)
     subagent_cost_usd: float = None
@@ -566,6 +614,185 @@ class Report:
         return self.total_tokens + self.subagent_total_tokens
 
 
+@dataclass
+class TopRow:
+    spec: str
+    session_count: int = 0
+    marker_session_count: int = 0
+    heuristic_session_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    subagent_input_tokens: int = 0
+    subagent_output_tokens: int = 0
+    subagent_cache_read_tokens: int = 0
+    subagent_cache_creation_tokens: int = 0
+    orchestrator_turns: int = 0
+    subagent_turns: int = 0
+    peak_cache_read_tokens: int = 0
+    models: set = field(default_factory=set)
+    subagent_by_type: dict = field(default_factory=dict)
+
+    @property
+    def total_tokens(self) -> int:
+        return (self.input_tokens + self.output_tokens
+                + self.cache_read_tokens + self.cache_creation_tokens)
+
+    @property
+    def subagent_total_tokens(self) -> int:
+        return (self.subagent_input_tokens + self.subagent_output_tokens
+                + self.subagent_cache_read_tokens
+                + self.subagent_cache_creation_tokens)
+
+    @property
+    def combined_total_tokens(self) -> int:
+        return self.total_tokens + self.subagent_total_tokens
+
+    @property
+    def combined_cache_read_tokens(self) -> int:
+        return self.cache_read_tokens + self.subagent_cache_read_tokens
+
+    @property
+    def combined_output_tokens(self) -> int:
+        return self.output_tokens + self.subagent_output_tokens
+
+    @property
+    def combined_cache_creation_tokens(self) -> int:
+        return (self.cache_creation_tokens
+                + self.subagent_cache_creation_tokens)
+
+    @property
+    def combined_input_tokens(self) -> int:
+        return self.input_tokens + self.subagent_input_tokens
+
+
+@dataclass
+class TopReport:
+    rows: list
+    session_count: int = 0
+    attributed_session_count: int = 0
+    unattributed_session_count: int = 0
+    empty_session_count: int = 0
+    marker_required: bool = False
+    skipped_heuristic_session_count: int = 0
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(r.combined_input_tokens for r in self.rows)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(r.combined_output_tokens for r in self.rows)
+
+    @property
+    def cache_read_tokens(self) -> int:
+        return sum(r.combined_cache_read_tokens for r in self.rows)
+
+    @property
+    def cache_creation_tokens(self) -> int:
+        return sum(r.combined_cache_creation_tokens for r in self.rows)
+
+    @property
+    def orchestrator_tokens(self) -> int:
+        return sum(r.total_tokens for r in self.rows)
+
+    @property
+    def subagent_tokens(self) -> int:
+        return sum(r.subagent_total_tokens for r in self.rows)
+
+    @property
+    def combined_total_tokens(self) -> int:
+        return self.orchestrator_tokens + self.subagent_tokens
+
+
+@dataclass
+class CompactThresholdRow:
+    threshold: float
+    crossing_turns: int = 0
+    sessions_crossed: int = 0
+    first_crossing_turn: int = None
+
+
+@dataclass
+class CompactThresholdSpecReport:
+    spec: str
+    window_tokens: int
+    thresholds: list
+    session_count: int = 0
+    marker_session_count: int = 0
+    heuristic_session_count: int = 0
+    marker_required: bool = False
+    skipped_heuristic_session_count: int = 0
+    orchestrator_turns: int = 0
+    orchestrator_tokens: int = 0
+    peak_cache_read_tokens: int = 0
+
+    @property
+    def peak_ratio(self) -> float:
+        if self.window_tokens <= 0:
+            return 0.0
+        return self.peak_cache_read_tokens / self.window_tokens
+
+
+@dataclass
+class ReadPathSummary:
+    file_path: str
+    count: int = 0
+    total_known_size_bytes: int = 0
+
+
+@dataclass
+class ReadAttributionRow:
+    spec: str
+    session_id: str
+    counts: dict = field(default_factory=lambda: {"large": 0, "duplicate": 0})
+    total_known_size_bytes: int = 0
+    top_paths: list = field(default_factory=list)
+    _path_stats: dict = field(default_factory=dict, repr=False)
+
+    @property
+    def event_count(self) -> int:
+        return int(self.counts.get("large", 0)) + int(
+            self.counts.get("duplicate", 0))
+
+    @property
+    def estimated_tokens(self) -> int:
+        return self.total_known_size_bytes // READ_ATTRIBUTION_BYTES_PER_TOKEN
+
+
+@dataclass
+class HookInjectionAttributionRow:
+    spec: str
+    session_id: str
+    source_hook: str
+    kind_counts: dict = field(default_factory=dict)
+    total_bytes: int = 0
+    estimated_tokens: int = 0
+    hook_event_names: list = field(default_factory=list)
+    _hook_event_name_set: set = field(default_factory=set, repr=False)
+    share: float = 0.0
+
+    @property
+    def event_count(self) -> int:
+        return sum(int(v) for v in self.kind_counts.values())
+
+
+@dataclass
+class ReadAttributionReport:
+    log_path: Path
+    rows: list = field(default_factory=list)
+    hook_injection_rows: list = field(default_factory=list)
+    scanned_event_count: int = 0
+    included_event_count: int = 0
+    hook_injection_event_count: int = 0
+    included_hook_injection_event_count: int = 0
+    malformed_line_count: int = 0
+    skipped_unattributed_event_count: int = 0
+    total_context_growth_bytes: int = 0
+    require_marker: bool = False
+
+
 def _spec_number(spec: str) -> str:
     """Normalize a spec argument (number or slug) to a three-digit number.
 
@@ -580,7 +807,8 @@ def _spec_number(spec: str) -> str:
 
 
 def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
-                 ccusage_runner=run_ccusage_npx) -> Report:
+                 ccusage_runner=run_ccusage_npx,
+                 require_marker: bool = False) -> Report:
     """Build a per-spec usage report: measured orchestrator (flat sessions)
     + measured subagent (nested transcripts) token totals and $ costs, plus
     their combined total (= the true per-spec cost).
@@ -603,6 +831,7 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     """
     target = _spec_number(spec)
     rep = Report(spec=target)
+    rep.marker_required = require_marker
 
     # Attribute sessions, keeping the session PATH so we can locate each
     # session's nested subagent transcripts (slice 056-02). Slice 056-03:
@@ -611,12 +840,16 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     attributed = []
     marker_count = 0
     heuristic_count = 0
+    skipped_heuristic = 0
     for session_path in find_sessions(projects_dir, encoded_prefix):
         records = read_session(session_path)
         if not records:
             continue
         spec_num, method = attribute_session(records)
         if spec_num == target:
+            if require_marker and method != "marker":
+                skipped_heuristic += 1
+                continue
             attributed.append((session_path, records))
             if method == "marker":
                 marker_count += 1
@@ -636,6 +869,9 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
         rep.cache_read_tokens += sums["cache_read_input_tokens"]
         rep.cache_creation_tokens += sums["cache_creation_input_tokens"]
         models.update(sums["models"])
+        turns, peak = _usage_turns_and_peak(records)
+        rep.orchestrator_turns += turns
+        rep.peak_cache_read_tokens = max(rep.peak_cache_read_tokens, peak)
         for model, slot in sums["per_model"].items():
             agg = per_model.setdefault(model, {f: 0 for f in _USAGE_FIELDS})
             for f in _USAGE_FIELDS:
@@ -654,6 +890,8 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
             rep.subagent_cache_read_tokens += asums["cache_read_input_tokens"]
             rep.subagent_cache_creation_tokens += \
                 asums["cache_creation_input_tokens"]
+            turns, _peak = _usage_turns_and_peak(agent_records)
+            rep.subagent_turns += turns
             for model, slot in asums["per_model"].items():
                 agg = sub_per_model.setdefault(
                     model, {f: 0 for f in _USAGE_FIELDS})
@@ -668,6 +906,7 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
     rep.session_count = len(attributed)
     rep.marker_session_count = marker_count
     rep.heuristic_session_count = heuristic_count
+    rep.skipped_heuristic_session_count = skipped_heuristic
     rep.models = sorted(models)
     rep.per_model = per_model
     rep.subagent_per_model = sub_per_model
@@ -711,6 +950,305 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
             rep.combined_cost_note = note
 
     return rep
+
+
+def _usage_turns_and_peak(records: list) -> tuple:
+    """Return ``(turn_count, peak_cache_read_tokens)`` for assistant records
+    carrying positive ``message.usage``. Used by report/top/threshold rollups
+    to expose spec 057's measured levers (turn count + peak context) without
+    letting zero-token synthetic records inflate the counters.
+    """
+    turns = 0
+    peak = 0
+    for _rec, _msg, token_values in _iter_positive_usage(records):
+        turns += 1
+        peak = max(peak, token_values["cache_read_input_tokens"])
+    return turns, peak
+
+
+def build_top_report(projects_dir: Path, encoded_prefix: str,
+                     require_marker: bool = False) -> TopReport:
+    """Build a read-only all-spec rollup from the same transcript substrate as
+    ``report``. The rows are sorted by combined orchestrator+subagent tokens,
+    descending, with spec number as the deterministic tie-breaker.
+    """
+    rows = {}
+    summary = TopReport(rows=[], marker_required=require_marker)
+
+    for session_path in find_sessions(projects_dir, encoded_prefix):
+        summary.session_count += 1
+        records = read_session(session_path)
+        if not records:
+            summary.empty_session_count += 1
+            continue
+        spec_num, method = attribute_session(records)
+        if spec_num is None:
+            summary.unattributed_session_count += 1
+            continue
+        if require_marker and method != "marker":
+            summary.skipped_heuristic_session_count += 1
+            continue
+
+        summary.attributed_session_count += 1
+        row = rows.setdefault(spec_num, TopRow(spec=spec_num))
+        row.session_count += 1
+        if method == "marker":
+            row.marker_session_count += 1
+        else:
+            row.heuristic_session_count += 1
+
+        sums = sum_usage(records)
+        row.input_tokens += sums["input_tokens"]
+        row.output_tokens += sums["output_tokens"]
+        row.cache_read_tokens += sums["cache_read_input_tokens"]
+        row.cache_creation_tokens += sums["cache_creation_input_tokens"]
+        row.models.update(sums["models"])
+        turns, peak = _usage_turns_and_peak(records)
+        row.orchestrator_turns += turns
+        row.peak_cache_read_tokens = max(row.peak_cache_read_tokens, peak)
+
+        for agent_path in find_subagent_files(session_path):
+            agent_records = read_session(agent_path)
+            if not agent_records:
+                continue
+            asums = sum_subagent_usage(agent_records)
+            row.subagent_input_tokens += asums["input_tokens"]
+            row.subagent_output_tokens += asums["output_tokens"]
+            row.subagent_cache_read_tokens += asums["cache_read_input_tokens"]
+            row.subagent_cache_creation_tokens += \
+                asums["cache_creation_input_tokens"]
+            turns, _peak = _usage_turns_and_peak(agent_records)
+            row.subagent_turns += turns
+            for agent, slot in asums["by_type"].items():
+                prior = row.subagent_by_type.setdefault(
+                    agent, {f: 0 for f in _USAGE_FIELDS})
+                for f in _USAGE_FIELDS:
+                    prior[f] += int(slot.get(f, 0))
+
+    summary.rows = sorted(
+        rows.values(),
+        key=lambda r: (-r.combined_total_tokens, r.spec),
+    )
+    return summary
+
+
+def build_compact_threshold_reports(specs: list, projects_dir: Path,
+                                    encoded_prefix: str, thresholds: list,
+                                    window_tokens: int =
+                                    DEFAULT_TOKEN_WINDOW_TOKENS,
+                                    require_marker: bool = False) -> list:
+    """Build read-only what-if reports for alternate active-compaction bands.
+
+    Each row answers: for this spec's attributed orchestrator turns, how many
+    turns had ``cache_read_input_tokens`` at or above ``threshold * window``?
+    This does not simulate post-/compact cache drops; it measures historical
+    crossings from the transcript facts, which is enough to pick candidate
+    thresholds for a controlled A/B run.
+    """
+    normalized = [_spec_number(s) for s in specs]
+    reports = {
+        spec: CompactThresholdSpecReport(
+            spec=spec,
+            window_tokens=window_tokens,
+            thresholds=[CompactThresholdRow(t) for t in thresholds],
+            marker_required=require_marker,
+        )
+        for spec in normalized
+    }
+
+    for session_path in find_sessions(projects_dir, encoded_prefix):
+        records = read_session(session_path)
+        if not records:
+            continue
+        spec_num, method = attribute_session(records)
+        if spec_num not in reports:
+            continue
+        rep = reports[spec_num]
+        if require_marker and method != "marker":
+            rep.skipped_heuristic_session_count += 1
+            continue
+
+        rep.session_count += 1
+        if method == "marker":
+            rep.marker_session_count += 1
+        else:
+            rep.heuristic_session_count += 1
+
+        sums = sum_usage(records)
+        rep.orchestrator_tokens += sum(int(sums.get(f, 0))
+                                       for f in _USAGE_FIELDS)
+
+        turn_index = 0
+        crossed_in_session = {row.threshold: False
+                              for row in rep.thresholds}
+        for _rec, _msg, token_values in _iter_positive_usage(records):
+            turn_index += 1
+            rep.orchestrator_turns += 1
+            cache_read = token_values["cache_read_input_tokens"]
+            rep.peak_cache_read_tokens = max(
+                rep.peak_cache_read_tokens, cache_read)
+            ratio = cache_read / window_tokens if window_tokens > 0 else 0
+            for row in rep.thresholds:
+                if ratio >= row.threshold:
+                    row.crossing_turns += 1
+                    crossed_in_session[row.threshold] = True
+                    if (row.first_crossing_turn is None
+                            or turn_index < row.first_crossing_turn):
+                        row.first_crossing_turn = turn_index
+
+        for row in rep.thresholds:
+            if crossed_in_session[row.threshold]:
+                row.sessions_crossed += 1
+
+    return [reports[spec] for spec in normalized]
+
+
+def _read_known_size(event: dict):
+    size = event.get("size_bytes")
+    if isinstance(size, bool):
+        return None
+    if isinstance(size, (int, float)) and size >= 0:
+        return int(size)
+    return None
+
+
+def _nonnegative_int_or_none(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value >= 0:
+        return int(value)
+    return None
+
+
+def _read_attribution_sort_key(row: ReadAttributionRow):
+    # Attributed specs first, then the empty/unattributed bucket.
+    spec_key = row.spec if row.spec else "zzz-unattributed"
+    return (spec_key, row.session_id)
+
+
+def _hook_injection_sort_key(row: HookInjectionAttributionRow):
+    spec_key = row.spec if row.spec else "zzz-unattributed"
+    return (spec_key, row.session_id, row.source_hook)
+
+
+def build_read_attribution_report(log_path: Path,
+                                  require_marker: bool = False
+                                  ) -> ReadAttributionReport:
+    """Build a read-only report from the context-growth attribution log.
+
+    Hooks write metadata-only read-nudge and additionalContext events under
+    `.claude/`. This parser is deliberately tolerant: malformed lines are
+    counted and skipped, missing files simply produce an empty report, and
+    unknown event shapes are ignored.
+    """
+    log_path = Path(log_path)
+    report = ReadAttributionReport(
+        log_path=log_path,
+        require_marker=require_marker,
+    )
+    rows = {}
+    hook_rows = {}
+
+    try:
+        fh = log_path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return report
+
+    with fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                report.malformed_line_count += 1
+                continue
+            if not isinstance(event, dict):
+                report.malformed_line_count += 1
+                continue
+            event_name = event.get("event")
+            if event_name == "read_nudge":
+                kind = event.get("kind")
+                if kind not in ("large", "duplicate"):
+                    continue
+
+                report.scanned_event_count += 1
+                spec = str(event.get("spec") or "")
+                if require_marker and not spec:
+                    report.skipped_unattributed_event_count += 1
+                    continue
+
+                session_id = str(event.get("session_id") or "unknown")
+                row = rows.setdefault(
+                    (spec, session_id),
+                    ReadAttributionRow(spec=spec, session_id=session_id),
+                )
+                row.counts[kind] = int(row.counts.get(kind, 0)) + 1
+
+                size = _read_known_size(event)
+                if size is not None:
+                    row.total_known_size_bytes += size
+                    report.total_context_growth_bytes += size
+
+                file_path = str(event.get("file_path") or "")
+                if file_path:
+                    path_summary = row._path_stats.setdefault(
+                        file_path, ReadPathSummary(file_path=file_path))
+                    path_summary.count += 1
+                    if size is not None:
+                        path_summary.total_known_size_bytes += size
+                report.included_event_count += 1
+                continue
+
+            if event_name == "additional_context":
+                report.hook_injection_event_count += 1
+                spec = str(event.get("spec") or "")
+                if require_marker and not spec:
+                    report.skipped_unattributed_event_count += 1
+                    continue
+
+                session_id = str(event.get("session_id") or "unknown")
+                source_hook = str(event.get("source_hook") or "unknown")
+                row = hook_rows.setdefault(
+                    (spec, session_id, source_hook),
+                    HookInjectionAttributionRow(
+                        spec=spec,
+                        session_id=session_id,
+                        source_hook=source_hook,
+                    ),
+                )
+                kind = str(event.get("kind") or "unknown")
+                row.kind_counts[kind] = int(row.kind_counts.get(kind, 0)) + 1
+                hook_event_name = str(event.get("hook_event_name") or "")
+                if (hook_event_name
+                        and hook_event_name not in row._hook_event_name_set):
+                    row._hook_event_name_set.add(hook_event_name)
+                    row.hook_event_names.append(hook_event_name)
+
+                byte_count = _nonnegative_int_or_none(event.get("bytes")) or 0
+                row.total_bytes += byte_count
+                report.total_context_growth_bytes += byte_count
+                est = _nonnegative_int_or_none(event.get("estimated_tokens"))
+                row.estimated_tokens += (
+                    est if est is not None
+                    else byte_count // READ_ATTRIBUTION_BYTES_PER_TOKEN
+                )
+                report.included_hook_injection_event_count += 1
+                continue
+
+    for row in rows.values():
+        row.top_paths = sorted(
+            row._path_stats.values(),
+            key=lambda p: (-p.count, -p.total_known_size_bytes, p.file_path),
+        )
+    report.rows = sorted(rows.values(), key=_read_attribution_sort_key)
+    if report.total_context_growth_bytes > 0:
+        for row in hook_rows.values():
+            row.share = row.total_bytes / report.total_context_growth_bytes
+    report.hook_injection_rows = sorted(
+        hook_rows.values(), key=_hook_injection_sort_key)
+    return report
 
 
 def _merge_per_model(*maps) -> dict:
@@ -763,10 +1301,20 @@ def render(rep: Report) -> str:
                  f"(orchestrator + subagent)")
     lines.append("")
     if rep.session_count == 0:
-        lines.append(
-            f"No sessions attributed to spec {rep.spec} "
-            f"(no spec-path mentions found in any transcript)."
-        )
+        if rep.marker_required:
+            lines.append(
+                f"No marker-attributed sessions found for spec {rep.spec}."
+            )
+            if rep.skipped_heuristic_session_count:
+                lines.append(
+                    f"  Heuristic sessions skipped: "
+                    f"{rep.skipped_heuristic_session_count}"
+                )
+        else:
+            lines.append(
+                f"No sessions attributed to spec {rep.spec} "
+                f"(no spec-path mentions found in any transcript)."
+            )
         lines.append("")
         lines.append("  Total tokens: 0")
         lines.append("  $ estimate:   n/a")
@@ -776,6 +1324,11 @@ def render(rep: Report) -> str:
 
     lines.append(f"  Sessions:               {rep.session_count}")
     lines.append(f"  Models:                 {', '.join(rep.models) or 'unknown'}")
+    if rep.marker_required:
+        lines.append("  Marker required:        yes")
+        lines.append(
+            f"  Heuristic skipped:      {rep.skipped_heuristic_session_count}"
+        )
     # Slice 056-03: surface attribution confidence — how many sessions were
     # mapped exactly (by the `.jig/spec-ref` marker) vs. heuristically (the
     # dominant content-mention guess). The lower-confidence caveat is shown
@@ -794,6 +1347,10 @@ def render(rep: Report) -> str:
 
     # --- Orchestrator (flat sessions, 056-01) -----------------------------
     lines.append("ORCHESTRATOR (flat sessions, measured)")
+    lines.append(f"  turns:                  {_fmt(rep.orchestrator_turns)}")
+    lines.append(
+        f"  peak_cache_read_tokens: {_fmt(rep.peak_cache_read_tokens)}"
+    )
     _token_block(lines, rep.input_tokens, rep.output_tokens,
                  rep.cache_read_tokens, rep.cache_creation_tokens,
                  rep.total_tokens)
@@ -802,6 +1359,7 @@ def render(rep: Report) -> str:
 
     # --- Subagent (nested transcripts, 056-02) ----------------------------
     lines.append("SUBAGENT (nested transcripts, measured)")
+    lines.append(f"  turns:                  {_fmt(rep.subagent_turns)}")
     _token_block(lines, rep.subagent_input_tokens, rep.subagent_output_tokens,
                  rep.subagent_cache_read_tokens,
                  rep.subagent_cache_creation_tokens,
@@ -822,6 +1380,244 @@ def render(rep: Report) -> str:
     lines.append("")
 
     _append_framing(lines, rep)
+    return "\n".join(lines) + "\n"
+
+
+def _pct(part: int, total: int) -> str:
+    if total <= 0:
+        return "0.0%"
+    return f"{(part / total) * 100:.1f}%"
+
+
+def render_top(rep: TopReport, limit: int = 10) -> str:
+    lines = []
+    lines.append("## Token usage top specs")
+    lines.append("")
+    lines.append(f"  Sessions scanned:       {_fmt(rep.session_count)}")
+    lines.append(f"  Attributed sessions:    {_fmt(rep.attributed_session_count)}")
+    lines.append(f"  Unattributed sessions:  {_fmt(rep.unattributed_session_count)}")
+    lines.append(f"  Empty sessions:         {_fmt(rep.empty_session_count)}")
+    if rep.marker_required:
+        lines.append("  Marker required:        yes")
+        lines.append(
+            f"  Heuristic skipped:      "
+            f"{_fmt(rep.skipped_heuristic_session_count)}"
+        )
+    lines.append(f"  Specs attributed:       {_fmt(len(rep.rows))}")
+    lines.append("")
+
+    lines.append("CATEGORY TOTALS (attributed sessions)")
+    total = rep.combined_total_tokens
+    lines.append(
+        f"  input_tokens:           {_fmt(rep.input_tokens)} "
+        f"({_pct(rep.input_tokens, total)})"
+    )
+    lines.append(
+        f"  output_tokens:          {_fmt(rep.output_tokens)} "
+        f"({_pct(rep.output_tokens, total)})"
+    )
+    lines.append(
+        f"  cache_read_tokens:      {_fmt(rep.cache_read_tokens)} "
+        f"({_pct(rep.cache_read_tokens, total)})"
+    )
+    lines.append(
+        f"  cache_creation_tokens:  {_fmt(rep.cache_creation_tokens)} "
+        f"({_pct(rep.cache_creation_tokens, total)})"
+    )
+    lines.append("  ------------------------")
+    lines.append(f"  combined_total_tokens:  {_fmt(total)}")
+    lines.append("")
+
+    lines.append("DIMENSION TOTALS")
+    lines.append(
+        f"  orchestrator_tokens:    {_fmt(rep.orchestrator_tokens)} "
+        f"({_pct(rep.orchestrator_tokens, total)})"
+    )
+    lines.append(
+        f"  subagent_tokens:        {_fmt(rep.subagent_tokens)} "
+        f"({_pct(rep.subagent_tokens, total)})"
+    )
+    lines.append("")
+
+    rows = rep.rows[:max(0, limit)]
+    lines.append(f"TOP SPECS (by combined tokens, limit {len(rows)})")
+    if not rep.rows:
+        lines.append("  No attributed specs with token usage.")
+        return "\n".join(lines) + "\n"
+    if not rows:
+        lines.append("  No rows shown (limit 0).")
+        return "\n".join(lines) + "\n"
+    header = (
+        "  spec  sessions  attribution  combined     orch         sub"
+        "          cache_read   output       orch_turns  sub_turns  peak_cR"
+    )
+    lines.append(header)
+    for row in rows:
+        attr = f"{row.marker_session_count}m/{row.heuristic_session_count}h"
+        lines.append(
+            f"  {row.spec:<4}  {row.session_count:>8}  {attr:>11}  "
+            f"{_fmt(row.combined_total_tokens):>11}  "
+            f"{_fmt(row.total_tokens):>11}  "
+            f"{_fmt(row.subagent_total_tokens):>11}  "
+            f"{_fmt(row.combined_cache_read_tokens):>11}  "
+            f"{_fmt(row.combined_output_tokens):>10}  "
+            f"{_fmt(row.orchestrator_turns):>10}  "
+            f"{_fmt(row.subagent_turns):>9}  "
+            f"{_fmt(row.peak_cache_read_tokens):>7}"
+        )
+    lines.append("")
+    lines.append(
+        "Note: top is token-only; run `usage.py report <spec>` for ccusage "
+        "$ estimates. Attribution is marker count / heuristic count."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def render_compact_thresholds(reports: list) -> str:
+    lines = []
+    lines.append("## Compaction threshold comparison")
+    lines.append("")
+    for idx, rep in enumerate(reports):
+        if idx:
+            lines.append("")
+        lines.append(f"SPEC {rep.spec}")
+        lines.append(f"  Sessions:               {_fmt(rep.session_count)}")
+        if rep.marker_required:
+            lines.append("  Marker required:        yes")
+            lines.append(
+                f"  Heuristic skipped:      "
+                f"{_fmt(rep.skipped_heuristic_session_count)}"
+            )
+        lines.append(
+            f"  Attribution:            {rep.marker_session_count} by marker "
+            f"(exact), {rep.heuristic_session_count} by heuristic"
+        )
+        lines.append(f"  Window tokens:          {_fmt(rep.window_tokens)}")
+        lines.append(f"  Orchestrator turns:     {_fmt(rep.orchestrator_turns)}")
+        lines.append(f"  Orchestrator tokens:    {_fmt(rep.orchestrator_tokens)}")
+        lines.append(
+            f"  Peak cache_read:        "
+            f"{_fmt(rep.peak_cache_read_tokens)} "
+            f"({_pct(rep.peak_cache_read_tokens, rep.window_tokens)})"
+        )
+        if rep.session_count == 0:
+            lines.append("  No attributed sessions to compare.")
+            continue
+        lines.append("")
+        lines.append(
+            "  threshold  turns_at_or_above  sessions_crossed  first_turn"
+        )
+        for row in rep.thresholds:
+            first = (str(row.first_crossing_turn)
+                     if row.first_crossing_turn is not None else "-")
+            lines.append(
+                f"  {row.threshold:>8.2f}  "
+                f"{_fmt(row.crossing_turns):>17}  "
+                f"{_fmt(row.sessions_crossed):>16}  "
+                f"{first:>10}"
+            )
+    lines.append("")
+    lines.append(
+        "Note: this is a read-only what-if over historical orchestrator turns. "
+        "It counts positive-token turns whose cache_read_input_tokens crossed "
+        "threshold * window_tokens; it does not simulate cache drops after "
+        "/compact."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def render_read_attribution(rep: ReadAttributionReport, limit: int = 50) -> str:
+    lines = []
+    lines.append("## Read attribution")
+    lines.append("")
+    lines.append(f"  Log:                    {rep.log_path}")
+    lines.append(f"  Events scanned:         {_fmt(rep.scanned_event_count)}")
+    lines.append(f"  Events included:        {_fmt(rep.included_event_count)}")
+    lines.append(
+        f"  Hook injections scanned: {_fmt(rep.hook_injection_event_count)}"
+    )
+    lines.append(
+        f"  Hook injections incl.:  "
+        f"{_fmt(rep.included_hook_injection_event_count)}"
+    )
+    lines.append(
+        f"  Context-growth bytes:   "
+        f"{_fmt(rep.total_context_growth_bytes)}"
+    )
+    if rep.require_marker:
+        lines.append("  Marker required:        yes")
+        lines.append(
+            f"  Skipped unattributed:   "
+            f"{_fmt(rep.skipped_unattributed_event_count)}"
+        )
+    if rep.malformed_line_count:
+        lines.append(
+            f"  Malformed lines:        {_fmt(rep.malformed_line_count)}"
+        )
+    lines.append("")
+
+    rows = rep.rows[:max(0, limit)]
+    lines.append(f"BY SPEC / SESSION (limit {len(rows)})")
+    if not rep.rows:
+        lines.append("  No read-attribution events found.")
+    elif not rows:
+        lines.append("  No rows shown (limit 0).")
+    else:
+        header = (
+            "  spec            session  events  counts               known_bytes"
+            "  est_tokens  top_paths"
+        )
+        lines.append(header)
+        for row in rows:
+            spec = row.spec or "(unattributed)"
+            counts = (
+                f"large={int(row.counts.get('large', 0))} "
+                f"duplicate={int(row.counts.get('duplicate', 0))}"
+            )
+            top = ", ".join(
+                f"{p.file_path} ({p.count})" for p in row.top_paths[:3]
+            ) or "-"
+            lines.append(
+                f"  {spec:<15} {row.session_id:<8} "
+                f"{_fmt(row.event_count):>6}  {counts:<20} "
+                f"{_fmt(row.total_known_size_bytes):>11}  "
+                f"{_fmt(row.estimated_tokens):>10}  {top}"
+            )
+
+    lines.append("")
+    hook_rows = rep.hook_injection_rows[:max(0, limit)]
+    lines.append(f"HOOK INJECTIONS BY HOOK / SPEC / SESSION (limit {len(hook_rows)})")
+    if not rep.hook_injection_rows:
+        lines.append("  No Hook injections found.")
+    elif not hook_rows:
+        lines.append("  No rows shown (limit 0).")
+    else:
+        header = (
+            "  source_hook                spec            session  events"
+            "  kinds                 bytes  est_tokens  share  hook_events"
+        )
+        lines.append(header)
+        for row in hook_rows:
+            spec = row.spec or "(unattributed)"
+            kinds = " ".join(
+                f"{kind}={int(count)}"
+                for kind, count in sorted(row.kind_counts.items())
+            ) or "-"
+            hook_events = ",".join(row.hook_event_names) or "-"
+            lines.append(
+                f"  {row.source_hook:<26} {spec:<15} {row.session_id:<8} "
+                f"{_fmt(row.event_count):>6}  {kinds:<20} "
+                f"{_fmt(row.total_bytes):>7}  "
+                f"{_fmt(row.estimated_tokens):>10}  "
+                f"{row.share * 100:>5.1f}%  {hook_events}"
+            )
+    lines.append("")
+    lines.append(
+        f"Note: estimated tokens use "
+        f"{READ_ATTRIBUTION_BYTES_PER_TOKEN} bytes/token. The log is "
+        "metadata-only: file paths, sizes, thresholds, injected-context "
+        "byte counts, and attribution fields."
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -879,7 +1675,106 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-ccusage", action="store_true",
         help="skip ccusage entirely; show '$: unavailable'",
     )
+    rep.add_argument(
+        "--require-marker", action="store_true",
+        help="only include sessions attributed by exact .jig/spec-ref marker",
+    )
+
+    top = sub.add_parser(
+        "top",
+        help="rank attributed specs by combined orchestrator+subagent tokens",
+    )
+    top.add_argument(
+        "--limit", type=int, default=10, metavar="N",
+        help="number of specs to show (default: 10)",
+    )
+    top.add_argument(
+        "--projects-dir", default=None, metavar="PATH",
+        help="override the ~/.claude/projects root (testing seam)",
+    )
+    top.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to derive the encoded prefix",
+    )
+    top.add_argument(
+        "--require-marker", action="store_true",
+        help="only include sessions attributed by exact .jig/spec-ref marker",
+    )
+
+    compact = sub.add_parser(
+        "compact-thresholds",
+        help="compare what-if active-compaction thresholds for one or more "
+             "specs",
+    )
+    compact.add_argument(
+        "specs", nargs="+",
+        help="spec number(s) or slug(s), e.g. 055 057-token-budget",
+    )
+    compact.add_argument(
+        "--thresholds", default="0.60,0.65,0.75",
+        help="comma-separated threshold fractions (default: 0.60,0.65,0.75)",
+    )
+    compact.add_argument(
+        "--window-tokens", type=int, default=DEFAULT_TOKEN_WINDOW_TOKENS,
+        metavar="N",
+        help=f"context window token budget (default: "
+             f"{DEFAULT_TOKEN_WINDOW_TOKENS})",
+    )
+    compact.add_argument(
+        "--projects-dir", default=None, metavar="PATH",
+        help="override the ~/.claude/projects root (testing seam)",
+    )
+    compact.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to derive the encoded prefix",
+    )
+    compact.add_argument(
+        "--require-marker", action="store_true",
+        help="only include sessions attributed by exact .jig/spec-ref marker",
+    )
+
+    read_attr = sub.add_parser(
+        "read-attribution",
+        help="summarize context-growth read-nudge and additionalContext "
+             "telemetry",
+    )
+    read_attr.add_argument(
+        "--log", default=None, metavar="PATH",
+        help="override the read-attribution JSONL log path",
+    )
+    read_attr.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to locate the default log",
+    )
+    read_attr.add_argument(
+        "--require-marker", action="store_true",
+        help="only include events attributed by exact .jig/spec-ref marker",
+    )
+    read_attr.add_argument(
+        "--limit", type=int, default=50, metavar="N",
+        help="number of spec/session rows to show (default: 50)",
+    )
     return p
+
+
+def _parse_thresholds(raw: str) -> list:
+    thresholds = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            val = float(part)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"invalid threshold {part!r}") from exc
+        if not 0 < val <= 1:
+            raise argparse.ArgumentTypeError(
+                f"threshold must be in (0, 1], got {part!r}")
+        thresholds.append(val)
+    if not thresholds:
+        raise argparse.ArgumentTypeError("at least one threshold is required")
+    return sorted(set(thresholds))
 
 
 def _make_ccusage_runner(ns):
@@ -906,14 +1801,53 @@ def main(argv: list) -> int:
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
-    if ns.command != "report":
+    if ns.command not in ("report", "top", "compact-thresholds",
+                          "read-attribution"):
         parser.print_help(sys.stderr)
         return 2
 
-    projects_dir = (Path(ns.projects_dir) if ns.projects_dir
-                    else default_projects_dir())
     root = ns.main_root if ns.main_root else main_root()
     encoded_prefix = encode_cwd(root)
+
+    if ns.command == "read-attribution":
+        log_path = (Path(ns.log) if ns.log
+                    else Path(root) / ".claude" / READ_ATTRIBUTION_LOG)
+        rep = build_read_attribution_report(
+            log_path,
+            require_marker=ns.require_marker,
+        )
+        sys.stdout.write(render_read_attribution(rep, limit=ns.limit))
+        return 0
+
+    projects_dir = (Path(ns.projects_dir) if ns.projects_dir
+                    else default_projects_dir())
+
+    if ns.command == "top":
+        top = build_top_report(projects_dir, encoded_prefix,
+                               require_marker=ns.require_marker)
+        sys.stdout.write(render_top(top, limit=ns.limit))
+        return 0
+
+    if ns.command == "compact-thresholds":
+        if ns.window_tokens <= 0:
+            sys.stderr.write("usage.py: error: --window-tokens must be > 0\n")
+            return 2
+        try:
+            thresholds = _parse_thresholds(ns.thresholds)
+        except argparse.ArgumentTypeError as exc:
+            sys.stderr.write(f"usage.py: error: {exc}\n")
+            return 2
+        reports = build_compact_threshold_reports(
+            specs=ns.specs,
+            projects_dir=projects_dir,
+            encoded_prefix=encoded_prefix,
+            thresholds=thresholds,
+            window_tokens=ns.window_tokens,
+            require_marker=ns.require_marker,
+        )
+        sys.stdout.write(render_compact_thresholds(reports))
+        return 0
+
     runner = _make_ccusage_runner(ns)
 
     rep = build_report(
@@ -921,6 +1855,7 @@ def main(argv: list) -> int:
         projects_dir=projects_dir,
         encoded_prefix=encoded_prefix,
         ccusage_runner=runner,
+        require_marker=ns.require_marker,
     )
     sys.stdout.write(render(rep))
     return 0

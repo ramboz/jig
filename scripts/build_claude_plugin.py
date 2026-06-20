@@ -89,6 +89,10 @@ def _iter_package_files(source_root: Path):
         if (source_root / file_name).is_file():
             seen.append(Path(file_name))
 
+    for file_name in build_release_zip.install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
+        if (source_root / file_name).is_file():
+            seen.append(Path(file_name))
+
     return sorted(seen, key=lambda p: p.as_posix())
 
 
