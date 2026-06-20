@@ -53,14 +53,7 @@ Resolved by [Spec 025-01](specs/025-claude-md-hygiene/spec.md) — onboarding co
 ## Conventions
 
 ### ~~Decision: Skill telemetry granularity~~ — RESOLVED 2026-06-02
-Resolved by [spec 041](specs/041-routing-observability/spec.md). Telemetry is
-no longer a Task-spawn *proxy*: the `PreToolUse`/`Skill` hook `jig-skill-trace.sh`
-(slice 041-01) logs precise per-skill invocations (`event: "skill_invoked"` +
-verbatim `skill_name`) to `.claude/skill-usage.jsonl`, and `workflow.py
-routing-stats` (slice 041-02) surfaces the granular histogram. The
-"two-weeks-of-data" trigger is moot — the measurement is precise by
-construction. Closed together with "Skill-routing observability" below (they
-shared one mechanism — this spec's Q3).
+Resolved by [spec 041](specs/041-routing-observability/spec.md) — per-skill `jig-skill-trace.sh` (041-01) + `workflow.py routing-stats` (041-02) replace the Task-spawn proxy. Closed together with "Skill-routing observability" below (shared mechanism).
 
 ### ~~Decision: `adr.py index` sentence-end detector mishandles abbreviations~~ — RESOLVED 2026-05-15
 Resolved by abbreviation allowlist in `_extract_description` (`skills/adr-workflow/adr.py`); pinned by `ExtractDescriptionAbbreviationTests`. Lifecycle companion: [ADR-0006](decisions/adr-0006-adr-accept-then-index-ordering.md).
@@ -137,9 +130,7 @@ Resolved by [Spec 001-01](specs/001-scaffold-init/spec.md) + [ADR-0007](decision
 **Risk:** Currently theoretical — local-only scaffolder on user-owned dirs.
 
 ### ~~Decision: jig-memory-scan + jig-task-capture firing-rate measurement~~ — CLOSED (won't-measure) 2026-06-01
-**Closed without action.** Slice 002-03 tuned the heuristics deterministically (strip code blocks / URLs / absolute paths; common-acronym skiplist) but never measured firing rate against real session traffic (AC #5's 10–40% healthy band). The original 2-week trigger window (2026-05-18) and the weeks since have elapsed with zero hook-noise / unknown-reference-spam reports across all jig dogfooding — so the measurement is retired as "never bit in practice."
-**Re-open trigger:** first user-reported noise complaint OR explicit ask for telemetry. Mitigation if anyone needs to actually measure: a gitignored `.claude/hook-firing.jsonl` one-line-per-fire write at the bottom of each hook — cheap, easy to grep.
-**Note:** the three latent-heuristic watch-items that rode along on this entry (schemeless-URL leak / nested-fence leak / `CSS` skiplist collision) are **not** closed — relocated to [`docs/inbox.md`](inbox.md) (2026-06-01) as a parked low-priority watch.
+**Closed without action** — slice 002-03 tuned the heuristics but firing rate was never measured; zero noise reports across all dogfooding. **Re-open trigger:** first noise complaint or telemetry ask (cheap measure: a gitignored `.claude/hook-firing.jsonl` one-line-per-fire write). The three latent-heuristic watch-items (schemeless-URL / nested-fence / `CSS` skiplist) are **not** closed — relocated to [`docs/inbox.md`](inbox.md).
 
 ### ~~Decision: Transactional writes in scaffold()~~ — RESOLVED 2026-05-20
 Resolved by [Slice 032-02](specs/032-atomic-writes/slice-02-scaffold-completion-marker.md) — `scaffold.json` is now the LAST file written by `scaffold()`, making it the completion sentinel. A crash before that write leaves no `scaffold.json`, so a re-run without `--force` correctly resumes (a small `_is_jig_partial_state` watermark gate skips `_looks_already_spec_driven` when CLAUDE.md carries jig's watermark — see deviation log §3–§4).
@@ -175,41 +166,13 @@ Resolved by [Slice 032-01](specs/032-atomic-writes/slice-01-atomic-write-helper.
 Resolved by `shutil.rmtree(spec_dir, ignore_errors=True)` in `workflow.py` race-recovery path; pinned by `test_new_race_recovery_removes_empty_spec_dir`.
 
 ### ~~Decision: `workflow.py new` / `adr.py new` refuse on non-main branches, defeating reserve-on-main when work originates on a feature branch~~ — RESOLVED 2026-06-02
-**Resolved by** [ADR-0015](decisions/adr-0015-worktree-aware-reservation.md) (worktree-aware reservation) + [spec 051](specs/051-worktree-aware-reservation/spec.md) (slices 051-01 / 051-02 DONE). Reservation now **routes on the current branch**: on `main` the proven in-place flow is unchanged; off `main` (feature branch / linked worktree) it builds the reservation commit in an ephemeral **detached** worktree at `origin/main` and pushes it by SHA from the project dir (option B; the leaned-toward open-question candidate (a)/(c) below were the alternatives — see ADR-0015). `--no-push` off-main commits a provisional reservation on the current branch. The caller's branch / cwd / working tree are never touched, so the impossible `git checkout main` advice is gone. The land-time collision backstop (the open-question's option (c) flavor) is parked as slice 051-03 (DEFERRED). Original deferral preserved below.
-
-**Deferred:** `workflow.py new` requires the current branch to be `main` because the reservation commit lands on `main`. Caused the spec 021→022 collision-and-renumber on 2026-05-15: a feature-branch session refused to reserve spec 021 up-front ("must switch to main first"), the session continued without reservation, parallel work landed `021-migrate-copy-machinery` on origin/main in the meantime, the feature branch had to rename `docs/specs/021-contracts/ → 022-contracts/` (+ propagate the renumber across slice files, deviation logs, CLAUDE.md, ADR-0005, dogfood report, test labels) at merge-time. The very pain spec 003-03's reserve-on-main flow was built to prevent reproduced because the flow wasn't usable from where work was happening. **Slice 028-01 (2026-05-19) extended the same preflight to `adr.py new`**, so the gap is now symmetric across both reserve-on-main helpers — a future fix should land in both at once.
-**Resolution trigger:** Next time a multi-worktree session has to renumber a spec dir on merge, OR a user-reported "I tried to reserve but workflow.py refused" pain.
-**Open questions:**
-- Loosen the branch check to allow reservation from a feature branch by (a) doing the commit in a temporary `git worktree add` of main, (b) auto-fast-forwarding the current branch's pointer to origin/main first, then committing on main and merging back into the feature branch, or (c) push-only-no-local-commit (use `git push origin HEAD:refs/heads/main-reservation-<NNN-slug>` then ask origin to fast-forward main when ready).
-- (a) is cleanest semantically (cwd never leaves the feature branch's working tree) but adds a temp-worktree dependency to the helper.
-- (b) is the smallest code change but moves the feature branch's tip silently, which surprises if the user wasn't ready to FF.
-- Should the relaxed flow stay opt-in (`--from-feature-branch`) or default?
-**Mitigation idea (interim):** SKILL.md gains a "if you're on a feature branch and can't switch to main, manually `mkdir docs/specs/NNN-<slug>/` and `touch spec.md` so subsequent helpers see the dir; reserve-on-main when you can" workaround — acknowledges the gap without changing the helper.
+**Resolved by** [ADR-0015](decisions/adr-0015-worktree-aware-reservation.md) (worktree-aware reservation) + [spec 051](specs/051-worktree-aware-reservation/spec.md) (slices 051-01 / 051-02 DONE). Reservation now **routes on the current branch**: on `main` the proven in-place flow is unchanged; off `main` (feature branch / linked worktree) it builds the reservation commit in an ephemeral **detached** worktree at `origin/main` and pushes it by SHA from the project dir (option B; the leaned-toward open-question candidate (a)/(c) below were the alternatives — see ADR-0015). `--no-push` off-main commits a provisional reservation on the current branch. The caller's branch / cwd / working tree are never touched, so the impossible `git checkout main` advice is gone. The land-time collision backstop (the open-question's option (c) flavor) is parked as slice 051-03 (DEFERRED). Original deferral (the spec 021→022 collision incident + the loosen-the-branch-check open questions) preserved in git history.
 
 ### ~~Decision: scaffold-mode `--with-machinery` doesn't copy `skills/_common/`, breaking scaffolded helpers~~ — RESOLVED 2026-05-20
 Resolved by extending `_copy_skills_and_agents` in `skills/scaffold-init/scaffold.py` to copy `_`-prefixed private shared dirs unprefixed (e.g. `_common/` → `.claude/skills/_common/`); helpers' `sys.path.insert(0, parent.parent)` resolves `from _common.parsing import ...` at scaffold-mode runtime. Pinned by `test_common_module_copied_unprefixed` + `test_scaffolded_helper_imports_common_at_runtime`.
 
 ### ~~Decision: Skill-routing observability~~ — RESOLVED 2026-06-02
-Resolved by [spec 041](specs/041-routing-observability/spec.md). Routing is now
-observable on **both** delegation paths:
-- **Path A (interactive skill-router)** — the `PreToolUse`/`Skill` trace
-  (`hooks/scripts/jig-skill-trace.sh`, slice 041-01) records each Skill
-  invocation verbatim to `.claude/skill-usage.jsonl`, read back by
-  `workflow.py routing-stats` (slice 041-02) as a jig-baseline-vs-richer
-  histogram per category.
-- **Path B (spec-workflow craft/arch pass)** — `review.py`'s deterministic
-  file-read dispatch, documented alongside Path A in
-  [`docs/skill-routing-verification.md`](skill-routing-verification.md) (slice 041-03).
-
-The original "first observable routing mismatch" trigger was *unobservable by
-construction* (you can't see a mismatch without seeing which skill fired); spec
-041 replaced it with a measurable one. Open questions resolved: **Q1** (is
-`UserPromptSubmit` rich enough for *implicit* routing?) → no — `PreToolUse`/`Skill`
-is the routable surface that carries `skill_name`; **Q2** (jig-only vs. include
-richer?) → category-split, including the non-jig "other" column (deferral is
-invisible otherwise); **Q3** (fold both refinement-todo entries?) → yes (closed
-with "Skill telemetry granularity" above). The deferred `SubagentStart` event
-stays deferred (it was a non-goal — see its own entry).
+Resolved by [spec 041](specs/041-routing-observability/spec.md) — routing is observable on both paths: the `jig-skill-trace.sh` → `.claude/skill-usage.jsonl` → `workflow.py routing-stats` histogram (interactive router), and `review.py`'s deterministic file-read dispatch documented in [`docs/skill-routing-verification.md`](skill-routing-verification.md) (spec-workflow pass). The original "first observable mismatch" trigger was unobservable by construction; spec 041 replaced it with a measurable one. The deferred `SubagentStart` event stays deferred (its own entry).
 
 ### Decision: Code-staleness hard-gating for review evidence
 **Deferred:** [ADR-0014](decisions/adr-0014-review-evidence-model.md) (spec 045) makes the review-evidence gate check existence + frontmatter parse + `verdict: pass`. It does NOT detect *stale-but-passing* evidence — a `pass` artifact whose `reviewed_at` predates a later change to the slice's deliverable. The supersession case (a `fail`/`needs-changes` not yet overwritten by a later `pass`) IS enforced — it reduces to `verdict != pass`, which the gate already blocks; only the deliverable-changed-after-pass case is deferred. Hard-blocking it would reuse the `workflow.py stale` git-log/mtime machinery (slice 015-03) to compare the deliverable's last change against `reviewed_at`.
@@ -243,10 +206,7 @@ stays deferred (it was a non-goal — see its own entry).
 **Resolution trigger:** A pass to broaden the curated rule set (e.g. adding `RUF`), or any time the `# noqa: E402` lines are touched for another reason. Adding `RUF100` to `ruff.toml`'s `select` would both surface the existing redundant noqas and prevent future unused-noqa drift — do the prune and the rule-add together so the floor stays green.
 
 ### ~~Decision: extend the scaffold-precondition gate to `adr.py new`~~ — RESOLVED 2026-06-09
-**Resolved by** [spec 066](specs/066-adr-scaffold-precondition-gate/spec.md) (both slices DONE) — promoted proactively rather than waiting for the trigger. 066-01 wired `classify_scaffold_state` into `adr.py`'s `reserve_adr` path (route greenfield→`/jig:scaffold-init` / adoptable→`/jig:migrate`, shared `JIG_SCAFFOLD_PRECONDITION` bypass); 066-02 added the parallel Step 0 precondition to `adr-workflow` SKILL.md. Mirrors spec 063 exactly; reused the 063-01 classifier unchanged. Original deferral preserved below.
-
-> **Deferred:** [Spec 063](specs/063-scaffold-precondition-gate/spec.md) (DONE) hardened the **spec-creation** door (`workflow.py new` classify-and-route + the `spec-workflow` SKILL.md Step 0 precondition) so an unscaffolded project is routed to `/jig:scaffold-init` / `/jig:migrate` instead of dead-ending or improvising structure. The **ADR-creation** door (`adr.py new` + the `adr-workflow` skill) has the *same shape* and would benefit from the same treatment, but spec 063 was scoped to spec creation **per direction**. The primitives are now in place — `skills/_common/scaffold_state.py` `classify_scaffold_state()` is reusable as-is — so this is wiring + a SKILL.md Step 0 mirror, not new detection.
-> **Resolution trigger:** A user reports the same failure on ADR creation, OR `adr.py new` / the `adr-workflow` SKILL.md is touched for another reason.
+**Resolved by** [spec 066](specs/066-adr-scaffold-precondition-gate/spec.md) (both slices DONE) — promoted proactively. 066-01 wired `classify_scaffold_state` into `adr.py`'s `reserve_adr` path (shared `JIG_SCAFFOLD_PRECONDITION` bypass); 066-02 added the Step 0 precondition to `adr-workflow` SKILL.md. Mirrors spec 063; reused the 063-01 classifier unchanged. Original deferral preserved in git history.
 ### Decision: parametrize the four `_*_review_flag` helpers — wait for the fifth gated pass
 **Deferred:** There are now four near-identical flag-reader helpers — `_arch_review_flag` / `_code_health_review_flag` / `_frame_review_flag` / `_design_review_flag` (`skills/_common/review_evidence.py` + `skills/spec-workflow/workflow.py`), each a thin `load_slice → parse_frontmatter → frontmatter_flag_truthy` read differing only in the frontmatter key. A parametrized `_review_flag(spec, frag, field)` would collapse them. This is past ADR-0002's rule-of-three by count, but kept inline deliberately (each helper is a trivial read; consolidating now is a cross-cutting refactor across the whole gated-pass family). Surfaced by the 071-01 craft + arch reviews (nit, non-blocking).
 **Resolution trigger:** The fifth gated review pass is added (the next `*_review` flag), OR any time the flag-reader family is touched for another reason — do the parametrization then so the family converges in one move rather than growing a fifth near-duplicate.
