@@ -238,8 +238,8 @@
 | [077-type-check-floor](077-type-check-floor/spec.md) | 077-02 — jig self typed baseline | DRAFT |  |
 | [078-gate-bypass-telemetry](078-gate-bypass-telemetry/spec.md) | 078-01 — emit bypass events | DRAFT |  |
 | [078-gate-bypass-telemetry](078-gate-bypass-telemetry/spec.md) | 078-02 — gate-stats digest | DRAFT |  |
-| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-01 — workflow.md index guidance | DRAFT |  |
-| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | DRAFT |  |
+| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-01 — workflow.md index guidance | **DONE** | Adds the `### Reach for a semantic/code index` lever to `docs/workflow.md` § Context-cost discipline (when / which portable-first / detect-installed-else-recommend / install-nothing / honest-about-limits). **Docs-only** — no skill, no `.py`, nothing in CLAUDE.md; guard `scripts/test_semantic_index_guidance.py`. Lives in jig's own workflow.md (the slim scaffold template has no Context-cost section); scaffold reach is the DEFERRED 079-02. Closes spec 079. |
+| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | DEFERRED | Conditional scaffold-init nudge; deferred — pursue only if 079-01's passive guidance is shown insufficient (a scaffold nudge would add the always-on surface 076 removed). |
 
 ## Deferred slices
 
@@ -270,3 +270,4 @@
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-01 - phase-mode vocabulary and docs | Resume when Codex host-adapter work from spec 033 is |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-02 - session-plan mode hints | Resume after 074-01 lands and a concrete host adapter |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | Resume when spec 033's Codex scaffold/plugin slices |
+| [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | 079-01's passive `docs/workflow.md` guidance is shown |

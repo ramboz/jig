@@ -317,6 +317,52 @@ of the same path (at most once per path per session) and a whole-file Read of
 a file above `JIG_READ_LEAN_BYTES` (default 64 KiB). It never blocks; it is
 guidance, not a gate.
 
+### Reach for a semantic/code index
+
+The levers above cut the *cost per turn*; a **semantic/code index** cuts the
+*number of turns*. Locating a definition or every caller with `Grep` is usually
+several speculative searches spread across turns ("where is `foo` declared?",
+"who calls it?", "is this the only overload?"); a code index answers each in
+one deterministic query. Because cost ≈ context-size × turns (specs 055/057)
+and turn count is the dominant driver (r = 0.92, spec 057), collapsing those
+search-and-disambiguate round-trips is the highest-leverage deterministic move
+EngTip #26 ("Token Saving") / #23 names — and jig's delegate-reading and
+read-lean rules above only attack the per-turn side of the product.
+
+**When it pays for itself.** Roughly: a codebase large or unfamiliar enough
+that "find where X is defined / used" is a multi-search, multi-turn operation —
+in practice a repo past a few hundred source files, or any repo where you catch
+yourself grepping the same symbol two or three ways to disambiguate. On a small,
+familiar repo a couple of `Grep`s is cheaper than standing one up — don't
+bother.
+
+**Which to reach for** (portable/public options first — jig ships publicly):
+
+- **Your IDE's indexer / LSP.** Go-to-definition, find-references, and call
+  hierarchy *are* a semantic index; an agent can drive them through an editor
+  MCP when one is connected. Zero extra setup where it already exists.
+- **A local symbol indexer** (`ctags`, or tree-sitter-based tooling / a local
+  code-search MCP) — language-aware symbol lookup with no service to run.
+- **Glean / Kythe** — heavier, service-backed code-graph indexers suited to
+  large or multi-repo estates.
+- *If available* (e.g. Adobe-internal: Scout, Tokensave, Polyget) — the same
+  query-the-graph capability; use them when the environment already provides
+  them. They are a convenience, not a dependency.
+
+**Detect-installed, else recommend — install nothing.** Mirror jig's
+`contracts` / `code-health` / security-floor stance: if an index or code-search
+MCP is already present, use it; otherwise *recommend* the category to the human
+and fall back to `Grep`-to-locate. jig never vendors or auto-installs an
+indexer — standing one up and keeping it fresh is the project's call, not a
+scaffold side effect.
+
+**Honest about limits — a recommendation is not a savings guarantee.** An index
+is itself context the agent consumes: query results land in the orchestrator
+and are re-read every turn, so EngTip #23's "context isn't free" caution applies
+to index output too, and a stale index can mislead. The win is real only when
+one good query replaces *several* speculative searches — reach for it
+deliberately, not as a default switched on everywhere.
+
 ### Keep verbose command output out of the orchestrator
 
 Bash output is ≈ 19% of one-time orchestrator context — and a single dumped

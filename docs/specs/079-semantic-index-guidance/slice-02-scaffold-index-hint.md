@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: [079-01]
 last_verified:
 ---
@@ -14,6 +14,13 @@ last_verified:
 > **Conditional slice.** Pursue only if 079-01's passive `docs/workflow.md`
 > guidance demonstrably isn't reaching people. Otherwise mark DEFERRED with
 > the resolution trigger "079-01 guidance shown insufficient in practice."
+
+**Resolution trigger:** 079-01's passive `docs/workflow.md` guidance is shown
+insufficient in practice — i.e. concrete evidence that readers/agents are not
+reaching for a semantic index despite the standing guidance (e.g. a repeated
+"should have used an index" observation, or a usage.py A/B showing the lever
+goes untaken). Until then this stays DEFERRED: a scaffold-time nudge would add
+an always-on surface the passive guidance is meant to avoid (spec 076).
 
 **Goal:** Surface a one-line "consider a semantic index" hint at
 `scaffold-init` time for large-enough targets, with a tracked
