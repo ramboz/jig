@@ -1,5 +1,6 @@
 ---
-status: IN_PROGRESS
+status: DONE
+last_verified: 2026-06-20
 ---
 
 # Spec 033: Host adapter portability
@@ -141,6 +142,22 @@ Each host adapter should implement the same conceptual operations:
 | **I** - Interface | Where is the portability boundary? | **Host adapters.** The shared workflow model stays in source; adapters render host-native primers, skills, agents, hooks, and manifests. |
 | **D** - Data | What generated data needs drift control? | Project primers, skill files, agent files, hook registrations, copied hook scripts, and plugin manifests all need managed metadata or manifest entries. |
 | **R** - Rules | What rule keeps token use low? | Materialize host-native prose at scaffold time. Do not require runtime include chains. Shared logic belongs in helpers and hook wrappers, not in multi-host prose abstractions. |
+
+## Close-out
+
+Spec 033 is closed retroactively on 2026-06-20. The implementation landed across
+the original adapter slices plus the later Codex-focused specs that fired the
+deferred triggers:
+
+- Slices 033-01..04 established the host-adapter framing, canonical
+  `AGENTS.md` primer, scaffold renderer boundary, and managed-file metadata.
+- Slice 033-05 shipped Codex scaffold mode once the user trigger fired.
+- Slice 033-06 shipped Codex plugin packaging.
+- Slice 033-07 shipped Codex TOML custom-agent materialization and the explicit
+  plugin helper for global Codex agents.
+- Spec 059 and Spec 061 supplied the Codex polish, live install verification,
+  committed host packages, drift guard, and release archive validation that make
+  the v2 Codex path shippable.
 
 ## Known constraints
 
