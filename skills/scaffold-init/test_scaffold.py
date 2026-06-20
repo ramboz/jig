@@ -2430,8 +2430,8 @@ def _load_scaffold_module():
 
 
 class VersionProvenanceTests(unittest.TestCase):
-    """Slice 046-02 — scaffold.json.jig_version is derived from the plugin
-    manifest (.claude-plugin/plugin.json), not a hard-coded constant.
+    """Slice 046-02 — scaffold.json.jig_version is derived from the host
+    plugin manifest, not a hard-coded constant.
 
     AC1: version read from the manifest; no production code hard-codes the
          release version.
@@ -2488,6 +2488,16 @@ class VersionProvenanceTests(unittest.TestCase):
             mod._read_plugin_version(REPO_ROOT),
             self._live_manifest_version(),
         )
+
+    def test_read_plugin_version_accepts_codex_manifest(self):
+        mod = self._load_scaffold_module()
+        fake_plugin = Path(self.tmpdir) / "codex-plugin"
+        (fake_plugin / ".codex-plugin").mkdir(parents=True)
+        (fake_plugin / ".codex-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "jig", "version": "9.8.7"})
+        )
+
+        self.assertEqual(mod._read_plugin_version(fake_plugin), "9.8.7")
 
     # AC2 — a temp scaffold records the source manifest version.
     def test_scaffold_json_jig_version_matches_source(self):
