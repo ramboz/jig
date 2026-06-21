@@ -19,10 +19,13 @@ without re-scaffolding from scratch.
 
 1. **`jig:migrate to-federation --central=<url>`** runs in an
    existing standalone repo and:
-   - Validates the central repo URL resolves and has a `repos.yaml`
+   - Validates the central/workspace federation URL resolves through
+     the configured repo access provider and has a `repos.yaml` or an
+     accepted import proposal
    - Calls `scaffold-init --role=member --central=<url>` in
      upgrade-in-place mode
-   - Opens a PR against central to add this repo to `repos.yaml`
+   - Opens a PR against central/workspace registry when the provider
+     supports PRs, or emits a patch/manual PR instruction otherwise
 2. **Refuses on conflict.** If the repo is already a member, or the
    name already exists in central's registry with a different host
    / path, the helper exits with a structured error naming the
@@ -32,8 +35,9 @@ without re-scaffolding from scratch.
 4. **Dry-run support.** `--dry-run` prints every action without
    writing or opening PRs.
 5. **Documented migration path.** SKILL.md (or `migrate.py`'s
-   subcommand help) walks the user through: prep (central is set
-   up) → migrate (local) → review/merge central PR → done.
+   subcommand help) walks the user through: prep (central/workspace
+   registry is set up) → migrate (local) → review/merge registry PR
+   or inventory-source sync → done.
 6. **Standalone fallback.** If the central URL is unreachable, the
    helper exits with a clear error; the local install stays
    standalone.

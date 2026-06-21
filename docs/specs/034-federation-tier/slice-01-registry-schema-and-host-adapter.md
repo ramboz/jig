@@ -8,44 +8,56 @@ arch_review: true
 ## Slice 034-01 — registry-schema-and-host-adapter
 
 **Goal:** Land the foundation that every other federation slice depends
-on: the `repos.yaml` schema (`hosts:` + `repos:`), the
-`.jig/scaffold.json` federation fields, and a host-adapter shim that
-scopes every `gh` invocation per-repo without mutating global state.
+on: the normalized `repos.yaml` schema (`hosts:` + `repos:` +
+`authorities:`), the `.jig/scaffold.json` federation fields, and a
+project-selected repo access provider boundary that can use MCP, GitHub
+API, `gh`, SSH, or local worktrees without mutating global auth state.
 
 **DoR:**
 - Spec 034 overview accepted as the working framing.
+- Slice 034-00 produced an adoption report or was explicitly skipped
+  for a greenfield/simple-central federation.
 - No federation slice has started ahead of this one.
 
 **Acceptance Criteria:**
 
 1. **`repos.yaml` schema documented and validated.** A canonical schema
    for `docs/repos.yaml` exists in the central repo's docs, covering
-   a `hosts:` block (host id, hostname, expected `auth_user`, optional
-   `requires_sso` flag) and a `repos:` block (name, host id, path,
-   role, optional contract surfaces). A schema-validation helper
-   exits non-zero on malformed input with a structured error.
+   `hosts:` (host id, hostname, provider defaults, optional SSO/auth
+   hints), `authorities:` (a map of named authority homes, with built-in
+   examples such as workspace_ops, architecture, guidelines, org_rfcs,
+   and product_specs plus project-defined keys), and `repos:` (name,
+   host id, path, role, membership `status`, optional local path, import
+   provenance, access provider override, and declared/discovered
+   contract surfaces). A schema-validation helper exits non-zero on
+   malformed input with a structured error.
 2. **Scaffold.json fields added.** `.jig/scaffold.json` gains two new
    optional fields: `role` (one of `standalone` / `central` /
-   `member`) and `central_repo` (URL or null). Default is
-   `standalone` / `null`, matching current single-repo installs.
+   `member`) and `central_repo` (URL or null), plus optional
+   `authority_repos` for split-authority installs. Default
+   is `standalone` / `null`, matching current single-repo installs.
    (Per spec 034's Q4 clarification: a separate `federation_mode`
    field was considered and dropped — `role` is the single source of
-   truth.)
-3. **Host adapter shim implemented.** `host_adapter.py` exposes one
-   public function: `gh(repo_name, *args)` that resolves the repo's
-   host, runs `gh --hostname <hostname> <args>` (env-scoped via
-   `GH_HOST`, NOT global), and returns stdout/exit. Never invokes
-   `gh auth switch`. Pre-flight call asserts
-   `gh api user --hostname X` matches the declared `auth_user`;
-   mismatch raises a typed error.
-4. **`JIG_HOST_<id>_TOKEN` env override honored.** When set, the
-   adapter uses the env-supplied token via `GH_TOKEN` for that host.
-   Otherwise falls through to `gh`'s default credential chain.
+   truth; onboarding state lives in repo `status`, not in `role`.)
+3. **Repo access provider boundary implemented.** `repo_access.py`
+   exposes provider-neutral operations needed by federation helpers
+   (at minimum: `read_file`, `list_dir`, `repo_view`, `default_branch`,
+   `open_pr` where supported). Providers include `mcp`, `gh`,
+   `github-api`, `git-ssh`, and `local-worktree`; unsupported operations
+   return typed "provider unsupported" errors rather than falling
+   through to another auth path silently.
+4. **Provider auth is scoped per repo/host.** `JIG_HOST_<id>_TOKEN`
+   env vars are honored by GitHub API / `gh` providers; MCP providers
+   use configured MCP credentials; SSH/local providers use workspace
+   paths or aliases. No helper invokes `gh auth switch`, and `gh
+   --hostname` is only used by the `gh` provider when that provider is
+   selected.
 5. **Failure modes surface clear nudges.** Not logged in → "run
-   `gh auth login --hostname X --user Y`". Wrong user authenticated
-   → "expected Y on host X, got Z". 401 with `requires_sso: true` →
-   "run `gh auth refresh --hostname X`". 404 on a repo path → "check
-   `repos.yaml` host assignment for <name>".
+   the configured provider's auth setup for host X". Wrong account /
+   MCP route / SSH alias → "expected <declared identity/route> for host
+   X, got <actual>". 401/SSO with `requires_sso: true` names the
+   provider-specific refresh step. 404 on a repo path → "check
+   `repos.yaml` host/provider assignment for <name>".
 6. **No runtime change for standalone installs.** A repo with
    `role: standalone` (or no federation fields) behaves exactly as
    today — no new files loaded, no warnings emitted.
@@ -71,10 +83,10 @@ scopes every `gh` invocation per-repo without mutating global state.
 
 **Anti-horizontal-phasing check:** After this slice lands, a
 contributor can write a `repos.yaml`, run a
-`host_adapter.gh(<repo>, "api", "user")` call against any declared
-host (gh.com or GHEC), and watch the adapter either succeed or refuse
-with a clear message. Federation has a foundation; the consuming
-skills can build on it.
+`repo_access.read_file(<repo>, "CLAUDE.md")` call against any declared
+provider (MCP, GitHub API, `gh`, SSH, or local worktree fixture), and
+watch the provider either succeed or refuse with a clear message.
+Federation has a foundation; the consuming skills can build on it.
 
 ### Deviation log (after reconciliation)
 

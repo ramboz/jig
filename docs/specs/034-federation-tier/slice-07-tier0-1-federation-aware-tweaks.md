@@ -40,14 +40,22 @@ federation-aware read-through behaviors that activate only when
    mode.** Central `conventions.md` takes precedence on conflict;
    local `conventions.md` may extend but not contradict. Behavior
    gated on `role != standalone`.
-7. **Standalone mode is unchanged.** All six tweaks above no-op when
+7. **Federation read-through is cache-aware and fail-open by default.**
+   Each tweak documents its central/authority unreachable behavior:
+   stale-but-present cached context may be used with a short note;
+   absent/unreachable authority context produces a warning or silent
+   no-op as appropriate, but routine member-local work is never blocked
+   solely because a central/authority repo cannot be reached. Only
+   malformed local federation config may refuse.
+8. **Standalone mode is unchanged.** All six tweaks above no-op when
    `role: standalone`; tests pin this.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions in
       single-repo behavior).
 - [ ] Implementer test coverage exercises each tweak in standalone
-      + member modes.
+      + member modes, including reachable authority, stale cached
+      authority, and unreachable/no-cache behavior.
 - [ ] Reviewed by `reviewer` subagent.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.

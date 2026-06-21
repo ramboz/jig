@@ -23,6 +23,8 @@ already visible on `origin/main`.
    `skills/spec-workflow/**`) or federation-scoped tokens
    (`repo-name:src/contracts/**`). Absolute paths and `..` segments
    are invalid.
+   Typed contract surfaces stay out of frontmatter and live in
+   registry/generated federation metadata.
 2. **Optional owner/branch metadata.** `owner:` and `work_branch:`
    are documented as optional advisory fields. Defaults may come from
    `git config user.name` / current branch when the helper can infer
@@ -39,6 +41,9 @@ already visible on `origin/main`.
    helper fetches `origin/main` best-effort, scans unfinished specs and
    slices for `touches:`, excludes the current spec, and reports exact
    path overlaps, glob overlaps, and same-directory broad overlaps.
+   In federation mode it may also consult local cached contract-surface
+   metadata, but malformed/missing contract metadata never invalidates
+   `touches:`.
 6. **Advisory by default.** Overlap warnings exit 0 and include spec
    id, owner, work branch, and matching touch tokens when known.
    Malformed touchset metadata exits non-zero with a clear validation

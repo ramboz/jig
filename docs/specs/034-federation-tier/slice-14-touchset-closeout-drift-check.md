@@ -24,6 +24,9 @@ collision radar stays honest without requiring constant metadata pushes.
    declared `touches:`, declared touches that matched no changed file,
    and changed files that overlap another unfinished spec even though
    they were not declared up front.
+   In federation mode it also reports actual changes to known
+   contract-surface files that were not represented in the candidate
+   touchset/contract metadata.
 3. **Review integration.** `review.py` or the review prompt builder
    includes the touchset drift report when reviewing an implementation
    slice.
@@ -42,6 +45,10 @@ collision radar stays honest without requiring constant metadata pushes.
    labeled with the local repo name when the federation role is known,
    so output can be compared with `repo-name:path` tokens from central
    parent specs.
+8. **Verification-profile handoff.** When slice 034-15 is present and
+   actual changes match a declared verification profile surface, the
+   report lists the affected repo commands/deploy-order notes as
+   advisory follow-up.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green.
