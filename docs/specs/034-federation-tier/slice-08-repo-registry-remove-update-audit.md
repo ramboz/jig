@@ -23,15 +23,20 @@ broken-pointer detection).
    prints a list of surfaces the archived repo declared as owned;
    humans decide where they re-home or whether to deprecate.
 3. **`registry.py update <repo>`** supports changing `role`,
-   `contract_surfaces`, and `auth_user` (host id stays immutable —
-   a host change requires remove + add).
+   membership `status`, provider config, authority mapping overrides,
+   and declared `contract_surfaces` (host id stays immutable — a host
+   change requires remove + add). Imported/discovered fields carry
+   provenance so manual declarations are not overwritten silently by a
+   later inventory-source sync.
 4. **`registry.py audit`** reports four classes of drift:
    - members whose `jig_version` lags central's by ≥2 versions
    - members whose `federation-state.json` cache is stale (>30 days)
    - `affects:` references that point to non-existent or archived
      members
-   - contract surfaces declared but not referenced by any cross-repo
-     spec for ≥90 days (potential dead surfaces)
+   - contract surfaces declared or discovered but not referenced by any
+     cross-repo spec for ≥90 days (potential dead surfaces)
+   - imported inventory-source drift (tag/path/provider changed in the
+     source importer, e.g. a workspace manifest, since last import)
 5. **Audit is read-only.** Reports only; never mutates `repos.yaml`.
    Exits 0 if no findings, 1 if findings, 2 if helper error.
 6. **Cross-repo spec impact on remove.** Cross-repo specs touching

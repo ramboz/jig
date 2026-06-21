@@ -16,8 +16,8 @@ making cross-repo context loads explicit and short-lived.
 **Acceptance Criteria:**
 
 1. **`jig:context-pull <repo1> <repo2> ...`** fetches each named
-   repo's `CLAUDE.md` (or scaffold-mode `AGENTS.md`) via the host
-   adapter and loads it as `additionalContext` for the current
+   repo's `CLAUDE.md` (or scaffold-mode `AGENTS.md`) via the repo
+   access provider and loads it as `additionalContext` for the current
    session.
 2. **Per-call, not persistent.** Pulled context is not written to
    local disk; it's session-scoped. A new session re-issues
@@ -28,9 +28,10 @@ making cross-repo context loads explicit and short-lived.
    helper refuses the call rather than silently overshooting.
 4. **`--list` prints what's available** (every registered repo with
    its hot-cache path) without pulling anything.
-5. **Standalone-safe.** In standalone mode the skill is installed
-   but refuses with "context-pull requires federation; not
-   configured".
+5. **Standalone-safe.** Standalone scaffold installs do not install
+   Tier 2 skills. If the skill is invoked from a manually copied or
+   stale install in standalone mode, it refuses with "context-pull
+   requires federation; not configured".
 6. **No central dependency at call time** for already-resolved repos
    — if `repos.yaml` is cached locally (slice 034-09), context-pull
    uses the cache rather than re-fetching the registry.

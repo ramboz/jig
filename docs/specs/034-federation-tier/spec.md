@@ -12,10 +12,12 @@ scoped to one repo with one main branch. This works well for solo
 devs and small teams.
 
 For organizations running ~40 repositories across 40–60 engineers —
-with a central code-and-docs entry-point repo, varying degrees of
+with an existing workspace repo, service catalog, or repo manifest,
+split authority for architecture / guidelines / workspace operations,
+varying degrees of
 repo coupling, shared ownership, and multi-host GitHub setups
 (public + private + GHEC behind SSO with different users per host) —
-the single-repo assumption breaks in six ways:
+the single-repo assumption breaks in seven ways:
 
 1. **Cross-repo specs have no home.** A feature that touches N repos
    gets either duplicated into N specs or pinned in one repo with
@@ -35,24 +37,38 @@ the single-repo assumption breaks in six ways:
 6. **Parallel spec collision is discovered too late.** Two engineers
    can start unrelated-looking specs that touch the same files or
    contract surfaces and only discover the overlap at merge time.
+7. **Existing multi-repo metadata is already authoritative.** Mature
+   teams may already carry workspace manifests, service catalogs,
+   package workspaces, GitHub org/team inventories, MCP routing, repo
+   tags, and doc-placement rules. Federation must import and adapt that
+   substrate rather than creating a second stale registry.
 
 This spec introduces a **Federation tier (Tier 2)** — a
 conditionally-scaffolded skill bundle plus federation-aware tweaks
-to existing Tier 0/1 skills — that lets one repo act as the
-**central** for an org and the others as **members**, without
-changing how solo / standalone projects work.
+to existing Tier 0/1 skills — that lets one repo act as the simple
+**central** for an org and the others as **members**, while also
+supporting mature multi-repo installs where the registry,
+architecture/spec authority, guidelines authority, and workspace
+operations authority are separate repos. Solo / standalone projects
+remain unchanged.
 
 The Federation tier is the first promotion *into* Tier 2 from its
 deliberately-empty state, and the first that responds to a named
 user signal rather than speculation. See vision §"How new work
-enters jig" for the bar.
+enters jig" for the bar. The revised workspace/provider boundary is
+recorded in [ADR-0028](../../decisions/adr-0028-federation-workspace-provider-model.md).
+Spacecat/Mysticat is the validation fixture for scale and realism, not
+the normative product shape; federation must stay a general workflow
+with project-specific import, access, and verification choices.
 
 ## Why now
 
-- **First named Tier 2 user signal.** A real 40-repo / 40–60
-  engineer organization with a central entry-point repo asked for
+- **First named Tier 2 user signal.** A real 35+ repo / 40–60
+  engineer organization with existing repo inventory, split
+  spec/architecture homes, and multiple GitHub auth paths asked for
   federation. Vision §"How new work enters jig" reserves Tier 2 for
-  exactly this case.
+  exactly this scale; the implementation must generalize beyond that
+  one team's specific manifest and testing conventions.
 - **Tier 0/1 surface is stable.** Tier 0 + Tier 1 are effectively
   complete (per product-vision MVP scope); federation can extend a
   steady baseline without churning it.
@@ -71,30 +87,47 @@ enters jig" for the bar.
    `collision-radar`) installable conditionally, with skills no-op-ing
    based on role rather than tier 2 being split into per-role
    sub-bundles.
-3. **`repos.yaml` registry schema** covering hosts, repos, roles,
-   and declared contract surfaces. Sits in the central repo's
-   `docs/`.
-4. **Multi-host GitHub auth without `gh auth switch`.** Each repo
-   declares its host; helpers run `gh` per-command with `--hostname`
-   / `GH_HOST` env scoping. Global `gh` state is never mutated by
-   jig.
-5. **Federation-aware tweaks to existing Tier 0/1 skills + hooks**
+3. **Discovery/import adoption path.** Federation can inventory
+   existing repo sources such as workspace manifests (`mani.yaml` /
+   `workspace.yaml` as one bundled example), service catalogs, package
+   workspaces, GitHub org/team discovery, hand-authored registries,
+   `AGENTS.md`/`CLAUDE.md`, MCP routing, spec homes, OpenAPI files,
+   package dependencies, and default branches, then generate a
+   reviewable adoption report + draft registry instead of asking mature
+   teams to re-enter what they already know.
+4. **`repos.yaml` registry schema** covering hosts, repos, roles,
+   membership status, authority mappings, import-source provenance,
+   and declared or discovered contract surfaces. In simple central
+   installs it sits in the central repo's `docs/`; in imported-inventory
+   installs it may be generated from and reconciled against the chosen
+   source inventory.
+5. **Multi-host repo access without global auth mutation.** Each repo
+   declares a project-selected access provider (`mcp`, `gh`,
+   `github-api`, `git-ssh`, or `local-worktree`). Helpers never invoke
+   `gh auth switch`; `gh --hostname` is one provider implementation,
+   not the federation contract.
+6. **Federation-aware tweaks to existing Tier 0/1 skills + hooks**
    that degrade to no-op outside federation. No new skill is needed
    for the read-through behaviors (memory-sync, spec-workflow,
    adr-workflow, independent-review, plus two hooks).
-6. **Member lifecycle** — `add`, `remove`, `update`, `audit`, with
+7. **Member lifecycle** — `add`, `import`, `sync`, `remove`, `update`,
+   `audit`, with
    archive-don't-delete semantics on removal and clear failure
    modes on drift / version mismatch.
-7. **Pull-based drift detection.** Members don't poll; a
+8. **Pull-based drift detection.** Members don't poll; a
    SessionStart hook in member mode surfaces a one-line nudge when
    central conventions or jig version drift past local cache.
-8. **Migration path** from existing standalone installs into
+9. **Migration path** from existing standalone installs into
    federation, idempotent and re-runnable.
-9. **Collision radar for parallel specs.** Specs can declare an
+10. **Collision radar for parallel specs.** Specs can declare an
    advisory `touches:` list in frontmatter; new/resumed work scans
    unfinished specs visible on `origin/main` and the federation
    registry/cache to warn about likely file or contract-surface
    conflicts before branches drift.
+11. **Optional verification profile.** Larger installs can declare
+    project-specific per-repo validation commands and cross-repo
+    workflow checks without making that matrix mandatory for
+    small/simple federation users.
 
 ## Non-goals
 
@@ -114,6 +147,11 @@ enters jig" for the bar.
 - **Auto-pushing central updates to members.** Pull-based; the
   member decides when to consume updates via
   `jig:repo-sync update`.
+- **Replacing workspace repos, service catalogs, or local-dev systems.**
+  A team's existing environment/control-plane layer remains in place.
+  Federation consumes inventory and context through importers; it does
+  not become a clone manager, secrets resolver, IDE workspace generator,
+  or local-dev harness.
 - **Governance of org-wide ADRs.** This spec covers how org ADRs
   are *stored* + *propagated*, not who proposes / accepts them.
   That stays a team-process question outside jig's scope.
@@ -136,25 +174,44 @@ Tier 2 *installs* uniformly when `role != standalone`; individual
 skills refuse with a clear message when invoked in the wrong role
 (`federated-status` on a member, etc.).
 
+Registry membership is tracked separately from role: `status` is one
+of `pending` / `active` / `archived`. `role: pending` is invalid.
+This avoids overloading the runtime behavior (`role`) with onboarding
+state (`status`).
+
 ## SPIDR analysis
 
 | Technique | Question | Decision |
 |---|---|---|
-| **S** - Spike | Is research needed before designing? | **No.** Every component is concrete: registry shape, gh auth scoping, scaffold-init extension, frontmatter contract. Codex-style v1/v2 deferral does not apply. |
-| **P** - Path | One big landing or phased? | **Phased.** Slices 1–6 are MVP federation (registry + adapter, add/list, scaffold-init extension, cross-repo-spec, status, context-pull). Slice 7 hardens Tier 0/1 tweaks. Slices 8–11 are lifecycle + migration + the contract-surface hook. Slices 12–14 add advisory collision radar: declared touchsets, federated warnings, and close-out drift checks. |
-| **I** - Interface | Where is the federation boundary? | **`repos.yaml` + host adapter.** Schema sits in central; helpers consult it; nothing else mediates between central and members. |
-| **D** - Data | What data shape is foundational? | **Registry schema (`hosts:` + `repos:`) + scaffold.json fields (`role`, `central_repo`) + spec/slice `touches:` string-list metadata.** Slice 1 establishes federation config; slice 12 establishes touchsets. |
-| **R** - Rules | What rules govern lifecycle? | **Archive-don't-delete on remove; pull-based drift detection; never mutate `gh` global state; central conventions win on conflict; collision radar warns by default; standalone behavior unchanged.** |
+| **S** - Spike | Is research needed before designing? | **No separate spike.** The Spacecat/Mysticat workspace and guidelines repo supplied the first evidence; slice 034-00 turns that into a repeatable discovery/adoption pass that other repo-operating models can plug into. |
+| **P** - Path | One big landing or phased? | **Phased.** Slice 00 proves/imports existing inventory through importer examples. Slices 1–6 are MVP federation (registry + provider adapter, import/add/list, scaffold-init extension, cross-repo-spec, status, context-pull). Slice 7 hardens Tier 0/1 tweaks. Slices 8–11 are lifecycle + migration + contract-surface hook. Slices 12–14 add advisory collision radar. Slice 15 adds the optional verification profile. |
+| **I** - Interface | Where is the federation boundary? | **Inventory importers + `repos.yaml` + repo access provider.** `repos.yaml` is the normalized jig view; an existing workspace manifest, service catalog, package workspace, or hand registry can remain the source of truth. |
+| **D** - Data | What data shape is foundational? | **Registry schema (`hosts:` + `repos:` + `authorities:` + provider config + import provenance) + scaffold.json fields (`role`, `central_repo`, optional `authority_repos`) + spec/slice `touches:` string-list metadata + typed contract-surface metadata.** |
+| **R** - Rules | What rules govern lifecycle? | **Import before duplicate entry; archive-don't-delete on remove; pull-based drift detection; never mutate global auth state; authority-specific conventions win on conflict; collision radar warns by default; standalone behavior unchanged.** |
 
 ## Known constraints
 
-- **`gh` CLI is the only adapter primitive in v1.** No raw GitHub
-  API calls; no other vendors.
+- **GitHub is the only repo host family in v1, but `gh` is not the
+  only access primitive.** Providers may use MCP, `gh`, GitHub API
+  with token env, git-over-SSH, or local worktrees. No GitLab /
+  Bitbucket / Azure DevOps / Gitea adapters ship in v1.
+- **Spacecat/Mysticat is a validation fixture, not a schema.** The
+  fixture should prove that federation handles a large, messy,
+  split-authority workspace. It must not make `mani.yaml`, a specific
+  testing convention, or MCP-over-`gh` a universal requirement.
+- **Inventory importers are examples behind one workflow.** v1 can ship
+  built-in importers for `repos.proposed.yaml` and common workspace
+  manifest shapes, but the product contract is discover → decide →
+  normalize → sync/audit. Future Backstage, Terraform/IaC, package
+  workspace, GitHub org/team, or hand-registry importers should fit the
+  same pipeline.
 - **`gh auth switch` must NOT be invoked by any helper.** Only
   respected. Mutates global state; breaks parallel sessions.
-- **`JIG_HOST_<id>_TOKEN` env vars are the only auth override.**
-  For CI / headless use. Interactive sessions go through `gh`'s
-  normal chain.
+- **Auth is provider-scoped.** `JIG_HOST_<id>_TOKEN` env vars are the
+  CI/headless override for GitHub API / `gh` providers; MCP providers
+  use configured MCP credentials; SSH providers use the workspace's
+  SSH alias / identity setup. Helpers never assume one global GitHub
+  identity can see every repo.
 - **Spec numbering stays scope-local.** `workflow.py new` reserves
   on the *local* repo's `origin/main`; no global counter.
   Cross-repo specs use `parent_spec:` frontmatter pointers, not a
@@ -162,13 +219,18 @@ skills refuse with a clear message when invoked in the wrong role
 - **Central repo is not a critical path for per-repo slices.**
   Federation must not slow down or block routine single-repo work
   in a member repo.
+- **Authority repos can be split.** Simple installs use one central.
+  Workspace-scale installs may map `workspace_ops`, `architecture`,
+  `guidelines`, `org_rfcs`, and `product_specs` to different repos.
+  A member still has one primary federation, but read-through
+  authority can come from multiple declared repos.
 - **Conventions hierarchy is read-only on the member side.**
-  Central `conventions.md` is fetched, not copied; local
-  `conventions.md` may extend but not contradict. Helper
-  enforcement is in slice 7.
-- **No backward-compat shims for the host adapter contract.** If
-  `repos.yaml` schema changes after v1 lands, it changes wholly
-  (per product-vision design principle #6).
+  Authority `conventions.md` / glossary / org ADRs are fetched or
+  read through cache, not copied; local conventions may extend but
+  not contradict. Helper enforcement is in slice 7.
+- **No backward-compat shims for the RepoAccessProvider contract.** If
+  the provider or `repos.yaml` schema changes after v1 lands, it
+  changes wholly (per product-vision design principle #6).
 - **No changes to `docs/conventions.md` without explicit
   approval.** Any conventions-affecting decision in implementation
   needs a deliberate human approval gate.
@@ -181,6 +243,10 @@ skills refuse with a clear message when invoked in the wrong role
   entries use `repo-name:path/to/file` strings. No nested YAML objects
   in v1, because jig's shared frontmatter parser supports scalars and
   string lists only.
+- **Contract metadata is richer than touch metadata.** `touches:`
+  stays frontmatter-small. Typed contract surfaces live in registry /
+  generated federation metadata and may include OpenAPI paths, npm
+  packages, event topics, DB migrations/RPCs, and deploy units.
 - **Main is the coordination surface, not a live lock service.** A
   spec stub on `origin/main` advertises likely touch intent. Routine
   scope changes do not auto-push on every edit; users update touchsets
@@ -192,6 +258,7 @@ skills refuse with a clear message when invoked in the wrong role
 
 ## Slices
 
+- [034-00 — discovery-and-import-framework](slice-00-workspace-discovery-and-import.md)
 - [034-01 — registry-schema-and-host-adapter](slice-01-registry-schema-and-host-adapter.md)
 - [034-02 — repo-registry-add-and-list](slice-02-repo-registry-add-and-list.md)
 - [034-03 — scaffold-init-role-member](slice-03-scaffold-init-role-member.md)
@@ -206,6 +273,7 @@ skills refuse with a clear message when invoked in the wrong role
 - [034-12 — touchset-frontmatter-and-preflight](slice-12-touchset-frontmatter-and-preflight.md)
 - [034-13 — federated-collision-radar](slice-13-federated-collision-radar.md)
 - [034-14 — touchset-closeout-drift-check](slice-14-touchset-closeout-drift-check.md)
+- [034-15 — federation-verification-profile](slice-15-federation-verification-profile.md)
 
 ## Clarifications
 
@@ -221,9 +289,11 @@ central unreachable. Drift hook becomes silent rather than nudging.
 _(category: Scope & Boundaries)_
 
 Defer to refinement-todo. v1 enforces exactly one central per member
-with a clear error on second-federation attempt. Add to
-`docs/refinement-todo.md` with resolution trigger: first real
-shared-library user asks. Schema designed to leave the door open.
+with a clear error on second-federation attempt, but a single
+federation may declare multiple read-only authority repos for
+architecture, guidelines, org RFCs, and workspace operations. Add true
+multi-federation membership to `docs/refinement-todo.md` with
+resolution trigger: first real shared-library user asks.
 
 ### Q3: Spec 033 (host-adapter portability) is concurrent and also defines a "host adapter". How should 034's `host_adapter.py` relate to 033's adapter?
 _(category: Dependencies & Blockers)_
@@ -232,6 +302,11 @@ Orthogonal concerns. 033's adapter is LLM-host rendering (Claude /
 Codex). 034's adapter is Git-host scoping (gh.com / GHEC). Different
 files, different responsibilities. Document the distinction in spec
 034 to avoid confusion.
+
+2026-06-21 update: rename 034's implementation concept to
+`RepoAccessProvider` in prose and code to avoid overloading "host
+adapter." The provider boundary is repo-content/status access; the
+spec 033 host adapter boundary is prompt/rendering portability.
 
 ### Q4: Slice 034-01 introduces both `federation_mode` and `role` in scaffold.json as "mirrors". Is the duplication intentional?
 _(category: Terminology Consistency)_
@@ -247,6 +322,17 @@ No by default. It warns and names the potentially conflicting specs,
 owners, branches, and touched paths. Blocking is reserved for future
 project-specific policy on explicitly exclusive paths, because
 parallel work often overlaps safely after human coordination.
+
+### Q6: Do Spacecat/Mysticat conventions become federation requirements?
+_(category: Scope & Boundaries)_
+
+No. Spacecat/Mysticat is a scale fixture and source of concrete
+adoption evidence. Its `mani.yaml` / `workspace.yaml` inventory, MCP
+preference, split authority repos, and testing conventions are examples
+of project-specific decisions. The product workflow is generic:
+discover existing inventory and policies, make unresolved decisions
+explicit, normalize the accepted shape into federation metadata, then
+sync/audit against the chosen source of truth.
 
 ### Coverage summary
 

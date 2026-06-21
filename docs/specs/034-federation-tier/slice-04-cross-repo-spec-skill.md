@@ -8,9 +8,10 @@ arch_review: true
 ## Slice 034-04 — cross-repo-spec-skill
 
 **Goal:** Ship `jig:cross-repo-spec` for authoring an org-level epic
-that touches N member repos — creates a parent spec in central + child
-specs in each named member, wired together via `parent_spec:` and
-`affects:` frontmatter pointers.
+that touches N member repos — creates a parent spec in the declared
+product/spec authority (central by default) + child specs in each named
+member, wired together via `parent_spec:` and `affects:` frontmatter
+pointers.
 
 **DoR:**
 - Slice 034-02 is DONE (registry populated).
@@ -18,13 +19,16 @@ specs in each named member, wired together via `parent_spec:` and
 **Acceptance Criteria:**
 
 1. **`jig:cross-repo-spec new <slug> --affects <repo1>,<repo2>,...`
-   creates the parent in central** with `parent_spec: null` + an
-   `affects:` list of member names. Numbering uses the central
-   repo's `workflow.py new` reservation.
+   creates the parent in the declared spec authority** with
+   `parent_spec: null` + an `affects:` list of member names. Numbering
+   uses that repo's `workflow.py new` reservation. Simple installs use
+   central as the spec authority.
 2. **Child spec stubs created in each affected repo** with
-   `parent_spec: <central-url>#<spec-id>` frontmatter and a
+   `parent_spec: <authority-url>#<spec-id>` frontmatter and a
    placeholder `## Overview` pointing back to the parent. Each child
-   uses its own repo's `workflow.py new` reservation.
+   uses its own repo's `workflow.py new` reservation when the repo is
+   jig-scaffolded; legacy/external spec homes are reported with manual
+   instructions instead of forcing a new layout.
 3. **Frontmatter contract documented.** `parent_spec:` and
    `affects:` shapes are specified in `docs/spec-workflow/`.
    `spec_lint.py` or equivalent validates that values resolve.

@@ -22,19 +22,20 @@ standalone install can be upgraded in place.
    Default is `standalone` (current behavior). When `member`,
    `--central=<url>` is required; refused otherwise with a clear
    message.
-2. **Tier 2 skills installed when `role != standalone`.** All five
+2. **Tier 2 skills installed when `role != standalone`.** All Tier 2
    federation skills install (skills self-gate by role at invocation
-   time; see slice 034-07 for hook gating).
+   time; see slice 034-07 for hook gating). Standalone installs still
+   install no Tier 2 skills.
 3. **Re-scaffold from standalone to federation is non-destructive.**
    Running `scaffold-init --role=member --central=<url>` against an
    existing standalone install upgrades scaffold.json, installs Tier
    2 skills, and leaves all existing skills + hooks + state
    untouched. Idempotent if re-run.
 4. **`AGENTS.md` / `CLAUDE.md` carry a federation pointer when
-   `role != standalone`.** A single concise line ("This repo is a
-   member of <central-url>; see
-   `<central>/docs/product-vision.md` for org context.") so the
-   primer stays lean.
+   `role != standalone`.** A single concise line names the central or
+   workspace federation URL and points at declared authority repos
+   (architecture/guidelines/org RFCs when present) so the primer stays
+   lean and does not duplicate central docs.
 5. **Member install does not duplicate central docs.** No copy of
    central `conventions.md` / `glossary.md` / org ADRs lands
    locally. Federation-aware skills fetch on demand (slice 034-07).

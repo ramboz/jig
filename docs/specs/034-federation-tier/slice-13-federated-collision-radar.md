@@ -25,6 +25,10 @@ unfinished specs in registered member repos.
    generated touchset cache under `docs/federation/` (exact filename
    chosen in implementation) so member-side preflight can warn without
    walking every repo in the session.
+   A companion generated contract-surface cache records declared and
+   discovered surfaces (for example npm package names, OpenAPI
+   files/paths, event topics, DB migration/RPC names, and deploy units)
+   with provenance.
 3. **`jig:collision-radar check`.** A Tier 2 skill/helper accepts a
    candidate touchset and compares it against the local repo's active
    specs plus the central cache when available.
@@ -33,16 +37,16 @@ unfinished specs in registered member repos.
    repo. Central parent specs may include multiple repo-prefixed
    tokens.
 5. **Warning classes.** Output distinguishes at least: exact file
-   overlap, glob/path overlap, same declared contract surface, and
-   broad same-directory overlap. Exact file and contract-surface
-   overlaps are listed first.
+   overlap, glob/path overlap, same typed contract surface, and broad
+   same-directory overlap. Exact file and contract-surface overlaps are
+   listed first.
 6. **Degraded central behavior.** If central is unreachable or the
    cache is absent/stale, member preflight still runs against local
    specs and emits a short "federated cache unavailable" note. Routine
    single-repo work is never blocked by a missing central cache.
 7. **No context blow-up.** Collision checks load metadata only: spec
-   frontmatter, slice frontmatter, and the generated touchset cache.
-   They do not pull full spec bodies from every repo.
+   frontmatter, slice frontmatter, and generated touchset/contract
+   caches. They do not pull full spec bodies from every repo.
 8. **Cross-repo-spec integration.** `jig:cross-repo-spec new` runs
    collision radar for the parent and child touchsets before creating
    stubs, and includes warnings in its user-facing output.
