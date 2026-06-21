@@ -13,6 +13,7 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 - **Active specs:** none — see [docs/specs/README.md](docs/specs/README.md). Deferred decisions → [docs/refinement-todo.md](docs/refinement-todo.md).
 
 ### Key terms (one-line index — full defs via `/jig:explain <term>`)
+- **Subagent permission** — In this jig project, the user explicitly permits Codex to use subagents when they materially help implementation, review, reconciliation, or coordination work.
 - **Lifecycle-family spine** — [ADR-0023](docs/decisions/adr-0023-lifecycle-family-spine.md) — spec-workflow / bug-fix / refactor share one C1–C7 gated-evidence spine; extract to `_common/lifecycle.py` only at the *third* `transition`. **PARKED — don't re-propose** the servo pluggable-oracle boundary ([ADR-0022](docs/decisions/adr-0022-pluggable-oracle-boundary.md) C5) without a real eval case / servo spec 006 / a built consumer.
 - **Closed-spec drift** — [ADR-0010](docs/decisions/adr-0010-amendment-scope-records-vs-live-prose.md) (supersedes [ADR-0008](docs/decisions/adr-0008-closed-spec-drift-policy.md)) — closed records get `## Amendments`; live prose corrected inline; new ADR for decision changes.
 - **Spec-gate model** — [ADR-0011](docs/decisions/adr-0011-spec-gate-model.md) — `jig-spec-gate.sh` is a *deliberateness* gate on `conventions.md`, not human-only enforcement; real control is out-of-band.
