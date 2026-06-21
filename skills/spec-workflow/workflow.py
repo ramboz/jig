@@ -29,6 +29,7 @@ from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
     check_deviation_log,
+    check_reconciliation_sweep,
     clear_frontmatter_field,
     frontmatter_flag_truthy,
     parse_frontmatter,
@@ -803,7 +804,8 @@ def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
 
 # The states whose transitions are gated on review evidence (ADR-0014 §5).
 # READY_FOR_REVIEW → frame-critique (iff `frame_review`); REVIEWED →
-# compliance+craft(+arch); RECONCILED → reconciliation + deviation log;
+# compliance+craft(+arch); RECONCILED → reconciliation + deviation log +
+# reconciliation sweep;
 # DONE → the REVIEWED + RECONCILED sets re-validated (plus the existing
 # dependency check) — frame-critique is NOT re-validated at DONE (one-time
 # pre-implementation gate). Every OTHER target — DRAFT /
@@ -839,9 +841,9 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
 
     Delegates shape/verdict validation to
     `review_evidence.validate_evidence` (the 045-02 validator — single
-    source of truth) and the deviation-log presence check to the shared
-    `_common.parsing.check_deviation_log` (the 007-01 heading predicate,
-    lifted to `_common` by this slice so `land.py` and the gate share it).
+    source of truth) and the reconciliation heading presence checks to shared
+    `_common.parsing` predicates. The gate only checks subsection shape;
+    reviewers attest content quality.
     """
     if new_status not in _EVIDENCE_GATED_STATES:
         return
@@ -865,8 +867,8 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
         diagnostics.extend(
             validate_evidence(spec_md, slice_fragment, "REVIEWED")
         )
-    # RECONCILED-stage: the reconciliation verdict AND the deviation log,
-    # required for RECONCILED and re-validated for DONE.
+    # RECONCILED-stage: the reconciliation verdict, deviation log, and
+    # reconciliation sweep; required for RECONCILED and re-validated for DONE.
     if new_status in ("RECONCILED", "DONE"):
         diagnostics.extend(
             validate_evidence(spec_md, slice_fragment, "RECONCILED")
@@ -877,6 +879,14 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
                 "`### Deviation log` subsection under the slice heading "
                 "before reconciling (the reconciliation reviewer attests "
                 "its content; the gate only checks presence)"
+            )
+        if not check_reconciliation_sweep(section):
+            diagnostics.append(
+                "[reconciliation] reconciliation sweep missing — add a "
+                "`### Reconciliation sweep` subsection under the slice "
+                "heading before reconciling (the reconciliation reviewer "
+                "judges artifact coverage and disposition quality; the gate "
+                "only checks presence)"
             )
 
     if diagnostics:
@@ -988,8 +998,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     Slice 045-03: REVIEWED / RECONCILED / DONE are gated on review
     evidence (ADR-0014 §5) — the move is refused unless the required
     verdict artifacts exist and clear (and, for RECONCILED/DONE, the
-    deviation log is present). The gate is ON by default; bypass with
-    `JIG_REVIEW_EVIDENCE_GATE=0`.
+    deviation log and reconciliation sweep are present). The gate is ON
+    by default; bypass with `JIG_REVIEW_EVIDENCE_GATE=0`.
 
     Slice 049-01: → IN_PROGRESS stamps a `claimed_by:` identifier
     (branch name, or `JIG_CLAIM_ID`) and refuses an on-disk foreign
@@ -2391,7 +2401,32 @@ def _render_stub_slice(num_str: str, slice_num: str = "01",
             "docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "
             "\"Self-defining vocabulary\". -->\n"
             "\n## Slice {{NUMBER}} — {{NAME}}\n\n"
-            "**Goal:** _TBD_\n"
+            "**Goal:** _TBD_\n\n"
+            "**DoD:**\n"
+            "- [ ] All ACs pass; full test suite green (no regressions).\n"
+            "- [ ] Deviation log produced under this slice heading.\n"
+            "- [ ] Reconciliation sweep produced under this slice heading.\n"
+            "- [ ] Reconciliation review passed.\n"
+            "\n### Deviation log (after reconciliation)\n\n"
+            "_TODO: numbered sections covering deviations from the planned "
+            "shape, reviewer findings folded back in, doc updates, plan "
+            "adherence._\n"
+            "\n### Reconciliation sweep\n\n"
+            "Record the drift-prone surfaces checked during reconciliation. "
+            "The transition gate only requires this subsection to exist; the "
+            "reviewer judges whether coverage and rationales are honest.\n\n"
+            "| Artifact | Disposition | Rationale |\n"
+            "|----------|-------------|-----------|\n"
+            "| `README.md` | `no-op` | _TODO._ |\n"
+            "| `docs/specs/README.md` | `updated` | _TODO._ |\n"
+            "| `docs/product-vision.md` | `no-op` | _TODO._ |\n"
+            "| `docs/architecture.md` | `no-op` | _TODO._ |\n"
+            "| `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO._ |\n"
+            "| `docs/inbox.md` | `no-op` | _TODO._ |\n"
+            "| `docs/refinement-todo.md` | `no-op` | _TODO._ |\n"
+            "| `docs/memory/**` | `no-op` | _TODO._ |\n"
+            "| `docs/decisions/README.md` / ADR index | `no-op` | _TODO._ |\n"
+            "| Additional live prose / generated templates | `deferred` | _TODO._ |\n"
         )
     return body.replace("{{NUMBER}}", fragment).replace("{{NAME}}", name)
 

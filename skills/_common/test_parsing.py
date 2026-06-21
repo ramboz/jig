@@ -14,6 +14,7 @@ from parsing import (
     SliceLocation,
     SliceLookupError,
     check_deviation_log,
+    check_reconciliation_sweep,
     clear_frontmatter_field,
     env_flag_enabled,
     env_gate_enabled,
@@ -672,6 +673,31 @@ class CheckDeviationLogTests(unittest.TestCase):
     def test_requires_h3_not_h2(self):
         # An H2 `## Deviation log` is not the slice's deviation-log subsection.
         self.assertFalse(check_deviation_log("## Deviation log\n\nx\n"))
+
+
+class CheckReconciliationSweepTests(unittest.TestCase):
+    """Spec 082-01: `### Reconciliation sweep` is the deterministic shape
+    marker for the reviewer-judged cleanup manifest."""
+
+    def test_plain_heading_present(self):
+        self.assertTrue(check_reconciliation_sweep(
+            "## Slice\n\n### Reconciliation sweep\n\n| Artifact | x |\n"
+        ))
+
+    def test_case_insensitive(self):
+        self.assertTrue(check_reconciliation_sweep(
+            "### RECONCILIATION SWEEP\n"
+        ))
+
+    def test_absent(self):
+        self.assertFalse(check_reconciliation_sweep(
+            "## Slice\n\n### Deviation log\n\nx\n"
+        ))
+
+    def test_requires_h3_not_h2(self):
+        self.assertFalse(check_reconciliation_sweep(
+            "## Reconciliation sweep\n\nx\n"
+        ))
 
 
 class EnvGatePredicateTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: []
-last_verified:
+last_verified: 2026-06-21
 frame_review: true
 ---
 
@@ -9,7 +9,7 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-06-21)
+Accepted (2026-06-21)
 
 ## Context
 
@@ -63,10 +63,26 @@ turning every doc file into a brittle hard gate.
   written manifests could become checkbox theater unless the reviewer prompt
   explicitly checks omissions.
 
+### Option D: Generate an inventory and require evidence for each no-op
+- **Pros:** Stronger independence. A helper could derive touched files from
+  `git diff`, list core docs that always need a disposition, and require
+  evidence commands for `no-op` rows.
+- **Cons:** It front-loads a lot of mechanism before jig has measured whether
+  the lighter control fails. It also risks brittle false positives: many
+  documentation freshness checks are semantic, and a generated list can still
+  miss related-but-untouched stale prose. The right first escalation is to make
+  the reviewer compare the manifest against an independent checklist; only
+  promote generated inventory to a gate if copied boilerplate or missed
+  omissions persist.
+
 ## Recommended Decision
 
 Adopt **Option C: require a reconciliation sweep manifest and reviewer omission
-check**.
+check**, with one explicit guard from Option D: the reviewer check is not a
+blind attestation of the implementer's self-report. The reviewer prompt must
+compare the sweep against (a) the canonical core surfaces below, (b) artifacts
+touched by the slice, and (c) related generated/index files such as the status
+board or ADR index when statuses or ADRs changed.
 
 Every slice that transitions `REVIEWED → RECONCILED` should carry a
 `### Reconciliation sweep` subsection adjacent to the deviation log. The sweep
@@ -92,8 +108,12 @@ Each row records one disposition:
 The deterministic transition gate should initially check only that the sweep
 subsection exists, mirroring the deviation-log presence gate. It should not
 parse or validate every row semantically. The reconciliation reviewer should be
-updated to check whether the sweep has credible coverage and whether any
-obvious touched or related artifact is missing.
+updated to check whether the sweep has credible coverage, whether `no-op`
+claims conflict with touched files or landed behavior, whether `deferred` rows
+name an owner or trigger, and whether any obvious touched or related artifact is
+missing. This is the cheap independence layer: the manifest records the
+implementer's claim, but the reviewer has an explicit artifact-discovery
+checklist to push against that claim.
 
 For hot primers, use the broader term **primer hygiene** rather than
 `CLAUDE.md hygiene`: `CLAUDE.md` remains the Claude adapter, while `AGENTS.md`
@@ -114,6 +134,9 @@ and related templates become the host-portable primer surfaces on the v2 path.
 - Every reconciled slice has a little more close-out prose to write.
 - Reviewers must learn to judge `no-op` and `deferred` rationales, not just
   code/spec deviations.
+- Reviewer prompts become slightly more demanding: they must compare the sweep
+  against core surfaces and touched/related artifacts, not merely read the
+  manifest.
 - The first implementation has to update the transition gate, prompt builder,
   templates, and documentation together so the new subsection is not optional
   by accident.
@@ -142,6 +165,9 @@ when there is no meaningful kill condition; do not invent ceremonial ones._
 
 - Reconciliation manifests become mostly copied boilerplate and reviewers stop
   catching real omissions.
+- Reviewers repeatedly miss omissions because there is no generated/touched-file
+  inventory in the prompt; that is the trigger to promote Option D's inventory
+  from deferred escalation to a deterministic helper.
 - Manifest upkeep costs more than the drift it prevents across several landed
   specs.
 - A later deterministic freshness audit can cheaply prove the same artifact

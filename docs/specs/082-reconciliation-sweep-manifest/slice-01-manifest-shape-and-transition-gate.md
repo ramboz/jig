@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [adr-0029]
-last_verified:
+last_verified: 2026-06-21
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -24,7 +24,9 @@ deviation log.
 
 **DoR:**
 - ✅ [ADR-0029](../../decisions/adr-0029-reconciliation-sweep-manifest.md)
-  is accepted or explicitly approved for implementation.
+  is accepted; implementation began from the user's 2026-06-21 request to
+  start spec 082, then ADR-0029 cleared frame-critique and was accepted during
+  landing prep.
 - ✅ Current reconciliation gate behavior is verified against
   `skills/spec-workflow/workflow.py`.
 - ✅ The slice template and existing deviation-log detection helpers are
@@ -53,14 +55,14 @@ deviation log.
    bypass disables the check; and legacy deviation-log behavior still works.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one fixture.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred during
       implementation.
 
 ### Close-out (post-DONE)
@@ -82,4 +84,54 @@ a slice to `RECONCILED` without leaving an inspectable cleanup ledger.
 
 The original spec is preserved above. Implementation notes:
 
-_To be filled during reconciliation._
+1. **Gate shape implemented as a shared parser predicate.**
+   Added `check_reconciliation_sweep()` beside `check_deviation_log()` in
+   `skills/_common/parsing.py`, then wired `workflow.py`'s evidence gate to
+   require `### Reconciliation sweep` for `RECONCILED` and `DONE`.
+   Like the deviation-log gate, this is heading-presence only: the diagnostic
+   says the reviewer judges artifact coverage and disposition quality.
+
+2. **Template guidance covers the canonical manifest.**
+   `templates/docs/specs/slice-template.md` now includes a DoD checkbox for
+   the sweep and a concrete manifest table naming ADR-0029's core surfaces
+   with `updated`, `no-op`, and `deferred` dispositions. The inline
+   `_render_stub_slice()` fallback now carries the same close-out sections so
+   scaffolded/minimal-template contexts are not left without authoring
+   guidance.
+
+3. **Process corrections folded back in before the passing review evidence.**
+   The DoR originally overstated ADR-0029's state; implementation proceeded
+   from the user's explicit 2026-06-21 request, then ADR-0029 cleared
+   frame-critique and was accepted during landing prep so the dependency gate
+   can move this slice to `DONE`. The inline `_render_stub_slice()` fallback
+   originally lacked the new reconciliation sections; that was fixed and pinned by
+   `SelfDefiningReminderInRenderersTests`.
+
+4. **Non-blocking craft nit carried forward.**
+   The craft pass noted the slice template still uses the older `CLAUDE.md
+   hygiene` close-out wording beside the new host-portable sweep guidance. That
+   is intentionally left for 082-03, whose scope is primer hygiene and queue
+   cleanup terminology.
+
+5. **Verification.**
+   Focused verification passed after the fallback fix:
+   `python3 -m unittest skills._common.test_parsing skills.spec-workflow.test_workflow`
+   (`432 tests OK`). Before reviews, the full project runner also passed under
+   the needed cache-access escalation: `python3 scripts/run_tests.py`
+   (`2763 tests OK (skipped=3)`, `pyright: clean`). `git diff --check` was
+   clean before reconciliation edits.
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | Not touched; this shape-gate slice changes internal workflow behavior, not the project front-door summary. |
+| `docs/specs/README.md` | `updated` | Regenerated after review and reconciliation so 082-01 appears as `RECONCILED`. |
+| `docs/product-vision.md` | `no-op` | Checked via use-case coverage; jig's repo has no `## Use cases` breadth layer, so coverage is a documented no-op. No design-principle text changed. |
+| `docs/architecture.md` | `no-op` | No module-boundary or public-contract architecture change; the implementation extends the existing evidence-gate/parser pattern. |
+| `CLAUDE.md` / `AGENTS.md` / scaffold templates | `deferred` | Craft review identified stale `CLAUDE.md hygiene` wording in `templates/docs/specs/slice-template.md`; this is 082-03 primer-hygiene scope. No active-spec primer compression is needed because spec 082 remains in flight. |
+| `docs/inbox.md` | `no-op` | Searched for `082`, `reconciliation sweep`, `sweep manifest`, `CLAUDE.md hygiene`, and `primer hygiene`; no resolved inbox item was found. |
+| `docs/refinement-todo.md` | `no-op` | Same search found no resolved refinement-todo item and no new deferred implementation decision beyond the already-scoped 082-03 terminology work. |
+| `docs/memory/**` | `no-op` | No new reusable project knowledge beyond spec-local mechanics; no memory-sync entry warranted. |
+| `docs/decisions/README.md` / ADR index | `updated` | ADR-0029 cleared frame-critique and was accepted during landing prep; `adr.py index docs/decisions` regenerated the index so ADR-0029 appears as Accepted. |
+| `skills/spec-workflow/workflow.py` inline fallback | `updated` | `_render_stub_slice()` fallback now includes the deviation-log and reconciliation-sweep sections so scaffolded/minimal-template contexts stay aligned with the gate. |

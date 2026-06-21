@@ -1268,6 +1268,12 @@ class SliceTemplateTests(unittest.TestCase):
         self.assertIn("last_verified:", text)
         # Close-out section per slice 009 convention
         self.assertIn("### Close-out (post-DONE)", text)
+        # Spec 082-01: reconciliation sweep manifest is a required
+        # close-out section next to the deviation log.
+        self.assertIn("### Reconciliation sweep", text)
+        self.assertIn("`updated`", text)
+        self.assertIn("`no-op`", text)
+        self.assertIn("`deferred`", text)
 
     def test_slice_template_is_file_per_slice_shape(self):
         """Slice 018-03: template's frontmatter must come BEFORE the
@@ -5324,8 +5330,8 @@ class StatusBoardClaimRenderTests(unittest.TestCase):
 
 class _GateFixture(unittest.TestCase):
     """Builds a temp spec dir with one slice file and (optionally) review
-    evidence + a deviation log, then drives gated transitions with the
-    gate enabled."""
+    evidence + reconciliation close-out sections, then drives gated transitions
+    with the gate enabled."""
 
     def setUp(self):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-gate-"))
@@ -5348,6 +5354,7 @@ class _GateFixture(unittest.TestCase):
                     frame_review: bool = False,
                     design_review: bool = False,
                     deviation_log: bool = False,
+                    reconciliation_sweep: bool = False,
                     dod_lines: list = None,
                     label: str = None) -> None:
         """Write `slice-NN-<slug>.md` with the given status. The `## Slice`
@@ -5372,6 +5379,16 @@ class _GateFixture(unittest.TestCase):
         if deviation_log:
             body.extend(["### Deviation log (after reconciliation)", "",
                          "Real reconciliation prose here.", ""])
+        if reconciliation_sweep:
+            body.extend([
+                "### Reconciliation sweep",
+                "",
+                "| Artifact | Disposition | Rationale |",
+                "|----------|-------------|-----------|",
+                "| `README.md` | `no-op` | Checked; no front-door drift. |",
+                "| `docs/specs/README.md` | `deferred` | Regenerate at close-out. |",
+                "",
+            ])
         (self.spec_dir / f"slice-{slice_no}-{slug}.md").write_text(
             "\n".join(fm) + "\n" + "\n".join(body) + "\n"
         )
@@ -5470,7 +5487,8 @@ class TransitionReadyForReviewFrameGateTests(_GateFixture):
     def test_frame_critique_not_required_at_done(self):
         # frame-critique is a ONE-TIME pre-implementation gate — NOT
         # re-validated at DONE (only REVIEWED + RECONCILED sets are).
-        self.write_slice("RECONCILED", frame_review=True, deviation_log=True)
+        self.write_slice("RECONCILED", frame_review=True, deviation_log=True,
+                         reconciliation_sweep=True)
         self.write_evidence("compliance")
         self.write_evidence("craft")
         self.write_evidence("reconciliation")
@@ -5652,10 +5670,12 @@ class TransitionReviewedGateTests(_GateFixture):
 
 
 class TransitionReconciledGateTests(_GateFixture):
-    """AC2: RECONCILED needs the reconciliation verdict AND a deviation log."""
+    """AC2: RECONCILED needs the reconciliation verdict, deviation log, and
+    reconciliation sweep."""
 
-    def test_reconciled_clears_with_verdict_and_devlog(self):
-        self.write_slice("REVIEWED", deviation_log=True)
+    def test_reconciled_clears_with_verdict_devlog_and_sweep(self):
+        self.write_slice("REVIEWED", deviation_log=True,
+                         reconciliation_sweep=True)
         self.write_evidence("reconciliation")
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "RECONCILED", gate=True)
@@ -5664,7 +5684,8 @@ class TransitionReconciledGateTests(_GateFixture):
         self.assertEqual(self._status_in_slice(), "RECONCILED")
 
     def test_reconciled_blocked_when_reconciliation_evidence_missing(self):
-        self.write_slice("REVIEWED", deviation_log=True)
+        self.write_slice("REVIEWED", deviation_log=True,
+                         reconciliation_sweep=True)
         # no reconciliation verdict file
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "RECONCILED", gate=True)
@@ -5672,15 +5693,28 @@ class TransitionReconciledGateTests(_GateFixture):
         self.assertIn("reconciliation", r.stderr.lower())
 
     def test_reconciled_blocked_when_deviation_log_missing(self):
-        self.write_slice("REVIEWED", deviation_log=False)
+        self.write_slice("REVIEWED", deviation_log=False,
+                         reconciliation_sweep=True)
         self.write_evidence("reconciliation")
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "RECONCILED", gate=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("deviation log", r.stderr.lower())
 
+    def test_reconciled_blocked_when_sweep_missing(self):
+        self.write_slice("REVIEWED", deviation_log=True,
+                         reconciliation_sweep=False)
+        self.write_evidence("reconciliation")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "RECONCILED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reconciliation sweep", r.stderr.lower())
+        self.assertIn("reviewer", r.stderr.lower())
+        self.assertEqual(self._status_in_slice(), "REVIEWED")
+
     def test_reconciled_blocked_when_reconciliation_fail(self):
-        self.write_slice("REVIEWED", deviation_log=True)
+        self.write_slice("REVIEWED", deviation_log=True,
+                         reconciliation_sweep=True)
         self.write_evidence("reconciliation", verdict="fail")
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "RECONCILED", gate=True)
@@ -5697,7 +5731,8 @@ class TransitionDoneGateTests(_GateFixture):
         self.write_evidence("reconciliation")
 
     def test_done_clears_with_full_evidence(self):
-        self.write_slice("RECONCILED", deviation_log=True)
+        self.write_slice("RECONCILED", deviation_log=True,
+                         reconciliation_sweep=True)
         self._write_full_evidence()
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "DONE", gate=True)
@@ -5708,7 +5743,8 @@ class TransitionDoneGateTests(_GateFixture):
     def test_done_blocked_when_reviewed_evidence_missing(self):
         # Reconciliation present but compliance/craft absent — the DONE
         # re-validation must catch a hand-edited status that skipped REVIEWED.
-        self.write_slice("RECONCILED", deviation_log=True)
+        self.write_slice("RECONCILED", deviation_log=True,
+                         reconciliation_sweep=True)
         self.write_evidence("reconciliation")
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "DONE", gate=True)
@@ -5716,13 +5752,23 @@ class TransitionDoneGateTests(_GateFixture):
         self.assertIn("compliance", r.stderr.lower())
 
     def test_done_blocked_when_reconciliation_missing(self):
-        self.write_slice("RECONCILED", deviation_log=True)
+        self.write_slice("RECONCILED", deviation_log=True,
+                         reconciliation_sweep=True)
         self.write_evidence("compliance")
         self.write_evidence("craft")
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "DONE", gate=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("reconciliation", r.stderr.lower())
+
+    def test_done_blocked_when_sweep_missing(self):
+        self.write_slice("RECONCILED", deviation_log=True,
+                         reconciliation_sweep=False)
+        self._write_full_evidence()
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DONE", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reconciliation sweep", r.stderr.lower())
 
     def test_done_still_enforces_dependency_check(self):
         # Full evidence present, but a dependency is unsatisfied — the
@@ -5841,6 +5887,18 @@ class TransitionGateBypassTests(_GateFixture):
                     r.returncode, 0,
                     f"bypass={value!r} should skip the gate; stderr={r.stderr}",
                 )
+
+    def test_bypass_zero_skips_reconciliation_sweep_check(self):
+        self.write_slice("REVIEWED", deviation_log=True,
+                         reconciliation_sweep=False)
+        r = self._run_with_gate_env(
+            "0", "transition", str(self.spec_md), "045-01", "RECONCILED",
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"bypass=0 should skip sweep presence check; stderr={r.stderr}",
+        )
+        self.assertEqual(self._status_in_slice(), "RECONCILED")
 
     def test_bypass_still_enforces_dependency_check_on_done(self):
         # The bypass only skips the *evidence* check; the DONE dependency
@@ -6423,6 +6481,12 @@ class SelfDefiningReminderInRenderersTests(unittest.TestCase):
             text = self.workflow._render_stub_slice("099")
         self.assertIn("self-defining vocabulary", text.lower())
         self.assertIn("glossary.md", text)
+        self.assertIn("### Deviation log (after reconciliation)", text)
+        self.assertIn("### Reconciliation sweep", text)
+        self.assertIn("`updated`", text)
+        self.assertIn("`no-op`", text)
+        self.assertIn("`deferred`", text)
+        self.assertIn("`docs/refinement-todo.md`", text)
         # Sanity: substitutions still applied in the fallback path.
         self.assertIn("099-01", text)
 

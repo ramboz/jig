@@ -117,6 +117,7 @@ def env_flag_enabled(name: str) -> bool:
 # `_common` move is a reasonable refactor") without a cross-skill import or a
 # second copy of the regex. `land.py` re-exports it for its callers.
 _DEVIATION_LOG_RE = re.compile(r"(?im)^###\s+deviation\s+log\b")
+_RECONCILIATION_SWEEP_RE = re.compile(r"(?im)^###\s+reconciliation\s+sweep\b")
 
 
 def check_deviation_log(section: str) -> bool:
@@ -126,6 +127,16 @@ def check_deviation_log(section: str) -> bool:
     real prose vs. the template's `_TODO.` stub is attested by the
     reconciliation reviewer's verdict, not re-derived here (ADR-0014 §5)."""
     return bool(_DEVIATION_LOG_RE.search(section))
+
+
+def check_reconciliation_sweep(section: str) -> bool:
+    """Look for a `### Reconciliation sweep` subsection within the slice.
+
+    Heading-presence ONLY: the transition gate makes the cleanup ledger
+    inspectable, while the reconciliation reviewer judges whether its
+    `updated` / `no-op` / `deferred` dispositions are honest (ADR-0029).
+    """
+    return bool(_RECONCILIATION_SWEEP_RE.search(section))
 
 
 class SliceLookupError(RuntimeError):
