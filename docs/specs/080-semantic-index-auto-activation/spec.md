@@ -8,29 +8,44 @@ use_cases: []
 
 # Spec 080: Semantic-index auto-activation
 
-> Source: 2026-06-20 design discussion: Scout vs. tokensave for jig's
-> `cache_read`-heavy token pattern, and how to make `scout daemon start` /
-> `scout attach <path>` transparent when jig's Codex v2 adapter lands.
+> Source: 2026-06-20 design discussion, revised 2026-06-21: Scout vs.
+> tokensave for jig's `cache_read`-heavy token pattern, and the follow-up
+> decision that public jig defaults must prefer public providers while Scout
+> remains an internal overlay.
 
 ## Overview
 
 jig's context-cost guidance now recommends a semantic/code index as the
 turn-count lever: one graph query can replace several speculative Grep /
 Read rounds. But the operational seam is still manual. A user has to know
-whether Scout is installed, whether its daemon is running, and whether the
-current repository is attached before the model can rely on it.
+which supported provider is installed, whether any provider daemon or index is
+ready, and whether the current repository is attached before the model can
+rely on it.
+
+jig is a public project, so its default behavior cannot assume access to an
+internal semantic-index provider. The default provider profile must be public
+and portable: tokensave is the current named candidate if it proves
+public/portable enough, but implementation must re-evaluate public alternatives
+and may choose a better public default if one fits the contract. Scout support
+remains valuable for internal repositories, but it is modeled as an overlay
+that can register an additional provider and provider preference only when the
+project/environment explicitly enables that internal path.
 
 That manual setup is exactly the kind of low-level ceremony jig should hide
 once a project has opted in. The desired behavior is:
 
-- If no semantic index is installed, jig stays silent until the work shape
-  makes a recommendation useful.
-- If Scout (or a future provider) is installed but the project has not opted
-  in, jig emits a one-time soft suggestion rather than doing heavyweight work.
+- If no supported semantic index is installed, jig stays silent until the work
+  shape makes a recommendation useful.
+- If the public default provider (or another public provider) is installed but
+  the project has not opted in, jig emits a one-time soft suggestion rather
+  than doing heavyweight work.
+- If an internal overlay registers Scout, internal repositories may prefer
+  Scout without making Scout part of the public default or public scaffold
+  output.
 - If the project has opted in, jig makes the index ready transparently:
-  ensure the provider daemon is available, attach the canonical repository
-  root if needed, then steer Claude Code and Codex toward index-first
-  exploration.
+  ensure the provider daemon/index worker is available, attach or index the
+  canonical repository root if needed, then steer Claude Code and Codex toward
+  index-first exploration.
 - Every automatic action is instrumented locally so we can measure whether
   index activation actually reduces broad reads, raw Grep loops, and
   `cache_read` growth.
@@ -44,26 +59,39 @@ materialize it through both host adapters at once.
 
 1. **Provider-neutral activation contract.** Define a small local contract
    for semantic-index providers: detect availability, report attachment
-   status, start or wake a daemon when safe, attach a repository when the
-   project opted in, and return a compact status summary.
-2. **Transparent after opt-in.** After a project records `auto_attach: true`,
-   sessions should not require a human or agent to remember `scout daemon
-   start` or `scout attach <path>`.
-3. **No silent install or model download.** jig never installs Scout,
+   or index status, start or wake a daemon/index worker when safe, attach or
+   index a repository when the project opted in, and return a compact status
+   summary.
+2. **Public default provider profile.** Ship public jig with a public,
+   portable default provider candidate (tokensave if it proves public/portable
+   enough, otherwise the best public alternative) and no dependency on internal
+   tooling.
+3. **Transparent after opt-in.** After a project records `auto_attach: true`,
+   sessions should not require a human or agent to remember provider-specific
+   daemon or attach commands.
+4. **No silent install or model download.** jig never installs Scout,
    tokensave, or any indexer, and never triggers first-run heavyweight setup
    without an explicit project/user opt-in.
-4. **Same semantics for Claude Code and Codex.** The Claude and Codex host
+5. **Same semantics for Claude Code and Codex.** The Claude and Codex host
    adapters render the same logical behavior in host-native hooks, primers,
    and skill/agent instructions.
-5. **Instrument the effect.** Activation attempts, outcomes, and fallbacks are
+6. **Internal overlay support.** Allow internal overlays to register providers
+   such as Scout, override provider preference for matching repositories, and
+   render internal-only guidance without leaking those assumptions into public
+   jig scaffolds.
+7. **Instrument the effect.** Activation attempts, outcomes, and fallbacks are
    recorded in local, content-free telemetry so `usage.py` can compare
    indexed vs. non-indexed sessions.
 
 ## Non-goals
 
-- **Choosing Scout as a mandatory dependency.** Scout is the first provider
-  because it best matches jig's measured pattern today; the contract must not
-  make jig require Scout.
+- **Choosing Scout as the public default.** Scout is useful for internal repos,
+  but public jig must not require or recommend an internal-only provider unless
+  an internal overlay is explicitly active.
+- **Hard-coding tokensave forever.** tokensave is the current named candidate,
+  not a permanent mandate or an excuse to ship an internal-only default. The
+  implementation slice must choose the best public provider that satisfies the
+  contract at that time.
 - **Replacing the read-once/read-lean hooks.** Index activation complements
   the existing context-cost nudges. It does not remove the `PreToolUse(Read)`
   warning or thin-orchestrator guidance.
@@ -80,14 +108,15 @@ materialize it through both host adapters at once.
 
 <!-- Spec 064-02 / ADR-0020: prove runnable-surface facts by probe before implementation. -->
 
-- **Scout remains the first concrete provider.** Before implementation,
-  re-probe the installed Scout CLI and MCP docs/behavior for: status/list
-  commands, daemon autostart behavior, attach idempotence, worktree
-  auto-attach policy, and Codex/Claude MCP install shape.
-- **tokensave remains a viable fallback provider category.** Before
-  implementation, re-probe whether tokensave's hooks conflict with jig's
-  delegated-read guidance, especially any behavior that blocks Explore-style
-  subagents.
+- **Public default provider must be re-selected by evidence.** Before
+  implementation, re-probe tokensave and any better public alternatives for:
+  status/list commands, daemon or index readiness behavior, attach/index
+  idempotence, worktree policy, Codex/Claude integration shape, and whether the
+  tool stays compatible with jig's delegated-read guidance.
+- **Scout remains the first internal overlay provider.** Before implementation,
+  re-probe the installed Scout CLI and MCP docs/behavior for the same contract
+  surfaces, then keep Scout-specific commands and recommendations behind the
+  internal overlay boundary.
 - **Codex hook and skill surfaces may drift.** The Codex slices must verify
   current Codex project-local hooks, skills, custom agents, and plugin
   packaging before rendering files.
@@ -99,12 +128,17 @@ materialize it through both host adapters at once.
 ## Clarifications
 
 - **Opt-in state:** record project intent in a small project-local file or
-  manifest field, not in the user's global Scout/Codex/Claude config. The
+  manifest field, not in the user's global provider/Codex/Claude config. The
   implementation slice decides whether that is `scaffold.json`,
   `.jig/index.json`, or another host-neutral location.
-- **Activation rule:** after opt-in, `attach` is allowed to run automatically
-  and must be idempotent. Explicit daemon start is a fallback only when the
-  provider's cheap status/attach path proves the daemon is unavailable.
+- **Provider selection:** public jig resolves the public default provider first
+  unless project opt-in names another public provider. Internal overlays may
+  register Scout and may prefer it only when the project/environment is marked
+  internal.
+- **Activation rule:** after opt-in, provider readiness actions are allowed to
+  run automatically and must be idempotent. Explicit daemon/index startup is a
+  fallback only when the provider's cheap status/readiness path proves the
+  worker is unavailable.
 - **Worktree policy:** default to the canonical repo root. Temporary Codex /
   Claude worktrees should not be silently attached unless the project opts
   into per-worktree indexing.
@@ -120,9 +154,11 @@ materialize it through both host adapters at once.
 SPIDR split: **Interface + Path + Data**.
 
 - **080-01 (Interface):** the provider-neutral activation contract, project
-  opt-in state, and telemetry schema. This is the seam both hosts consume.
+  opt-in state, public provider profile, internal overlay registration, and
+  telemetry schema. This is the seam both hosts consume.
 - **080-02 (Path):** Claude Code materialization: SessionStart/Prompt hook
-  behavior, prompt/agent guidance, and Scout-first exploration when present.
+  behavior, prompt/agent guidance, public-default-first exploration, and
+  Scout overlay behavior only when internal.
 - **080-03 (Path):** Codex materialization: the same behavior rendered through
   Codex scaffold/plugin adapters from spec 033 v2.
 - **080-04 (Data):** usage/digest integration proving whether indexed

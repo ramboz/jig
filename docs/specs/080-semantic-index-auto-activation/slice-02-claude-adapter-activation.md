@@ -13,8 +13,9 @@ arch_review: true
 ## Slice 080-02 - Claude Code adapter activation
 
 **Goal:** Wire the activation contract into Claude Code scaffold/plugin
-surfaces so an opted-in project gets Scout-ready behavior transparently,
-while non-opted-in projects receive at most a one-time recommendation.
+surfaces so an opted-in project gets the selected public provider ready
+transparently, while internal projects can enable the Scout overlay and
+non-opted-in projects receive at most a one-time recommendation.
 
 **DoR:**
 - ✅ 080-01 is DONE.
@@ -28,27 +29,32 @@ while non-opted-in projects receive at most a one-time recommendation.
 1. **Claude hook path calls the contract.** The Claude adapter invokes the
    activation helper from a low-noise lifecycle point, fails open, and emits
    no output when there is no useful recommendation or action.
-2. **Opted-in projects auto-ready Scout.** With Scout present and opt-in
-   enabled, a new session makes a bounded best-effort attempt to ensure the
-   canonical repo is attached and records the activation outcome.
+2. **Opted-in projects auto-ready the selected provider.** With the selected
+   public provider present and opt-in enabled, a new session makes a bounded
+   best-effort attempt to ensure the canonical repo is attached/index-ready and
+   records the activation outcome.
 3. **Non-opted-in projects get one soft suggestion.** If Scout is present but
-   the project has not opted in, Claude receives a compact one-time suggestion
-   explaining the opt-in command/path; repeated sessions are rate-limited.
+   the internal overlay is not enabled, Claude does not recommend Scout. If a
+   public provider is present but the project has not opted in, Claude receives
+   a compact one-time suggestion explaining the opt-in command/path; repeated
+   sessions are rate-limited.
 4. **Claude instructions prefer index-first exploration.** Generated Claude
    primer/agent/skill prose says: for broad architecture, lifecycle, change,
-   or review questions, use the semantic index first when available, then
-   narrow Read/Edit only after the index names the neighborhood.
+   or review questions, use the semantic index first when available. Public
+   output names the public provider profile; Scout-specific prose appears only
+   when the internal overlay is active.
 5. **No hook conflict with jig's context-cost nudges.** The existing
    `jig-context-check`, read-once/read-lean, memory-scan, and safety hooks
    remain registered and keep their current behavior.
 6. **Tests pin scaffold/plugin output.** Scaffold-mode and plugin-mode tests
    assert the hook registration, prompt text, and no-provider/no-opt-in/opted-in
-   behavior without requiring Scout to be installed on the test machine.
+   behavior without requiring Scout or the public provider to be installed on
+   the test machine.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Tests use fake provider commands/fixtures; no real Scout daemon or
-      network setup is required.
+- [ ] Tests use fake provider commands/fixtures; no real Scout daemon, public
+      provider daemon/index, or network setup is required.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
@@ -62,8 +68,9 @@ while non-opted-in projects receive at most a one-time recommendation.
       Codex adapter slice follows.
 
 **Anti-horizontal-phasing check:** After this slice, a Claude Code user in an
-opted-in project no longer has to remember `scout daemon start` or
-`scout attach .` before jig can route exploration through the index.
+opted-in project no longer has to remember provider-specific daemon/index or
+attach commands before jig can route exploration through the index, and Scout
+is available only through the internal overlay.
 
 ### Deviation log (after reconciliation)
 

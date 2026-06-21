@@ -16,13 +16,16 @@ arch_review: true
 
 **Goal:** Render the same semantic-index activation behavior through Codex's
 host-native scaffold/plugin surfaces, using the 080-01 contract rather than a
-Claude-specific hook script.
+Claude-specific hook script. Public Codex scaffolds use the selected public
+provider profile; Scout is available only when an internal overlay registers
+it.
 
 **DoR:**
 - 033-05 or 033-06 is active and has re-verified Codex's current
   project-local hooks, skills, custom agents, and plugin packaging.
 - 080-01 is DONE.
-- A Codex dogfood target exists with Scout or another provider available.
+- A Codex dogfood target exists with the public provider available, or an
+  internal target exists with the Scout overlay explicitly enabled.
 
 **Acceptance Criteria:**
 
@@ -31,15 +34,20 @@ Claude-specific hook script.
    timeout, no-provider, and fail-open rules as Claude.
 2. **Codex primer/agent guidance is host-native.** `AGENTS.md`, Codex skill
    prose, and Codex agent instructions prefer semantic-index exploration when
-   available without mentioning Claude-only tools or env vars.
+   available without mentioning Claude-only tools or env vars. Public output
+   names only public provider/profile guidance; Scout-specific guidance appears
+   only when the internal overlay is active.
 3. **Opt-in flow is discoverable.** A Codex user can enable auto-attach through
    the same project-local setting as Claude, and the generated prose names that
    path/command.
 4. **No Claude artifacts are required.** A Codex-only scaffold can use the
    activation path without `.claude/` files or `${CLAUDE_PLUGIN_ROOT}`.
-5. **Tests pin Codex output.** Golden fixtures cover Codex hook registration,
+5. **Public vs. internal output is pinned.** Golden fixtures prove public
+   Codex output contains no Scout-specific commands or recommendations, while
+   internal-overlay fixtures include the Scout provider path.
+6. **Tests pin Codex output.** Golden fixtures cover Codex hook registration,
    generated instructions, and fake-provider activation outcomes.
-6. **Claude parity holds.** The same contract tests run against both host
+7. **Claude parity holds.** The same contract tests run against both host
    adapters, proving the semantic behavior is shared even though files differ.
 
 **DoD:**
@@ -59,8 +67,9 @@ Claude-specific hook script.
       spec 033 canonical-primer rule.
 
 **Anti-horizontal-phasing check:** After this slice, a Codex-only jig scaffold
-can transparently ready an opted-in semantic index without relying on Claude
-Code machinery.
+can transparently ready an opted-in public semantic index without relying on
+Claude Code machinery, and internal repos can opt into Scout through the same
+overlay boundary.
 
 ### Deviation log (after reconciliation)
 

@@ -13,7 +13,8 @@ last_verified:
 
 **Goal:** Extend jig's usage reporting so maintainers can compare sessions
 where semantic-index activation was available/used against sessions that fell
-back to raw Grep/Read exploration.
+back to raw Grep/Read exploration, separated by public provider profile vs.
+internal overlay provider.
 
 **DoR:**
 - ✅ 080-01 is DONE and emits content-free activation telemetry.
@@ -23,11 +24,11 @@ back to raw Grep/Read exploration.
 **Acceptance Criteria:**
 
 1. **Activation telemetry is summarized.** `usage.py` can report activation
-   attempts by provider, outcome, repo-root class, and host adapter over a
-   configurable time window.
+   attempts by provider, provider profile (public/internal-overlay), outcome,
+   repo-root class, and host adapter over a configurable time window.
 2. **Indexed vs. fallback sessions are distinguishable.** The digest groups
    sessions into index-ready, recommended-but-not-opted-in, provider-missing,
-   and activation-failed buckets.
+   activation-failed, and overlay-disabled buckets.
 3. **Read/search proxies are included.** Where existing transcript data allows
    it, the digest reports raw Read nudges, large/duplicate read events,
    context-growth bands, and broad Grep/Search fallback counts alongside the
@@ -35,12 +36,14 @@ back to raw Grep/Read exploration.
 4. **No content leakage.** The report never prints search queries, file bodies,
    diffs, or provider command output. It prints counts and small status labels.
 5. **Works without provider installed.** Tests use synthetic JSONL fixtures and
-   do not require Scout, tokensave, Codex, or Claude Code.
+   do not require Scout, tokensave, another public provider, Codex, or Claude
+   Code.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Tests cover empty telemetry, mixed hosts/providers, malformed rows,
-      missing transcript data, and write-failure/noise cases.
+- [ ] Tests cover empty telemetry, mixed hosts/providers/profiles, overlay
+      disabled rows, malformed rows, missing transcript data, and
+      write-failure/noise cases.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.

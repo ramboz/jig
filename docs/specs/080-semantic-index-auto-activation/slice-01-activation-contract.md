@@ -13,46 +13,61 @@ arch_review: true
 ## Slice 080-01 - activation contract and opt-in state
 
 **Goal:** Define and implement the host-neutral semantic-index activation
-contract that Claude Code and Codex adapters can call: detect provider,
-read/write opt-in state, ensure an opted-in repo is attached, and emit
-content-free telemetry.
+contract that Claude Code and Codex adapters can call: detect providers,
+select the public default provider profile, admit internal provider overlays,
+read/write opt-in state, ensure an opted-in repo is attached/index-ready, and
+emit content-free telemetry.
 
 **DoR:**
 - ✅ Spec 079 has landed the standing guidance that a semantic/code index is
   recommended when it can collapse multi-turn exploration.
+- ✅ Public provider candidates are re-probed, with tokensave as the named
+  baseline if it proves public/portable enough; otherwise the best public
+  alternative that satisfies the contract.
 - ✅ Scout CLI/MCP behavior is re-probed locally for status/list/attach,
-  daemon startup fallback, idempotence, and worktree auto-attach behavior.
+  daemon startup fallback, idempotence, and worktree auto-attach behavior, but
+  only as an internal overlay provider.
 - ✅ The storage location for project opt-in state is chosen.
 
 **Acceptance Criteria:**
 
 1. **Provider contract exists.** A stdlib-only helper exposes a small
-   provider-neutral API for `detect`, `status`, `ensure_ready`, and
-   `recommendation`, with Scout as the first concrete provider and a clean
-   "no provider" result.
-2. **Opt-in state is explicit.** A project-local setting records whether
-   auto-attach is allowed, which provider is preferred, and whether per-worktree
-   attach is allowed. Missing state defaults to no automatic attach.
-3. **No silent heavyweight setup.** When Scout is absent, not configured, or
-   not opted in, the helper never installs anything, never downloads models,
-   and never attaches the repo. It returns a compact recommendation only when
-   useful.
-4. **Opted-in attach is idempotent and bounded.** When opted in, the helper
-   makes a best-effort attach/status call for the canonical repository root,
-   uses explicit daemon start only as a fallback, and times out/fails open.
-5. **Worktree policy is enforced.** Temporary worktrees are not automatically
+   provider-neutral API for `detect`, `status`, `ensure_ready`,
+   `recommendation`, and provider metadata, with a clean "no provider" result.
+2. **Public default is public.** The built-in provider registry includes a
+   public default provider adapter (tokensave if it proves public/portable
+   enough, otherwise the best public alternative) and never requires Scout for
+   public jig behavior.
+3. **Opt-in state is explicit.** A project-local setting records whether
+   auto-attach is allowed, which provider/profile is preferred, which overlays
+   are allowed, and whether per-worktree indexing is allowed. Missing state
+   defaults to the public profile with no automatic attach.
+4. **Internal overlay boundary exists.** Scout support is loaded through an
+   overlay registration path and is unavailable to public-default scaffolds
+   unless the project/environment explicitly enables the internal overlay.
+5. **No silent heavyweight setup.** When the selected provider is absent, not
+   configured, or not opted in, the helper never installs anything, never
+   downloads models, and never attaches the repo. It returns a compact
+   recommendation only when useful.
+6. **Opted-in readiness is idempotent and bounded.** When opted in, the helper
+   makes a best-effort status/readiness call for the canonical repository root,
+   uses explicit attach/index or daemon/index start only as a fallback, and
+   times out/fails open.
+7. **Worktree policy is enforced.** Temporary worktrees are not automatically
    attached unless the opt-in state explicitly allows per-worktree indexing;
    the returned status names which root was considered canonical.
-6. **Telemetry is content-free.** Each activation attempt records provider,
-   action (`detect`, `recommend`, `attach`, `fallback`), outcome, repo-root
-   class (canonical/worktree/unknown), and timestamp, but never file contents,
-   search queries, diffs, or command output.
+8. **Telemetry is content-free.** Each activation attempt records provider,
+   provider profile (public/internal-overlay), action (`detect`, `recommend`,
+   `ready`, `attach`, `fallback`), outcome, repo-root class
+   (canonical/worktree/unknown), and timestamp, but never file contents, search
+   queries, diffs, or command output.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Unit tests cover no-provider, provider-present/no-opt-in, opted-in
-      already-attached, opted-in attach-needed, daemon fallback, timeout,
-      worktree-suppressed, and telemetry write-failure fail-open cases.
+- [ ] Unit tests cover no-provider, public-provider-present/no-opt-in,
+      opted-in already-ready, opted-in readiness-needed, daemon/index fallback,
+      timeout, worktree-suppressed, Scout-overlay-disabled,
+      Scout-overlay-enabled, and telemetry write-failure fail-open cases.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
@@ -66,8 +81,9 @@ content-free telemetry.
       becomes the only shipped slice in the spec.
 
 **Anti-horizontal-phasing check:** After this slice, a host adapter has a real
-callable semantic-index activation primitive and a project can opt in without
-knowing provider-specific commands.
+callable semantic-index activation primitive, public projects can opt into a
+public provider without knowing provider-specific commands, and internal repos
+can add Scout without changing public defaults.
 
 ### Deviation log (after reconciliation)
 
