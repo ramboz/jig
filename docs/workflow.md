@@ -61,15 +61,19 @@ still `IN_PROGRESS`, naming the holder. The claim is **local by default**;
 `REVIEWED` and on any back-transition; `--release --reason "<why>"`
 force-clears a stale claim and logs it to the slice's `## Release log`.
 
-**Worktree baseline (suggestion).** Reservations from `workflow.py new` and
-`--push` slice claims land on `origin/main` but don't advance your local
-`main`, so a worktree forked from a stale local `main` silently misses
-already-shipped work. If you work in worktrees, set `worktree.baseRef:
-"fresh"` in `~/.claude/settings.json` so Claude Code forks each one from
-`origin/HEAD` (the remote tip your own pushes keep current) rather than local
-`main`. Mechanism, verification, and fallback:
-[memory/learnings.md](memory/learnings.md) → "Worktrees fork off stale local
-`main`".
+**Worktree baseline and post-land sync.** Reservations from `workflow.py new`
+and `--push` slice claims land on `origin/main`; that remote ref remains the
+authority for reservation and landing correctness. `slice-land execute --mode
+direct` performs the final local housekeeping step after a successful
+authoritative push: it fast-forwards the canonical local worktree checked out
+at `refs/heads/main` to `origin/main`, or prints `local main sync skipped:
+<reason>` when that worktree is missing, dirty, locked, diverged, or otherwise
+unavailable. PR-shaped landings report local sync as pending until the PR
+merges. For worktree-heavy sessions, `worktree.baseRef: "fresh"` in
+`~/.claude/settings.json` still keeps new Claude Code worktrees forked from
+`origin/HEAD` rather than any stale local `main`. Mechanism, verification, and
+fallback: [memory/learnings.md](memory/learnings.md) → "Worktrees fork off
+stale local `main`".
 
 ## SPIDR splitting
 

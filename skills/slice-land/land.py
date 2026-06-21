@@ -31,11 +31,13 @@ prepare: does NOT mutate git state. Mode-specific next-steps appear as
   when `.servo/` is present in the target — filesystem-probed only (no
   subprocess), opt-out via `.jig/no-servo-hint`; it never alters the exit code.
 
-execute --mode direct: DOES mutate git state. Runs `git checkout main`,
-  `git merge <branch> --ff-only`, `git push origin main`. Guards: refuses if
-  current branch is main/master; refuses if main has diverged (FF not possible).
-  `git worktree remove` is never executed — always printed as a suggestion.
-  Use `--dry-run` to print the commands without running them.
+execute --mode direct: DOES mutate git state. Runs
+  `git push origin <branch>:main` from the current worktree, then fetches /
+  fast-forwards the canonical local `main` worktree to `origin/main` or
+  reports why local sync was skipped. Guards: refuses if current branch is
+  main/master; refuses if main has diverged (FF not possible). `git worktree
+  remove` is never executed — always printed as a suggestion. Use `--dry-run`
+  to print the commands without running them.
 
 execute --mode pr: DOES mutate remote state. Runs `git push -u origin
   <branch>` then `gh pr create --title <title> --body-file <path>`. Guards:
@@ -385,11 +387,13 @@ def render_next_steps_direct(branch: str, worktree: str) -> str:
     """Direct-mode (merge to main) git commands."""
     return (
         "## Next steps (mode: direct)\n\n"
-        "Run these from the project root (NOT inside this worktree):\n\n"
+        "Run via `execute --mode direct` so `origin/main` is updated from "
+        "this branch, then the canonical local `main` worktree is "
+        "fast-forwarded as housekeeping when it is available and clean:\n\n"
         "```\n"
-        "git checkout main\n"
-        f"git merge {branch} --ff-only\n"
-        "git push origin main\n"
+        f"git push origin {branch}:main\n"
+        "git fetch origin main\n"
+        "git merge --ff-only origin/main\n"
         f"git worktree remove {worktree}  # optional, after the merge lands\n"
         "```\n"
     )
@@ -619,40 +623,91 @@ def prepare(spec_path: Path, slice_fragment: str,
 
 
 _PROTECTED_BRANCHES = {"main", "master"}
+_MAIN_WORKTREE_SKIP_REASON = None
 
 
-def _detect_main_worktree_root() -> Path:
-    """Return the root of the primary (main) worktree.
+def _detect_main_worktree_root() -> Path | None:
+    """Return the worktree root that has `refs/heads/main` checked out."""
+    global _MAIN_WORKTREE_SKIP_REASON
+    root, _reason = _detect_main_worktree_root_with_skip_reason()
+    _MAIN_WORKTREE_SKIP_REASON = _reason
+    return root
 
-    In a linked worktree, `git rev-parse --git-common-dir` returns the
-    absolute path to the main `.git` directory, whose parent is the main
-    worktree root.  In the main worktree itself, it returns the relative
-    path `.git`.
+
+def _detect_main_worktree_root_with_skip_reason() -> tuple:
+    """Return (main_root, skip_reason) for the canonical main worktree.
+
+    `skip_reason` is populated when a main worktree exists but must not be
+    mutated, such as when Git marks it locked.
     """
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
+            ["git", "worktree", "list", "--porcelain"],
             capture_output=True, text=True,
         )
     except FileNotFoundError:
-        return Path.cwd()
-    if result.returncode != 0:
-        return Path.cwd()
-    common = result.stdout.strip()
-    if common == ".git":
-        return Path.cwd()
-    return Path(common).resolve().parent
+        return None, "git not found on PATH"
+    if result.returncode == 0:
+        current_worktree = None
+        current_branch = None
+        current_locked = None
+
+        def flush_current():
+            if current_worktree is None or current_branch != "refs/heads/main":
+                return None
+            if current_locked is not None:
+                reason = current_locked or "locked"
+                return None, f"locked worktree at {current_worktree}: {reason}"
+            return current_worktree, ""
+
+        for line in result.stdout.splitlines() + [""]:
+            if line == "":
+                match = flush_current()
+                if match is not None:
+                    return match
+                current_worktree = None
+                current_branch = None
+                current_locked = None
+                continue
+            if line.startswith("worktree "):
+                match = flush_current()
+                if match is not None:
+                    return match
+                current_worktree = Path(line.removeprefix("worktree ")).resolve()
+                current_branch = None
+                current_locked = None
+            elif line.startswith("branch "):
+                current_branch = line.removeprefix("branch ")
+            elif line == "locked":
+                current_locked = "locked"
+            elif line.startswith("locked "):
+                current_locked = line.removeprefix("locked ")
+        return None, ("no local worktree checked out at refs/heads/main")
+
+    # Fallback for very old Git versions without porcelain worktree output.
+    # Preserve the pre-081 behavior only when the current checkout is already
+    # main; never switch the caller's worktree.
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        return None, "git not found on PATH"
+    if result.returncode == 0 and result.stdout.strip() == "main":
+        return Path.cwd(), ""
+    return None, "no local worktree checked out at refs/heads/main"
 
 
 def _check_ff_viable(branch: str) -> tuple:
     """Returns (ok: bool, message: str).
 
-    Verifies that a --ff-only merge of `branch` into the team-wide
-    `main` (i.e. `origin/main`) will succeed.
+    Verifies that updating the team-wide `main` (i.e. `origin/main`) to
+    `branch` can succeed as a fast-forward.
 
     Spec 037-01: this helper reads `origin/main` rather than the
     local `main` ref, because the local ref may be stale relative
-    to what the eventual `git push origin main` will be checked
+    to what the eventual `git push origin <branch>:main` will be checked
     against. The previous version compared against local `main`
     and let a stale local-tree user merge into a `main` that the
     remote had since moved past, producing a non-FF push that left
@@ -782,6 +837,53 @@ def _run_gh_cmd(args: list, cwd: Path, dry_run: bool) -> tuple:
     return result.returncode == 0, output
 
 
+def _sync_local_main_worktree(root: Path | None,
+                              missing_reason: str | None = None) -> str:
+    """Fast-forward local main after origin/main has been updated.
+
+    Returns a one-line status.  Failures are deliberately reported as
+    `local main sync skipped: ...` so a successful authoritative push remains
+    successful while the local housekeeping problem is visible.
+    """
+    if root is None:
+        reason = missing_reason or (
+            "no local worktree checked out at refs/heads/main"
+        )
+        return f"local main sync skipped: {reason}"
+
+    ok, output = _run_git_cmd(["status", "--porcelain"], root, dry_run=False)
+    if not ok:
+        reason = output or "status check failed"
+        return f"local main sync skipped: {reason}"
+    if output.strip():
+        return f"local main sync skipped: dirty worktree at {root}"
+
+    ok, output = _run_git_cmd(["fetch", "origin", "main"], root, dry_run=False)
+    if not ok:
+        reason = output or "git fetch origin main failed"
+        return f"local main sync skipped: {reason}"
+
+    ok, output = _run_git_cmd(
+        ["merge-base", "--is-ancestor", "HEAD", "origin/main"],
+        root, dry_run=False,
+    )
+    if not ok:
+        reason = output or "local main diverged from origin/main"
+        return f"local main sync skipped: {reason}"
+
+    ok, output = _run_git_cmd(
+        ["merge", "--ff-only", "origin/main"], root, dry_run=False,
+    )
+    if not ok:
+        reason = output or "fast-forward failed"
+        return f"local main sync skipped: {reason}"
+
+    ok, output = _run_git_cmd(["rev-parse", "--short", "HEAD"],
+                              root, dry_run=False)
+    commit = output.strip() if ok and output.strip() else "current HEAD"
+    return f"local main synced: {root} @ {commit}"
+
+
 def _check_gh_available() -> tuple:
     """Slice 007-03 — verify the `gh` CLI is on PATH.  Returns (ok, msg)."""
     if shutil.which("gh") is None:
@@ -862,9 +964,12 @@ def execute(spec_path: Path, slice_fragment: str,
 
 
 def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
-    """Direct-mode merge sequence: checkout main, merge --ff-only, push."""
+    """Direct-mode landing: push feature branch to origin/main, then sync."""
+    global _MAIN_WORKTREE_SKIP_REASON
     worktree = _detect_worktree_path()
+    _MAIN_WORKTREE_SKIP_REASON = None
     root = _detect_main_worktree_root()
+    root_skip_reason = _MAIN_WORKTREE_SKIP_REASON
 
     if not dry_run:
         ff_ok, ff_msg = _check_ff_viable(branch)
@@ -874,9 +979,8 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
             return "\n".join(parts) + "\n", 1
 
     git_steps = [
-        (["checkout", "main"], "git checkout main"),
-        (["merge", branch, "--ff-only"], f"git merge {branch} --ff-only"),
-        (["push", "origin", "main"], "git push origin main"),
+        (["push", "origin", f"{branch}:main"],
+         f"git push origin {branch}:main"),
     ]
 
     if dry_run:
@@ -884,13 +988,17 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
         lines.append("```")
         for args, _ in git_steps:
             lines.append("git " + " ".join(args))
+        lines.append("git fetch origin main")
+        lines.append("git merge --ff-only origin/main")
         lines.append(f"# suggestion (not run): git worktree remove {worktree}")
         lines.append("```")
         parts.extend(lines)
         parts.append("")
         parts.append(
             f"## Post-landing\n\n"
-            f"After the merge, optionally clean up the worktree:\n\n"
+            f"After the landing push, local `main` is fast-forwarded to "
+            f"`origin/main` when a clean canonical main worktree exists. "
+            f"Optionally clean up the worktree:\n\n"
             f"```\ngit worktree remove {worktree}\n```\n"
         )
         return "\n".join(parts) + "\n", 0
@@ -900,7 +1008,7 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
     failed = False
     for args, label in git_steps:
         log_lines.append(f"**{label}**")
-        ok, output = _run_git_cmd(args, root, dry_run=False)
+        ok, output = _run_git_cmd(args, Path.cwd(), dry_run=False)
         if output:
             log_lines.append(f"```\n{output}\n```")
         if not ok:
@@ -908,30 +1016,16 @@ def _execute_direct(parts: list, branch: str, dry_run: bool) -> tuple:
             parts.append("")
             parts.append(f"## Error\n\n`{label}` failed. See output above.\n")
             failed = True
-            # Spec 037-01 AC #6: when the push step is the failing
-            # one, the user is now on a half-merged local main with
-            # no automatic rollback. Append a recovery paragraph
-            # rather than performing destructive cleanup (Q1: print +
-            # refuse; destructive helpers should not silently reset).
-            if args and args[0] == "push":
-                parts.append(
-                    "Local `main` now carries the merge commit but "
-                    "it could not be pushed. Inspect the rejection "
-                    "with `git push origin main`; if the remote "
-                    "moved, run `git fetch origin main` then "
-                    "`git reset --hard origin/main` to drop the "
-                    "local merge, then re-run `land.py execute` "
-                    "after rebasing your feature branch on the new "
-                    "origin.\n"
-                )
             break
         log_lines.append("")
 
     if not failed:
         parts.extend(log_lines)
+        sync_status = _sync_local_main_worktree(root, root_skip_reason)
         parts.append(
             f"## Post-landing\n\n"
-            f"Merge complete. Optionally clean up the worktree:\n\n"
+            f"Merge complete. {sync_status}.\n\n"
+            f"Optionally clean up the worktree:\n\n"
             f"```\ngit worktree remove {worktree}\n```\n"
         )
 
@@ -1041,7 +1135,7 @@ def _execute_pr(parts: list, spec_path: Path, slice_fragment: str,
     parts.append(
         f"## Post-landing\n\n"
         f"PR opened.  After review approval, merge via the GitHub UI or "
-        f"`gh pr merge {branch}`.\n"
+        f"`gh pr merge {branch}`. local main sync pending on PR merge.\n"
     )
     return "\n".join(parts) + "\n", 0
 

@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-06-20
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -55,15 +55,15 @@ why the local sync was skipped.
    and invocation from a non-main worktree.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 
 ### Close-out (post-DONE)
@@ -94,5 +94,31 @@ could not be updated.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+1. **Direct mode no longer runs `git checkout main`.** The implementation
+   changed the direct execute path to run `git push origin <branch>:main`
+   from the caller worktree after the fast-forward guard passes, leaving the
+   caller's feature/detached worktree untouched. The canonical local
+   worktree checked out at `refs/heads/main` is used only for post-push sync
+   housekeeping; if it is missing, the already-successful landing remains
+   successful and reports `local main sync skipped: no local worktree checked
+   out at refs/heads/main`.
+2. **Post-push local sync is explicit housekeeping.** After a successful
+   direct push, `land.py` checks that the local main worktree exists, is not
+   locked by `git worktree list --porcelain`, and is clean; then it fetches
+   `origin main`, verifies fast-forward ancestry, runs
+   `git merge --ff-only origin/main`, and reports either
+   `local main synced: <path> @ <commit>` or
+   `local main sync skipped: <reason>`. A skipped sync does not change the
+   already-successful authoritative push result.
+3. **PR mode reports pending sync.** `execute --mode pr` now states that
+   local main sync is pending on PR merge; it does not claim local `main`
+   moved before `origin/main` changes.
+4. **Docs and guidance updated.** `docs/workflow.md`,
+   `skills/slice-land/SKILL.md`, and `prepare --mode direct` guidance now
+   describe the origin-authority invariant and the post-land local-main sync
+   step.
+5. **Verification.** Added `LocalMainSyncTests` plus updated direct-mode
+   sequence expectations. Focused verification:
+   `python3 -m unittest test_land` from `skills/slice-land` passed
+   (120 tests, 1 skipped). Full verification:
+   `python3 .../skills/tdd-loop/tdd.py run .` passed (2746 tests, 3 skipped).

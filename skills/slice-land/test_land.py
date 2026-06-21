@@ -119,6 +119,11 @@ class PrepareReportTests(unittest.TestCase):
     def tearDown(self):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
+        for p in Path(tempfile.gettempdir()).glob("jig-slice-*-pr-body.md"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
 
     def _all_green_spec(self):
         self.spec.write_text(_spec_with_slice("007-01 — land-prepare", "DONE"))
@@ -349,8 +354,8 @@ class ModeTests(unittest.TestCase):
                          f"stderr: {result.stderr}\nstdout: {result.stdout}")
         self.assertNotIn("Next steps", result.stdout)
 
-    def test_mode_direct_emits_four_git_commands(self):
-        """--mode direct → Next steps has the four-line git workflow."""
+    def test_mode_direct_emits_remote_push_and_local_sync_commands(self):
+        """--mode direct → Next steps names remote push + local sync."""
         result = run_land("prepare", str(self.spec), "007-01",
                           "--mode", "direct",
                           cwd=Path(self.tmpdir))
@@ -358,9 +363,10 @@ class ModeTests(unittest.TestCase):
                          f"stderr: {result.stderr}\nstdout: {result.stdout}")
         out = result.stdout
         self.assertIn("Next steps", out)
-        self.assertIn("git checkout main", out)
-        self.assertIn("git merge", out)
-        self.assertIn("git push origin main", out)
+        self.assertRegex(out, r"git push origin \S+:main")
+        self.assertIn("git fetch origin main", out)
+        self.assertIn("git merge --ff-only origin/main", out)
+        self.assertIn("canonical local `main` worktree", out)
         # worktree-remove is suggested (even if as a comment)
         self.assertIn("git worktree remove", out)
 
@@ -380,15 +386,15 @@ class ModeTests(unittest.TestCase):
         self.assertIn("-pr-body.md", out)
 
     def test_mode_direct_substitutes_branch(self):
-        """direct-mode merge command names the actual current branch."""
+        """direct-mode push command names the actual current branch."""
         result = run_land("prepare", str(self.spec), "007-01",
                           "--mode", "direct",
                           cwd=Path(self.tmpdir))
         out = result.stdout
         # Branch detection runs against the test cwd which is a tmp dir,
         # NOT a git repo. So branch detection should degrade gracefully
-        # to a placeholder. Either way, the merge command must appear.
-        self.assertRegex(out, r"git merge \S+\s+--ff-only")
+        # to a placeholder. Either way, the push refspec must appear.
+        self.assertRegex(out, r"git push origin \S+:main")
 
 
 # -------------------- PrBodyTests --------------------
@@ -400,6 +406,11 @@ class PrBodyTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-land-pr-")
         self.spec = Path(self.tmpdir) / "spec.md"
+        for p in Path(tempfile.gettempdir()).glob("jig-slice-*-pr-body.md"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
         # No test signals → tdd.py warns (not blocker)
         self.spec.write_text(_spec_with_slice(
             "007-01 — land-prepare", "DONE",
@@ -800,9 +811,8 @@ class ExecuteDryRunTests(unittest.TestCase):
         )
         report, _ = self._dry_run_in_process()
         self.assertIn("Dry-run", report)
-        self.assertIn("git checkout main", report)
-        self.assertIn("git merge", report)
-        self.assertIn("git push origin main", report)
+        self.assertIn("git push origin feature/test:main", report)
+        self.assertIn("git merge --ff-only origin/main", report)
 
     def test_dry_run_does_not_contain_execute_log(self):
         self.spec.write_text(
@@ -853,7 +863,7 @@ class ExecuteDryRunTests(unittest.TestCase):
         # And the dry-run output still prints the would-be commands
         self.assertEqual(code, 0, f"report: {report}")
         self.assertIn("Dry-run", report)
-        self.assertIn("git checkout main", report)
+        self.assertNotIn("git checkout main", report)
 
 
 # -------------------- ExecuteSafetyTests (direct calls + mocking) --------------------
@@ -966,6 +976,218 @@ class ExecuteSuccessTests(unittest.TestCase):
         self.assertIn("worktree remove", report)
 
 
+# -------------------- LocalMainSyncTests (slice 081-01) --------------------
+
+
+class LocalMainSyncTests(unittest.TestCase):
+    """Slice 081-01 — direct landing syncs or reports local main state."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-local-main-sync-")
+        self.main_root = Path(self.tmpdir) / "main"
+        self.main_root.mkdir()
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("081-01 — test", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_direct_success_confirms_local_main_sync(self):
+        from unittest.mock import patch
+
+        calls = []
+        caller_root = Path(self.tmpdir) / "feature"
+
+        def fake_git(args, cwd, dry_run=False):
+            calls.append((list(args), Path(cwd)))
+            if args[:2] == ["status", "--porcelain"]:
+                return True, ""
+            if args[:3] == ["rev-parse", "--short", "HEAD"]:
+                return True, "abc1234"
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=self.main_root), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=caller_root), \
+             patch.object(_land.Path, "cwd", return_value=caller_root), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git):
+            report, code = _land.execute(self.spec, "081-01",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main synced", report)
+        self.assertIn(str(self.main_root), report)
+        self.assertIn("abc1234", report)
+        self.assertNotIn(["checkout", "main"], [args for args, _cwd in calls])
+        self.assertTrue(calls, "expected git calls")
+        self.assertIn((["push", "origin", "feat/081:main"], caller_root), calls)
+        sync_calls = [(args, cwd) for args, cwd in calls if args[0] != "push"]
+        self.assertTrue(all(cwd == self.main_root for _args, cwd in sync_calls),
+                        f"local-main sync calls must run in main worktree: {calls}")
+
+    def test_dirty_local_main_reports_skipped_without_failing_landing(self):
+        from unittest.mock import patch
+
+        calls = []
+        caller_root = Path(self.tmpdir) / "feature"
+
+        def fake_git(args, cwd, dry_run=False):
+            calls.append((list(args), Path(cwd)))
+            if args[:2] == ["status", "--porcelain"]:
+                return True, " M docs/workflow.md"
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=self.main_root), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=caller_root), \
+             patch.object(_land.Path, "cwd", return_value=caller_root), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git):
+            report, code = _land.execute(self.spec, "081-01",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main sync skipped: dirty worktree", report)
+        self.assertIn((["push", "origin", "feat/081:main"], caller_root), calls)
+        self.assertNotIn((["merge", "--ff-only", "origin/main"], self.main_root),
+                         calls)
+
+    def test_missing_local_main_reports_skipped_without_mutation(self):
+        from unittest.mock import patch
+
+        calls = []
+        caller_root = Path(self.tmpdir) / "feature"
+
+        def fake_git(args, cwd, dry_run=False):
+            calls.append((list(args), Path(cwd)))
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=None), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=caller_root), \
+             patch.object(_land.Path, "cwd", return_value=caller_root), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git):
+            report, code = _land.execute(self.spec, "081-01",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main sync skipped: no local worktree", report)
+        self.assertEqual(calls, [(["push", "origin", "feat/081:main"], caller_root)])
+
+    def test_locked_local_main_reports_skipped_without_syncing(self):
+        from unittest.mock import patch
+
+        calls = []
+        caller_root = Path(self.tmpdir) / "feature"
+
+        def fake_detect_main():
+            _land._MAIN_WORKTREE_SKIP_REASON = (
+                f"locked worktree at {self.main_root}: maintenance"
+            )
+            return None
+
+        def fake_git(args, cwd, dry_run=False):
+            calls.append((list(args), Path(cwd)))
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          side_effect=fake_detect_main), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=caller_root), \
+             patch.object(_land.Path, "cwd", return_value=caller_root), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git):
+            report, code = _land.execute(self.spec, "081-01",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main sync skipped: locked worktree", report)
+        self.assertIn("maintenance", report)
+        self.assertEqual(calls, [(["push", "origin", "feat/081:main"], caller_root)])
+
+    def test_diverged_local_main_reports_skipped_without_syncing(self):
+        from unittest.mock import patch
+
+        calls = []
+        caller_root = Path(self.tmpdir) / "feature"
+
+        def fake_git(args, cwd, dry_run=False):
+            calls.append((list(args), Path(cwd)))
+            if args[:2] == ["status", "--porcelain"]:
+                return True, ""
+            if args[:2] == ["fetch", "origin"]:
+                return True, "ok"
+            if args[:2] == ["merge-base", "--is-ancestor"]:
+                return False, ""
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=self.main_root), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=caller_root), \
+             patch.object(_land.Path, "cwd", return_value=caller_root), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git):
+            report, code = _land.execute(self.spec, "081-01",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main sync skipped: local main diverged", report)
+        self.assertIn((["push", "origin", "feat/081:main"], caller_root), calls)
+        self.assertNotIn((["merge", "--ff-only", "origin/main"], self.main_root),
+                         calls)
+
+    def test_main_worktree_detector_reports_locked_porcelain(self):
+        from unittest.mock import patch
+
+        def fake_subprocess_run(args, *unused_args, **unused_kwargs):
+            self.assertEqual(args, ["git", "worktree", "list", "--porcelain"])
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout=(
+                    f"worktree {self.main_root}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "locked maintenance\n"
+                ),
+                stderr="",
+            )
+
+        with patch.object(_land.subprocess, "run",
+                          side_effect=fake_subprocess_run):
+            root = _land._detect_main_worktree_root()
+
+        self.assertIsNone(root)
+        self.assertIn("locked worktree", _land._MAIN_WORKTREE_SKIP_REASON)
+        self.assertIn("maintenance", _land._MAIN_WORKTREE_SKIP_REASON)
+
+    def test_pr_success_reports_local_main_sync_pending_on_merge(self):
+        from unittest.mock import patch
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_gh_available", return_value=(True, "")), \
+             patch.object(_land, "_check_github_remote", return_value=(True, "")), \
+             patch.object(_land, "_run_git_cmd", return_value=(True, "ok")), \
+             patch.object(_land, "_run_gh_cmd",
+                          return_value=(True, "https://github.com/org/repo/pull/81")):
+            report, code = _land.execute(self.spec, "081-01", mode="pr",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main sync pending on PR merge", report)
+
+
 # -------------------- ExecuteGitFailureTests --------------------
 
 
@@ -981,15 +1203,15 @@ class ExecuteGitFailureTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_merge_failure_exits_one(self):
+    def test_push_failure_exits_one(self):
         from unittest.mock import patch
 
         call_log = []
 
         def fake_git_cmd(args, cwd, dry_run=False):
             call_log.append(args[0])  # record subcommand
-            if args[0] == "merge":
-                return False, "CONFLICT (content): Merge conflict in foo.py"
+            if args[0] == "push":
+                return False, "rejected: fetch first"
             return True, "ok"
 
         with patch.object(_land, "_detect_branch", return_value="feat/test"), \
@@ -1000,29 +1222,28 @@ class ExecuteGitFailureTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("Error", report)
-        # push must NOT have been called after merge failure
-        self.assertNotIn("push", call_log)
+        self.assertEqual(call_log, ["push"])
 
-    def test_checkout_failure_prevents_merge_and_push(self):
+    def test_missing_main_worktree_does_not_block_remote_push(self):
         from unittest.mock import patch
 
         call_log = []
 
         def fake_git_cmd(args, cwd, dry_run=False):
-            call_log.append(args[0])
-            if args[0] == "checkout":
-                return False, "error: pathspec 'main' did not match"
+            call_log.append(list(args))
+            if args[:2] == ["status", "--porcelain"]:
+                return True, ""
             return True, "ok"
 
         with patch.object(_land, "_detect_branch", return_value="feat/test"), \
              patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
-             patch.object(_land, "_detect_main_worktree_root", return_value=Path(self.tmpdir)), \
+             patch.object(_land, "_detect_main_worktree_root", return_value=None), \
              patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
-            _, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
+            report, code = _land.execute(self.spec, "007-02", target=Path(self.tmpdir))
 
-        self.assertEqual(code, 1)
-        self.assertNotIn("merge", call_log)
-        self.assertNotIn("push", call_log)
+        self.assertEqual(code, 0)
+        self.assertIn("local main sync skipped", report)
+        self.assertEqual(call_log, [["push", "origin", "feat/test:main"]])
 
 
 # -------------------- ExecuteWorktreeNeverRunTests --------------------
@@ -1965,10 +2186,8 @@ class ExecuteDirectPushFailureRecoveryTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_push_failure_appends_recovery_hint_no_rollback(self):
-        """AC #6 — push fails → report has 'could not be pushed' AND
-        the `git reset --hard origin/main` hint; no `reset --hard`
-        was actually called."""
+    def test_push_failure_reports_without_recovery_reset_hint(self):
+        """Push failure reports the rejection without local rollback advice."""
         from unittest.mock import patch
 
         call_log = []
@@ -1990,11 +2209,9 @@ class ExecuteDirectPushFailureRecoveryTests(unittest.TestCase):
                                           target=Path(self.tmpdir))
 
         self.assertEqual(code, 1, f"report: {report}")
-        # AC #6(b) — recovery hint substrings
-        self.assertIn("could not be pushed", report)
-        self.assertIn("git reset --hard origin/main", report)
-        # AC #6(a) — no automatic rollback: `reset --hard` was NOT
-        # invoked.
+        self.assertIn("git push origin feat/test:main", report)
+        self.assertIn("failed. See output above", report)
+        self.assertNotIn("git reset --hard origin/main", report)
         for args in call_log:
             self.assertFalse(
                 args[0] == "reset" and "--hard" in args,
@@ -2002,10 +2219,8 @@ class ExecuteDirectPushFailureRecoveryTests(unittest.TestCase):
             )
 
 
-class ExecuteDirectThreeStepSequencePreservedTests(unittest.TestCase):
-    """Spec 037-01 AC #7 — the live git sequence stays at three
-    steps (checkout main → merge --ff-only → push origin main).
-    No new "verify push will succeed" middle step is added."""
+class ExecuteDirectSequenceTests(unittest.TestCase):
+    """Spec 081-01 — direct mode never switches the caller to main."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-exec-")
@@ -2016,12 +2231,14 @@ class ExecuteDirectThreeStepSequencePreservedTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_live_runs_exactly_three_git_steps(self):
+    def test_live_pushes_without_checkout_then_syncs_local_main(self):
         from unittest.mock import patch
         call_log = []
 
         def fake_git_cmd(args, cwd, dry_run=False):
             call_log.append(list(args))
+            if args[:2] == ["status", "--porcelain"]:
+                return True, ""
             return True, "ok"
 
         with patch.object(_land, "_detect_branch", return_value="feat/test"), \
@@ -2031,10 +2248,11 @@ class ExecuteDirectThreeStepSequencePreservedTests(unittest.TestCase):
              patch.object(_land, "_run_git_cmd", side_effect=fake_git_cmd):
             _land.execute(self.spec, "037-01", target=Path(self.tmpdir))
 
-        # Exactly three steps; first arg is the subcommand.
         subcmds = [args[0] for args in call_log]
-        self.assertEqual(subcmds, ["checkout", "merge", "push"],
-                         f"unexpected step sequence: {subcmds}")
+        self.assertNotIn("checkout", subcmds)
+        self.assertEqual(subcmds[:4], ["push", "status", "fetch", "merge-base"],
+                         f"unexpected landing sequence: {subcmds}")
+        self.assertIn("merge", subcmds)
 
 
 class ExecuteDirectDryRunNoFetchTests(unittest.TestCase):
