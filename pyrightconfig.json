@@ -1,0 +1,12 @@
+{
+  // Spec 077-02 baseline: gate jig's helper/runtime code first. Tests use
+  // dynamic import harnesses and are intentionally outside this v1 floor.
+  "include": ["skills", "scripts/run_tests.py"],
+  "extraPaths": ["scripts"],
+  "exclude": [
+    "**/test_*.py",
+    "**/__pycache__"
+  ],
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11"
+}

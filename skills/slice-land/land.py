@@ -482,7 +482,7 @@ def _servo_hint_opted_out(target: Path) -> bool:
     return (target / _SERVO_HINT_OPT_OUT[0] / _SERVO_HINT_OPT_OUT[1]).exists()
 
 
-def _latest_paused_run(target: Path) -> Path:
+def _latest_paused_run(target: Path) -> Path | None:
     """Return the most recently modified `.servo/runs/*/state.json`, or None
     when there are no paused runs. Filesystem-only (glob + stat); no
     subprocess."""
@@ -532,7 +532,7 @@ def render_servo_advisory(target: Path) -> str:
 
 
 def prepare(spec_path: Path, slice_fragment: str,
-            mode: str = None, target: Path = None,
+            mode: str | None = None, target: Path | None = None,
             skip_deviation_log: bool = False) -> tuple:
     """Run all four readiness checks and emit the markdown report.
 
@@ -892,7 +892,7 @@ def _check_gh_available() -> tuple:
     return True, ""
 
 
-def _check_github_remote(cwd: Path = None) -> tuple:
+def _check_github_remote(cwd: Path | None = None) -> tuple:
     """Slice 007-03 — verify that origin points at github.com.
     Substring-matches `github.com` against the origin URL so both HTTPS
     (`https://github.com/...`) and SSH (`git@github.com:...`) forms pass.
@@ -919,7 +919,7 @@ def _check_github_remote(cwd: Path = None) -> tuple:
 
 def execute(spec_path: Path, slice_fragment: str,
             mode: str = "direct",
-            dry_run: bool = False, target: Path = None,
+            dry_run: bool = False, target: Path | None = None,
             skip_deviation_log: bool = False) -> tuple:
     """Run the landing sequence for a ready slice.
 

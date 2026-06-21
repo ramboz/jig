@@ -854,7 +854,7 @@ def _build_jig_hook_entries(plugin: Path) -> dict:
     return out
 
 
-def _merge_permissions_deny(existing_perms: dict) -> dict:
+def _merge_permissions_deny(existing_perms: dict | None) -> dict:
     """Slice 052-03 — merge jig's conservative `permissions.deny` defaults
     into a (possibly pre-existing) `permissions` block.
 
@@ -1281,7 +1281,7 @@ def _ensure_self_defining_convention_block(target: Path) -> None:
 
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
-             overrides: Overrides = None,
+             overrides: Overrides | None = None,
              with_machinery: bool = True) -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
     already-scaffolded directory unless `force=True`. `overrides` carries the

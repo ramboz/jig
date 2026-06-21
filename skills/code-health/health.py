@@ -125,7 +125,7 @@ def _custom_command_file(target: Path):
     return p if p.is_file() else None
 
 
-def _parse_custom_command(cmd_file) -> str:
+def _parse_custom_command(cmd_file) -> Optional[str]:
     """Return the first non-blank, non-comment line from cmd_file, or None.
 
     Identical parsing semantics to tdd.py's `_parse_custom_command`."""
@@ -476,6 +476,8 @@ def _summarize_jscpd_report(report_text: str) -> Optional[str]:
     if not isinstance(total, dict) or "percentage" not in total:
         return None
     pct = total.get("percentage")
+    if pct is None:
+        return None
     try:
         pct_str = f"{float(pct):.1f}%"
     except (TypeError, ValueError):

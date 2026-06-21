@@ -692,7 +692,7 @@ def _validate_dependencies(deps: list, project_dir: Path,
 
 
 def _lookup_slice_status(specs_dir: Path, fragment: str,
-                         current_spec: Path) -> str:
+                         current_spec: Path) -> str | None:
     """Walk every spec under specs_dir (both layouts via iter_slices),
     return the status of the slice whose label contains `fragment`.
     Returns None if not found. A slice can depend on an earlier slice
@@ -976,7 +976,7 @@ def _project_root_for_spec(spec_md: Path) -> Path:
 
 def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                push: bool = False, pr_mode: bool = False,
-               release: bool = False, reason: str = None) -> str:
+               release: bool = False, reason: str | None = None) -> str:
     """Transition the named slice's STATUS to `new_status`. Auto-ticks
     "Implementation review passed" on REVIEWED, and "Reconciliation
     review passed" on RECONCILED (slice 003-04). When the slice has a
@@ -1109,6 +1109,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     #     READY_FOR_IMPLEMENTATION / DRAFT : clear claimed_by (AC4).
     if has_frontmatter:
         if release:
+            if reason is None:
+                raise WorkflowError("--release requires --reason")
             released_from = existing_claim or "(unclaimed)"
             new_section = _clear_slice_frontmatter_field(
                 new_section, CLAIM_FIELD)
@@ -1129,6 +1131,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # refusal leaves the caller's slice file untouched.
         if (new_status == IN_PROGRESS_STATUS and not release
                 and (push or pr_mode)):
+            if claim_identifier is None:
+                raise WorkflowError("cannot reserve a claim without a claim identifier")
             claim_project_dir = _project_root_for_spec(spec_md)
             rel_path = loc.path.resolve().relative_to(
                 claim_project_dir).as_posix()
@@ -1395,7 +1399,7 @@ def _render_claim_suffix(claimed_by: str) -> str:
     return f" ({claim})"
 
 
-def render_status_table(rows: list, notes_map: dict = None) -> str:
+def render_status_table(rows: list, notes_map: dict | None = None) -> str:
     """Build the Markdown table for the status board. `notes_map` carries
     Notes from the prior version of the board, looked up by (spec_dir, label).
     Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), 5-tuple
@@ -1547,7 +1551,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
             f"{len({r[0] for r in rows})} spec(s)")
 
 
-def _resolve_dep_path(dep: str, project_dir: Path) -> Path:
+def _resolve_dep_path(dep: str, project_dir: Path) -> Path | None:
     """Map a dep token to its underlying doc file. Returns None if the
     token shape is unrecognized or no file matches.
 
@@ -2162,7 +2166,7 @@ def _title_case_slug(slug: str) -> str:
 
 
 def _next_spec_number(specs_dir: Path,
-                      project_dir: Path = None,
+                      project_dir: Path | None = None,
                       use_origin: bool = False) -> int:
     """Scan for `NNN-*/` entries; return max(NNN) + 1.
 

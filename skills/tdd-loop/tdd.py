@@ -99,7 +99,7 @@ def _custom_command_file(target: Path):
     return p if p.is_file() else None
 
 
-def _parse_custom_command(cmd_file) -> str:
+def _parse_custom_command(cmd_file) -> str | None:
     """Return the first non-blank, non-comment line from cmd_file, or None."""
     for line in _read_text_safe(cmd_file).splitlines():
         stripped = line.strip()
@@ -177,7 +177,7 @@ def cmd_detect(target: Path) -> int:
     return 0
 
 
-def cmd_run(target: Path, test_path: Path) -> int:
+def cmd_run(target: Path, test_path: Path | None) -> int:
     """`run` subcommand. Auto-detects, subprocess-invokes, streams output,
     normalizes the exit code (0 green / 1 red / 2 env error).
 
