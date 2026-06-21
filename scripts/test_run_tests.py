@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 RUN_TESTS = Path(__file__).resolve().parent / "run_tests.py"
 SPEC = importlib.util.spec_from_file_location("jig_run_tests", RUN_TESTS)
 run_tests = importlib.util.module_from_spec(SPEC)
