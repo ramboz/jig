@@ -431,6 +431,31 @@ RUFF_COMPLEXITY_JSON = (
     '[{"code": "C901", "filename": "a.py", "location": {"row": 5, "column": 1}}]'
 )
 
+# A representative `pyright --outputjson` payload. Pyright reports counts under
+# summary and detailed diagnostics under generalDiagnostics.
+PYRIGHT_JSON_TWO_DIAGNOSTICS = json.dumps({
+    "version": "1.1.400",
+    "time": "1700000000000",
+    "generalDiagnostics": [
+        {
+            "file": "src/a.py",
+            "severity": "error",
+            "message": '"str | None" is not assignable to "str"',
+            "rule": "reportAssignmentType",
+            "range": {"start": {"line": 3, "character": 0}},
+        },
+        {
+            "file": "src/b.py",
+            "severity": "warning",
+            "message": "Type of \"x\" is unknown",
+            "rule": "reportUnknownVariableType",
+            "range": {"start": {"line": 8, "character": 4}},
+        },
+    ],
+    "summary": {"filesAnalyzed": 2, "errorCount": 1, "warningCount": 1,
+                "informationCount": 0, "timeInSec": 0.12},
+})
+
 
 # -------------------- TableExtensibilityTests --------------------
 
@@ -653,6 +678,92 @@ class ComplexityAdvisoryTests(unittest.TestCase):
     def test_complexity_probe_unparseable_reports_nothing(self):
         line = self._h._summarize_complexity_probe(1, "not json at all", "")
         self.assertIsNone(line)
+
+
+# -------------------- PyrightAdvisoryTests --------------------
+
+
+class PyrightAdvisoryTests(unittest.TestCase):
+    """Spec 077-01 — pyright is a Python advisory probe: resolved on PATH or
+    ephemerally, summarized tightly, skipped when absent, and never gating."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        _seed_python(self.target)
+        self._h = _load_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_pyright_resolves_on_path(self):
+        with patch.object(self._h.shutil, "which",
+                          side_effect=lambda n: "/x" if n == "pyright" else None):
+            argv = self._h._resolve_pyright(self.target)
+        self.assertEqual(argv[:2], ["pyright", "--outputjson"])
+        self.assertIn(str(self.target), argv)
+
+    def test_pyright_resolves_via_uvx_then_pipx(self):
+        with patch.object(self._h.shutil, "which",
+                          side_effect=lambda n: "/x" if n == "uvx" else None):
+            self.assertEqual(self._h._resolve_pyright(self.target)[:3],
+                             ["uvx", "pyright", "--outputjson"])
+        with patch.object(self._h.shutil, "which",
+                          side_effect=lambda n: "/x" if n == "pipx" else None):
+            self.assertEqual(self._h._resolve_pyright(self.target)[:4],
+                             ["pipx", "run", "pyright", "--outputjson"])
+
+    def test_pyright_summary_is_tight(self):
+        line = self._h._summarize_pyright_probe(
+            1, PYRIGHT_JSON_TWO_DIAGNOSTICS, "")
+        self.assertIsNotNone(line)
+        self.assertIn("pyright", line.lower())
+        self.assertIn("2", line)
+        self.assertIn("reportAssignmentType", line)
+        self.assertIn("reportUnknownVariableType", line)
+        self.assertNotIn("generalDiagnostics", line)
+
+    def test_pyright_signal_does_not_flip_clean_exit(self):
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            if "pyright" in argv:
+                return MagicMock(returncode=1, stdout=PYRIGHT_JSON_TWO_DIAGNOSTICS,
+                                 stderr="")
+            return MagicMock(returncode=0, stdout="[]", stderr="")
+
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["ruff", "check", "--output-format=json", "."]):
+            with patch.object(self._h.shutil, "which",
+                              side_effect=lambda n: "/x" if n in ("ruff", "pyright") else None):
+                with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                    with patch("sys.stdout") as mock_out:
+                        mock_out.write = lambda s: stdout_buf.append(s)
+                        code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0, "pyright (advisory) must not flip the exit code")
+        out = "".join(stdout_buf)
+        self.assertIn("pyright", out.lower())
+        self.assertIn("reportAssignmentType", out)
+
+    def test_pyright_absent_reports_skipped(self):
+        stdout_buf = []
+
+        def fake_run(argv, *a, **k):
+            return MagicMock(returncode=0, stdout="[]", stderr="")
+
+        with patch.object(self._h, "resolve_lint_command",
+                          return_value=["ruff", "check", "--output-format=json", "."]):
+            with patch.object(self._h.shutil, "which",
+                              side_effect=lambda n: "/x" if n == "ruff" else None):
+                with patch.object(self._h.subprocess, "run", side_effect=fake_run):
+                    with patch("sys.stdout") as mock_out:
+                        mock_out.write = lambda s: stdout_buf.append(s)
+                        code = self._h.cmd_check(self.target)
+        self.assertEqual(code, 0)
+        out = "".join(stdout_buf).lower()
+        self.assertIn("pyright", out)
+        self.assertIn("skipped", out)
+        self.assertIn("no type-checker", out)
 
 
 # -------------------- MixedAndUnknownTests --------------------

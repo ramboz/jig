@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: code-health
 use_cases: []
 ---

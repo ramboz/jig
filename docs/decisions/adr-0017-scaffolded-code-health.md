@@ -78,3 +78,16 @@ This keeps "don't force constraints" as the *default* (Tier 1 adds nothing) whil
 One fork remains open for the implementing spec; the other three were resolved during review (2026-06-04) and folded into the Recommended Decision above:
 
 - **Tier placement and the install contract.** Which tier(s) host Tier-1 (detect-and-drive + review) versus Tier-2 (opt-in scaffold-the-floor), and exactly what `scripts/verify_install.py` / the scaffold contract assert about a code-health install. Deferred — to be settled as the spec is sliced.
+
+## Amendments
+
+### 2026-06-21 — Python type-check advisory probe
+
+Spec 077-01 extends the Tier-1 detect-and-drive capability with a Python
+`pyright` advisory probe. The primary exit contract remains unchanged:
+`health.py` still normalizes only the ecosystem's primary linter
+(`ruff` / `eslint`) to `0` clean / `1` findings / `2` unavailable.
+Pyright resolves on `PATH`, then via `uvx pyright`, then via
+`pipx run pyright`; its diagnostics are summarized into the same tight
+code-health output consumed by the reviewer pass, and absence is reported
+as `pyright: skipped (no type-checker)`.
