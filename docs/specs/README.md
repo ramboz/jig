@@ -244,7 +244,7 @@
 | [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-01 — reader honors frontmatter status | **DONE** |  |
 | [073-adr-status-frontmatter](073-adr-status-frontmatter/spec.md) | 073-02 — writer stamps frontmatter status | **DONE** | ADR-0026: ADR `status:` is canonical in frontmatter. `adr.py` new/accept/supersede stamp it (Proposed/Accepted/old→Superseded) **in the same single atomic write** as the prose `## Status` mutation — no second write pass (the drift vector). Template carries `status: Proposed`. **No backfill**: legacy ADRs (no `status:`, e.g. adr-0026 itself) grandfather via the reader's prose fallback (073-01). |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-01 - phase-mode vocabulary and docs | **DONE** |  |
-| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-02 - session-plan mode hints | RECONCILED |  |
+| [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-02 - session-plan mode hints | **DONE** |  |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | DEFERRED |  |
 | [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-01 — ship spec_lint and fix the runnable reference | **DONE** |  |
 | [075-spec-lint-shipped-reference-leak](075-spec-lint-shipped-reference-leak/spec.md) | 075-02 — normalize remaining shipped references | **DONE** |  |
