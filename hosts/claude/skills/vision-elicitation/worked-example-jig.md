@@ -13,7 +13,8 @@
 > "Identity", "The core problem" instead of "Core problem", "Future
 > scope" instead of an Open questions section, etc. The elicitation
 > skill is **template-driven**: it produces output with the template's
-> 9 H2s, regardless of what the hand-seeded artifact looks like. This
+> 10 H2s (incl. the `## Use cases` breadth section added by slice
+> 068-01), regardless of what the hand-seeded artifact looks like. This
 > worked example shows the template-shaped output and annotates the
 > divergence inline.
 
@@ -243,6 +244,31 @@ Tier 0 + Tier 1 — already shipped as of 2026-05-15.
 groups the prioritized features + tiers + MVP + non-goals under
 one bucket — broader/tighter by design.
 
+### Use cases capture *(conversational loop — slice 068-01)*
+
+After Scope, the skill runs the **conversational capture loop** for the
+`## Use cases` section (a distinct flow from the per-section Q&A — see
+[`worked-example-yarnfinder.md`](worked-example-yarnfinder.md) for the
+fully-annotated capture / normalize / confirm / no-infer walk-through). For
+jig — itself behavior-dense — the user pastes a few behaviors, the skill runs
+one normalize pass, surfaces one no-infer question, and writes only on confirm.
+
+**Skill renders into `## Use cases`** (on confirm):
+
+```markdown
+## Use cases
+
+<!-- elicited: 2026-05-15 / status: filled -->
+
+- UC-1: A developer can scaffold jig into a fresh project
+- UC-2: A developer can author a spec slice through its lifecycle
+- UC-3: A developer can run an independent review pass on a finished slice
+- UC-4: A developer can migrate an existing spec-driven repo onto jig
+```
+
+Each entry carries a stable `UC-N` id (append-only) — a spec then records which
+use case it serves in its `use_cases:` frontmatter (slice 068-02).
+
 ### Section 6 — Repository structure *(feeds architecture.md)*
 
 **Skill asks Q6.1:** *"What's the top-level directory layout?"*
@@ -435,12 +461,13 @@ points to.
 ## Result: rendered docs/product-vision.md
 
 After this elicitation pass, the project's `docs/product-vision.md`
-has 9 H2 sections in the template's order (Identity / Target users /
-Core problem / Competitive landscape / Scope / Stack / Design
-principles & constraints / How new work enters / Open questions),
-each with its marker transitioned from `unfilled` to `filled`. The
-content reflects the user's literal words; the skill did not
-paraphrase or expand.
+has 10 H2 sections in the template's order (Identity / Target users /
+Core problem / Competitive landscape / Scope / Use cases / Stack /
+Design principles & constraints / How new work enters / Open
+questions), each with its marker transitioned from `unfilled` to
+`filled`. The content reflects the user's literal words; the skill
+did not paraphrase or expand. (The `## Use cases` section is filled
+by the conversational capture loop, not the per-section Q&A.)
 
 `docs/architecture.md` has 4 of its elicitation slots filled (Repository
 structure / Tech stack / Module boundaries / Data model) and 0 still

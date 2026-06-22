@@ -17,6 +17,7 @@ Update via `/jig:memory-sync` or when `jig-memory-scan` surfaces an unknown refe
 
 ### Key terms
 - **Context-cost discipline** — the orchestrator's context is the most expensive real estate (re-read every turn); delegate file-heavy reading to a read-only `Explore` / `general-purpose` subagent and keep only the summary. See [docs/workflow.md](docs/workflow.md#context-cost-discipline).
+- **Semantic-index exploration** — for broad architecture, lifecycle, change, or review questions, use the configured public semantic-index provider first when available, then fall back to targeted search/read. See [docs/workflow.md](docs/workflow.md#semantic-index-exploration).
 - (populated as the project grows — see docs/memory/glossary.md for full glossary)
 
 ### Active specs

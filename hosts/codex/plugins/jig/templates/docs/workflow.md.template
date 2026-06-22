@@ -99,6 +99,20 @@ The stocktake reports:
 
 This is a `skill, not a hook` (per slice 001-04 design): it requires judgment about which deferred items are now ripe. Run it manually as part of a reconciliation step, or whenever you want a snapshot.
 
+## Semantic-Index Exploration
+
+For broad architecture, lifecycle, change, or review questions, prefer the
+configured public semantic-index provider first when it is available. One index
+query can replace several speculative search/read turns; fall back to targeted
+search/read when no provider is configured, unavailable, or stale.
+
+Scaffolded Claude sessions run `jig-semantic-index` on `SessionStart`. With
+`.jig/semantic-index.json` `auto_attach: true`, the hook makes a bounded
+best-effort readiness call and records content-free activation telemetry. When
+a public provider is installed but the project has not opted in, Claude gets at
+most one compact suggestion. The hook never installs providers, downloads
+models, or blocks a workflow.
+
 ## Hook Strictness Profiles
 
 jig hooks support three enforcement levels via the `SCAFFOLD_HOOK_PROFILE` env var:

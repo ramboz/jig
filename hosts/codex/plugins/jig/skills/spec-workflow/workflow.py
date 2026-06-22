@@ -29,6 +29,7 @@ from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
     check_deviation_log,
+    check_reconciliation_sweep,
     clear_frontmatter_field,
     frontmatter_flag_truthy,
     parse_frontmatter,
@@ -36,8 +37,16 @@ from _common.parsing import (
 )
 from _common.parsing import iter_slices as _iter_slices_common
 from _common.parsing import load_slice as _load_slice_common
+from _common.review_evidence import evidence_gate_enabled as _evidence_gate_enabled
 from _common.review_evidence import validate_evidence
+from _common.scaffold_state import classify_scaffold_state
+from _common.scaffold_state import precondition_enabled as _scaffold_precondition_enabled
 from _common.team_signal import team_context_drift
+from _common.use_cases import (
+    has_use_cases_section,
+    parse_use_cases,
+    resolve_use_cases,
+)
 
 VALID_STATUSES = (
     "DRAFT",
@@ -297,6 +306,145 @@ def slice_needs_code_health_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("code_health_review", ""))
 
 
+def slice_needs_design_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares
+    `design_review: true` (slice 071-01; mirrors `slice_needs_arch_review`
+    exactly).
+
+    Drives the orchestrator's decision to spawn the on-demand, attest-only
+    design-review pass (a read-only reviewer ATTESTS the external
+    design-fidelity eval's frozen verdict — ADR-0022), and keeps the
+    spawner in lock-step with the evidence gate's reader
+    (`review_evidence._design_review_flag`) via the same shared
+    `frontmatter_flag_truthy` predicate. Defaults to False on any miss (no
+    frontmatter, field absent, non-truthy value) so every existing slice
+    (no flag) is unaffected — the pass is opt-in/gated.
+
+    Layout-aware via `load_slice`; raises WorkflowError on slice lookup
+    failures, like `slice_needs_arch_review`.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("design_review", ""))
+
+
+# ---------- derived frame_review trigger (slice 064-04 / ADR-0020) ----------
+
+# A `## Assumptions` bullet/line that is a placeholder rather than a real
+# assumption — the risk-gated "no unverified load-bearing assumptions" state.
+# Compared case-insensitively against the stripped, markdown-stripped content.
+# `None` is the canonical "no assumptions" marker (spec 064-02 template);
+# `_TBD_` / `_TODO_` are the italic stub placeholders the reservation stub /
+# slice template ship. Anything else (real prose) flips the trigger on.
+_FRAME_ASSUMPTION_PLACEHOLDERS = ("none", "tbd", "todo", "n/a", "na")
+
+_ADR_BASENAME_RE = re.compile(r"^adr-\d", re.IGNORECASE)
+
+
+def _extract_section_body(text: str, heading: str) -> str:
+    """Return the body of a `## <heading>` section — everything from after
+    the heading line up to (but not including) the next `## ` heading (or
+    EOF). Returns "" when the heading is absent. Pure / read-only.
+
+    Used by `derive_frame_review` to read the `## Assumptions` section. A
+    small local reader rather than a shared helper because it has exactly
+    one caller (ADR-0002: extract on the third)."""
+    m = re.search(r"(?m)^##[ \t]+" + re.escape(heading) + r"[ \t]*$", text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    nxt = re.search(r"(?m)^##[ \t]", rest)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def _assumptions_are_real(body: str) -> bool:
+    """True iff the `## Assumptions` section body carries >=1 real (non-
+    placeholder) assumption. Conservative: empty body, or a body whose only
+    meaningful content is a placeholder, returns False.
+
+    A line is a PLACEHOLDER iff (a) it is fully emphasis-wrapped — `_..._` /
+    `*...*` — i.e. the template guidance stub the spec/ADR ships
+    (`_TBD — list load-bearing assumptions ..._`, `- _TODO_`), OR (b) its
+    WHOLE content (ignoring a leading bullet + trailing punctuation) is a bare
+    placeholder token (`None` / `TBD` / `TODO` / `N/A`). Matching the *whole*
+    line — not just the first token — means a real assumption that merely
+    *begins* with a placeholder word ("None of the dates are tz-aware",
+    "TBD-style configs are validated") correctly counts as real (064-04
+    craft-review fix: the first-token heuristic false-negatived these and
+    silently suppressed the trigger — the exact failure 064 guards against)."""
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Strip a leading list-bullet marker.
+        line = re.sub(r"^[-*+]\s+", "", line).strip()
+        if not line:
+            continue
+        # (a) Fully emphasis-wrapped → template guidance stub, not a real
+        #     assumption.
+        if re.fullmatch(r"_.+_", line) or re.fullmatch(r"\*.+\*", line):
+            continue
+        # (b) Whole line is a bare placeholder token (trailing punctuation
+        #     tolerated) → "no assumptions".
+        token = line.strip("_*").strip().rstrip(".:;—- ").lower()
+        if token in _FRAME_ASSUMPTION_PLACEHOLDERS:
+            continue
+        # Anything else is a real, surfaced assumption.
+        return True
+    return False
+
+
+def derive_frame_review(spec_path, slice_fragment: str) -> bool:
+    """Slice 064-04 (AC1/AC2): DERIVE whether `frame_review: true` should be
+    set for a target — the mechanical, side-effect-free rule that makes the
+    adversarial frame-critique pass (064-03) auto-trigger exactly when there
+    is an unverified frame to attack. This DERIVES the flag; it does NOT read
+    an existing one (contrast `slice_needs_arch_review`, which reads).
+
+    The rule (ADR-0020 Option B §3 + Amendments OQ3, 2026-06-07):
+      - **ADR target** — the path basename matches `adr-*.md` (an ADR under
+        `docs/decisions/`): always-on (`True`). OQ3 resolved ADRs always
+        carry frame-review; encoded here even though the ADR-side accept-gate
+        is slice 064-05.
+      - **else a spec/slice**: `True` iff the **spec's** `## Assumptions`
+        section (in spec.md — where 064-02 places it; the slice template only
+        *points* at it) OR, defensively, the slice's own `## Assumptions`
+        section carries >=1 real (non-placeholder) assumption.
+        This is the mechanical link 064-02 set up: the act of grounding +
+        surfacing assumptions produces the trigger signal. The ADR-0020 rule
+        also names "introduces a new external dependency / asserts external
+        library/API/version/perf behavior" — but per the 064-02 contract
+        those claims LIVE in `## Assumptions`, so the assumptions-non-empty
+        check subsumes them. No fragile NLP external-dependency heuristic.
+      - **else**: `False`.
+
+    Conservative + pure (clarify-style): any parse miss / empty section /
+    placeholder-only body returns False — default-off, so existing specs are
+    unaffected. No file writes, no frontmatter mutation (stdout/return only,
+    like `session_plan`).
+
+    Raises WorkflowError on slice lookup failure for the spec/slice path
+    (mirrors `slice_needs_arch_review`) — the CLI surfaces it as a non-zero
+    exit. ADR targets short-circuit on the path basename before any slice
+    lookup (an ADR file is not a sliced spec)."""
+    p = Path(spec_path)
+    if _ADR_BASENAME_RE.match(p.name):
+        return True
+    # Validate the slice exists (CLI contract: raise on a bad fragment,
+    # mirroring slice_needs_arch_review); keep `loc` for the slice-level
+    # fallback below.
+    loc = load_slice(spec_path, slice_fragment)
+    # PRIMARY signal: the SPEC-level `## Assumptions` (spec 064-02 places it
+    # in spec.md; the slice template only *points* at it). The frame being
+    # critiqued is the spec's, so its load-bearing assumptions are spec-level.
+    spec_text = p.read_text(encoding="utf-8")
+    if _assumptions_are_real(_extract_section_body(spec_text, "Assumptions")):
+        return True
+    # DEFENSIVE fallback: a slice that carries its own `## Assumptions`.
+    section = loc.text[loc.start:loc.end]
+    return _assumptions_are_real(_extract_section_body(section, "Assumptions"))
+
+
 # ---------- session-plan: delegation-first dispatch plan (slice 057-01) ----------
 
 # The standard per-slice phase sequence. Each tuple is
@@ -315,6 +463,9 @@ def slice_needs_code_health_review(spec_path, slice_fragment: str) -> bool:
 # The code-health phase is likewise conditional (emitted iff the slice
 # declares `code_health_review: true` — slice 060-05); it is inserted
 # after the arch phase (or after craft when no arch) and before reconcile.
+# The design-review phase is likewise conditional (emitted iff the slice
+# declares `design_review: true` — slice 071-01); the attest-only pass is
+# inserted after the code-health phase and before reconcile.
 _SESSION_PLAN_PHASES = (
     ("implement", "delegate", "implementer", None),
     ("compliance", "delegate", "reviewer", "jig:independent-review"),
@@ -323,6 +474,16 @@ _SESSION_PLAN_PHASES = (
     ("reconcile", "dispatch", None, "jig:independent-review"),
     ("land", "dispatch", None, "jig:slice-land"),
 )
+
+# Slice 064-04: the conditional PRE-implementation frame-critique phase
+# (ADR-0020 Option B). Emitted as the FIRST phase, BEFORE `implement`, iff
+# the slice declares `frame_review: true` — the adversarial pass gates
+# DRAFT → READY_FOR_REVIEW (pre-implementation), so the orchestrator must
+# dispatch it before building. This closes the spawner/gate dispatch gap the
+# 064-03 arch review flagged (a flagged spec would otherwise hit a gate it
+# was never dispatched to satisfy — the dead-loop ADR-0020 warns against).
+_SESSION_PLAN_FRAME_PHASE = (
+    "frame-critique", "delegate", "reviewer", "jig:independent-review")
 
 _SESSION_PLAN_ARCH_PHASE = ("arch", "delegate", "reviewer", "arch-review")
 
@@ -333,6 +494,14 @@ _SESSION_PLAN_ARCH_AFTER = "craft"
 # the craft block (and after arch, since arch is emitted first).
 _SESSION_PLAN_CODE_HEALTH_PHASE = (
     "code-health", "delegate", "reviewer", "jig:code-health")
+
+# The conditional design-review phase (slice 071-01). The attest-only pass
+# runs via jig:independent-review (a read-only `reviewer` subagent attesting
+# the external design-fidelity eval's frozen verdict — never re-deriving it,
+# the ADR-0022 honesty boundary). Slots in after the code-health phase and
+# before reconcile.
+_SESSION_PLAN_DESIGN_REVIEW_PHASE = (
+    "design-review", "delegate", "reviewer", "jig:independent-review")
 
 
 def _slice_status_from_section(section: str) -> str:
@@ -350,8 +519,17 @@ def _slice_status_from_section(section: str) -> str:
 def session_plan(spec_path: Path) -> str:
     """Slice 057-01: emit a deterministic, delegation-first dispatch plan
     for a spec — each non-DEFERRED slice mapped to its phase sequence
-    (implement → compliance → craft → [arch iff `arch_review: true`] →
-    reconcile → land) with the subagent type + skill for each phase.
+    ([frame-critique iff `frame_review: true`, PRE-implementation] →
+    implement → compliance → craft → [arch iff `arch_review: true`] →
+    [code-health iff `code_health_review: true`] → reconcile → land) with
+    the subagent type + skill for each phase.
+
+    The conditional frame-critique phase (slice 064-04 / ADR-0020) is
+    emitted FIRST, before `implement` — the adversarial pass gates
+    DRAFT → READY_FOR_REVIEW (pre-implementation), so the orchestrator
+    dispatches it before building. This closes the dispatch gap 064-03
+    flagged: a `frame_review: true` slice now surfaces its pass on the
+    dispatch surface the orchestrator follows.
 
     Pure function of the spec's slices + their frontmatter — no hidden
     state, no side effects on spec/slice files (clarify Q1/Q2: helper
@@ -368,7 +546,9 @@ def session_plan(spec_path: Path) -> str:
     # Enumerate slices via the shared dual-layout iterator, excluding
     # DEFERRED. `arch_review` is read per-slice from its frontmatter via
     # the shared truthy predicate (no hand-rolled truthiness).
-    planned = []  # list of (label, needs_arch, needs_code_health)
+    # list of (label, needs_frame, needs_arch, needs_code_health,
+    #          needs_design)
+    planned = []
     total = 0
     for loc in _iter_slices_common(spec_path):
         total += 1
@@ -377,10 +557,14 @@ def session_plan(spec_path: Path) -> str:
         if status == "DEFERRED":
             continue
         fm_fields, _ = _slice_frontmatter(section)
+        needs_frame = frontmatter_flag_truthy(fm_fields.get("frame_review", ""))
         needs_arch = frontmatter_flag_truthy(fm_fields.get("arch_review", ""))
         needs_code_health = frontmatter_flag_truthy(
             fm_fields.get("code_health_review", ""))
-        planned.append((loc.label, needs_arch, needs_code_health))
+        needs_design = frontmatter_flag_truthy(
+            fm_fields.get("design_review", ""))
+        planned.append((loc.label, needs_frame, needs_arch, needs_code_health,
+                        needs_design))
 
     lines = []
     lines.append(f"# Session plan — {spec_path}")
@@ -423,16 +607,27 @@ def session_plan(spec_path: Path) -> str:
             line += f"  {note}"
         return line
 
-    for label, needs_arch, needs_code_health in planned:
+    for label, needs_frame, needs_arch, needs_code_health, needs_design \
+            in planned:
         lines.append(f"## Slice {label}")
         lines.append("")
         step = 1
+        # Slice 064-04: the conditional frame-critique phase is emitted FIRST,
+        # before `implement` — it gates DRAFT → READY_FOR_REVIEW (pre-impl).
+        if needs_frame:
+            fphase, fmode, factor, fskill = _SESSION_PLAN_FRAME_PHASE
+            lines.append(_render_phase(
+                step, fphase, fmode, factor, fskill,
+                note="(slice declares frame_review: true — PRE-implementation, "
+                     "gates READY_FOR_REVIEW)"))
+            step += 1
         for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
             lines.append(_render_phase(step, phase, mode, actor, skill))
             step += 1
             if phase == _SESSION_PLAN_ARCH_AFTER:
-                # arch first (when declared), then code-health — both
-                # conditional, both slotted between craft and reconcile.
+                # arch first (when declared), then code-health, then
+                # design-review — all conditional, all slotted between
+                # craft and reconcile.
                 if needs_arch:
                     aphase, amode, aactor, askill = _SESSION_PLAN_ARCH_PHASE
                     lines.append(_render_phase(
@@ -445,6 +640,14 @@ def session_plan(spec_path: Path) -> str:
                     lines.append(_render_phase(
                         step, cphase, cmode, cactor, cskill,
                         note="(slice declares code_health_review: true)"))
+                    step += 1
+                if needs_design:
+                    dphase, dmode, dactor, dskill = \
+                        _SESSION_PLAN_DESIGN_REVIEW_PHASE
+                    lines.append(_render_phase(
+                        step, dphase, dmode, dactor, dskill,
+                        note="(slice declares design_review: true — "
+                             "attest-only)"))
                     step += 1
         lines.append("")
 
@@ -490,7 +693,7 @@ def _validate_dependencies(deps: list, project_dir: Path,
 
 
 def _lookup_slice_status(specs_dir: Path, fragment: str,
-                         current_spec: Path) -> str:
+                         current_spec: Path) -> str | None:
     """Walk every spec under specs_dir (both layouts via iter_slices),
     return the status of the slice whose label contains `fragment`.
     Returns None if not found. A slice can depend on an earlier slice
@@ -519,54 +722,113 @@ def _lookup_slice_status(specs_dir: Path, fragment: str,
 
 
 def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
-    """Find docs/decisions/adr-<num>-*.md and verify its `## Status`
-    section says Accepted. Returns (ok, reason)."""
+    """Find docs/decisions/adr-<num>-*.md and verify it is Accepted for
+    dependency purposes. Returns (ok, reason).
+
+    Resolution is **frontmatter-first, prose-fallback** (ADR-0026):
+
+      1. If the ADR's frontmatter carries a `status:` field, it is
+         canonical — satisfied iff `status == "Accepted"` (exact,
+         case-sensitive). `Superseded` / `Proposed` / anything else →
+         not satisfied, with a human-readable reason naming the state
+         (and, for `Superseded`, the superseder pulled from the prose
+         `Superseded by` line when present). The prose `^Accepted` scan
+         is NOT consulted in this branch.
+      2. If there is no frontmatter `status:` field (every legacy ADR
+         authored before ADR-0026), fall back to the existing prose
+         `## Status` scan — but treat a `Superseded by` line in that
+         section as NOT accepted even when an `Accepted (date)` line is
+         also present (fixes the prose-only bug on e.g. adr-0002 /
+         adr-0008, where `supersede` leaves the `Accepted` line in
+         place). Only when there is no `Superseded by` line does the
+         `^Accepted` check decide.
+
+    `Superseded`-detection is a minimal inline `Superseded by` line
+    check — NOT a lift of adr.py's `_classify_status`. Per jig's
+    rule-of-three extraction convention (ADR-0002) this reader is only
+    the second place needing prose Superseded-vs-Accepted logic;
+    extraction waits for a third caller.
+    """
     if not decisions_dir.is_dir():
         return False, "docs/decisions/ not found"
     candidates = sorted(decisions_dir.glob(f"adr-{num}-*.md"))
     if not candidates:
         return False, "ADR file not found under docs/decisions/"
+    name = candidates[0].name
     adr_text = candidates[0].read_text()
+
+    # Isolate the prose `## Status` section once (used by both branches:
+    # the frontmatter branch reads the `Superseded by` superseder from it,
+    # the prose branch decides on it).
     sm = re.search(r"(?m)^##\s+Status\s*$", adr_text)
-    if not sm:
-        return False, f"{candidates[0].name} has no '## Status' section"
-    rest = adr_text[sm.end():]
-    nxt = re.search(r"(?m)^##\s", rest)
-    section = rest[: nxt.start()] if nxt else rest
+    if sm:
+        rest = adr_text[sm.end():]
+        nxt = re.search(r"(?m)^##\s", rest)
+        section = rest[: nxt.start()] if nxt else rest
+    else:
+        section = None
+
+    # Pull the superseder (e.g. `ADR-0200`) from a prose `Superseded by`
+    # line when one is present, so the not-satisfied reason can name it.
+    superseder = None
+    if section is not None:
+        sup = re.search(
+            r"(?im)^Superseded\s+by\s+\[(ADR-\d{1,4})\]", section
+        )
+        if sup:
+            superseder = sup.group(1)
+
+    # (1) Frontmatter-first: when `status:` is present, it is canonical.
+    fields, _ = parse_frontmatter(adr_text)
+    if "status" in fields:
+        status = fields["status"]
+        if status == "Accepted":
+            return True, "accepted"
+        if status == "Superseded":
+            if superseder:
+                return False, f"{name} is Superseded by {superseder}"
+            return False, f"{name} is Superseded"
+        return False, f"{name} is {status} (not Accepted)"
+
+    # (2) Prose fallback (legacy ADRs with no frontmatter `status:`).
+    if section is None:
+        return False, f"{name} has no '## Status' section"
+    if superseder:
+        return False, f"{name} is Superseded by {superseder}"
     if re.search(r"(?m)^Accepted\b", section):
         return True, "accepted"
-    return False, f"{candidates[0].name} is not Accepted"
+    return False, f"{name} is not Accepted"
 
 
 # ---------- Slice 045-03: review-evidence transition gate (ADR-0014 §5) ----------
 
 # The states whose transitions are gated on review evidence (ADR-0014 §5).
-# REVIEWED → compliance+craft(+arch); RECONCILED → reconciliation + deviation
-# log; DONE → the full set re-validated (plus the existing dependency check).
-# Every OTHER target — DRAFT / READY_FOR_REVIEW / READY_FOR_IMPLEMENTATION /
-# IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT re-open, and the two review
-# back-edges (REVIEWED→IN_PROGRESS, RECONCILED→IN_PROGRESS) — relaxes or
-# advances status with nothing to gate and is left untouched (AC4).
-_EVIDENCE_GATED_STATES = ("REVIEWED", "RECONCILED", "DONE")
+# READY_FOR_REVIEW → frame-critique (iff `frame_review`); REVIEWED →
+# compliance+craft(+arch); RECONCILED → reconciliation + deviation log +
+# reconciliation sweep;
+# DONE → the REVIEWED + RECONCILED sets re-validated (plus the existing
+# dependency check) — frame-critique is NOT re-validated at DONE (one-time
+# pre-implementation gate). Every OTHER target — DRAFT /
+# READY_FOR_IMPLEMENTATION / IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT
+# re-open, and the two review back-edges (REVIEWED→IN_PROGRESS,
+# RECONCILED→IN_PROGRESS) — relaxes or advances status with nothing to gate
+# and is left untouched (AC4). An unflagged READY_FOR_REVIEW transition is
+# similarly free (empty required set).
+# Slice 064-03 / ADR-0020 added READY_FOR_REVIEW: it gates the
+# pre-implementation frame-critique pass iff the slice declares
+# `frame_review: true` (an unflagged slice yields an empty required set →
+# no gating, so existing specs transition DRAFT → READY_FOR_REVIEW freely).
+# This is the only PRE-implementation evidence gate.
+_EVIDENCE_GATED_STATES = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED", "DONE")
 
-# Falsey tokens that disable the gate via `JIG_REVIEW_EVIDENCE_GATE`. The
-# gate is ON by default; this is the documented bypass for a deliberate
-# actor / automation. Per ADR-0011 (cited by ADR-0014 §6), an in-process
-# gate sits inside the agent's trust boundary — it is a *deliberateness*
-# signal, not human-only enforcement — so an env-var escape hatch is
-# consistent with the model (cf. `JIG_CONVENTIONS_APPROVED`). The
+# The review-evidence gate enable/disable predicate is shared with the
+# ADR-side accept gate (slice 064-05): both read `JIG_REVIEW_EVIDENCE_GATE`
+# identically, so the predicate + its falsey-token set now live in
+# `_common.review_evidence` (single source — see that module's
+# `evidence_gate_enabled`). `_evidence_gate_enabled` is imported above as an
+# alias so the call sites + tests in this module are unchanged. The
 # dependency check on DONE is NOT part of the evidence gate and still runs
 # under the bypass.
-_GATE_DISABLE_VALUES = ("0", "false", "off", "no")
-
-
-def _evidence_gate_enabled() -> bool:
-    """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
-    is set to one of the falsey tokens (case-insensitive)."""
-    raw = os.environ.get("JIG_REVIEW_EVIDENCE_GATE")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in _GATE_DISABLE_VALUES
 
 
 def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
@@ -579,9 +841,9 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
 
     Delegates shape/verdict validation to
     `review_evidence.validate_evidence` (the 045-02 validator — single
-    source of truth) and the deviation-log presence check to the shared
-    `_common.parsing.check_deviation_log` (the 007-01 heading predicate,
-    lifted to `_common` by this slice so `land.py` and the gate share it).
+    source of truth) and the reconciliation heading presence checks to shared
+    `_common.parsing` predicates. The gate only checks subsection shape;
+    reviewers attest content quality.
     """
     if new_status not in _EVIDENCE_GATED_STATES:
         return
@@ -589,14 +851,24 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
         return
 
     diagnostics: list = []
+    # READY_FOR_REVIEW-stage: the adversarial frame-critique pass, required
+    # iff the slice declares `frame_review: true` (slice 064-03 / ADR-0020).
+    # This is a ONE-TIME pre-implementation gate — deliberately NOT added to
+    # the DONE re-validation below (DONE re-runs REVIEWED + RECONCILED only;
+    # the frame is critiqued once, before code exists, not re-litigated at
+    # close). An unflagged slice yields an empty required set → no gating.
+    if new_status == "READY_FOR_REVIEW":
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "READY_FOR_REVIEW")
+        )
     # REVIEWED-stage evidence is required for REVIEWED and re-validated for
     # DONE (ADR-0014 §5: DONE re-runs REVIEWED + RECONCILED).
     if new_status in ("REVIEWED", "DONE"):
         diagnostics.extend(
             validate_evidence(spec_md, slice_fragment, "REVIEWED")
         )
-    # RECONCILED-stage: the reconciliation verdict AND the deviation log,
-    # required for RECONCILED and re-validated for DONE.
+    # RECONCILED-stage: the reconciliation verdict, deviation log, and
+    # reconciliation sweep; required for RECONCILED and re-validated for DONE.
     if new_status in ("RECONCILED", "DONE"):
         diagnostics.extend(
             validate_evidence(spec_md, slice_fragment, "RECONCILED")
@@ -607,6 +879,14 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
                 "`### Deviation log` subsection under the slice heading "
                 "before reconciling (the reconciliation reviewer attests "
                 "its content; the gate only checks presence)"
+            )
+        if not check_reconciliation_sweep(section):
+            diagnostics.append(
+                "[reconciliation] reconciliation sweep missing — add a "
+                "`### Reconciliation sweep` subsection under the slice "
+                "heading before reconciling (the reconciliation reviewer "
+                "judges artifact coverage and disposition quality; the gate "
+                "only checks presence)"
             )
 
     if diagnostics:
@@ -706,7 +986,7 @@ def _project_root_for_spec(spec_md: Path) -> Path:
 
 def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                push: bool = False, pr_mode: bool = False,
-               release: bool = False, reason: str = None) -> str:
+               release: bool = False, reason: str | None = None) -> str:
     """Transition the named slice's STATUS to `new_status`. Auto-ticks
     "Implementation review passed" on REVIEWED, and "Reconciliation
     review passed" on RECONCILED (slice 003-04). When the slice has a
@@ -718,8 +998,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     Slice 045-03: REVIEWED / RECONCILED / DONE are gated on review
     evidence (ADR-0014 §5) — the move is refused unless the required
     verdict artifacts exist and clear (and, for RECONCILED/DONE, the
-    deviation log is present). The gate is ON by default; bypass with
-    `JIG_REVIEW_EVIDENCE_GATE=0`.
+    deviation log and reconciliation sweep are present). The gate is ON
+    by default; bypass with `JIG_REVIEW_EVIDENCE_GATE=0`.
 
     Slice 049-01: → IN_PROGRESS stamps a `claimed_by:` identifier
     (branch name, or `JIG_CLAIM_ID`) and refuses an on-disk foreign
@@ -839,6 +1119,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     #     READY_FOR_IMPLEMENTATION / DRAFT : clear claimed_by (AC4).
     if has_frontmatter:
         if release:
+            if reason is None:
+                raise WorkflowError("--release requires --reason")
             released_from = existing_claim or "(unclaimed)"
             new_section = _clear_slice_frontmatter_field(
                 new_section, CLAIM_FIELD)
@@ -859,6 +1141,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # refusal leaves the caller's slice file untouched.
         if (new_status == IN_PROGRESS_STATUS and not release
                 and (push or pr_mode)):
+            if claim_identifier is None:
+                raise WorkflowError("cannot reserve a claim without a claim identifier")
             claim_project_dir = _project_root_for_spec(spec_md)
             rel_path = loc.path.resolve().relative_to(
                 claim_project_dir).as_posix()
@@ -1125,7 +1409,7 @@ def _render_claim_suffix(claimed_by: str) -> str:
     return f" ({claim})"
 
 
-def render_status_table(rows: list, notes_map: dict = None) -> str:
+def render_status_table(rows: list, notes_map: dict | None = None) -> str:
     """Build the Markdown table for the status board. `notes_map` carries
     Notes from the prior version of the board, looked up by (spec_dir, label).
     Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), 5-tuple
@@ -1277,7 +1561,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
             f"{len({r[0] for r in rows})} spec(s)")
 
 
-def _resolve_dep_path(dep: str, project_dir: Path) -> Path:
+def _resolve_dep_path(dep: str, project_dir: Path) -> Path | None:
     """Map a dep token to its underlying doc file. Returns None if the
     token shape is unrecognized or no file matches.
 
@@ -1683,6 +1967,164 @@ def amendment_digest(project_dir: Path) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+# ---------- Slice 068-03: bidirectional use-case coverage ----------
+#
+# The project-wide BACKSTOP to slice 02's framing-time grow prompt: a
+# DETERMINISTIC set-difference over slice 02's `use_cases:` trace links +
+# stable UC-N ids (no reviewer subagent — ADR-0025 §A4). Surfaced at the
+# reconcile checkpoint, ADVISORY by default (OQ3 / ADR-0011): it warns,
+# never gates RECONCILED / DONE. A fourth read-only project-wide query
+# sibling of `stale` / `routing-stats` / `amendment_digest` — same shape
+# (`--project-dir`, stdout, always exits 0).
+#
+# It lives here, NOT as a `/jig:analyze` extension: `/jig:analyze` is a
+# judgment-only skill with no `.py` helper, and a deterministic
+# set-difference has no home in an LLM-judgment surface. `workflow.py`
+# already hosts the read-only query family, so coverage joins it.
+#
+# Bidirectional (AC1):
+#   - coverage GAP  — a vision use case with no implementing spec.
+#   - scope CREEP   — a spec that cites no (resolvable) parent use case.
+# Plus a subordinate third honesty category: a spec citing a UC id absent
+# from the vision (unresolvable trace link). `resolve_use_cases` already
+# hands these over; dropping them silently would hide a data error.
+#
+# NO-OP STATE (load-bearing): a project whose vision has no `## Use cases`
+# section has not adopted the breadth layer (jig's own repo; opted-out
+# libraries / single-flow CLIs). It must emit a no-op note with ZERO
+# findings and exit 0 — never a finding, never non-zero.
+#
+# Computed from frontmatter `use_cases:` METADATA, not spec prose (AC2).
+
+
+def coverage(project_dir: Path) -> str:
+    """Render the bidirectional use-case coverage report to a string.
+
+    Read-only and ADVISORY (the caller always exits 0; a finding never
+    gates RECONCILED / DONE — ADR-0025 OQ3 / ADR-0011). Reuses slice 02's
+    `parse_use_cases` + `resolve_use_cases` (a deterministic set-difference,
+    not an LLM reviewer pass — AC4).
+
+    Algorithm:
+      1. No `docs/product-vision.md` → advisory 'skipped' note (no crash).
+      2. Vision has no `## Use cases` section → NO-OP note, zero findings.
+         (The breadth layer is not adopted — jig's own repo / opted-out
+         project classes. Load-bearing: must never emit findings.)
+      3. For each `docs/specs/*/spec.md`, read its `use_cases:` frontmatter
+         (a list; a bare or `[]` value means 'no citations'), resolve the
+         cited ids against the vision, and accumulate:
+           - covered ids (for the gap direction),
+           - scope-creep specs (cited nothing),
+           - unresolvable-citation specs (cited a UC absent from the vision).
+      4. Coverage gaps = vision use cases not in the covered set (document
+         order, rendered with id + goal text).
+    """
+    vision = project_dir / "docs" / "product-vision.md"
+    if not vision.is_file():
+        return (
+            "Use-case coverage (advisory, non-blocking) — skipped: "
+            f"{vision.as_posix()} not found. The bidirectional check needs "
+            "a project vision with a `## Use cases` section "
+            "(ADR-0025 / spec 068).\n"
+        )
+
+    vision_text = vision.read_text(encoding="utf-8")
+    if not has_use_cases_section(vision_text):
+        return (
+            "Use-case coverage (advisory, non-blocking) — no-op: the "
+            "use-case breadth layer is not adopted (no `## Use cases` "
+            "section in docs/product-vision.md). Coverage is a no-op here "
+            "(e.g. a library, a single-flow CLI, or jig's own repo). "
+            "ADR-0025 / spec 068-03.\n"
+        )
+
+    vision_ucs = parse_use_cases(vision_text)  # ordered {UC-id: goal}
+
+    covered: set = set()
+    scope_creep: list = []        # spec dirnames citing nothing
+    unresolvable: list = []       # (spec dirname, [bad UC ids])
+
+    specs_dir = project_dir / "docs" / "specs"
+    # Materialize once: the loop and the `n_specs` summary count share this
+    # list (a glob on a missing dir yields [], so no `is_dir()` guard is
+    # needed — n_specs is then 0).
+    spec_paths = sorted(specs_dir.glob("*/spec.md"))
+    for spec_md in spec_paths:
+        fields, _ = parse_frontmatter(spec_md.read_text(encoding="utf-8"))
+        raw = fields.get("use_cases")
+        # A bare `use_cases:` parses to "" and `use_cases: []` to [] — both
+        # mean "no citations". Only a real list carries cited ids.
+        cited = raw if isinstance(raw, list) else []
+        result = resolve_use_cases(cited, vision_text)
+        spec_name = spec_md.parent.name
+        if not cited:
+            scope_creep.append(spec_name)
+        covered.update(result.resolved)
+        if result.unresolvable:
+            unresolvable.append((spec_name, list(result.unresolvable)))
+
+    gaps = [(uc, goal) for uc, goal in vision_ucs.items()
+            if uc not in covered]
+
+    n_specs = len(spec_paths)
+
+    lines = [
+        "# Use-case coverage",
+        "",
+        "**ADVISORY (non-blocking).** A finding here does NOT block "
+        "RECONCILED / DONE (ADR-0025 OQ3 / ADR-0011); it is the "
+        "reconcile-time backstop to slice 02's framing-time grow prompt.",
+        "",
+    ]
+
+    if not gaps and not scope_creep and not unresolvable:
+        lines.append(
+            f"✓ coverage clean — all {len(vision_ucs)} use case(s) have an "
+            f"implementing spec, and all {n_specs} traced spec(s) resolve to "
+            "a stated use case."
+        )
+        return "\n".join(lines) + "\n"
+
+    # Direction 1 — coverage gaps (AC1).
+    lines.append("## Coverage gaps (use case → no implementing spec)")
+    if gaps:
+        for uc, goal in gaps:
+            lines.append(f"- {uc}: {goal}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    # Direction 2 — scope creep (AC1).
+    lines.append("## Scope creep (spec → no parent use case)")
+    if scope_creep:
+        for name in scope_creep:
+            lines.append(f"- docs/specs/{name}/spec.md")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    # Subordinate third category — dangling trace links (honesty; kept
+    # visually below the two headline directions). A spec citing a UC id
+    # absent from the vision: a data error, surfaced not silently dropped.
+    lines.append(
+        "## Unresolvable trace links (spec cites a use case absent from "
+        "the vision)"
+    )
+    if unresolvable:
+        for name, bad_ids in unresolvable:
+            lines.append(f"- docs/specs/{name}/spec.md: {', '.join(bad_ids)}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    lines.append(
+        f"Summary: {len(vision_ucs)} use case(s), {n_specs} spec(s) traced; "
+        f"{len(gaps)} gap(s) / {len(scope_creep)} orphan(s) / "
+        f"{len(unresolvable)} dangling."
+    )
+    return "\n".join(lines) + "\n"
+
+
 # ---------- Slice 003-03: reserve-spec-on-main ----------
 
 # Valid slug shape: starts with lowercase letter; lowercase letters,
@@ -1734,7 +2176,7 @@ def _title_case_slug(slug: str) -> str:
 
 
 def _next_spec_number(specs_dir: Path,
-                      project_dir: Path = None,
+                      project_dir: Path | None = None,
                       use_origin: bool = False) -> int:
     """Scan for `NNN-*/` entries; return max(NNN) + 1.
 
@@ -1883,6 +2325,14 @@ def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
         "---\n"
         "status: DRAFT\n"
         "skill:\n"
+        # Spec 068-02 / ADR-0025 — the use-case trace link. A flow-list of
+        # `UC-N` ids (the vision's `## Use cases` section) this spec serves,
+        # the same `dependencies:`-style shape `parsing.py` already parses.
+        # Seeded EMPTY: soft/advisory (AC4 — never blocks a transition), and
+        # the empty state is exactly what trips the AC5 cite/grow/decline
+        # framing prompt at draft time. Leave `[]` when this spec serves no
+        # captured behavior (infra/refactor) or the layer isn't adopted.
+        "use_cases: []\n"
         "---\n"
         "\n"
         # Spec 065-04 — self-defining vocabulary reminder, emitted into the
@@ -1900,6 +2350,19 @@ def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
         "## Overview\n"
         "\n"
         "_TBD_\n"
+        "\n"
+        # Spec 064-02 / ADR-0020 §1–§2 — risk-gated grounding/assumptions
+        # section. Makes jig's existing informal "Current state (verified …)"
+        # discipline mandatory + derived (064-01 retro): load-bearing factual
+        # claims about runnable surfaces must be probe-backed or marked here.
+        # Slice 064-04 derives the frame_review trigger from what lands here.
+        "## Assumptions\n"
+        "\n"
+        "_TBD — list load-bearing assumptions about runnable surfaces "
+        "(library/API capability, version/perf behavior, behavior of existing "
+        "code); probe-back (run it / cite source) or mark explicitly here. "
+        "Risk-gated: omit (or write \"None\") when there are no unverified "
+        "load-bearing assumptions — do not pad with boilerplate._\n"
         "\n"
         "## Decomposition\n"
         "\n"
@@ -1938,7 +2401,32 @@ def _render_stub_slice(num_str: str, slice_num: str = "01",
             "docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "
             "\"Self-defining vocabulary\". -->\n"
             "\n## Slice {{NUMBER}} — {{NAME}}\n\n"
-            "**Goal:** _TBD_\n"
+            "**Goal:** _TBD_\n\n"
+            "**DoD:**\n"
+            "- [ ] All ACs pass; full test suite green (no regressions).\n"
+            "- [ ] Deviation log produced under this slice heading.\n"
+            "- [ ] Reconciliation sweep produced under this slice heading.\n"
+            "- [ ] Reconciliation review passed.\n"
+            "\n### Deviation log (after reconciliation)\n\n"
+            "_TODO: numbered sections covering deviations from the planned "
+            "shape, reviewer findings folded back in, doc updates, plan "
+            "adherence._\n"
+            "\n### Reconciliation sweep\n\n"
+            "Record the drift-prone surfaces checked during reconciliation. "
+            "The transition gate only requires this subsection to exist; the "
+            "reviewer judges whether coverage and rationales are honest.\n\n"
+            "| Artifact | Disposition | Rationale |\n"
+            "|----------|-------------|-----------|\n"
+            "| `README.md` | `no-op` | _TODO._ |\n"
+            "| `docs/specs/README.md` | `updated` | _TODO._ |\n"
+            "| `docs/product-vision.md` | `no-op` | _TODO._ |\n"
+            "| `docs/architecture.md` | `no-op` | _TODO._ |\n"
+            "| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO._ |\n"
+            "| `docs/inbox.md` | `no-op` | _TODO._ |\n"
+            "| `docs/refinement-todo.md` | `no-op` | _TODO._ |\n"
+            "| `docs/memory/**` | `no-op` | _TODO._ |\n"
+            "| `docs/decisions/README.md` / ADR index | `no-op` | _TODO._ |\n"
+            "| Additional live prose / generated templates | `deferred` | _TODO._ |\n"
         )
     return body.replace("{{NUMBER}}", fragment).replace("{{NAME}}", name)
 
@@ -2399,14 +2887,45 @@ def reserve_spec(slug: str, project_dir: Path,
     # cheapest failure to surface and shouldn't waste git invocations.
     _validate_slug(slug)
 
-    # AC #5 (specs-dir-absent) — the helper only makes sense inside a
-    # scaffolded jig project.
     specs_dir = project_dir / "docs" / "specs"
-    if not specs_dir.is_dir():
-        raise WorkflowError(
-            f"refusing: docs/specs/ not found under {project_dir} "
-            f"(not inside a scaffolded jig project)"
-        )
+
+    # Spec 063-01: scaffold-state PRECONDITION. Replaces the weak, dead-end
+    # `docs/specs/`-presence check with a three-way, scaffold.json-first
+    # classification that ROUTES an unscaffolded project to the right setup
+    # skill instead of refusing into a dead end (ADR-0011 / ADR-0013:
+    # route-don't-block; jig redirects, the user/agent acts — it never runs
+    # scaffold-init / migrate on the user's behalf).
+    #
+    # The bypass (`JIG_SCAFFOLD_PRECONDITION=0|false|off|no`) is a
+    # deliberateness signal, not human-only enforcement: when set it skips
+    # classification and preserves TODAY's behavior, including the legacy
+    # weak `docs/specs/`-absent refusal below.
+    if _scaffold_precondition_enabled():
+        state = classify_scaffold_state(project_dir)
+        if state == "greenfield":
+            raise WorkflowError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: greenfield — no scaffold.json and no "
+                f"spec-driven layout). Run `/jig:scaffold-init` to set jig "
+                f"up here first, then re-run `new`."
+            )
+        if state == "adoptable":
+            raise WorkflowError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: adoptable — a spec-driven layout exists "
+                f"but no scaffold.json). Run `/jig:migrate` to adopt it into "
+                f"jig first, then re-run `new`."
+            )
+        # state == "scaffolded": fall through to the existing reserve flow
+        # unchanged (number computation, stub write, commit, push routing).
+    else:
+        # Bypass active — preserve today's behavior, including the legacy
+        # weak refusal so a deliberate actor sees identical output.
+        if not specs_dir.is_dir():
+            raise WorkflowError(
+                f"refusing: docs/specs/ not found under {project_dir} "
+                f"(not inside a scaffolded jig project)"
+            )
 
     # Worktree-aware routing (prototype): the original flow below REQUIRES
     # being on `main` (it commits on local main, then pushes `origin main`).
@@ -2917,6 +3436,31 @@ def _build_parser() -> argparse.ArgumentParser:
     pch.add_argument("slice",
                      help="slice name or fragment (case-insensitive substring)")
 
+    # Slice 071-01: design-review-pass gating mirror of arch-review-needed.
+    pdr = sub.add_parser(
+        "design-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`design_review: true`; 'false' otherwise (slice 071-01)",
+    )
+    pdr.add_argument("spec", help="path to spec.md")
+    pdr.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
+    # Slice 064-04: DERIVE (not read) whether the frame-critique pass should
+    # fire — the mechanical ADR-0020 trigger (ADRs always-on; specs iff the
+    # `## Assumptions` section carries >=1 real assumption). Mirrors
+    # `arch-review-needed`'s CLI/exit-code shape.
+    pfr = sub.add_parser(
+        "frame-review-needed",
+        help="print 'true' if the frame-critique pass should fire for this "
+             "target (ADR → always; spec/slice → iff `## Assumptions` carries "
+             ">=1 real assumption); 'false' otherwise — DERIVED, not read "
+             "(slice 064-04)",
+    )
+    pfr.add_argument("spec", help="path to spec.md (or an ADR path)")
+    pfr.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
     # Slice 057-01: delegation-first per-slice dispatch plan (stdout-only).
     psp = sub.add_parser(
         "session-plan",
@@ -2936,6 +3480,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pam.add_argument("--project-dir", default=".",
                      help="project root directory (default: cwd)")
+
+    # Slice 068-03: read-only, ADVISORY, project-wide bidirectional
+    # use-case coverage check — a deterministic set-difference over slice
+    # 02's `use_cases:` trace links. Reports coverage gaps (use case → no
+    # spec) and scope creep (spec → no use case). Never gates (exits 0);
+    # no-op when the vision has no `## Use cases` section.
+    pcov = sub.add_parser(
+        "coverage",
+        help="read-only, advisory, project-wide bidirectional use-case "
+             "coverage check: use cases with no implementing spec (gap) + "
+             "specs citing no parent use case (scope creep) (slice 068-03)",
+    )
+    pcov.add_argument("--project-dir", default=".",
+                      help="project root directory (default: cwd)")
     return p
 
 
@@ -2977,10 +3535,21 @@ def main(argv: list) -> int:
         elif ns.command == "code-health-review-needed":
             needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "design-review-needed":
+            needed = slice_needs_design_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "frame-review-needed":
+            needed = derive_frame_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "session-plan":
             sys.stdout.write(session_plan(Path(ns.spec)))
         elif ns.command == "amendments":
             sys.stdout.write(amendment_digest(Path(ns.project_dir)))
+        elif ns.command == "coverage":
+            # Advisory (slice 068-03): always exits 0 — never raise
+            # WorkflowError for a finding. Only a genuine error (e.g. an
+            # unreadable tree) falls through to the generic handler.
+            sys.stdout.write(coverage(Path(ns.project_dir)))
     except StatusBoardRaceError as exc:
         # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
         # Must be caught before the generic `WorkflowError → 2` handler so

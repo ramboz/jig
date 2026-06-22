@@ -29,11 +29,11 @@ and diverge in detail (ephemeral-runner resolution is lint-specific).
 ADR-0002's extract-trigger is the *third* caller — inline mirror until then,
 exactly as tdd.py documents its duplication of scaffold.py.
 
-Scope (slice 060-04): Python (ruff, + advisory C901/PLR09xx complexity) and
-Node (eslint primary, + advisory prettier --check), plus a cross-ecosystem
-advisory **duplication** dimension (native-first → ephemeral `npx jscpd`
-fallback → `skipped (no detector)` line; reported, never gating). The
-dedicated code-health reviewer pass (060-05) is a later slice.
+Scope: Python (ruff, + advisory C901/PLR09xx complexity and pyright type
+findings) and Node (eslint primary, + advisory prettier --check), plus a
+cross-ecosystem advisory **duplication** dimension (native-first → ephemeral
+`npx jscpd` fallback → `skipped (no detector)` line; reported, never
+gating). The dedicated code-health reviewer pass (060-05) judges the summary.
 """
 
 import argparse
@@ -89,6 +89,13 @@ DUPLICATION_SKIP_MSG = (
     "Node (npx jscpd) to enable"
 )
 
+# The advisory pyright skip line (spec 077-01): emitted when a Python project
+# can run its primary linter but no type checker is resolvable.
+PYRIGHT_SKIP_MSG = (
+    "pyright: skipped (no type-checker) — install pyright or run via "
+    "pipx/uvx to enable"
+)
+
 
 # -------------------- shared file idioms (inline-mirror tdd.py) --------------------
 
@@ -118,7 +125,7 @@ def _custom_command_file(target: Path):
     return p if p.is_file() else None
 
 
-def _parse_custom_command(cmd_file) -> str:
+def _parse_custom_command(cmd_file) -> Optional[str]:
     """Return the first non-blank, non-comment line from cmd_file, or None.
 
     Identical parsing semantics to tdd.py's `_parse_custom_command`."""
@@ -221,6 +228,20 @@ def _resolve_prettier(target: Path, workdir: Optional[Path] = None) -> Optional[
         return ["prettier", *args]
     if shutil.which("npx"):
         return ["npx", "prettier", *args]
+    return None
+
+
+def _resolve_pyright(target: Path, workdir: Optional[Path] = None) -> Optional[list]:
+    """Resolve pyright's advisory type-check argv: PATH → uvx → pipx.
+    `workdir` is part of the uniform probe-resolver signature; pyright writes
+    JSON to stdout, so it is unused here."""
+    args = ["--outputjson", str(target)]
+    if shutil.which("pyright"):
+        return ["pyright", *args]
+    if shutil.which("uvx"):
+        return ["uvx", "pyright", *args]
+    if shutil.which("pipx"):
+        return ["pipx", "run", "pyright", *args]
     return None
 
 
@@ -384,6 +405,56 @@ def _summarize_prettier_probe(returncode: int, stdout: str, stderr: str,
     return f"prettier: {n} file(s) need formatting"
 
 
+def _summarize_pyright_probe(returncode: int, stdout: str, stderr: str,
+                             workdir: Optional[Path] = None) -> Optional[str]:
+    """Surface pyright diagnostics as a tight advisory line. Pyright exits
+    non-zero for type findings, but this probe never changes health.py's exit
+    code; it only contributes a count + representative diagnostic rules."""
+    try:
+        report = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
+    if not isinstance(report, dict):
+        return None
+
+    diagnostics = report.get("generalDiagnostics")
+    if not isinstance(diagnostics, list):
+        diagnostics = []
+
+    summary = report.get("summary")
+    count = len(diagnostics)
+    if count == 0 and isinstance(summary, dict):
+        counts = [
+            summary.get("errorCount", 0),
+            summary.get("warningCount", 0),
+            summary.get("informationCount", 0),
+        ]
+        try:
+            count = sum(int(c or 0) for c in counts)
+        except (TypeError, ValueError):
+            count = 0
+
+    if count <= 0:
+        return None
+
+    rules = Counter()
+    for diag in diagnostics:
+        if not isinstance(diag, dict):
+            continue
+        rule = diag.get("rule")
+        if rule:
+            rules[rule] += 1
+            continue
+        severity = diag.get("severity")
+        if severity:
+            rules[severity] += 1
+
+    top = [rule for rule, _ in rules.most_common(TOP_CODES)]
+    if top:
+        return f"pyright: {count} type diagnostic(s); top: {', '.join(top)}"
+    return f"pyright: {count} type diagnostic(s)"
+
+
 def _summarize_jscpd_report(report_text: str) -> Optional[str]:
     """Parse a jscpd JSON report into a tight duplication summary line (AC4):
     a percentage + the top clones as `file:line`. Returns None on missing /
@@ -405,6 +476,8 @@ def _summarize_jscpd_report(report_text: str) -> Optional[str]:
     if not isinstance(total, dict) or "percentage" not in total:
         return None
     pct = total.get("percentage")
+    if pct is None:
+        return None
     try:
         pct_str = f"{float(pct):.1f}%"
     except (TypeError, ValueError):
@@ -488,6 +561,12 @@ ECOSYSTEMS: List[Ecosystem] = [
                 name="complexity",
                 resolve=_resolve_ruff_complexity,
                 summarize=_summarize_complexity_probe,
+            ),
+            AdvisoryProbe(
+                name="pyright",
+                resolve=_resolve_pyright,
+                summarize=_summarize_pyright_probe,
+                skip_summary=PYRIGHT_SKIP_MSG,
             ),
             DUPLICATION_PROBE,
         ],

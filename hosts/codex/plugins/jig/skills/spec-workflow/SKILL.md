@@ -29,6 +29,12 @@ user-invocable: true
 - Surfaces skill-routing observability via `workflow.py routing-stats [--days N]` —
   a read-only histogram of which skills fired (jig baseline vs. richer/"other"
   skill per category) from `.codex/skill-usage.jsonl` (slice 041-02).
+- Surfaces use-case coverage via `workflow.py coverage [--project-dir DIR]` — a
+  read-only, **advisory** (non-blocking), project-wide **bidirectional** check
+  (slice 068-03): a deterministic set-difference over the `use_cases:` trace
+  links that reports use cases with no implementing spec (coverage gap) and
+  specs citing no parent use case (scope creep). No-op when the project has no
+  `## Use cases` section.
 
 ## SPIDR splitting
 
@@ -106,7 +112,44 @@ SKILL.md hand-off is the documented gate.
 
 ### Creating a new spec
 
+0. **Step 0 — confirm the project is scaffolded (spec 063 / ADR-0011).**
+   BEFORE reserving a number or drafting ANY `docs/specs/` or slice
+   structure, confirm this project is a scaffolded jig project. If it
+   isn't, **route — do not hand-roll directories**:
+   - **Greenfield** (no jig structure yet) → tell the user to run
+     `/jig:scaffold-init`. It lays down conventions, templates, hooks, the
+     status board, and a seed reference spec.
+   - **Existing spec/`slices/` layout, but not jig-scaffolded** (no
+     `scaffold.json`) → tell the user to run `/jig:migrate`. It adopts the
+     existing layout into jig structure.
+
+   You don't have to decide the state yourself: `workflow.py new` (step 2)
+   **classifies and routes** for you (spec 063-01) — a `scaffold.json`-bearing
+   project proceeds; a greenfield project is refused naming
+   `/jig:scaffold-init`; an adoptable spec-driven project is refused naming
+   `/jig:migrate`. The deterministic gate and this human-readable
+   precondition agree by construction, so **don't restate the detection
+   heuristic here** — run the helper and let it route. (Bypass for a
+   deliberate out-of-band flow: `JIG_SCAFFOLD_PRECONDITION=0`.)
+
+   **The anti-pattern this step exists to kill:** an auto-triggered
+   `spec-workflow` run improvising a loose `slices/` folder (or any ad-hoc
+   `docs/specs/` skeleton) because `/jig:scaffold-init` was skipped. That
+   produces a non-jig layout that then needs migrating — exactly the
+   reported failure. When in doubt, route to setup first; never invent the
+   structure by hand.
+
 1. Confirm the work needs a spec. Trivial fixes don't.
+1a. **Read the vision `## Use cases` section as framing — before drafting
+   (spec 068-02 / [ADR-0025](../../docs/decisions/adr-0025-use-cases-breadth-layer.md)).**
+   If the project's `docs/product-vision.md` carries a `## Use cases` section
+   (the breadth-layer behaviors captured at init), **read it first** as framing
+   context for this spec — *which captured behavior does this work serve?* The
+   section is the shared frame specs anchor against; reading it before you draft
+   is what keeps behavior-dense projects from each spec inventing its own slice
+   of the world. (If there is **no** `## Use cases` section, the layer isn't
+   adopted for this project — skip this step; nothing here applies.) You record
+   the answer as a trace link in the spec's `use_cases:` frontmatter (step 2a).
 2. **Reserve the next free number on origin/main:**
 
    ```bash
@@ -137,6 +180,50 @@ SKILL.md hand-off is the documented gate.
    (the number is local-view and may collide at merge — treat it as
    provisional); `--pr` to skip the direct-push attempt on
    protection-locked main.
+2a. **Record the use-case trace link — and grow the vision on discovery
+   (spec 068-02 / [ADR-0025](../../docs/decisions/adr-0025-use-cases-breadth-layer.md)).**
+   The stub seeds an empty `use_cases:` frontmatter list. Fill it with the
+   `UC-N` id(s) (from the vision `## Use cases` section, step 1a) this spec
+   serves — the `dependencies:`-style flow-list shape, e.g.
+   `use_cases: [UC-1, UC-3]`. This is the machine-resolvable trace link the
+   reconcile-phase coverage check (slice 03) reads.
+
+   **The discipline is soft — an empty/absent `use_cases:` never blocks a
+   transition (AC4 / [ADR-0011](../../docs/decisions/adr-0011-spec-gate-model.md)).
+   But it is not silent.** The trigger is **mechanical and deterministic** — the
+   `classify_spec` predicate in
+   [`skills/_common/use_cases.py`](../_common/use_cases.py) computes one of
+   `no_section` / `empty` / `resolved` / `unresolvable` for this spec — **not** a
+   voluntary "is this new?" self-report. **Whenever `classify_spec` returns `empty`
+   or `unresolvable`** (the spec cites nothing, or cites a `UC-N` with no match
+   in the vision) at draft/framing, surface a **three-path prompt** — every path
+   is **one step** and **none blocks drafting**:
+
+   - **(a) cite an existing use case** — this spec serves a behavior already in
+     the vision: put its `UC-N` id(s) in `use_cases:`. Done.
+   - **(b) grow the vision** — this spec serves a behavior **not yet captured**:
+     **reuse `vision-elicitation`'s capture loop, seeded with the existing
+     entries** (so the author sees the current set), → normalize → **confirm**,
+     then **write additively** (append, never discard-and-replace) and **assign
+     the next free `UC-N`** (`use_cases.next_use_case_id` allocates `max + 1`;
+     retired numbers are never reused). The **confirm step guards grow quality**
+     so a reachable trigger can't silently bloat the section: **(i)** enforce
+     **goal-level grain** — reject spec-shaped / requirements-level phrasing,
+     re-running slice 01's normalize (`"[actor] can [goal]"`); **(ii)** run a
+     **near-duplicate check** against the seeded existing entries
+     (`use_cases.is_near_duplicate`) — on an apparent match, **route back to
+     path (a)-cite** rather than minting a duplicate. Then record the new id in
+     `use_cases:`.
+   - **(c) decline** — legitimately untraced (infra / refactor / no user-facing
+     behavior) or defer: leave `use_cases: []`. The vision is unchanged, and any
+     resulting gap is slice 03's advisory coverage backstop. No-op.
+
+   **CRITICAL — the no-section no-op.** When `classify_spec` returns `no_section`
+   (the project has **no** `## Use cases` section — the breadth layer is **not
+   adopted**, e.g. jig's own repo), **the prompt is suppressed entirely**:
+   nothing prompts and nothing errors. A project with specs but no use-case
+   layer is wholly unaffected. The trigger fires **only** on `empty` /
+   `unresolvable`, which presuppose the section exists.
 3. Create `docs/specs/NNN-<slug>/{spec.md,plan.md,tasks.md}` with the conventional
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers
@@ -147,7 +234,46 @@ SKILL.md hand-off is the documented gate.
    DoR / AC / DoD / Close-out sections. Set `status: DRAFT` in the
    frontmatter. Legacy slices that use prose `**STATUS: DRAFT**` markers
    still work (lazy migration); no need to rewrite them.
-6. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
+6. **Ground your factual claims (spec 064-02 / ADR-0020 §1–§2).** Any
+   load-bearing factual claim about a *runnable* surface — library/API
+   capability, version/perf behavior, behavior of existing code — must be
+   backed by an **executed probe** (run the command, read the source /
+   `node_modules`) or a citation. Everything you cannot verify goes in the
+   spec stub's risk-gated `## Assumptions` section, marked explicitly — never
+   asserted as fact. This **makes mandatory + derived** the existing informal
+   "Current state (verified …)" discipline that the 064-01 retro found jig
+   already half-practices by hand: it was grounding-by-probe all along, just
+   reliant on author diligence. The `## Assumptions` you surface here has
+   downstream value — slice 064-04 derives the `frame_review` trigger
+   mechanically from it, so honest framing now is what decides later whether
+   the adversarial frame-critique pass fires. The section is risk-gated: write
+   "None" / omit when there are no unverified load-bearing assumptions; don't
+   pad with boilerplate. (For a worked example of marked assumptions plus
+   probe-grounded claims, see [ADR-0020](../../docs/decisions/adr-0020-spec-frame-hardening.md)
+   `## Assumptions` A1–A4 + `## Kill criteria`, and the
+   [spec 064-01 retro](../../docs/specs/064-spec-frame-hardening/retro.md),
+   which probe-verified its three most load-bearing claims before recording
+   them.)
+7. **Let the assumptions decide `frame_review` (spec 064-04 / ADR-0020).**
+   You are **not** asked "is frame-review needed?" — the `## Assumptions` you
+   just surfaced decide it, mechanically. Set the slice's `frame_review` flag
+   from `workflow.py frame-review-needed`:
+
+   ```bash
+   python3 "${PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+     frame-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"
+   ```
+
+   The rule is a derivation, not a judgment call: `true` iff the slice's
+   `## Assumptions` section carries ≥1 real (non-placeholder) assumption —
+   so honest framing in step 6 is exactly what fires (or silences) the
+   adversarial frame-critique pass. An inline-mirror / refactor slice with
+   no unverified assumptions (`## Assumptions` absent or just "None") stays
+   default-off. **ADRs are always-on** (OQ3): any ADR gets `frame_review:
+   true` unconditionally — the deriver returns `true` for any `adr-*.md`
+   path. When the value is `true`, set `frame_review: true` in the slice
+   frontmatter so the gate + `session-plan` dispatch the pass.
+8. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
 
 ### Picking up a slice
 
@@ -171,8 +297,10 @@ SKILL.md hand-off is the documented gate.
    `transition <spec> <slice> READY_FOR_IMPLEMENTATION --release --reason
    "<why>"` (clears `claimed_by:`, logs to the slice's `## Release log`).
 3. Fill in / refresh `plan.md` and `tasks.md` for the slice.
-4. Spawn the `implementer` subagent with the spec path. Implementer writes the
-   deliverable to disk (TDD — failing tests first).
+4. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
+   with `[jig:phase=implementation] [jig:spec=NNN] [jig:slice=NNN-NN]` so
+   `jig-telemetry.sh` can attribute implementation-phase cost. Implementer
+   writes the deliverable to disk (TDD — failing tests first).
 
 ### After implementation
 
@@ -237,6 +365,12 @@ The orchestrator runs the passes in this order:
    authors opt in with `code_health_review: true`. The evidence file is
    `reviews/slice-NN-code-health.md`.
 
+When spawning any reviewer Task above, prefix the Task prompt with telemetry
+tags before the `review.py` body: `[jig:phase=<phase>] [jig:spec=NNN]
+[jig:slice=NNN-NN]`. Use `compliance` for `review.py implementation`,
+`craft` for `pr-review`, `arch` for `arch-review`, `code-health` for
+`code-health`, and `reconciliation` for the final reconciliation review.
+
 **Block rule for the REVIEWED transition.** All required passes
 (compliance + craft, plus arch when `arch_review: true`, plus code-health
 when `code_health_review: true`) must pass before
@@ -265,8 +399,9 @@ when `code_health_review: true`) must pass before
 `compliance` + `craft` (+ `arch` when the slice declares
 `arch_review: true`, + `code-health` when it declares
 `code_health_review: true`); `RECONCILED` requires the `reconciliation` verdict
-**and** a `### Deviation log` subsection; `DONE` re-validates the whole
-set (in addition to the existing `dependencies:` check). A refusal names
+**and** `### Deviation log` plus `### Reconciliation sweep` subsections;
+`DONE` re-validates the post-implementation and reconciliation evidence set
+(in addition to the existing `dependencies:` check). A refusal names
 the missing/invalid artifact and the `record-review` command to produce
 it. The gate enforces *evidence consistency*, not human sign-off (it
 lives in the agent's trust boundary per [ADR-0011](../../docs/decisions/adr-0011-spec-gate-model.md)).
@@ -307,7 +442,8 @@ PROMPT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   "<deliverable-path-1>" ...)
 SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type implementation)
-# … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+# … feed "[jig:phase=compliance] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+# … to Task with subagent_type: $SUBAGENT, wait for pass …
 
 # Craft pass (always)
 PROMPT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
@@ -315,7 +451,8 @@ PROMPT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   "<deliverable-path-1>" ...)
 SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type pr-review)
-# … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+# … feed "[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+# … to Task with subagent_type: $SUBAGENT, wait for pass …
 
 # Arch pass (only when slice frontmatter has `arch_review: true`)
 # IMPORTANT: capture the helper exit code — a non-zero exit means the
@@ -333,7 +470,8 @@ if [ "$NEED_ARCH" = "true" ]; then
     "<deliverable-path-1>" ...)
   SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
     subagent-type arch-review)
-  # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+  # … feed "[jig:phase=arch] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+  # … to Task with subagent_type: $SUBAGENT, wait for pass …
 fi
 
 # Code-health pass (only when slice frontmatter has `code_health_review: true`)
@@ -355,7 +493,8 @@ if [ "$NEED_CH" = "true" ]; then
     "<deliverable-path-1>" ... --summary-file /tmp/health-summary.txt)
   SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
     subagent-type code-health)
-  # … feed $PROMPT to Task with subagent_type: $SUBAGENT, wait for pass …
+  # … feed "[jig:phase=code-health] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
+  # … to Task with subagent_type: $SUBAGENT, wait for pass …
 fi
 ```
 
@@ -368,12 +507,14 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
 1. After the reconciliation review passes, **record its verdict** with
    `review.py record-review … --pass reconciliation`, then
    `transition <spec.md> <slice> RECONCILED`. That move is gated on the
-   recorded `reconciliation` verdict (`pass`) **and** a `### Deviation log`
-   subsection under the slice heading (ADR-0014 §5).
+   recorded `reconciliation` verdict (`pass`) **and** `### Deviation log`
+   plus `### Reconciliation sweep` subsections under the slice heading
+   (ADR-0014 §5 + ADR-0029).
 2. Commit the work.
 3. After commit: `transition <spec.md> <slice> DONE`. `DONE` re-validates
    the whole evidence set — `compliance` + `craft` (+ `arch`,
-   + `code-health`) + `reconciliation` — on top of the existing
+   + `code-health`) + `reconciliation` — plus the deviation log and
+   reconciliation sweep, on top of the existing
    `dependencies:` check.
 4. Regenerate the board: `workflow.py status-board <project-dir>`.
 5. Run `/jig:memory-sync` (or `memory.py`) to consolidate any new learnings.
@@ -459,6 +600,10 @@ status flip is allowed. Each item is a gate.
 - [ ] **Deviation log** — write what changed during implementation and why,
       under a "Deviation log (after reconciliation)" subsection of the slice
       in `spec.md`. Original ACs preserved above; deviations append, not overwrite.
+- [ ] **Reconciliation sweep** — write which drift-prone surfaces were checked,
+      using `updated` / `no-op` / `deferred` dispositions. The transition gate
+      checks the subsection exists; the reconciliation reviewer judges coverage
+      and rationale quality.
 - [ ] **Architecture impact** — did module boundaries or public contracts change?
       If yes, update `docs/architecture.md` AND write an ADR.
 - [ ] **Conventions impact** — did this slice introduce or change a rule worth
@@ -466,12 +611,14 @@ status flip is allowed. Each item is a gate.
       `JIG_CONVENTIONS_APPROVED=1`).
 - [ ] **Inbox triage** — sweep `docs/inbox.md` for items resolved by this slice;
       move them to the relevant memory file or strike them through.
-- [ ] **AGENTS.md hygiene** — if this slice closes the spec (all non-deferred
-      slices DONE), apply the compress-on-close-out rule per the slice
-      template's `### Close-out (post-DONE)` section. AGENTS.md's "Active
-      specs" section should only carry in-flight work; load-bearing
+- [ ] **Primer hygiene** — if this slice closes the spec (all non-deferred
+      slices DONE), apply the spec 025 compress-on-close-out rule per the slice
+      template's `### Close-out (post-DONE)` section. Check every primer surface
+      present in this project: `AGENTS.md`, `AGENTS.md`, and scaffold templates.
+      Active-spec sections should only carry in-flight work; load-bearing
       per-slice invariants migrate to the status board Notes column (which
-      `workflow.py status-board` preserves across regen).
+      `workflow.py status-board` preserves across regen), memory, or the
+      reconciled spec/slice record.
 - [ ] **Memory-sync** — run `/jig:memory-sync` (or invoke `memory.py` directly)
       to persist any new domain terms, dead-end learnings, or tool decisions
       that emerged during implementation. **This is where slice 002-04's
@@ -488,8 +635,17 @@ status flip is allowed. Each item is a gate.
       is the audit trail. New ADR (or superseding spec) only for
       decision-content changes.
 - [ ] **Reconciliation review** — spawn a second reviewer subagent with a
-      reconciliation-review prompt: are the doc changes faithful? Is the
-      deviation log honest? Is scope appropriate (no scope creep in docs)?
+      reconciliation-review prompt prefixed by
+      `[jig:phase=reconciliation] [jig:spec=NNN] [jig:slice=NNN-NN]`: are the
+      doc changes faithful? Is the deviation log honest? Is scope appropriate
+      (no scope creep in docs)?
+- [ ] **Use-case coverage (advisory)** — run `workflow.py coverage
+      [--project-dir DIR]` and review any **coverage gap** (a use case with no
+      implementing spec) or **scope creep** (a spec citing no resolvable use
+      case). **Non-blocking** — unlike the gates above, a finding here does
+      **not** block `RECONCILED` / `DONE` (ADR-0025 OQ3 / ADR-0011); it is the
+      reconcile-time backstop to slice 02's framing-time grow prompt. No-op
+      when the project has no `## Use cases` section.
 - [ ] **Commit** — only after all gates pass.
 
 ### Auditing staleness (`workflow.py stale`)

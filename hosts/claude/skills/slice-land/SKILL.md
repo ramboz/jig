@@ -33,9 +33,12 @@ skill provides a deterministic landing path:
 `prepare` is **read-only on git state** (only `git rev-parse
 --abbrev-ref HEAD` runs, to populate the branch name in the suggested
 commands).  `execute --mode direct` runs the destructive merge sequence
-(slice 007-02); `execute --mode pr` runs the destructive push + PR-open
-sequence (slice 007-03).  `git worktree remove` and `gh pr merge` are
-never executed — both stay user-driven post-landing suggestions.
+by pushing the current branch to `origin/main`, then fast-forwards the
+canonical local `main` worktree to `origin/main` or reports why local sync
+was skipped (slice 007-02 + 081-01); `execute --mode pr` runs the
+destructive push + PR-open sequence
+(slice 007-03).  `git worktree remove` and `gh pr merge` are never
+executed — both stay user-driven post-landing suggestions.
 
 ## How to use
 
@@ -51,7 +54,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" prepare \
   headings. Same lenient match as `workflow.py transition`.
 - `--mode` — optional. Without it, only the readiness check runs.
   - `direct` — for solo / merge-to-main projects. Suggested commands:
-    `git checkout main && git merge <branch> --ff-only && git push`.
+    push the branch to `origin/main`, then fast-forward local `main` to
+    `origin/main` when a clean canonical `main` worktree exists.
   - `pr` — for team / PR-shaped flows. Suggested commands: `git push -u
     origin <branch> && gh pr create --body-file <path>`. A PR body is
     written to `/tmp/jig-slice-<NNN-NN>-pr-body.md` containing the
@@ -60,7 +64,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" prepare \
 ### Run the merge sequence (execute --mode direct)
 
 After `prepare` confirms the slice is ready, `execute --mode direct`
-runs the merge:
+runs the direct landing sequence:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
@@ -69,9 +73,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
 
 - `--dry-run` — print the git commands that would run without executing
   them. Use this for a final sanity check before committing.
-- Without `--dry-run` — runs `git checkout main`, `git merge <branch>
-  --ff-only`, and `git push origin main` in sequence. Stops and reports
-  on the first failure. Never runs `git worktree remove` (printed as a
+- Without `--dry-run` — runs `git push origin <branch>:main` from the
+  current worktree after the fast-forward guard passes, then fetches and
+  fast-forwards the canonical local worktree checked out at
+  `refs/heads/main` to `origin/main` when that worktree exists and is
+  clean. The caller's feature/detached worktree is not switched to `main`.
+  Stops and reports if the authoritative push fails. If the post-push
+  local sync cannot run because `main` is missing, dirty, locked, diverged,
+  or unavailable, the report says
+  `local main sync skipped: <reason>` while preserving the successful
+  authoritative push. Never runs `git worktree remove` (printed as a
   post-landing suggestion only).
 
 **Safety guards** (checked before any git mutation):
@@ -99,6 +110,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
 - Push runs from the **current worktree** (not the main worktree root,
   since the feature branch is checked out here).
 - Never runs `gh pr merge` (printed as a post-landing suggestion only).
+- Local `main` sync is pending until the PR actually merges. PR mode never
+  claims local `main` was updated before `origin/main` moves.
 
 **Safety guards** (checked before any subprocess mutation):
 - Refuses if current branch is `main` or `master`.
@@ -203,11 +216,13 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
 #
 #   ## Next steps (mode: direct)
 #
-#   Run these from the project root (NOT inside this worktree):
+#   Run via `execute --mode direct` so `origin/main` is updated from
+#   this branch, then the canonical local `main` worktree is
+#   fast-forwarded as housekeeping when it is available and clean:
 #
-#       git checkout main
-#       git merge claude/eager-zhukovsky-34ebb0 --ff-only
-#       git push origin main
+#       git push origin claude/eager-zhukovsky-34ebb0:main
+#       git fetch origin main
+#       git merge --ff-only origin/main
 #       git worktree remove .claude/worktrees/eager-zhukovsky-34ebb0
 ```
 
@@ -216,8 +231,10 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
 - **`prepare` is non-destructive; `execute` IS destructive.**
   `prepare` only writes the PR body file (mode=pr); it never runs
   `git checkout`, `git merge`, `git push`, `git worktree remove`, or
-  `gh pr create`.  `execute --mode direct` runs the merge sequence
-  (007-02); `execute --mode pr` runs push + gh pr create (007-03).
+  `gh pr create`.  `execute --mode direct` runs the push/sync sequence
+  as an authoritative push to `origin/main` and reports the post-push local
+  sync result (007-02 / 081-01); `execute --mode pr` runs push + gh pr
+  create (007-03) and reports local sync as pending on merge.
   Use `--dry-run` for a non-destructive preview of either execute mode.
 - **Test-check target = `land.py`'s cwd.** The helper invokes
   `tdd.py run` against the current working directory by default. If

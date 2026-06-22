@@ -139,7 +139,7 @@ The spec author at the time can now:
 This historical snapshot is genuinely valuable for analyze's design:
 the seven staleness incidents that hit spec 017 over its lifetime
 were all variants of these six categories. None of them surfaced as
-"is the syntax valid?" (that's `scripts/spec_lint.py`'s job); all of
+"is the syntax valid?" (that's `spec_lint.py`'s job); all of
 them surfaced as "are these artifacts consistent with each other?"
 (that's analyze's job).
 

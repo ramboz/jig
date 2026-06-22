@@ -544,6 +544,8 @@ def _yaml_quote(s: str) -> str:
 def emit_yaml(applicable, metrics=None, signals=None, reason=None):
     """Render the YAML output. Schema is deliberately language-agnostic
     so a future polyglot extension stays trivial."""
+    metrics = metrics or {}
+    signals = signals or {}
     lines = ["test-quality-snapshot:"]
     lines.append(f"  schema-version: {SCHEMA_VERSION}")
     lines.append(f"  applicable: {'true' if applicable else 'false'}")
@@ -553,7 +555,7 @@ def emit_yaml(applicable, metrics=None, signals=None, reason=None):
 
     lines.append("  signals:")
     for k in ("per-file-flood", "assertion-thin", "mock-heavy"):
-        lines.append(f"    {k}: {'true' if signals[k] else 'false'}")
+        lines.append(f"    {k}: {'true' if signals.get(k, False) else 'false'}")
     lines.append("  metrics:")
     key_order = [
         "new-test-files", "new-code-files", "new-test-loc", "new-code-loc",

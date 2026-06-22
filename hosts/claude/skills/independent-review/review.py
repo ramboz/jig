@@ -42,10 +42,12 @@ Usage:
     python3 review.py reconciliation <spec.md> <slice-fragment>
     python3 review.py pr-review     <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py arch-review   <spec.md> <slice-fragment> <deliverable-path>...
+    python3 review.py design-review <spec.md> <slice-fragment> <deliverable-path>...
+    python3 review.py frame-critique <spec.md> <slice-fragment> <deliverable-path>...
     python3 review.py code-health   <spec.md> <slice-fragment> <deliverable-path>...
                                     [--summary-file PATH]
     python3 review.py subagent-type
-        {implementation|reconciliation|pr-review|arch-review|code-health}
+        {implementation|reconciliation|pr-review|arch-review|design-review|code-health}
 """
 
 from __future__ import annotations
@@ -290,6 +292,30 @@ def _practices_check_block() -> str:
 # project on a different default branch falls back to the graceful
 # `_Test-quality snapshot unavailable: ..._` line.
 _TEST_QUALITY_BASE_BRANCH = "main"
+
+
+def _reconciliation_sweep_check_block() -> str:
+    """UNCONDITIONAL reconciliation-review hint for the sweep manifest.
+
+    The deterministic gate only checks that the `### Reconciliation sweep`
+    subsection exists. This reviewer block judges artifact omissions and
+    disposition quality without turning reconciliation into another
+    implementation pass.
+    """
+    return (
+        "- **Reconciliation sweep check**: read both the Deviation log and "
+        "Reconciliation sweep subsections for this slice.\n"
+        "  1. **Omissions** — is any obvious drift-prone artifact missing "
+        "from the sweep,\n"
+        "     especially front-door docs, primers/templates, inbox,\n"
+        "     refinement todo, memory, ADR index, or generated status board?\n"
+        "  2. **Disposition quality** — is each `updated`, `no-op`, or "
+        "`deferred`\n"
+        "     rationale credible? `deferred` entries should name an owner "
+        "or trigger;\n"
+        "     `no-op` claims should not conflict with touched files or "
+        "landed behavior."
+    )
 
 
 def _test_quality_snapshot_block(spec_path: Path) -> str:
@@ -821,6 +847,239 @@ Tag every SPECIFIC ISSUES entry with one of `[blocker]` / `[nit]` /
 """
 
 
+# -------- frame-critique prompt (slice 064-03 / ADR-0020) --------
+
+
+_FRAME_CRITIQUE_OUTPUT_FORMAT = """\
+## Output (required — do not deviate)
+
+```
+VERDICT: pass | fail | needs-changes
+
+REASONING:
+<2-4 sentences: name the single highest-risk load-bearing assumption and
+ your overall assessment of how exposed the frame is>
+
+SPECIFIC ISSUES:
+- <the load-bearing assumption, stated plainly> — <a concrete, specific
+  argument for why it could be wrong, and what breaks downstream if it is>
+(state ONE primary assumption; add secondary ones only if genuinely
+ load-bearing — do not pad)
+```
+
+Be terse but specific. A `pass` here means the frame survives your
+strongest attack — NOT that it conforms to anything. (No
+reconciliation-notes section: this pass runs pre-implementation, before
+there is any implementation to reconcile.)"""
+
+
+def build_frame_critique_prompt(spec_path: Path, slice_label: str,
+                                deliverables: list) -> str:
+    """Construct the adversarial frame-critique prompt (slice 064-03 / ADR-0020).
+
+    UNLIKE every other review pass, this one gates the **pre-implementation**
+    READY_FOR_REVIEW stage (on the spec/ADR itself), where cost-of-error is
+    lowest — there is no implementation yet to conform to. It runs only when
+    the artifact declares `frame_review: true` (the derived trigger of slice
+    064-04: set when grounding leaves ≥1 unverified load-bearing assumption).
+
+    The reviewer's *only* job is ADVERSARIAL: find the single load-bearing
+    assumption in the spec/ADR most likely to be wrong and argue concretely
+    why — explicitly NOT a conformance check, NOT "does the implementation
+    match the spec." It hunts the FRAME, before any code exists. The
+    independence (rung-1 per ADR-0020 OQ4) comes from the fresh-context
+    subagent forcing a different stance than the author held.
+
+    MODEL POLICY (ADR-0020 Consequences / OQ4): this pass runs
+    **equal-or-stronger** than the artifact's author and must **NEVER be
+    downgraded for cost**. A weaker model can't out-think the frame it's
+    attacking, so the one pass whose value IS adversarial depth is the one
+    pass that must not be cheapened. 064-03 ships rung-1 (fresh-context
+    subagent) independence; cross-model (rung-3) routing is deferred
+    (`docs/refinement-todo.md`) and is intentionally NOT wired here.
+
+    Same read-only `reviewer` subagent + VERDICT envelope as the sibling
+    passes. NO richer-skill detection: there is no established "richer
+    frame-critique reviewer" skill category to defer to (unlike pr-review /
+    arch-review), so the builder is self-contained.
+
+    NOTE: like the other craft/arch passes, this builder does NOT append
+    `_principles_check_block()` — its scope is the single highest-risk
+    assumption, nothing else.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job
+
+You are running the **frame-critique pass** on **{slice_label}**. The
+artifact declared `frame_review: true` — meaning its grounding left at
+least one unverified load-bearing assumption worth an adversarial read.
+
+**There is NO implementation yet. This is NOT a conformance check.** Do
+NOT verify that any code matches the spec. Do NOT check acceptance
+criteria. Do NOT review craft or architecture. Every other pass does that
+work later — yours is the one pass that runs BEFORE implementation, when
+the cost of a wrong frame is lowest.
+
+Your *only* job is adversarial: **find the single load-bearing assumption
+in this spec/ADR that is most likely to be WRONG, and argue concretely why
+it could be wrong** — what evidence is missing, what alternative reading of
+reality the author did not consider, and what breaks downstream if the
+assumption fails. A load-bearing assumption is one the whole approach rests
+on: if it falls, the work is misdirected, not merely imperfect.
+
+Attack the frame, not the wording. You are trying to save the author from
+building the wrong thing — be the strongest skeptic they will face.
+
+## What to read (in this order)
+
+1. The artifact under critique — `{spec_path}`. Read **{slice_label}** and
+   its stated goal, grounding, and assumptions/kill-criteria (if present)
+   closely.
+2. The supporting material:
+{deliverable_lines}
+3. Any linked ADRs / specs / evidence the artifact relies on (read-only) —
+   verify whether the load-bearing claims are actually grounded or merely
+   asserted.
+
+{_PROHIBITIONS}
+## Evaluate (adversarial — hunt the frame, not conformance)
+
+- What is the single assumption this whole approach rests on?
+- Is that assumption GROUNDED (probed, cited, evidenced) or merely asserted?
+- What is the most plausible way reality differs from that assumption?
+- If the assumption is wrong, what downstream work is misdirected — and how
+  expensive is it to discover that AFTER implementation rather than now?
+- Did the author consider, and honestly rule out, the alternative framing?
+
+Concede a `pass` only if the frame survives your strongest attack.
+
+{_FRAME_CRITIQUE_OUTPUT_FORMAT}
+"""
+
+
+# -------- design-review prompt (slice 071-01 / ADR-0022) --------
+
+
+_DESIGN_REVIEW_OUTPUT_FORMAT = """\
+## Output (required — do not deviate)
+
+```
+VERDICT: pass | fail | needs-changes
+
+SUMMARY:
+<1-2 sentences: which eval you attested, where its evidence lives, and your
+ overall attestation>
+
+EVAL-RAN:
+<did the eval actually run? cite the ledger/run entry you read. An
+ env_error / infra failure is NOT "ran" — it is a fail, never a pass and
+ never a 0.0 composite>
+
+NON-STALE:
+<is the eval's frozen definition (config/threshold) unchanged since it ran?
+ cite what you compared>
+
+THRESHOLD-MET:
+<is the latest composite >= the eval's OWN declared threshold? quote both
+ the composite and the threshold>
+```
+
+Be terse but specific. A `pass` means you ATTESTED an honest, non-stale,
+threshold-meeting eval verdict — NOT that you re-scored anything. (No
+reconciliation-notes section: you record an attestation, you do not judge
+craft.)"""
+
+
+def build_design_review_prompt(spec_path: Path, slice_label: str,
+                               deliverables: list) -> str:
+    """Construct the ATTEST-ONLY design-review prompt (slice 071-01 / ADR-0022).
+
+    The orchestrator runs this pass AFTER the compliance + craft (+ arch +
+    code-health) passes, but ONLY when the slice's frontmatter declares
+    `design_review: true` (queried via `workflow.py design-review-needed`).
+    It gates the REVIEWED transition exactly like `arch` — but its JOB is
+    fundamentally different from every other pass.
+
+    HONESTY BOUNDARY (ADR-0022): the external eval (e.g. servo's
+    design-fidelity oracle) is the thing that RUNS and SCORES the UI against
+    a frozen design definition. This pass does NOT re-run, re-derive, or
+    re-judge that score. The read-only `reviewer` subagent's *only* job is to
+    ATTEST jig's own recorded eval evidence: locate it, confirm the eval
+    actually RAN, is NON-STALE (its frozen definition is unchanged), is
+    HONEST (an `env_error` / infra failure is NOT a pass and NOT a 0.0
+    composite), and that the latest composite clears the eval's OWN declared
+    threshold — then RECORD that verdict. servo runs and scores; jig attests.
+
+    NO richer-skill detection (unlike pr-review / arch-review): there is no
+    established external "design-review" skill category to defer to — this
+    pass attests jig's OWN eval evidence, so the builder is self-contained.
+
+    NOTE: like the other craft/arch passes, this builder does NOT append
+    `_principles_check_block()` — its scope is the attestation, nothing else.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job — ATTEST (do not re-derive)
+
+You are running the **design-review pass** on slice **{slice_label}**. The
+slice declared `design_review: true` — meaning it ships UI gated by an
+external, non-deterministic **design-fidelity eval** (e.g. servo's oracle).
+
+**Your only job is to ATTEST the eval's frozen verdict — NOT to produce
+it.** The eval is the thing that RUNS the UI and SCORES it against a frozen
+design definition. You are read-only and you must **NOT re-run, re-derive,
+re-score, or re-judge** the eval. servo runs and scores; jig attests. That
+is the honesty boundary (ADR-0022): re-deriving the score here would
+launder a non-deterministic judgment into a deterministic-looking gate.
+
+Confirm — by READING the recorded eval evidence — that:
+
+1. **It RAN.** The eval actually executed and produced a verdict. An
+   `env_error` / infra / harness failure is **NOT a pass** and **NOT a
+   0.0** — it is a fail, because no honest score exists.
+2. **It is NON-STALE.** The eval's frozen definition (its config + the
+   threshold it was frozen with) is unchanged since the recorded run — the
+   composite you are reading is for THIS frozen definition, not an older one.
+3. **It MET its threshold.** The latest composite score is **>= the eval's
+   OWN declared threshold** (read both from the eval's frozen config — do
+   not invent a threshold).
+
+If all three hold, RECORD a `pass`. If any fails — or you cannot locate /
+read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
+
+## What to read (in this order)
+
+1. The eval evidence the slice points at — the project's external
+   design-fidelity oracle. Look for a frozen eval definition + a results
+   ledger, e.g. under `.servo/design-eval/` (the frozen config with its
+   threshold, and `ledger.jsonl`'s latest composite), or whatever
+   equivalent eval verdict location the slice/spec names. Read the frozen
+   THRESHOLD and the latest COMPOSITE.
+2. The spec — `{spec_path}`. Read slice **{slice_label}** only to learn
+   WHERE the eval evidence lives and what it gates — do NOT re-evaluate the
+   acceptance criteria (that's the compliance pass's job) and do NOT review
+   craft (that's the craft pass's job).
+3. The deliverables, for context on what UI the eval judged:
+{deliverable_lines}
+
+{_PROHIBITIONS}
+## Attest (read the evidence — do not re-derive it)
+
+- Did the eval actually RUN, or is the latest entry an `env_error` / infra
+  failure masquerading as a result? (infra failure ≠ pass ≠ 0.0)
+- Is the frozen eval definition (config + threshold) UNCHANGED since the
+  recorded composite — i.e. is the verdict non-stale?
+- Is the latest composite **>= the eval's own declared threshold**?
+- Record the verdict. Do NOT re-run the eval, do NOT recompute the
+  composite, do NOT substitute your own aesthetic judgment for the eval's.
+
+{_DESIGN_REVIEW_OUTPUT_FORMAT}
+"""
+
+
 def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     """Construct the standard reconciliation-review prompt.
 
@@ -844,6 +1103,7 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     # reconciliation pass verifies the deviation log didn't paper over
     # task / approach / ADR / tech-debt gaps.
     extra_check += "\n" + _practices_check_block()
+    extra_check += "\n" + _reconciliation_sweep_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -859,7 +1119,8 @@ re-reviewing against original ACs — that's done.
 ## What to read
 
 1. `{spec_path}` — focus on the Slice {slice_label} section, especially the
-   "Deviation log (after reconciliation)" subsection.
+   "Deviation log (after reconciliation)" and "Reconciliation sweep"
+   subsections.
 2. Any implementation files the deviation log claims to describe — read them
    as needed to verify claims.
 
@@ -952,9 +1213,72 @@ def _read_summary(args) -> str:
     return ""
 
 
+def _record_adr_review(args) -> int:
+    """Write an ADR-side verdict file for an (adr, pass) under
+    `docs/decisions/reviews/adr-NNNN-<pass>.md` (slice 064-05 / ADR-0020
+    OQ2). Mirrors the slice path but keys the frontmatter on `adr` instead
+    of `slice` (no `slice` field). Overwrites in place on re-record."""
+    if args.pass_name not in _evidence.PASSES:
+        sys.stderr.write(
+            f"unknown pass '{args.pass_name}'; expected one of "
+            f"{', '.join(_evidence.PASSES)}\n"
+        )
+        return 2
+    if args.verdict not in _evidence.VERDICTS:
+        sys.stderr.write(
+            f"unknown verdict '{args.verdict}'; expected one of "
+            f"{', '.join(_evidence.VERDICTS)}\n"
+        )
+        return 2
+
+    # ADRs live at docs/decisions/ relative to cwd (the project root),
+    # mirroring adr.py's accept/supersede dispatch.
+    decisions_dir = Path.cwd() / "docs" / "decisions"
+    try:
+        num = f"{int(args.adr):04d}"
+        out_path = _evidence.adr_evidence_path(decisions_dir, args.adr,
+                                               args.pass_name)
+        body = _read_summary(args)
+    except (ValueError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    # Frontmatter keyed on `adr` (ADR_REQUIRED_FIELDS) — no `slice` field.
+    frontmatter = (
+        "---\n"
+        f"adr: {num}\n"
+        f"pass: {args.pass_name}\n"
+        f"verdict: {args.verdict}\n"
+        f"reviewer: {args.reviewer}\n"
+        f"reviewed_at: {_now_iso8601()}\n"
+        f"prompt_source: {args.prompt_source}\n"
+        "---\n"
+    )
+    content = frontmatter + "\n" + body
+    if not content.endswith("\n"):
+        content += "\n"
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(out_path, content)
+    sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    return 0
+
+
 def record_review(args) -> int:
     """Write a verdict file for a (slice, pass). Overwrites in place on
     re-record (ADR-0014 §4 — git history is the audit trail, no append)."""
+    # Slice 064-05: ADR mode is mutually exclusive with spec+slice (enforced
+    # by the argparse mutually-exclusive group + the required-pair check
+    # below). ADRs aren't slices, so they take a separate path.
+    if getattr(args, "adr", None) is not None:
+        return _record_adr_review(args)
+
+    if not args.spec or not args.slice:
+        sys.stderr.write(
+            "record-review requires either a spec + slice pair or --adr NNNN\n"
+        )
+        return 2
+
     spec = Path(args.spec)
     if not spec.is_file():
         sys.stderr.write(f"spec not found: {spec}\n")
@@ -1067,6 +1391,27 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pa.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
 
+    # Slice 064-03: frame-critique pass — on-demand (gated by
+    # `frame_review: true`), adversarial, runs PRE-implementation at
+    # READY_FOR_REVIEW on the spec/ADR itself. Mirrors `arch-review`'s
+    # signature.
+    pfc = sub.add_parser(
+        "frame-critique",
+        help="construct an adversarial frame-critique prompt (pre-implementation)",
+    )
+    pfc.add_argument(
+        "spec",
+        help="path to spec.md, OR an ADR path (docs/decisions/adr-NNNN-*.md) "
+             "for an ADR frame-critique (slice 064-05)")
+    pfc.add_argument(
+        "slice", nargs="?", default=None,
+        help="slice name or fragment (omit for an ADR target — ADRs aren't "
+             "sliced)")
+    pfc.add_argument(
+        "deliverables", nargs="*",
+        help="one or more deliverable paths (defaults to the ADR itself for "
+             "an ADR target)")
+
     # Slice 060-05: code-health pass — on-demand (gated by
     # `code_health_review: true`), mirrors `arch-review` plus a summary.
     # `health.py` is run by the spine; its tight summary is fed IN via
@@ -1083,21 +1428,52 @@ def _build_parser() -> argparse.ArgumentParser:
         help="path to the health.py summary text (default: read stdin)",
     )
 
+    # Slice 071-01: design-review pass — on-demand (gated by
+    # `design_review: true`), ATTEST-ONLY. Mirrors `arch-review`'s
+    # signature; the reviewer attests an external design-fidelity eval's
+    # frozen verdict, never re-derives it (ADR-0022).
+    pdr = sub.add_parser(
+        "design-review",
+        help="construct an attest-only design-review prompt (ADR-0022)",
+    )
+    pdr.add_argument("spec", help="path to spec.md")
+    pdr.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pdr.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+
     # Slice 045-02: record a durable verdict file for a (slice, pass).
     prec = sub.add_parser(
         "record-review",
         help="record a review verdict as durable slice evidence",
         description=(
             "Write a verdict file at "
-            "docs/specs/NNN-slug/reviews/slice-NN-<pass>.md (ADR-0014 §1). "
-            "Re-recording the same (slice, pass) overwrites in place — git "
-            "history is the audit trail (ADR-0014 §4). The freeform summary "
-            "body is read from --summary-file or stdin."
+            "docs/specs/NNN-slug/reviews/slice-NN-<pass>.md (ADR-0014 §1), "
+            "or — with --adr NNNN — at "
+            "docs/decisions/reviews/adr-NNNN-<pass>.md (ADR-0020 OQ2, the "
+            "ADR-side frame-critique evidence). Re-recording the same target "
+            "overwrites in place — git history is the audit trail (ADR-0014 "
+            "§4). The freeform summary body is read from --summary-file or "
+            "stdin."
         ),
     )
-    prec.add_argument("spec", help="path to spec.md")
-    prec.add_argument("slice",
-                      help="slice name or fragment (case-insensitive substring)")
+    # Slice 064-05: record-review takes EITHER a spec + slice pair (the
+    # slice-evidence path) OR --adr NNNN (the ADR-side frame-critique
+    # evidence path, ADR-0020 OQ2). The two targets are mutually exclusive:
+    # spec/slice are optional positionals, and --adr lives in a
+    # mutually-exclusive group with the spec positional so argparse rejects
+    # passing both. record_review() also checks the spec+slice pair is
+    # complete when --adr is absent.
+    target = prec.add_mutually_exclusive_group()
+    target.add_argument("spec", nargs="?", default=None, help="path to spec.md")
+    target.add_argument(
+        "--adr", default=None,
+        help="4-digit ADR number (record an ADR-side verdict at "
+             "docs/decisions/reviews/adr-NNNN-<pass>.md instead of a slice)",
+    )
+    prec.add_argument(
+        "slice", nargs="?", default=None,
+        help="slice name or fragment (case-insensitive substring); required "
+             "with a spec, omit with --adr",
+    )
     prec.add_argument(
         "--pass", dest="pass_name", required=True,
         choices=list(_evidence.PASSES),
@@ -1137,9 +1513,11 @@ def _build_parser() -> argparse.ArgumentParser:
     pchk.add_argument("slice",
                       help="slice name or fragment (case-insensitive substring)")
     pchk.add_argument(
-        "--stage", default="REVIEWED", choices=["REVIEWED", "RECONCILED"],
+        "--stage", default="REVIEWED",
+        choices=["READY_FOR_REVIEW", "REVIEWED", "RECONCILED"],
         help="transition stage whose required passes to validate "
-             "(default: REVIEWED)",
+             "(READY_FOR_REVIEW gates frame-critique iff frame_review; "
+             "default: REVIEWED)",
     )
 
     pt = sub.add_parser(
@@ -1149,7 +1527,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument(
         "mode",
         choices=["implementation", "reconciliation", "pr-review",
-                 "arch-review", "code-health"],
+                 "arch-review", "design-review", "code-health"],
         help=(
             "review mode (currently informational — every mode returns the "
             "same name; the choice exists for forward compatibility)"
@@ -1199,6 +1577,36 @@ def main(argv: list) -> int:
         sys.stderr.write(f"spec not found: {spec}\n")
         return 2
 
+    # Slice 064-05: `frame-critique` accepts an ADR target (no slice). The
+    # accept-gate's refusal advertises `review.py frame-critique <adr>`, so an
+    # ADR is critiqued as its own deliverable — ADRs aren't sliced, so skip
+    # find_slice_label (which would die on the missing `## Slice` headings).
+    if ns.command == "frame-critique":
+        adr_m = re.match(r"(?i)^adr-(\d{1,4})\b", spec.name)
+        if adr_m:
+            adr_label = f"ADR-{int(adr_m.group(1)):04d}"
+            deliverables = ns.deliverables or [str(spec)]
+            try:
+                sys.stdout.write(
+                    build_frame_critique_prompt(spec, adr_label, deliverables))
+                return 0
+            except ReviewError as exc:
+                sys.stderr.write(f"{exc}\n")
+                return 2
+        # Spec target: slice + >=1 deliverable are both required (the
+        # argparse positionals were relaxed to optional only to permit the
+        # ADR form above, which defaults its deliverable to the ADR itself).
+        if ns.slice is None:
+            sys.stderr.write(
+                "frame-critique on a spec requires a <slice> fragment (or pass "
+                "an ADR path for an ADR frame-critique)\n")
+            return 2
+        if not ns.deliverables:
+            sys.stderr.write(
+                "frame-critique on a spec requires at least one deliverable "
+                "path\n")
+            return 2
+
     try:
         slice_label = find_slice_label(spec, ns.slice)
         if ns.command == "implementation":
@@ -1207,6 +1615,10 @@ def main(argv: list) -> int:
             prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "arch-review":
             prompt = build_arch_review_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "design-review":
+            prompt = build_design_review_prompt(spec, slice_label, ns.deliverables)
+        elif ns.command == "frame-critique":
+            prompt = build_frame_critique_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "code-health":
             summary = _read_summary(ns)
             prompt = build_code_health_review_prompt(

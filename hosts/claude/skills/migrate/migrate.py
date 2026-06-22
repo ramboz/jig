@@ -76,23 +76,21 @@ class Inventory:
     """Aggregated read-only observations about <project-dir>."""
 
     def __init__(self):
-        self.slices = []          # list of Path under docs/slices/
-        self.specs = []           # list of Path under docs/specs/*/spec.md
-        self.decisions = []       # list of Path under docs/decisions/
-        self.adrs = []            # list of Path under docs/adrs/
-        self.spikes = []          # list of Path under docs/spikes/
-        self.workflow = None      # Path | None
-        self.architecture = None  # Path | None
-        self.product_vision = None  # Path | None
-        self.custom_skills = []   # list of Path under .claude/skills/
-        self.custom_agents = []   # list of Path under .claude/agents/
-        self.jig_skill_dirs = []  # list of Path under .claude/skills/jig-*/
-                                  # (slice 021-01 — used by report's
-                                  # operations section to suppress the
-                                  # `copy-machinery` suggestion when
-                                  # the machinery is already in place).
-        self.claude_md_size = None  # int | None — bytes
-        self.milestones_referenced = set()  # set of strings like "M1"
+        self.slices: list[Path] = []          # under docs/slices/
+        self.specs: list[Path] = []           # docs/specs/*/spec.md
+        self.decisions: list[Path] = []       # under docs/decisions/
+        self.adrs: list[Path] = []            # under docs/adrs/
+        self.spikes: list[Path] = []          # under docs/spikes/
+        self.workflow: Path | None = None
+        self.architecture: Path | None = None
+        self.product_vision: Path | None = None
+        self.custom_skills: list[Path] = []   # under .claude/skills/
+        self.custom_agents: list[Path] = []   # under .claude/agents/
+        # Slice 021-01 — used by report's operations section to suppress the
+        # `copy-machinery` suggestion when the machinery is already in place.
+        self.jig_skill_dirs: list[Path] = []
+        self.claude_md_size: int | None = None
+        self.milestones_referenced: set[str] = set()
 
 
 def _safe_iterdir(p: Path) -> list:
@@ -1592,7 +1590,7 @@ def _resolve_plugin_root() -> Path:
 
 
 def copy_machinery(
-    project_dir: Path, *, force: bool = False, add_tiers: list = None,
+    project_dir: Path, *, force: bool = False, add_tiers: list | None = None,
     host: str = "claude",
 ) -> tuple:
     """Top-level entry for the `copy-machinery` subcommand.

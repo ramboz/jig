@@ -1465,7 +1465,7 @@ def _build_jig_hook_entries(plugin: Path) -> dict:
     return out
 
 
-def _merge_permissions_deny(existing_perms: dict) -> dict:
+def _merge_permissions_deny(existing_perms: dict | None) -> dict:
     """Slice 052-03 — merge jig's conservative `permissions.deny` defaults
     into a (possibly pre-existing) `permissions` block.
 
@@ -1904,6 +1904,10 @@ _GITIGNORE_SECRET_PATTERNS = (
     "*.key",
     "secrets/",
     "credentials/",
+    # Local semantic-index activation state/telemetry (spec 080). Scoped
+    # entries only: .jig/test-command and project opt-in state remain tracked.
+    ".jig/semantic-index-claude-hook.json",
+    ".jig/semantic-index-events.jsonl",
 )
 
 
@@ -2057,7 +2061,7 @@ def _ensure_self_defining_convention_block(target: Path) -> None:
 
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
-             overrides: Overrides = None,
+             overrides: Overrides | None = None,
              with_machinery: bool = True,
              host: str = "claude") -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
@@ -2423,9 +2427,11 @@ def main(argv: list[str]) -> int:
     #
     # The verifier modules (verify_install + install_contract +
     # scaffold_contract) live under `scripts/`, which is dev-only EXCEPT for
-    # these three — `build_release_zip.py::_INCLUDE_SCRIPT_FILES` re-includes
-    # them so they ship in the plugin install (they were absent before, which
-    # crashed this self-check on every packaged install). The import is still
+    # the allowlisted runtime modules —
+    # `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` lists this verifier trio
+    # and the release builder's `iter_release_files` enumerator ships them in
+    # the plugin install (they were absent before, which crashed this
+    # self-check on every packaged install). The import is still
     # guarded: if a future packaging regression drops them, the *scaffold has
     # already succeeded and printed* above — degrade to a one-line notice
     # rather than crashing on the closing report. A genuine verification

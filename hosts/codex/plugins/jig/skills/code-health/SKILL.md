@@ -2,9 +2,9 @@
 name: code-health
 description: >
   Run a static-analysis pass on a project — detect the ecosystem (Python or
-  Node), drive its linter (ruff / eslint, plus advisory prettier/complexity
-  and a cross-ecosystem duplication signal) via the `health.py` helper, and
-  act on the normalized exit code
+  Node), drive its linter (ruff / eslint, plus advisory pyright/complexity/
+  prettier and a cross-ecosystem duplication signal) via the `health.py`
+  helper, and act on the normalized exit code
   (0 clean / 1 findings / 2 no-linter). Auto-triggers when you say lint this,
   check code health, run the linter, ask is this code clean, ask any lint
   issues, or want a static analysis pass. Tools are resolved on PATH or run
@@ -33,7 +33,7 @@ Detects the project's ecosystem and runs its linter, normalizing the result
 so callers can branch deterministically. Ecosystem detection is
 **table-driven** — each ecosystem (Python, Node) is a data-structure entry,
 so adding a language is an entry, not a control-flow fork. Current scope:
-**Python (ruff) + Node (eslint)**, each with an **advisory** secondary signal.
+**Python (ruff) + Node (eslint)**, each with **advisory** secondary signals.
 
 - A `.jig/lint-command` override always wins and **bypasses ecosystem
   detection entirely** (honored verbatim — same semantics as `tdd.py`'s
@@ -52,6 +52,12 @@ so adding a language is an entry, not a control-flow fork. Current scope:
   - **Python — complexity:** an advisory ruff probe with
     `--select C901,PLR0911,PLR0912,PLR0913,PLR0915` surfaces a per-function
     complexity signal ("complexity: N function(s) over threshold; top: …").
+  - **Python — type checking:** an advisory `pyright --outputjson` probe
+    resolves `pyright` on `PATH`, then `uvx pyright`, then `pipx run pyright`.
+    Type diagnostics are summarized as a count + representative rules
+    ("pyright: N type diagnostic(s); top: …"). If no type-checker resolves,
+    it emits `pyright: skipped (no type-checker) …`. Like every advisory
+    signal, it is reported, never gating.
   - **Node — formatting:** an advisory `prettier --check` probe surfaces
     files that need formatting ("prettier: N file(s) need formatting").
   - **Cross-ecosystem — duplication:** an advisory probe (run for BOTH
@@ -109,8 +115,9 @@ python3 "${PLUGIN_ROOT}/skills/code-health/health.py" check [target]
 
 - Auto-resolves the ecosystem's linter via the same logic as `detect`.
 - Prints a tight summary (count + top rule codes) to stdout, plus any
-  **advisory** lines (Python complexity / Node prettier / cross-ecosystem
-  duplication) — advisory lines are reported but never change the exit code.
+  **advisory** lines (Python complexity / Python pyright / Node prettier /
+  cross-ecosystem duplication) — advisory lines are reported but never
+  change the exit code.
 - Exit code is normalized off the **primary** linter (`0` clean / `1`
   findings / `2` no-linter) per the table above. Branch on it
   deterministically — exit `1` means inspect the summarized findings; exit
@@ -190,17 +197,17 @@ four-pass orchestration recipe.
 
 ## Gotchas
 
-- **Scope is Python (ruff, + advisory complexity) and Node (eslint, +
-  advisory prettier --check), plus a cross-ecosystem advisory duplication
-  signal (`npx jscpd`).** The dedicated code-health reviewer pass (slice
+- **Scope is Python (ruff, + advisory complexity and pyright) and Node
+  (eslint, + advisory prettier --check), plus a cross-ecosystem advisory
+  duplication signal (`npx jscpd`).** The dedicated code-health reviewer pass (slice
   060-05) is now live — see "The code-health review pass" above; the Tier-2
   scaffold-the-floor work (slice 060-06) is **DEFERRED**. An unrecognized
   ecosystem with no `.jig/lint-command` override degrades to a recommendation.
-- **Advisory ≠ gating.** The complexity (Python), prettier (Node), and
-  duplication (cross-ecosystem) signals are reported in the summary but
-  **never** change the exit code — the exit code is driven solely by the
+- **Advisory ≠ gating.** The complexity and pyright (Python), prettier
+  (Node), and duplication (cross-ecosystem) signals are reported in the
+  summary but **never** change the exit code — the exit code is driven solely by the
   primary linter (ruff / eslint). A clean ruff run with complexity or
-  duplication findings still exits `0`.
+  type findings still exits `0`.
 - **Duplication is honest about being unavailable.** Unlike complexity /
   prettier (which stay silent when their tool isn't present), the duplication
   probe emits `duplication: skipped (no detector) …` when neither a native
@@ -221,10 +228,10 @@ four-pass orchestration recipe.
   failed to start (an environment issue) — don't conflate any of those with
   clean.
 - **Ephemeral runs need a network/cache.** `uvx ruff` / `pipx run ruff` /
-  `npx eslint` / `npx prettier` / `npx jscpd` fetch the tool on first use. If
-  neither the binary nor a launcher is present, the skill recommends (for the
-  primary linter) or reports `skipped (no detector)` (for duplication) rather
-  than failing opaquely.
+  `uvx pyright` / `pipx run pyright` / `npx eslint` / `npx prettier` /
+  `npx jscpd` fetch the tool on first use. If neither the binary nor a
+  launcher is present, the skill recommends (for the primary linter) or
+  reports `skipped` (for pyright/duplication) rather than failing opaquely.
 - **Tight summary, not the raw dump.** `check` parses the linter's JSON into
   a count + top codes; it does not echo the full tool output. Re-run the
   linter directly when you need every finding's location.

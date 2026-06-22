@@ -30,7 +30,7 @@ jig installs a focused, opinionated workflow layer into your project:
 - **Deterministic gates** — hooks enforce what *must* happen; skills carry
   judgment.
 
-A fixed, opinionated set — **7 Tier 0 skills** at the floor and 8 more on by
+A fixed, opinionated set — **7 Tier 0 skills** at the floor and 10 more on by
 default (Tier 1) — not a hundred-skill marketplace. For the full picture, see
 [product-vision.md](docs/product-vision.md) (vision, target users, principles)
 and [architecture.md](docs/architecture.md) (mechanics).
@@ -45,9 +45,11 @@ not left as advice:
   correct it, the isolation boundaries that contain it. Swapping models won't
   close a workflow gap — the scaffold does.
 - **Guardrails, not guidelines.** What *must* happen is enforced mechanically by
-  hooks (secret scanning, spec gates, review-evidence gates); what takes
-  *judgment* lives in skills. The line between a deterministic gate and an
-  advisory nudge is drawn on purpose.
+  deterministic gates: hooks for immediate local checks (secret scanning,
+  spec-file gates) and workflow transitions for lifecycle evidence
+  (review-evidence gates, reconciliation artifacts). What takes *judgment*
+  lives in skills. The line between a deterministic gate and an advisory nudge
+  is drawn on purpose.
 - **The context window is working memory, not a storage buffer.** Irrelevant
   context degrades reasoning, so jig keeps a lean hot cache, loads deeper docs
   on demand, and delegates file-heavy reading to subagents that return only a
@@ -142,8 +144,9 @@ When in doubt, scaffold and own it — that's jig's default posture
 
 > **Bring your own depth; jig provides the floor.**
 
-A few jig skills — `pr-review`, `arch-review`, `contracts` — ship as
-lightweight baselines that **defer to a richer user-installed skill** in the
+A few jig skills — `pr-review`, `arch-review`, `contracts`, `security-review`,
+`code-health`, `explain`, `vision-elicitation` — ship as lightweight baselines
+that **defer to a richer user-installed skill** in the
 same category when one is present. The deferral is category-based, not
 name-specific, so your own reviewer skill wins automatically, with no
 configuration. jig stays opinionated about *workflow* and out of the way of
@@ -337,7 +340,7 @@ is owned — lives in
 
 ## Status
 
-Tier 0 and Tier 1 are complete — all 15 skills, 3 subagents, and the jig hooks
+Tier 0 and Tier 1 are complete — all 17 skills, 3 subagents, and the jig hooks
 ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
 state, see the **[status board](docs/specs/README.md)**.
 

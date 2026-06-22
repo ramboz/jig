@@ -42,6 +42,20 @@ every slice may run:
   architecture-shaped concerns; the slice template at
   `templates/docs/specs/slice-template.md` ships the field commented
   out as a discoverability nudge.
+- **Design-review (attest-only pass — on-demand)** — slice 071-01 /
+  ADR-0022. After the craft (+ arch) passes, the orchestrator queries the
+  slice's `design_review:` flag via `workflow.py design-review-needed`;
+  when `true`, it runs an **attest-only** pass: the read-only reviewer
+  attests an external, non-deterministic design-fidelity eval's frozen
+  verdict (e.g. servo's `.servo/design-eval/` composite ≥ its own
+  threshold, non-stale, `env_error` ≠ pass) and records pass/fail — it
+  never re-runs or re-derives the score (servo runs/scores, jig attests).
+  Gates REVIEWED like arch. Authors set `design_review: true` when the
+  slice ships UI gated by an external design-fidelity eval — and the slice
+  body must point at **where the eval evidence lives** (the frozen config +
+  threshold and the results ledger), since the reviewer can only attest a
+  verdict it can locate; with no pointer it has nothing to read and records
+  a `fail`.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -49,6 +63,23 @@ every slice may run:
 tool restrictions and persistent system rules.
 
 ## How to use
+
+### Task telemetry tags
+
+When you feed a `review.py` prompt to the `Task` tool, prefix the prompt with
+the compact attribution tags that `jig-telemetry.sh` records:
+
+```text
+[jig:phase=<phase>] [jig:spec=NNN] [jig:slice=NNN-NN]
+
+<review.py prompt body>
+```
+
+Use `compliance` for `review.py implementation`, `craft` for `pr-review`,
+`arch` for `arch-review`, `code-health` for `code-health`,
+`frame-critique` for frame critique, and `reconciliation` for
+reconciliation review. These tags make later token reports price the workflow
+phase, not just the subagent type.
 
 ### Implementation review
 
@@ -64,12 +95,13 @@ SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type implementation)
 ```
 
-Then feed `$PROMPT` to the `Task` tool with `subagent_type: "$SUBAGENT"`.
-The helper resolves `$SUBAGENT` deterministically — `reviewer` when jig is
-installed as a plugin (the real filesystem-based agent is reachable),
-`general-purpose` when running from source. Wait for the verdict. Address
-any `fail`/`needs-changes` findings; rerun the helper + Task as needed
-until `pass`.
+Then feed `[jig:phase=compliance] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to the `Task` tool with
+`subagent_type: "$SUBAGENT"`. The helper resolves `$SUBAGENT`
+deterministically — `reviewer` when jig is installed as a plugin (the real
+filesystem-based agent is reachable), `general-purpose` when running from
+source. Wait for the verdict. Address any `fail`/`needs-changes` findings;
+rerun the helper + Task as needed until `pass`.
 
 ### Pr-review (craft pass — slice 031-01)
 
@@ -85,14 +117,15 @@ SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type pr-review)
 ```
 
-Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
-points the reviewer at the most-specific `pr-review` SKILL.md reachable
-in the environment — Codex's skill router resolves user > project >
-`jig:pr-review` precedence via the skill description hints. The pass
-returns the canonical four output buckets (scope / blockers / nits /
-strengths) wrapped in the same verdict envelope as the compliance
-pass. SPECIFIC ISSUES entries are tagged `[blocker]` / `[nit]` /
-`[strength]`; only `[blocker]` entries block the REVIEWED transition.
+Feed `[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT` to
+`Task` with `subagent_type: "$SUBAGENT"`. The prompt points the reviewer at
+the most-specific `pr-review` SKILL.md reachable in the environment —
+Codex's skill router resolves user > project > `jig:pr-review` precedence
+via the skill description hints. The pass returns the canonical four output
+buckets (scope / blockers / nits / strengths) wrapped in the same verdict
+envelope as the compliance pass. SPECIFIC ISSUES entries are tagged
+`[blocker]` / `[nit]` / `[strength]`; only `[blocker]` entries block the
+REVIEWED transition.
 
 ### Arch-review (architecture pass — slice 031-02, on-demand)
 
@@ -122,19 +155,92 @@ if [ "$NEED_ARCH" = "true" ]; then
 fi
 ```
 
-When `$NEED_ARCH` is `true`, feed `$PROMPT` to `Task` with
-`subagent_type: "$SUBAGENT"`. The prompt routes via the same
-prose-based dispatch as `pr-review` to the most-specific `arch-review`
-SKILL.md reachable. The pass returns the canonical four arch output
-buckets (summary / strengths / concerns / open questions). Tag and
-block semantics match the craft pass: `[blocker]` entries block the
-REVIEWED transition; `[nit]` entries and `needs-changes` become
-reconciliation-log items.
+When `$NEED_ARCH` is `true`, feed `[jig:phase=arch] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`. The prompt routes via the same prose-based
+dispatch as `pr-review` to the most-specific `arch-review` SKILL.md
+reachable. The pass returns the canonical four arch output buckets (summary /
+strengths / concerns / open questions). Tag and block semantics match the
+craft pass: `[blocker]` entries block the REVIEWED transition; `[nit]`
+entries and `needs-changes` become reconciliation-log items.
 
 Slice authors set `arch_review: true` in the slice file's frontmatter
 when the slice changes module boundaries, public contracts, or
 architecture-shaped concerns. The slice template ships the field
 commented out as a discoverability nudge.
+
+### Frame-critique (adversarial pass — slice 064-03 / ADR-0020, on-demand)
+
+Unlike every other pass, frame-critique runs **PRE-implementation** — it
+gates the `DRAFT → READY_FOR_REVIEW` transition of a spec/slice (or, once
+[064-05](../../docs/specs/064-spec-frame-hardening/slice-05-adr-accept-gate.md)
+lands, an ADR at `adr.py accept`), before any code exists. Its job is
+**adversarial**, not conformance: a fresh reviewer hunts the single
+load-bearing assumption most likely to be **wrong** and argues why, so a
+bad *premise* is caught at authoring time (the cheapest point) rather than
+executed with discipline. It runs only when the artifact declares a truthy
+`frame_review` flag.
+
+```bash
+PROMPT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
+  frame-critique \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  "<deliverable-path>" ...)
+SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
+  subagent-type)
+```
+
+Feed `[jig:phase=frame-critique] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`.
+
+Record the verdict as the `frame-critique` pass (below); the
+`READY_FOR_REVIEW` gate requires it iff `frame_review` is truthy
+(default-off artifacts transition freely). **Model policy (ADR-0020):**
+run frame-critique **equal-or-stronger** than the artifact's author —
+**never downgrade it for cost** (the one pass whose value is adversarial
+depth). 064-03 ships rung-1 (fresh-context subagent) independence;
+cross-model (rung-3) is deferred (`docs/refinement-todo.md`).
+
+### Design-review (attest-only pass — slice 071-01 / ADR-0022, on-demand)
+
+Unlike every other pass, design-review produces no judgment of its own — it
+**attests** an *external, non-deterministic* eval's frozen verdict. The eval
+(e.g. servo's design-fidelity oracle) is the thing that RUNS the UI and SCORES
+it against a frozen design definition; this pass's read-only reviewer confirms,
+by reading the recorded eval evidence, that the eval actually **RAN**, is
+**NON-STALE** (its frozen config/threshold unchanged since the run), is
+**HONEST** (an `env_error` / infra failure is **not** a pass and **not** a
+0.0), and that the latest composite is **≥ the eval's own declared threshold** —
+then RECORDS that verdict. It **never re-runs, re-derives, or re-judges** the
+score: servo runs and scores, jig attests (the ADR-0022 honesty boundary). It
+runs only when the slice declares a truthy `design_review` flag, and gates
+REVIEWED exactly like `arch`.
+
+```bash
+PROMPT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
+  design-review \
+  "docs/specs/NNN-<slug>/spec.md" \
+  "<slice-fragment>" \
+  "<deliverable-path>" ...)
+```
+
+Record the verdict as the `design-review` pass; the `REVIEWED` gate requires it
+iff `design_review` is truthy (default-off slices transition freely). Although
+the shared envelope offers `pass | fail | needs-changes`, an attestation is
+binary — the recorded eval verdict either attests (honest, non-stale, meets its
+threshold) or it does not — so this pass meaningfully emits only `pass` / `fail`
+(the gate clears on `pass` and blocks on either of the others). **No
+richer-skill detection** — there is no external "design-review" skill category;
+the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
+(servo design-fidelity eval).
+
+> The `design_review` flag is set **by hand** on a slice/spec whose deliverable
+> is validated by an external design-fidelity eval — there is **no** mechanical
+> derivation (unlike `frame_review`, which slice 064-04 derives from the spec's
+> grounding). Once set, `workflow.py session-plan` surfaces the pass on the
+> dispatch plan so it isn't a dead loop.
 
 ### Reconciliation review
 
@@ -150,16 +256,18 @@ SUBAGENT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type reconciliation)
 ```
 
-Feed `$PROMPT` to `Task` with `subagent_type: "$SUBAGENT"`. The prompt
-explicitly tells the reviewer NOT to re-evaluate against ACs — it only
-verifies the deviation log matches reality.
+Feed `[jig:phase=reconciliation] [jig:spec=NNN]
+[jig:slice=NNN-NN]\n\n$PROMPT` to `Task` with
+`subagent_type: "$SUBAGENT"`. The prompt explicitly tells the reviewer NOT to
+re-evaluate against ACs — it only verifies the deviation log matches reality.
 
 ### Recording and checking review evidence (slice 045-02)
 
 A review pass is durable evidence, not ephemeral chat. After a pass
 returns a verdict, record it as a file beside the slice it grades, at
 `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md` (ADR-0014 §1). The
-schema (`pass ∈ {compliance, craft, arch, reconciliation}`,
+schema (`pass ∈ {compliance, craft, arch, code-health, frame-critique,
+reconciliation}`,
 `verdict ∈ {pass, fail, needs-changes}`, plus `reviewer`, `reviewed_at`,
 `prompt_source`) lives in `skills/_common/review_evidence.py` so the
 slice 045-03 transition gate validates the same shape.

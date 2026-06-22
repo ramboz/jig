@@ -14,7 +14,9 @@ What this module owns (ADR-0014):
     caller's fragment — `evidence_path` resolves the slice first.
   - §1/§3 vocabularies: `PASSES` and `VERDICTS`.
   - §5 transition map:
-    `required_passes(stage, arch_review, code_health_review)`.
+    `required_passes(stage, arch_review, code_health_review,
+    frame_review)`. Slice 064-03 added the READY_FOR_REVIEW →
+    `frame-critique` (iff `frame_review`) pre-implementation entry.
   - §2 schema: `parse_verdict_file(path)` checks the six required
     frontmatter fields and in-vocabulary `pass`/`verdict`.
   - §3 gate rule (uniform): an evidence file *clears* iff `verdict: pass`.
@@ -38,6 +40,7 @@ from pathlib import Path
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
+    env_gate_enabled,
     frontmatter_flag_truthy,
     load_slice,
     parse_frontmatter,
@@ -46,7 +49,16 @@ from _common.parsing import (
 # ADR-0014 §1: the review passes, one verdict file per (slice, pass).
 # Slice 060-05 added the on-demand `code-health` pass (gated by a slice's
 # `code_health_review: true` frontmatter flag, mirroring `arch`).
-PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation")
+# Slice 064-03 added the on-demand `frame-critique` pass (gated by a slice's
+# `frame_review: true` flag) — unlike the others it gates the
+# READY_FOR_REVIEW (pre-implementation) stage, not REVIEWED (ADR-0020).
+# Slice 071-01 added the on-demand, attest-only `design-review` pass (gated
+# by a slice's `design_review: true` flag, mirroring `arch` at REVIEWED): a
+# read-only reviewer ATTESTS an external non-deterministic eval's frozen
+# verdict (servo's design-fidelity composite) — never re-deriving the score
+# (the honesty boundary, ADR-0022).
+PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation",
+          "frame-critique", "design-review")
 
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
@@ -61,10 +73,39 @@ REQUIRED_FIELDS = (
     "prompt_source",
 )
 
+# Slice 064-05 (ADR-0020 OQ2/OQ3): ADRs are NOT slices, so the ADR-side
+# frame-critique evidence file is keyed on `adr` (the 4-digit number)
+# instead of `slice`. Same six-field shape otherwise. The ADR gate lives
+# at `adr.py accept`; this is the only place the field set diverges.
+ADR_REQUIRED_FIELDS = (
+    "adr",
+    "pass",
+    "verdict",
+    "reviewer",
+    "reviewed_at",
+    "prompt_source",
+)
+
 # Command the diagnostics point at when evidence is missing/non-clearing
 # (ADR-0014 Consequences: "the gate names the missing artifact and the
 # command to produce it"). Kept as a constant so writer + gate agree.
 RECORD_CMD = "review.py record-review"
+
+def evidence_gate_enabled() -> bool:
+    """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
+    is set to one of the falsey tokens (`_common.parsing.ENV_FALSEY`,
+    case-insensitive). The gate is ON by default; this is the documented
+    bypass for a deliberate actor / automation. Per ADR-0011 (cited by
+    ADR-0014 §6), an in-process gate sits inside the agent's trust boundary —
+    a *deliberateness* signal, not human-only enforcement — so an env escape
+    hatch is consistent (cf. `JIG_CONVENTIONS_APPROVED`).
+
+    The falsey vocabulary + this opt-out logic live in `_common.parsing`
+    (`ENV_FALSEY` / `env_gate_enabled`) so every jig bypass gate reads one
+    source and cannot drift — the load-bearing-consistency case ADR-0002 calls
+    out. (`workflow.py` keeps `_evidence_gate_enabled` as an alias; the
+    ADR-side accept gate in `adr.py` reads the same function.)"""
+    return env_gate_enabled("JIG_REVIEW_EVIDENCE_GATE")
 
 
 class EvidenceError(RuntimeError):
@@ -147,35 +188,51 @@ def evidence_path(spec_path, slice_fragment: str, pass_name: str) -> Path:
 
 
 def required_passes(stage: str, *, arch_review: bool,
-                    code_health_review: bool = False) -> tuple:
+                    code_health_review: bool = False,
+                    frame_review: bool = False,
+                    design_review: bool = False) -> tuple:
     """Return the passes required to enter `stage` (ADR-0014 §5 map).
 
+    - ``READY_FOR_REVIEW`` → ``frame-critique`` iff the slice/spec
+      declared ``frame_review: true`` (slice 064-03 / ADR-0020), else
+      empty. This is the only PRE-implementation gate: the adversarial
+      frame-critique runs before any code exists.
     - ``REVIEWED`` → ``compliance`` + ``craft`` (+ ``arch`` iff the slice
       declared ``arch_review: true``) (+ ``code-health`` iff the slice
-      declared ``code_health_review: true`` — slice 060-05).
+      declared ``code_health_review: true`` — slice 060-05) (+
+      ``design-review`` iff the slice declared ``design_review: true`` —
+      slice 071-01).
     - ``RECONCILED`` → ``reconciliation``.
 
-    `arch_review` and `code_health_review` are honored only for the
-    REVIEWED stage (both are REVIEWED-stage passes). `code_health_review`
-    defaults False so every existing slice (no flag) is unaffected — the
-    code-health pass is opt-in, gated like arch. Raises `EvidenceError`
-    for an unknown stage.
+    `arch_review` / `code_health_review` / `design_review` are honored
+    only for REVIEWED, `frame_review` only for READY_FOR_REVIEW (each is a
+    stage-specific pass). All four flag kwargs default False so every
+    existing slice (no flag) is unaffected — the frame-critique, arch,
+    code-health, and design-review passes are all opt-in gates. An
+    unflagged READY_FOR_REVIEW yields an EMPTY tuple → no gating (existing
+    specs transition freely). Raises `EvidenceError` for an unknown stage.
 
     NOTE: the ``DONE`` re-validation (ADR-0014 §5) re-runs the REVIEWED +
     RECONCILED sets; that composition lives in the 045-03 gate, not here,
-    so this stays a single-stage lookup.
+    so this stays a single-stage lookup. frame-critique is a ONE-TIME
+    pre-implementation gate and is deliberately NOT re-validated at DONE.
     """
+    if stage == "READY_FOR_REVIEW":
+        return ("frame-critique",) if frame_review else ()
     if stage == "REVIEWED":
         passes = ["compliance", "craft"]
         if arch_review:
             passes.append("arch")
         if code_health_review:
             passes.append("code-health")
+        if design_review:
+            passes.append("design-review")
         return tuple(passes)
     if stage == "RECONCILED":
         return ("reconciliation",)
     raise EvidenceError(
-        f"unknown transition stage '{stage}'; expected REVIEWED or RECONCILED"
+        f"unknown transition stage '{stage}'; expected READY_FOR_REVIEW, "
+        f"REVIEWED or RECONCILED"
     )
 
 
@@ -188,15 +245,20 @@ def verdict_clears(verdict: str) -> bool:
     return verdict == "pass"
 
 
-def parse_verdict_file(path) -> VerdictRecord:
+def parse_verdict_file(path, required_fields=REQUIRED_FIELDS) -> VerdictRecord:
     """Read and validate one verdict file.
 
     Checks (ADR-0014 §2/§3):
       - file exists and is readable;
       - has a frontmatter block;
-      - carries all six `REQUIRED_FIELDS`;
+      - carries all `required_fields`;
       - `pass` and `verdict` are in-vocabulary;
       - `verdict == pass` to clear.
+
+    `required_fields` defaults to the slice-evidence `REQUIRED_FIELDS`
+    (six fields keyed on `slice`) so existing callers are unaffected.
+    The ADR-side gate (slice 064-05) passes `ADR_REQUIRED_FIELDS` (keyed
+    on `adr` instead of `slice`).
 
     Returns a `VerdictRecord`. Never raises for content problems — every
     failure mode becomes a `problems` entry so callers can aggregate
@@ -225,12 +287,12 @@ def parse_verdict_file(path) -> VerdictRecord:
         problems.append(
             f"{path.name}: missing or malformed frontmatter block "
             f"(need a leading `---` … `---` block with "
-            f"{', '.join(REQUIRED_FIELDS)})"
+            f"{', '.join(required_fields)})"
         )
         # No fields to validate further.
         return VerdictRecord(path, fields, problems, False)
 
-    for key in REQUIRED_FIELDS:
+    for key in required_fields:
         val = fields.get(key)
         if val is None or (isinstance(val, str) and not val.strip()):
             problems.append(f"{path.name}: missing required field '{key}'")
@@ -319,6 +381,52 @@ def _code_health_review_flag(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("code_health_review", ""))
 
 
+def _frame_review_flag(spec_path, slice_fragment: str) -> bool:
+    """Read the resolved slice's `frame_review:` frontmatter flag
+    (slice 064-03 / ADR-0020). Mirrors `_arch_review_flag` exactly.
+
+    Returns True iff the slice declares a truthy `frame_review` token
+    (`true`/`yes`/`on`/`1`, case-insensitive — the shared
+    `frontmatter_flag_truthy` predicate). Conservative: any miss (no
+    frontmatter, field absent, unrecognized value) returns False, so
+    every existing slice (no flag) stays unaffected — the frame-critique
+    pass is opt-in. Raises `EvidenceError` only when the slice itself
+    can't be resolved.
+    """
+    spec_path = Path(spec_path)
+    try:
+        loc = load_slice(spec_path, slice_fragment)
+    except SliceLookupError as exc:
+        raise EvidenceError(str(exc)) from exc
+    body = loc.text[loc.start:loc.end]
+    fields, _ = parse_frontmatter(body)
+    return frontmatter_flag_truthy(fields.get("frame_review", ""))
+
+
+def _design_review_flag(spec_path, slice_fragment: str) -> bool:
+    """Read the resolved slice's `design_review:` frontmatter flag
+    (slice 071-01). Mirrors `_arch_review_flag` exactly.
+
+    Returns True iff the slice declares a truthy `design_review` token
+    (`true`/`yes`/`on`/`1`, case-insensitive — the shared
+    `frontmatter_flag_truthy` predicate, same source as
+    `workflow.py:slice_needs_design_review`). Conservative: any miss (no
+    frontmatter, field absent, unrecognized value) returns False, so every
+    existing slice (no flag) stays unaffected — the design-review pass is
+    opt-in. This is the no-drift invariant: the gate reads the flag itself
+    (the same flag the orchestrator reads to spawn the pass). Raises
+    `EvidenceError` only when the slice itself can't be resolved.
+    """
+    spec_path = Path(spec_path)
+    try:
+        loc = load_slice(spec_path, slice_fragment)
+    except SliceLookupError as exc:
+        raise EvidenceError(str(exc)) from exc
+    body = loc.text[loc.start:loc.end]
+    fields, _ = parse_frontmatter(body)
+    return frontmatter_flag_truthy(fields.get("design_review", ""))
+
+
 def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     """Validate the evidence set required to enter `stage` for one slice.
 
@@ -334,17 +442,24 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     Does NOT raise for an invalid slice target — that becomes the first
     diagnostic (so the gate can report it uniformly rather than crashing).
     """
-    # Resolve the arch + code-health flags + slice first; an unresolvable
-    # slice is a single actionable diagnostic, not an exception.
+    # Resolve the arch + code-health + frame + design flags + slice first;
+    # an unresolvable slice is a single actionable diagnostic, not an
+    # exception. Reading the flags HERE (rather than in the caller) keeps
+    # the spawner and the gate from drifting — the same per-stage flag
+    # determines both what runs and what the gate requires.
     try:
         arch = _arch_review_flag(spec_path, slice_fragment)
         code_health = _code_health_review_flag(spec_path, slice_fragment)
+        frame = _frame_review_flag(spec_path, slice_fragment)
+        design = _design_review_flag(spec_path, slice_fragment)
     except EvidenceError as exc:
         return [f"invalid slice target: {exc}"]
 
     try:
         needed = required_passes(stage, arch_review=arch,
-                                 code_health_review=code_health)
+                                 code_health_review=code_health,
+                                 frame_review=frame,
+                                 design_review=design)
     except EvidenceError as exc:
         return [str(exc)]
 
@@ -365,4 +480,58 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
                     f"(produce with: {RECORD_CMD} <spec> {slice_fragment} "
                     f"--pass {pass_name} --verdict pass ...)"
                 )
+    return diagnostics
+
+
+# ---------------------------------------------------------------------------
+# ADR-side evidence (slice 064-05 / ADR-0020 OQ2/OQ3).
+#
+# ADRs are NOT slices, so the `reviews/slice-NN-<pass>.md` path under a
+# spec dir doesn't apply. The ADR-side frame-critique verdict lives under
+# `docs/decisions/reviews/adr-NNNN-<pass>.md`, mirroring the slice layout
+# one level up — a `reviews/` subdir beside the artifacts it judges. The
+# gate is enforced at `adr.py accept` (the ADR's pre-commitment moment),
+# not at a workflow transition.
+# ---------------------------------------------------------------------------
+
+
+def adr_evidence_path(decisions_dir, adr_num, pass_name: str) -> Path:
+    """Resolve the ADR verdict-file path for an (adr, pass).
+
+    Returns ``<decisions_dir>/reviews/adr-NNNN-<pass>.md`` with the ADR
+    number zero-padded to 4 digits (mirroring adr.py's `adr-NNNN-` file
+    convention). Raises `EvidenceError` for an unknown pass name.
+    """
+    if pass_name not in PASSES:
+        raise EvidenceError(
+            f"unknown pass '{pass_name}'; expected one of "
+            f"{', '.join(PASSES)}"
+        )
+    num = f"{int(adr_num):04d}"
+    return Path(decisions_dir) / "reviews" / f"adr-{num}-{pass_name}.md"
+
+
+def validate_adr_evidence(decisions_dir, adr_num, pass_name: str) -> list:
+    """Validate the ADR-side verdict file for an (adr, pass).
+
+    Returns a list of human-readable diagnostics; an empty list means the
+    verdict clears (exists, well-formed against `ADR_REQUIRED_FIELDS`, and
+    `verdict: pass`). Mirrors `validate_evidence`'s diagnostic style and
+    names the missing artifact + the command to produce it (ADR-0014
+    Consequences). The ADR gate (`adr.py accept`) calls this.
+    """
+    num = f"{int(adr_num):04d}"
+    try:
+        path = adr_evidence_path(decisions_dir, adr_num, pass_name)
+    except EvidenceError as exc:
+        return [str(exc)]
+    rec = parse_verdict_file(path, required_fields=ADR_REQUIRED_FIELDS)
+    diagnostics: list = []
+    if not rec.clears:
+        for problem in rec.problems:
+            diagnostics.append(
+                f"[{pass_name}] {problem} "
+                f"(produce with: {RECORD_CMD} --adr {num} "
+                f"--pass {pass_name} --verdict pass ...)"
+            )
     return diagnostics
