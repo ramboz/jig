@@ -1,0 +1,20 @@
+{
+  "name": "jig",
+  "interface": {
+    "displayName": "jig"
+  },
+  "plugins": [
+    {
+      "name": "jig",
+      "source": {
+        "source": "local",
+        "path": "./hosts/codex/plugins/jig"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

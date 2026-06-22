@@ -20,6 +20,7 @@ Run:
     python3 -m unittest scripts.test_symmetric_install_docs
 """
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -27,10 +28,25 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
+ROOT_CODEX_MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 
 
 def _read(p: Path) -> str:
     return p.read_text(encoding="utf-8")
+
+
+class RootCodexMarketplaceTests(unittest.TestCase):
+    """The repo-root Codex marketplace must route remote installs to Codex."""
+
+    def test_root_codex_marketplace_points_at_codex_package(self) -> None:
+        data = json.loads(ROOT_CODEX_MARKETPLACE.read_text(encoding="utf-8"))
+        plugins = data.get("plugins", [])
+        self.assertEqual(len(plugins), 1)
+        self.assertEqual(plugins[0].get("name"), "jig")
+        self.assertEqual(
+            plugins[0].get("source"),
+            {"source": "local", "path": "./hosts/codex/plugins/jig"},
+        )
 
 
 class Ac1BothRemoteInstalls(unittest.TestCase):
@@ -65,27 +81,21 @@ class Ac1BothRemoteInstalls(unittest.TestCase):
             "README must document `codex plugin add jig@jig` (Codex)",
         )
 
-    def test_codex_install_targets_committed_hosts_codex(self) -> None:
-        # The Codex install points marketplace-add at the committed hosts/codex
-        # package directly (its descriptor lives in the hosts/codex subtree,
-        # not the repo root) — not a locally built dist dir.
+    def test_codex_install_uses_repo_root_marketplace(self) -> None:
+        # The repo-root `.agents/plugins/marketplace.json` lets Codex resolve
+        # the bare repo shorthand to the committed Codex package.
         self.assertRegex(
             self.text,
-            r"codex plugin marketplace add hosts/codex\b",
-            "the Codex `marketplace add` command must point at the committed "
-            "`hosts/codex` package directly",
+            r"codex plugin marketplace add ramboz/jig\b",
+            "the Codex `marketplace add` command must use the remote repo "
+            "marketplace shorthand",
         )
 
-    def test_codex_install_does_not_claim_bare_repo_shorthand(self) -> None:
-        # Honesty guard (jig design principle): there is NO repo-root Codex
-        # marketplace descriptor, so `codex plugin marketplace add ramboz/jig`
-        # would NOT resolve. Only Claude has the repo-root pointer that enables
-        # the bare-repo one-liner. Re-introducing it is a doc-honesty regression.
-        self.assertNotIn(
-            "codex plugin marketplace add ramboz/jig", self.text,
-            "README must NOT claim a bare-repo `codex plugin marketplace add "
-            "ramboz/jig` one-liner — Codex has no repo-root marketplace pointer; "
-            "point it at the committed `hosts/codex` package instead",
+    def test_codex_install_names_root_agents_marketplace(self) -> None:
+        self.assertIn(
+            ".agents/plugins/marketplace.json", self.text,
+            "README must name the root Codex marketplace descriptor that makes "
+            "`codex plugin marketplace add ramboz/jig` resolve correctly",
         )
 
     def test_keeps_hook_trust_caveat(self) -> None:
