@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [076-01]
-last_verified:
+last_verified: 2026-06-21
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -36,14 +36,14 @@ relationship so the two primers stop drifting.
    existing scaffold/verify tests stay green.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Coverage exercises each AC with ≥1 fixture (scaffolded primer under
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Coverage exercises each AC with ≥1 fixture (scaffolded primer under
       budget; divergence detected).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 **Implementation notes (non-binding):**
 - Do not confuse `templates/CLAUDE.md.template` (scaffold source) with the
@@ -63,4 +63,14 @@ observable in the generated `CLAUDE.md`.
 
 ### Deviation log (after reconciliation)
 
-_Produced during reconciliation._
+- The sync model landed as **lockstep host-neutral primer templates**:
+  `templates/CLAUDE.md.template` and `templates/AGENTS.md.template` are
+  byte-identical by test. This avoids adding a generator or extending
+  `memory-sync` until there is a second real caller for more machinery.
+- The lean-primer guard now covers both static templates and real
+  `scaffold-init` output for Claude and Codex hosts, so the budget check
+  follows the actual render path rather than only direct template reads.
+- Committed host package template copies were regenerated with
+  `scripts/build_host_packages.py`; `scripts/build_host_packages.py --check`
+  verifies they are in sync with source.
+- No deferred decisions remain for `docs/refinement-todo.md`.

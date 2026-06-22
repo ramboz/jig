@@ -19,13 +19,19 @@ Run:
 """
 
 import re
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 GLOSSARY = REPO_ROOT / "docs" / "memory" / "glossary.md"
+CLAUDE_TEMPLATE = REPO_ROOT / "templates" / "CLAUDE.md.template"
+AGENTS_TEMPLATE = REPO_ROOT / "templates" / "AGENTS.md.template"
+SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
 
 # AC #4 — the always-on budget, resolved during DRAFT review (spec 076-01).
 # Tied to spec-055's "dumb zone" framing: the always-loaded primer is re-read
@@ -122,6 +128,124 @@ class BudgetGuard(unittest.TestCase):
             len(self.raw), MAX_BYTES,
             f"CLAUDE.md is {len(self.raw)} bytes; budget is {MAX_BYTES} "
             f"(spec 076-01). Relocate prose to docs/memory/glossary.md.",
+        )
+
+
+class ScaffoldPrimerBudgetGuard(unittest.TestCase):
+    """076-02 AC #1/#3 — freshly scaffolded primers inherit the lean budget."""
+
+    def _rendered(self, template: Path) -> str:
+        return template.read_text(encoding="utf-8").replace(
+            "{{PROJECT_NAME}}", "demo-project",
+        )
+
+    def test_claude_template_renders_under_budget(self):
+        rendered = self._rendered(CLAUDE_TEMPLATE)
+        lines = rendered.count("\n") + (0 if rendered.endswith("\n") else 1)
+        self.assertLessEqual(
+            lines, MAX_LINES,
+            "rendered templates/CLAUDE.md.template must stay within the "
+            "076-01 line budget for freshly scaffolded projects.",
+        )
+        self.assertLessEqual(
+            len(rendered.encode("utf-8")), MAX_BYTES,
+            "rendered templates/CLAUDE.md.template must stay within the "
+            "076-01 byte budget for freshly scaffolded projects.",
+        )
+
+    def test_agents_template_renders_under_budget(self):
+        rendered = self._rendered(AGENTS_TEMPLATE)
+        lines = rendered.count("\n") + (0 if rendered.endswith("\n") else 1)
+        self.assertLessEqual(
+            lines, MAX_LINES,
+            "rendered templates/AGENTS.md.template must stay within the "
+            "076-01 line budget for freshly scaffolded projects.",
+        )
+        self.assertLessEqual(
+            len(rendered.encode("utf-8")), MAX_BYTES,
+            "rendered templates/AGENTS.md.template must stay within the "
+            "076-01 byte budget for freshly scaffolded projects.",
+        )
+
+
+class FreshScaffoldPrimerBudgetGuard(unittest.TestCase):
+    """076-02 AC #1 — scaffold-init emits primers under the 076-01 budget."""
+
+    def _scaffolded_primer(self, host: str, primer_name: str) -> bytes:
+        with tempfile.TemporaryDirectory(prefix="jig-lean-primer-") as tmp:
+            target = Path(tmp) / "demo-project"
+            target.mkdir()
+            env = os.environ.copy()
+            env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+            result = subprocess.run(
+                [sys.executable, str(SCAFFOLD), "--host", host, str(target)],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"scaffold.py --host {host} failed: "
+                f"stderr={result.stderr}\nstdout={result.stdout}",
+            )
+            return (target / primer_name).read_bytes()
+
+    def _assert_under_budget(self, raw: bytes, label: str) -> None:
+        text = raw.decode("utf-8")
+        lines = text.count("\n") + (0 if text.endswith("\n") else 1)
+        self.assertLessEqual(lines, MAX_LINES, f"{label} line budget")
+        self.assertLessEqual(len(raw), MAX_BYTES, f"{label} byte budget")
+
+    def test_scaffolded_claude_md_under_budget(self):
+        self._assert_under_budget(
+            self._scaffolded_primer("claude", "CLAUDE.md"),
+            "fresh scaffold CLAUDE.md",
+        )
+
+    def test_scaffolded_agents_md_under_budget(self):
+        self._assert_under_budget(
+            self._scaffolded_primer("codex", "AGENTS.md"),
+            "fresh scaffold AGENTS.md",
+        )
+
+
+class ScaffoldPrimerIndexShape(unittest.TestCase):
+    """076-02 AC #1 — scaffold templates model the lean Hot Cache shape."""
+
+    def _hot_cache(self, template: Path) -> str:
+        body = template.read_text(encoding="utf-8")
+        start = body.find("## Hot Cache")
+        self.assertNotEqual(start, -1, f"{template} must have a Hot Cache")
+        end = body.find("\n## ", start + 1)
+        return body[start:end if end != -1 else len(body)]
+
+    def test_claude_template_hot_cache_is_index_form(self):
+        hot_cache = self._hot_cache(CLAUDE_TEMPLATE)
+        self.assertIn("This is an **index**", hot_cache)
+        self.assertIn("docs/memory/glossary.md", hot_cache)
+        for fragment in RELOCATED_PROSE_FRAGMENTS:
+            with self.subTest(fragment=fragment):
+                self.assertNotIn(fragment, hot_cache)
+
+    def test_agents_template_hot_cache_is_index_form(self):
+        hot_cache = self._hot_cache(AGENTS_TEMPLATE)
+        self.assertIn("This is an **index**", hot_cache)
+        self.assertIn("docs/memory/glossary.md", hot_cache)
+        for fragment in RELOCATED_PROSE_FRAGMENTS:
+            with self.subTest(fragment=fragment):
+                self.assertNotIn(fragment, hot_cache)
+
+
+class HostPrimerTemplateSync(unittest.TestCase):
+    """076-02 AC #2 — AGENTS.md and CLAUDE.md templates stay lockstep."""
+
+    def test_agents_template_matches_claude_template(self):
+        self.assertEqual(
+            AGENTS_TEMPLATE.read_text(encoding="utf-8"),
+            CLAUDE_TEMPLATE.read_text(encoding="utf-8"),
+            "AGENTS.md.template and CLAUDE.md.template intentionally share "
+            "one host-neutral primer body. Update them together so Claude "
+            "and Codex scaffolds cannot silently drift.",
         )
 
 
