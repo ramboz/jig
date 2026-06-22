@@ -208,11 +208,24 @@ python3 -m unittest discover -s scripts -p "test_*.py"
 ```
 
 The repo ships [`scripts/run_tests.py`](scripts/run_tests.py) as the
-canonical wrapper (CI calls it directly); use it locally too:
+canonical fast test wrapper (CI calls it for the unit-test step); use it
+locally while iterating:
 
 ```bash
 python3 scripts/run_tests.py
 ```
+
+Before pushing, run the CI-equivalent local gate:
+
+```bash
+python3 scripts/ci_check.py
+```
+
+That command mirrors [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+tests, spec lint, manifest validation, the code-health floor, and host package
+drift checks. The code-health floor reads [`.jig/lint-command`](.jig/lint-command),
+which currently pins ruff via `pipx run --spec ruff==0.15.16 ...`; install
+`pipx` locally so this gate exercises the same ruff path as CI.
 
 When you add a new skill or top-level `scripts/`-style dir, make sure
 its tests are discoverable by the same pattern.
