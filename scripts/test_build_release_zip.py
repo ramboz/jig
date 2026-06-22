@@ -257,7 +257,7 @@ class VersionCoherenceTests(unittest.TestCase):
         shutil.copytree(CLAUDE_PKG, tmp_hosts / "claude")
         manifest_path = tmp_hosts / "claude" / ".claude-plugin" / "plugin.json"
         data = json.loads(manifest_path.read_text())
-        data["version"] = "2.0.0"  # committed tree now says 2.0.0
+        data["version"] = "9.9.9"  # deliberately different from requested version
         manifest_path.write_text(json.dumps(data))
 
         out = tmp_hosts / "out.zip"

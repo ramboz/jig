@@ -37,7 +37,7 @@ thin-orchestrator discipline ([spec 055](specs/055-context-cost-discipline/spec.
 | [078 — gate-bypass telemetry](specs/078-gate-bypass-telemetry/spec.md) | Instrument deliberate gate overrides so soft gates stay auditable. | 1.x observability work; later hosts should preserve the same event semantics. |
 | [079 — semantic-index guidance](specs/079-semantic-index-guidance/spec.md) | Document when to reach for an installed semantic/code index without adding a new always-loaded surface. | Shipped in 1.x; its passive guidance feeds the v2 auto-activation work. |
 
-### 2.0 — Multi-host portability _(release candidate · integration branch `v2`)_
+### 2.0 — Multi-host portability _(final · integration branch `v2`)_
 
 Decouple jig's workflow model from any one LLM harness. One canonical source
 tree; materialized, host-native files per supported host (**copy prose, share
@@ -45,7 +45,7 @@ code**). Adds Codex as a first-class host alongside Claude Code, with symmetric
 packaging and install paths.
 
 - **Branch:** `v2` (kept current with `main`; see "Working model" below)
-- **Current candidate:** 2.0.0-rc.3
+- **Release:** 2.0.0
 - **Board:** the `v2` branch's [status board](specs/README.md) is the
   per-slice source of truth for these specs until `v2` lands.
 
