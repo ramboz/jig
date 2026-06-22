@@ -10,8 +10,8 @@ skill: scaffold-init
 This is the worked-example spec that `scaffold-init` seeds into a fresh
 project so the very first turn has a faithful pattern to imitate. It
 records the genuine first unit of work in `{{PROJECT_NAME}}`: adopting
-jig by running `scaffold-init` to lay down the docs tree, CLAUDE.md, the
-status board, and the runtime machinery under `.claude/`.
+jig by running `scaffold-init` to lay down the docs tree, AGENTS.md, the
+status board, and the runtime machinery under `.codex/`.
 
 It is **real, permanent project history**, not a labelled-deletable
 demo. Scaffolding genuinely was the first thing that happened here, so
@@ -32,6 +32,6 @@ present and wired." A single vertical slice delivers it end-to-end.
 ### Slices
 
 1. **`001-01 bootstrap`** — Run `scaffold-init` so the project opens
-   with the jig docs tree, CLAUDE.md, an honest status board, and the
-   `.claude/` runtime machinery. DONE — see
+   with the jig docs tree, AGENTS.md, an honest status board, and the
+   `.codex/` runtime machinery. DONE — see
    [slice-01-bootstrap.md](slice-01-bootstrap.md).

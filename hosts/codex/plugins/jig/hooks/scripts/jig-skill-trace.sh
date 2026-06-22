@@ -1,5 +1,5 @@
 #!/bin/bash
-# Logs Skill-tool invocations to .claude/skill-usage.jsonl for routing
+# Logs Skill-tool invocations to .codex/skill-usage.jsonl for routing
 # observability (spec 041). Fires on PreToolUse/Skill — records which skill
 # the model actually invoked, including auto-triggered (implicit) routing,
 # so a user can verify a richer user-installed skill won over jig's baseline
@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 try:
     data = json.load(sys.stdin)
-    log_dir = os.path.join(os.environ.get('CLAUDE_PROJECT_DIR', '.'), '.claude')
+    log_dir = os.path.join(os.environ.get('CODEX_PROJECT_DIR', '.'), '.codex')
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'skill-usage.jsonl')
 

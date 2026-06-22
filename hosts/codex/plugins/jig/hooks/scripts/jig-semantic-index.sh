@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fires on SessionStart. Calls the host-neutral semantic-index activation
-# helper and stays quiet unless there is useful Claude-facing guidance:
+# helper and stays quiet unless there is useful Codex-facing guidance:
 # a one-time public-provider opt-in suggestion or a compact fallback warning.
 # Never blocks and never installs/indexes anything unless the project has
 # explicitly opted in through .jig/semantic-index.json.
@@ -27,13 +27,13 @@ def _common_dir(project_dir):
     script_relative = os.path.abspath(os.path.join(script_dir, '..', '..', 'skills', '_common'))
     if os.path.isdir(script_relative):
         return script_relative
-    plugin_root = os.environ.get('CLAUDE_PLUGIN_ROOT')
+    plugin_root = os.environ.get('CODEX_HOME')
     if plugin_root:
         return os.path.join(plugin_root, 'skills', '_common')
     return script_relative
 
 def _seen_path(project_dir):
-    return Path(project_dir) / '.jig' / 'semantic-index-claude-hook.json'
+    return Path(project_dir) / '.jig' / 'semantic-index-codex-hook.json'
 
 def _already_suggested(project_dir, key):
     path = _seen_path(project_dir)
@@ -86,13 +86,13 @@ try:
     event = payload.get('hook_event_name')
     if event != 'SessionStart':
         raise SystemExit(0)
-    project_dir = os.environ.get('CLAUDE_PROJECT_DIR') or payload.get('cwd') or os.getcwd()
+    project_dir = os.environ.get('CODEX_PROJECT_DIR') or payload.get('cwd') or os.getcwd()
     common_dir = _common_dir(project_dir)
     if common_dir not in sys.path:
         sys.path.insert(0, common_dir)
     import semantic_index
 
-    result = semantic_index.activate(Path(project_dir), host='claude')
+    result = semantic_index.activate(Path(project_dir), host='codex')
     msg = _message_for(result, project_dir)
     if msg:
         try:

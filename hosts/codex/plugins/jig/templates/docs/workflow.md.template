@@ -57,7 +57,7 @@ not honour-system prose, and no `Stop` hook is involved:
 2. Record the verdict:
 
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py \
+   python3 ${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-independent-review/review.py \
      record-review docs/specs/NNN-slug/spec.md "<slice>" \
      --pass compliance --verdict pass --reviewer jig:reviewer \
      --prompt-source "review.py implementation ..." --summary-file verdict.md
@@ -68,7 +68,7 @@ not honour-system prose, and no `Stop` hook is involved:
 3. Run the gated transition:
 
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py \
+   python3 ${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-spec-workflow/workflow.py \
      transition docs/specs/NNN-slug/spec.md "<slice>" REVIEWED
    ```
 
@@ -89,7 +89,7 @@ in place — git history keeps the prior verdict), then re-run the transition.
 After every few reconciled slices, review what was deferred during scaffolding to see if any items now have signal:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/stocktake.py .
+python3 ${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-scaffold-init/stocktake.py .
 ```
 
 The stocktake reports:
@@ -106,12 +106,21 @@ configured public semantic-index provider first when it is available. One index
 query can replace several speculative search/read turns; fall back to targeted
 search/read when no provider is configured, unavailable, or stale.
 
-Scaffolded Claude sessions run `jig-semantic-index` on `SessionStart`. With
-`.jig/semantic-index.json` `auto_attach: true`, the hook makes a bounded
-best-effort readiness call and records content-free activation telemetry. When
-a public provider is installed but the project has not opted in, Claude gets at
-most one compact suggestion. The hook never installs providers, downloads
-models, or blocks a workflow.
+Scaffolded Codex and Codex sessions run `jig-semantic-index` on `SessionStart`.
+Opt in by creating `.jig/semantic-index.json` with `auto_attach: true` and a
+public provider name, for example:
+
+```json
+{
+  "auto_attach": true,
+  "provider": "tokensave"
+}
+```
+
+After opt-in, the hook makes a bounded best-effort readiness call and records
+content-free activation telemetry. When a public provider is installed but the
+project has not opted in, the host gets at most one compact suggestion. The
+hook never installs providers, downloads models, or blocks a workflow.
 
 ## Hook Strictness Profiles
 

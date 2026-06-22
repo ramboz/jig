@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fires on UserPromptSubmit. Scans the user's prompt for capitalized references
 # (proper nouns, acronyms) not found in the hot cache (CLAUDE.md) or
-# docs/memory/glossary.md. Surfaces unknowns as additionalContext so Claude
+# docs/memory/glossary.md. Surfaces unknowns as additionalContext so Codex
 # can ask about them naturally in the current response.
 #
 # Heuristic refinements (slice 002-03):
@@ -19,8 +19,8 @@
 #
 # Resolve the directory this script lives in so the embedded Python can locate
 # skills/_common/lexicon.py whether jig runs as a plugin
-# (${CLAUDE_PLUGIN_ROOT}/hooks/scripts/) or a scaffolded install
-# (${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/) — the same idiom as
+# (${CODEX_HOME}/hooks/scripts/) or a scaffolded install
+# (${CODEX_PROJECT_DIR}/.codex/hooks/scripts/) — the same idiom as
 # jig-context-check.sh. JIG_LEXICON_COMMON_DIR overrides it (test seam).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -29,7 +29,7 @@ import sys, json, os, re
 
 try:
     data = json.load(sys.stdin)
-    project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
+    project_dir = os.environ.get('CODEX_PROJECT_DIR', '.')
     prompt = data.get('prompt', '')
 
     # Strip fenced code blocks (\`\`\`...\`\`\`) — multi-line, non-greedy

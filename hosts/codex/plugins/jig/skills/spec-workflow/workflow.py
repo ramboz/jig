@@ -503,6 +503,21 @@ _SESSION_PLAN_CODE_HEALTH_PHASE = (
 _SESSION_PLAN_DESIGN_REVIEW_PHASE = (
     "design-review", "delegate", "reviewer", "jig:independent-review")
 
+# Slice 074-02: host-mode hints are advisory UX guidance, not lifecycle
+# state. Keep the values host-neutral so adapters can map them to Claude,
+# Codex, or another host without changing jig transition semantics.
+_SESSION_PLAN_HOST_MODE_HINTS = {
+    "frame-critique": "plan",
+    "implement": "implement",
+    "compliance": "review",
+    "craft": "review",
+    "arch": "review",
+    "code-health": "review",
+    "design-review": "review",
+    "reconcile": "reconcile",
+    "land": "land",
+}
+
 
 def _slice_status_from_section(section: str) -> str:
     """Layout-aware status read for a slice section/file — frontmatter
@@ -585,6 +600,11 @@ def session_plan(spec_path: Path) -> str:
                  "runs a jig {skill} names it; `implement` runs the "
                  "[implementer] agent (no skill), and `reconcile`/`land` are "
                  "orchestrator-driven steps.")
+    lines.append("Host-mode hints are advisory only: they suggest the portable "
+                 "phase to use in a native host UX (`plan`, `implement`, "
+                 "`review`, `reconcile`, or `land`) and never satisfy or block "
+                 "workflow.py transitions, review evidence, or dependency "
+                 "checks.")
     lines.append("")
 
     if not planned:
@@ -602,6 +622,8 @@ def session_plan(spec_path: Path) -> str:
             head = "ORCHESTRATOR step"
         if skill:
             head += f", runs {{{skill}}}"
+        hint = _SESSION_PLAN_HOST_MODE_HINTS[phase]
+        head += f" (host-mode hint: {hint}; advisory only)"
         line = f"  {step}. {phase} — {head}"
         if note:
             line += f"  {note}"

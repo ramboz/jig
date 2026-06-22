@@ -1,5 +1,5 @@
 #!/bin/bash
-# Logs Task tool spawns to .claude/skill-usage.jsonl for workflow telemetry.
+# Logs Task tool spawns to .codex/skill-usage.jsonl for workflow telemetry.
 # Fires async on PreToolUse/Task — never blocks.
 #
 # Optional phase/spec/slice attribution comes from explicit tool_input fields
@@ -84,7 +84,7 @@ def _extract_tags(tool_input, prompt):
 
 try:
     data = json.load(sys.stdin)
-    log_dir = os.path.join(os.environ.get('CLAUDE_PROJECT_DIR', '.'), '.claude')
+    log_dir = os.path.join(os.environ.get('CODEX_PROJECT_DIR', '.'), '.codex')
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'skill-usage.jsonl')
 

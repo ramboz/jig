@@ -26,11 +26,12 @@ sys.path.insert(0, str(ROOT / "skills" / "scaffold-init"))
 
 import scaffold as scaffold_mod  # noqa: E402
 
+_CODEX_PLUGIN_HOOK_SCRIPT_PREFIX = "${PLUGIN_ROOT}/hooks/scripts/"
+
 _ROOT_DIRS: tuple[str, ...] = (
     ".codex-plugin",
     "agents",
     "hooks",
-    "templates",
 )
 
 _ROOT_FILES: tuple[str, ...] = (
@@ -149,9 +150,64 @@ def _write_codex_hooks(source_root: Path, output_dir: Path) -> None:
     dst = output_dir / "hooks" / "hooks.json"
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(
-        json.dumps(scaffold_mod.render_codex_plugin_hooks(hooks), indent=2) + "\n",
+        json.dumps(
+            scaffold_mod.render_codex_plugin_hooks(
+                hooks,
+                command_rewriter=lambda command: command.replace(
+                    scaffold_mod.ClaudeScaffoldRenderer.PLUGIN_HOOK_SCRIPT_PREFIX,
+                    _CODEX_PLUGIN_HOOK_SCRIPT_PREFIX,
+                ),
+            ),
+            indent=2,
+        ) + "\n",
         encoding="utf-8",
     )
+
+
+def _rewrite_codex_hook_scripts(output_dir: Path) -> None:
+    scripts_dir = output_dir / "hooks" / "scripts"
+    if not scripts_dir.is_dir():
+        return
+    for script in sorted(scripts_dir.glob("jig-*.sh")):
+        script.write_text(
+            scaffold_mod.CodexScaffoldRenderer.rewrite_hook_script_body(
+                script.read_text()
+            ),
+            encoding="utf-8",
+        )
+    lib_dir = scripts_dir / "lib"
+    if lib_dir.is_dir():
+        for helper in sorted(lib_dir.glob("*.py")):
+            helper.write_text(
+                scaffold_mod.CodexScaffoldRenderer.rewrite_hook_script_body(
+                    helper.read_text()
+                ),
+                encoding="utf-8",
+            )
+
+
+def _copy_templates(source_root: Path, output_dir: Path) -> None:
+    templates_src = source_root / "templates"
+    templates_dst = output_dir / "templates"
+    if not templates_src.is_dir():
+        return
+    for entry in sorted(templates_src.rglob("*")):
+        if entry.is_dir():
+            continue
+        rel = entry.relative_to(templates_src)
+        if _is_excluded(rel):
+            continue
+        dst = templates_dst / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if entry.name.endswith(".md.template"):
+            dst.write_text(
+                scaffold_mod.CodexScaffoldRenderer.rewrite_skill_md_paths(
+                    entry.read_text()
+                ),
+                encoding="utf-8",
+            )
+        else:
+            dst.write_bytes(entry.read_bytes())
 
 
 def _render_codex_agent_templates(source_root: Path, output_dir: Path) -> None:
@@ -217,6 +273,7 @@ def _validate_output_dir(source_root: Path, output_dir: Path) -> tuple[bool, str
     if output_dir == source_root:
         return False, "output directory must not be the source root"
     if source_root in output_dir.parents:
+        canonical_host_output = source_root / "hosts" / "codex" / "plugins" / "jig"
         source_owned_roots = {
             source_root / ".codex-plugin",
             source_root / ".claude-plugin",
@@ -228,14 +285,18 @@ def _validate_output_dir(source_root: Path, output_dir: Path) -> tuple[bool, str
             source_root / "docs",
             source_root / ".github",
         }
-        if not (
-            _is_relative_to(output_dir, source_root / "hosts")
-            or _is_relative_to(output_dir, source_root / "dist")
-        ):
+        under_hosts = _is_relative_to(output_dir, source_root / "hosts")
+        under_dist = _is_relative_to(output_dir, source_root / "dist")
+        if not (under_hosts or under_dist):
             return (
                 False,
                 "output directory inside the source tree must be under "
                 "hosts/ or dist/",
+            )
+        if under_hosts and output_dir != canonical_host_output:
+            return (
+                False,
+                "output directory under hosts/ must be hosts/codex/plugins/jig",
             )
         if output_dir in source_owned_roots or any(
             root in output_dir.parents for root in source_owned_roots
@@ -270,6 +331,8 @@ def build(source_root: Path, output_dir: Path) -> int:
             _copy_tree(src, output_dir / root_name)
 
     _write_codex_hooks(source_root, output_dir)
+    _rewrite_codex_hook_scripts(output_dir)
+    _copy_templates(source_root, output_dir)
     _copy_skills(source_root, output_dir)
     _render_codex_agent_templates(source_root, output_dir)
 

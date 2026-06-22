@@ -32,6 +32,8 @@ if str(ROOT / "scripts") not in sys.path:
 import build_codex_plugin  # noqa: E402
 import install_contract  # noqa: E402
 
+_CODEX_PLUGIN_HOOK_COMMAND_PREFIX = "bash ${PLUGIN_ROOT}/hooks/scripts/"
+
 PASS = "PASS"
 FAIL = "FAIL"
 UNAVAILABLE = "UNAVAILABLE"
@@ -212,7 +214,11 @@ def _validate_generated_package(plugin_dir: Path, marketplace_root: Path) -> Smo
         problems.append(error)
     elif hooks is not None:
         problems.extend(
-            install_contract.validate_hooks(hooks, plugin_dir / "hooks" / "scripts")
+            install_contract.validate_hooks(
+                hooks,
+                plugin_dir / "hooks" / "scripts",
+                command_prefix=_CODEX_PLUGIN_HOOK_COMMAND_PREFIX,
+            )
         )
         problems.extend(_validate_codex_hooks(hooks))
 
@@ -409,7 +415,9 @@ def _validate_live_hook_config(installed_root: Path | None) -> SmokeResult:
         return SmokeResult("codex-hook-config", FAIL, error)
     assert hooks is not None
     problems = install_contract.validate_hooks(
-        hooks, installed_root / "hooks" / "scripts"
+        hooks,
+        installed_root / "hooks" / "scripts",
+        command_prefix=_CODEX_PLUGIN_HOOK_COMMAND_PREFIX,
     )
     problems.extend(_validate_codex_hooks(hooks))
     if problems:

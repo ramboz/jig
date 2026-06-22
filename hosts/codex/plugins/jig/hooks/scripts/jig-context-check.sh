@@ -7,7 +7,7 @@
 #
 # SessionStart branches (the always-loaded baseline — unchanged by 055-02):
 #   1. MCP-server count (legacy proxy). Warns above 8 servers — tool-
-#      description overhead pushes Claude toward the dumb zone (>40%
+#      description overhead pushes Codex toward the dumb zone (>40%
 #      context fill, Horthy).
 #   2. Context-fill estimate (slice 026-01). Sums CLAUDE.md + every
 #      docs/memory/*.md in the project and warns once the byte total
@@ -70,8 +70,8 @@
 
 # Resolve the directory this script lives in so the Python helper can
 # import lib/context_fill.py regardless of whether jig is running as a
-# plugin (${CLAUDE_PLUGIN_ROOT}/hooks/scripts/) or a scaffolded install
-# (${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/).
+# plugin (${CODEX_HOME}/hooks/scripts/) or a scaffolded install
+# (${CODEX_PROJECT_DIR}/.codex/hooks/scripts/).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SCRIPT_DIR="$SCRIPT_DIR" python3 -c "
@@ -91,7 +91,7 @@ try:
         sys.exit(0)
     event = payload.get('hook_event_name', 'SessionStart')
 
-    project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
+    project_dir = os.environ.get('CODEX_PROJECT_DIR', '.')
 
     if event == 'PreToolUse':
         # ----- Branch 4: read-once / read-lean nudge (slice 055-03) ---
@@ -160,7 +160,7 @@ try:
 
         # ----- Branch 1: MCP server count (legacy proxy) --------------
         server_count = 0
-        for candidate in ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json']:
+        for candidate in ['.mcp.json', '.codex/settings.json', '.codex/settings.local.json']:
             path = os.path.join(project_dir, candidate)
             if os.path.exists(path):
                 with open(path) as f:
@@ -174,7 +174,7 @@ try:
         if server_count > 8:
             warnings.append(
                 f'Context budget warning: {server_count} MCP servers are configured. '
-                'Above ~8 servers, tool description overhead pushes Claude toward the '
+                'Above ~8 servers, tool description overhead pushes Codex toward the '
                 \"'dumb zone' (>40% context fill). Consider disabling unused servers.\"
             )
 

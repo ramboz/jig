@@ -88,9 +88,53 @@ class CodexCommittedPackageBuildTests(unittest.TestCase):
             "hooks/hooks.json",
             "hooks/scripts/jig-context-check.sh",
             "templates/AGENTS.md.template",
+            "templates/docs/workflow.md.template",
             "agents/reviewer.md",
         ):
             self.assertTrue((self.plugin_dir / rel).is_file(), rel)
+        workflow_template = (
+            self.plugin_dir / "templates" / "docs" / "workflow.md.template"
+        ).read_text()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", workflow_template)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", workflow_template)
+        self.assertIn(".jig/semantic-index.json", workflow_template)
+        self.assertIn('"provider": "tokensave"', workflow_template)
+        semantic_hook = (
+            self.plugin_dir / "hooks" / "scripts" / "jig-semantic-index.sh"
+        ).read_text()
+        self.assertNotIn("CLAUDE_PROJECT_DIR", semantic_hook)
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", semantic_hook)
+        self.assertIn("CODEX_PROJECT_DIR", semantic_hook)
+        self.assertIn("host='codex'", semantic_hook)
+        self.assertIn("semantic-index-codex-hook.json", semantic_hook)
+        attribution_helper = (
+            self.plugin_dir / "hooks" / "scripts" / "lib" / "read_attribution.py"
+        ).read_text()
+        self.assertNotIn(".claude", attribution_helper)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", attribution_helper)
+        self.assertIn(".codex", attribution_helper)
+        hooks = json.loads((self.plugin_dir / "hooks" / "hooks.json").read_text())
+        rendered_commands = [
+            hook["command"]
+            for entries in hooks["hooks"].values()
+            for entry in entries
+            for hook in entry.get("hooks", [])
+            if hook.get("type") == "command"
+        ]
+        self.assertGreater(len(rendered_commands), 0)
+        self.assertTrue(
+            all(command.startswith("bash ${PLUGIN_ROOT}/hooks/scripts/")
+                for command in rendered_commands),
+            rendered_commands,
+        )
+        self.assertFalse(
+            any("CLAUDE_PLUGIN_ROOT" in command or "CLAUDE_PROJECT_DIR" in command
+                for command in rendered_commands),
+            rendered_commands,
+        )
+        self.assertTrue(
+            any("jig-semantic-index.sh" in command for command in rendered_commands)
+        )
 
     # AC #2 — generated role-agent TOML
     def test_payload_has_role_agent_toml(self):
@@ -99,6 +143,7 @@ class CodexCommittedPackageBuildTests(unittest.TestCase):
         data = tomllib.loads(agent.read_text())
         self.assertEqual(data["name"], "jig-reviewer")
         self.assertEqual(data["sandbox_mode"], "read-only")
+        self.assertIn("Semantic-index exploration", data["developer_instructions"])
 
     # AC #3 — package-relative marketplace path
     def test_marketplace_source_path_resolves_to_plugin(self):

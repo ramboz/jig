@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-telemetry.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-telemetry.sh",
             "timeout": 5,
             "statusMessage": "jig: record task telemetry"
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-skill-trace.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-skill-trace.sh",
             "timeout": 5,
             "statusMessage": "jig: record skill usage"
           }
@@ -28,13 +28,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-spec-gate.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-spec-gate.sh",
             "timeout": 5,
             "statusMessage": "jig: enforce spec gate"
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-secret-scan.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-secret-scan.sh",
             "timeout": 5,
             "statusMessage": "jig: scan for secrets"
           }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
             "timeout": 5,
             "statusMessage": "jig: check context budget"
           }
@@ -58,13 +58,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-post-edit-verify.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-post-edit-verify.sh",
             "timeout": 5,
             "statusMessage": "jig: verify edit landed"
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-boundary-change-warn.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-boundary-change-warn.sh",
             "timeout": 5,
             "statusMessage": "jig: warn on boundary changes"
           }
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
             "timeout": 5,
             "statusMessage": "jig: check context budget"
           }
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-semantic-index.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-semantic-index.sh",
             "timeout": 25,
             "statusMessage": "jig: semantic index"
           }
@@ -98,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-memory-scan.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-memory-scan.sh",
             "timeout": 10,
             "statusMessage": "jig: scan memory references"
           }
@@ -108,7 +108,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
             "timeout": 5,
             "statusMessage": "jig: check context budget"
           }
@@ -120,7 +120,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-task-capture.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-task-capture.sh",
             "timeout": 10,
             "statusMessage": "jig: capture follow-up tasks"
           }

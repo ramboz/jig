@@ -823,6 +823,10 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         "canonical Markdown role prompt. The TOML sandbox_mode is the "
         "closest Codex-native posture for the role; treat any remaining "
         "Claude-specific capability language as operating intent.\n\n"
+        "Semantic-index exploration: for broad architecture, lifecycle, "
+        "change, or review questions, use the configured public "
+        "semantic-index provider first when available, then fall back to "
+        "targeted search/read.\n\n"
     )
 
     @classmethod
@@ -1167,6 +1171,9 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         out = out.replace("CLAUDE_PLUGIN_ROOT", "CODEX_HOME")
         out = out.replace(".claude", ".codex")
         out = out.replace("Claude", "Codex")
+        out = out.replace("semantic-index-claude-hook.json",
+                          "semantic-index-codex-hook.json")
+        out = out.replace("host='claude'", "host='codex'")
         return out
 
     def bind_paths(self) -> dict[str, str]:
@@ -1272,7 +1279,13 @@ def _copy_codex_templates(plugin: Path, target: Path) -> None:
         rel = entry.relative_to(templates_src)
         dst = templates_dst / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(entry.read_bytes())
+        if entry.name.endswith(".md.template"):
+            atomic_write_text(
+                dst,
+                CodexScaffoldRenderer.rewrite_skill_md_paths(entry.read_text()),
+            )
+        else:
+            dst.write_bytes(entry.read_bytes())
 
 
 def _copy_codex_skills(plugin: Path, target: Path,
@@ -1432,9 +1445,9 @@ def _build_codex_hooks_from_source(source: dict, command_rewriter=None) -> dict:
     return out
 
 
-def render_codex_plugin_hooks(source: dict) -> dict:
+def render_codex_plugin_hooks(source: dict, command_rewriter=None) -> dict:
     """Render a Codex plugin ``hooks/hooks.json`` payload from source hooks."""
-    return {"hooks": _build_codex_hooks_from_source(source)}
+    return {"hooks": _build_codex_hooks_from_source(source, command_rewriter)}
 
 
 def _build_jig_hook_entries(plugin: Path) -> dict:
@@ -1697,15 +1710,20 @@ def _copy_codex_hooks_and_register(plugin: Path, target: Path, *,
             for py in sorted(src_lib.glob("*.py")):
                 if py.name.startswith("test_"):
                     continue
-                (dst_lib / py.name).write_bytes(py.read_bytes())
+                atomic_write_text(
+                    dst_lib / py.name,
+                    CodexScaffoldRenderer.rewrite_hook_script_body(
+                        py.read_text()
+                    ),
+                )
 
     source_hooks = plugin / "hooks" / "hooks.json"
+    payload = {"hooks": _build_codex_hook_entries(plugin)}
     if source_hooks.is_file():
         raw_hooks = target / ".codex" / "hooks" / "hooks.json"
         raw_hooks.parent.mkdir(parents=True, exist_ok=True)
-        raw_hooks.write_bytes(source_hooks.read_bytes())
+        atomic_write_text(raw_hooks, json.dumps(payload, indent=2) + "\n")
 
-    payload = {"hooks": _build_codex_hook_entries(plugin)}
     hooks_path = target / ".codex" / "hooks.json"
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(hooks_path, json.dumps(payload, indent=2) + "\n")
@@ -1907,6 +1925,7 @@ _GITIGNORE_SECRET_PATTERNS = (
     # Local semantic-index activation state/telemetry (spec 080). Scoped
     # entries only: .jig/test-command and project opt-in state remain tracked.
     ".jig/semantic-index-claude-hook.json",
+    ".jig/semantic-index-codex-hook.json",
     ".jig/semantic-index-events.jsonl",
 )
 
@@ -2140,14 +2159,12 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # copied to `target/.claude/skills/jig-*`, so rendered docs must point
     # at THOSE paths, not `${CLAUDE_PLUGIN_ROOT}/skills/...` (the env var is
     # unset in a scaffolded project). Reuse the exact transform SKILL.md
-    # bodies already get (`_rewrite_skill_md_paths`). In `--plugin-only`
-    # mode the machinery stays under the plugin root, so the plugin-root
-    # path is correct and we pass no transform (None = leave docs verbatim).
+    # bodies already get (`_rewrite_skill_md_paths`). In Claude `--plugin-only`
+    # mode the machinery stays under the plugin root, so the plugin-root path
+    # is correct and we pass no transform (None = leave docs verbatim). Codex
+    # never has `CLAUDE_PLUGIN_ROOT`, so its docs always get Codex-native paths.
     if host == "codex":
-        doc_rewrite = (
-            CodexScaffoldRenderer.rewrite_skill_md_paths
-            if with_machinery else None
-        )
+        doc_rewrite = CodexScaffoldRenderer.rewrite_skill_md_paths
     else:
         doc_rewrite = _rewrite_skill_md_paths if with_machinery else None
 

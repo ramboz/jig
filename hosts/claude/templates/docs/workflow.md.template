@@ -106,12 +106,21 @@ configured public semantic-index provider first when it is available. One index
 query can replace several speculative search/read turns; fall back to targeted
 search/read when no provider is configured, unavailable, or stale.
 
-Scaffolded Claude sessions run `jig-semantic-index` on `SessionStart`. With
-`.jig/semantic-index.json` `auto_attach: true`, the hook makes a bounded
-best-effort readiness call and records content-free activation telemetry. When
-a public provider is installed but the project has not opted in, Claude gets at
-most one compact suggestion. The hook never installs providers, downloads
-models, or blocks a workflow.
+Scaffolded Claude and Codex sessions run `jig-semantic-index` on `SessionStart`.
+Opt in by creating `.jig/semantic-index.json` with `auto_attach: true` and a
+public provider name, for example:
+
+```json
+{
+  "auto_attach": true,
+  "provider": "tokensave"
+}
+```
+
+After opt-in, the hook makes a bounded best-effort readiness call and records
+content-free activation telemetry. When a public provider is installed but the
+project has not opted in, the host gets at most one compact suggestion. The
+hook never installs providers, downloads models, or blocks a workflow.
 
 ## Hook Strictness Profiles
 

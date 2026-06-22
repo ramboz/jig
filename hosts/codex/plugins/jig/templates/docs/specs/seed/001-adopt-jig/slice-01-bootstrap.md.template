@@ -7,8 +7,8 @@ last_verified:
 ## Slice 001-01 — bootstrap
 
 **Goal:** Adopt jig in {{PROJECT_NAME}} by running `scaffold-init`, so the
-project opens with the jig docs tree, an honest CLAUDE.md, a populated
-status board, and the `.claude/` runtime machinery — a complete pattern
+project opens with the jig docs tree, an honest AGENTS.md, a populated
+status board, and the `.codex/` runtime machinery — a complete pattern
 for the spec-driven loop from turn one.
 
 **DoR:**
@@ -24,7 +24,7 @@ for the spec-driven loop from turn one.
    `docs/refinement-todo.md`, `docs/inbox.md`, the `docs/memory/` stubs,
    `docs/specs/README.md`, and `docs/decisions/README.md` are all
    present after the scaffold runs.
-2. **CLAUDE.md is present and honest.** A generated `CLAUDE.md` exists at
+2. **AGENTS.md is present and honest.** A generated `AGENTS.md` exists at
    the project root, carries the jig watermark, and points at the docs
    above without claiming work that has not happened.
 3. **The status board is populated.** `docs/specs/README.md` contains a

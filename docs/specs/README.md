@@ -258,7 +258,7 @@
 | [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | DEFERRED | Conditional scaffold-init nudge; deferred — pursue only if 079-01's passive guidance is shown insufficient (a scaffold nudge would add the always-on surface 076 removed). |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-01 - activation contract and opt-in state | **DONE** |  |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-02 - Claude Code adapter activation | **DONE** |  |
-| [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-03 - Codex adapter activation | DEFERRED |  |
+| [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-03 - Codex adapter activation | **DONE** |  |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-04 - usage attribution digest | **DONE** |  |
 | [081-main-worktree-sync-on-landing](081-main-worktree-sync-on-landing/spec.md) | 081-01 — post-land main worktree sync | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-01 — manifest shape and transition gate | **DONE** |  |
@@ -291,4 +291,3 @@
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | (a) slice 02's trace links exist and are populated across a real spec corpus, AND (b) a genuine mid-flight use-case addition that intersects existing specs has been observed (a real conflict/reframe event), so the triage classifier can be validated against an actual case rather than an imagined one. Mirrors [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md) Option C's revisit trigger. |
 | [074-host-native-phase-modes](074-host-native-phase-modes/spec.md) | 074-03 - host-adapter rendering | Resume when spec 033's Codex scaffold/plugin slices |
 | [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | 079-01's passive `docs/workflow.md` guidance is shown |
-| [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-03 - Codex adapter activation | Start implementation of spec 033's Codex scaffold/plugin adapter (`033-05` / `033-06`), or a dogfood project asks to run jig from Codex with semantic-index activation enabled. |

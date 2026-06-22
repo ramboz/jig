@@ -64,7 +64,7 @@ def append_read_nudge_event(project_dir, session_id, decision) -> None:
         if isinstance(size, (int, float)) and size >= 0:
             event["size_bytes"] = int(size)
 
-        log_dir = project / ".claude"
+        log_dir = project / ".codex"
         log_dir.mkdir(parents=True, exist_ok=True)
         with (log_dir / READ_ATTRIBUTION_LOG).open(
             "a", encoding="utf-8") as fh:
@@ -108,7 +108,7 @@ def append_additional_context_event(
             "slice": slice_id,
         }
 
-        log_dir = project / ".claude"
+        log_dir = project / ".codex"
         log_dir.mkdir(parents=True, exist_ok=True)
         with (log_dir / READ_ATTRIBUTION_LOG).open(
             "a", encoding="utf-8") as fh:

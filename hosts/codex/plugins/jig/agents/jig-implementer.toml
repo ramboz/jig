@@ -4,6 +4,8 @@ description = "Implements a spec slice with TDD discipline. Writes tests first, 
 sandbox_mode = "workspace-write"
 developer_instructions = '''Codex adapter note: this custom agent is rendered from jig's canonical Markdown role prompt. The TOML sandbox_mode is the closest Codex-native posture for the role; treat any remaining Claude-specific capability language as operating intent.
 
+Semantic-index exploration: for broad architecture, lifecycle, change, or review questions, use the configured public semantic-index provider first when available, then fall back to targeted search/read.
+
 
 You are an implementer agent. Your job is to implement a single spec slice.
 

@@ -136,6 +136,21 @@ class CodexPluginRuntimeTests(unittest.TestCase):
         )
         handlers = _hook_handlers(data)
         self.assertGreater(len(handlers), 0)
+        commands = [
+            hook["command"]
+            for hook in handlers
+            if hook.get("type") == "command"
+        ]
+        self.assertTrue(
+            all(command.startswith("bash ${PLUGIN_ROOT}/hooks/scripts/")
+                for command in commands),
+            commands,
+        )
+        self.assertFalse(
+            any("CLAUDE_PLUGIN_ROOT" in command or "CLAUDE_PROJECT_DIR" in command
+                for command in commands),
+            commands,
+        )
         for hook in handlers:
             self.assertNotIn("async", hook)
             self.assertIn("statusMessage", hook)
@@ -293,6 +308,16 @@ class CodexPluginBuilderTests(unittest.TestCase):
         )
         self.assertNotEqual(code, 0)
         self.assertTrue((existing_source_dir / "scaffold-init" / "SKILL.md").is_file())
+
+    def test_builder_refuses_sibling_host_package_output(self):
+        sentinel = REPO_ROOT / "hosts" / "claude" / ".claude-plugin" / "plugin.json"
+        before = sentinel.read_text()
+        code = build_codex_plugin.build(
+            source_root=REPO_ROOT,
+            output_dir=REPO_ROOT / "hosts" / "claude",
+        )
+        self.assertNotEqual(code, 0)
+        self.assertEqual(sentinel.read_text(), before)
 
 
 class CodexPluginDocsTests(unittest.TestCase):

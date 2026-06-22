@@ -2042,6 +2042,7 @@ class SecurityFloorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         text = (self.target / ".gitignore").read_text()
         self.assertIn(".jig/semantic-index-claude-hook.json", text)
+        self.assertIn(".jig/semantic-index-codex-hook.json", text)
         self.assertIn(".jig/semantic-index-events.jsonl", text)
         self.assertNotIn(".jig/semantic-index.json", text)
 
@@ -2245,7 +2246,9 @@ class SecurityFloorTests(unittest.TestCase):
         workflow = (self.target / "docs" / "workflow.md").read_text()
         self.assertIn("## Semantic-Index Exploration", workflow)
         self.assertIn("jig-semantic-index", workflow)
+        self.assertIn(".jig/semantic-index.json", workflow)
         self.assertIn("auto_attach: true", workflow)
+        self.assertIn('"provider": "tokensave"', workflow)
         self.assertIn("never installs providers", workflow)
         self.assertIn("downloads", workflow)
         self.assertIn("models", workflow)

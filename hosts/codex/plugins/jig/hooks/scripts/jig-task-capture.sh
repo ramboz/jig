@@ -51,7 +51,7 @@ try:
         try:
             from lib.read_attribution import append_additional_context_event
             append_additional_context_event(
-                os.environ.get('CLAUDE_PROJECT_DIR', '.'),
+                os.environ.get('CODEX_PROJECT_DIR', '.'),
                 data.get('session_id') or 'default',
                 data.get('hook_event_name') or 'Stop',
                 'jig-task-capture', 'task_capture', msg)

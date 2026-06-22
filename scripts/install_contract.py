@@ -141,7 +141,12 @@ def parse_hook_script_names(hooks_data: dict) -> set[str]:
     return names
 
 
-def validate_hooks(hooks_data: dict, scripts_dir: Path) -> list[str]:
+def validate_hooks(
+    hooks_data: dict,
+    scripts_dir: Path,
+    *,
+    command_prefix: str = _HOOK_COMMAND_PREFIX,
+) -> list[str]:
     """Validate every hook command in a parsed hooks.json against the jig
     convention and confirm each referenced script exists under `scripts_dir`.
 
@@ -160,20 +165,20 @@ def validate_hooks(hooks_data: dict, scripts_dir: Path) -> list[str]:
         return ["hooks.json: missing or malformed top-level 'hooks' object"]
 
     for event, command in _iter_hook_commands(hooks_data):
-        if not command.startswith(_HOOK_COMMAND_PREFIX):
+        if not command.startswith(command_prefix):
             problems.append(
                 f"hooks.json {event} entry {command!r}: command must invoke "
-                f"'{_HOOK_COMMAND_PREFIX}<name>' "
+                f"'{command_prefix}<name>' "
                 "(no bare script names, no other path/env var)"
             )
             continue
-        name = command[len(_HOOK_COMMAND_PREFIX):].strip()
+        name = command[len(command_prefix):].strip()
         # Reject a command that smuggles a nested path or extra args after
         # the scripts/ segment — the contract is a single bare basename.
         if not name or "/" in name or " " in name:
             problems.append(
                 f"hooks.json {event} entry {command!r}: expected a single "
-                f"'{_HOOK_COMMAND_PREFIX}<name>' basename"
+                f"'{command_prefix}<name>' basename"
             )
             continue
         if not (scripts_dir / name).is_file():

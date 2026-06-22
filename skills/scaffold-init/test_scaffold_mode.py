@@ -1221,6 +1221,55 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertTrue((common / "parsing.py").is_file())
         self.assertFalse((common / "test_parsing.py").exists())
 
+    def test_codex_primer_guides_public_semantic_index_exploration(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        agents_md = (self.target / "AGENTS.md").read_text()
+        self.assertIn("Semantic-index exploration", agents_md)
+        self.assertIn("configured public semantic-index provider first", agents_md)
+        self.assertIn("fall back to targeted search/read", agents_md)
+        self.assertNotIn("Scout", agents_md)
+
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+        self.assertIn("## Semantic-Index Exploration", workflow)
+        self.assertIn("jig-semantic-index", workflow)
+        self.assertIn(".jig/semantic-index.json", workflow)
+        self.assertIn("auto_attach: true", workflow)
+        self.assertIn('"provider": "tokensave"', workflow)
+        self.assertIn("never installs providers", workflow)
+        self.assertNotIn("Scout", workflow)
+
+    def test_codex_plugin_only_docs_do_not_leak_claude_runtime_vars(self):
+        r = self._run_codex_scaffold("--plugin-only")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
+
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+        primer = (self.target / "AGENTS.md").read_text()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", workflow)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", workflow)
+        self.assertNotIn(".claude/", workflow)
+        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex", workflow)
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", primer)
+
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertEqual(manifest.get("host_renderer"), "codex")
+        self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
+        self.assertFalse((self.target / ".codex" / "skills").exists())
+
+    def test_codex_project_local_templates_are_codex_native(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
+
+        workflow_template = (
+            self.target / ".codex" / "templates" / "docs"
+            / "workflow.md.template"
+        ).read_text()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", workflow_template)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", workflow_template)
+        self.assertNotIn(".claude/", workflow_template)
+        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex", workflow_template)
+
     def test_codex_review_skills_use_codex_user_skill_locations(self):
         r = self._run_codex_scaffold("--has-tests")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
@@ -1281,6 +1330,11 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
             self.assertEqual(data["name"], f"jig-{role}")
             self.assertEqual(data["sandbox_mode"], sandbox)
             self.assertIn("Codex adapter note", data["developer_instructions"])
+            self.assertIn("Semantic-index exploration", data["developer_instructions"])
+            self.assertIn(
+                "configured public semantic-index provider first",
+                data["developer_instructions"],
+            )
             self.assertNotIn(".claude", data["developer_instructions"])
             self.assertNotIn("CLAUDE.md", data["developer_instructions"])
 
@@ -1375,14 +1429,133 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         text = hooks_path.read_text()
         self.assertNotIn("CLAUDE_PLUGIN_ROOT", text)
         self.assertNotIn("CLAUDE_PROJECT_DIR", text)
+        raw_text = (self.target / ".codex" / "hooks" / "hooks.json").read_text()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", raw_text)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", raw_text)
         for script in EXPECTED_HOOK_SCRIPTS:
             self.assertIn(
                 f"${{CODEX_PROJECT_DIR:-$PWD}}/.codex/hooks/scripts/{script}",
                 text,
             )
+            self.assertIn(
+                f"${{CODEX_PROJECT_DIR:-$PWD}}/.codex/hooks/scripts/{script}",
+                raw_text,
+            )
             path = self.target / ".codex" / "hooks" / "scripts" / script
             self.assertTrue(path.is_file(), f"missing hook script: {path}")
             self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+
+        semantic_hook = (
+            self.target / ".codex" / "hooks" / "scripts" / "jig-semantic-index.sh"
+        ).read_text()
+        self.assertNotIn("CLAUDE_PROJECT_DIR", semantic_hook)
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", semantic_hook)
+        self.assertIn("CODEX_PROJECT_DIR", semantic_hook)
+        self.assertIn("host='codex'", semantic_hook)
+        self.assertIn("semantic-index-codex-hook.json", semantic_hook)
+        attribution_helper = (
+            self.target / ".codex" / "hooks" / "scripts" / "lib"
+            / "read_attribution.py"
+        ).read_text()
+        self.assertNotIn(".claude", attribution_helper)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", attribution_helper)
+        self.assertIn(".codex", attribution_helper)
+
+    def test_codex_semantic_index_hook_uses_shared_contract(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        common_dir = Path(self.tmpdir) / "fake-common"
+        common_dir.mkdir()
+        (common_dir / "semantic_index.py").write_text(
+            "class Result:\n"
+            "    action = 'recommend'\n"
+            "    outcome = 'provider_available'\n"
+            "    provider = 'tokensave'\n"
+            "    provider_profile = 'public'\n"
+            "    recommendation = 'Enable semantic index via .jig/semantic-index.json'\n"
+            "\n"
+            "def activate(project_dir, host='unknown'):\n"
+            "    assert host == 'codex'\n"
+            "    return Result()\n"
+        )
+
+        script = self.target / ".codex" / "hooks" / "scripts" / "jig-semantic-index.sh"
+        env = os.environ.copy()
+        env["CODEX_PROJECT_DIR"] = str(self.target)
+        env["JIG_SEMANTIC_INDEX_COMMON_DIR"] = str(common_dir)
+        result = subprocess.run(
+            ["bash", str(script)],
+            input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s1"}),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["continue"])
+        self.assertEqual(
+            payload["additionalContext"],
+            "Enable semantic index via .jig/semantic-index.json",
+        )
+        self.assertTrue(
+            (self.target / ".jig" / "semantic-index-codex-hook.json").is_file()
+        )
+
+    def test_codex_semantic_index_internal_overlay_fixture_activates_scout(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        state_path = self.target / ".jig" / "semantic-index.json"
+        state_path.parent.mkdir(exist_ok=True)
+        state_path.write_text(json.dumps({
+            "auto_attach": True,
+            "provider": "scout",
+            "allowed_overlays": ["scout"],
+            "timeout_seconds": 1.0,
+        }) + "\n")
+
+        calls_path = Path(self.tmpdir) / "scout-calls.jsonl"
+        bin_dir = Path(self.tmpdir) / "bin"
+        bin_dir.mkdir()
+        scout = bin_dir / "scout"
+        scout.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$SCOUT_CALLS\"\n"
+            "if [ \"$1\" = \"status\" ]; then exit 1; fi\n"
+            "exit 0\n"
+        )
+        scout.chmod(0o755)
+
+        script = self.target / ".codex" / "hooks" / "scripts" / "jig-semantic-index.sh"
+        env = os.environ.copy()
+        env["CODEX_PROJECT_DIR"] = str(self.target)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env["SCOUT_CALLS"] = str(calls_path)
+        result = subprocess.run(
+            ["bash", str(script)],
+            input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s1"}),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        calls = calls_path.read_text().splitlines()
+        self.assertTrue(any(call.startswith("status ") for call in calls), calls)
+        self.assertTrue(any(call.startswith("attach ") for call in calls), calls)
+        telemetry = [
+            json.loads(line)
+            for line in (self.target / ".jig" / "semantic-index-events.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        self.assertEqual(telemetry[-1]["host"], "codex")
+        self.assertEqual(telemetry[-1]["provider"], "scout")
+        self.assertEqual(telemetry[-1]["provider_profile"], "internal-overlay")
+        self.assertEqual(telemetry[-1]["action"], "attach")
 
     def test_codex_refuses_existing_unmanaged_hooks_before_runtime_copy(self):
         hooks_path = self.target / ".codex" / "hooks.json"
