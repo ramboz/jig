@@ -18,8 +18,8 @@ Run:
     python3 -m unittest scripts.test_lean_primer
 """
 
-import re
 import os
+import re
 import subprocess
 import sys
 import tempfile

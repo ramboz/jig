@@ -97,8 +97,6 @@ class ReleasePleaseManifestTests(unittest.TestCase):
         self.assertIsInstance(version, str)
         # Loose SemVer shape: N.N.N, optionally with prerelease/build metadata
         # for manually-cut release candidates on long-lived branches.
-        import re
-
         self.assertRegex(
             version,
             r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$",

@@ -1457,7 +1457,8 @@ def _build_codex_hooks_from_source(source: dict, command_rewriter=None) -> dict:
     metadata and supplies stable status messages for command hooks.
     """
     if command_rewriter is None:
-        command_rewriter = lambda command: command
+        def command_rewriter(command):
+            return command
 
     out: dict = {}
     for event, entries in (source.get("hooks") or {}).items():

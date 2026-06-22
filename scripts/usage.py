@@ -100,13 +100,13 @@ It never raises on a malformed or missing transcript — bad lines are skipped.
 """
 
 import argparse
-from datetime import datetime, timezone
 import json
 import re
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
