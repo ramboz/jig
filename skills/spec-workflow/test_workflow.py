@@ -6250,12 +6250,18 @@ class SessionPlanTests(unittest.TestCase):
 
     def _write_slice(self, fname: str, label: str, status: str = "DRAFT",
                      arch_review: str = None,
-                     code_health_review: str = None) -> None:
+                     code_health_review: str = None,
+                     frame_review: str = None,
+                     design_review: str = None) -> None:
         fm = [f"status: {status}", "dependencies: []", "last_verified:"]
         if arch_review is not None:
             fm.append(f"arch_review: {arch_review}")
         if code_health_review is not None:
             fm.append(f"code_health_review: {code_health_review}")
+        if frame_review is not None:
+            fm.append(f"frame_review: {frame_review}")
+        if design_review is not None:
+            fm.append(f"design_review: {design_review}")
         block = "---\n" + "\n".join(fm) + "\n---\n\n"
         (self.tmpdir / fname).write_text(
             block + f"## Slice {label}\n\n**Goal:** placeholder.\n"
@@ -6341,6 +6347,101 @@ class SessionPlanTests(unittest.TestCase):
         self.assertIn("jig:code-health", out)
         self.assertLess(out.index("arch-review"), out.index("jig:code-health"),
                         "arch phase must come before code-health phase")
+
+    # Slice 074-02 — phase-mode hints are visible, advisory, and
+    # host-neutral (`plan` / `implement` / `review` / `reconcile` / `land`).
+    def test_host_mode_hints_are_advisory_and_host_neutral(self):
+        self._write_slice(
+            "slice-01-hinted.md", "074-02 hinted",
+            arch_review="true", code_health_review="true",
+            frame_review="true", design_review="true",
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = result.stdout
+
+        self.assertIn("Host-mode hints are advisory only", out)
+        self.assertIn("never satisfy or block workflow.py transitions", out)
+        for expected in (
+            "frame-critique — DELEGATE to [reviewer] subagent, "
+            "runs {jig:independent-review} "
+            "(host-mode hint: plan; advisory only)",
+            "implement — DELEGATE to [implementer] subagent "
+            "(host-mode hint: implement; advisory only)",
+            "compliance — DELEGATE to [reviewer] subagent, "
+            "runs {jig:independent-review} "
+            "(host-mode hint: review; advisory only)",
+            "craft — DELEGATE to [reviewer] subagent, runs {pr-review} "
+            "(host-mode hint: review; advisory only)",
+            "arch — DELEGATE to [reviewer] subagent, runs {arch-review} "
+            "(host-mode hint: review; advisory only)",
+            "code-health — DELEGATE to [reviewer] subagent, "
+            "runs {jig:code-health} "
+            "(host-mode hint: review; advisory only)",
+            "design-review — DELEGATE to [reviewer] subagent, "
+            "runs {jig:independent-review} "
+            "(host-mode hint: review; advisory only)",
+            "reconcile — ORCHESTRATOR step, runs {jig:independent-review} "
+            "(host-mode hint: reconcile; advisory only)",
+            "land — ORCHESTRATOR step, runs {jig:slice-land} "
+            "(host-mode hint: land; advisory only)",
+        ):
+            self.assertIn(expected, out)
+
+        hints = set(re.findall(r"host-mode hint: ([a-z-]+); advisory only", out))
+        self.assertLessEqual(
+            hints, {"plan", "implement", "review", "reconcile", "land"},
+        )
+
+    # Slice 074-02 AC #4 — hints are rendered by session-plan only; transition
+    # gates still use their original evidence and dependency inputs.
+    def test_host_mode_hints_do_not_affect_review_gate(self):
+        self._write_slice("slice-01-alpha.md", "057-01 alpha",
+                          status="IN_PROGRESS")
+        plan = self._run()
+        self.assertEqual(plan.returncode, 0, msg=plan.stderr)
+        self.assertIn("host-mode hint", plan.stdout)
+
+        result = run_workflow("transition", str(self.spec), "057-01",
+                              "REVIEWED", gate=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("compliance", result.stderr.lower())
+        self.assertNotIn("host-mode", result.stderr.lower())
+
+    def test_host_mode_hints_do_not_affect_dependency_gate(self):
+        root = self.tmpdir / "project"
+        spec_dir = root / "docs" / "specs" / "074-host-mode-demo"
+        spec_dir.mkdir(parents=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "---\nstatus: IN_PROGRESS\n---\n\n# Spec 074\n\n## Overview\n\nx.\n"
+        )
+        slice_md = spec_dir / "slice-02-demo.md"
+        slice_md.write_text(
+            "---\n"
+            "status: RECONCILED\n"
+            "dependencies: [999-01]\n"
+            "last_verified: 2026-06-21\n"
+            "---\n\n"
+            "## Slice 074-02 — demo\n\n"
+            "**Goal:** placeholder.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "No deviations.\n\n"
+            "### Reconciliation sweep\n\n"
+            "| Artifact | Disposition | Rationale |\n"
+            "|----------|-------------|-----------|\n"
+            "| `docs/specs/README.md` | `deferred` | Checked later. |\n"
+        )
+
+        plan = run_workflow("session-plan", str(spec_md))
+        self.assertEqual(plan.returncode, 0, msg=plan.stderr)
+        self.assertIn("host-mode hint", plan.stdout)
+
+        result = run_workflow("transition", str(spec_md), "074-02", "DONE")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsatisfied dependencies", result.stderr.lower())
+        self.assertIn("999-01", result.stderr)
+        self.assertNotIn("host-mode", result.stderr.lower())
 
     # AC #1 — DEFERRED slices are excluded
     def test_deferred_slice_excluded(self):
