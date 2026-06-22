@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [082-01]
-last_verified:
+last_verified: 2026-06-21
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -47,14 +47,14 @@ including missing artifacts and weak `no-op` / `deferred` rationales.
    without adding unrelated implementation-review or test-quality checks.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one fixture.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred during
       implementation.
 
 ### Close-out (post-DONE)
@@ -70,4 +70,51 @@ deviation-log claims.
 
 The original spec is preserved above. Implementation notes:
 
-_To be filled during reconciliation._
+1. **Reconciliation prompt now reads the sweep.**
+   Added `_reconciliation_sweep_check_block()` to
+   `skills/independent-review/review.py` and appended it only to
+   `build_reconciliation_prompt()`. The prompt now points reviewers at both
+   `Deviation log (after reconciliation)` and `Reconciliation sweep`, then asks
+   them to judge omitted drift-prone artifacts and weak `updated` / `no-op` /
+   `deferred` rationales.
+
+2. **Deterministic gates stayed out of semantic judgment.**
+   The implementation does not change `workflow.py` or the manifest shape
+   gate from 082-01. Artifact coverage and disposition honesty remain reviewer
+   work, while the helper continues to check shape/presence only.
+
+3. **Regression tests pin the reviewer contract.**
+   `ReconciliationPromptTests` now asserts that the prompt names the sweep,
+   omission checks, the core artifact families, disposition quality, deferred
+   owner/trigger expectations, and the existing no-scope-creep guard. The tests
+   also pin that the reconciliation prompt does not grow unrelated
+   implementation-review or test-quality checks.
+
+4. **Review results.**
+   Compliance review passed with no reconciliation notes. Craft review passed
+   with no blockers or nits, and called out the prompt-only scope plus
+   behavioral prompt tests as strengths.
+
+5. **Verification.**
+   Focused verification passed:
+   `python3 -m unittest skills/independent-review/test_review.py`
+   (`207 tests OK`). Full project verification passed after cache-access
+   escalation for pyright:
+   `python3 scripts/run_tests.py` (`2767 tests OK (skipped=3)`,
+   `pyright: clean`). `git diff --check` was clean.
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | Prompt-only review wording does not affect the project front-door summary. |
+| `docs/specs/README.md` | `deferred` | Owner: current implementer. Trigger: regenerate after the final `RECONCILED` / `DONE` status transition so the board records the landed state, not an intermediate one. |
+| `docs/product-vision.md` | `no-op` | No product behavior, use-case breadth layer, or design-principle text changed. |
+| `docs/architecture.md` | `no-op` | No module boundary, public contract, or architecture decision changed; the implementation extends an existing review-prompt builder pattern. |
+| `CLAUDE.md` / `AGENTS.md` / scaffold templates | `deferred` | Owner: spec 082-03. Trigger: primer and queue cleanup integration; this slice deliberately keeps primer hygiene terminology out of scope. |
+| `docs/inbox.md` | `no-op` | Checked for `082`, reconciliation-sweep, sweep-manifest, reviewer-omission, and primer-hygiene terms; no item was resolved by this prompt-only slice. |
+| `docs/refinement-todo.md` | `no-op` | Existing Stop-hook reconciliation nudge remains deferred until forgotten-reconciliation cases appear; primer-hygiene cleanup remains scoped to 082-03. No new implementation decision was deferred. |
+| `docs/memory/**` | `no-op` | No new reusable project knowledge beyond the slice-local prompt mechanics; review evidence and this slice record are sufficient. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No ADR state changed in this slice. |
+| `skills/independent-review/review.py` | `updated` | Added the reconciliation-sweep reviewer check and wired it only into reconciliation review prompts. |
+| `skills/independent-review/test_review.py` | `updated` | Added prompt tests covering sweep reading, omission scope, disposition quality, and non-expansion into unrelated review concerns. |

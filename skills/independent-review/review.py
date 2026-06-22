@@ -294,6 +294,30 @@ def _practices_check_block() -> str:
 _TEST_QUALITY_BASE_BRANCH = "main"
 
 
+def _reconciliation_sweep_check_block() -> str:
+    """UNCONDITIONAL reconciliation-review hint for the sweep manifest.
+
+    The deterministic gate only checks that the `### Reconciliation sweep`
+    subsection exists. This reviewer block judges artifact omissions and
+    disposition quality without turning reconciliation into another
+    implementation pass.
+    """
+    return (
+        "- **Reconciliation sweep check**: read both the Deviation log and "
+        "Reconciliation sweep subsections for this slice.\n"
+        "  1. **Omissions** — is any obvious drift-prone artifact missing "
+        "from the sweep,\n"
+        "     especially front-door docs, primers/templates, inbox,\n"
+        "     refinement todo, memory, ADR index, or generated status board?\n"
+        "  2. **Disposition quality** — is each `updated`, `no-op`, or "
+        "`deferred`\n"
+        "     rationale credible? `deferred` entries should name an owner "
+        "or trigger;\n"
+        "     `no-op` claims should not conflict with touched files or "
+        "landed behavior."
+    )
+
+
 def _test_quality_snapshot_block(spec_path: Path) -> str:
     """Compute the deterministic test-quality snapshot for the current
     slice and return a markdown block to embed in the implementation
@@ -1079,6 +1103,7 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     # reconciliation pass verifies the deviation log didn't paper over
     # task / approach / ADR / tech-debt gaps.
     extra_check += "\n" + _practices_check_block()
+    extra_check += "\n" + _reconciliation_sweep_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -1094,7 +1119,8 @@ re-reviewing against original ACs — that's done.
 ## What to read
 
 1. `{spec_path}` — focus on the Slice {slice_label} section, especially the
-   "Deviation log (after reconciliation)" subsection.
+   "Deviation log (after reconciliation)" and "Reconciliation sweep"
+   subsections.
 2. Any implementation files the deviation log claims to describe — read them
    as needed to verify claims.
 

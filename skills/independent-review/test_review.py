@@ -141,6 +141,38 @@ class ReconciliationPromptTests(unittest.TestCase):
         prompt = self._prompt()
         self.assertRegex(prompt, r"(?i)deviation\s+log")
 
+    def test_points_at_reconciliation_sweep(self):
+        prompt = self._prompt()
+        self.assertIn("Reconciliation sweep", prompt)
+        self.assertRegex(prompt, r"(?i)read.+Deviation log.+Reconciliation sweep")
+
+    def test_checks_for_sweep_omissions_across_core_artifacts(self):
+        prompt = self._prompt()
+        self.assertRegex(prompt, r"(?i)missing.+sweep")
+        for artifact in (
+            "front-door docs",
+            "primers/templates",
+            "inbox",
+            "refinement todo",
+            "memory",
+            "ADR index",
+            "generated status board",
+        ):
+            self.assertIn(artifact, prompt)
+
+    def test_judges_sweep_disposition_quality(self):
+        prompt = self._prompt()
+        for disposition in ("updated", "no-op", "deferred"):
+            self.assertIn(disposition, prompt)
+        self.assertRegex(prompt, r"(?i)deferred.+(?:owner|trigger)")
+        self.assertRegex(prompt, r"(?i)no-op.+(?:touched files|landed behavior)")
+
+    def test_keeps_reconciliation_scope_narrow(self):
+        prompt = self._prompt()
+        self.assertIn("no scope creep in doc updates", prompt)
+        self.assertNotIn("test-quality", prompt)
+        self.assertNotIn("implementation review", prompt.lower())
+
     def test_includes_output_format(self):
         prompt = self._prompt()
         for marker in ("VERDICT", "REASONING"):
