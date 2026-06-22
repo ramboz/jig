@@ -243,7 +243,7 @@
 | [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-01 — workflow.md index guidance | **DONE** | Adds the `### Reach for a semantic/code index` lever to `docs/workflow.md` § Context-cost discipline (when / which portable-first / detect-installed-else-recommend / install-nothing / honest-about-limits). **Docs-only** — no skill, no `.py`, nothing in CLAUDE.md; guard `scripts/test_semantic_index_guidance.py`. Lives in jig's own workflow.md (the slim scaffold template has no Context-cost section); scaffold reach is the DEFERRED 079-02. Closes spec 079. |
 | [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | DEFERRED | Conditional scaffold-init nudge; deferred — pursue only if 079-01's passive guidance is shown insufficient (a scaffold nudge would add the always-on surface 076 removed). |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-01 - activation contract and opt-in state | **DONE** |  |
-| [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-02 - Claude Code adapter activation | DRAFT |  |
+| [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-02 - Claude Code adapter activation | **DONE** |  |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-03 - Codex adapter activation | DEFERRED |  |
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-04 - usage attribution digest | DRAFT |  |
 | [081-main-worktree-sync-on-landing](081-main-worktree-sync-on-landing/spec.md) | 081-01 — post-land main worktree sync | **DONE** |  |
