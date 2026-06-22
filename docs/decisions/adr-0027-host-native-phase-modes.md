@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: [033-05, 057-01]
-last_verified: 2026-06-17
+last_verified: 2026-06-21
 frame_review: true
 ---
 
@@ -9,7 +9,7 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-06-17)
+Accepted (2026-06-21)
 
 ## Context
 

@@ -97,6 +97,25 @@ merges. For worktree-heavy sessions, `worktree.baseRef: "fresh"` in
 fallback: [memory/learnings.md](memory/learnings.md) → "Worktrees fork off
 stale local `main`".
 
+## Host phase modes
+
+Jig uses a small host-neutral phase vocabulary so Claude, Codex, and future
+host adapters can describe the same workflow in their own native UI terms:
+
+| Phase | Meaning in jig |
+|---|---|
+| `plan` | Clarify the request, draft or revise specs and ADRs, split slices, and produce the session plan before source edits begin. |
+| `implement` | Execute one accepted slice against its acceptance criteria, including tests and code/docs changes. |
+| `review` | Run the required read-only compliance, craft, and optional specialist passes after the deliverable is on disk. |
+| `reconcile` | Record deviations, update drift-prone docs, run the reconciliation review, and prepare the slice for closure. |
+| `land` | Commit, merge or open the PR, regenerate the status board, and sync memory after gates pass. |
+
+Host-native modes are advisory affordances, not lifecycle state. Codex Plan
+mode, Claude Code plan mode, edit/accept modes, and similar host controls can
+make the phase rhythm clearer, but they never satisfy a jig transition, review,
+or approval requirement by themselves. The durable record remains the spec,
+slice frontmatter, ADRs, status board, deviation log, and review evidence.
+
 ## SPIDR splitting
 
 All specs are SPIDR-split before implementation begins:

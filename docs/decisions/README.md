@@ -31,7 +31,7 @@
 - [ADR-0024: Reframe on a load-bearing reference shift — a lightweight correction capability over the spine](adr-0024-reference-reframe.md) — jig is built to keep work **consistent with prior decisions**. (2026-06-09, Proposed)
 - [ADR-0025: Use cases as a first-class breadth layer](adr-0025-use-cases-breadth-layer.md) — jig's artifact stack runs **vision → spec → slice**. (2026-06-10, Accepted)
 - [ADR-0026: Frontmatter is the canonical home for ADR status](adr-0026-adr-status-frontmatter.md) — ADR status lives only in prose; slice status lives in frontmatter. (2026-06-15, Accepted)
-- [ADR-0027: Host-native phase modes are advisory workflow affordances](adr-0027-host-native-phase-modes.md) — Jig already has a durable workflow model: specs, slices, review evidence, state transitions, deviation logs, and ADRs. (2026-06-17, Proposed)
+- [ADR-0027: Host-native phase modes are advisory workflow affordances](adr-0027-host-native-phase-modes.md) — Jig already has a durable workflow model: specs, slices, review evidence, state transitions, deviation logs, and ADRs. (2026-06-21, Accepted)
 - [ADR-0028: Federation composes with existing repo operating models and access providers](adr-0028-federation-workspace-provider-model.md) — Federation must compose with mature multi-repo operating models instead of replacing them. (2026-06-21, Proposed)
 - [ADR-0029: Reconciliation sweep manifest](adr-0029-reconciliation-sweep-manifest.md) — Reconciliation is already the right phase for documentation cleanup: it runs after implementation and review, when the agent knows what actually changed. (2026-06-21, Accepted)
 

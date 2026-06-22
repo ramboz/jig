@@ -63,6 +63,22 @@ The core loop. Each step is a copy-paste prompt; the lifecycle states
 (`DRAFT → READY_FOR_REVIEW → READY_FOR_IMPLEMENTATION → IN_PROGRESS →
 REVIEWED → RECONCILED → DONE`) are jig's, enforced by the spec-workflow helper.
 
+### Using Host Modes
+
+Use your host's planning surface for jig's `plan` phase: ambiguity scans,
+spec drafting, ADR framing, SPIDR splitting, and `session-plan` work. In Codex,
+that means `/plan` or the app's Plan mode. In Claude Code, use plan mode when
+you want Claude to explore and propose changes before editing.
+
+Use your host's implementation or edit surface only after the selected slice is
+ready for execution. In jig terms, that is the `implement` phase: tests,
+source/docs edits, and verification against the slice's acceptance criteria.
+Then return to the artifact workflow for `review`, `reconcile`, and `land`.
+
+Host modes are a convenience layer. They do not approve a spec, satisfy a
+transition, replace reviewer evidence, or bypass a dependency check; the repo
+artifacts remain the workflow record.
+
 **1 — (optional) Scan the idea for ambiguity before you spec it.**
 
 ```text
