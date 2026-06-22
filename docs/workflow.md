@@ -32,7 +32,7 @@ stateDiagram-v2
 
     IN_PROGRESS --> REVIEWED: all required review passes pass
     REVIEWED --> IN_PROGRESS: needs-changes
-    REVIEWED --> RECONCILED: review pass + deviation log
+    REVIEWED --> RECONCILED: review pass + deviation log + sweep
     RECONCILED --> IN_PROGRESS: reconciliation fails
     RECONCILED --> DONE: reconciliation pass
     DEFERRED --> DRAFT: trigger met
@@ -94,7 +94,7 @@ All specs are SPIDR-split before implementation begins:
 3. Spawn the `implementer` subagent with the spec path.
 4. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — up to four passes via `jig:independent-review`, `pr-review`, and optionally `arch-review` (`arch_review: true`) + `jig:code-health` (`code_health_review: true`)).
 5. Address reviewer findings; `[blocker]`-tagged craft/arch/code-health findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.
-6. Run reconciliation: update `architecture.md` if module boundaries changed; annotate spec with deviation log; run + `record-review` the reconciliation review, then `workflow.py transition … RECONCILED` (gated on that evidence + the deviation log).
+6. Run reconciliation: update `architecture.md` if module boundaries changed; annotate spec with deviation log and reconciliation sweep; run + `record-review` the reconciliation review, then `workflow.py transition … RECONCILED` (gated on that evidence + the deviation log + the sweep).
 7. `workflow.py transition … DONE` (re-validates the full review-evidence set + dependencies). Update `docs/specs/README.md`.
 8. Run `memory-sync` to consolidate learnings.
 
@@ -225,12 +225,24 @@ After implementation, before marking DONE:
   verdict with `review.py record-review … --pass reconciliation`, then
   `workflow.py transition <spec.md> <slice> RECONCILED`. That move is
   **gated** (ADR-0014 §5): it refuses unless the `reconciliation` verdict
-  is recorded and `pass` **and** a `### Deviation log` subsection is present
-  under the slice heading (the reviewer attests the log's content; the gate
-  only checks the heading is there). `transition … DONE` re-validates the
-  whole set — `compliance` + `craft` (+ `arch`) + `reconciliation` — on top
-  of the existing `dependencies:` check, so a hand-edited status can't walk
-  past a gate an earlier transition enforced.
+  is recorded and `pass` **and** `### Deviation log` plus
+  `### Reconciliation sweep` subsections are present under the slice heading
+  (the reviewer attests the content; the gate only checks the headings are
+  there).
+- Write a `### Reconciliation sweep` beside the deviation log before moving to
+  `RECONCILED`. The sweep is a manifest of drift-prone surfaces checked during
+  reconciliation: front-door docs, architecture/product docs, primer surfaces
+  (`CLAUDE.md`, `AGENTS.md`, scaffold templates), inbox/refinement queues,
+  memory, ADR indexes, and any other live prose the slice affected. Use
+  `updated` when the surface changed, `no-op` when it was checked and still
+  matches reality, and `deferred` when cleanup remains; deferred rows name an
+  owner or trigger. Live prose stays inline-correct per ADR-0010; closed
+  records preserve corrections in amendments.
+- `transition … DONE` re-validates the post-implementation set —
+  `compliance` + `craft` (+ any REVIEWED-stage gated passes such as `arch`,
+  `code-health`, or `design-review`) + `reconciliation` — plus the deviation log and
+  reconciliation sweep, on top of the existing `dependencies:` check, so a
+  hand-edited status can't walk past a gate an earlier transition enforced.
 
 ## Context-cost discipline
 

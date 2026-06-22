@@ -15,6 +15,8 @@ import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
 
@@ -418,6 +420,26 @@ class SkillPromotionTests(unittest.TestCase):
         section = rest[: nxt.start()] if nxt else rest
         self.assertIn("memory-sync", section,
                       "memory-sync must stay in the reconciliation section after promotion")
+        self.assertIn("Primer hygiene", section)
+        self.assertIn("CLAUDE.md", section)
+        self.assertIn("AGENTS.md", section)
+        self.assertIn("scaffold templates", section)
+        self.assertNotIn("**CLAUDE.md hygiene**", section,
+                         "live checklist should use host-portable primer hygiene")
+        live_surfaces = "\n".join(
+            [
+                self.skill,
+                (REPO_ROOT / "templates" / "docs" / "specs" / "slice-template.md").read_text(),
+                (REPO_ROOT / "skills" / "spec-workflow" / "workflow.py").read_text(),
+                (REPO_ROOT / "docs" / "workflow.md").read_text(),
+            ]
+        )
+        self.assertNotIn("CLAUDE.md hygiene", live_surfaces,
+                         "live workflow surfaces should use primer hygiene")
+        self.assertNotIn("REVIEWED --> RECONCILED: review pass + deviation log\n", live_surfaces,
+                         "workflow summaries should include the reconciliation sweep gate")
+        self.assertIn("Reconciliation sweep", section,
+                      "closing guidance must name the sweep transition gate")
 
     def test_skill_references_workflow_helper(self):
         """The promoted SKILL.md should tell Claude to use workflow.py."""

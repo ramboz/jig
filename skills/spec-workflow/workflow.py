@@ -2421,7 +2421,7 @@ def _render_stub_slice(num_str: str, slice_num: str = "01",
             "| `docs/specs/README.md` | `updated` | _TODO._ |\n"
             "| `docs/product-vision.md` | `no-op` | _TODO._ |\n"
             "| `docs/architecture.md` | `no-op` | _TODO._ |\n"
-            "| `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO._ |\n"
+            "| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO._ |\n"
             "| `docs/inbox.md` | `no-op` | _TODO._ |\n"
             "| `docs/refinement-todo.md` | `no-op` | _TODO._ |\n"
             "| `docs/memory/**` | `no-op` | _TODO._ |\n"

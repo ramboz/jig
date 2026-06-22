@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [082-01, 082-02]
-last_verified:
+last_verified: 2026-06-21
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -49,15 +49,15 @@ already-resolved inbox/refinement items exposed by this spec.
    Claude-only `CLAUDE.md hygiene` gate name where primer hygiene is intended.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage or docs checks exercise each AC where
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage or docs checks exercise each AC where
       practical.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred during
       implementation.
 
 ### Close-out (post-DONE)
@@ -73,4 +73,53 @@ dogfooded against it.
 
 The original spec is preserved above. Implementation notes:
 
-_To be filled during reconciliation._
+1. **Primer hygiene replaced Claude-only live wording.** The reconciliation
+   checklist and close-out guidance in `skills/spec-workflow/SKILL.md` now use
+   "Primer hygiene" and explicitly cover `CLAUDE.md`, `AGENTS.md`, and
+   scaffold templates when present. The slice template and workflow.py inline
+   fallback template use the same host-portable primer-surface row.
+2. **Sweep guidance expanded beyond the first implementation pass.** Review
+   found stale live prose in the session workflow, lifecycle diagram, closing
+   gate summary, and DONE revalidation summary. Those were corrected inline per
+   ADR-0010 so the live workflow now names the `### Reconciliation sweep` gate
+   consistently and does not describe `frame-critique` as a DONE-time
+   revalidation.
+3. **Queue cleanup was dogfooded.** `docs/inbox.md` now closes the already-fixed
+   `product-vision/stale-elicit-header` item, refreshes the still-valid
+   `review.py/prompt-path/file-per-slice` item with a sweep note, and
+   `docs/refinement-todo.md` records why the soft Stop-hook reconciliation
+   nudge remains valid after spec 082.
+4. **Front-door stale claim fixed inline.** `README.md` no longer groups
+   review-evidence gates under hooks; it distinguishes hook checks from
+   workflow-transition gates.
+5. **Review loop findings were folded back.** Compliance review initially found
+   stale prose in multiple live surfaces and one script-mode test failure. The
+   implementation now includes a `sys.path` bootstrap so
+   `python3 skills/spec-workflow/test_workflow.py` works as documented, plus
+   prose assertions that guard the primer-hygiene and sweep wording.
+6. **Verification.** Focused checks passed with
+   `python3 -m unittest skills.spec-workflow.test_workflow.SkillPromotionTests
+   skills.spec-workflow.test_workflow.SpikeSliceTemplateTests
+   skills.spec-workflow.test_spec_workflow_skill_surface`; script-style
+   `python3 skills/spec-workflow/test_workflow.py` passed 349 tests; the
+   project test runner via `tdd.py run . --test-path
+   skills/spec-workflow/test_workflow.py` passed 2,787 tests with 3 skipped and
+   pyright clean after rerunning with local cache access.
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `updated` | Corrected front-door gate wording so review-evidence gates are lifecycle transition gates, not hooks. |
+| `docs/workflow.md` | `updated` | Added sweep timing/disposition guidance; fixed session workflow and lifecycle diagram labels; removed stale DONE-time `frame-critique` revalidation wording. |
+| `skills/spec-workflow/SKILL.md` | `updated` | Renamed live checklist item to Primer hygiene and added explicit reconciliation-sweep gate wording in checklist and closing guidance. |
+| `templates/docs/specs/slice-template.md` / `skills/spec-workflow/workflow.py` | `updated` | Aligned on-disk and fallback sweep rows around host-portable primer surfaces. |
+| `docs/specs/README.md` | `deferred` | Regenerate after the final `RECONCILED -> DONE` close-out transition, per slice close-out flow. |
+| `docs/product-vision.md` | `no-op` | Checked after inbox cleanup; stale vision-elicitation header was already corrected before this slice, so only the queue breadcrumb needed closing. |
+| `docs/architecture.md` | `no-op` | No module boundary or public contract changed. |
+| `CLAUDE.md` / `AGENTS.md` / scaffold templates | `updated` | `CLAUDE.md` exists but did not need active-spec compression before DONE; `AGENTS.md` is absent in this worktree; scaffold slice template was updated. |
+| `docs/inbox.md` | `updated` | Closed the product-vision stale-header item and refreshed the still-valid review.py file-per-slice prompt-builder item. |
+| `docs/refinement-todo.md` | `updated` | Added a sweep note explaining why the soft Stop-hook reconciliation nudge remains deferred after spec 082. |
+| `docs/memory/**` | `no-op` | No new durable term or reusable learning worth promoting beyond this slice record. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No ADR changed. ADR-0029 remains the controlling decision. |
+| Review evidence | `updated` | Recorded passing compliance and craft verdicts for slice 082-03. |

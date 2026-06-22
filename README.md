@@ -45,9 +45,11 @@ not left as advice:
   correct it, the isolation boundaries that contain it. Swapping models won't
   close a workflow gap — the scaffold does.
 - **Guardrails, not guidelines.** What *must* happen is enforced mechanically by
-  hooks (secret scanning, spec gates, review-evidence gates); what takes
-  *judgment* lives in skills. The line between a deterministic gate and an
-  advisory nudge is drawn on purpose.
+  deterministic gates: hooks for immediate local checks (secret scanning,
+  spec-file gates) and workflow transitions for lifecycle evidence
+  (review-evidence gates, reconciliation artifacts). What takes *judgment*
+  lives in skills. The line between a deterministic gate and an advisory nudge
+  is drawn on purpose.
 - **The context window is working memory, not a storage buffer.** Irrelevant
   context degrades reasoning, so jig keeps a lean hot cache, loads deeper docs
   on demand, and delegates file-heavy reading to subagents that return only a

@@ -399,8 +399,9 @@ when `code_health_review: true`) must pass before
 `compliance` + `craft` (+ `arch` when the slice declares
 `arch_review: true`, + `code-health` when it declares
 `code_health_review: true`); `RECONCILED` requires the `reconciliation` verdict
-**and** a `### Deviation log` subsection; `DONE` re-validates the whole
-set (in addition to the existing `dependencies:` check). A refusal names
+**and** `### Deviation log` plus `### Reconciliation sweep` subsections;
+`DONE` re-validates the post-implementation and reconciliation evidence set
+(in addition to the existing `dependencies:` check). A refusal names
 the missing/invalid artifact and the `record-review` command to produce
 it. The gate enforces *evidence consistency*, not human sign-off (it
 lives in the agent's trust boundary per [ADR-0011](../../docs/decisions/adr-0011-spec-gate-model.md)).
@@ -506,12 +507,14 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
 1. After the reconciliation review passes, **record its verdict** with
    `review.py record-review … --pass reconciliation`, then
    `transition <spec.md> <slice> RECONCILED`. That move is gated on the
-   recorded `reconciliation` verdict (`pass`) **and** a `### Deviation log`
-   subsection under the slice heading (ADR-0014 §5).
+   recorded `reconciliation` verdict (`pass`) **and** `### Deviation log`
+   plus `### Reconciliation sweep` subsections under the slice heading
+   (ADR-0014 §5 + ADR-0029).
 2. Commit the work.
 3. After commit: `transition <spec.md> <slice> DONE`. `DONE` re-validates
    the whole evidence set — `compliance` + `craft` (+ `arch`,
-   + `code-health`) + `reconciliation` — on top of the existing
+   + `code-health`) + `reconciliation` — plus the deviation log and
+   reconciliation sweep, on top of the existing
    `dependencies:` check.
 4. Regenerate the board: `workflow.py status-board <project-dir>`.
 5. Run `/jig:memory-sync` (or `memory.py`) to consolidate any new learnings.
@@ -597,6 +600,10 @@ status flip is allowed. Each item is a gate.
 - [ ] **Deviation log** — write what changed during implementation and why,
       under a "Deviation log (after reconciliation)" subsection of the slice
       in `spec.md`. Original ACs preserved above; deviations append, not overwrite.
+- [ ] **Reconciliation sweep** — write which drift-prone surfaces were checked,
+      using `updated` / `no-op` / `deferred` dispositions. The transition gate
+      checks the subsection exists; the reconciliation reviewer judges coverage
+      and rationale quality.
 - [ ] **Architecture impact** — did module boundaries or public contracts change?
       If yes, update `docs/architecture.md` AND write an ADR.
 - [ ] **Conventions impact** — did this slice introduce or change a rule worth
@@ -604,12 +611,14 @@ status flip is allowed. Each item is a gate.
       `JIG_CONVENTIONS_APPROVED=1`).
 - [ ] **Inbox triage** — sweep `docs/inbox.md` for items resolved by this slice;
       move them to the relevant memory file or strike them through.
-- [ ] **CLAUDE.md hygiene** — if this slice closes the spec (all non-deferred
-      slices DONE), apply the compress-on-close-out rule per the slice
-      template's `### Close-out (post-DONE)` section. CLAUDE.md's "Active
-      specs" section should only carry in-flight work; load-bearing
+- [ ] **Primer hygiene** — if this slice closes the spec (all non-deferred
+      slices DONE), apply the spec 025 compress-on-close-out rule per the slice
+      template's `### Close-out (post-DONE)` section. Check every primer surface
+      present in this project: `CLAUDE.md`, `AGENTS.md`, and scaffold templates.
+      Active-spec sections should only carry in-flight work; load-bearing
       per-slice invariants migrate to the status board Notes column (which
-      `workflow.py status-board` preserves across regen).
+      `workflow.py status-board` preserves across regen), memory, or the
+      reconciled spec/slice record.
 - [ ] **Memory-sync** — run `/jig:memory-sync` (or invoke `memory.py` directly)
       to persist any new domain terms, dead-end learnings, or tool decisions
       that emerged during implementation. **This is where slice 002-04's
