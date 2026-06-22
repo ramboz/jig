@@ -112,12 +112,15 @@ and makes the `/jig:*` commands available:
 | Host | Remote one-command install | Release zip |
 |---|---|---|
 | **Claude Code / Desktop** | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` (resolves to the committed `hosts/claude` package). | `jig-claude-vX.Y.Z.zip` — a **flat, drag-droppable** plugin. Download from the [latest release](https://github.com/ramboz/jig/releases/latest) and add it via Claude Desktop's plugin manager (**Settings → Plugins**). |
-| **Codex** | `codex plugin marketplace add hosts/codex` (the committed marketplace root, from a repo checkout or the extracted `jig-codex` zip) → `codex plugin add jig@jig`. Codex has **no bare-repo one-liner** like Claude's — its marketplace descriptor lives in the `hosts/codex` subtree, not the repo root. See [Codex Distribution](#codex-distribution) for the hook-trust + agent-install caveats. | `jig-codex-vX.Y.Z.zip` — a marketplace bundle with **no direct zip-drop install**: `unzip` it, then `codex plugin marketplace add <extracted-dir>` → `codex plugin add jig@jig` (extract-then-add). |
+| **Codex** | `codex plugin marketplace add ramboz/jig` → `codex plugin add jig@jig` (resolves through the repo-root `.agents/plugins/marketplace.json` to the committed `hosts/codex/plugins/jig` package). See [Codex Distribution](#codex-distribution) for the hook-trust + agent-install caveats. | `jig-codex-vX.Y.Z.zip` — a marketplace bundle with **no direct zip-drop install**: `unzip` it, then `codex plugin marketplace add <extracted-dir>` → `codex plugin add jig@jig` (extract-then-add). |
 
 The two release zips ship **different internal shapes** by design — the Claude
 package is a flat plugin (`.claude-plugin/plugin.json` at the package root)
 while the Codex package is **marketplace-wrapped**
 (`hosts/codex/.agents/plugins/marketplace.json` + `hosts/codex/plugins/jig/...`).
+For remote Codex installs, the repo-root `.agents/plugins/marketplace.json`
+points Codex at that committed Codex package so `codex plugin marketplace add
+ramboz/jig` resolves to Codex-shaped files, not the Claude package.
 See [Repository structure](#repository-structure-for-contributors) for how the
 two committed host packages sit beside the canonical source. The legacy
 host-neutral `jig-vX.Y.Z.zip` is kept one cycle only as a deprecated alias of
@@ -176,16 +179,29 @@ workflow machinery editable in the project itself.
 
 ### Codex plugin (central install)
 
-The Codex install resolves against the **committed** Codex host package at
-`hosts/codex` (the marketplace root). Unlike Claude — whose repo-root
-`marketplace.json` lets `marketplace add ramboz/jig` resolve remotely — Codex's
-marketplace descriptor lives inside the `hosts/codex` subtree, not the repo
-root, so you point Codex at that package on disk: a repo checkout, or the
-extracted `jig-codex-vX.Y.Z.zip`. Because the package is committed, there is no
-build step:
+The Codex remote install resolves through the repo-root
+`.agents/plugins/marketplace.json`, which points at the **committed** Codex host
+package under `hosts/codex/plugins/jig`. Because the package is committed, there
+is no build step:
 
 ```bash
-codex plugin marketplace add hosts/codex   # the committed Codex marketplace root
+codex plugin marketplace add ramboz/jig
+codex plugin add jig@jig
+```
+
+For a local checkout, the same shape works from the repository root:
+
+```bash
+codex plugin marketplace add .
+codex plugin add jig@jig
+```
+
+The release zip remains an extract-then-add fallback because it is itself a
+marketplace root:
+
+```bash
+unzip jig-codex-vX.Y.Z.zip -d jig-codex-vX.Y.Z
+codex plugin marketplace add jig-codex-vX.Y.Z
 codex plugin add jig@jig
 ```
 
@@ -304,6 +320,7 @@ plugin (`.claude-plugin/plugin.json` at the package root) while Codex is
 # Canonical source root (dev tooling + the tree the host packages build from):
 .claude-plugin/plugin.json       # Claude plugin source manifest
 .claude-plugin/marketplace.json  # remote-install pointer → ./hosts/claude
+.agents/plugins/marketplace.json # Codex remote-install pointer → ./hosts/codex/plugins/jig
 .codex-plugin/plugin.json        # Codex plugin source manifest
 skills/                          # Skill definitions (SKILL.md per skill)
 agents/                          # Subagent definitions
