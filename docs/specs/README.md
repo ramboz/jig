@@ -248,7 +248,7 @@
 | [080-semantic-index-auto-activation](080-semantic-index-auto-activation/spec.md) | 080-04 - usage attribution digest | DRAFT |  |
 | [081-main-worktree-sync-on-landing](081-main-worktree-sync-on-landing/spec.md) | 081-01 — post-land main worktree sync | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-01 — manifest shape and transition gate | **DONE** |  |
-| [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-02 — reconciliation reviewer omission check | DRAFT |  |
+| [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-02 — reconciliation reviewer omission check | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-03 — primer and queue cleanup integration | DRAFT |  |
 
 ## Deferred slices
