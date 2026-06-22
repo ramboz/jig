@@ -38,7 +38,7 @@ the workflow model.
 |---|---|---|---|
 | Claude Code | Plugin | v1 supported | Existing `.claude-plugin` package remains valid. |
 | Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output remains the default ownership model. |
-| Codex | Scaffold | 033-05 implemented | Project-local output lives under `AGENTS.md` and `.codex/`. |
+| Codex | Scaffold | v2 supported | Project-local output lives under `AGENTS.md` and `.codex/`. |
 | Codex | Plugin | v2 supported | `.codex-plugin/plugin.json` plus rendered Codex skills, root `hooks/hooks.json`, templates, and canonical agent prompts are produced by `scripts/build_codex_plugin.py`. |
 | Other harnesses | Any | out of scope | Future adapters need their own real user signal and spec slices. |
 
@@ -353,7 +353,7 @@ Jig is a workflow layer, not a data application (per [product-vision.md](product
 
 <!-- elicited: 2026-05-15 / status: skipped -->
 
-_Skipped: jig does not currently expose schema-shaped external interfaces. It is a Claude Code plugin — the only external surfaces are SKILL.md frontmatter (consumed by the Claude Code router) and CLI argparse interfaces on the `.py` helpers (consumed by humans + scripts). Neither warrants an OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL artifact. If jig later grows an HTTP / events / RPC surface (e.g. a telemetry sink endpoint, a remote-spec-status query API), this section gets filled per the `/jig:contracts` skill's per-surface recommendation table._
+_Skipped: jig does not currently expose schema-shaped external interfaces. It is a dual-host plugin/scaffold package — the external surfaces are host plugin manifests, skill frontmatter/bodies consumed by Claude Code or Codex routers, Codex custom-agent TOML, hook configuration files, and CLI argparse interfaces on the `.py` helpers consumed by humans + scripts. None warrants an OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL artifact. If jig later grows an HTTP / events / RPC surface (e.g. a telemetry sink endpoint, a remote-spec-status query API), this section gets filled per the `/jig:contracts` skill's per-surface recommendation table._
 
 _Self-coherence note (spec 022-02): this slot exists so the `/jig:independent-review` reviewer-prompt's conditional contract-surface check stays quiet on jig's own slice reviews — the `status: skipped` marker + the no-bullet body together signal "no surfaces to check" to the detector. See [skills/contracts/SKILL.md](../skills/contracts/SKILL.md) for the per-surface recommendation table the elicitation references._
 

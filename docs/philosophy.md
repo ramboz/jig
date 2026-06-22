@@ -3,20 +3,20 @@
 > *jig (noun): a tool that guides other tools to work accurately and
 > consistently.*
 
-jig is an opinionated workflow scaffold for Claude Code projects. It puts
-spec-driven slices, independent review, a memory layer, and deterministic
+jig is an opinionated workflow scaffold for Claude Code and Codex projects. It
+puts spec-driven slices, independent review, a memory layer, and deterministic
 gates into your repo on day one — then gets out of the way. This page is the
-**why**. For who it's for, the competitive landscape, and the full set of
-design principles, see [product-vision.md](product-vision.md); for the
-day-to-day lifecycle, see [workflow.md](workflow.md).
+**why**. For who it's for, the competitive landscape, and the full set of design
+principles, see [product-vision.md](product-vision.md); for the day-to-day
+lifecycle, see [workflow.md](workflow.md).
 
 ## The one idea
 
 **jig encodes the AI-native workflow so you don't rediscover it session by
-session.** Claude Code is powerful but deliberately unopinionated about
-*project workflow*. Left to invent one, every team relearns the same lessons
-over its first few sprints — and those lessons don't carry across projects.
-jig is those lessons, encoded once.
+session.** Claude Code and Codex are powerful but deliberately unopinionated
+about *project workflow*. Left to invent one, every team relearns the same
+lessons over its first few sprints — and those lessons don't carry across
+projects. jig is those lessons, encoded once.
 
 ## The scars jig is built from
 
@@ -67,8 +67,9 @@ opinionated about *workflow* and out of the way of *judgment skills you've
 already invested in*.
 
 **Own the scaffolding; don't rent the plugin.** By default jig copies its
-machinery into your repo's `.claude/`, where you can read and edit it under
-version control — rather than hiding it behind a plugin runtime you can't see.
+machinery into your repo's host-native project directory (`.claude/` or
+`.codex/`), where you can read and edit it under version control — rather than
+hiding it behind a plugin runtime you can't see.
 
 **Dogfood everything.** Every jig feature is built using jig's own spec
 lifecycle. This repository's `docs/` is the worked example of what jig
@@ -91,10 +92,10 @@ richer skills where you have them.
 hard sandbox** and **not a replacement** for human judgment. It catches the
 gaps an implementer glosses over; you still own the call.
 
-**"I'm not on Claude Code, or my repo isn't greenfield."** Claude Code is
-what's supported today; cross-tool support (Codex / `AGENTS.md`) is planned,
-not shipped. For an existing spec-driven repo, adopt jig through the
-`/jig:migrate` skill rather than scaffolding fresh.
+**"I'm not on Claude Code, or my repo isn't greenfield."** Codex is supported
+alongside Claude Code in the v2 line. For an existing spec-driven repo, adopt
+jig through the `/jig:migrate` skill rather than scaffolding fresh; for another
+host, wait for a real adapter spec.
 
 **"Do I have to use all of it?"** No. jig installs in tiers and gets out of
 the way after day one. Start with the floor; reach for the rest when a real

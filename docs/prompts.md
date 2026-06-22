@@ -22,9 +22,9 @@ repo first, see [adoption-readiness.md](adoption-readiness.md).
 
 ## Stage 1 — First-time setup (once per repo)
 
-**Use this when:** you've just opened a repo in Claude Code and want jig's
-workflow in place. You run this **once** per repo — once it's done, you live in
-Stage 2.
+**Use this when:** you've just opened a repo in Claude Code or Codex and want
+jig's workflow in place. You run this **once** per repo — once it's done, you
+live in Stage 2.
 
 ```text
 Set up this project for AI-native development.
@@ -37,11 +37,11 @@ Equivalent explicit command:
 ```
 
 **What happens:** jig writes `docs/` (vision, architecture, conventions,
-workflow), a hot-cache `CLAUDE.md`, and — in the default scaffold mode — its
-skills, hooks, and `settings.json` into `.claude/`. A greenfield repo is also
-seeded with a worked-example spec (`docs/specs/001-adopt-jig`, already DONE)
-plus a `002-first-spec` DRAFT stub, and the run ends with a "scaffold complete
-and verified" check.
+workflow), a host primer (`CLAUDE.md` or `AGENTS.md`), and — in the default
+scaffold mode — its skills, hooks, and host config into `.claude/` or `.codex/`.
+A greenfield repo is also seeded with a worked-example spec
+(`docs/specs/001-adopt-jig`, already DONE) plus a `002-first-spec` DRAFT stub,
+and the run ends with a "scaffold complete and verified" check.
 
 **Then set your vision** — this is what every later slice is judged against:
 

@@ -8,17 +8,17 @@
 
 ## Vision statement
 
-A small, opinionated Claude Code plugin that scaffolds AI-native
-development practices — spec-driven slices, independent review, memory
-continuity, deterministic gates — into a project on day 1, and gets
-out of the way after.
+A small, opinionated workflow scaffold for Claude Code and Codex that installs
+AI-native development practices — spec-driven slices, independent review,
+memory continuity, deterministic gates — into a project on day 1, and gets out
+of the way after.
 
 > *jig (noun): a tool that guides other tools to work accurately and
 > consistently.*
 
 ## Target users
 
-- **Devs starting a new AI-native project on Claude Code** who want a
+- **Devs starting a new AI-native project in Claude Code or Codex** who want a
   structured workflow on day 1 instead of inventing one over the first
   three sprints.
 - **Devs adopting AI-native practices on an existing project** —
@@ -38,8 +38,8 @@ want their tooling to make architectural decisions for them.
 
 ## The core problem
 
-Claude Code is powerful but deliberately unopinionated about *project
-workflow*. Teams adopting it tend to land in one of three places:
+Claude Code and Codex are powerful but deliberately unopinionated about
+*project workflow*. Teams adopting them tend to land in one of three places:
 
 1. **Build the workflow yourself, slowly.** Each project re-invents
    spec discipline, review gates, memory conventions, and
@@ -49,8 +49,8 @@ workflow*. Teams adopting it tend to land in one of three places:
    skill marketplaces). The toolset works, but ~40% context fill is
    the practical ceiling for model recall (the "dumb zone"), and a
    mega-pack blows through it before the dev's actual work loads.
-3. **Hand-roll team conventions in CLAUDE.md.** Common; expensive;
-   non-portable; no enforcement.
+3. **Hand-roll team conventions in CLAUDE.md or AGENTS.md.** Common;
+   expensive; non-portable; no enforcement.
 
 There's a gap in the middle: **a focused, opinionated, *extensible*
 workflow layer that respects context economy and dogfoods its own
@@ -96,7 +96,8 @@ for tier definitions.
 
 The minimum coherent workflow. Nothing useful without all seven.
 
-1. **`scaffold-init`** — generate docs/, hot-cache CLAUDE.md, settings.json
+1. **`scaffold-init`** — generate docs/, the host primer (`CLAUDE.md` or
+   `AGENTS.md`), and host hook/skill config
 2. **`memory-sync`** — cross-session continuity; hot cache + deep storage + inbox
 3. **`spec-workflow`** — SPIDR-split slices; DRAFT → DONE state machine; status board
 4. **`independent-review`** — reviewer subagent with a fresh prompt and read-only tools. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
@@ -141,8 +142,8 @@ for the live status board.
   `/jig:spec-workflow` + `implementer` subagent.
 - **Polyglot test runner support beyond pytest/vitest/jest.** Add
   others when a real project hits the gap.
-- **A web UI, dashboard, or external service.** Jig is a Claude Code
-  plugin and a directory of files. That's the whole product.
+- **A web UI, dashboard, or external service.** Jig is a pair of host-native
+  plugins plus scaffolded project files. That's the whole product.
 
 ## Design principles
 
@@ -189,11 +190,12 @@ reconciliation.
    transition). Backwards-compat is a tax on every future spec; pay
    the migration cost once instead.
 7. **Owning the scaffolding beats renting the plugin.** Default install
-   mode after [spec 016](specs/016-scaffold-mode/spec.md) puts the
-   machinery (`skills/`, `agents/`, `hooks/`) in the dev's `.claude/`
-   directory where it can be read, modified, and extended. Plugin mode
-   stays available for users who want it; scaffolded mode is the
-   default because positioning matters.
+   mode after [spec 016](specs/016-scaffold-mode/spec.md) and the v2
+   host-adapter work puts the machinery (`skills/`, `agents/`, `hooks/`)
+   in the dev's host-native project directory (`.claude/` or `.codex/`)
+   where it can be read, modified, and extended. Plugin mode stays
+   available for users who want it; scaffolded mode is the default
+   because positioning matters.
 8. **Designed to reduce token cost.** Beyond keeping context below the
    dumb zone for *quality* (principle #2), jig is built to keep token
    usage — and the bill — *down*: it favors a lean context, delegates
@@ -225,11 +227,12 @@ real pain.
 Track in [docs/specs/README.md](specs/README.md) and
 [docs/refinement-todo.md](refinement-todo.md). High-level horizon:
 
-- **Multi-host portability** — a host-adapter layer beyond Claude Code
-  ([spec 033](specs/033-host-adapter-portability/spec.md)) and a
-  multi-repo federation tier ([spec 034](specs/034-federation-tier/spec.md)),
-  tracked on the 2.0 milestone (`v2` branch per
-  [docs/roadmap.md](roadmap.md)); on the roadmap, not shipped today.
+- **Multi-host portability** — shipped in the v2 line through the
+  host-adapter layer for Claude Code and Codex
+  ([spec 033](specs/033-host-adapter-portability/spec.md)). The next
+  horizon is a multi-repo federation tier
+  ([spec 034](specs/034-federation-tier/spec.md)), tracked in
+  [docs/roadmap.md](roadmap.md).
 - **Tier 2 stays empty** until `local-dev-parity` (or another
   candidate) gets a real user signal.
 - **`contracts` skill stays a deliberate stub** ([ADR-0002](decisions/adr-0002-contracts-stays-deferred.md))

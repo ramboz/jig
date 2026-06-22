@@ -72,12 +72,11 @@ rules jig holds *itself* to, spec by spec — see
 [product-vision § Design principles](docs/product-vision.md#design-principles)
 for the operational detail.
 
-Two more jig is building toward, honestly not yet landed: **one development
-experience across AI tools** (a host-adapter layer beyond Claude Code — [spec
-033](docs/specs/033-host-adapter-portability/spec.md)) and **coordination across
-a multi-repo workspace** (a federation tier — [spec
-034](docs/specs/034-federation-tier/spec.md)). Both are on the roadmap, not
-shipped today.
+jig now ships one development experience across Claude Code and Codex: the same
+workflow model, rendered into host-native files by the host-adapter layer
+([spec 033](docs/specs/033-host-adapter-portability/spec.md)). The next big
+horizon is **coordination across a multi-repo workspace** (a federation tier —
+[spec 034](docs/specs/034-federation-tier/spec.md)).
 
 ## Start here
 
@@ -85,17 +84,17 @@ shipped today.
 **[adoption & readiness guide](docs/adoption-readiness.md)** first — who jig is
 for, what your repo needs, and your first 30 minutes.
 
-Then, in a Claude Code session at your project root:
+Then, in a Claude Code or Codex session at your project root:
 
 ```text
 Set up this project for AI-native development.
 ```
 
 (or the explicit `/jig:scaffold-init`). This copies jig's docs, skills, hooks,
-and `settings.json` into your repo's `.claude/`, seeds a worked-example spec,
-and runs a "scaffold complete and verified" check. Follow it with
-`/jig:vision-elicitation` to set the vision every later slice is judged
-against.
+and host config into your repo: Claude gets `CLAUDE.md` + `.claude/`; Codex gets
+`AGENTS.md` + `.codex/`. The scaffold seeds a worked-example spec and runs a
+"scaffold complete and verified" check. Follow it with `/jig:vision-elicitation`
+to set the vision every later slice is judged against.
 
 **Copy-paste prompts** live in the **[prompt cookbook](docs/prompts.md)**, in
 the order you run them: scaffold the repo once, then repeat the idea-to-landed
@@ -133,7 +132,7 @@ either way; the flag picks the shape (recorded as `scaffold_mode` in
 
 | Shape | What lands in your repo | Command |
 |---|---|---|
-| **Own it** (default) | Docs **and** machinery (`skills/`, `agents/`, `hooks/`, `settings.json`) copied into `.claude/` — version-controlled and editable. | `/jig:scaffold-init` |
+| **Own it** (default) | Docs **and** host-native machinery copied into `.claude/` or `.codex/` — version-controlled and editable. | `/jig:scaffold-init` |
 | **Central machinery** | Docs + `scaffold.json` only; machinery stays plugin-side and upgrades centrally. | `/jig:scaffold-init --plugin-only` |
 | **Plugin only** (full manual) | Nothing — `/jig:*` skills and hooks come from the plugin centrally. For folks who already have their own setup and want to wire jig's workflow into it by hand. | _(skip step 2)_ |
 

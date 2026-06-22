@@ -16,7 +16,7 @@ next action and links out, rather than recreating a leadership curriculum.
 
 ## Who jig is for
 
-- **Devs starting a new Claude Code project** who want spec-driven slices,
+- **Devs starting a new Claude Code or Codex project** who want spec-driven slices,
   reviewer gates, and a memory layer on day 1 instead of inventing them
   over the first few sprints.
 - **Small teams who want a thin, opinionated baseline** they can extend
@@ -34,13 +34,12 @@ next action and links out, rather than recreating a leadership curriculum.
   lifecycle is overhead you won't recoup.
 - You **can't keep specs/ADRs in the repo** (e.g. process forbids it) —
   jig's whole contract is that "done" is verifiable in version control.
-- You're **not on Claude Code** today. Cross-tool support (Codex /
-  `AGENTS.md`) is planned, not shipped — see
-  [spec 033](specs/033-host-adapter-portability/spec.md).
+- You need a host beyond **Claude Code or Codex** today. New host adapters need
+  real user signal and their own spec slices.
 
 ## Prerequisites
 
-- **Claude Code** — CLI, desktop, web, or an IDE extension.
+- **Claude Code or Codex** — whichever host you plan to run jig from.
 - **A git repository** in reasonable health (a clean-ish tree; you can
   commit). jig reserves spec/ADR numbers on `origin/main` when a remote is
   present and falls back gracefully when it isn't.
@@ -55,7 +54,7 @@ next action and links out, rather than recreating a leadership curriculum.
 Run through this before scaffolding. Each item is a quick yes/no:
 
 - [ ] **Git repo health** — initialized, not mid-rebase, you can commit.
-- [ ] **Claude Code access** — you can open this repo in a Claude Code
+- [ ] **Host access** — you can open this repo in a Claude Code or Codex
       session.
 - [ ] **Python 3 available** — `python3 --version` works.
 - [ ] **Test command** — you know your stack's test command, or you accept
@@ -89,8 +88,9 @@ posture (product-vision § Design principle 7).
 ## Your first 30 minutes
 
 1. **Scaffold** — run `/jig:scaffold-init` at your repo root. You get
-   `docs/`, a hot-cache `CLAUDE.md`, hooks + skills under `.claude/`, and a
-   completion check that reports "scaffold complete and verified."
+   `docs/`, a host primer (`CLAUDE.md` or `AGENTS.md`), host-native hooks +
+   skills under `.claude/` or `.codex/`, and a completion check that reports
+   "scaffold complete and verified."
 2. **Read the worked example** — a fresh scaffold seeds
    `docs/specs/001-adopt-jig/` (a `DONE` reference spec to imitate) plus a
    `002-first-spec` `DRAFT` stub. Skim `001-adopt-jig` to see the shape of a

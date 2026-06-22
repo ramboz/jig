@@ -14,7 +14,7 @@
 
 ## Milestones
 
-### 1.x — Spec-driven workflow on Claude Code _(current · shipped on `main`)_
+### 1.x — Spec-driven workflow on Claude Code _(stable · shipped on `main`)_
 
 The released line. A complete spec-driven development scaffold for Claude Code:
 SPIDR slicing, the lifecycle state machine, the review-evidence gate
@@ -26,7 +26,7 @@ thin-orchestrator discipline ([spec 055](specs/055-context-cost-discipline/spec.
 ([spec 065](specs/065-lower-vocabulary-barrier/spec.md)).
 
 - **Branch:** `main`
-- **Latest release:** 1.12.0
+- **Latest stable release:** 1.12.0
 - **Status:** ongoing — new single-host capability work continues to land here.
 
 | Spec | Theme | Version fit |
@@ -37,7 +37,7 @@ thin-orchestrator discipline ([spec 055](specs/055-context-cost-discipline/spec.
 | [078 — gate-bypass telemetry](specs/078-gate-bypass-telemetry/spec.md) | Instrument deliberate gate overrides so soft gates stay auditable. | 1.x observability work; later hosts should preserve the same event semantics. |
 | [079 — semantic-index guidance](specs/079-semantic-index-guidance/spec.md) | Document when to reach for an installed semantic/code index without adding a new always-loaded surface. | Shipped in 1.x; its passive guidance feeds the v2 auto-activation work. |
 
-### 2.0 — Multi-host portability _(in progress · integration branch `v2`)_
+### 2.0 — Multi-host portability _(release candidate · integration branch `v2`)_
 
 Decouple jig's workflow model from any one LLM harness. One canonical source
 tree; materialized, host-native files per supported host (**copy prose, share
@@ -45,16 +45,17 @@ code**). Adds Codex as a first-class host alongside Claude Code, with symmetric
 packaging and install paths.
 
 - **Branch:** `v2` (kept current with `main`; see "Working model" below)
+- **Current candidate:** 2.0.0-rc.3
 - **Board:** the `v2` branch's [status board](specs/README.md) is the
   per-slice source of truth for these specs until `v2` lands.
 
 | Spec | Theme | Status on `v2` |
 |------|-------|----------------|
-| [033 — host-adapter-portability](specs/033-host-adapter-portability/spec.md) | Host-adapter architecture; Codex scaffold + plugin packaging + TOML custom-agent adapter | IN_PROGRESS — 033-06/07 DONE, 033-05 deferred, 033-01..04 drafted |
-| [074 — host-native phase modes](specs/074-host-native-phase-modes/spec.md) | Map jig phases onto Claude/Codex planning and implementation modes without making host mode state a lifecycle gate. | DRAFT — resumes with concrete host-adapter work |
-| [080 — semantic-index auto-activation](specs/080-semantic-index-auto-activation/spec.md) | Provider-neutral semantic-index activation contract with a public default provider profile, internal Scout overlay support, and Claude/Codex adapter materialization so provider-specific readiness commands become transparent after opt-in. | DRAFT / DEFERRED split — contract + Claude path drafted; Codex slice deferred until 033-05/06 resumes |
+| [033 — host-adapter-portability](specs/033-host-adapter-portability/spec.md) | Host-adapter architecture; Codex scaffold + plugin packaging + TOML custom-agent adapter | **DONE** |
+| [074 — host-native phase modes](specs/074-host-native-phase-modes/spec.md) | Map jig phases onto Claude/Codex planning and implementation modes without making host mode state a lifecycle gate. | **DONE** |
+| [080 — semantic-index auto-activation](specs/080-semantic-index-auto-activation/spec.md) | Provider-neutral semantic-index activation contract with a public default provider profile, internal Scout overlay support, and Claude/Codex adapter materialization so provider-specific readiness commands become transparent after opt-in. | **DONE** |
 | 059 — codex-port-polish _(on `v2`)_ | Parity polish after the core port: host-aware migrate, hook-trust onboarding, install smoke, override deferral, role-capability dogfood | **DONE** (all slices) |
-| 061 — dual-host-plugin-artifacts _(on `v2`)_ | Symmetric Claude + Codex plugin packages, drift guard, host-explicit release zips (ADR-0018) | IN_PROGRESS — 061-01..05 DONE, 061-06/07 (install verification) drafted |
+| 061 — dual-host-plugin-artifacts _(on `v2`)_ | Symmetric Claude + Codex plugin packages, drift guard, host-explicit release zips (ADR-0018) | **DONE** |
 
 ### Future — Federation & beyond _(exploring)_
 
@@ -69,9 +70,8 @@ into 2.0.
 
 - **`main` is the released trunk.** Single-host capability work lands here
   directly and ships in the 1.x line.
-- **`v2` is the 2.0 integration branch.** Multi-host work lands on `v2`. It is
-  kept current with `main` by **merging `main` → `v2`** periodically (one-shot
-  conflict resolution, no history rewrite) — not by rebasing the shared branch.
-- **When 2.0 is ready, `v2` merges into `main`** as the 2.0 release. At that
+- **`v2` is the 2.0 release-candidate branch.** Multi-host work landed on `v2`.
+  Keep it current with `main` before final release validation.
+- **When 2.0 is accepted, `v2` merges into `main`** as the 2.0 release. At that
   point its specs' DONE rows flow into `main`'s board and these roadmap entries
   collapse into the 1.x-style "shipped" record.
