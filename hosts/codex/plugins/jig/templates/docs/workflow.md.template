@@ -37,6 +37,14 @@ and deliver end-to-end value.
 7. Run `/jig:memory-sync` to consolidate learnings.
 8. Update spec status to DONE.
 
+## Phase-Mode Guidance
+
+{{HOST_PHASE_MODE_WORKFLOW}}
+
+Host-native modes are advisory workflow affordances. They never replace
+`workflow.py` transitions, review evidence, dependency checks, or
+reconciliation gates.
+
 ## Post-implementation review
 
 Every slice runs up to three review passes between IN_PROGRESS and REVIEWED:

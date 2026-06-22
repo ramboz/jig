@@ -762,6 +762,10 @@ class HostRenderer(ABC):
     def bind_paths(self) -> dict[str, str]:
         raise NotImplementedError
 
+    @abstractmethod
+    def phase_mode_substitutions(self) -> dict[str, str]:
+        raise NotImplementedError
+
 
 class ClaudeScaffoldRenderer(HostRenderer):
     """Claude Code scaffold renderer metadata and path rewrites."""
@@ -803,6 +807,24 @@ class ClaudeScaffoldRenderer(HostRenderer):
             "plugin_root_env": "CLAUDE_PLUGIN_ROOT",
         }
 
+    def phase_mode_substitutions(self) -> dict[str, str]:
+        return {
+            "HOST_PHASE_MODE_TERM": "Claude Code plan mode",
+            "HOST_PHASE_MODE_PRIMER": (
+                "Use Claude Code plan mode for framing and normal edit mode for "
+                "implementation; jig specs, slices, and review artifacts remain "
+                "the source of truth."
+            ),
+            "HOST_PHASE_MODE_WORKFLOW": (
+                "Use Claude Code plan mode to shape the slice, confirm unknowns, "
+                "and decide the next action. Once the slice is "
+                "`IN_PROGRESS`, switch back to normal edit mode for file changes, "
+                "tests, and review follow-up. Do not create a parallel Claude plan "
+                "artifact as lifecycle state; update the jig slice, `plan.md`, "
+                "`tasks.md`, or review evidence instead."
+            ),
+        }
+
 
 class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
     """Codex scaffold/plugin renderer metadata and TOML agent materializer."""
@@ -828,6 +850,23 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         "semantic-index provider first when available, then fall back to "
         "targeted search/read.\n\n"
     )
+
+    def phase_mode_substitutions(self) -> dict[str, str]:
+        return {
+            "HOST_PHASE_MODE_TERM": "Codex Plan mode",
+            "HOST_PHASE_MODE_PRIMER": (
+                "Use Codex Plan mode for framing and Default mode for "
+                "implementation; jig specs, slices, and review artifacts remain "
+                "the source of truth."
+            ),
+            "HOST_PHASE_MODE_WORKFLOW": (
+                "Use Codex Plan mode to shape the slice, confirm unknowns, and "
+                "decide the next action. Once the slice is `IN_PROGRESS`, switch "
+                "to Default mode for workspace edits, tests, and review follow-up. "
+                "Do not treat Codex mode state as a lifecycle gate; update the jig "
+                "slice, `plan.md`, `tasks.md`, or review evidence instead."
+            ),
+        }
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
@@ -2097,6 +2136,11 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     target = target.resolve()
     template_root = plugin / "templates"
+    renderer: HostRenderer
+    if host == "codex":
+        renderer = CodexScaffoldRenderer(plugin, target, force=force)
+    else:
+        renderer = ClaudeScaffoldRenderer(plugin, target, force=force)
 
     if not template_root.exists():
         raise FileNotFoundError(f"Template root not found: {template_root}")
@@ -2153,6 +2197,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         "PROJECT_NAME": project_name,
         "JIG_VERSION": jig_version,
         "TIMESTAMP": timestamp,
+        **renderer.phase_mode_substitutions(),
     }
 
     # Slice 046-01: in scaffold (in-repo) mode the runtime machinery is

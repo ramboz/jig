@@ -187,6 +187,21 @@ class GreenfieldScaffoldTests(unittest.TestCase):
         # No raw template placeholders left
         self.assertNotIn("{{PROJECT_NAME}}", claude_md)
 
+    def test_claude_phase_mode_guidance_is_host_native(self):
+        claude_md = (self.target / "CLAUDE.md").read_text()
+        workflow = (self.target / "docs/workflow.md").read_text()
+
+        self.assertIn("Claude Code plan mode", claude_md)
+        self.assertIn("normal edit mode", claude_md)
+        self.assertIn("jig specs, slices, and review artifacts", claude_md)
+        self.assertIn("## Phase-Mode Guidance", workflow)
+        self.assertIn("Claude Code plan mode", workflow)
+        self.assertIn("normal edit mode", workflow)
+        self.assertIn("Host-native modes are advisory", workflow)
+        self.assertIn("never replace", workflow)
+        self.assertNotIn("Codex Plan mode", claude_md)
+        self.assertNotIn("Default mode", workflow)
+
     # AC #7: No people.md (solo project default)
     def test_no_people_md(self):
         self.assertFalse(

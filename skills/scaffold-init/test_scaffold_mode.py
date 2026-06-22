@@ -1240,6 +1240,24 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertIn("never installs providers", workflow)
         self.assertNotIn("Scout", workflow)
 
+    def test_codex_phase_mode_guidance_is_host_native(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        agents_md = (self.target / "AGENTS.md").read_text()
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+
+        self.assertIn("Codex Plan mode", agents_md)
+        self.assertIn("Default mode", agents_md)
+        self.assertIn("jig specs, slices, and review artifacts", agents_md)
+        self.assertIn("## Phase-Mode Guidance", workflow)
+        self.assertIn("Codex Plan mode", workflow)
+        self.assertIn("Default mode", workflow)
+        self.assertIn("Do not treat Codex mode state as a lifecycle gate", workflow)
+        self.assertIn("Host-native modes are advisory", workflow)
+        self.assertNotIn("Claude Code plan mode", agents_md)
+        self.assertNotIn("normal edit mode", workflow)
+
     def test_codex_plugin_only_docs_do_not_leak_claude_runtime_vars(self):
         r = self._run_codex_scaffold("--plugin-only")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
