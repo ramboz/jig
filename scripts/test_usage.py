@@ -181,6 +181,18 @@ def _write_read_events(log_path: Path, events: list):
     return log_path
 
 
+def _write_semantic_events(log_path: Path, events: list):
+    """Write a synthetic semantic-index activation JSONL log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w") as fh:
+        for event in events:
+            if isinstance(event, str):
+                fh.write(event + "\n")
+            else:
+                fh.write(json.dumps(event) + "\n")
+    return log_path
+
+
 # Encoded-cwd dir names for a fake repo at /Users/me/Projects/demo, with a
 # worktree at /Users/me/Projects/demo/.claude/worktrees/foo.
 MAIN_CWD = "/Users/me/Projects/demo"
@@ -1348,6 +1360,219 @@ class HookInjectionAttributionReportTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Slice 080-04 — semantic-index activation digest
+# ---------------------------------------------------------------------------
+
+class SemanticIndexDigestTests(unittest.TestCase):
+    """Synthetic fixtures for the content-free semantic-index activation digest.
+
+    No provider binary is required: activation rows are local JSONL events and
+    transcript proxies are counted from synthetic Claude-shaped sessions.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-sem-index-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+        self.telemetry_log = (
+            self._tmp / ".jig" / "semantic-index-events.jsonl")
+        self.read_log = (
+            self._tmp / ".claude" / "context-growth-read-events.jsonl")
+
+        _write_semantic_events(self.telemetry_log, [
+            {
+                "timestamp": 1500,
+                "host": "claude",
+                "provider": "tokensave",
+                "provider_profile": "public",
+                "action": "ready",
+                "outcome": "ready",
+                "repo_root_class": "canonical",
+            },
+            {
+                "timestamp": 1510,
+                "host": "codex",
+                "provider": "tokensave",
+                "provider_profile": "public",
+                "action": "recommend",
+                "outcome": "not_opted_in",
+                "repo_root_class": "canonical",
+            },
+            {
+                "timestamp": 1520,
+                "host": "claude",
+                "provider": "scout",
+                "provider_profile": "internal-overlay",
+                "action": "detect",
+                "outcome": "overlay_disabled",
+                "repo_root_class": "worktree",
+            },
+            {
+                "timestamp": 1530,
+                "host": "codex",
+                "provider": "symdex",
+                "provider_profile": "public",
+                "action": "detect",
+                "outcome": "provider_missing",
+                "repo_root_class": "canonical",
+            },
+            {
+                "timestamp": 1540,
+                "host": "claude",
+                "provider": "tokensave",
+                "provider_profile": "public",
+                "action": "fallback",
+                "outcome": "fallback_failed",
+                "repo_root_class": "canonical",
+            },
+            {
+                "timestamp": 10,
+                "host": "claude",
+                "provider": "tokensave",
+                "provider_profile": "public",
+                "action": "ready",
+                "outcome": "ready",
+                "repo_root_class": "canonical",
+            },
+            "not-json",
+            ["noise"],
+        ])
+        _write_read_events(self.read_log, [
+            {
+                "timestamp": "1970-01-01T00:25:00Z",
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/secret-query-result.py",
+                "size_bytes": 400,
+                "spec": "080",
+            },
+            {
+                "timestamp": 1510,
+                "event": "read_nudge",
+                "kind": "duplicate",
+                "file_path": "/repo/secret-diff.txt",
+                "size_bytes": 200,
+                "spec": "080",
+            },
+            {
+                "timestamp": 10,
+                "event": "read_nudge",
+                "kind": "duplicate",
+                "file_path": "/repo/old.py",
+                "size_bytes": 200,
+                "spec": "080",
+            },
+            "bad-read-json",
+        ])
+
+        records = [
+            _user_record(MAIN_CWD, "Work on spec 080.", session="semA"),
+            _tool_use_record(
+                MAIN_CWD,
+                {"file_path": "/repo/private-body.py"},
+                name="Read",
+                session="semA",
+            ),
+            _tool_use_record(
+                MAIN_CWD,
+                {"pattern": "private_search_query"},
+                name="Grep",
+                session="semA",
+            ),
+            _tool_use_record(
+                MAIN_CWD,
+                {"query": "private semantic query"},
+                name="Search",
+                session="semA",
+            ),
+            _assistant_record(
+                "claude-opus-4-8",
+                _usage(inp=1, cache_read=80),
+                MAIN_CWD,
+                session="semA",
+            ),
+        ]
+        for rec in records:
+            rec["timestamp"] = 1505
+        _write_session(self.projects, ENC_MAIN, "semA", records)
+        # Empty file exercises missing/malformed transcript accounting without
+        # requiring any external provider or host runtime.
+        (self.projects / ENC_MAIN / "empty.jsonl").write_text("")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_build_semantic_index_digest_buckets_and_proxies(self):
+        rep = uu.build_semantic_index_digest(
+            self.telemetry_log,
+            self.projects,
+            ENC_MAIN,
+            read_log=self.read_log,
+            since_seconds=1000,
+            window_tokens=100,
+            now=lambda: 2000,
+        )
+        self.assertEqual(rep.activation_event_count, 5)
+        self.assertEqual(rep.filtered_activation_event_count, 1)
+        self.assertEqual(rep.malformed_activation_line_count, 2)
+        buckets = {r.bucket for r in rep.activation_rows}
+        self.assertEqual(buckets, {
+            "index-ready",
+            "recommended-but-not-opted-in",
+            "provider-missing",
+            "activation-failed",
+            "overlay-disabled",
+        })
+        self.assertIn("internal-overlay",
+                      {r.provider_profile for r in rep.activation_rows})
+        self.assertEqual(rep.session_count, 1)
+        self.assertEqual(rep.usage_session_count, 1)
+        self.assertEqual(rep.raw_read_tool_calls, 1)
+        self.assertEqual(rep.broad_grep_tool_calls, 1)
+        self.assertEqual(rep.broad_search_tool_calls, 1)
+        self.assertEqual(rep.cache_read_bands["75%+"], 1)
+        self.assertEqual(rep.read_large_events, 1)
+        self.assertEqual(rep.read_duplicate_events, 1)
+        self.assertEqual(rep.read_filtered_event_count, 1)
+        self.assertEqual(rep.read_malformed_line_count, 1)
+        self.assertEqual(rep.missing_transcript_count, 1)
+
+    def test_empty_semantic_index_digest_is_zero_not_crash(self):
+        missing = self._tmp / ".jig" / "missing-events.jsonl"
+        rep = uu.build_semantic_index_digest(
+            missing,
+            self._tmp / "missing-projects",
+            ENC_MAIN,
+            read_log=self._tmp / ".claude" / "missing.jsonl",
+        )
+        self.assertEqual(rep.activation_event_count, 0)
+        self.assertEqual(rep.session_count, 0)
+        out = uu.render_semantic_index_digest(rep)
+        self.assertIn("No semantic-index activation telemetry", out)
+
+    def test_render_semantic_index_digest_does_not_leak_content(self):
+        rep = uu.build_semantic_index_digest(
+            self.telemetry_log,
+            self.projects,
+            ENC_MAIN,
+            read_log=self.read_log,
+            since_seconds=1000,
+            window_tokens=100,
+            now=lambda: 2000,
+        )
+        out = uu.render_semantic_index_digest(rep)
+        self.assertIn("Semantic-index activation digest", out)
+        self.assertIn("overlay-disabled", out)
+        self.assertIn("Raw Read tool calls", out)
+        self.assertNotIn("private_search_query", out)
+        self.assertNotIn("private semantic query", out)
+        self.assertNotIn("private-body.py", out)
+        self.assertNotIn("secret-query-result.py", out)
+        self.assertNotIn("secret-diff.txt", out)
+
+
+# ---------------------------------------------------------------------------
 # CLI subprocess tests
 # ---------------------------------------------------------------------------
 
@@ -1543,6 +1768,44 @@ class CliTests(_TreeMixin, unittest.TestCase):
         self.assertIn("Hook injections", result.stdout)
         self.assertIn("jig-post-edit-verify", result.stdout)
         self.assertIn("post_edit_verify=1", result.stdout)
+
+    def test_cli_semantic_index_runs_with_overrides(self):
+        telemetry = self._tmp / ".jig" / "semantic-index-events.jsonl"
+        read_log = self._tmp / ".claude" / "context-growth-read-events.jsonl"
+        _write_semantic_events(telemetry, [
+            {
+                "timestamp": 1,
+                "host": "codex",
+                "provider": "tokensave",
+                "provider_profile": "public",
+                "action": "recommend",
+                "outcome": "not_opted_in",
+                "repo_root_class": "canonical",
+            },
+        ])
+        _write_read_events(read_log, [
+            {
+                "timestamp": 1,
+                "event": "read_nudge",
+                "kind": "large",
+                "file_path": "/repo/not-rendered.py",
+                "size_bytes": 400,
+                "spec": "080",
+            },
+        ])
+        result = _run_usage(
+            "semantic-index",
+            "--telemetry-log", str(telemetry),
+            "--read-log", str(read_log),
+            "--projects-dir", str(self.projects),
+            "--main-root", MAIN_CWD,
+            "--window-tokens", "1000",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Semantic-index activation digest", result.stdout)
+        self.assertIn("recommended-but-not-opted-in", result.stdout)
+        self.assertIn("Large read nudges", result.stdout)
+        self.assertNotIn("not-rendered.py", result.stdout)
 
 
 # ---------------------------------------------------------------------------

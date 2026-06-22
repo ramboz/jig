@@ -68,6 +68,7 @@ Usage
     python3 scripts/usage.py top [options]
     python3 scripts/usage.py compact-thresholds <spec> [<spec> ...] [options]
     python3 scripts/usage.py read-attribution [options]
+    python3 scripts/usage.py semantic-index [options]
 
     <spec>                A spec number (e.g. ``055``) or slug
                           (e.g. ``055-token-usage-tracking``).
@@ -89,6 +90,9 @@ Options
                           by spec/session for read events and by
                           hook/spec/session for `additionalContext`
                           injections.
+    semantic-index        Summarize `.jig/semantic-index-events.jsonl`
+                          activation telemetry alongside content-free
+                          transcript/read fallback proxies.
 
 Read-only: this tool never writes or deletes anything. The only network access
 is the optional ``npx ccusage`` call (suppressed by --ccusage-json/--no-ccusage).
@@ -96,10 +100,12 @@ It never raises on a malformed or missing transcript — bad lines are skipped.
 """
 
 import argparse
+from datetime import datetime, timezone
 import json
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -140,6 +146,7 @@ def default_projects_dir() -> Path:
 
 READ_ATTRIBUTION_LOG = "context-growth-read-events.jsonl"
 READ_ATTRIBUTION_BYTES_PER_TOKEN = 4
+SEMANTIC_INDEX_TELEMETRY_LOG = Path(".jig") / "semantic-index-events.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -793,6 +800,40 @@ class ReadAttributionReport:
     require_marker: bool = False
 
 
+@dataclass
+class SemanticIndexActivationRow:
+    bucket: str
+    provider: str
+    provider_profile: str
+    outcome: str
+    repo_root_class: str
+    host: str
+    count: int = 0
+
+
+@dataclass
+class SemanticIndexDigest:
+    telemetry_log: Path
+    read_log: Path
+    since_seconds: int = None
+    window_tokens: int = DEFAULT_TOKEN_WINDOW_TOKENS
+    activation_event_count: int = 0
+    malformed_activation_line_count: int = 0
+    filtered_activation_event_count: int = 0
+    activation_rows: list = field(default_factory=list)
+    session_count: int = 0
+    usage_session_count: int = 0
+    raw_read_tool_calls: int = 0
+    broad_grep_tool_calls: int = 0
+    broad_search_tool_calls: int = 0
+    cache_read_bands: dict = field(default_factory=dict)
+    read_large_events: int = 0
+    read_duplicate_events: int = 0
+    read_malformed_line_count: int = 0
+    read_filtered_event_count: int = 0
+    missing_transcript_count: int = 0
+
+
 def _spec_number(spec: str) -> str:
     """Normalize a spec argument (number or slug) to a three-digit number.
 
@@ -1251,6 +1292,241 @@ def build_read_attribution_report(log_path: Path,
     return report
 
 
+def _timestamp_seconds(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    return None
+
+
+def _in_window(timestamp, cutoff):
+    if cutoff is None:
+        return True
+    # Rows without timestamps are retained. Older schemas and synthetic
+    # fixtures should stay visible rather than disappearing silently.
+    if timestamp is None:
+        return True
+    return timestamp >= cutoff
+
+
+def _activation_bucket(event: dict) -> str:
+    outcome = str(event.get("outcome") or "unknown")
+    action = str(event.get("action") or "")
+    if outcome in ("ready", "attach_started"):
+        return "index-ready"
+    if outcome == "not_opted_in" or action == "recommend":
+        return "recommended-but-not-opted-in"
+    if outcome == "provider_missing":
+        return "provider-missing"
+    if outcome == "overlay_disabled":
+        return "overlay-disabled"
+    return "activation-failed"
+
+
+def _cache_read_band(peak_cache_read: int, window_tokens: int) -> str:
+    if peak_cache_read <= 0:
+        return "0"
+    if window_tokens <= 0:
+        return "unknown-window"
+    ratio = peak_cache_read / window_tokens
+    if ratio < 0.25:
+        return "0-25%"
+    if ratio < 0.50:
+        return "25-50%"
+    if ratio < 0.75:
+        return "50-75%"
+    return "75%+"
+
+
+def _iter_tool_uses(records: list):
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                yield str(block.get("name") or "")
+
+
+def _session_timestamp(records: list):
+    for rec in records:
+        if isinstance(rec, dict):
+            ts = _timestamp_seconds(rec.get("timestamp"))
+            if ts is not None:
+                return ts
+    return None
+
+
+def _read_proxy_counts(log_path: Path, cutoff):
+    counts = {
+        "large": 0,
+        "duplicate": 0,
+        "malformed": 0,
+        "filtered": 0,
+    }
+    try:
+        fh = Path(log_path).open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return counts
+    with fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                counts["malformed"] += 1
+                continue
+            if not isinstance(event, dict):
+                counts["malformed"] += 1
+                continue
+            if not _in_window(_timestamp_seconds(event.get("timestamp")), cutoff):
+                counts["filtered"] += 1
+                continue
+            if event.get("event") != "read_nudge":
+                continue
+            kind = event.get("kind")
+            if kind in ("large", "duplicate"):
+                counts[kind] += 1
+    return counts
+
+
+def build_semantic_index_digest(
+        telemetry_log: Path,
+        projects_dir: Path,
+        encoded_prefix: str,
+        *,
+        read_log: Path = None,
+        since_seconds: int = None,
+        window_tokens: int = DEFAULT_TOKEN_WINDOW_TOKENS,
+        now=time.time) -> SemanticIndexDigest:
+    """Build a metadata-only semantic-index activation digest.
+
+    Activation telemetry has no session id by design, so this digest keeps the
+    activation buckets and transcript/read proxies adjacent but aggregated over
+    the same time window rather than pretending they join one-to-one.
+    """
+    telemetry_log = Path(telemetry_log)
+    read_log = (
+        Path(read_log) if read_log is not None
+        else telemetry_log.parent / READ_ATTRIBUTION_LOG
+    )
+    cutoff = None
+    if since_seconds is not None:
+        cutoff = float(now()) - max(0, int(since_seconds))
+    digest = SemanticIndexDigest(
+        telemetry_log=telemetry_log,
+        read_log=read_log,
+        since_seconds=since_seconds,
+        window_tokens=window_tokens,
+    )
+
+    activation_rows = {}
+    try:
+        fh = telemetry_log.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        fh = None
+    if fh is not None:
+        with fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except (ValueError, TypeError):
+                    digest.malformed_activation_line_count += 1
+                    continue
+                if not isinstance(event, dict):
+                    digest.malformed_activation_line_count += 1
+                    continue
+                if not _in_window(_timestamp_seconds(event.get("timestamp")), cutoff):
+                    digest.filtered_activation_event_count += 1
+                    continue
+                bucket = _activation_bucket(event)
+                key = (
+                    bucket,
+                    str(event.get("provider") or "unknown"),
+                    str(event.get("provider_profile") or "unknown"),
+                    str(event.get("outcome") or "unknown"),
+                    str(event.get("repo_root_class") or "unknown"),
+                    str(event.get("host") or "unknown"),
+                )
+                row = activation_rows.setdefault(
+                    key,
+                    SemanticIndexActivationRow(
+                        bucket=key[0],
+                        provider=key[1],
+                        provider_profile=key[2],
+                        outcome=key[3],
+                        repo_root_class=key[4],
+                        host=key[5],
+                    ),
+                )
+                row.count += 1
+                digest.activation_event_count += 1
+    digest.activation_rows = sorted(
+        activation_rows.values(),
+        key=lambda r: (r.bucket, r.provider_profile, r.provider, r.outcome,
+                       r.repo_root_class, r.host),
+    )
+
+    bands = {"0": 0, "0-25%": 0, "25-50%": 0, "50-75%": 0, "75%+": 0}
+    for session_path in find_sessions(projects_dir, encoded_prefix):
+        records = read_session(session_path)
+        if not records:
+            digest.missing_transcript_count += 1
+            continue
+        if not _in_window(_session_timestamp(records), cutoff):
+            continue
+        digest.session_count += 1
+        turns, peak = _usage_turns_and_peak(records)
+        if turns:
+            digest.usage_session_count += 1
+        band = _cache_read_band(peak, window_tokens)
+        bands[band] = bands.get(band, 0) + 1
+        for tool_name in _iter_tool_uses(records):
+            lowered = tool_name.lower()
+            if lowered == "read":
+                digest.raw_read_tool_calls += 1
+            elif lowered == "grep":
+                digest.broad_grep_tool_calls += 1
+            elif lowered == "search":
+                digest.broad_search_tool_calls += 1
+    digest.cache_read_bands = {k: v for k, v in bands.items() if v}
+
+    read_counts = _read_proxy_counts(read_log, cutoff)
+    digest.read_large_events = read_counts["large"]
+    digest.read_duplicate_events = read_counts["duplicate"]
+    digest.read_malformed_line_count = read_counts["malformed"]
+    digest.read_filtered_event_count = read_counts["filtered"]
+    return digest
+
+
 def _merge_per_model(*maps) -> dict:
     """Sum several ``{model: {<usage fields>}}`` maps into one (for the
     combined orchestrator+subagent cost)."""
@@ -1621,6 +1897,91 @@ def render_read_attribution(rep: ReadAttributionReport, limit: int = 50) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_semantic_index_digest(rep: SemanticIndexDigest,
+                                 limit: int = 50) -> str:
+    lines = []
+    lines.append("## Semantic-index activation digest")
+    lines.append("")
+    lines.append(f"  Telemetry log:          {rep.telemetry_log}")
+    lines.append(f"  Read proxy log:         {rep.read_log}")
+    window = (f"last {_fmt(rep.since_seconds)}s"
+              if rep.since_seconds is not None else "all time")
+    lines.append(f"  Window:                 {window}")
+    lines.append(f"  Activation events:      {_fmt(rep.activation_event_count)}")
+    if rep.filtered_activation_event_count:
+        lines.append(
+            f"  Activation filtered:    {_fmt(rep.filtered_activation_event_count)}"
+        )
+    if rep.malformed_activation_line_count:
+        lines.append(
+            f"  Malformed activation:   "
+            f"{_fmt(rep.malformed_activation_line_count)}"
+        )
+    lines.append("")
+
+    rows = rep.activation_rows[:max(0, limit)]
+    lines.append(f"ACTIVATION BUCKETS (limit {len(rows)})")
+    if not rep.activation_rows:
+        lines.append("  No semantic-index activation telemetry found.")
+    elif not rows:
+        lines.append("  No rows shown (limit 0).")
+    else:
+        lines.append(
+            "  bucket                          provider       profile"
+            "           outcome                 repo_root  host     count"
+        )
+        for row in rows:
+            lines.append(
+                f"  {row.bucket:<31} {row.provider:<14} "
+                f"{row.provider_profile:<17} {row.outcome:<22} "
+                f"{row.repo_root_class:<10} {row.host:<8} "
+                f"{_fmt(row.count):>5}"
+            )
+    lines.append("")
+
+    lines.append("TRANSCRIPT PROXIES")
+    lines.append(f"  Sessions scanned:       {_fmt(rep.session_count)}")
+    lines.append(f"  Sessions with usage:    {_fmt(rep.usage_session_count)}")
+    lines.append(f"  Raw Read tool calls:    {_fmt(rep.raw_read_tool_calls)}")
+    lines.append(f"  Broad Grep calls:       {_fmt(rep.broad_grep_tool_calls)}")
+    lines.append(f"  Broad Search calls:     {_fmt(rep.broad_search_tool_calls)}")
+    if rep.missing_transcript_count:
+        lines.append(
+            f"  Empty/malformed files:   {_fmt(rep.missing_transcript_count)}"
+        )
+    if rep.cache_read_bands:
+        lines.append("  Cache-read peak bands:")
+        for band in ("0", "0-25%", "25-50%", "50-75%", "75%+",
+                     "unknown-window"):
+            if band in rep.cache_read_bands:
+                lines.append(
+                    f"    {band:<14} {_fmt(rep.cache_read_bands[band])}"
+                )
+    else:
+        lines.append("  Cache-read peak bands:  none")
+    lines.append("")
+
+    lines.append("READ-GROWTH PROXIES")
+    lines.append(f"  Large read nudges:      {_fmt(rep.read_large_events)}")
+    lines.append(f"  Duplicate read nudges:  {_fmt(rep.read_duplicate_events)}")
+    if rep.read_filtered_event_count:
+        lines.append(
+            f"  Read events filtered:   {_fmt(rep.read_filtered_event_count)}"
+        )
+    if rep.read_malformed_line_count:
+        lines.append(
+            f"  Malformed read lines:   {_fmt(rep.read_malformed_line_count)}"
+        )
+    lines.append("")
+    lines.append(
+        "Note: activation telemetry has no session id, so activation buckets "
+        "and transcript/read proxies are compared as aggregate counts over "
+        "the same window. Output is metadata-only: no queries, file bodies, "
+        "diffs, provider command output, or read paths are printed."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _append_framing(lines: list, rep: Report) -> None:
     lines.append(
         "Note: the $ figure is an ESTIMATE — notional under subscription "
@@ -1754,6 +2115,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=50, metavar="N",
         help="number of spec/session rows to show (default: 50)",
     )
+
+    semantic = sub.add_parser(
+        "semantic-index",
+        help="summarize semantic-index activation telemetry alongside "
+             "read/search fallback proxies",
+    )
+    semantic.add_argument(
+        "--telemetry-log", default=None, metavar="PATH",
+        help="override the semantic-index telemetry JSONL path",
+    )
+    semantic.add_argument(
+        "--read-log", default=None, metavar="PATH",
+        help="override the read-attribution JSONL log path",
+    )
+    semantic.add_argument(
+        "--projects-dir", default=None, metavar="PATH",
+        help="override the ~/.claude/projects root (testing seam)",
+    )
+    semantic.add_argument(
+        "--main-root", default=None, metavar="PATH",
+        help="override the repo main root used to derive the encoded prefix",
+    )
+    semantic.add_argument(
+        "--since-seconds", type=int, default=None, metavar="N",
+        help="only count timestamped events from the last N seconds",
+    )
+    semantic.add_argument(
+        "--window-tokens", type=int, default=DEFAULT_TOKEN_WINDOW_TOKENS,
+        metavar="N",
+        help=f"context window token budget for cache-read bands (default: "
+             f"{DEFAULT_TOKEN_WINDOW_TOKENS})",
+    )
+    semantic.add_argument(
+        "--limit", type=int, default=50, metavar="N",
+        help="number of activation bucket rows to show (default: 50)",
+    )
     return p
 
 
@@ -1802,7 +2199,7 @@ def main(argv: list) -> int:
         return int(exc.code) if exc.code is not None else 2
 
     if ns.command not in ("report", "top", "compact-thresholds",
-                          "read-attribution"):
+                          "read-attribution", "semantic-index"):
         parser.print_help(sys.stderr)
         return 2
 
@@ -1821,6 +2218,26 @@ def main(argv: list) -> int:
 
     projects_dir = (Path(ns.projects_dir) if ns.projects_dir
                     else default_projects_dir())
+
+    if ns.command == "semantic-index":
+        if ns.window_tokens <= 0:
+            sys.stderr.write("usage.py: error: --window-tokens must be > 0\n")
+            return 2
+        telemetry_log = (Path(ns.telemetry_log) if ns.telemetry_log
+                         else Path(root) / SEMANTIC_INDEX_TELEMETRY_LOG)
+        read_log = (Path(ns.read_log) if ns.read_log
+                    else Path(root) / ".claude" / READ_ATTRIBUTION_LOG)
+        digest = build_semantic_index_digest(
+            telemetry_log,
+            projects_dir,
+            encoded_prefix,
+            read_log=read_log,
+            since_seconds=ns.since_seconds,
+            window_tokens=ns.window_tokens,
+        )
+        sys.stdout.write(render_semantic_index_digest(
+            digest, limit=ns.limit))
+        return 0
 
     if ns.command == "top":
         top = build_top_report(projects_dir, encoded_prefix,
