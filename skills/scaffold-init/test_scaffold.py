@@ -2037,6 +2037,14 @@ class SecurityFloorTests(unittest.TestCase):
         for pat in self.SECRET_BLOCK_PATTERNS:
             self.assertIn(pat, text, f".gitignore missing secret pattern: {pat}")
 
+    def test_gitignore_ignores_semantic_index_local_runtime_files(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(".jig/semantic-index-claude-hook.json", text)
+        self.assertIn(".jig/semantic-index-events.jsonl", text)
+        self.assertNotIn(".jig/semantic-index.json", text)
+
     def test_gitignore_block_is_marker_delimited(self):
         result = run_scaffold(self.target)
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
@@ -2221,6 +2229,29 @@ class SecurityFloorTests(unittest.TestCase):
             len(lines), 12,
             f"Security block must be ≤ 12 non-blank lines; got {len(lines)}",
         )
+
+    def test_semantic_index_guidance_rendered_to_claude_and_workflow(self):
+        """Slice 080-02 — generated Claude surfaces prefer public
+        semantic-index exploration when available, with targeted search/read
+        fallback and no Scout-specific public prose."""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+        claude_md = (self.target / "CLAUDE.md").read_text()
+        self.assertIn("Semantic-index exploration", claude_md)
+        self.assertIn("configured public semantic-index provider first", claude_md)
+        self.assertIn("fall back to targeted search/read", claude_md)
+
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+        self.assertIn("## Semantic-Index Exploration", workflow)
+        self.assertIn("jig-semantic-index", workflow)
+        self.assertIn("auto_attach: true", workflow)
+        self.assertIn("never installs providers", workflow)
+        self.assertIn("downloads", workflow)
+        self.assertIn("models", workflow)
+        self.assertIn("blocks a workflow", workflow)
+        self.assertNotIn("Scout", claude_md)
+        self.assertNotIn("Scout", workflow)
 
 
 class PermissionsDenyTests(unittest.TestCase):

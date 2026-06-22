@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: ["080-01"]
-last_verified:
+last_verified: 2026-06-21
 arch_review: true
 ---
 
@@ -52,14 +52,14 @@ non-opted-in projects receive at most a one-time recommendation.
    the test machine.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Tests use fake provider commands/fixtures; no real Scout daemon, public
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Tests use fake provider commands/fixtures; no real Scout daemon, public
       provider daemon/index, or network setup is required.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
 
@@ -74,4 +74,29 @@ is available only through the internal overlay.
 
 ### Deviation log (after reconciliation)
 
-_Produced during reconciliation._
+- Shipped a Claude `SessionStart` hook (`hooks/scripts/jig-semantic-index.sh`)
+  registered through `hooks/hooks.json`; it delegates to the shared
+  `semantic_index.activate(..., host="claude")` contract and fails open.
+- The hook stays quiet for missing providers, ready providers, and attach-started
+  outcomes; it emits only a rate-limited public-provider opt-in suggestion or a
+  compact fallback warning. Internal-overlay recommendations remain silent in
+  public Claude output.
+- Added fake-provider hook tests for missing provider, public recommendation
+  rate limiting, internal-overlay silence, fallback warning, ready/attach
+  silence, malformed payload fail-open behavior, and the bounded hook timeout.
+- Added generated Claude/workflow guidance that prefers the configured public
+  semantic-index provider for broad exploration, without public Scout prose.
+- Kept local runtime artifacts ignored (`.jig/semantic-index-claude-hook.json`
+  and `.jig/semantic-index-events.jsonl`) while leaving
+  `.jig/semantic-index.json` trackable as project opt-in state.
+- Updated architecture docs for the ten-hook spine, semantic-index state files,
+  and shell/Python hook helper boundary.
+- Review-driven fixes: explicit malformed-payload no-activation behavior,
+  scaffold guidance coverage, local artifact ignores, 25-second hook timeout,
+  and stale hook-count prose.
+- Verification: focused hook/scaffold/install/memory tests passed; the full
+  unittest body passed 2793 tests with 3 skips. The TDD wrapper then exited 1
+  because pyright could not open `/Users/ramboz/.cache/uv/sdists-v9/.git` under
+  sandbox permissions, matching the known environment caveat rather than a unit
+  test regression.
+- No decisions were deferred, so `docs/refinement-todo.md` was unchanged.

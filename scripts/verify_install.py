@@ -192,6 +192,7 @@ _EXPECTED_HOOK_SCRIPTS = (
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
     "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
+    "jig-semantic-index.sh",  # slice 080-02 — semantic-index activation
     "jig-skill-trace.sh",  # Skill PreToolUse trace hook (registered in hooks.json)
     "jig-spec-gate.sh",
     "jig-task-capture.sh",

@@ -1128,6 +1128,10 @@ _GITIGNORE_SECRET_PATTERNS = (
     "*.key",
     "secrets/",
     "credentials/",
+    # Local semantic-index activation state/telemetry (spec 080). Scoped
+    # entries only: .jig/test-command and project opt-in state remain tracked.
+    ".jig/semantic-index-claude-hook.json",
+    ".jig/semantic-index-events.jsonl",
 )
 
 

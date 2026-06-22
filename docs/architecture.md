@@ -18,7 +18,7 @@ jig/
 ├── agents/                        # Subagent definitions (implementer, reviewer, architect)
 ├── hooks/                         # Deterministic enforcement layer
 │   ├── hooks.json
-│   └── scripts/                   # Python 3 scripts (no jq dependency)
+│   └── scripts/                   # shell/Python hook helpers (no jq dependency)
 ├── templates/                     # Source templates scaffold-init reads
 └── docs/                          # Dev docs for building jig itself (dogfooded)
 ```
@@ -27,7 +27,7 @@ jig/
 
 How a session actually flows in plugin-install mode. The LLM layer (user →
 Claude → skill router → SKILL.md → helper or subagent → on-disk state) is
-non-deterministic; the nine hooks form the deterministic spine that fires on
+non-deterministic; the ten hooks form the deterministic spine that fires on
 fixed events and can inject context or block tool calls.
 
 ```mermaid
@@ -49,7 +49,7 @@ flowchart TB
     subs --> specs
     subs --> memory[(CLAUDE.md<br/>+ docs/memory/)]
 
-    subgraph hookspine["Deterministic spine — 9 hooks"]
+    subgraph hookspine["Deterministic spine — 10 hooks"]
         direction TB
         h1["SessionStart · UserPromptSubmit · PreToolUse·Read<br/>jig-context-check<br/>context-fill + in-session growth/compact nudge"]
         h2["UserPromptSubmit<br/>jig-memory-scan<br/>surface unknown references"]
@@ -60,6 +60,7 @@ flowchart TB
         h7["PostToolUse · Edit/Write<br/>jig-post-edit-verify<br/>same-turn edit-landed check"]
         h8["PostToolUse · Edit/Write<br/>jig-boundary-change-warn<br/>nudge ADR on contract-artifact edit"]
         h9["Stop<br/>jig-task-capture<br/>surface TODOs next turn"]
+        h10["SessionStart<br/>jig-semantic-index<br/>ready opted-in provider or suggest once"]
     end
 
     h1 -. additionalContext .-> claude
@@ -68,13 +69,14 @@ flowchart TB
     h6 -. exit 2 = blocks Edit .-> claude
     h7 -. additionalContext .-> claude
     h8 -. additionalContext .-> claude
+    h10 -. additionalContext .-> claude
     h9 -. next-turn context .-> claude
 ```
 
 - **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
 - **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only. `pr-review` and `arch-review` stay judgment-only as skills, but are *invoked* deterministically from the post-implementation flow via `review.py pr-review` / `review.py arch-review` prompt builders (see [skills/spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) § "After implementation").
 - **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
-- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via nine hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); five inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `task-capture`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`).
+- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via ten hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); six can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `task-capture`, `jig-semantic-index`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`).
 
 Scaffold-mode wiring is identical in shape — only path strings differ
 (`${CLAUDE_PROJECT_DIR}/.claude/...` instead of `${CLAUDE_PLUGIN_ROOT}/...`).
@@ -101,7 +103,7 @@ runtime machinery (`skills/`, `agents/`, `hooks/scripts/`) into the
 user's `.claude/` directory under `jig-` prefixed names
 (`.claude/skills/jig-<name>/`, `.claude/agents/jig-<name>.md`,
 `.claude/hooks/scripts/jig-*.sh`), and generate/merge
-`.claude/settings.json` to register the nine jig hooks against the
+`.claude/settings.json` to register the ten jig hooks against the
 project-local script paths. SKILL.md path strings are rewritten from
 `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` to
 `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`, and hook command
@@ -162,7 +164,7 @@ Six top-level concerns, named in [product-vision.md § Core features](product-vi
 
 - `skills/` — auto-triggering LLM behaviors (one `SKILL.md` + supporting files per skill)
 - `agents/` — three subagent definitions (`implementer` / `reviewer` / `architect`)
-- `hooks/` — deterministic spine (`hooks.json` + Python 3 scripts under `hooks/scripts/`)
+- `hooks/` — deterministic spine (`hooks.json` + shell/Python hook helpers under `hooks/scripts/`)
 - `templates/` — source templates that `scaffold-init` copies into new projects (CLAUDE.md, docs/, brief)
 - skill helpers — Python helpers live **next to the skill that owns them** (`skills/<name>/*.py`), one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py` (+ `quality.py`), `land.py`, `migrate.py`, `scaffold.py` (+ `stocktake.py`), `health.py` (code-health, spec 060), and `memory.py`. Shared stdlib-only helpers live in `skills/_common/` (`parsing.py`, `review_evidence.py`, `lexicon.py`, `team_signal.py`, `use_cases.py`, `scaffold_state.py`, `atomic_io.py`)
 - `scripts/` — top-level repo tooling, not skill helpers: `usage.py` (per-spec token/cost reporting, spec 056), `verify_install.py`, `spec_lint.py`, `validate_manifests.py`, `build_release_zip.py`, the `*_contract.py` builders, and `run_tests.py`
@@ -175,6 +177,8 @@ Interface contracts between these modules are deliberately deferred — today's 
 Jig is a workflow layer, not a data application (per [product-vision.md](product-vision.md) non-goals). Relevant on-disk state is small:
 
 - `.jig/scaffold.json` — install manifest: which tiers chosen, when, by which jig version (per [ADR-0001](decisions/adr-0001-scaffold-stable.md))
+- `.jig/semantic-index.json` — project-local semantic-index opt-in state: auto-attach permission, provider preference, allowed overlays, and worktree policy (spec 080)
+- `.jig/semantic-index-events.jsonl` — content-free local activation telemetry written by the semantic-index helper; ignored by git alongside `.jig/semantic-index-claude-hook.json`, the Claude hook's one-time recommendation rate-limit file
 - `.claude/skill-usage.jsonl` — append-only log written by `jig-telemetry.sh` (Task spawns; `event: task_spawned`, with optional `phase`/`spec`/`slice`) and `jig-skill-trace.sh` (Skill invocations; `event: skill_invoked`); read via [docs/skill-routing-verification.md](skill-routing-verification.md). Histogram consumer is `workflow.py routing-stats` (slice 041-02)
 - `docs/specs/**/spec.md` — the only project-level state jig owns; everything else lives in the dev's repo, owned by the dev
 

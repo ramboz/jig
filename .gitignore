@@ -10,6 +10,8 @@
 # or travel across branches. Scoped to the file (NOT a blanket `.jig/`) because
 # `.jig/test-command` IS tracked.
 .jig/spec-ref
+.jig/semantic-index-claude-hook.json
+.jig/semantic-index-events.jsonl
 
 .DS_Store
 node_modules/

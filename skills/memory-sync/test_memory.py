@@ -125,7 +125,8 @@ class MemoryHelperTests(unittest.TestCase):
         # Locate the Key terms section under Hot Cache
         idx = content.find("### Key terms")
         self.assertGreater(idx, 0, "missing Key terms section")
-        section = content[idx:idx + 600]
+        next_heading = content.find("\n### ", idx + 1)
+        section = content[idx:next_heading if next_heading != -1 else len(content)]
         self.assertIn("jig", section)
         self.assertIn("the AI-native dev scaffold plugin", section)
 
