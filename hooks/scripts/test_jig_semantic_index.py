@@ -90,7 +90,10 @@ class SemanticIndexHookTests(unittest.TestCase):
                     provider_profile='public',
                     action='recommend',
                     outcome='not_opted_in',
-                    recommendation='Semantic index provider tokensave is available. Opt in via .jig/semantic-index.json.',
+                    recommendation=(
+                        'Semantic index provider tokensave is available. '
+                        'Opt in via .jig/semantic-index.json.'
+                    ),
                 )
             """,
         )
