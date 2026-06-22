@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: []
-last_verified:
+last_verified: 2026-06-21
 arch_review: true
 ---
 
@@ -63,16 +63,16 @@ emit content-free telemetry.
    queries, diffs, or command output.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Unit tests cover no-provider, public-provider-present/no-opt-in,
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Unit tests cover no-provider, public-provider-present/no-opt-in,
       opted-in already-ready, opted-in readiness-needed, daemon/index fallback,
       timeout, worktree-suppressed, Scout-overlay-disabled,
       Scout-overlay-enabled, and telemetry write-failure fail-open cases.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
 
@@ -87,4 +87,16 @@ can add Scout without changing public defaults.
 
 ### Deviation log (after reconciliation)
 
-_Produced during reconciliation._
+- Implemented the shared contract as `skills/_common/semantic_index.py` with
+  project-local state at `.jig/semantic-index.json` and content-free telemetry
+  at `.jig/semantic-index-events.jsonl`.
+- Public provider registry now names `tokensave`, `codebase-memory-mcp`,
+  `symdex`, and `cocoindex-code` as public candidates. Scout remains available
+  only through an exact internal overlay permission (`allowed_overlays:
+  ["scout"]` or `JIG_SEMANTIC_INDEX_INTERNAL=1`).
+- Reviewer-driven fixes tightened opt-in and provider-selection safety:
+  string booleans do not opt in, unknown explicitly selected providers do not
+  fall back and attach, `providers={}` disables built-ins, and
+  `allowed_overlays: []` overrides legacy `internal_overlays`.
+- No decisions were deferred; `docs/refinement-todo.md` did not require an
+  update.
