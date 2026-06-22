@@ -100,47 +100,35 @@ to set the vision every later slice is judged against.
 the order you run them: scaffold the repo once, then repeat the idea-to-landed
 loop for every feature.
 
-### Install shapes
+### Install
 
-Two independent choices: **how you acquire the plugin**, and **where the
-machinery lives** once it's installed. Full detail and how to choose in
-[adoption-readiness § Choosing an install shape](docs/adoption-readiness.md#choosing-an-install-shape).
+**Claude plugin**
 
-**1. Acquire the plugin** — puts the machinery under `${CLAUDE_PLUGIN_ROOT}`
-and makes the `/jig:*` commands available:
+```text
+/plugin marketplace add ramboz/jig
+/plugin install jig@jig
+```
 
-| Host | Remote one-command install | Release zip |
-|---|---|---|
-| **Claude Code / Desktop** | `/plugin marketplace add ramboz/jig` → `/plugin install jig@jig` (resolves to the committed `hosts/claude` package). | `jig-claude-vX.Y.Z.zip` — a **flat, drag-droppable** plugin. Download from the [latest release](https://github.com/ramboz/jig/releases/latest) and add it via Claude Desktop's plugin manager (**Settings → Plugins**). |
-| **Codex** | `codex plugin marketplace add ramboz/jig` → `codex plugin add jig@jig` (resolves through the repo-root `.agents/plugins/marketplace.json` to the committed `hosts/codex/plugins/jig` package). See [Codex Distribution](#codex-distribution) for the hook-trust + agent-install caveats. | `jig-codex-vX.Y.Z.zip` — a marketplace bundle with **no direct zip-drop install**: `unzip` it, then `codex plugin marketplace add <extracted-dir>` → `codex plugin add jig@jig` (extract-then-add). |
+**Claude scaffold**
 
-The two release zips ship **different internal shapes** by design — the Claude
-package is a flat plugin (`.claude-plugin/plugin.json` at the package root)
-while the Codex package is **marketplace-wrapped**
-(`hosts/codex/.agents/plugins/marketplace.json` + `hosts/codex/plugins/jig/...`).
-For remote Codex installs, the repo-root `.agents/plugins/marketplace.json`
-points Codex at that committed Codex package so `codex plugin marketplace add
-ramboz/jig` resolves to Codex-shaped files, not the Claude package.
-See [Repository structure](#repository-structure-for-contributors) for how the
-two committed host packages sit beside the canonical source. The legacy
-host-neutral `jig-vX.Y.Z.zip` is kept one cycle only as a deprecated alias of
-the Claude zip; prefer the host-explicit names.
+```bash
+git clone https://github.com/ramboz/jig.git
+python3 jig/hosts/claude/skills/scaffold-init/scaffold.py <your-project>
+```
 
-Running jig from a source checkout (for hacking on jig itself): see
-[CONTRIBUTING § Local dev install](CONTRIBUTING.md#local-dev-install).
+**Codex plugin**
 
-**2. Choose where the machinery lives** — `/jig:scaffold-init` runs the same
-either way; the flag picks the shape (recorded as `scaffold_mode` in
-`scaffold.json`):
+```bash
+codex plugin marketplace add ramboz/jig
+codex plugin add jig@jig
+```
 
-| Shape | What lands in your repo | Command |
-|---|---|---|
-| **Own it** (default) | Docs **and** host-native machinery copied into `.claude/` or `.codex/` — version-controlled and editable. | `/jig:scaffold-init` |
-| **Central machinery** | Docs + `scaffold.json` only; machinery stays plugin-side and upgrades centrally. | `/jig:scaffold-init --plugin-only` |
-| **Plugin only** (full manual) | Nothing — `/jig:*` skills and hooks come from the plugin centrally. For folks who already have their own setup and want to wire jig's workflow into it by hand. | _(skip step 2)_ |
+**Codex scaffold**
 
-When in doubt, scaffold and own it — that's jig's default posture
-([product-vision § Design principle 7](docs/product-vision.md#design-principles)).
+```bash
+git clone https://github.com/ramboz/jig.git
+python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex <your-project>
+```
 
 ## Extension points
 
@@ -155,132 +143,7 @@ configuration. jig stays opinionated about *workflow* and out of the way of
 the *judgment skills you've already invested in*. Detail:
 [product-vision § Design principles](docs/product-vision.md#design-principles).
 
-## Codex Distribution
-
-jig now supports four distribution modes from the same source tree:
-**Claude scaffold**, **Claude plugin**, **Codex scaffold**, and **Codex plugin**.
-For editable Codex project-local machinery, run the scaffold from the committed
-Codex host package (never the repo root):
-
-```bash
-python3 hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex <your-project>
-```
-
-The equivalent Claude scaffold runs from the committed Claude host package:
-
-```bash
-python3 hosts/claude/skills/scaffold-init/scaffold.py <your-project>
-```
-
-This produces `<your-project>/AGENTS.md`, `.codex/skills/jig-*/`,
-`.codex/agents/jig-*.toml`, `.codex/hooks/scripts/jig-*.sh`, and
-`.codex/hooks.json`. This is the Codex mode to use when you want the
-workflow machinery editable in the project itself.
-
-### Codex plugin (central install)
-
-The Codex remote install resolves through the repo-root
-`.agents/plugins/marketplace.json`, which points at the **committed** Codex host
-package under `hosts/codex/plugins/jig`. Because the package is committed, there
-is no build step:
-
-```bash
-codex plugin marketplace add ramboz/jig
-codex plugin add jig@jig
-```
-
-For a local checkout, the same shape works from the repository root:
-
-```bash
-codex plugin marketplace add .
-codex plugin add jig@jig
-```
-
-The release zip remains an extract-then-add fallback because it is itself a
-marketplace root:
-
-```bash
-unzip jig-codex-vX.Y.Z.zip -d jig-codex-vX.Y.Z
-codex plugin marketplace add jig-codex-vX.Y.Z
-codex plugin add jig@jig
-```
-
-`hosts/codex` is a **committed, source-derived build output** kept fresh by the
-drift guard, **not hand-edited** — see
-[Repository structure](#repository-structure-for-contributors). To rebuild or
-verify it, run `python3 scripts/build_host_packages.py [--check]`.
-
-After `codex plugin add`, start or restart Codex and open `/hooks` in the
-CLI. Codex requires non-managed command hooks, including plugin-bundled
-hooks, to be reviewed and trusted before they run. Until you trust jig's
-hook definitions, Codex can load the plugin skills but skips the hook gates;
-after you rebuild or reinstall the plugin, revisit `/hooks` because trust is
-recorded against the current hook definition hash.
-
-The Codex plugin package includes `.codex-plugin/plugin.json`, rendered
-Codex skill copies, `hooks/hooks.json`, hook scripts, templates, and the
-canonical agent prompts plus generated TOML custom-agent templates.
-Codex custom-agent discovery uses TOML agent files under
-project-local or user-local `.codex/agents/`. Rechecked on 2026-06-05:
-the official Codex manual still documents plugin manifests for skills and
-plugin surfaces, not plugin-level custom agents, and local `codex-cli 0.133.0`
-does not expose plugin-bundled `agents/jig-*.toml` files as custom agents
-after an isolated plugin install. After installing the plugin, run the
-explicit post-install step to copy jig's custom agents into the global Codex
-agents directory. From the installed Codex plugin context, the helper is
-addressed through the plugin root:
-
-```bash
-python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" --install-codex-agents
-```
-
-In the committed source tree, the equivalent path is
-`hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py`. The command
-defaults to `~/.codex/agents`. Use `--codex-agents-dir <dir>` to target
-another Codex agents directory, and `--force` only when replacing existing
-user-owned `jig-*.toml` files is intentional.
-
-To smoke-test the full generated Codex install contract locally, run:
-
-```bash
-python3 scripts/codex_install_smoke.py
-```
-
-The smoke command builds the same `codex-plugin/plugins/jig` layout in an
-isolated temp workspace, validates the generated Codex package, runs the
-custom-agent helper against a temp agents directory, and probes the Codex CLI
-plugin surfaces when `codex` is available. It sets a temporary child
-`CODEX_HOME` by default so the marketplace/plugin add probe does not touch your
-real Codex config. For debugging, set `JIG_CODEX_SMOKE_CODEX_HOME=<dir>` or
-pass `--codex-home <dir>`; set `JIG_CODEX_SMOKE_CODEX_BIN=<path>` or
-`--codex-bin <path>` to choose a specific CLI. If Codex is not installed, the
-live portion reports `UNAVAILABLE` while the static package and agent checks
-still run.
-
-To dogfood Codex role-agent capability semantics separately, run:
-
-```bash
-python3 scripts/codex_role_capability_probe.py
-```
-
-That probe validates the generated `jig-implementer`, `jig-reviewer`, and
-`jig-architect` TOML files, confirms the intended `workspace-write` vs.
-`read-only` posture, and probes local Codex sandbox/debug surfaces when
-available. See [docs/codex-role-capability.md](docs/codex-role-capability.md)
-for the interactive `/agent` dogfood prompt and noninteractive review fallback.
-
-To re-check whether Codex has gained plugin-native custom-agent discovery, run:
-
-```bash
-python3 scripts/codex_agent_discovery_probe.py
-```
-
-The probe builds the same generated Codex plugin package, installs it through
-an isolated marketplace and temporary `CODEX_HOME`, confirms the plugin cache
-carries `agents/jig-*.toml`, and verifies whether Codex exposes those
-plugin-bundled templates as custom agents without running the explicit helper.
-
-### Verifying a host install
+## Verifying a host install
 
 Each host is verified **in its own environment** — one host's check does not
 prove the other installs and runs:
