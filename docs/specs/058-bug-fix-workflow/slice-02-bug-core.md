@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-06-23
 ---
 
 ## Slice 058-02 — `bug.py` core: new / triage / numbering / board / claim
@@ -41,16 +41,16 @@ the 049-style claim/`--release` machinery is in place.
    `## Release log` entry.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases (trivial-tier non-zero exit; foreign-claim
       refusal; Notes-column preservation) covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
 
@@ -66,4 +66,35 @@ even before the gated lifecycle lands.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- Added `skills/bug-fix/bug.py` and focused subprocess tests in
+  `skills/bug-fix/test_bug.py`; generated host copies were rebuilt for both
+  Claude and Codex plugin packages.
+- Kept `bug.py` as a deterministic helper only. The future `jig:bug-fix`
+  skill still owns orchestration and subagent coordination in slice 058-06.
+- Added a `pickup` subcommand for claim/release because AC4 requires pickup
+  semantics before the later lifecycle-transition slices exist.
+- Hardened destructive trivial triage after reviewer feedback: all lookup
+  routes now constrain mutation targets to real `docs/bugs/NNN-slug.md`
+  records, with regressions for absolute paths outside `docs/bugs`, direct
+  `docs/bugs/README.md`, and bare `README.md` lookup.
+- No decisions were deferred; `docs/refinement-todo.md` was refreshed only
+  to remove the stale "start at 058-01" next-action text now that spec 058 is
+  in progress.
+
+### Reconciliation sweep
+
+- `skills/bug-fix/bug.py` — updated: implements local numbering, schema,
+  triage, board regeneration with Notes preservation, claim/release, and
+  bug-record-only mutation boundaries.
+- `skills/bug-fix/test_bug.py` — updated: covers all ACs plus reviewer-found
+  destructive-path regressions.
+- `hosts/claude/skills/bug-fix/` and
+  `hosts/codex/plugins/jig/skills/bug-fix/` — updated: regenerated from
+  source with `scripts/build_host_packages.py`.
+- `docs/specs/README.md` — updated: regenerated to show 058-02 lifecycle
+  movement.
+- `docs/refinement-todo.md` — updated: the triggered spec 058 entry now points
+  at the remaining in-flight slices rather than completed 058-01 startup.
+- `docs/architecture.md`, `docs/conventions.md`, and `docs/inbox.md` — no-op:
+  this slice follows ADR-0016/spec 058 and did not introduce new architecture,
+  convention, or inbox cleanup work.
