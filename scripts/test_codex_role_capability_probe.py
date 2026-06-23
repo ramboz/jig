@@ -300,8 +300,8 @@ class CodexRoleLiveProbeTests(unittest.TestCase):
 
 
 class CodexRoleDocsTests(unittest.TestCase):
-    def test_readme_documents_role_probe_command(self):
-        text = (REPO_ROOT / "README.md").read_text()
+    def test_contributor_docs_document_role_probe_command(self):
+        text = (REPO_ROOT / "CONTRIBUTING.md").read_text()
         self.assertIn("scripts/codex_role_capability_probe.py", text)
         self.assertIn("jig-implementer", text)
         self.assertIn("jig-reviewer", text)

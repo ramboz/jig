@@ -72,7 +72,7 @@ If every box is checked, you're ready to scaffold.
 ## Choosing an install shape
 
 First **acquire the plugin** (marketplace or release zip — see
-[README § Install shapes](../README.md#install-shapes)). That alone makes the
+[README § Install](../README.md#install). That alone makes the
 `/jig:*` commands available. Then decide where the machinery lives — all three
 shapes start from that same install:
 

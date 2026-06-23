@@ -1,12 +1,11 @@
 """
-Doc guards for the symmetric three-peer install story (spec 061-05).
+Doc guards for the symmetric install story (spec 061-05).
 
 Slice 061-05 rewrites README.md (and CONTRIBUTING.md) so the three-peer layout
 — canonical source root, committed `hosts/claude`, committed `hosts/codex` —
-reads symmetrically: each host gets its native remote one-command install, the
-committed-and-drift-guarded nature of the host packages is stated (not implied),
-scaffold examples run from the host packages (never the repo root), release-zip
-docs use host-explicit names, and the docs point at per-host verification.
+reads symmetrically. The public README is intentionally terse: four install
+command sets (Claude plugin, Claude scaffold, Codex plugin, Codex scaffold),
+with the deeper package/release details kept in contributor docs.
 
 These guards lock the corrections in. Positive guards assert the corrected
 prose is present (one+ per AC, plus the structural-asymmetry edge case); inverse
@@ -49,68 +48,74 @@ class RootCodexMarketplaceTests(unittest.TestCase):
         )
 
 
-class Ac1BothRemoteInstalls(unittest.TestCase):
-    """AC1: README documents BOTH remote one-command installs."""
+class Ac1InstallCommandMatrix(unittest.TestCase):
+    """AC1: README documents the four host/mode install command sets."""
 
     def setUp(self) -> None:
         self.text = _read(README)
+        match = re.search(
+            r"### Install\n(?P<body>.*?)\n## Extension points",
+            self.text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "README must keep a compact Install section")
+        self.install = match.group("body")
 
     def test_claude_marketplace_add(self) -> None:
         self.assertIn(
-            "/plugin marketplace add ramboz/jig", self.text,
+            "/plugin marketplace add ramboz/jig", self.install,
             "README must document the Claude remote one-command install "
             "(`/plugin marketplace add ramboz/jig`)",
         )
 
     def test_claude_plugin_install(self) -> None:
         self.assertIn(
-            "/plugin install jig@jig", self.text,
+            "/plugin install jig@jig", self.install,
             "README must document `/plugin install jig@jig` (Claude)",
+        )
+
+    def test_claude_scaffold_from_host_package(self) -> None:
+        self.assertIn(
+            "python3 jig/hosts/claude/skills/scaffold-init/scaffold.py "
+            "<your-project>",
+            self.install,
+            "README must document Claude scaffold from the committed host "
+            "package path",
         )
 
     def test_codex_marketplace_add(self) -> None:
         self.assertIn(
-            "codex plugin marketplace add", self.text,
+            "codex plugin marketplace add ramboz/jig", self.install,
             "README must document the Codex remote install "
-            "(`codex plugin marketplace add`)",
+            "(`codex plugin marketplace add ramboz/jig`)",
         )
 
     def test_codex_plugin_add(self) -> None:
         self.assertIn(
-            "codex plugin add jig@jig", self.text,
+            "codex plugin add jig@jig", self.install,
             "README must document `codex plugin add jig@jig` (Codex)",
         )
 
-    def test_codex_install_uses_repo_root_marketplace(self) -> None:
-        # The repo-root `.agents/plugins/marketplace.json` lets Codex resolve
-        # the bare repo shorthand to the committed Codex package.
-        self.assertRegex(
-            self.text,
-            r"codex plugin marketplace add ramboz/jig\b",
-            "the Codex `marketplace add` command must use the remote repo "
-            "marketplace shorthand",
+    def test_codex_scaffold_from_host_package(self) -> None:
+        self.assertIn(
+            "python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/"
+            "scaffold.py --host codex <your-project>",
+            self.install,
+            "README must document Codex scaffold from the committed host "
+            "package path",
         )
 
-    def test_codex_install_names_root_agents_marketplace(self) -> None:
-        self.assertIn(
-            ".agents/plugins/marketplace.json", self.text,
-            "README must name the root Codex marketplace descriptor that makes "
-            "`codex plugin marketplace add ramboz/jig` resolve correctly",
-        )
-
-    def test_keeps_hook_trust_caveat(self) -> None:
-        # Spec 059 caveat must not regress.
-        self.assertIn(
-            "/hooks", self.text,
-            "README must keep the Codex hook-trust caveat (the `/hooks` "
-            "trust note from spec 059)",
-        )
-
-    def test_keeps_explicit_agent_install_caveat(self) -> None:
-        self.assertIn(
-            "--install-codex-agents", self.text,
-            "README must keep the explicit Codex agent-install caveat "
-            "(`--install-codex-agents`, spec 059)",
+    def test_install_section_is_four_named_command_sets(self) -> None:
+        self.assertEqual(
+            re.findall(r"^\*\*(Claude|Codex) (plugin|scaffold)\*\*$",
+                       self.install, re.MULTILINE),
+            [
+                ("Claude", "plugin"),
+                ("Claude", "scaffold"),
+                ("Codex", "plugin"),
+                ("Codex", "scaffold"),
+            ],
+            "README install section should be the four symmetric command sets",
         )
 
 
@@ -154,7 +159,7 @@ class Ac2ThreePeerLayoutExplained(unittest.TestCase):
         # Allow either "not hand-edited" or "never hand-edited" phrasing.
         self.assertRegex(
             self.text,
-            r"(not|never|n['’]t)\s+hand-?edit",
+            r"(?i)(not|never|n['’]t)\s+hand-?edit",
             "README must state the committed host packages are NOT "
             "hand-edited (they are source-derived build outputs)",
         )
@@ -197,33 +202,39 @@ class Ac3ScaffoldExamplesRunFromHostPackages(unittest.TestCase):
         )
 
 
-class Ac4HostExplicitReleaseZips(unittest.TestCase):
-    """AC4: release-zip docs use host-explicit names + honest Codex story."""
+class Ac4ReadmeInstallTerseness(unittest.TestCase):
+    """AC4: README install docs stay terse; release details live elsewhere."""
 
     def setUp(self) -> None:
         self.text = _read(README)
-
-    def test_claude_zip_name(self) -> None:
-        self.assertIn(
-            "jig-claude-vX.Y.Z.zip", self.text,
-            "README must reference the Claude release zip "
-            "`jig-claude-vX.Y.Z.zip`",
-        )
-
-    def test_codex_zip_name(self) -> None:
-        self.assertIn(
-            "jig-codex-vX.Y.Z.zip", self.text,
-            "README must reference the Codex release zip "
-            "`jig-codex-vX.Y.Z.zip`",
-        )
-
-    def test_codex_no_direct_zip_drop(self) -> None:
-        # Honest: Codex has no drag-drop zip install — it's extract-then-add.
-        self.assertRegex(
+        match = re.search(
+            r"### Install\n(?P<body>.*?)\n## Extension points",
             self.text,
-            r"(no direct zip[- ]drop|extract[- ]then[- ]add|unzip)",
-            "README must be honest that the Codex zip is an extract-then-add "
-            "marketplace bundle (no direct zip-drop install)",
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "README must keep a compact Install section")
+        self.install = match.group("body")
+
+    def test_install_section_has_no_release_zip_prose(self) -> None:
+        self.assertNotRegex(
+            self.install,
+            r"jig-(claude|codex|v)|zip|unzip|extract[- ]then[- ]add",
+            "README install section should stay command-only; release zip "
+            "details belong in maintainer docs",
+        )
+
+    def test_no_codex_distribution_section(self) -> None:
+        self.assertNotIn(
+            "## Codex Distribution", self.text,
+            "README must not reintroduce a verbose Codex-only distribution "
+            "section",
+        )
+
+    def test_codex_specific_caveats_not_in_readme_install(self) -> None:
+        self.assertNotRegex(
+            self.install,
+            r"(/hooks|--install-codex-agents|PLUGIN_ROOT)",
+            "Codex caveats should not make the README install matrix verbose",
         )
 
 

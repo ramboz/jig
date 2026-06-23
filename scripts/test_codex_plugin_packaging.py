@@ -347,48 +347,41 @@ class CodexPluginDocsTests(unittest.TestCase):
         self.assertIn("changed hook definitions require renewed trust", section)
 
     def test_readme_places_hook_trust_step_after_codex_plugin_add(self):
-        text = (REPO_ROOT / "README.md").read_text()
+        architecture = (REPO_ROOT / "docs" / "architecture.md").read_text()
         section = _section_between(
-            text,
-            "### Codex plugin (central install)",
-            "### From source (contributors)",
+            architecture,
+            "### Codex plugin packaging",
+            "### Context economy",
         )
-        install_idx = section.index("codex plugin add jig@jig")
-        trust_idx = section.index("open `/hooks`")
-        package_idx = section.index("The Codex plugin package includes")
-        self.assertLess(install_idx, trust_idx)
-        self.assertLess(trust_idx, package_idx)
-        self.assertIn("reviewed and trusted before they run", section)
-        self.assertIn("skips the hook gates", section)
-        self.assertIn("current hook definition hash", section)
+        self.assertIn("review and trust them through `/hooks`", section)
+        self.assertIn("changed hook definitions require renewed trust", section)
 
     def test_claude_plugin_install_docs_do_not_carry_codex_hook_trust(self):
         text = (REPO_ROOT / "README.md").read_text()
         section = _section_between(
             text,
-            "**1. Acquire the plugin**",
-            "## Codex Distribution",
+            "### Install",
+            "## Extension points",
         )
         self.assertNotIn("/hooks", section)
         self.assertNotIn("Codex requires", section)
         self.assertNotIn("hook definition hash", section)
 
-    def test_generated_plugin_readme_keeps_hook_trust_step(self):
+    def test_generated_plugin_readme_keeps_install_terse(self):
         plugin_dir = _build_codex_plugin_dir()
         try:
             section = _section_between(
                 (plugin_dir / "README.md").read_text(),
-                "### Codex plugin (central install)",
-                "### From source (contributors)",
+                "### Install",
+                "## Extension points",
             )
             self.assertIn("codex plugin add jig@jig", section)
-            self.assertIn("open `/hooks`", section)
-            self.assertIn("skips the hook gates", section)
+            self.assertNotIn("open `/hooks`", section)
+            self.assertNotIn("skips the hook gates", section)
         finally:
             shutil.rmtree(plugin_dir.parent, ignore_errors=True)
 
     def test_docs_record_plugin_agent_discovery_deviation(self):
-        readme = (REPO_ROOT / "README.md").read_text()
         architecture = (REPO_ROOT / "docs" / "architecture.md").read_text()
         refinement = (REPO_ROOT / "docs" / "refinement-todo.md").read_text()
         slice_doc = (
@@ -398,8 +391,6 @@ class CodexPluginDocsTests(unittest.TestCase):
             / "033-host-adapter-portability"
             / "slice-06-codex-plugin-packaging.md"
         ).read_text()
-        self.assertIn("Codex custom-agent discovery uses TOML", readme)
-        self.assertIn("explicit post-install step", readme)
         self.assertIn("unsupported `agents` field", architecture)
         self.assertIn("TOML custom-agent templates", architecture)
         self.assertIn("plugin-level custom-agent discovery", refinement)

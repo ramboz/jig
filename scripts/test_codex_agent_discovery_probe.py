@@ -254,11 +254,10 @@ class CodexAgentDiscoveryLiveProbeTests(unittest.TestCase):
 
 
 class CodexAgentDiscoveryDocsTests(unittest.TestCase):
-    def test_readme_documents_agent_discovery_probe_and_current_contract(self):
-        text = (REPO_ROOT / "README.md").read_text()
+    def test_contributor_docs_document_agent_discovery_probe_and_current_contract(self):
+        text = (REPO_ROOT / "docs" / "refinement-todo.md").read_text()
         self.assertIn("scripts/codex_agent_discovery_probe.py", text)
-        self.assertIn("plugin-bundled `agents/jig-*.toml`", text)
-        self.assertIn("explicit post-install step", text)
+        self.assertIn("plugin-native custom-agent discovery observed", text)
 
     def test_architecture_records_no_plugin_native_agent_discovery(self):
         text = (REPO_ROOT / "docs" / "architecture.md").read_text()

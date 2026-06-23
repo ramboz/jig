@@ -309,8 +309,8 @@ class CodexSmokeLiveProbeTests(unittest.TestCase):
 
 
 class CodexSmokeDocsTests(unittest.TestCase):
-    def test_readme_documents_codex_smoke_command_and_isolation(self):
-        text = (REPO_ROOT / "README.md").read_text()
+    def test_contributing_documents_codex_smoke_command_and_isolation(self):
+        text = (REPO_ROOT / "CONTRIBUTING.md").read_text()
         self.assertIn("scripts/codex_install_smoke.py", text)
         self.assertIn("JIG_CODEX_SMOKE_CODEX_HOME", text)
         self.assertIn("CODEX_HOME", text)
