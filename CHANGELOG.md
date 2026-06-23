@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.0.1](https://github.com/ramboz/jig/compare/v2.0.0...v2.0.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **ci:** satisfy ruff after v2 release ([9881a4d](https://github.com/ramboz/jig/commit/9881a4d39def2c7f1c24bdf169bc5d52975df68a))
+* **codex:** add root marketplace descriptor ([9f127c9](https://github.com/ramboz/jig/commit/9f127c9a21ad3ebab351e0c0076eda8d972f1e54))
+
+
+### Documentation
+
+* align codex agent primer ([add7f09](https://github.com/ramboz/jig/commit/add7f0920d055d99b6318525316cb0162fb18d82))
+* simplify install commands ([d1e05d7](https://github.com/ramboz/jig/commit/d1e05d72e53e46602e081a3178013215104919a2))
+
 ## [1.15.0](https://github.com/ramboz/jig/compare/v1.14.0...v1.15.0) (2026-06-13)
 
 
