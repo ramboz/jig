@@ -652,6 +652,51 @@ implementation: scope, blockers, nits, and strengths.
 """
 
 
+# -------- bug-review prompt (spec 058-04) --------
+
+
+def build_bug_review_prompt(bug_path: Path, deliverables: list) -> str:
+    """Construct the bug-tailored review prompt for spec 058.
+
+    This pass is the bug lifecycle's compliance analogue: it does not compare
+    an implementation to slice ACs, it checks whether the fix honestly closes
+    the recorded bug without hiding uncertainty or widening scope.
+    """
+    deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    return f"""{_PREAMBLE}
+
+## Your job
+
+You are running the **bug-review** pass for bug record `{bug_path}`.
+Evaluate whether the fix resolves the recorded bug honestly and narrowly.
+
+## What to read (in this order)
+
+1. The bug record — `{bug_path}`. Read the symptom, repro, evidence,
+   hypotheses, root cause, fix class, regression test, proof, and learning.
+2. The deliverables:
+{deliverable_lines}
+3. Any related files needed to verify the behavior and blast radius
+   (read-only).
+
+{_PROHIBITIONS}
+## Evaluate
+
+- root cause vs. symptom: does the fix address the documented root cause,
+  or merely mask the observed symptom?
+- regression test fails without the fix: is there evidence the named
+  regression test would be red before the fix and green after it?
+- blast radius: are nearby call paths, persisted data, public contracts,
+  and edge cases considered for this bug's tier?
+- scope creep: does the change stay within the bug's fix class and avoid
+  unrelated refactors or behavior changes?
+- workaround honesty: if `fix_class: workaround`, does the record state the
+  remaining risk, owner/trigger for follow-up, and user-visible limits?
+
+{_OUTPUT_FORMAT}
+"""
+
+
 # -------- arch-review prompt (slice 031-02) --------
 
 
@@ -1264,6 +1309,86 @@ def _record_adr_review(args) -> int:
     return 0
 
 
+def _resolve_bug_arg(raw: str) -> Path:
+    """Resolve --bug as either a direct docs/bugs/NNN-slug.md path or an id
+    fragment under the current project's docs/bugs directory."""
+    candidate = Path(raw)
+    if candidate.suffix == ".md":
+        if not candidate.is_file():
+            raise ReviewError(f"bug not found: {candidate}")
+        if not re.match(r"^\d{3}-.+\.md$", candidate.name):
+            raise ReviewError(
+                f"bug path must name a NNN-slug.md file: {candidate}"
+            )
+        return candidate
+
+    bugs_dir = Path.cwd() / "docs" / "bugs"
+    if not bugs_dir.is_dir():
+        raise ReviewError(f"bug directory not found: {bugs_dir}")
+    if re.fullmatch(r"\d+", raw):
+        prefix = f"{int(raw):03d}-"
+    else:
+        prefix = raw.removesuffix(".md")
+        if not prefix.endswith("-"):
+            prefix += "-"
+    matches = sorted(
+        p for p in bugs_dir.glob("*.md")
+        if re.match(r"^\d{3}-.+\.md$", p.name)
+        and (p.name == raw or p.stem == raw or p.name.startswith(prefix))
+    )
+    if not matches:
+        raise ReviewError(f"bug not found: {raw}")
+    if len(matches) > 1:
+        names = ", ".join(p.name for p in matches)
+        raise ReviewError(f"ambiguous bug id {raw!r}: {names}")
+    return matches[0]
+
+
+def _record_bug_review(args) -> int:
+    """Write a bug-side verdict file for a (bug, pass) under
+    `docs/bugs/reviews/bug-NNN-<pass>.md` (spec 058-04)."""
+    if args.pass_name not in _evidence.PASSES:
+        sys.stderr.write(
+            f"unknown pass '{args.pass_name}'; expected one of "
+            f"{', '.join(_evidence.PASSES)}\n"
+        )
+        return 2
+    if args.verdict not in _evidence.VERDICTS:
+        sys.stderr.write(
+            f"unknown verdict '{args.verdict}'; expected one of "
+            f"{', '.join(_evidence.VERDICTS)}\n"
+        )
+        return 2
+    try:
+        bug_path = _resolve_bug_arg(args.bug)
+        match = re.match(r"^(\d{3})-", bug_path.name)
+        bug_num = match.group(1) if match else ""
+        out_path = _evidence.bug_evidence_path(bug_path, args.pass_name)
+        body = _read_summary(args)
+    except (ReviewError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    frontmatter = (
+        "---\n"
+        f"bug: {bug_num}\n"
+        f"pass: {args.pass_name}\n"
+        f"verdict: {args.verdict}\n"
+        f"reviewer: {args.reviewer}\n"
+        f"reviewed_at: {_now_iso8601()}\n"
+        f"prompt_source: {args.prompt_source}\n"
+        "---\n"
+    )
+    content = frontmatter + "\n" + body
+    if not content.endswith("\n"):
+        content += "\n"
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(out_path, content)
+    sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    return 0
+
+
 def record_review(args) -> int:
     """Write a verdict file for a (slice, pass). Overwrites in place on
     re-record (ADR-0014 §4 — git history is the audit trail, no append)."""
@@ -1272,10 +1397,13 @@ def record_review(args) -> int:
     # below). ADRs aren't slices, so they take a separate path.
     if getattr(args, "adr", None) is not None:
         return _record_adr_review(args)
+    if getattr(args, "bug", None) is not None:
+        return _record_bug_review(args)
 
     if not args.spec or not args.slice:
         sys.stderr.write(
-            "record-review requires either a spec + slice pair or --adr NNNN\n"
+            "record-review requires a spec + slice pair, --adr NNNN, "
+            "or --bug NNN\n"
         )
         return 2
 
@@ -1382,6 +1510,13 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pp.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
 
+    pb = sub.add_parser(
+        "bug-review",
+        help="construct a bug-tailored review prompt",
+    )
+    pb.add_argument("bug", help="path to docs/bugs/NNN-slug.md")
+    pb.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+
     # Slice 031-02: arch (arch-review) pass — on-demand, mirrors `pr-review`.
     pa = sub.add_parser(
         "arch-review",
@@ -1449,7 +1584,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "docs/specs/NNN-slug/reviews/slice-NN-<pass>.md (ADR-0014 §1), "
             "or — with --adr NNNN — at "
             "docs/decisions/reviews/adr-NNNN-<pass>.md (ADR-0020 OQ2, the "
-            "ADR-side frame-critique evidence). Re-recording the same target "
+            "ADR-side frame-critique evidence), or — with --bug NNN — at "
+            "docs/bugs/reviews/bug-NNN-<pass>.md. Re-recording the same target "
             "overwrites in place — git history is the audit trail (ADR-0014 "
             "§4). The freeform summary body is read from --summary-file or "
             "stdin."
@@ -1468,6 +1604,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--adr", default=None,
         help="4-digit ADR number (record an ADR-side verdict at "
              "docs/decisions/reviews/adr-NNNN-<pass>.md instead of a slice)",
+    )
+    target.add_argument(
+        "--bug", default=None,
+        help="bug id or docs/bugs/NNN-slug.md path (record a bug-side "
+             "verdict at docs/bugs/reviews/bug-NNN-<pass>.md)",
     )
     prec.add_argument(
         "slice", nargs="?", default=None,
@@ -1527,7 +1668,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument(
         "mode",
         choices=["implementation", "reconciliation", "pr-review",
-                 "arch-review", "design-review", "code-health"],
+                 "arch-review", "design-review", "code-health",
+                 "bug-review"],
         help=(
             "review mode (currently informational — every mode returns the "
             "same name; the choice exists for forward compatibility)"
@@ -1565,6 +1707,21 @@ def main(argv: list) -> int:
     if ns.command == "check-reviews":
         try:
             return check_reviews(ns)
+        except ReviewError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"review.py failed: {exc}\n")
+            return 1
+
+    if ns.command == "bug-review":
+        bug = Path(ns.bug)
+        if not bug.is_file():
+            sys.stderr.write(f"bug not found: {bug}\n")
+            return 2
+        try:
+            sys.stdout.write(build_bug_review_prompt(bug, ns.deliverables))
+            return 0
         except ReviewError as exc:
             sys.stderr.write(f"{exc}\n")
             return 2

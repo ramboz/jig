@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import (
     clear_frontmatter_field,
@@ -418,6 +419,12 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
                     "green check failed; routed bug back to DIAGNOSING"
                 )
             text = set_frontmatter_field(text, "green_confirmed_at", _today())
+        diagnostics = _evidence.validate_bug_evidence(path, "REVIEWED")
+        if diagnostics:
+            raise BugError(
+                "review evidence does not clear REVIEWED for bug "
+                f"{path.name}:\n  - " + "\n  - ".join(diagnostics)
+            )
 
     text = set_frontmatter_field(text, "status", new_status)
     atomic_write_text(path, text)

@@ -256,7 +256,8 @@ class BugTransitionTests(unittest.TestCase):
     def _write_bug(self, *, status: str = "REPORTED", tier: str = "standard",
                    fix_class: str = "", regression_test: str = "tests/test_alpha.py::test_bug",
                    evidence: str = "trace: log line 7",
-                   hypotheses: str = "- [ ] cache race\n- [x] parser bug\n") -> Path:
+                   hypotheses: str = "- [ ] cache race\n- [x] parser bug\n",
+                   security_surface: str = "false") -> Path:
         return write(self._bug(), (
             "---\n"
             f"status: {status}\n"
@@ -267,7 +268,7 @@ class BugTransitionTests(unittest.TestCase):
             "red_confirmed_at:\n"
             "green_confirmed_at:\n"
             f"fix_class: {fix_class}\n"
-            "security_surface: false\n"
+            f"security_surface: {security_surface}\n"
             "escalated_to:\n"
             "---\n\n"
             "## Symptom\n\n"
@@ -295,6 +296,26 @@ class BugTransitionTests(unittest.TestCase):
             f"raise SystemExit({code})\n"
         )
         return script
+
+    def _write_review(self, pass_name: str, verdict: str = "pass") -> Path:
+        return write(
+            self.root / "docs" / "bugs" / "reviews" / f"bug-001-{pass_name}.md",
+            "---\n"
+            "bug: 001\n"
+            f"pass: {pass_name}\n"
+            f"verdict: {verdict}\n"
+            "reviewer: reviewer\n"
+            "reviewed_at: 2026-06-23T00:00:00Z\n"
+            "prompt_source: test\n"
+            "---\n\n"
+            "VERDICT body\n",
+        )
+
+    def _write_required_reviews(self, *extra_passes: str) -> None:
+        self._write_review("bug-review")
+        self._write_review("craft")
+        for pass_name in extra_passes:
+            self._write_review(pass_name)
 
     def test_transition_reported_to_diagnosing_sets_status(self):
         self._write_bug(status="REPORTED")
@@ -409,6 +430,7 @@ class BugTransitionTests(unittest.TestCase):
 
     def test_reviewed_green_gate_stamps_green_confirmed_at(self):
         self._write_bug(status="FIXING", fix_class="local_patch")
+        self._write_required_reviews()
         r = run_bug(
             "transition", "001", "REVIEWED", "--project-dir", str(self.root),
             env={"JIG_TDD_HELPER": str(self._fake_tdd(0))},
@@ -420,6 +442,7 @@ class BugTransitionTests(unittest.TestCase):
 
     def test_failed_green_check_routes_back_to_diagnosing_and_logs_attempt(self):
         self._write_bug(status="FIXING", fix_class="local_patch")
+        self._write_required_reviews()
         r = run_bug(
             "transition", "001", "REVIEWED", "--project-dir", str(self.root),
             env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
@@ -441,9 +464,67 @@ class BugTransitionTests(unittest.TestCase):
 
     def test_green_test_gate_bypass_skips_tdd_and_transitions_to_reviewed(self):
         self._write_bug(status="FIXING", fix_class="local_patch")
+        self._write_required_reviews()
         r = run_bug(
             "transition", "001", "REVIEWED", "--project-dir", str(self.root),
             env={"JIG_BUG_TEST_GATE": "0", "JIG_TDD_HELPER": str(self.root / "missing.py")},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def test_reviewed_refuses_missing_bug_review_evidence(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0"},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("bug-review", r.stderr)
+        self.assertIn("record-review", r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_reviewed_refuses_failing_bug_review_evidence(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        self._write_review("bug-review", verdict="needs-changes")
+        self._write_review("craft")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0"},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("needs-changes", r.stderr)
+        self.assertIn("bug-review", r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_reviewed_refuses_missing_craft_evidence_after_bug_review(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        self._write_review("bug-review")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0"},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("craft", r.stderr)
+        self.assertIn("record-review", r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_reviewed_requires_security_when_security_surface_truthy(self):
+        self._write_bug(
+            status="FIXING", fix_class="local_patch", security_surface="YES",
+        )
+        self._write_required_reviews()
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0"},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("security", r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+        self._write_review("security")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0"},
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._fm()["status"], "REVIEWED")

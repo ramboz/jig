@@ -35,6 +35,7 @@ already rejects.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from _common.parsing import (
@@ -58,7 +59,7 @@ from _common.parsing import (
 # verdict (servo's design-fidelity composite) — never re-deriving the score
 # (the honesty boundary, ADR-0022).
 PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation",
-          "frame-critique", "design-review")
+          "frame-critique", "design-review", "bug-review", "security")
 
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
@@ -79,6 +80,17 @@ REQUIRED_FIELDS = (
 # at `adr.py accept`; this is the only place the field set diverges.
 ADR_REQUIRED_FIELDS = (
     "adr",
+    "pass",
+    "verdict",
+    "reviewer",
+    "reviewed_at",
+    "prompt_source",
+)
+
+# Spec 058-04: bug records are not slices, so bug-review evidence is keyed
+# on `bug` and stored beside docs/bugs/ under docs/bugs/reviews/.
+BUG_REQUIRED_FIELDS = (
+    "bug",
     "pass",
     "verdict",
     "reviewer",
@@ -234,6 +246,22 @@ def required_passes(stage: str, *, arch_review: bool,
         f"unknown transition stage '{stage}'; expected READY_FOR_REVIEW, "
         f"REVIEWED or RECONCILED"
     )
+
+
+def required_bug_passes(stage: str, *, security_surface: bool = False) -> tuple:
+    """Return the review passes required to enter a bug lifecycle stage.
+
+    Spec 058-04 gates ``REVIEWED`` on a bug-tailored review pass plus the
+    same craft pass used for slices. Bugs that declare ``security_surface:
+    true`` also require the security pass. Other stages have no review
+    evidence gate.
+    """
+    if stage == "REVIEWED":
+        passes = ["bug-review", "craft"]
+        if security_surface:
+            passes.append("security")
+        return tuple(passes)
+    return ()
 
 
 def verdict_clears(verdict: str) -> bool:
@@ -534,4 +562,78 @@ def validate_adr_evidence(decisions_dir, adr_num, pass_name: str) -> list:
                 f"(produce with: {RECORD_CMD} --adr {num} "
                 f"--pass {pass_name} --verdict pass ...)"
             )
+    return diagnostics
+
+
+# ---------------------------------------------------------------------------
+# Bug-side evidence (spec 058-04).
+#
+# Bug records live in docs/bugs/NNN-slug.md and do not have a spec/slice
+# target. Their review evidence mirrors the slice/ADR shape but lives at
+# docs/bugs/reviews/bug-NNN-<pass>.md and is keyed by `bug`.
+# ---------------------------------------------------------------------------
+
+
+def _bug_number_from_path(bug_path: Path) -> str:
+    match = re.match(r"^(\d{3})-.+\.md$", Path(bug_path).name)
+    if not match:
+        raise EvidenceError(
+            f"cannot derive bug number from file name {Path(bug_path).name!r}; "
+            "expected NNN-slug.md"
+        )
+    return match.group(1)
+
+
+def bug_evidence_path(bug_path, pass_name: str) -> Path:
+    """Resolve the verdict-file path for a (bug, pass).
+
+    Returns ``<docs/bugs>/reviews/bug-NNN-<pass>.md``. Raises
+    `EvidenceError` for an unknown pass or malformed bug filename.
+    """
+    if pass_name not in PASSES:
+        raise EvidenceError(
+            f"unknown pass '{pass_name}'; expected one of "
+            f"{', '.join(PASSES)}"
+        )
+    bug_path = Path(bug_path)
+    bug_num = _bug_number_from_path(bug_path)
+    return bug_path.parent / "reviews" / f"bug-{bug_num}-{pass_name}.md"
+
+
+def validate_bug_evidence(bug_path, stage: str) -> list:
+    """Validate the evidence set required to enter a bug lifecycle stage.
+
+    The validator parses ``security_surface`` through the shared
+    `_common.parsing.frontmatter_flag_truthy` / `FRONTMATTER_TRUTHY`
+    predicate so bug orchestration and evidence gating cannot drift.
+    """
+    if not evidence_gate_enabled():
+        return []
+    bug_path = Path(bug_path)
+    try:
+        text = bug_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"invalid bug target: cannot read {bug_path}: {exc}"]
+    fields, _ = parse_frontmatter(text)
+    security_surface = frontmatter_flag_truthy(fields.get("security_surface", ""))
+    needed = required_bug_passes(stage, security_surface=security_surface)
+    diagnostics: list = []
+    try:
+        bug_num = _bug_number_from_path(bug_path)
+    except EvidenceError as exc:
+        return [f"invalid bug target: {exc}"]
+    for pass_name in needed:
+        try:
+            path = bug_evidence_path(bug_path, pass_name)
+        except EvidenceError as exc:
+            diagnostics.append(str(exc))
+            continue
+        rec = parse_verdict_file(path, required_fields=BUG_REQUIRED_FIELDS)
+        if not rec.clears:
+            for problem in rec.problems:
+                diagnostics.append(
+                    f"[{pass_name}] {problem} "
+                    f"(produce with: {RECORD_CMD} --bug {bug_num} "
+                    f"--pass {pass_name} --verdict pass ...)"
+                )
     return diagnostics

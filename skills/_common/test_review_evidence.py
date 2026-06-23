@@ -106,11 +106,12 @@ class VocabularyTests(unittest.TestCase):
     def test_pass_vocabulary(self):
         # Slice 060-05 added the gated `code-health` pass; slice 064-03
         # added the gated, pre-implementation `frame-critique` pass; slice
-        # 071-01 added the gated, attest-only `design-review` pass.
+        # 071-01 added the gated, attest-only `design-review` pass; spec
+        # 058-04 added bug-side `bug-review` and security-surface `security`.
         self.assertEqual(
             set(ev.PASSES),
             {"compliance", "craft", "arch", "code-health", "reconciliation",
-             "frame-critique", "design-review"},
+             "frame-critique", "design-review", "bug-review", "security"},
         )
 
     def test_verdict_vocabulary(self):
@@ -183,6 +184,27 @@ class PathResolverTests(unittest.TestCase):
             ev.evidence_path(spec, "0XX-foo", "compliance")
 
 
+class BugPathResolverTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-ev-bug-path-"))
+        self.bug = self.tmp / "docs" / "bugs" / "001-cache-race.md"
+        self.bug.parent.mkdir(parents=True)
+        self.bug.write_text("---\nsecurity_surface: false\n---\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_bug_path_lands_in_reviews_dir(self):
+        p = ev.bug_evidence_path(self.bug, "bug-review")
+        self.assertEqual(p.parent, self.bug.parent / "reviews")
+        self.assertEqual(p.name, "bug-001-bug-review.md")
+
+    def test_bug_path_rejects_malformed_bug_filename(self):
+        with self.assertRaises(ev.EvidenceError):
+            ev.bug_evidence_path(self.bug.parent / "README.md", "bug-review")
+
+
 # ---------------------------------------------------------------------------
 # required_passes (ADR-0014 §5 transition map)
 # ---------------------------------------------------------------------------
@@ -209,6 +231,14 @@ class RequiredPassesTests(unittest.TestCase):
     def test_unknown_stage_rejected(self):
         with self.assertRaises(ev.EvidenceError):
             ev.required_passes("BOGUS", arch_review=False)
+
+    def test_bug_reviewed_requires_bug_review_and_craft(self):
+        req = ev.required_bug_passes("REVIEWED", security_surface=False)
+        self.assertEqual(set(req), {"bug-review", "craft"})
+
+    def test_bug_reviewed_adds_security_when_surface_truthy(self):
+        req = ev.required_bug_passes("REVIEWED", security_surface=True)
+        self.assertEqual(set(req), {"bug-review", "craft", "security"})
 
     # Slice 060-05: the gated code-health pass.
     def test_code_health_in_passes(self):

@@ -18,12 +18,13 @@ REVIEW = REPO_ROOT / "skills" / "independent-review" / "review.py"
 SKILL_MD = REPO_ROOT / "skills" / "independent-review" / "SKILL.md"
 
 
-def run_review(*args: str) -> subprocess.CompletedProcess:
+def run_review(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     return subprocess.run(
         [sys.executable, str(REVIEW), *args],
         capture_output=True, text=True, env=env,
+        cwd=str(cwd) if cwd else None,
     )
 
 
@@ -221,6 +222,82 @@ class HelperErrorTests(unittest.TestCase):
         # No deliverable args
         result = run_review("implementation", str(self.spec), "001-01")
         self.assertNotEqual(result.returncode, 0)
+
+
+class BugReviewPromptTests(unittest.TestCase):
+    """Spec 058-04: bug-review prompt shape."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-bug-"))
+        self.bug = self.tmpdir / "docs" / "bugs" / "001-cache-race.md"
+        self.bug.parent.mkdir(parents=True)
+        self.bug.write_text(
+            "---\n"
+            "status: FIXING\n"
+            "tier: standard\n"
+            "fix_class: workaround\n"
+            "regression_test: tests/test_cache.py::test_race\n"
+            "security_surface: false\n"
+            "---\n\n"
+            "# Bug 001: cache-race\n\n"
+            "## Symptom\n\n"
+            "Flaky stale cache.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_bug_review_prompt_names_bug_specific_concerns(self):
+        result = run_review(
+            "bug-review", str(self.bug),
+            "skills/bug-fix/bug.py", "skills/bug-fix/test_bug.py",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = result.stdout
+        self.assertIn(str(self.bug), prompt)
+        self.assertIn("skills/bug-fix/bug.py", prompt)
+        for phrase in (
+            "root cause vs. symptom",
+            "regression test fails without the fix",
+            "blast radius",
+            "scope creep",
+            "workaround honesty",
+        ):
+            self.assertIn(phrase, prompt)
+        self.assertIn("VERDICT: pass | fail | needs-changes", prompt)
+
+
+class BugReviewEvidenceRecorderTests(unittest.TestCase):
+    """Spec 058-04: record-review writes bug-keyed evidence."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-bugev-"))
+        self.bug = self.tmpdir / "docs" / "bugs" / "001-cache-race.md"
+        self.bug.parent.mkdir(parents=True)
+        self.bug.write_text(
+            "---\nstatus: FIXING\nsecurity_surface: false\n---\n\n# Bug\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_record_review_bug_mode_writes_bug_frontmatter(self):
+        result = run_review(
+            "record-review", "--bug", str(self.bug),
+            "--pass", "bug-review",
+            "--verdict", "pass",
+            "--reviewer", "reviewer",
+            "--prompt-source", "review.py bug-review docs/bugs/001-cache-race.md",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        evidence = self.tmpdir / "docs" / "bugs" / "reviews" / "bug-001-bug-review.md"
+        self.assertTrue(evidence.is_file())
+        text = evidence.read_text()
+        self.assertIn("bug: 001", text)
+        self.assertIn("pass: bug-review", text)
+        self.assertIn("verdict: pass", text)
 
 
 class SkillPromotionTests(unittest.TestCase):
