@@ -23,8 +23,8 @@ The skill:
 
 - Detects the project's test runner from filesystem signals (one of `pytest`,
   `vitest`, `jest`).
-- Invokes the runner as a subprocess against a target (or a focused
-  `--test-path`).
+- Invokes the runner as a subprocess against a target, a focused
+  `--test-path`, or a single `--test` selector.
 - Streams the runner's stdout/stderr through to the caller — you see real
   output, not a swallowed summary.
 - Normalizes the runner's native exit code so callers can branch
@@ -77,6 +77,7 @@ When multiple runners are detected, priority is **pytest > vitest > jest**.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test-path PATH]
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
 ```
 
 - Auto-detects the runner via the same logic as `detect`.
@@ -89,6 +90,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test-path
 
 Use `--test-path` when you want to run a focused subset (e.g. a single
 test file) while still letting the helper detect which runner to invoke.
+Use `--test` when you want one named test: pytest selectors are passed as
+node ids (`path::test_name`), and vitest/jest selectors map to file plus
+`-t` when shaped as `path::test name`.
 
 ## When NOT to use
 

@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-06-23
 ---
 
 ## Slice 058-01 — `tdd.py` targeted-test support
@@ -37,9 +37,9 @@ prerequisite the red→green teeth gate shells out to.
       test) covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
@@ -57,4 +57,53 @@ workflow.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- Added `tdd.py run --test <selector>` while preserving existing whole-suite
+  and `--test-path` behavior. Pytest receives selectors as native node ids
+  (`path::test_name`). Vitest/Jest split `path::test name` into a file argument
+  plus `-t <name>`.
+- A targeted run that starts the runner but resolves no matching test now exits
+  `2` and prints `unresolved selector: <selector>`, so future bug gates do not
+  confuse "test missing/misnamed" with a red regression test. Reviewer passes
+  caught that broad output-text matching could also misclassify real failures;
+  final behavior is deliberately narrow: pytest uses pytest's distinct
+  collection/no-match exit codes, while JS runners match only explicit no-test
+  phrases at column zero of an output line.
+- Targeted runs stream combined process output while retaining it for the
+  no-match classifier. This keeps the existing tdd-loop "show real test output"
+  contract instead of buffering until process exit.
+- The `.jig/test-command` override remains the highest-priority runner path.
+  When `--test` is supplied with a custom command, the selector is appended as
+  the final argv item; the custom command owns any deeper selector semantics.
+- Updated `jig:tdd-loop` SKILL.md and regenerated both committed host packages
+  so Claude/Codex installs expose the new selector surface.
+- Verification run:
+  `python3 -m unittest discover -s skills/tdd-loop -p 'test_*.py'` passed
+  121 tests (5 skipped); `python3 skills/code-health/health.py check .` passed;
+  `python3 scripts/spec_lint.py --all --strict` passed; `python3
+  scripts/run_tests.py` passed 3019 tests (6 skipped) with `pyright: clean`;
+  `python3 scripts/build_host_packages.py --check` passed.
+
+### Reconciliation sweep (after reconciliation)
+
+- `skills/tdd-loop/SKILL.md`: updated to document `--test <selector>`.
+- `hosts/claude/skills/tdd-loop/{SKILL.md,tdd.py}` and
+  `hosts/codex/plugins/jig/skills/tdd-loop/{SKILL.md,tdd.py}`: regenerated
+  from source and verified with `scripts/build_host_packages.py --check`.
+- `docs/specs/README.md`: regenerated after the `REVIEWED` transition so the
+  board reflects the slice state.
+- `docs/specs/058-bug-fix-workflow/spec.md`: updated to clarify that bug-fix
+  review passes are run by reviewer subagents through the host/orchestrator
+  while `bug.py` validates recorded verdict artifacts.
+- `docs/decisions/adr-0016-bug-fix-lifecycle.md`: updated while still Proposed
+  to remove the ambiguous "automatic subagent spawning" wording and state the
+  same host/orchestrator vs. helper boundary.
+- `docs/refinement-todo.md`: updated because the spec-058 demand trigger fired
+  on 2026-06-20; the old "wait for demand" note is no longer true.
+- `docs/architecture.md`: checked; no update needed because module ownership
+  and helper boundaries are unchanged.
+- `docs/conventions.md`: no update needed; no new workflow rule or convention.
+- `docs/specs/006-tdd-loop/spec.md`: no amendment needed. It is the historical
+  record for the original tdd-loop helper surface; the live contract now lives
+  in SKILL.md and this 058-01 slice.
+- `workflow.py coverage --project-dir .`: no-op because jig has not adopted the
+  use-case breadth layer.

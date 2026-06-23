@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: jig:bug-fix
 ---
 
@@ -36,7 +36,8 @@ This spec adds **`jig:bug-fix`** — a first-class workflow (peer to
   `docs/bugs/README.md`;
 - a bug-tailored review pass reusing the ADR-0014 evidence gate, plus the
   reused craft (`pr-review`) and conditional security (`security-review`)
-  passes.
+  passes, run by reviewer subagents through the host/orchestrator while
+  `bug.py` validates their recorded verdict artifacts.
 
 See ADR-0016 for the full decision (gate table, record schema, reuse
 map, deferral note).

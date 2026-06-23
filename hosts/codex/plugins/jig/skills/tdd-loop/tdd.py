@@ -5,9 +5,10 @@ Deterministic test-runner detection + subprocess-driven invocation, with
 normalized exit codes so Claude can branch deterministically on the result.
 
 Two subcommands:
-  - `detect [target]`             : print detected runner name (or exit 2).
-  - `run [target] [--test-path P]`: invoke the runner, stream output, exit
-                                    0 (green) / 1 (red) / 2 (env error).
+  - `detect [target]`               : print detected runner name (or exit 2).
+  - `run [target] [--test-path P]`
+    `run [target] [--test SELECTOR]`: invoke the runner, stream output, exit
+                                      0 (green) / 1 (red) / 2 (env error).
 
 Mirrors the shape of workflow.py / review.py / memory.py / scaffold.py /
 adr.py. Helper is deterministic; SKILL.md drives the judgment layer.
@@ -154,17 +155,109 @@ def detect_runner(target: Path):
     return None
 
 
-def _build_command(runner: str, path: Path) -> list:
+def _split_test_selector(selector: str | None) -> tuple[str | None, str | None]:
+    """Split a test selector into optional path + optional test-name parts.
+
+    The shared selector convention is pytest-like: `path::test_name`. For
+    vitest/jest the path narrows the file set and the name maps to `-t`.
+    A selector without `::` is treated as a runner-native atom: pytest gets
+    it verbatim; JS runners treat path-looking strings as files and everything
+    else as a test-name filter.
+    """
+    if selector is None:
+        return None, None
+    if "::" in selector:
+        path_part, name_part = selector.split("::", 1)
+        return path_part or None, name_part or None
+    if (
+        "/" in selector
+        or "\\" in selector
+        or selector.endswith((".py", ".js", ".jsx", ".ts", ".tsx"))
+    ):
+        return selector, None
+    return None, selector
+
+
+def _build_command(runner: str, path: Path, test_selector: str | None = None) -> list:
     """Map runner name to argv. pytest goes via `python3 -m pytest` to avoid
     PATH-dependent shims; vitest + jest go via `npx` because we don't assume
     a local `vitest`/`jest` binary."""
+    selector_path, selector_name = _split_test_selector(test_selector)
     if runner == "pytest":
+        if test_selector:
+            return [sys.executable, "-m", "pytest", test_selector]
         return [sys.executable, "-m", "pytest", str(path)]
     if runner == "vitest":
-        return ["npx", "vitest", "run", str(path)]
+        cmd = ["npx", "vitest", "run", selector_path or str(path)]
+        if selector_name:
+            cmd.extend(["-t", selector_name])
+        return cmd
     if runner == "jest":
-        return ["npx", "jest", str(path)]
+        cmd = ["npx", "jest", selector_path or str(path)]
+        if selector_name:
+            cmd.extend(["-t", selector_name])
+        return cmd
     raise ValueError(f"unknown runner: {runner}")
+
+
+def _selector_missed(runner: str, returncode: int, output: str) -> bool:
+    """Return True when a targeted run failed because the selector found no test."""
+    if returncode == 0:
+        return False
+    if runner == "pytest" and returncode in {4, 5}:
+        return True
+    if runner == "pytest":
+        return False
+    no_match_prefixes = (
+        "no test found",
+        "no tests found",
+        "no matching tests",
+        "your test suite must contain at least one test",
+    )
+    lines = (line.rstrip().lower() for line in output.splitlines())
+    return any(
+        any(line.startswith(prefix) for prefix in no_match_prefixes)
+        for line in lines
+    )
+
+
+def _run_streaming(cmd: list[str], target: Path) -> tuple[int, str]:
+    """Run a command while streaming combined output and retaining it for checks."""
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(target),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    output_parts = []
+    if proc.stdout is not None:
+        for line in proc.stdout:
+            output_parts.append(line)
+            sys.stdout.write(line)
+    return proc.wait(), "".join(output_parts)
+
+
+def _run_command(cmd: list[str], target: Path, runner: str, test_selector: str | None) -> int:
+    """Run the test command and normalize runner exit status."""
+    try:
+        if test_selector:
+            returncode, output = _run_streaming(cmd, target)
+            if _selector_missed(runner, returncode, output):
+                sys.stderr.write(f"unresolved selector: {test_selector}\n")
+                return 2
+        else:
+            result = subprocess.run(cmd, cwd=str(target))
+            returncode = result.returncode
+    except FileNotFoundError:
+        # The runner binary itself is missing (e.g. `npx` not on PATH, or
+        # `python3` shim absent). Normalize to 2 (env error) so callers
+        # don't confuse "binary missing" with "tests failed".
+        sys.stderr.write(
+            f"{cmd[0]}: binary not found (is {runner} installed?)\n"
+        )
+        return 2
+    return 0 if returncode == 0 else 1
 
 
 def cmd_detect(target: Path) -> int:
@@ -177,7 +270,11 @@ def cmd_detect(target: Path) -> int:
     return 0
 
 
-def cmd_run(target: Path, test_path: Path | None) -> int:
+def cmd_run(
+    target: Path,
+    test_path: Path | None,
+    test_selector: str | None = None,
+) -> int:
     """`run` subcommand. Auto-detects, subprocess-invokes, streams output,
     normalizes the exit code (0 green / 1 red / 2 env error).
 
@@ -193,6 +290,8 @@ def cmd_run(target: Path, test_path: Path | None) -> int:
             sys.stderr.write(".jig/test-command is empty (no runnable command found)\n")
             return 2
         argv = shlex.split(cmd_str)
+        if test_selector:
+            argv = [*argv, test_selector]
         try:
             result = subprocess.run(argv, cwd=str(target))
         except (FileNotFoundError, OSError):
@@ -212,18 +311,8 @@ def cmd_run(target: Path, test_path: Path | None) -> int:
         sys.stderr.write("pytest module is not installed (try: pip install pytest)\n")
         return 2
 
-    cmd = _build_command(runner, test_path or target)
-    try:
-        result = subprocess.run(cmd, cwd=str(target))
-    except FileNotFoundError:
-        # The runner binary itself is missing (e.g. `npx` not on PATH, or
-        # `python3` shim absent). Normalize to 2 (env error) so callers
-        # don't confuse "binary missing" with "tests failed".
-        sys.stderr.write(
-            f"{cmd[0]}: binary not found (is {runner} installed?)\n"
-        )
-        return 2
-    return 0 if result.returncode == 0 else 1
+    cmd = _build_command(runner, test_path or target, test_selector)
+    return _run_command(cmd, target, runner, test_selector)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -244,6 +333,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="target directory (default: .)")
     pr.add_argument("--test-path", default=None,
                     help="optional explicit test path (defaults to target)")
+    pr.add_argument("--test", default=None,
+                    help="optional test selector, e.g. path::test_name")
 
     return p
 
@@ -265,7 +356,7 @@ def main(argv: list) -> int:
             return cmd_detect(target)
         if ns.cmd == "run":
             test_path = Path(ns.test_path).resolve() if ns.test_path else None
-            return cmd_run(target, test_path)
+            return cmd_run(target, test_path, ns.test)
     except Exception as exc:  # noqa: BLE001 — surface programming errors clearly.
         sys.stderr.write(f"tdd.py failed: {exc}\n")
         return 1

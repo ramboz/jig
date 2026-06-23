@@ -232,6 +232,174 @@ class RunTests(unittest.TestCase):
         self.assertIn("not found", result.stderr.lower())
 
 
+# -------------------- TargetedRunTests (058-01) --------------------
+
+
+class TargetedRunTests(unittest.TestCase):
+    """ACs for slice 058-01 — `tdd.py run --test <selector>`."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self._tdd = _load_tdd()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_pytest_targeted_passing_test_ignores_other_red_tests(self):
+        try:
+            import pytest  # noqa: F401
+        except ImportError:
+            self.skipTest("pytest not installed in this environment")
+        write(self.target / "pytest.ini", "[pytest]\n")
+        write(self.target / "test_sample.py",
+              "def test_passes():\n    assert True\n\n"
+              "def test_fails():\n    assert False\n")
+
+        r = run_tdd("run", str(self.target), "--test", "test_sample.py::test_passes")
+
+        self.assertEqual(r.returncode, 0,
+                         f"expected targeted green; stderr={r.stderr}; stdout={r.stdout}")
+
+    def test_pytest_targeted_failing_test_exits_1(self):
+        try:
+            import pytest  # noqa: F401
+        except ImportError:
+            self.skipTest("pytest not installed in this environment")
+        write(self.target / "pytest.ini", "[pytest]\n")
+        write(self.target / "test_sample.py",
+              "def test_fails():\n    assert False\n")
+
+        r = run_tdd("run", str(self.target), "--test", "test_sample.py::test_fails")
+
+        self.assertEqual(r.returncode, 1,
+                         f"expected targeted red; stderr={r.stderr}; stdout={r.stdout}")
+
+    def test_pytest_missing_selector_exits_2_and_names_selector(self):
+        try:
+            import pytest  # noqa: F401
+        except ImportError:
+            self.skipTest("pytest not installed in this environment")
+        write(self.target / "pytest.ini", "[pytest]\n")
+        write(self.target / "test_sample.py",
+              "def test_passes():\n    assert True\n")
+
+        selector = "test_sample.py::test_missing"
+        r = run_tdd("run", str(self.target), "--test", selector)
+
+        self.assertEqual(r.returncode, 2,
+                         f"missing selector must be env error; stderr={r.stderr}")
+        self.assertIn(selector, r.stderr)
+        self.assertIn("unresolved selector", r.stderr)
+
+    def test_pytest_selector_builds_node_id_command(self):
+        write(self.target / "pytest.ini", "[pytest]\n")
+        with patch.object(self._tdd, "_is_module_importable", return_value=True):
+            with patch.object(self._tdd, "_run_streaming") as mock_run:
+                mock_run.return_value = (0, "")
+                code = self._tdd.cmd_run(
+                    self.target, None, test_selector="test_sample.py::test_passes")
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv[-1], "test_sample.py::test_passes")
+
+    def test_pytest_targeted_failure_text_does_not_look_unresolved(self):
+        write(self.target / "pytest.ini", "[pytest]\n")
+        with patch.object(self._tdd, "_is_module_importable", return_value=True):
+            with patch.object(self._tdd, "_run_streaming") as mock_run:
+                mock_run.return_value = (
+                    1,
+                    "AssertionError: no tests found for this input",
+                )
+                code = self._tdd.cmd_run(
+                    self.target, None, test_selector="test_sample.py::test_fails")
+
+        self.assertEqual(code, 1)
+
+    def test_vitest_selector_maps_file_and_test_name(self):
+        write(self.target / "vitest.config.ts", "")
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (0, "")
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.ts::does the thing")
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv, [
+            "npx", "vitest", "run", "tests/foo.test.ts", "-t", "does the thing",
+        ])
+
+    def test_jest_selector_maps_file_and_test_name(self):
+        write(self.target / "jest.config.js", "")
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (0, "")
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.js::does the thing")
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv, [
+            "npx", "jest", "tests/foo.test.js", "-t", "does the thing",
+        ])
+
+    def test_js_no_matching_test_output_exits_2(self):
+        write(self.target / "vitest.config.ts", "")
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (1, "No test found")
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.ts::missing")
+
+        self.assertEqual(code, 2)
+
+    def test_js_suite_load_failure_text_does_not_look_unresolved(self):
+        write(self.target / "jest.config.js", "")
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (
+                1,
+                "Test suite failed to run\nReferenceError: broken is not defined",
+            )
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.js::loads")
+
+        self.assertEqual(code, 1)
+
+    def test_js_targeted_failure_text_does_not_look_unresolved(self):
+        write(self.target / "vitest.config.ts", "")
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (
+                1,
+                "AssertionError: no tests found for this input",
+            )
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.ts::fails")
+
+        self.assertEqual(code, 1)
+
+    def test_indented_js_targeted_failure_text_does_not_look_unresolved(self):
+        write(self.target / "vitest.config.ts", "")
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (
+                1,
+                "    No tests found for this input",
+            )
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.ts::fails")
+
+        self.assertEqual(code, 1)
+
+    def test_without_test_selector_uses_existing_path_behavior(self):
+        write(self.target / "vitest.config.ts", "")
+        test_path = self.target / "tests"
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            code = self._tdd.cmd_run(self.target, test_path)
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv, ["npx", "vitest", "run", str(test_path)])
+
+
 # -------------------- SkillSurfaceTests --------------------
 
 

@@ -238,11 +238,14 @@ fork:
   capability; see Scope / slice 01).
 - `independent-review` + reviewer subagent, `pr-review`,
   `security-review`, `slice-land`, `memory-sync` — reused as steps.
+  The skill/orchestrator invokes reviewer subagents; `bug.py` validates
+  the durable verdict artifacts they produce.
 
 ### 6. Review passes
 
-Two required passes + one conditional, validated by the ADR-0014
-evidence gate at `→ REVIEWED`:
+Two required passes + one conditional, run as reviewer-subagent passes
+by the host/orchestrator and validated by the ADR-0014 evidence gate at
+`→ REVIEWED`:
 
 - **bug-review** (the "compliance" analog) — a bug-tailored reviewer
   prompt: does the fix address root cause or paper over the symptom? is
@@ -330,8 +333,13 @@ teeth gates, the record schema + board, the bug-review prompt, the
 - **Land-time collision backstop** for bug numbers — same deferral as
   051-03 for specs.
 
-**Out of scope:** automatic subagent spawning; proving human
-verification; CI consumption.
+**Out of scope:** `bug.py` directly spawning host subagents or depending
+on a host-native subagent API; proving human verification; CI
+consumption. `jig:bug-fix` still coordinates reviewer subagents for
+bug-review, craft, and conditional security passes, matching the SDD
+evidence model. The durable gate remains the recorded verdict artifact;
+subagent execution is the host/orchestrator step that produces that
+evidence.
 
 ## Relationship to other decisions
 

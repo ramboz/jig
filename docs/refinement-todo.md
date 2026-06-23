@@ -200,10 +200,10 @@ Resolved by [spec 041](specs/041-routing-observability/spec.md) — routing is o
 **Resolution trigger:** First time a downstream packaging / release tool emits a non-string `version` in a plugin manifest, OR the next time `_read_plugin_version` is touched for any reason.
 **Mitigation idea:** Tighten the guard to `if not version or not isinstance(version, str):` and add a `PluginManifestError` test case for the non-string payload — closes the silent-late-failure hole in one line.
 
-### Decision: implement spec 058 (bug-fix workflow) — wait for demand
-**Deferred:** [Spec 058](specs/058-bug-fix-workflow/spec.md) / [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md) (the `jig:bug-fix` parallel bug-fix lifecycle) is designed and DRAFT/Proposed but **deliberately not implemented**. The design is real but the demand signal is not yet proven — building a six-slice helper + skill + teeth gates before we've felt the pain of doing bug fixes by hand risks the very over-engineering the workflow is meant to avoid. Let real usage size the need.
-**Resolution trigger:** **2–3 real bug fixes** in jig (or a dogfooding project) where the absence of a proportional, diagnose-first, regression-proven workflow is actually felt — i.e. we catch ourselves either over-applying the spec lifecycle to a bug or skipping diagnosis/regression-test rigor. At that point, validate the design against those concrete cases (adjust tiers/gates if they mispredicted) and start at slice 058-01 (`tdd.py` targeted-test support, the dependency-free prerequisite).
-**Note:** Until then, bug-shaped work continues to route to the personal global `debug-workflow` skill (judgment-only) per `spec-workflow`'s existing guidance.
+### Decision: implement spec 058 (bug-fix workflow) — TRIGGERED 2026-06-20
+**Status:** The demand trigger fired. [Spec 058](specs/058-bug-fix-workflow/spec.md) / [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md) is now actionable workflow debt, not a parked enhancement.
+**Trigger evidence:** A retrospective found six strong prior specs that would have fit bug-fix records (019, 035, 037, 039, 040, 075), plus escalation-shaped candidates 063/066/081. That clears the original "2–3 real bug fixes" threshold.
+**Next action:** Validate the Proposed ADR/spec in review, then start at slice 058-01 (`tdd.py` targeted-test support), the dependency-free prerequisite.
 
 ### Decision: prune redundant per-line `# noqa: E402` (and add `RUF100`)
 **Deferred:** Slice 060-02 adopted a repo-wide Ruff floor with `E402` globally ignored in `ruff.toml` (jig helpers `sys.path.insert(...)` before imports — a deliberate pattern). Many source/test files still carry pre-existing per-line `# noqa: E402` comments that are now redundant under the global ignore. They are harmless — `RUF100` (unused-noqa) is not in the curated select set (`F`/`E`/`W`/`I`/`B`), so ruff does not flag them — but they are dead weight. Both 060-02 review passes flagged this as an optional cleanup.
