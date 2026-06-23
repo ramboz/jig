@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: RECONCILED
 dependencies: ["058-01", "058-02"]
-last_verified:
-claimed_by: detached
+last_verified: 2026-06-23
 ---
 
 ## Slice 058-03 — gated transitions: diagnose gate + red→green teeth + fix_class
@@ -43,17 +42,17 @@ test fail before the fix and pass after.
    legal ordering.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases (red gate sees exit 0 → refuse; exit 2 → fail
       closed; bypass vars; ≥2-hypotheses mandatory vs advisory by tier)
       covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
 
@@ -69,4 +68,47 @@ end-to-end, even before the independent review passes are wired in.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- Added `bug.py transition <id> <status>` for the core bug lifecycle
+  statuses in ADR-0016, with simple ordering validation for ungated moves.
+- Implemented the diagnose gate for `ROOT_CAUSED`: gnarly bugs block on
+  missing evidence, while standard bugs emit an advisory warning; the gate is
+  bypassable with `JIG_BUG_DIAGNOSE_GATE=0`.
+- Implemented red→green teeth with `tdd.py run --test <regression_test>`:
+  `FIXING` requires a valid `fix_class` and witnessed red (exit 1), while
+  `REVIEWED` requires green (exit 0). `JIG_BUG_TEST_GATE=0` bypasses both
+  test checks as a deliberate act.
+- Added back-edge evidence accrual: a failed green check writes the bug back
+  to `DIAGNOSING` and appends a dated `## Already tried` entry.
+- Added deterministic tests with fake `tdd.py` helpers for red, green,
+  pass-without-fix, environment-error, bypass, invalid-status, illegal-order,
+  missing/invalid `fix_class`, and tier-specific diagnose behavior.
+- Addressed compliance feedback by adding coverage for diagnose bypass,
+  green-gate bypass, invalid/missing `fix_class`, invalid status membership,
+  and illegal ordering.
+- Addressed craft feedback by broadening the module/test headers from
+  slice-specific 058-02 wording to spec 058 wording.
+- Addressed reconciliation feedback by regenerating `docs/specs/README.md`
+  after the REVIEWED transition and refreshing `docs/refinement-todo.md`'s
+  spec 058 next-action text for the current 058-03 state.
+- Deferred no decisions. Craft noted that environment-error messages classify
+  the failure but do not include captured `tdd.py` stdout/stderr; this is a
+  non-blocking diagnostic-detail nit and remains acceptable for this slice.
+
+### Reconciliation sweep
+
+- `skills/bug-fix/bug.py` — updated: transition command, diagnose gate,
+  red/green gates, bypass env vars, back-edge evidence, and fix-class/status
+  validation.
+- `skills/bug-fix/test_bug.py` — updated: 058-03 coverage added alongside
+  the existing 058-02 core tests.
+- `hosts/claude/skills/bug-fix/bug.py` and
+  `hosts/codex/plugins/jig/skills/bug-fix/bug.py` — updated: regenerated from
+  source with `scripts/build_host_packages.py`.
+- `docs/specs/README.md` — updated: regenerated for the 058-03 lifecycle
+  move.
+- `docs/refinement-todo.md` — updated: spec 058's triggered next-action note
+  now points past the closed 058-01/058-02 work and reflects 058-03's current
+  review/reconciliation state.
+- `docs/architecture.md`, `docs/conventions.md`, and `docs/inbox.md` — no-op:
+  no new decision, boundary, convention, or inbox cleanup was introduced by
+  this slice.

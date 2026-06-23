@@ -203,7 +203,7 @@ Resolved by [spec 041](specs/041-routing-observability/spec.md) — routing is o
 ### Decision: implement spec 058 (bug-fix workflow) — TRIGGERED 2026-06-20
 **Status:** The demand trigger fired. [Spec 058](specs/058-bug-fix-workflow/spec.md) / [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md) is now actionable workflow debt, not a parked enhancement.
 **Trigger evidence:** A retrospective found six strong prior specs that would have fit bug-fix records (019, 035, 037, 039, 040, 075), plus escalation-shaped candidates 063/066/081. That clears the original "2–3 real bug fixes" threshold.
-**Next action:** Spec 058 is now in progress: 058-01 is DONE and 058-02 is underway. Continue through the remaining vertical slices, with 058-03 (`bug.py transition` gates) next after 058-02 lands.
+**Next action:** Spec 058 is now in progress: 058-01 and 058-02 are DONE; 058-03 (`bug.py transition` gates) is under review/reconciliation. Continue with 058-04 (review integration) after 058-03 lands.
 
 ### Decision: prune redundant per-line `# noqa: E402` (and add `RUF100`)
 **Deferred:** Slice 060-02 adopted a repo-wide Ruff floor with `E402` globally ignored in `ruff.toml` (jig helpers `sys.path.insert(...)` before imports — a deliberate pattern). Many source/test files still carry pre-existing per-line `# noqa: E402` comments that are now redundant under the global ignore. They are harmless — `RUF100` (unused-noqa) is not in the curated select set (`F`/`E`/`W`/`I`/`B`), so ruff does not flag them — but they are dead weight. Both 060-02 review passes flagged this as an optional cleanup.

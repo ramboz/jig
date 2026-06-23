@@ -1,5 +1,5 @@
 """
-AC verification tests for spec 058-02 (bug-fix core helper).
+AC verification tests for spec 058 (bug-fix helper).
 
 Run from the repo root:
     python3 -m unittest discover -s skills/bug-fix -p 'test_*.py'
@@ -240,6 +240,213 @@ class BugCoreTests(unittest.TestCase):
         self.assertIn("## Release log", text)
         self.assertIn("worktree abandoned", text)
         self.assertIn("wt-other", text)
+
+
+class BugTransitionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self, rel: str = "001-alpha.md") -> Path:
+        return self.root / "docs" / "bugs" / rel
+
+    def _write_bug(self, *, status: str = "REPORTED", tier: str = "standard",
+                   fix_class: str = "", regression_test: str = "tests/test_alpha.py::test_bug",
+                   evidence: str = "trace: log line 7",
+                   hypotheses: str = "- [ ] cache race\n- [x] parser bug\n") -> Path:
+        return write(self._bug(), (
+            "---\n"
+            f"status: {status}\n"
+            "severity: high\n"
+            f"tier: {tier}\n"
+            "claimed_by: wt-alpha\n"
+            f"regression_test: {regression_test}\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            f"fix_class: {fix_class}\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            "---\n\n"
+            "## Symptom\n\n"
+            "## Repro\n\n"
+            f"## Evidence\n\n{evidence}\n\n"
+            f"## Hypotheses\n\n{hypotheses}\n"
+            "## Root cause\n\n"
+            "## Fix class\n\n"
+            "## Fix\n\n"
+            "## Already tried\n\n"
+            "## Regression test\n\n"
+            "## Proof\n\n"
+            "## Learning\n"
+        ))
+
+    def _fm(self) -> dict:
+        fields, _ = parse_frontmatter(self._bug().read_text())
+        return fields
+
+    def _fake_tdd(self, code: int) -> Path:
+        script = self.root / f"fake_tdd_{code}.py"
+        script.write_text(
+            "import sys\n"
+            "print('fake tdd', ' '.join(sys.argv[1:]))\n"
+            f"raise SystemExit({code})\n"
+        )
+        return script
+
+    def test_transition_reported_to_diagnosing_sets_status(self):
+        self._write_bug(status="REPORTED")
+        r = run_bug(
+            "transition", "001", "DIAGNOSING", "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "DIAGNOSING")
+
+    def test_transition_refuses_invalid_status_membership(self):
+        self._write_bug(status="REPORTED")
+        r = run_bug(
+            "transition", "001", "BOGUS", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("invalid status", r.stderr)
+        self.assertEqual(self._fm()["status"], "REPORTED")
+
+    def test_transition_refuses_illegal_ordering(self):
+        self._write_bug(status="REPORTED")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("invalid transition", r.stderr)
+        self.assertEqual(self._fm()["status"], "REPORTED")
+
+    def test_gnarly_root_caused_requires_diagnosis_evidence(self):
+        self._write_bug(
+            status="DIAGNOSING", tier="gnarly", evidence="", hypotheses="- [x] one\n",
+        )
+        r = run_bug(
+            "transition", "001", "ROOT_CAUSED", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("hypotheses", r.stderr)
+        self.assertIn("evidence", r.stderr)
+        self.assertEqual(self._fm()["status"], "DIAGNOSING")
+
+    def test_standard_root_caused_warns_but_does_not_block(self):
+        self._write_bug(
+            status="DIAGNOSING", tier="standard", evidence="", hypotheses="- [x] one\n",
+        )
+        r = run_bug(
+            "transition", "001", "ROOT_CAUSED", "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warning", r.stderr.lower())
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_diagnose_gate_bypass_allows_incomplete_gnarly_diagnosis(self):
+        self._write_bug(
+            status="DIAGNOSING", tier="gnarly", evidence="", hypotheses="- [x] one\n",
+        )
+        r = run_bug(
+            "transition", "001", "ROOT_CAUSED", "--project-dir", str(self.root),
+            env={"JIG_BUG_DIAGNOSE_GATE": "0"},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_fixing_requires_declared_fix_class(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("fix_class", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_fixing_refuses_unknown_fix_class(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="big_rewrite")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("fix_class", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_fixing_red_gate_stamps_red_confirmed_at(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields = self._fm()
+        self.assertEqual(fields["status"], "FIXING")
+        self.assertRegex(fields["red_confirmed_at"], r"\d{4}-\d{2}-\d{2}")
+
+    def test_fixing_exit_zero_refuses_test_that_already_passes(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(0))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("passes without a fix", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_fixing_exit_two_fails_closed_as_environment_error(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(2))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("environment error", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_reviewed_green_gate_stamps_green_confirmed_at(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(0))},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields = self._fm()
+        self.assertEqual(fields["status"], "REVIEWED")
+        self.assertRegex(fields["green_confirmed_at"], r"\d{4}-\d{2}-\d{2}")
+
+    def test_failed_green_check_routes_back_to_diagnosing_and_logs_attempt(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self._fm()["status"], "DIAGNOSING")
+        text = self._bug().read_text()
+        self.assertIn("## Already tried", text)
+        self.assertIn("green check failed", text)
+
+    def test_red_test_gate_bypass_skips_tdd_and_transitions_to_fixing(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0", "JIG_TDD_HELPER": str(self.root / "missing.py")},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_green_test_gate_bypass_skips_tdd_and_transitions_to_reviewed(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_BUG_TEST_GATE": "0", "JIG_TDD_HELPER": str(self.root / "missing.py")},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
 
 
 if __name__ == "__main__":
