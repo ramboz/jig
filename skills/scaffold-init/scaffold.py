@@ -384,7 +384,10 @@ def _detect_llm_agent(target: Path) -> bool:
 
 
 def _detect_ci(target: Path) -> bool:
-    """High-confidence CI files only — see spec 001's signal-detection findings. Makefiles excluded."""
+    """High-confidence CI files only.
+
+    See spec 001's signal-detection findings. Makefiles excluded.
+    """
     workflows = target / ".github" / "workflows"
     if workflows.is_dir() and any(workflows.iterdir()):
         return True

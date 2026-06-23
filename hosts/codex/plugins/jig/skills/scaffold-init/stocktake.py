@@ -7,8 +7,9 @@ When ≥3 slices are RECONCILED or DONE, surfaces a "review for promotion" sugge
 User invokes manually:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/stocktake.py <target>
 
-Per spec 001's signal-detection findings + slice 001-04 plan: "spec" is interpreted as "slice" here, since
-slice-level completion is the practical pulse of the workflow.
+Per spec 001's signal-detection findings + slice 001-04 plan: "spec" is
+interpreted as "slice" here, since slice-level completion is the practical
+pulse of the workflow.
 """
 
 import re
