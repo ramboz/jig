@@ -228,8 +228,9 @@ After tests pass:
   Document this in SKILL.md gotchas so users know JS-side run
   failures could be environment issues (no `node_modules`, no `npx`,
   etc.).
-- **Shallow scan depth for `test_*.py` files.** Spike 001a says
-  "no recursion deeper than 2 levels." `_is_pytest`'s test-file
+- **Shallow scan depth for `test_*.py` files.** Spec 001's
+  signal-detection findings say "no recursion deeper than 2 levels."
+  `_is_pytest`'s test-file
   scan walks root + direct subdirs only. Deep test trees (`tests/unit/`,
   `tests/integration/`) will miss — but the `pyproject.toml` /
   `pytest.ini` / `conftest.py` checks catch them anyway. Documented

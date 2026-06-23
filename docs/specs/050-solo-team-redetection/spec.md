@@ -34,7 +34,7 @@ re-check should preserve that.
   common. jig itself was scaffolded solo and now has a CLAUDE.md
   contributor pattern that benefits from being made first-class.
 - **Cheap to add.** The detection logic exists in scaffold-init
-  ([spike-001a-signal-detection.md](../../spikes/spike-001a-signal-detection.md)).
+  ([signal-detection-findings.md](../001-scaffold-init/signal-detection-findings.md)).
   Re-using it from `memory-sync` is import-and-call.
 - **Solves a silent failure.** Missing `people.md` doesn't break
   anything visibly — the agent just operates without per-person
@@ -143,7 +143,7 @@ Two slices, sequenced. SPIDR Interface-axis split.
   contributor story. Re-detection identified as the missing back-
   edge in scaffold-init's once-only team signal.
 - **Pattern precedent:** `scaffold-init`'s team-signal detection
-  ([spike-001a-signal-detection.md](../../spikes/spike-001a-signal-detection.md)),
+  ([signal-detection-findings.md](../001-scaffold-init/signal-detection-findings.md)),
   mailmap normalization, monorepo guard.
 - **Adjacent spec:** Spec 049 (slice-claim on IN_PROGRESS) —
   different mechanism, same "multi-contributor support gaps" theme.

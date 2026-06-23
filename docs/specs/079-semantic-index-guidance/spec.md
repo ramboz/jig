@@ -8,7 +8,7 @@ use_cases: []
 
 # Spec 079: Semantic-index guidance
 
-> Source: [eng-tips self-audit brief-05](../../external-review/eng-tips-2026-06/brief-05-semantic-index-recommendation.md)
+> Source: EngTips self-audit brief-05, folded into this spec and retired
 > (EngTip #26 "Token Saving", #23 "Your Codebase Is Your AI's Context").
 > Reserved 2026-06-19 via `workflow.py new`.
 

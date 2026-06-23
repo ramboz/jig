@@ -136,8 +136,8 @@ the main session) use to actually run the loop. The discipline lives in
   subprocess test, because pytest is the only runner with reliable presence
   in the jig dev environment.)
 - **Shallow scan depth.** The `test_*.py` / `*_test.py` scan only checks the
-  root and direct subdirectories (max depth 2 — per Spike 001a's signal-detection
-  rules). Deep test trees (`tests/unit/`, `tests/integration/`) won't be
+  root and direct subdirectories (max depth 2 — per spec 001's
+  signal-detection rules). Deep test trees (`tests/unit/`, `tests/integration/`) won't be
   found via the file-pattern path, but `pytest.ini` / `conftest.py` /
   `pyproject.toml` catch those projects anyway.
 - **Exit code 1 vs 2.** Exit 1 means the runner ran and saw red tests —

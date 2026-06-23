@@ -172,7 +172,8 @@ independent and could ship first.
 
 ## References
 
-- External review brief: [`brief-05-routing-observability.md`](../../external-review/brief-05-routing-observability.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - `docs/refinement-todo.md` — "Skill telemetry granularity" and
   "Skill-routing observability" entries.
 - Verification 2026-05-26: telemetry hook still PreToolUse/Task

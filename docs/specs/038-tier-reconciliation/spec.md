@@ -205,7 +205,8 @@ Q2 context-cost measurement. Retained for audit trail._
 
 - Policy decision: [ADR-0012 — Scaffold-init tiers gate which skills
   install](../../decisions/adr-0012-scaffold-tier-gated-install.md)
-- External review brief: [`brief-01-tier-reconciliation.md`](../../external-review/brief-01-tier-reconciliation.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - Verification 2026-05-26 (re-confirmed 2026-05-29 at HEAD `b7117c5`):
   `_copy_skills_and_agents` confirmed tier-blind; `verify_install`
   claim in brief corrected (asserts `>= 1`, not 14).

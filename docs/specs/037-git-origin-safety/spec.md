@@ -130,7 +130,8 @@ Slices 1 and 2 are independent. Slice 1 has higher user-impact
 
 ## References
 
-- External review brief: [`brief-03-git-origin-safety.md`](../../external-review/brief-03-git-origin-safety.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - Verification 2026-05-26: all four bugs confirmed live.
 
 ## Clarifications

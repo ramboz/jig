@@ -8,7 +8,7 @@ use_cases: []
 
 # Spec 076: Lean the always-loaded primer
 
-> Source: [eng-tips self-audit brief-01](../../external-review/eng-tips-2026-06/brief-01-lean-primer.md)
+> Source: EngTips self-audit brief-01, folded into this spec and retired
 > (EngTip #23 "Your Codebase Is Your AI's Context", #26 "Token Saving").
 > Reserved 2026-06-19 via `workflow.py new`. Pure dogfooding —
 > jig applying its own context-cost discipline to itself.

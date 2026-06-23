@@ -23,7 +23,8 @@ This is, like `adr-workflow`, a net-new skill (no stub directory yet).
   (16 reconciled slices) followed the same loop: write failing tests
   for each AC, observe red, write code, observe green, report counts.
   The pattern is fully stable.
-- **Auto-install plumbing already exists.** Spike 001a (`docs/spikes/spike-001a-signal-detection.md`)
+- **Auto-install plumbing already exists.** The historical Spike 001a
+  [signal-detection findings](../001-scaffold-init/signal-detection-findings.md)
   defined the install signals (`vitest.config.*`, `jest.config.*`,
   `pytest.ini`, `conftest.py`, `[tool.pytest]` in `pyproject.toml`,
   `*_test.go`); `scaffold.py:_detect_tests` already implements them

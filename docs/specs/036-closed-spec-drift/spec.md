@@ -123,7 +123,8 @@ but each is small — resist over-splitting.
 
 ## References
 
-- External review brief: [`brief-04-closed-spec-drift.md`](../../external-review/brief-04-closed-spec-drift.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - Verification 2026-05-26: all five drifts confirmed live.
 - Related: ADR-0006 (accept-then-index ordering — ADR-style immutability
   baseline).

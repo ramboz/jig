@@ -141,6 +141,7 @@ dramatically by option, so the ADR has to land first.
 
 ## References
 
-- External review brief: [`brief-08-spec-gate-model.md`](../../external-review/brief-08-spec-gate-model.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - Verification 2026-05-26: env var + literal path match both
   confirmed in `hooks/scripts/jig-spec-gate.sh`.

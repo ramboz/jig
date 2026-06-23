@@ -13,7 +13,7 @@ The `scaffold-init` skill runs a discovery wizard that initializes an AI-native 
 
 | Technique | Question | Outcome |
 |---|---|---|
-| S — Spike | How do we reliably detect LLM/agent work, CI, team size? | Spike 001a (docs/spikes/) — not gated for slice 001-01 |
+| S — Spike | How do we reliably detect LLM/agent work, CI, team size? | Historical Spike 001a, now [signal-detection-findings.md](signal-detection-findings.md) — not gated for slice 001-01 |
 | P — Path | Greenfield vs. existing repo with signals? | 2 slices (001-01, 001-03) |
 | I — Interface | Q&A wizard vs. filesystem-inference only? | Slice 001-05 (last) |
 | D — Data | Stub docs vs. content-filled? | Slice 001-02 |
@@ -23,9 +23,9 @@ The `scaffold-init` skill runs a discovery wizard that initializes an AI-native 
 
 ## Spike 001a — signal-detection
 
-**STATUS: DRAFT**
+**STATUS: DONE**
 
-Tracking artifact: [docs/spikes/spike-001a-signal-detection.md](../../spikes/spike-001a-signal-detection.md)
+Tracking artifact: [signal-detection-findings.md](signal-detection-findings.md)
 
 This spike is NOT a gate for slice 001-01. Slice 001-01 uses hardcoded defaults.
 

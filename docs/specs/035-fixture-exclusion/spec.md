@@ -114,7 +114,8 @@ unless `/jig:clarify` surfaces a reason to split.
 
 ## References
 
-- External review brief: [`brief-02-fixture-exclusion.md`](../../external-review/brief-02-fixture-exclusion.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - Verification 2026-05-26: both deny lists still lack `fixtures`.
 
 ## Clarifications

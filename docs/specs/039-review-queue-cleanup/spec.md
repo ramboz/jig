@@ -111,7 +111,8 @@ decided this session); the action is small.
 
 ## References
 
-- External review brief: [`brief-07-review-queue-cleanup.md`](../../external-review/brief-07-review-queue-cleanup.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - This session (2026-05-26): decision to drop, with rationale —
   jig's review loop is in-session; the file is dead-state
   masquerading as a contract.

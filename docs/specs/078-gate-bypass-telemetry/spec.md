@@ -8,7 +8,7 @@ use_cases: []
 
 # Spec 078: Gate-bypass telemetry
 
-> Source: [eng-tips self-audit brief-04](../../external-review/eng-tips-2026-06/brief-04-gate-bypass-telemetry.md)
+> Source: EngTips self-audit brief-04, folded into this spec and retired
 > (EngTip #19 "Don't Be a Hero", #20 "AI, Authorship, and
 > Accountability"). Reserved 2026-06-19 via `workflow.py new`.
 
@@ -33,6 +33,11 @@ natural sibling.
 honors its override (gate name, env var, timestamp, branch/spec-ref),
 fail-open, to the existing local gitignored telemetry sink; a read-only
 digest prints per-gate bypass counts over `--days N`.
+
+Non-goal inherited from the source review: this does **not** make gates
+harder to bypass. The bypasses stay bypassable; the change makes them
+visible. Events stay local, content-free, and gitignored — log the fact of
+the bypass, never the diff, secret, or prompt content.
 
 ## Assumptions
 

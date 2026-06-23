@@ -38,7 +38,8 @@ from _common.team_signal import (  # noqa: F401  (re-export)
     write_no_people_md_marker,
 )
 
-# Tier 0 always installs. Tier 1 is gated on test signals (per Spike 001a:
+# Tier 0 always installs. Tier 1 is gated on test signals (per the
+# historical Spike 001a signal-detection findings:
 # "default for most projects" = "most projects have tests, so most install tier-1").
 # Tier 2 is offered, never auto-installed.
 LLM_LIBRARIES = {
@@ -289,7 +290,7 @@ def _looks_already_spec_driven(target: Path) -> tuple:
 
 @dataclass
 class Signals:
-    """Detected project signals. Per Spike 001a (docs/spikes/spike-001a-signal-detection.md)."""
+    """Detected project signals. Per spec 001's signal-detection findings."""
     has_llm_agent_files: bool
     has_ci: bool
     has_tests: bool
@@ -333,7 +334,7 @@ def _read_text_safe(path: Path) -> str:
 
 
 def _detect_llm_agent(target: Path) -> bool:
-    """High-confidence signals only — see Spike 001a."""
+    """High-confidence signals only — see spec 001's signal-detection findings."""
     # File / directory presence at root
     if (target / "AGENTS.md").is_file():
         return True
@@ -383,7 +384,7 @@ def _detect_llm_agent(target: Path) -> bool:
 
 
 def _detect_ci(target: Path) -> bool:
-    """High-confidence CI files only — see Spike 001a. Makefiles excluded."""
+    """High-confidence CI files only — see spec 001's signal-detection findings. Makefiles excluded."""
     workflows = target / ".github" / "workflows"
     if workflows.is_dir() and any(workflows.iterdir()):
         return True
@@ -399,7 +400,7 @@ def _detect_ci(target: Path) -> bool:
 
 
 def _detect_tests(target: Path) -> bool:
-    """High-confidence test-framework signals — see Spike 001a."""
+    """High-confidence test-framework signals — see spec 001's signal-detection findings."""
     # Python
     if (target / "pytest.ini").is_file():
         return True
@@ -454,7 +455,7 @@ def detect_team(target: Path) -> bool:
 
 
 def _select_tiers(signals: Signals) -> tuple[list, list]:
-    """Map signals to (installed_tiers, offered_tiers). Per Spike 001a:
+    """Map signals to (installed_tiers, offered_tiers). Per spec 001's signal-detection findings:
     permissive offer, conservative install."""
     installed = ["tier-0"]
     if signals.has_tests:

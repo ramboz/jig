@@ -458,8 +458,8 @@ Stored in Cloudflare D1 (SQLite at edge).
 <!-- elicited: 2026-05-15 / status: filled -->
 
 **Data sourcing.** Manual curation from public sources for MVP — no
-Ravelry API dependency (explicit decision from Spike 0; see
-docs/spikes/spike-yarn-domain-research.md for full rationale).
+Ravelry API dependency (explicit decision from the domain-research
+spike slice; see that slice's Outcome for full rationale).
 Community contributions planned for v2 (feature 5).
 
 **Feature work.** Spec-driven slice-by-slice per the Agile SDD

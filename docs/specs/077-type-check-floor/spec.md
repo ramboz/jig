@@ -8,7 +8,7 @@ use_cases: []
 
 # Spec 077: Type-check floor for code-health
 
-> Source: [eng-tips self-audit brief-02](../../external-review/eng-tips-2026-06/brief-02-type-check-floor.md)
+> Source: EngTips self-audit brief-02, folded into this spec and retired
 > (EngTip #3 "Tighten Contracts on Nullable Values", #11 "Tests and
 > Contracts"). Reserved 2026-06-19 via `workflow.py new`.
 

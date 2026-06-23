@@ -134,7 +134,8 @@ Lean A. Doc sweeps benefit from being a single coherent edit.
 
 ## References
 
-- External review brief: [`brief-06-isolation-honesty.md`](../../external-review/brief-06-isolation-honesty.md)
+- Historical external review input was folded into this spec; the standalone
+  source brief was retired.
 - Upstream: [GitHub issue #20304](https://github.com/anthropics/claude-code/issues/20304)
   (parent context reachable to subagents).
 - Verification 2026-05-26: README claim and SKILL.md caveat both

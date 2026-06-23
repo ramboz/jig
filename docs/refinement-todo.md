@@ -125,7 +125,7 @@ Resolved by [ADR-0001](decisions/adr-0001-scaffold-stable.md) — threshold is 3
 Resolved by [Spec 001-01](specs/001-scaffold-init/spec.md) + [ADR-0007](decisions/adr-0007-scaffold-json-installed-skills.md); schema lives in `skills/scaffold-init/scaffold.py`.
 
 ### Decision: Signal detection time-box and resource bounds
-**Deferred:** Spike 001a calls for a 3-second wall-clock time-box and "no recursion deeper than 2 levels" with skip-dirs. The current `detect_signals()` honors the depth/skip-dir rule implicitly (no rglob in detectors) but does NOT enforce a wall-clock limit. `_read_text_safe()` reads files unboundedly — a multi-GB `requirements.txt` would be fully read into memory.
+**Deferred:** The historical Spike 001a signal-detection findings call for a 3-second wall-clock time-box and "no recursion deeper than 2 levels" with skip-dirs. The current `detect_signals()` honors the depth/skip-dir rule implicitly (no rglob in detectors) but does NOT enforce a wall-clock limit. `_read_text_safe()` reads files unboundedly — a multi-GB `requirements.txt` would be fully read into memory.
 **Resolution trigger:** First time a user reports a slow or hung scaffold-init on a real project, OR when adding network-touching detectors.
 **Risk:** Currently theoretical — local-only scaffolder on user-owned dirs.
 

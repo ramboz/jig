@@ -61,8 +61,8 @@ def _pkg_deps(target: Path) -> set:
 
 def _has_test_files_shallow(target: Path) -> bool:
     """Look for `test_*.py` or `*_test.py` at root OR in any DIRECT subdir.
-    Shallow scan only (max depth 2) — per Spike 001a's "no recursion deeper
-    than 2 levels" rule. Deep test trees (`tests/unit/`) miss here, but the
+    Shallow scan only (max depth 2) — per spec 001's "no recursion deeper
+    than 2 levels" signal-detection rule. Deep test trees (`tests/unit/`) miss here, but the
     pyproject / pytest.ini / conftest checks catch those projects anyway."""
     def _is_test_file(name: str) -> bool:
         return (name.startswith("test_") and name.endswith(".py")) \
