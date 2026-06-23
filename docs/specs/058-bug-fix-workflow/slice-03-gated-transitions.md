@@ -1,7 +1,8 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: ["058-01", "058-02"]
 last_verified:
+claimed_by: detached
 ---
 
 ## Slice 058-03 — gated transitions: diagnose gate + red→green teeth + fix_class
