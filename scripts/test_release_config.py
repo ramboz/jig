@@ -65,10 +65,25 @@ class ReleasePleaseConfigTests(unittest.TestCase):
             and e.get("type") == "json"
             and e.get("jsonpath") == "$.version"
         }
+        # release-please must bump EVERY version-bearing plugin.json in the
+        # same release commit — the two root descriptors AND the two committed
+        # host-package copies under hosts/. The host plugin.json files are
+        # byte-copies of the root descriptors (build_claude/codex_plugin copy
+        # them verbatim), so if release-please bumps only the roots, the
+        # committed hosts/ packages stay on the old version at the tagged
+        # commit. build_release_zip.py then refuses to build ("version
+        # mismatch — committed package declares <old>"), and the release ships
+        # with no host zips (regression seen on v2.0.1). Keep all four here.
         self.assertEqual(
             paths,
-            {".claude-plugin/plugin.json", ".codex-plugin/plugin.json"},
-            f"expected release-please to version both plugin manifests, got {extra!r}",
+            {
+                ".claude-plugin/plugin.json",
+                ".codex-plugin/plugin.json",
+                "hosts/claude/.claude-plugin/plugin.json",
+                "hosts/codex/plugins/jig/.codex-plugin/plugin.json",
+            },
+            "expected release-please to version both root plugin manifests AND "
+            f"both committed host-package copies, got {extra!r}",
         )
 
 
