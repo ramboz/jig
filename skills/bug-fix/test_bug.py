@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUG_PY = REPO_ROOT / "skills" / "bug-fix" / "bug.py"
@@ -18,6 +19,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from skills._common.parsing import parse_frontmatter  # noqa: E402
+
+
+def load_bug_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bug_module_058", BUG_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_bug(*args: str, cwd: Path | None = None,
@@ -528,6 +537,293 @@ class BugTransitionTests(unittest.TestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def _write_learning(self, text: str = "- Bug 001: learned the cache race pattern.\n") -> Path:
+        return write(self.root / "docs" / "memory" / "learnings.md", text)
+
+    def test_done_refuses_missing_learning_even_with_review_evidence(self):
+        self._write_bug(status="REVIEWED", fix_class="local_patch")
+        self._write_required_reviews()
+        r = run_bug(
+            "transition", "001", "DONE", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("learning", r.stderr.lower())
+        self.assertIn("docs/memory/learnings.md", r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def test_done_revalidates_review_evidence(self):
+        self._write_bug(status="REVIEWED", fix_class="local_patch")
+        self._write_learning()
+        r = run_bug(
+            "transition", "001", "DONE", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("review evidence", r.stderr.lower())
+        self.assertIn("bug-review", r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def test_standard_reviewed_can_close_done_with_reviews_and_learning(self):
+        self._write_bug(status="REVIEWED", fix_class="local_patch", tier="standard")
+        self._write_required_reviews()
+        self._write_learning()
+        r = run_bug(
+            "transition", "001", "DONE", "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "DONE")
+
+    def test_gnarly_bug_requires_verified_before_done(self):
+        self._write_bug(status="REVIEWED", fix_class="local_patch", tier="gnarly")
+        self._write_required_reviews()
+        self._write_learning()
+        r = run_bug(
+            "transition", "001", "DONE", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("VERIFIED", r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def test_security_surface_requires_verified_before_done(self):
+        self._write_bug(
+            status="REVIEWED", fix_class="local_patch",
+            tier="standard", security_surface="yes",
+        )
+        self._write_required_reviews("security")
+        self._write_learning()
+        r = run_bug(
+            "transition", "001", "DONE", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("VERIFIED", r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def test_verified_requires_original_repro_attestation_in_proof(self):
+        self._write_bug(status="REVIEWED", fix_class="local_patch", tier="gnarly")
+        r = run_bug(
+            "transition", "001", "VERIFIED", "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("original reported repro", r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+        text = self._bug().read_text()
+        text = text.replace(
+            "## Proof\n\n",
+            "## Proof\n\nAttested re-run of original reported repro on 2026-06-23.\n\n",
+        )
+        self._bug().write_text(text)
+        r = run_bug(
+            "transition", "001", "VERIFIED", "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "VERIFIED")
+
+    def test_verified_gnarly_can_close_done_with_reviews_and_learning(self):
+        self._write_bug(status="VERIFIED", fix_class="local_patch", tier="gnarly")
+        self._write_required_reviews()
+        self._write_learning()
+        r = run_bug(
+            "transition", "001", "DONE", "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "DONE")
+
+
+class BugEscalationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self) -> Path:
+        return self.root / "docs" / "bugs" / "001-alpha.md"
+
+    def test_escalate_opens_spec_links_both_directions_and_parks_bug(self):
+        write(self._bug(), (
+            "---\n"
+            "status: ROOT_CAUSED\n"
+            "severity: high\n"
+            "tier: gnarly\n"
+            "claimed_by: wt-alpha\n"
+            "regression_test: tests/test_alpha.py::test_bug\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            "fix_class: structural_fix\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            "---\n\n"
+            "# Bug 001: alpha\n\n"
+            "## Symptom\n\nDesign gap.\n"
+        ))
+        fake_workflow = self.root / "fake_workflow.py"
+        spec_dir = self.root / "docs" / "specs" / "123-alpha"
+        spec_path = spec_dir / "spec.md"
+        fake_workflow.write_text(
+            "from pathlib import Path\n"
+            "import sys\n"
+            f"p = Path({str(spec_path)!r})\n"
+            "p.parent.mkdir(parents=True, exist_ok=True)\n"
+            "p.write_text('---\\nstatus: DRAFT\\n---\\n\\n# Spec 123\\n')\n"
+            "print('reserved 123-alpha')\n"
+            "print(p)\n"
+        )
+        r = run_bug(
+            "escalate", "001", "--project-dir", str(self.root),
+            env={"JIG_WORKFLOW_HELPER": str(fake_workflow)},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields, _ = parse_frontmatter(self._bug().read_text())
+        self.assertEqual(fields["status"], "ESCALATED")
+        self.assertEqual(fields["escalated_to"], "123")
+        spec_text = spec_path.read_text()
+        spec_fields, _ = parse_frontmatter(spec_text)
+        self.assertEqual(spec_fields["originated_from_bug"], "001")
+        self.assertIn("originated from bug 001", spec_text.lower())
+
+
+class BugReservationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_push_reservation_race_cleans_ephemeral_worktree(self):
+        module = load_bug_module()
+        calls: list[tuple[list[str], Path]] = []
+
+        def fake_run(argv, cwd):
+            argv = list(argv)
+            cwd = Path(cwd)
+            calls.append((argv, cwd))
+            if argv[:3] == ["git", "worktree", "add"]:
+                Path(argv[4]).mkdir(parents=True, exist_ok=True)
+                return 0, "", ""
+            if argv[:3] == ["git", "rev-parse", "HEAD"]:
+                return 0, "abc123\n", ""
+            if argv[:2] == ["git", "push"]:
+                return 1, "", "rejected non-fast-forward"
+            return 0, "", ""
+
+        with patch.object(module, "_run", side_effect=fake_run):
+            with self.assertRaises(module.BugError) as cm:
+                module.reserve_bug_on_origin(self.root, "alpha", pr_mode=False)
+
+        self.assertIn("race-on-push", str(cm.exception))
+        self.assertTrue(
+            any(c[0][:3] == ["git", "worktree", "remove"] for c in calls),
+            "race path must remove the ephemeral worktree",
+        )
+
+    def _fake_run_factory(self, calls, main_push_rc, main_push_err):
+        """Build a fake _run that drives reservation to either a direct
+        main push (main_push_rc) or, on refusal, the PR-fallback branch."""
+        def fake_run(argv, cwd):
+            argv = list(argv)
+            calls.append((argv, Path(cwd)))
+            if argv[:3] == ["git", "worktree", "add"]:
+                Path(argv[4]).mkdir(parents=True, exist_ok=True)
+                return 0, "", ""
+            if argv[:3] == ["git", "rev-parse", "HEAD"]:
+                return 0, "abc123\n", ""
+            if argv[:4] == ["git", "config", "--get", "remote.origin.url"]:
+                return 0, "https://github.com/u/r.git\n", ""
+            if argv[:2] == ["git", "push"]:
+                # argv[3] is the refspec sha:refs/heads/<dest>
+                if argv[3].endswith(":refs/heads/main"):
+                    return main_push_rc, "", main_push_err
+                return 0, "", ""  # PR-fallback branch push
+            if argv[:2] == ["gh", "pr"]:
+                return 0, "https://github.com/u/r/pull/42\n", ""
+            return 0, "", ""
+        return fake_run
+
+    def test_pr_mode_reserves_via_branch_and_opens_pr(self):
+        module = load_bug_module()
+        calls: list[tuple[list[str], Path]] = []
+        fake_run = self._fake_run_factory(calls, main_push_rc=0, main_push_err="")
+
+        with patch.object(module, "_run", side_effect=fake_run), \
+                patch.object(module.shutil, "which", return_value="/usr/bin/gh"):
+            number, slug = module.reserve_bug_on_origin(
+                self.root, "alpha", pr_mode=True)
+
+        self.assertEqual((number, slug), ("001", "alpha"))
+        # --pr never pushes straight to main; it pushes the reserve branch.
+        self.assertFalse(
+            any(c[0][:2] == ["git", "push"]
+                and c[0][3].endswith(":refs/heads/main") for c in calls),
+            "--pr mode must not push directly to main",
+        )
+        self.assertTrue(
+            any(c[0][:2] == ["git", "push"]
+                and c[0][3].endswith(":refs/heads/reserve/bug-001-alpha")
+                for c in calls),
+            "--pr mode must push the reserve/bug-* branch",
+        )
+        self.assertTrue(
+            any(c[0][:2] == ["gh", "pr"] for c in calls),
+            "--pr mode must open a PR via gh",
+        )
+        self.assertTrue(
+            any(c[0][:3] == ["git", "worktree", "remove"] for c in calls),
+            "--pr path must remove the ephemeral worktree",
+        )
+
+    def test_protected_branch_push_falls_back_to_pr(self):
+        module = load_bug_module()
+        calls: list[tuple[list[str], Path]] = []
+        # Direct push to main refused by branch protection (GH006).
+        fake_run = self._fake_run_factory(
+            calls, main_push_rc=1,
+            main_push_err="GH006: Protected branch update failed")
+
+        with patch.object(module, "_run", side_effect=fake_run), \
+                patch.object(module.shutil, "which", return_value="/usr/bin/gh"):
+            number, slug = module.reserve_bug_on_origin(
+                self.root, "alpha", pr_mode=False)
+
+        self.assertEqual((number, slug), ("001", "alpha"))
+        # It must attempt the direct main push first, then fall back.
+        self.assertTrue(
+            any(c[0][:2] == ["git", "push"]
+                and c[0][3].endswith(":refs/heads/main") for c in calls),
+            "protection path must attempt the direct main push first",
+        )
+        self.assertTrue(
+            any(c[0][:2] == ["git", "push"]
+                and c[0][3].endswith(":refs/heads/reserve/bug-001-alpha")
+                for c in calls),
+            "protection fallback must push the reserve/bug-* branch",
+        )
+        self.assertTrue(
+            any(c[0][:2] == ["gh", "pr"] for c in calls),
+            "protection fallback must open a PR via gh",
+        )
+        self.assertTrue(
+            any(c[0][:3] == ["git", "worktree", "remove"] for c in calls),
+            "protection fallback must remove the ephemeral worktree",
+        )
+
+    def test_pr_fallback_refuses_when_gh_missing(self):
+        module = load_bug_module()
+        calls: list[tuple[list[str], Path]] = []
+        fake_run = self._fake_run_factory(calls, main_push_rc=0, main_push_err="")
+
+        with patch.object(module, "_run", side_effect=fake_run), \
+                patch.object(module.shutil, "which", return_value=None):
+            with self.assertRaises(module.BugError) as cm:
+                module.reserve_bug_on_origin(self.root, "alpha", pr_mode=True)
+
+        self.assertIn("gh", str(cm.exception).lower())
+        self.assertTrue(
+            any(c[0][:3] == ["git", "worktree", "remove"] for c in calls),
+            "gh-missing refusal must still remove the ephemeral worktree",
+        )
 
 
 if __name__ == "__main__":
