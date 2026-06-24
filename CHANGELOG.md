@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.1.0](https://github.com/ramboz/jig/compare/v2.0.1...v2.1.0) (2026-06-24)
+
+
+### Features
+
+* **bug-fix:** add bug core helper ([570d6bb](https://github.com/ramboz/jig/commit/570d6bb9c58d219ba96a8e43c26b64311a706590))
+* **bug-fix:** add escalation seam, close gate, origin reservation ([648815c](https://github.com/ramboz/jig/commit/648815cec7eb987a27172824c38a64d341dbc13f))
+* **bug-fix:** add review evidence gate ([ecc78b4](https://github.com/ramboz/jig/commit/ecc78b4e8e64f0807c82829a338c92b8381b8a27))
+* **bug-fix:** add transition gates ([31cbcb4](https://github.com/ramboz/jig/commit/31cbcb4e52526badf8e90c6adf47433859a9aeca))
+* **tdd-loop:** add targeted test selector ([bf7f2e5](https://github.com/ramboz/jig/commit/bf7f2e5f59bdf574f963bfccdf0d1bdeece41022))
+
+
+### Bug Fixes
+
+* **release:** refresh v2.0.1 host packages ([87580fb](https://github.com/ramboz/jig/commit/87580fb71ec957a4663ade0a4f2877c54027bd47))
+
+
+### Documentation
+
+* **specs:** close 058-01 ([cd486ba](https://github.com/ramboz/jig/commit/cd486baa1bc11289f9ddb43ac9ed1552d15998d9))
+* **specs:** close 058-02 ([7925b5d](https://github.com/ramboz/jig/commit/7925b5d372afd178c99c6f1b0732a5b655ff3787))
+* **specs:** close 058-03 ([dfcf76d](https://github.com/ramboz/jig/commit/dfcf76d96a3a9a22a6890a8a04b2db84d37ec6c8))
+* **specs:** start 058-03 ([40d9dbb](https://github.com/ramboz/jig/commit/40d9dbb8562a04450f8726da6c8616b2f5f30eed))
+
 ## [2.0.1](https://github.com/ramboz/jig/compare/v2.0.0...v2.0.1) (2026-06-23)
 
 
