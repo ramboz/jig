@@ -28,6 +28,35 @@ on every PR: it regenerates into a scratch dir and diffs against the committed
 release version bump that must reflect into both packages) cannot merge
 silently.
 
+## Routing: spec-shaped vs bug-shaped work
+
+Before reaching for the spec lifecycle, decide which lifecycle the work
+actually wants. jig has two first-class workflows, each proportional to a
+different shape of work, plus the no-ceremony floor:
+
+- **Bug-shaped work** — a reported defect: existing behaviour is wrong, and
+  the job is to *diagnose the root cause, prove it, prevent regression*. This
+  goes through **`jig:bug-fix`** ([ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md)),
+  **proportional to tier**. `bug.py triage` enforces this downward: a
+  **trivial** bug (typo, one-liner, mechanical) is bowed out — write the
+  failing test with `tdd-loop`, fix, and commit; **no record**. **Standard**
+  and **gnarly** bugs get the durable `docs/bugs/NNN-slug.md` record, the
+  diagnose-before-fix gate (≥2 hypotheses), and the red→green teeth.
+- **Spec-shaped work** — a hard-to-reverse decision, a cross-layer change, or
+  new/ambiguous-scope behaviour: the job is to *specify intended behaviour and
+  split it into vertical slices*. This goes through **`spec-workflow`** (the
+  lifecycle below). When a bug turns out to be a *missing* behaviour rather
+  than a defect, `bug.py escalate` is the seam that opens a spec and parks the
+  bug as `ESCALATED`.
+- **Trivial work** — a one-liner with no decision and no design — skips both
+  workflows: `tdd-loop` + commit.
+
+This is the bookend to `spec-workflow`'s "do not use for bug-shaped work"
+clause: bug-shaped work is no longer routed to a skill that doesn't exist — it
+has a first-class home. The bug lifecycle is documented in
+[skills/bug-fix/SKILL.md](../skills/bug-fix/SKILL.md); the rest of this
+document covers the spec lifecycle.
+
 ## Spec lifecycle
 
 Every non-trivial piece of work gets a spec in `docs/specs/NNN-name/`. The

@@ -81,7 +81,7 @@ not three "Deferred — no signal" stanzas.
 | **claude-code-templates-style boilerplate** | Solves day-1 layout | Static — no living workflow, no reviewer subagent, no spec lifecycle |
 
 **Where jig fits:** between "atomic skills" and "maximalist packs" —
-a fixed-size opinionated workflow layer (7 Tier 0 + **10** Tier 1
+a fixed-size opinionated workflow layer (7 Tier 0 + **11** Tier 1
 skills, 3 subagents) that ships with the templates, hooks, and helpers
 to enforce it, and that defers to richer user-installed skills where
 they exist.
@@ -120,6 +120,7 @@ drivers once Tier 0 is in place.
 15. **`security-review`** — slim baseline security review; orchestrates installed scanners (semgrep / bandit / gosec / npm audit / osv-scanner) + defers to a richer installed security skill (the user's own, Adobe's `adobe-security-*`, or a built-in `security-review`) via the same per-skill deferral pattern as `pr-review`. Heuristic-only floor when no scanner is present (per [ADR-0013](decisions/adr-0013-security-floor-policy.md))
 16. **`code-health`** — the static-analysis sibling of `tdd-loop`: detects the project's linter and drives it via `health.py` with normalized exit codes (0 clean / 1 findings / 2 no-linter). Scope today is Python + ruff (resolved on PATH or ephemerally via `uvx` / `pipx`); degrades to a recommendation when no linter is present and defers to a richer installed lint/static-analysis skill (per [ADR-0017](decisions/adr-0017-scaffolded-code-health.md))
 17. **`explain`** — on-demand vocabulary/artifact explainer (third consumer of the shipped lexicon): term mode defines a single jig term from the merged lexicon (shipped + project-glossary overlay) and flags an absent term rather than inventing one; artifact mode produces a junior-grade walkthrough of a spec/ADR, auto-pulling the refs it links. Ephemeral (chat-only), judgment-only/no-`.py`; defers to a richer installed plain-language/onboarding/walkthrough skill (per spec 065)
+18. **`bug-fix`** — proportional, teeth-gated bug-fix workflow (peer of `spec-workflow`, owns its orchestration) backed by `bug.py`: diagnose-before-fix gate (≥2 hypotheses) + red→green teeth that witness the regression test fail before the fix and pass after, a durable `docs/bugs/NNN-slug.md` record + board, and de-escalation (trivial bugs bow out to `tdd-loop`). Reuses the ADR-0014 evidence gate; only the craft (`pr-review`) and conditional security (`security-review`) passes defer (per [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md))
 
 ### Tier 2 — opt-in by signal (deferred until pain reported)
 
@@ -128,9 +129,9 @@ user signal yet. Tier 2 stays empty until pain is reported.
 
 ### MVP scope (already shipped)
 
-Tier 0 + Tier 1 are both **complete** — all 17 skills ship today
+Tier 0 + Tier 1 are both **complete** — all 18 skills ship today
 (the original floor plus later Tier 1 additions: `code-health`,
-`explain`, and the rest). See [docs/specs/README.md](specs/README.md)
+`explain`, `bug-fix`, and the rest). See [docs/specs/README.md](specs/README.md)
 for the live status board.
 
 ### Out of scope (deliberately)

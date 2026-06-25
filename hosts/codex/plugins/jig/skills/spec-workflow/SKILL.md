@@ -10,7 +10,7 @@ description: >
   non-trivial new work, creating a spec, transitioning a slice's state,
   parking a slice as DEFERRED, reconciling a reviewed slice, or auditing
   doc freshness. Do not use for quick one-off fixes that don't need a spec,
-  or for bug-shaped work where `debug-workflow` is the better fit.
+  or for bug-shaped work where `jig:bug-fix` is the better fit.
 user-invocable: true
 ---
 

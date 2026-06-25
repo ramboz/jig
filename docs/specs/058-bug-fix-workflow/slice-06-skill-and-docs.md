@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: ["058-02", "058-03", "058-04", "058-05"]
-last_verified:
+last_verified: 2026-06-25
 arch_review: true
 ---
 
@@ -50,9 +50,9 @@ here, not through specs.
       mechanically testable).
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
@@ -73,4 +73,96 @@ first-class answer in the docs.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO._
+- **SKILL.md `name:` uses bare `bug-fix`, not the literal `jig:bug-fix` from
+  AC #1.** Every shipped skill uses a bare `name:` (`spec-workflow`,
+  `tdd-loop`, …) and the host prefixes `jig:` at surface time; writing
+  `name: jig:bug-fix` would double-prefix to `jig:jig:bug-fix`. The AC's
+  intent (the skill is surfaced as `jig:bug-fix`) is satisfied. Followed the
+  established convention; flagged here for the literal-AC reader. All three
+  review passes independently confirmed this is the correct adaptation.
+- **AC #2 "registered in the plugin manifest / marketplace listing" is
+  satisfied via the contract tables, not a per-skill manifest entry.**
+  `.claude-plugin/plugin.json` and `marketplace.json` do **not** enumerate
+  skills individually (the host auto-discovers `skills/`); registration is the
+  one-line `scaffold._TIER_SKILLS["tier-1"]` entry, mirrored in
+  `install_contract.EXPECTED_SKILLS` + `scaffold_contract._TIER_SKILLS` (both
+  pinned equal to the source of truth by consistency tests) and asserted by
+  `verify_install.check_active_skills_present`.
+- **`bug.py` is copied transitively, not by bespoke wiring.** Both
+  `scaffold-init` and `migrate copy-machinery` use the shared
+  `_copy_skills_and_agents` / `_copy_skill_dir` whole-dir copy, which ships
+  every non-test `.py` next to its `SKILL.md` (so `bug.py` rides along and
+  `test_bug.py` is excluded). No bug.py-specific copy code was needed — the
+  single tier-table entry is sufficient. `verify_install` asserts the SKILL.md
+  presence; `bug.py` presence is covered transitively.
+- **Tier placement: Tier 1.** `bug-fix`'s red→green teeth shell to `tdd.py`
+  (Tier 1) and the workflow is an opt-in default for projects with tests, so
+  Tier 1 (per ADR-0012's "opt-in default" semantics, added when `has_tests`)
+  is its home — not the Tier-0 floor.
+- **Skill-count + roster drift fixed across all live-prose surfaces.** Adding
+  bug-fix changed the counts (7 Tier 0 + 11 Tier 1 = 18). Updated the four
+  restated tier lists (scaffold, install_contract, scaffold_contract, +3 test
+  pins) and every live-prose count/enumeration: `README.md`,
+  `docs/product-vision.md`, `docs/memory/glossary.md`,
+  `skills/vision-elicitation/worked-example-jig.md`, and `CLAUDE.md`'s helper
+  roster. The closed-spec record `docs/specs/065-.../slice-03` and the
+  third-party-tool count in `docs/research/04-*` were deliberately left
+  unchanged (ADR-0010: records aren't corrected inline; the research figure is
+  about a different tool).
+- **Review nits fixed inline (live prose).** Craft caught the
+  `product-vision.md` Tier-1 numbered list omitting bug-fix as #18; arch caught
+  `architecture.md`'s skill-helper enumeration omitting `bug.py`. Both are
+  `[nit]` (non-blocking) but were quick live-prose corrections, so fixed during
+  reconciliation rather than logged-and-deferred.
+- **`templates/CLAUDE.md.template` not modified.** It does not enumerate
+  individual skills (the host surfaces them each session per EngTip #23 / spec
+  076), so there is no skill list to update there — AC #4's "if the skill ships
+  in the scaffolded tier" conditional resolves to a no-op for the template.
+- **Host packages regenerated** with `scripts/build_host_packages.py` (drift
+  guard clean). No decisions were deferred.
+
+### Reconciliation sweep
+
+- `skills/bug-fix/SKILL.md` — added: the `jig:bug-fix` orchestration skill.
+- `skills/scaffold-init/scaffold.py` — updated: `bug-fix` added to
+  `_TIER_SKILLS["tier-1"]` (source of truth for copy + manifest +
+  verify_install).
+- `scripts/install_contract.py` — updated: `bug-fix` added to
+  `EXPECTED_SKILLS`.
+- `scripts/scaffold_contract.py` — updated: `bug-fix` added to the restated
+  `_TIER_SKILLS["tier-1"]`.
+- `docs/workflow.md` — updated: new `## Routing: spec-shaped vs bug-shaped
+  work` section (AC #3 bookend).
+- `skills/spec-workflow/SKILL.md` — updated: bookend now points at
+  `jig:bug-fix` (was the non-existent `debug-workflow`).
+- `CLAUDE.md` — updated: `bug-fix` (`bug.py`) added to the `.py`-helper roster
+  (close-out Skills-table rule).
+- `AGENTS.md` — updated: the same `.py`-helper roster (this primer mirrors
+  `CLAUDE.md` line-for-line) gains `bug-fix` (`bug.py`). Primer-hygiene check
+  covers both surfaces. `templates/CLAUDE.md.template` /
+  `templates/AGENTS.md.template` carry no skill roster (scaffold sources for
+  other projects) — no-op.
+- `docs/product-vision.md` — updated: Tier-1 count 10→11, total 17→18, and the
+  numbered Tier-1 enumeration gains `bug-fix` (#18).
+- `README.md` — updated: Tier-1 count 10→11 and total 17→18.
+- `docs/memory/glossary.md` — updated: Tier-1 "Built" list refreshed to
+  include `bug-fix` (and the previously-omitted clarify/analyze/security/
+  code-health/explain).
+- `skills/vision-elicitation/worked-example-jig.md` — updated: tier-count line
+  10→11 (pinned by `test_scaffold`) + two Tier-1 enumerations gain `bug-fix`.
+- `docs/architecture.md` — updated: skill-helper enumeration gains `bug.py`
+  (bug-fix, spec 058).
+- `scripts/test_bug_fix_skill_wiring.py` — added: one fixture per AC
+  (SKILL.md content, wiring/contract presence, workflow routing,
+  cross-references).
+- `skills/scaffold-init/test_scaffold.py`, `skills/migrate/test_migrate.py` —
+  updated: tier-1 pin lists gain `bug-fix`.
+- `hosts/claude/**`, `hosts/codex/**` — updated: regenerated from source with
+  `scripts/build_host_packages.py` (drift guard clean).
+- `docs/specs/058-bug-fix-workflow/reviews/slice-06-{compliance,craft,arch}.md`
+  — added: passing review evidence from the three subagent passes.
+- `docs/conventions.md`, `docs/inbox.md`, `docs/refinement-todo.md` — no-op:
+  this slice introduced no new convention, resolved no inbox item, and
+  deferred no decision.
+- `docs/specs/README.md` — to be regenerated at close-out (`workflow.py
+  status-board`).

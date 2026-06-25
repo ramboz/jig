@@ -200,10 +200,9 @@ Resolved by [spec 041](specs/041-routing-observability/spec.md) — routing is o
 **Resolution trigger:** First time a downstream packaging / release tool emits a non-string `version` in a plugin manifest, OR the next time `_read_plugin_version` is touched for any reason.
 **Mitigation idea:** Tighten the guard to `if not version or not isinstance(version, str):` and add a `PluginManifestError` test case for the non-string payload — closes the silent-late-failure hole in one line.
 
-### Decision: implement spec 058 (bug-fix workflow) — TRIGGERED 2026-06-20
-**Status:** The demand trigger fired. [Spec 058](specs/058-bug-fix-workflow/spec.md) / [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md) is now actionable workflow debt, not a parked enhancement.
-**Trigger evidence:** A retrospective found six strong prior specs that would have fit bug-fix records (019, 035, 037, 039, 040, 075), plus escalation-shaped candidates 063/066/081. That clears the original "2–3 real bug fixes" threshold.
-**Next action:** Spec 058 is now in progress: 058-01 through 058-04 are DONE/closing; continue with 058-05 (escalation seam + close/learning gate + origin/main reservation) after 058-04 lands.
+### Decision: implement spec 058 (bug-fix workflow) — RESOLVED 2026-06-25
+**Status:** RESOLVED. [Spec 058](specs/058-bug-fix-workflow/spec.md) / [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md) is fully **DONE** — all six slices landed, shipping `jig:bug-fix` (Tier-1) + `bug.py`, the teeth gates, the bug record + board, the bug-review pass, the escalation seam, and the `docs/workflow.md` routing bookend (058-06).
+**Trigger evidence:** A retrospective found six strong prior specs that would have fit bug-fix records (019, 035, 037, 039, 040, 075), plus escalation-shaped candidates 063/066/081. That cleared the original "2–3 real bug fixes" threshold.
 
 ### Decision: prune redundant per-line `# noqa: E402` (and add `RUF100`)
 **Deferred:** Slice 060-02 adopted a repo-wide Ruff floor with `E402` globally ignored in `ruff.toml` (jig helpers `sys.path.insert(...)` before imports — a deliberate pattern). Many source/test files still carry pre-existing per-line `# noqa: E402` comments that are now redundant under the global ignore. They are harmless — `RUF100` (unused-noqa) is not in the curated select set (`F`/`E`/`W`/`I`/`B`), so ruff does not flag them — but they are dead weight. Both 060-02 review passes flagged this as an optional cleanup.

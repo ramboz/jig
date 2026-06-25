@@ -78,6 +78,7 @@ _TIER_SKILLS = {
         "security-review",
         "code-health",  # spec 060 / ADR-0017 — Tier-1 detect-and-drive linter
         "explain",  # spec 065-03 — on-demand vocabulary/artifact explainer
+        "bug-fix",  # spec 058 / ADR-0016 — proportional teeth-gated bug lifecycle
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }
