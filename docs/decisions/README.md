@@ -34,6 +34,7 @@
 - [ADR-0027: Host-native phase modes are advisory workflow affordances](adr-0027-host-native-phase-modes.md) — Jig already has a durable workflow model: specs, slices, review evidence, state transitions, deviation logs, and ADRs. (2026-06-21, Accepted)
 - [ADR-0028: Federation composes with existing repo operating models and access providers](adr-0028-federation-workspace-provider-model.md) — Federation must compose with mature multi-repo operating models instead of replacing them. (2026-06-21, Proposed)
 - [ADR-0029: Reconciliation sweep manifest](adr-0029-reconciliation-sweep-manifest.md) — Reconciliation is already the right phase for documentation cleanup: it runs after implementation and review, when the agent knows what actually changed. (2026-06-21, Accepted)
+- [ADR-0030: Minimum supported Python is 3.9](adr-0030-python-39-floor.md) — jig is distributed as a Claude Code / Codex plugin, not a pip package, so it declares no `requires-python`. (2026-06-26, Accepted)
 
 ## Lightweight decisions
 
