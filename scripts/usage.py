@@ -99,6 +99,8 @@ is the optional ``npx ccusage`` call (suppressed by --ccusage-json/--no-ccusage)
 It never raises on a malformed or missing transcript — bad lines are skipped.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re

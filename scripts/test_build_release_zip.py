@@ -190,6 +190,8 @@ class CodexLanguageTests(unittest.TestCase):
         self.assertNotIn("directly-installable", lowered)
         self.assertNotIn("directly installable", lowered)
 
+    @unittest.skipUnless(sys.version_info >= (3, 11),
+                         "codex smoke validation needs tomllib (3.11+); jig is zero-dep")
     def test_codex_smoke_message_says_extract_then_add(self):
         zip_path, _ = _build_once("codex", _CODEX_VERSION)
         self.addCleanup(shutil.rmtree, zip_path.parent, ignore_errors=True)
@@ -198,6 +200,8 @@ class CodexLanguageTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=sink.getvalue())
         self.assertIn("extract-then-add", sink.getvalue())
 
+    @unittest.skipUnless(sys.version_info >= (3, 11),
+                         "codex smoke validation needs tomllib (3.11+); jig is zero-dep")
     def test_codex_smoke_message_not_directly_installable(self):
         zip_path, _ = _build_once("codex", _CODEX_VERSION)
         self.addCleanup(shutil.rmtree, zip_path.parent, ignore_errors=True)
@@ -309,6 +313,8 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=sink.getvalue())
         self.assertIn("claude", sink.getvalue().lower())
 
+    @unittest.skipUnless(sys.version_info >= (3, 11),
+                         "codex smoke validation needs tomllib (3.11+); jig is zero-dep")
     def test_codex_smoke_passes_and_names_host(self):
         zip_path, _ = _build_once("codex", _CODEX_VERSION)
         self.addCleanup(shutil.rmtree, zip_path.parent, ignore_errors=True)

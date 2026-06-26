@@ -9,6 +9,8 @@ This is the command pointed to by .jig/test-command, so:
 ...runs this script instead of trying to invoke pytest directly.
 """
 
+from __future__ import annotations
+
 import json
 import shutil
 import subprocess

@@ -11,6 +11,8 @@ The script is deterministic: no network, no user prompts. Q&A interaction
 is a later slice (001-05); signal detection is 001-03.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os

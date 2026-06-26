@@ -5,6 +5,8 @@ Run from the repo root:
     python3 skills/independent-review/test_review.py
 """
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
@@ -756,6 +758,7 @@ class PrinciplesCheckBlockTests(unittest.TestCase):
             "review_module_024", REVIEW,
         )
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
 
@@ -926,6 +929,7 @@ class PracticesCheckBlockTests(unittest.TestCase):
             "review_module_practices", REVIEW,
         )
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
 
@@ -2159,6 +2163,7 @@ class TestQualitySnapshotHelperTests(unittest.TestCase):
             "review_module_043", REVIEW,
         )
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
 
@@ -2309,6 +2314,7 @@ class TestQualitySnapshotPromptPlacementTests(unittest.TestCase):
             "review_module_043_p", REVIEW,
         )
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
 
@@ -2820,6 +2826,7 @@ class ReviewEvidenceScaffoldParityTests(unittest.TestCase):
         scaffold_py = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
         spec = importlib.util.spec_from_file_location("scaffold_045", scaffold_py)
         scaffold = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = scaffold
         sys.path.insert(0, str(scaffold_py.parent))
         spec.loader.exec_module(scaffold)
         with tempfile.TemporaryDirectory() as td:

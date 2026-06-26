@@ -37,7 +37,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:
@@ -75,8 +75,11 @@ class SmokeResult:
     message: str
 
 
+# NB: this is a runtime type-alias *assignment*, so `from __future__ import
+# annotations` does not stringify it — `Path | None` (PEP 604) would evaluate
+# at import and raise on Python 3.9. Use Optional[Path] for the 3.9 floor.
 CommandRunner = Callable[
-    [Sequence[str], Path | None, Mapping[str, str], int],
+    [Sequence[str], Optional[Path], Mapping[str, str], int],
     subprocess.CompletedProcess[str],
 ]
 

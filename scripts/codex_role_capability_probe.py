@@ -19,9 +19,12 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11 (e.g. default macOS 3.9)
+    tomllib = None  # codex-packaging paths require 3.11+; gated below
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -67,8 +70,10 @@ class ProbeResult:
     message: str
 
 
+# Runtime type-alias assignment — `from __future__ import annotations` does not
+# stringify it, so PEP 604 `Path | None` would raise on Python 3.9. Use Optional.
 CommandRunner = Callable[
-    [Sequence[str], Path | None, Mapping[str, str], int],
+    [Sequence[str], Optional[Path], Mapping[str, str], int],
     subprocess.CompletedProcess[str],
 ]
 

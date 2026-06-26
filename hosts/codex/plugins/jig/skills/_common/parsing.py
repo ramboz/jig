@@ -39,6 +39,8 @@ error type (WorkflowError / ReviewError / LandError) so CLI messages
 keep their original prefix.
 """
 
+from __future__ import annotations
+
 import os
 import re
 from collections import namedtuple

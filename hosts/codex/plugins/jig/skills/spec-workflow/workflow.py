@@ -10,6 +10,8 @@ Usage:
     python3 workflow.py status-board <project-dir>
 """
 
+from __future__ import annotations
+
 import argparse
 import datetime
 import hashlib

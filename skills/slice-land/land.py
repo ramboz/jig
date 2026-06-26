@@ -47,6 +47,8 @@ execute --mode pr: DOES mutate remote state. Runs `git push -u origin
   Use `--dry-run` to print the commands without running them.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import re

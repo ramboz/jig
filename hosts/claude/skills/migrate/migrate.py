@@ -22,6 +22,8 @@ Future subcommands (008-04 and later):
     slice-to-spec      — synthesize parent specs from milestones
 """
 
+from __future__ import annotations
+
 import argparse
 import dataclasses
 import os
@@ -1568,6 +1570,14 @@ def _load_scaffold_module(plugin: Path):
             f"importlib failed to build a module spec for {scaffold_py}"
         )
     module = importlib.util.module_from_spec(spec)
+    # Register in sys.modules BEFORE exec_module: scaffold.py's @dataclass types
+    # need to resolve `cls.__module__` during class creation. With string
+    # annotations (`from __future__ import annotations`), Python 3.9's dataclasses
+    # looks the module up via `sys.modules.get(cls.__module__).__dict__` and
+    # crashes with AttributeError if it isn't registered (same failure mode on
+    # 3.14+). This mirrors the loader in test_migrate.py. See the Python docs'
+    # recommended importlib.util pattern.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

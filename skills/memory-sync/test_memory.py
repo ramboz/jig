@@ -329,6 +329,7 @@ def _import_memory_module():
     directly (for `_file_lock` and configurable-timeout coverage)."""
     spec = importlib.util.spec_from_file_location("_memory_under_test", MEMORY)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -889,6 +890,7 @@ def _load_memory_module():
     import importlib.util
     spec = importlib.util.spec_from_file_location("jig_memory_for_test", MEMORY)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -900,6 +902,7 @@ def _load_scaffold_module():
     import importlib.util
     spec = importlib.util.spec_from_file_location("jig_scaffold_for_test", SCAFFOLD)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

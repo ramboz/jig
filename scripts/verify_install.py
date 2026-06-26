@@ -35,6 +35,21 @@ class VerifyError(RuntimeError):
     """Raised when verify_install is called with an unknown agent type."""
 
 
+def _zip_strict(a, b):
+    """`zip(a, b, strict=True)` equivalent that runs on Python 3.9.
+
+    `strict=` (PEP 618) lands in 3.10, but jig's helpers ship to adopters
+    whose default macOS `python3` is 3.9.6 — calling `zip(..., strict=True)`
+    there raises `TypeError`. This preserves the length-mismatch guard (the
+    whole point of `strict=`) without the 3.10 dependency. Do not "simplify"
+    this back to `zip(..., strict=True)` until the supported floor is 3.10+.
+    """
+    a, b = list(a), list(b)
+    if len(a) != len(b):
+        raise ValueError(f"zip() argument lengths differ: {len(a)} != {len(b)}")
+    return zip(a, b)
+
+
 # ----------------------------------------------------------------------------
 # Static checks
 # ----------------------------------------------------------------------------
@@ -660,7 +675,7 @@ def run_headless_scaffold(project_root: Path, out=None) -> int:
 
     results = run_all_scaffold_checks(project_root)
     failed = 0
-    for (name, _), (passed, msg) in zip(_SCAFFOLD_CHECKS, results, strict=True):
+    for (name, _), (passed, msg) in _zip_strict(_SCAFFOLD_CHECKS, results):
         marker = "PASS" if passed else "FAIL"
         out.write(f"{marker} {name}: {msg}\n")
         if not passed:
@@ -684,7 +699,7 @@ def run_headless(plugin_root: Path, out=None) -> int:
 
     results = run_all_checks(plugin_root)
     failed = 0
-    for (name, _), (passed, msg) in zip(_CHECKS, results, strict=True):
+    for (name, _), (passed, msg) in _zip_strict(_CHECKS, results):
         marker = "PASS" if passed else "FAIL"
         out.write(f"{marker} {name}: {msg}\n")
         if not passed:

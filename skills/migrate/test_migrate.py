@@ -39,11 +39,11 @@ import importlib.util as _ilu
 
 def _load_migrate():
     # Register the module in sys.modules BEFORE exec_module so dataclass's
-    # typing machinery can resolve `cls.__module__` (Python 3.14+ raises
-    # AttributeError otherwise).
+    # typing machinery can resolve `cls.__module__` (Python 3.9 with string
+    # annotations and 3.14+ raise AttributeError otherwise).
     spec = _ilu.spec_from_file_location("_migrate_module", MIGRATE_PY)
     mod = _ilu.module_from_spec(spec)
-    sys.modules["_migrate_module"] = mod
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -1549,6 +1549,7 @@ class CopyMachineryTests(unittest.TestCase):
         scaffold_py = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
         spec = _ilu.spec_from_file_location("_scaffold_for_test", scaffold_py)
         mod = _ilu.module_from_spec(spec)
+        sys.modules[spec.name] = mod
         sys.modules.setdefault("_scaffold_for_test", mod)
         spec.loader.exec_module(mod)
         self.assertTrue(callable(getattr(mod, "copy_machinery", None)),

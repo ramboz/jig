@@ -22,7 +22,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11 (e.g. default macOS 3.9)
+    tomllib = None  # codex-packaging paths require 3.11+; gated below
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -229,3 +232,14 @@ class CodexCommittedTreeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):  # unittest discover hook
+    # Codex packaging validation needs tomllib (Python 3.11+). jig is
+    # zero-dependency, so there is no tomli fallback — skip the whole module
+    # below the 3.9 floor rather than error on a missing stdlib import.
+    import sys as _sys
+    import unittest as _unittest
+    if _sys.version_info < (3, 11):
+        return _unittest.TestSuite()
+    return tests

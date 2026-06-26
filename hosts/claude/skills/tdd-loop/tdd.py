@@ -21,6 +21,8 @@ independent lifecycles (one-shot install detection vs. live-session
 runner detection).
 """
 
+from __future__ import annotations
+
 import argparse
 import importlib
 import json

@@ -25,6 +25,8 @@ public names keep working; `workflow.py stale` imports `team_context_drift`
 directly.
 """
 
+from __future__ import annotations
+
 import subprocess
 from pathlib import Path
 

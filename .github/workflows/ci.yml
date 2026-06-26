@@ -11,7 +11,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        # 3.9.6 is the default macOS (Command Line Tools) python3 — jig's
+        # helpers ship to adopters and run on their python3, so the supported
+        # floor is verified here, not just on modern interpreters. Keep `X | None`
+        # behind `from __future__ import annotations` and avoid 3.10-only runtime
+        # APIs (e.g. zip(strict=)) so this job stays green.
+        python-version: ["3.9.6", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:

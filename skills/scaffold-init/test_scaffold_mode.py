@@ -20,7 +20,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11 (e.g. default macOS 3.9)
+    tomllib = None  # codex-packaging paths require 3.11+; gated below
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
@@ -651,14 +654,19 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
                 len(src_event), len(dst_event),
                 f"hook event {event} entry count drifted",
             )
-            for src_entry, dst_entry in zip(src_event, dst_event, strict=True):
+            # plain zip (no 3.10 strict=) — length already asserted equal above
+            for src_entry, dst_entry in zip(src_event, dst_event):
                 # matcher (when present) carries over
                 self.assertEqual(
                     src_entry.get("matcher"), dst_entry.get("matcher"),
                     f"matcher drifted in {event}",
                 )
-                # Inner hook list shape
-                for src_h, dst_h in zip(src_entry["hooks"], dst_entry["hooks"], strict=True):
+                # Inner hook list shape — assert length, then plain zip (3.9-safe)
+                self.assertEqual(
+                    len(src_entry["hooks"]), len(dst_entry["hooks"]),
+                    f"hook list length drifted in {event}",
+                )
+                for src_h, dst_h in zip(src_entry["hooks"], dst_entry["hooks"]):
                     self.assertEqual(src_h.get("type"), dst_h.get("type"))
                     self.assertEqual(src_h.get("timeout"), dst_h.get("timeout"))
                     self.assertEqual(src_h.get("async"), dst_h.get("async"))
@@ -2258,3 +2266,14 @@ class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):  # unittest discover hook
+    # Codex packaging validation needs tomllib (Python 3.11+). jig is
+    # zero-dependency, so there is no tomli fallback — skip the whole module
+    # below the 3.9 floor rather than error on a missing stdlib import.
+    import sys as _sys
+    import unittest as _unittest
+    if _sys.version_info < (3, 11):
+        return _unittest.TestSuite()
+    return tests

@@ -2,6 +2,15 @@
 # Config-only: jig is not a pip package; this just configures the lint floor.
 line-length = 100
 
+# Supported Python floor is 3.9: jig's helpers run on the ADOPTER's `python3`,
+# which on default macOS (Command Line Tools) is 3.9.6. Pinning the target keeps
+# version-aware rules from rewriting toward 3.10+ syntax. PEP 604 unions
+# (`X | None`) are kept readable via `from __future__ import annotations` (lazy
+# string annotations, valid on 3.9) rather than typing.Optional. The load-bearing
+# regression guard is the 3.9 job in the CI matrix; do not raise this target
+# until the supported floor moves.
+target-version = "py39"
+
 # Generated, committed host packages (spec 061 / ADR-0018) are build outputs
 # byte-copied from already-linted source — exclude them from the floor so the
 # gate lints the source, not the artifact (the parallel to gitignored dist/,

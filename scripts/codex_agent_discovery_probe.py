@@ -17,7 +17,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:
@@ -61,8 +61,11 @@ class DiscoveryResult:
     message: str
 
 
+# NB: runtime type-alias *assignment* — `from __future__ import annotations`
+# does not stringify it, so `Path | None` (PEP 604) would raise on Python 3.9.
+# Use Optional[Path] for the 3.9 floor.
 CommandRunner = Callable[
-    [Sequence[str], Path | None, Mapping[str, str], int],
+    [Sequence[str], Optional[Path], Mapping[str, str], int],
     subprocess.CompletedProcess[str],
 ]
 

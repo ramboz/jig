@@ -5,6 +5,8 @@ Run from the repo root:
     python3 -m unittest discover -s skills/bug-fix -p 'test_*.py'
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys

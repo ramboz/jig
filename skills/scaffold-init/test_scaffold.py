@@ -65,6 +65,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "docs/memory/tooling.md",
             "docs/specs/README.md",
             "docs/decisions/README.md",
+            "docs/decisions/lightweight-decisions.md",  # spec 083-02
         ]
         for rel in expected:
             path = self.target / rel
@@ -478,6 +479,7 @@ def _load_scaffold_module():
     import importlib.util
     spec = importlib.util.spec_from_file_location("jig_scaffold_for_test", SCAFFOLD)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -1249,6 +1251,7 @@ class LooksAlreadySpecDrivenTests(unittest.TestCase):
             import importlib.util
             spec = importlib.util.spec_from_file_location("scaffold", SCAFFOLD)
             mod = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = mod
             spec.loader.exec_module(mod)
             cls._scaffold_mod = mod
         return cls._scaffold_mod
@@ -2475,6 +2478,7 @@ def _load_scaffold_module():
     import importlib.util
     spec = importlib.util.spec_from_file_location("scaffold_for_052", SCAFFOLD)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -2498,6 +2502,7 @@ class VersionProvenanceTests(unittest.TestCase):
             import importlib.util
             spec = importlib.util.spec_from_file_location("scaffold", SCAFFOLD)
             mod = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = mod
             spec.loader.exec_module(mod)
             cls._scaffold_mod = mod
         return cls._scaffold_mod
