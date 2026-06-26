@@ -604,6 +604,10 @@ status flip is allowed. Each item is a gate.
       using `updated` / `no-op` / `deferred` dispositions. The transition gate
       checks the subsection exists; the reconciliation reviewer judges coverage
       and rationale quality.
+- [ ] **Lightweight decisions** — did this session's review or implementation
+      settle any non-spec decisions (UI strings, visual choices, translation
+      corrections, scoped brand/icon calls)? If yes, record them in
+      `docs/decisions/lightweight-decisions.md`. (Non-blocking nudge; not a gate.)
 - [ ] **Architecture impact** — did module boundaries or public contracts change?
       If yes, update `docs/architecture.md` AND write an ADR.
 - [ ] **Conventions impact** — did this slice introduce or change a rule worth

@@ -264,7 +264,13 @@
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-01 — manifest shape and transition gate | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-02 — reconciliation reviewer omission check | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-03 — primer and queue cleanup integration | **DONE** |  |
-| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-01 — convention + seed file + reconcile prompt | **DRAFT** | Pilot with food-log adopter; promote after 3 adopter reports |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-01 — convention + seed file + reconcile prompt | **DONE** | Phase 1; ADOPTED 2026-06-25; OQ1–OQ4 resolved |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-02 — scaffold seeds the empty template (OQ3) | **DONE** | Phase 1; template ships in release zip |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-03 — memory-sync session-end prompt (OQ1) | **DONE** | Phase 1; recall-dependent nudge (superseded by 083-04 scan) |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-04 — session decision scan (Stop hook) | **DRAFT** | Phase 2; food-log report 2026-06-25; jig-native scan modeled on jig-task-capture.sh; frame-critique the recall→scan premise first |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-05 — routing rubric + decisions.py add-lightweight | **DRAFT** | Phase 2; ADR-branch wording single-sourced with 083-06 |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-06 — widen reconciliation ADR trigger (companion) | **DRAFT** | Phase 2; needs its own ADR (reserve via adr.py); shares wording with 083-05 |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-07 — in-flight decision stubs | **DEFERRED** | Phase 2; trigger: 083-04 scan proven to miss in-flight decisions |
 
 ## Deferred slices
 

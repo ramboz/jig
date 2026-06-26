@@ -28,6 +28,10 @@ idempotency, and self-healing of missing memory structure.
 - User explicitly invokes `/jig:memory-sync`.
 - An unknown capitalized reference appears in the conversation (→ lookup-pattern flow below).
 - Session-end consolidation (after slice 002-03 auto-trigger ships).
+- **The session settled a non-spec shipped decision** — a UI string, visual/CSS
+  choice, translation correction, or scoped brand/icon call made *outside* a spec
+  slice (→ lightweight-decision flow below). This is the forcing function for
+  out-of-spec work, which has no reconciliation phase to catch it.
 
 ## Lookup-pattern flow
 
@@ -69,11 +73,17 @@ time, then persist now.
    - **Learnings** — failed approaches, dead ends, "we tried X" gotchas.
    - **Parked ideas** — things mentioned but not yet decided on.
    - **Frequently-referenced terms** — anything used ≥3 times this session.
+   - **Non-spec shipped decisions** (spec 083) — UI strings, visual/CSS choices,
+     translation corrections, scoped brand/icon calls settled *outside* a spec
+     slice. **Conditional, to avoid noise:** only surface this when the session
+     actually touched such product/UI/out-of-spec work — skip it entirely for
+     pure backend/refactor/spec sessions.
 2. **Decide per item** which file it belongs in:
    - Niche/domain term → glossary
    - Failed approach / gotcha → learnings
    - Unresolved/unfinished thought → inbox
    - High-frequency term → hot cache (in AGENTS.md)
+   - Non-spec shipped decision → `docs/decisions/lightweight-decisions.md`
 3. **Invoke `memory.py` once per item** with the right command. **Always quote
    the term/definition/body arguments** — terms may contain spaces, definitions
    often contain punctuation:
@@ -88,6 +98,14 @@ time, then persist now.
    H2 category, deferred-/resolution-trigger structure, etc.) to
    `docs/refinement-todo.md` under the parallel-session file lock (slice 028-02).
    Where `<target>` is the project root (usually `.`).
+
+   **Non-spec shipped decisions have no `memory.py` subcommand** (spec 083): the
+   file lives in `docs/decisions/`, not `docs/memory/`, and is human-browsable
+   prose. Record one by appending an entry to
+   `docs/decisions/lightweight-decisions.md` with the `Edit`/`Write` tool, using
+   that file's `### [Date] — [Title]` / Decision / Context / Scope / Commit
+   template. Confirm with the user before writing — it's their decision to
+   record, not yours to infer.
 4. **Report a summary** at the end:
    ```bash
    python3 "${PLUGIN_ROOT}/skills/memory-sync/memory.py" summary <target>

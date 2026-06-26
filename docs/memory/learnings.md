@@ -436,3 +436,6 @@ Several test modules (e.g. `skills/spec-workflow/test_workflow.py`, the `NewSpec
 
 ## Semantic-index overlays are exact provider permissions
 Spec 080-01 established that semantic-index internal overlays must be authorized per provider: allowed_overlays=["scout"] enables Scout, allowed_overlays=["other"] does not, and allowed_overlays=[] must override legacy internal_overlays. Host adapters should preserve providers={} as an explicit empty registry rather than falling back to built-ins.
+
+## Reconcile-checklist additions require both workflow.md and SKILL.md
+When adding a new reconciliation checklist item, BOTH docs/workflow.md (Reconciliation rules section, human-readable) AND skills/spec-workflow/SKILL.md (## Reconciliation checklist, the operative gate agents walk) must be updated. Updating only workflow.md leaves the forcing function absent from the checklist that reviewer subagents and spec-workflow drive. Caught by compliance reviewer on spec 083-01.

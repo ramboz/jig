@@ -1,0 +1,40 @@
+# Lightweight Decisions
+
+> Status: Draft (wizard-generated)
+
+Small shipped decisions that fall outside spec slices but carry durable rationale:
+brand/icon swaps, cosmetic CSS polish, UI string or translation choices, scoped
+visual decisions, and "future sessions should/should not override this" notes.
+
+## When to write here vs. an ADR
+
+**Write here (lightweight)** if the decision **both**:
+- (a) does **not** change a module boundary, public contract, or cross-cutting
+  policy (if it does → ADR), and
+- (b) a future agent or maintainer **would need to know it to avoid undoing it**.
+
+**Write an ADR** if (a) fails — the decision changes a module boundary, public
+contract, or cross-cutting policy.
+
+**Write nothing** if it's already obvious from the code or a commit message.
+
+**Write to `refinement-todo.md`** if the decision is still *open* (has a
+resolution trigger — it isn't shipped yet).
+
+## Template
+
+```markdown
+### [Date] — [Short title]
+**Decision:** _what was decided_
+**Context:** _why — constraint, user feedback, design call_
+**Scope:** _which screen / component / string / asset — not product-wide_
+**Commit:** _optional — git SHA or PR; may be added retroactively_
+```
+
+---
+
+## Entries
+
+_No entries yet. The first lightweight decision will be recorded here — usually
+prompted at session end by `/jig:memory-sync`, or during a spec slice's
+reconciliation._

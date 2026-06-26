@@ -277,6 +277,10 @@ non-`pass` verdict). To recover:
 After implementation, before marking DONE:
 
 - Update specs with deviation log annotations (original ACs preserved).
+- **Lightweight decisions** — did this session's review or implementation settle
+  any non-spec decisions (UI strings, visual choices, translation corrections,
+  scoped brand/icon calls)? If yes, record them in
+  `docs/decisions/lightweight-decisions.md`. (Not a gate — a checklist nudge.)
 - Update `architecture.md` ONLY if module boundaries or contracts changed (signal: write an ADR).
 - ADRs are immutable after acceptance — new decisions supersede, never edit.
 - Closed records (DONE / SUPERSEDED specs and slices) preserve drift via a

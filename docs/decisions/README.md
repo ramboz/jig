@@ -35,6 +35,14 @@
 - [ADR-0028: Federation composes with existing repo operating models and access providers](adr-0028-federation-workspace-provider-model.md) — Federation must compose with mature multi-repo operating models instead of replacing them. (2026-06-21, Proposed)
 - [ADR-0029: Reconciliation sweep manifest](adr-0029-reconciliation-sweep-manifest.md) — Reconciliation is already the right phase for documentation cleanup: it runs after implementation and review, when the agent knows what actually changed. (2026-06-21, Accepted)
 
+## Lightweight decisions
+
+Small shipped decisions that fall **outside spec slices** (UI strings, visual
+choices, translation corrections, scoped brand/icon calls) live in
+[lightweight-decisions.md](lightweight-decisions.md). They are not ADRs — they
+are scope-local and do not change module boundaries or cross-cutting policy.
+See that file for the routing heuristic and template.
+
 ## Format
 
 Each ADR lives at `docs/decisions/adr-NNNN-<slug>.md`. Title: `# ADR-NNNN: <Title>`.
