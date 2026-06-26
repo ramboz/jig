@@ -204,6 +204,7 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 _EXPECTED_HOOK_SCRIPTS = (
     "jig-boundary-change-warn.sh",
     "jig-context-check.sh",
+    "jig-decision-capture.sh",  # slice 083-04 — Stop decision-scan (sibling of task-capture)
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
     "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
