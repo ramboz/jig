@@ -78,6 +78,14 @@ time, then persist now.
      slice. **Conditional, to avoid noise:** only surface this when the session
      actually touched such product/UI/out-of-spec work — skip it entirely for
      pure backend/refactor/spec sessions.
+   - **Load-bearing decision escape hatch** (spec 083-06 / ADR-0031) — the
+     enumerated surface list above is **not** a closed gate. This session-end
+     prompt is the **only** judgment owner for *out-of-spec* load-bearing
+     decisions (which have no reconciliation phase), so also surface — regardless
+     of which surface was touched — any decision the canonical ADR trigger
+     covers. Canonical wording — single-sourced from ADR-0031, drift-tested
+     verbatim across all four surfaces:
+     A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
 2. **Decide per item** which file it belongs in:
    - Niche/domain term → glossary
    - Failed approach / gotcha → learnings
@@ -99,13 +107,19 @@ time, then persist now.
    `docs/refinement-todo.md` under the parallel-session file lock (slice 028-02).
    Where `<target>` is the project root (usually `.`).
 
-   **Non-spec shipped decisions have no `memory.py` subcommand** (spec 083): the
-   file lives in `docs/decisions/`, not `docs/memory/`, and is human-browsable
-   prose. Record one by appending an entry to
-   `docs/decisions/lightweight-decisions.md` with the `Edit`/`Write` tool, using
-   that file's `### [Date] — [Title]` / Decision / Context / Scope / Commit
-   template. Confirm with the user before writing — it's their decision to
-   record, not yours to infer.
+   **Non-spec shipped decisions use `decisions.py`, not `memory.py`** (spec
+   083-05): the file lives in `docs/decisions/`, not `docs/memory/`. Record one
+   with the idempotent helper (it appends in the file's `### [Date] — [Title]` /
+   Decision / Context / Scope / Commit template; re-running with the same title
+   is a no-op):
+   ```bash
+   python3 "${PLUGIN_ROOT}/skills/memory-sync/decisions.py" add-lightweight \
+     --title "<short title>" --decision "<what>" --context "<why>" \
+     --scope "<which screen / component / string / asset>" [--commit "<SHA/PR>"]
+   ```
+   Confirm with the user before writing — it's their decision to record, not
+   yours to infer. If the decision clears the ADR trigger above, route it to an
+   ADR (`adr.py new`) instead of here.
 4. **Report a summary** at the end:
    ```bash
    python3 "${PLUGIN_ROOT}/skills/memory-sync/memory.py" summary <target>

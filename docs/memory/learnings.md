@@ -439,3 +439,6 @@ Spec 080-01 established that semantic-index internal overlays must be authorized
 
 ## Reconcile-checklist additions require both workflow.md and SKILL.md
 When adding a new reconciliation checklist item, BOTH docs/workflow.md (Reconciliation rules section, human-readable) AND skills/spec-workflow/SKILL.md (## Reconciliation checklist, the operative gate agents walk) must be updated. Updating only workflow.md leaves the forcing function absent from the checklist that reviewer subagents and spec-workflow drive. Caught by compliance reviewer on spec 083-01.
+
+## Scaffold helper-closure: a helper referenced from tier-0 surfaces must live in a tier-0 skill
+A SKILL.md or scaffolded doc that references `${CLAUDE_PLUGIN_ROOT}/skills/<name>/<helper>.py` must point at a skill that is actually in the default (tier-0) scaffold — the scaffold-verify **helper-closure** + **docs** checks resolve every such local-helper path against the scaffolded set and fail (exit 4) otherwise. Bit during 083-05: `decisions.py` was first placed in tier-1 `adr-workflow` but referenced from the always-scaffolded memory-sync prompt + `lightweight-decisions.md` → ~237 cascading test errors (every test that calls `scaffold_project` in setUp). Fix: put the helper in a tier-0 skill (memory-sync). Always-scaffolded docs can only safely reference tier-0 helpers.

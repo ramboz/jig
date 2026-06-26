@@ -4,30 +4,45 @@ Small shipped decisions that fall outside spec slices but carry durable rational
 brand/icon swaps, cosmetic CSS polish, UI string or translation choices, scoped
 visual decisions, and "future sessions should/should not override this" notes.
 
-## When to write here vs. an ADR
+## Routing rubric — where does this decision land?
 
-**Write here (lightweight)** if the decision **both**:
-- (a) does **not** change a module boundary, public contract, or cross-cutting
-  policy (if it does → ADR), and
-- (b) a future agent or maintainer **would need to know it to avoid undoing it**.
+Triage each settled decision to exactly **one** home:
 
-**Write an ADR** if (a) fails — the decision changes a module boundary, public
-contract, or cross-cutting policy.
+| Route | Criterion |
+|---|---|
+| **ADR** | A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract. Also: any change to a module boundary, public contract, or cross-cutting policy. |
+| **Lightweight record (here)** | Settled, local, bounded (one screen / component / string / asset), with no real rejected alternatives — and a future agent would need to know it to avoid undoing it. |
+| **`refinement-todo.md`** | Still *open* — has a resolution trigger; not shipped yet. |
+| **Drop (write nothing)** | Ephemeral / trivial / already obvious from the code or a commit message. |
 
-**Write nothing** if it's already obvious from the code or a commit message.
+The **ADR** row quotes the single canonical trigger sentence from
+[ADR-0031](adr-0031-load-bearing-decision-adr-trigger.md); the *same* sentence
+appears in both reconcile checklists and the memory-sync session-end prompt, so
+the "when is an ADR required?" policy can't drift across surfaces.
 
-**Write to `refinement-todo.md`** if the decision is still *open* (has a
-resolution trigger — it isn't shipped yet).
+Record a lightweight entry with the helper (idempotent append):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" add-lightweight \
+  --title "<short title>" --decision "<what>" --context "<why>" --scope "<where>"
+```
 
 ## Template
 
 ```markdown
 ### [Date] — [Short title]
+
 **Decision:** _what was decided_
+
 **Context:** _why — constraint, user feedback, design call_
+
 **Scope:** _which screen / component / string / asset — not product-wide_
+
 **Commit:** _optional — git SHA or PR; may be added retroactively_
 ```
+
+This matches what `decisions.py add-lightweight` emits (one blank line between
+fields), so the documented shape and the helper output agree.
 
 ---
 
