@@ -270,7 +270,8 @@
 | [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-04 — session decision scan (Stop hook) | **DRAFT** | Phase 2; food-log report 2026-06-25; jig-native scan modeled on jig-task-capture.sh; frame-critique the recall→scan premise first |
 | [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-05 — routing rubric + decisions.py add-lightweight | **DRAFT** | Phase 2; ADR-branch wording single-sourced with 083-06 |
 | [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-06 — widen reconciliation ADR trigger (companion) | **DRAFT** | Phase 2; needs its own ADR (reserve via adr.py); shares wording with 083-05 |
-| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-07 — in-flight decision stubs | **DEFERRED** | Phase 2; trigger: 083-04 scan proven to miss in-flight decisions |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-07 — in-flight decision stubs | **DRAFT** | Phase 2; promoted from DEFERRED 2026-06-25 (only recall-free path for Tier-1 load-bearing decisions) |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-08 — Codex host validation (handoff) | **DRAFT** | Phase 2; parity harness + host-capability matrix; completed on Codex by maintainer |
 
 ## Deferred slices
 

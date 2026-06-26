@@ -25,8 +25,34 @@ This reframes the spec into two layers:
 1. **Routing** (size-aware): each captured decision goes to the right home —
    ADR (load-bearing, rejected alternatives), lightweight record (settled, local,
    bounded), `refinement-todo.md` (still open), or dropped (ephemeral).
-2. **Capture** (size-agnostic): a *scan* replaces recall — surface candidate
-   decisions from the session automatically, then triage.
+2. **Capture** — a **three-way coverage map** (corrected over two frame-critique
+   rounds, 2026-06-25). No single mechanism covers the space; each owns a cell:
+
+   | Decision is… | …made **in-spec** (slice exists) | …made **out-of-spec** (no slice) |
+   |---|---|---|
+   | **lexically detectable** (AskUserQuestion answer, explicit user correction) | **083-04 scan** | **083-04 scan** |
+   | **load-bearing, no trigger phrase** (discursive ADR-worthy reasoning) | **083-06** reconciliation ADR-trigger (judgment) | **083-03/083-06** session-end memory-sync judgment prompt |
+
+   The scan (083-04) runs every session and catches what a regex *can* see,
+   in-spec or out. The two **judgment** prompts catch what a regex cannot — and
+   they are split by *which session-end surface fires*: reconciliation only
+   exists for spec slices, so the **memory-sync session-end prompt is the only
+   judgment owner for out-of-spec load-bearing decisions** (the spec's own
+   founding case).
+
+> **Why three, not two (two frame-critique findings).** (1) A lexical scan is
+> structurally biased to catch lightweight decisions and miss ADR-worthy ones —
+> the *more* load-bearing a decision, the *less* likely it carries a trigger
+> phrase — so the scan cannot own the load-bearing case. (2) Re-anchoring that
+> case solely on the *reconciliation* trigger (083-06) re-opened the crack: the
+> spec's target sessions are **out-of-spec, which have no reconciliation phase**,
+> so that owner never fires for them. The out-of-spec load-bearing decision is
+> therefore owned by the **session-end memory-sync judgment prompt**, whose
+> trigger must be a *judgment escape hatch* ("a load-bearing decision a future
+> agent would need to know to avoid undoing it"), **not** only the enumerated
+> surface list (UI strings/visual/translation) — an enumerated list is itself a
+> surface gate that re-imports the detectability bias. See
+> [reviews/slice-04-frame-critique.md](reviews/slice-04-frame-critique.md).
 
 Adopter projects accumulate shipped decisions that fall outside spec slices but
 carry durable rationale: brand/icon swaps, UI string/translation choices, scoped
@@ -44,10 +70,27 @@ no existing home fits **and** because capture depends on memory:
 **Phase 1 (shipped, slices 083-01..03)** added
 `docs/decisions/lightweight-decisions.md` (the browsable home + routing
 heuristic), scaffold seeding, and reconcile/memory-sync *nudges*. **Phase 2
-(slices 083-04..07, below)** replaces the recall-dependent nudge with a
-deterministic session-end **scan** and adds helper-backed routing.
+(slices 083-04..07, below)** adds a deterministic session-end **scan** and
+helper-backed routing.
 
-**Status:** ADOPTED (2026-06-25), Phase 2 in design (slices 083-04..07 DRAFT).
+> **Honest scope of the promise (frame-critique round 3).** Phase 2 does **not**
+> "eliminate recall." It delivers a **two-tier** capture: *deterministic* capture
+> for **lexically/structurally detectable** decisions (AskUserQuestion answers,
+> explicit user corrections — the scan, Tiers 1–2), and *recall-reduced-not-
+> eliminated* capture for **load-bearing** decisions, which remain owned by
+> **judgment prompts** because no regex can see a trigger-phrase-free design
+> choice. The judgment prompts (reconciliation + memory-sync) are attention
+> prompts — they widen *what* the agent is asked to consider, but still depend on
+> the agent attending at session end. The path that removes recall for a
+> load-bearing decision is **in-flight structured capture (083-07, now ACTIVE)**,
+> for the subset that arrives as a Tier-1 structured answer (AskUserQuestion /
+> default-override) — captured at decision time, not by session-end recall. What
+> stays recall-reduced-not-eliminated is the **discursive** load-bearing decision
+> (no structured answer, no trigger phrase), owned by the judgment prompts. This is
+> a sound architecture — a deterministic floor (lexical scan **+ in-flight Tier-1
+> capture**) plus a judgment ceiling — stated honestly.
+
+**Status:** ADOPTED (2026-06-25), Phase 2 in design (slices 083-04..08 DRAFT).
 Originally drafted as a pilot convention (shared with food-log, 2026-06-23). The
 maintainer adopted Phase 1 (slices 083-01..03 — convention, scaffold seeding,
 nudges) rather than wait for the three-adopter promotion trigger.
@@ -69,11 +112,16 @@ Phase 2 design-decision note), not as an agent-driven transcript read.
 **Phase 2** adds two more axes:
 
 - **R — Rules:** lightweight vs. ADR-worthy; the routing rubric; the widened
-  reconciliation ADR trigger (083-05/083-06, single-sourced wording).
-- **I — Interface:** the scan's signal patterns and candidate output shape, and
-  the `decisions.py add-lightweight` helper contract (083-04/083-05).
+  load-bearing-decision judgment trigger (083-05/083-06, single-sourced wording).
+- **I — Interface:** the scan's signal patterns and candidate output shape, the
+  `decisions.py add-lightweight` helper contract, and the in-flight stub shape
+  (083-04/083-05/083-07).
+- **P — Platform:** Claude vs Codex host parity for the hooks — split into its own
+  validation slice (083-08) because the payload/hook shapes can only be confirmed
+  on the actual Codex runtime, and jig is dual-host (ADR-0018).
 - **Data/Path** splits stay out: the scan reuses the existing Stop-hook payload
-  path (`jig-task-capture.sh`); no new data source.
+  path (`jig-task-capture.sh`); the in-flight stub adds one per-session scratch
+  log, not a new external data source.
 
 ## Slices
 
@@ -178,22 +226,47 @@ The `decisions.py` helper still exists (083-05) for the **write** side
 ### Slice 083-04 — Session decision scan (Stop hook)
 
 A `jig-decision-capture.sh` Stop hook modeled on `jig-task-capture.sh`, scanning
-the session for decision signals (highest-precision first):
-1. **AskUserQuestion answers** — explicit user picks.
-2. **User corrections / overrides** — "X should not be the default", "do A instead".
-3. **Agent statements of settled choices** — "chose A over B", "rejected because".
-4. **Reversed defaults.**
+the session for decision signals. **The scan claims only the tiers it can
+reliably detect** (frame-critique correction):
+
+- **Tier 1 — AskUserQuestion answers** (structured payload) and **Tier 2 —
+  explicit user corrections** ("X should not be the default", "do A instead").
+  These are discrete turns / structured data — reliably detectable. **This is
+  what 083-04 commits to catching.**
+- **Tier 3 — agent statements of settled choices** ("chose A over B", "rejected
+  because") and reversed defaults: **best-effort only.** A genuinely load-bearing
+  design choice is usually discursive reasoning with no stock phrase, so the
+  regex will miss it. **083-04 does not promise to catch load-bearing decisions —
+  083-06's judgment prompt owns that case.**
 
 Output: candidate list, each with a quoted evidence line, turn reference, and
-*who decided*. Dedups against already-recorded decisions (existing ADRs,
-`lightweight-decisions.md`, `refinement-todo.md`) so triaged-away items don't
-re-surface. The scan logic may live in `decisions.py scan-session` invoked **by
-the hook** (testable in isolation) rather than inline bash.
+*who decided*. **Provenance requires per-role tracking** — unlike
+`jig-task-capture.sh`, which flattens all content into one string (line 35) and
+so cannot say *who* decided; 083-04 must preserve message role/turn boundaries.
+Dedups against already-recorded decisions (existing ADRs,
+`lightweight-decisions.md`, `refinement-todo.md`) via an explicit matching
+strategy (normalized-substring / title match — stated in the slice, not assumed)
+so triaged-away items don't re-surface. The scan logic lives in
+`decisions.py scan-session` invoked **by the hook** (testable in isolation).
 
-**AC:** over a transcript fixture containing a representative session, it
-surfaces the load-bearing design choice, the chosen-alternative decision, and the
-reversed-default correction; it does **not** surface ephemera ("let me run the
-tests"). Provenance (who + quote) present on every candidate.
+**Per-host grounding task:** verify the Stop payload exposes the **AskUserQuestion
+answer shape** (Tier 1), not just `messages[].content` bodies, on both Claude and
+Codex; fall back to the Phase-1 nudge where unavailable.
+
+**AC (adversarial — must be ungameable):** over a transcript fixture, the scan
+(1) surfaces the AskUserQuestion answer and the user-correction (Tiers 1–2) with
+correct who-decided provenance; (2) does **not** surface ephemera ("let me run
+the tests"); and (3) **the fixture must include one load-bearing design choice
+phrased with NO literal trigger pattern** — the scan is asserted to *honestly
+miss* it (or surface it only as a low-confidence best-effort hit). The spec
+documents that this decision is caught instead by a **judgment** prompt, and
+**which** prompt depends on context (frame-critique round 2): an *in-spec*
+load-bearing decision is owned by 083-06's reconciliation trigger; an
+*out-of-spec* one (no reconciliation phase) is owned by the session-end
+memory-sync judgment prompt (083-03 widened in 083-06). The AC must assert the
+correct owner per fixture context — it cannot be satisfied by writing
+regex-matching fixture lines, **nor** by claiming reconciliation catches an
+out-of-spec decision.
 
 ### Slice 083-05 — Routing rubric + `decisions.py add-lightweight` helper
 
@@ -209,31 +282,111 @@ The triage step deciding where each candidate lands:
 Ships `decisions.py add-lightweight` (idempotent append in the template format,
 like `memory.py`'s helpers) so Phase 1's nudge-only file gains the helper-backed
 determinism the rest of jig has. The ADR-branch criterion **must use the same
-wording** as the 083-06 reconciliation trigger so they agree by construction.
+wording** as the 083-06 judgment prompts. **Single-sourcing mechanism**
+(frame-critique residual): the ADR-trigger sentence lives in **one** canonical
+place — the 083-06 ADR — and all four consumers quote it (this rubric, the two
+reconcile checklists, and the memory-sync prompt); a unit test asserts the exact
+string appears in all four sites, so drift fails CI rather than silently
+accumulating.
 
-### Slice 083-06 — Companion: widen the reconciliation ADR trigger (needs its own ADR)
+### Slice 083-06 — Companion: widen the load-bearing-decision judgment prompt in BOTH session-end surfaces (needs its own ADR)
 
-Today the reconcile checklist asks *"did module boundaries or public contracts
-change?"* to trigger an ADR. Widen it to **also** ask *"was a load-bearing design
-choice with rejected alternatives made, even if no boundary changed?"* — the
-clause that would have caught food-log's lost ADR-worthy decision at reconcile.
-Touches `docs/workflow.md` + `skills/spec-workflow/SKILL.md` reconcile checklists.
+**This slice owns the load-bearing-decision case** (frame-critique correction) —
+not the 083-04 scan. The same judgment clause is added to **both** session-end
+judgment surfaces so there is no out-of-spec gap (frame-critique round 2):
+
+1. **Reconciliation** (`docs/workflow.md` + `skills/spec-workflow/SKILL.md`): the
+   reconcile checklist asks *"did module boundaries or public contracts change?"*;
+   widen it to **also** ask *"was a load-bearing design choice with rejected
+   alternatives made, even if no boundary changed?"* — fires for in-spec slices.
+2. **Session-end memory-sync** (`skills/memory-sync/SKILL.md`, widening the
+   083-03 condition): the 083-03 prompt currently fires only on an *enumerated
+   surface list* (UI strings/visual/translation). Add the **same** judgment
+   clause as an escape hatch so it fires on **any** load-bearing decision a
+   future agent would need to know to avoid undoing — **this is the only judgment
+   owner for out-of-spec load-bearing decisions**, which have no reconciliation
+   phase. Without it, the spec's founding case (an off-spec ADR-worthy decision
+   with no trigger phrase) has no owner at all.
+
+Both are **judgment** prompts — no trigger phrase needed — so they catch the
+discursive ADR-worthy decisions the regex scan structurally cannot.
 
 Because this changes a **load-bearing lifecycle policy** (when an ADR is
 required), it warrants **its own ADR** — reserve the number via `adr.py new` at
 implementation time (do **not** mint a number from a stale local tree). The ADR's
-trigger wording and 083-05's rubric ADR-branch are the *same sentence*, single-sourced.
+trigger sentence is the **single canonical source**; 083-05's rubric ADR-branch,
+both reconcile checklists, and the memory-sync prompt all **quote** it, and a unit
+test asserts the exact string appears in all **four** sites so drift fails CI.
 
-### Slice 083-07 — In-flight decision stubs (DEFERRED)
+### Slice 083-07 — In-flight decision stubs (ACTIVE)
 
-The most robust capture: a hook on AskUserQuestion answers and on user override
-of a stated default writes a one-line stub to a session scratch log *the moment
-the decision settles*; triage reads the scratch log, depending on neither recall
-nor a perfect transcript scan. **DEFERRED** — adds in-flight overhead, and
-083-04's session-end scan may be sufficient. **Resolution trigger:** pilot
-evidence that the 083-04 scan misses in-flight decisions (e.g. a decision made
-and then talked-past in the same session that the end-of-session regex doesn't
-catch).
+**Promoted from DEFERRED (maintainer decision, 2026-06-25)** — this implements
+frame-critique R3's strengthening recommendation directly. In-flight capture is
+the **only recall-free path** for a load-bearing decision: every session-end
+owner (083-04 scan aside, both judgment prompts) depends on the agent attending
+at session end. A hook on **AskUserQuestion answers** and on **user override of a
+stated default** writes a one-line stub to a session scratch log *the moment the
+decision settles*; triage reads the scratch log, depending on neither recall nor
+a perfect transcript scan. This converts the Tier-1 structured subset from
+"reconstructed from end-of-session prose (083-04)" to "captured deterministically
+at decision time," and is the mechanism that most shrinks the recall residue.
+
+**Deliverables:**
+
+1. A capture hook (PreToolUse/PostToolUse on `AskUserQuestion`, plus a
+   user-override signal) appending `{timestamp, who, quoted decision, turn}`
+   stubs to a per-session scratch log (e.g. `.jig/decision-scratch/<session>.log`).
+2. Triage reads the scratch log at session-end (feeds the same owner-gated
+   surfacing as 083-04), and the scratch log is deduped against it so a decision
+   isn't surfaced twice (in-flight stub + end-of-session scan).
+3. Scratch-log lifecycle: created per session, cleared/rotated after triage.
+
+**AC:** an AskUserQuestion answer and a user default-override each produce a
+scratch-log stub with correct provenance (who + quote) at decision time, before
+session end; the end-of-session surfacing dedups in-flight stubs against scan
+hits (no double-surface); ephemera produce no stub.
+
+**Relationship to 083-04:** 083-04's scan remains the catch-all for sessions
+where the in-flight hook didn't fire (or the host lacks the hook point); 083-07
+is the deterministic fast path for the structured Tier-1 subset. They compose;
+083-07 does **not** remove the discursive-load-bearing residue (still owned by
+the 083-06 judgment prompts).
+
+### Slice 083-08 — Codex host validation (HANDOFF — completed on Codex)
+
+Phase 2's deterministic mechanisms (the 083-04 Stop-hook scan and the 083-07
+in-flight capture) depend on **host-specific** surfaces that are verified for
+Claude but **unproven on Codex**: the Stop-payload shape, whether
+`AskUserQuestion` (or its Codex analog) is a hookable tool with a structured
+answer in the payload, and whether the scratch-log hook points exist. jig is
+dual-host ([ADR-0018](../../decisions/adr-0018-dual-host-generated-plugin-artifacts.md)),
+so a mechanism that silently works only on Claude is a half-shipped feature.
+
+This slice is the **explicit Codex-side validation + parity harness**, authored
+here as the jig-side contract and **completed on Codex** by the maintainer (who
+has that host environment):
+
+**Deliverables:**
+
+1. A host-parity fixture/test asserting, on Codex: (a) the Stop payload exposes
+   the session content the scan reads; (b) the decision-signal patterns fire on a
+   Codex transcript fixture; (c) the in-flight hook point for the structured
+   answer exists (or is documented absent → fall back to scan + judgment prompts).
+2. A documented **host-capability matrix** (Claude vs Codex) for each Phase-2
+   mechanism: `supported` / `degraded-to-nudge` / `unsupported`, so adopters know
+   the guarantee level per host.
+3. Any Codex host-transform adjustments to the hooks (mirroring the standard
+   `CLAUDE.md→AGENTS.md` / `CLAUDE_PLUGIN_ROOT→PLUGIN_ROOT` transforms applied by
+   `build_host_packages.py`).
+
+**AC:** the parity harness runs green on Codex (or honestly records
+`degraded`/`unsupported` cells with the fallback wired); the capability matrix is
+committed; `build_host_packages.py --check` stays green with the Codex hook copies.
+
+**Why a separate slice, not folded in:** the validation needs the *actual* Codex
+runtime to confirm payload/hook shapes — it cannot be proven from the Claude side
+by inspection. Keeping it discrete lets the maintainer own the Codex-side
+completion without blocking the Claude-side Phase-2 build.
 
 ## Assumptions
 
@@ -254,6 +407,17 @@ catch).
 
 ## Risks (Phase 2 — from the food-log report, honestly carried)
 
+- **Discursive load-bearing decisions remain recall-dependent (the residue,
+  narrowed).** With 083-07 active, the **Tier-1 structured** load-bearing subset
+  (AskUserQuestion answers, default-overrides) is captured *deterministically
+  in-flight* — recall-free. What remains recall-dependent is the **discursive**
+  load-bearing decision (a design choice reasoned out in prose, no structured
+  answer, no trigger phrase): its only owner is the memory-sync session-end
+  judgment escape hatch — an *attention* prompt, not deterministic capture. An
+  agent that doesn't attend to it at session end still loses it. The owner-gate
+  and OQ4 rubric are *quality* backstops, not *capture* guarantees. This residue
+  is real but smaller than before 083-07 was promoted; closing it further would
+  require semantic (LLM-judged) in-flight detection, explicitly out of scope.
 - **Scan noise.** Many "let's do X" lines aren't durable decisions. Mitigated by
   precision-first patterns, dedup-against-recorded, and the owner-gate (never
   auto-writes). Not a hard guarantee.
@@ -262,8 +426,11 @@ catch).
   context). This is the design correction over the food-log proposal.
 - **ADR/lightweight boundary still needs judgment.** The rubric (083-05) narrows
   it but doesn't eliminate the judgment call; the owner-gate is the backstop.
-- **In-flight decisions talked-past in one session** may evade an end-of-session
-  scan — the explicit resolution trigger for the DEFERRED 083-07 stub capture.
+- **Per-host parity (Codex).** The deterministic mechanisms (083-04 scan, 083-07
+  in-flight capture) are proven only for Claude; their Codex behavior is unproven
+  until 083-08's parity harness runs on that host. Until then, the Codex guarantee
+  level is *unknown* — 083-08 must record it honestly (`supported` /
+  `degraded-to-nudge` / `unsupported`) rather than assume parity.
 
 ## Open questions (resolved 2026-06-25)
 
