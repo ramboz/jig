@@ -264,6 +264,7 @@
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-01 — manifest shape and transition gate | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-02 — reconciliation reviewer omission check | **DONE** |  |
 | [082-reconciliation-sweep-manifest](082-reconciliation-sweep-manifest/spec.md) | 082-03 — primer and queue cleanup integration | **DONE** |  |
+| [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-01 — convention + seed file + reconcile prompt | **DRAFT** | Pilot with food-log adopter; promote after 3 adopter reports |
 
 ## Deferred slices
 
