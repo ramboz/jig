@@ -1,5 +1,8 @@
 ---
-status: DONE
+status: IN_PROGRESS  # 083-07 (in-flight stubs) + 083-08 (Codex handoff) remain;
+#                    # they are `### Slice` prose (no slice file) so the derived
+#                    # rollup can't see them — do NOT let status-board reflip this
+#                    # to DONE until 07/08 are tracked slices or closed.
 dependencies: []
 last_verified: 2026-06-25
 use_cases: []
