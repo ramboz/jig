@@ -29,7 +29,8 @@ so the consistency machinery faithfully carried the dead premise forward.
 The pattern generalizes well beyond design. A **load-bearing reference** is any
 authoritative external input the corpus is premised on: a design system, a
 test-infrastructure choice, a vendor / API contract, a compliance regime, a
-target platform.
+target platform, **a product-positioning / strategic-vision shift** (the n=2
+servo case — §3).
 
 When such a reference moves, **two distinct things fail — and they are not the
 same gap:**
@@ -138,7 +139,8 @@ a best-effort nudge. Systematic detection is parked with triggers (§7).
 
 A **load-bearing reference** is a named authoritative external input the corpus
 depends on (design system, test infra, vendor / API contract, compliance regime,
-target platform). A **reframe** re-anchors the corpus to one that has *moved*.
+target platform, product-positioning / strategic-vision shift). A **reframe**
+re-anchors the corpus to one that has *moved*.
 This abstraction covers every motivating case and is what makes reframe distinct
 from refactor (which preserves behaviour against a *fixed* reference).
 
@@ -186,6 +188,14 @@ load-bearing risk, owned (Assumptions §4), not assumed away.
   disposition, each goaled "bring `<artifact/code>` in line with `<reference>`."
   Their `## Assumptions` cite the new reference so future frame-critique is
   anchored correctly.
+- **Emergent-work section** *(added 2026-06-27 from the n=2 servo reframe)*: a
+  reframe can *spawn* net-new forward specs/ADRs the new reference **reveals** —
+  work that did not exist before and is distinct from `retrofit` (which fixes
+  *existing* code). The keystone manifest records these in a separate
+  `## Emergent work` section, **not** forced into a per-artifact disposition row
+  (a disposition is the fate of an *already-affected* artifact; spawned work has
+  no prior artifact to dispose of). The servo reframe minted 3 ADRs + 4 specs
+  this way.
 
 Per-artifact **dispositions**, each routing to an operation that already exists:
 
@@ -196,6 +206,11 @@ Per-artifact **dispositions**, each routing to an operation that already exists:
 | `supersede` | decision now wrong | `adr.py supersede` / superseding spec |
 | `retire-draft` | future-work on the dead premise | DEFERRED or discard — **do first; drafts mint dead-premise work** |
 | `retrofit` | shipped code must change | a slice in the retrofit spec |
+| `rewrite` *(added 2026-06-27, n=2)* | **live, non-record prose** whose framing must change — not a closed record (`amend`), a decision (`supersede`), or code (`retrofit`) | rewrite in place, citing the keystone ADR |
+
+The `rewrite` disposition closes a gap the n=2 servo reframe exposed:
+a *documentation-shaped* reframe is mostly live-prose rewrites (vision /
+architecture / README), which the original five dispositions did not fit.
 
 ### 4. The noticing nudge — best-effort, not a detector
 

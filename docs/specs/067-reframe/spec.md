@@ -25,8 +25,9 @@ faithfully carried the dead premise forward.
 
 The pattern generalizes. A **load-bearing reference** is any authoritative
 external input the corpus is premised on: a design system, a test-infrastructure
-choice, a vendor / API contract, a compliance regime, a target platform. When
-one moves, **two distinct things fail:**
+choice, a vendor / API contract, a compliance regime, a target platform, **a
+product-positioning / strategic-vision shift** (the n=2 servo case — Design
+notes). When one moves, **two distinct things fail:**
 
 - **Correction** — once someone *recognizes* the shift, there is no operation
   that *re-baselines* the corpus. `adr.py supersede` is 1:1 and decision-scoped;
@@ -171,7 +172,26 @@ and ADR-0024 resolved the design.
   | `supersede` | decision now wrong | `adr.py supersede` / superseding spec |
   | `retire-draft` | future-work on the dead premise | DEFERRED or discard — **do first; drafts mint dead-premise work** |
   | `retrofit` | shipped code must change | a slice in the retrofit spec (067-02) |
+  | `rewrite` | **live, non-record prose** whose framing must change (not a closed record → not `amend`; not a decision → not `supersede`; not code → not `retrofit`) | rewrite in place, citing the keystone ADR. Per [ADR-0024](../../decisions/adr-0024-reference-reframe.md) §3 (added 2026-06-27, n=2); lands with 067-01 when ADR-0024 is accepted. |
 
+- **n=2 evidence (servo EDD reframe, 2026-06-27 — `docs/inbox.md`).** A second
+  real reframe (servo repositioned "autonomous loop" → "Evaluation-Driven
+  Development engine"; the new reference was a dropped-in vision brief) was
+  executed **ad hoc, without this workflow**, and reproduced the exact failure
+  067 guards against: the corpus read covered only `docs/` + `README` and **missed
+  the flagship skill's description** (still "closed-loop, unattended agent-operations
+  infrastructure"). This **corroborates the binding-risk control** — a mandatory
+  coverage statement (067-01 AC5) would have forced "did we scan `skills/`?" — and
+  is T1-adjacent evidence that an undisciplined single-pass read under-catches
+  (not a clean T1 trip, since the workflow wasn't used). It also surfaced **two
+  shape refinements**, both folded in above / below: (1) the **`rewrite`
+  disposition** for live non-record prose — a documentation-shaped reframe is
+  *mostly* prose rewrites, which the original five dispositions don't fit; (2) an
+  **emergent-work** manifest section — a reframe can *spawn* net-new forward
+  specs/ADRs the new framing reveals (servo minted 3 ADRs + 4 specs), which the
+  disposition model (fates of *existing* artifacts + retrofit specs) does not
+  represent. Both are now in **ADR-0024 §3** (added 2026-06-27); they land with
+  the rest of 067-01 when ADR-0024 is accepted (067-01's DoR).
 - **Tier placement: Tier-1.** Sibling of the other judgment skills and rides
   Tier-1 lifecycle tooling (`adr.py` / `workflow.py`). Registration surfaces (the
   spec 065-03 lesson — miss one and reconciliation surprises): `scaffold.py`
@@ -214,6 +234,14 @@ the design; these are the residual leans it recorded._
   cheap add if wanted (resolve in 067-01).
 - **Tier-1 placement** — stated in Design notes; confirm against the live tier
   model when 067-01 wires the registration surfaces.
+- **Resolved (ADR-0024 §3, 2026-06-27) — the `rewrite` disposition (n=2).** Live,
+  non-record prose whose framing must change fit none of the original five
+  dispositions; added to ADR-0024 §3 and the disposition table above. Lands with
+  067-01 when ADR-0024 is accepted.
+- **Resolved (ADR-0024 §3, 2026-06-27) — the `## Emergent work` manifest section
+  (n=2).** A reframe can spawn net-new forward specs/ADRs the new reference
+  reveals (distinct from `retrofit`, which fixes *existing* code); the keystone
+  manifest records them in a separate section, not a disposition row.
 
 ## Clarifications
 

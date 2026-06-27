@@ -63,9 +63,13 @@ re-baselined through one named operation instead of patched at the edges.
    premise **superseded**, and the **re-baselining manifest**.
 4. **The manifest assigns every affected artifact a disposition — no `TBD`.** The
    SKILL.md specifies the manifest is a table of affected artifacts, each tagged
-   `reaffirm` / `amend` / `supersede` / `retire-draft` / `retrofit`, each routing
-   to the named existing operation (ADR-0024 §3). `retire-draft` items are
-   surfaced **first** (drafts on the dead premise mint dead-premise work).
+   `reaffirm` / `amend` / `supersede` / `retire-draft` / `retrofit` / `rewrite`
+   (the last for live non-record prose), each routing to the named existing
+   operation per [ADR-0024](../../decisions/adr-0024-reference-reframe.md) §3.
+   `retire-draft` items are surfaced **first** (drafts on the dead premise mint
+   dead-premise work). Net-new forward work the reframe *spawns* (not a
+   disposition of an existing artifact) is recorded in a separate
+   **`## Emergent work`** section, not forced into a disposition row.
 5. **The manifest carries an explicit coverage statement.** The SKILL.md requires
    the keystone ADR to state **what corpus was scanned, by what method, and the
    residual uncertainty** — asserted, not assumed. The framing makes a weak
