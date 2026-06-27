@@ -7,25 +7,20 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # 3.9.6 is the default macOS (Command Line Tools) python3 — jig's
-        # helpers ship to adopters and run on their python3, so the supported
-        # floor is verified here, not just on modern interpreters. Keep `X | None`
-        # behind `from __future__ import annotations` and avoid 3.10-only runtime
-        # APIs (e.g. zip(strict=)) so this job stays green.
-        include:
-          # `actions/setup-python` no longer ships a 3.9.6 build for
-          # ubuntu-24.04 (the current `ubuntu-latest`), so the floor leg pins
-          # ubuntu-22.04, which still provides the exact macOS-default patch.
-          - python-version: "3.9.6"
-            os: ubuntu-22.04
-          - python-version: "3.11"
-            os: ubuntu-latest
-          - python-version: "3.12"
-            os: ubuntu-latest
+        # The supported floor is Python 3.9 — the default macOS (Command Line
+        # Tools) python3 ships a 3.9.x, and jig's helpers run on adopters'
+        # python3, so the floor is verified here, not just on modern interpreters.
+        # `actions/setup-python` no longer provides the exact old 3.9.6 patch for
+        # current hosted runners (ubuntu-22.04/24.04), so we pin the 3.9 MINOR and
+        # let it resolve the latest 3.9.x — patch releases don't change language /
+        # stdlib compat. Keep `X | None` behind `from __future__ import
+        # annotations` and avoid 3.10-only runtime APIs (e.g. zip(strict=)) so this
+        # job stays green; `ruff target-version=py39` enforces the syntax floor.
+        python-version: ["3.9", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
