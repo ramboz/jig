@@ -26,17 +26,19 @@ if script_dir not in sys.path:
 
 try:
     from lib.decision_scan import scan, dedup, render_summary
+    from lib.decision_scratch import (
+        read_stubs, write_stubs, prune_recorded_stubs,
+        stubs_to_candidates, dedup_scan_against_stubs)
 
     data = json.load(sys.stdin)
-    messages = data.get('messages', [])
-    candidates = scan(messages)
-    if not candidates:
-        sys.exit(0)
-
-    # Dedup against already-recorded decisions, split into per-entry blocks so a
-    # large file does not over-suppress (a candidate is only dropped when its
-    # tokens are >=60% contained in a SINGLE recorded entry).
     project_dir = os.environ.get('CODEX_PROJECT_DIR', '.')
+    session_id = data.get('session_id') or 'default'
+    messages = data.get('messages', [])
+
+    # Already-recorded decisions corpus, split into per-entry blocks so a large
+    # file does not over-suppress (a candidate is dropped only when its tokens
+    # are >=60% contained in a SINGLE recorded entry). Used to prune in-flight
+    # stubs AND to dedup scan hits.
     recorded = []
     for rel in ('docs/decisions/lightweight-decisions.md',
                 'docs/decisions/README.md',
@@ -49,7 +51,6 @@ try:
                 text = f.read()
         except Exception:
             continue
-        # Split into paragraph blocks AND standalone list lines (ADR index).
         for block in text.split('\n\n'):
             block = block.strip()
             if block:
@@ -59,7 +60,20 @@ try:
             if line.startswith('- ') or line.startswith('### '):
                 recorded.append(line)
 
-    candidates = dedup(candidates, recorded)
+    # 083-07: in-flight stubs. Prune the ones now recorded and persist the rest,
+    # so an un-recorded stub re-surfaces on the next Stop — same durability as a
+    # scan candidate (a stub is never silently dropped after a single surfacing).
+    stubs = prune_recorded_stubs(read_stubs(project_dir, session_id), recorded)
+    write_stubs(project_dir, session_id, stubs)
+    stub_candidates = stubs_to_candidates(stubs)
+
+    # Scan the transcript; drop scan hits already captured in-flight so a decision
+    # settled both ways surfaces ONCE (no double-surface). Stubs are already
+    # pruned against recorded; dedup the scan hits against recorded too.
+    scan_candidates = dedup_scan_against_stubs(scan(messages), stub_candidates)
+    candidates = stub_candidates + dedup(scan_candidates, recorded)
+    candidates.sort(key=lambda c: (c.turn, c.tier))
+
     if not candidates:
         sys.exit(0)
 
@@ -68,7 +82,7 @@ try:
         from lib.read_attribution import append_additional_context_event
         append_additional_context_event(
             project_dir,
-            data.get('session_id') or 'default',
+            session_id,
             data.get('hook_event_name') or 'Stop',
             'jig-decision-capture', 'decision_capture', msg)
     except Exception:
