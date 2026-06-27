@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -16,7 +16,16 @@ jobs:
         # floor is verified here, not just on modern interpreters. Keep `X | None`
         # behind `from __future__ import annotations` and avoid 3.10-only runtime
         # APIs (e.g. zip(strict=)) so this job stays green.
-        python-version: ["3.9.6", "3.11", "3.12"]
+        include:
+          # `actions/setup-python` no longer ships a 3.9.6 build for
+          # ubuntu-24.04 (the current `ubuntu-latest`), so the floor leg pins
+          # ubuntu-22.04, which still provides the exact macOS-default patch.
+          - python-version: "3.9.6"
+            os: ubuntu-22.04
+          - python-version: "3.11"
+            os: ubuntu-latest
+          - python-version: "3.12"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
