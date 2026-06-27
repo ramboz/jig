@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.0](https://github.com/ramboz/jig/compare/v2.1.0...v2.2.0) (2026-06-27)
+
+
+### Features
+
+* **decisions:** lightweight decision records for non-spec changes (083-01..03) ([2875fd7](https://github.com/ramboz/jig/commit/2875fd73d11ad034d827eec88f33565566235870))
+* **decisions:** session decision scan Stop hook (083-04) ([16ae3db](https://github.com/ramboz/jig/commit/16ae3db84352099f6f0eae6b56b852bce8157917))
+* **decisions:** spec 083 Phase 2 — routing rubric, single-sourced ADR trigger, in-flight capture (083-05/06/07) ([#60](https://github.com/ramboz/jig/issues/60)) ([006d67d](https://github.com/ramboz/jig/commit/006d67d38b509b6b425a7a4fa088ab0f22580f4a))
+
+
+### Bug Fixes
+
+* **python:** restore Python 3.9 compatibility + add 3.9.6 to CI matrix ([8ac2181](https://github.com/ramboz/jig/commit/8ac21816f336fd477caca6424566950042f522c3))
+
+
+### Documentation
+
+* **decisions:** ADR-0030 — minimum supported Python is 3.9 (Accepted) ([ca78899](https://github.com/ramboz/jig/commit/ca78899b6515e4f6bb01af56162b95c5b267ef05))
+* **decisions:** reserve adr-0031-load-bearing-decision-adr-trigger ([e52578a](https://github.com/ramboz/jig/commit/e52578a60242db731d30436b80f4c86fc46b96e8))
+* **specs:** reserve 083-lightweight-decision-records (DRAFT) ([bdf0187](https://github.com/ramboz/jig/commit/bdf018790eb52f12fa0264c67a80a2c3497c23b4))
+* **specs:** spec 083 Phase 2 design — scan-triage-route + Codex validation (083-04..08) ([882c7ca](https://github.com/ramboz/jig/commit/882c7caf51f2fc1dc44e3e9104922c7179d79405))
+
 ## [2.1.0](https://github.com/ramboz/jig/compare/v2.0.1...v2.1.0) (2026-06-25)
 
 
