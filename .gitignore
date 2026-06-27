@@ -12,6 +12,9 @@
 .jig/spec-ref
 .jig/semantic-index-claude-hook.json
 .jig/semantic-index-events.jsonl
+# Per-session in-flight decision stubs (slice 083-07) — ephemeral, cleared after
+# each Stop-hook triage; never tracked.
+.jig/decision-scratch/
 
 .DS_Store
 node_modules/

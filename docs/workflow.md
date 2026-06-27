@@ -282,6 +282,10 @@ After implementation, before marking DONE:
   scoped brand/icon calls)? If yes, record them in
   `docs/decisions/lightweight-decisions.md`. (Not a gate — a checklist nudge.)
 - Update `architecture.md` ONLY if module boundaries or contracts changed (signal: write an ADR).
+- **Load-bearing decision (ADR trigger, judgment — not just a boundary change).**
+  Canonical wording — single-sourced from ADR-0031, drift-tested verbatim across
+  all four surfaces:
+  A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
 - ADRs are immutable after acceptance — new decisions supersede, never edit.
 - Closed records (DONE / SUPERSEDED specs and slices) preserve drift via a
   `## Amendments` section ([ADR-0010](decisions/adr-0010-amendment-scope-records-vs-live-prose.md));

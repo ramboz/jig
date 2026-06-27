@@ -1,5 +1,7 @@
 ---
-status: IN_PROGRESS
+status: IN_PROGRESS  # 083-08 (Codex host-validation handoff) remains DRAFT —
+#                    # deferred to the maintainer on Codex (spec stops at 083-07
+#                    # for the Claude-side build).
 dependencies: []
 last_verified: 2026-06-25
 use_cases: []
@@ -81,14 +83,17 @@ helper-backed routing.
 > **judgment prompts** because no regex can see a trigger-phrase-free design
 > choice. The judgment prompts (reconciliation + memory-sync) are attention
 > prompts — they widen *what* the agent is asked to consider, but still depend on
-> the agent attending at session end. The path that removes recall for a
-> load-bearing decision is **in-flight structured capture (083-07, now ACTIVE)**,
-> for the subset that arrives as a Tier-1 structured answer (AskUserQuestion /
-> default-override) — captured at decision time, not by session-end recall. What
-> stays recall-reduced-not-eliminated is the **discursive** load-bearing decision
+> the agent attending at session end. The Tier-1 structured subset (AskUserQuestion
+> answers / default-overrides) is **already** captured recall-free by the 083-04
+> scan (structured extraction off the Stop payload, no agent attention);
+> **in-flight structured capture (083-07, now ACTIVE)** *hardens* that subset —
+> it persists the decision at decision time so it survives a Stop payload that
+> drops the tool blocks or a session that ends abnormally (a **resilience** layer,
+> not a new coverage cell, and not a shrink of the discursive residue). What stays
+> recall-reduced-not-eliminated is the **discursive** load-bearing decision
 > (no structured answer, no trigger phrase), owned by the judgment prompts. This is
 > a sound architecture — a deterministic floor (lexical scan **+ in-flight Tier-1
-> capture**) plus a judgment ceiling — stated honestly.
+> hardening**) plus a judgment ceiling — stated honestly.
 
 **Status:** ADOPTED (2026-06-25), Phase 2 in design (slices 083-04..08 DRAFT).
 Originally drafted as a pilot convention (shared with food-log, 2026-06-23). The
@@ -320,16 +325,21 @@ test asserts the exact string appears in all **four** sites so drift fails CI.
 
 ### Slice 083-07 — In-flight decision stubs (ACTIVE)
 
-**Promoted from DEFERRED (maintainer decision, 2026-06-25)** — this implements
-frame-critique R3's strengthening recommendation directly. In-flight capture is
-the **only recall-free path** for a load-bearing decision: every session-end
-owner (083-04 scan aside, both judgment prompts) depends on the agent attending
-at session end. A hook on **AskUserQuestion answers** and on **user override of a
-stated default** writes a one-line stub to a session scratch log *the moment the
-decision settles*; triage reads the scratch log, depending on neither recall nor
-a perfect transcript scan. This converts the Tier-1 structured subset from
-"reconstructed from end-of-session prose (083-04)" to "captured deterministically
-at decision time," and is the mechanism that most shrinks the recall residue.
+**Promoted from DEFERRED (maintainer decision, 2026-06-25)** — this **hardens**
+the Tier-1 structured cell of the deterministic floor. A hook on **AskUserQuestion
+answers** and on **user override of a stated default** writes a one-line stub to a
+session scratch log *the moment the decision settles*; the 083-04 triage merges it
+with the scan and dedups so a decision settled both ways surfaces once.
+
+> **Honest scope (frame-critique correction).** The Tier-1 subset is **already**
+> captured recall-free by the 083-04 scan (structured extraction off the Stop
+> `messages` payload). 083-07's marginal value is **resilience**, not residue-
+> shrink or a new coverage cell: (1) it does not depend on the Stop payload
+> retaining the AskUserQuestion tool blocks (a documented scan risk — see
+> Assumptions); (2) it persists *before* Stop, so a decision survives an abnormal
+> session end; (3) un-recorded stubs re-surface until recorded (durability parity
+> with the scan). It does **not** touch the discursive load-bearing residue,
+> which stays owned by 083-06's judgment prompts.
 
 **Deliverables:**
 

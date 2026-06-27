@@ -610,6 +610,11 @@ status flip is allowed. Each item is a gate.
       `docs/decisions/lightweight-decisions.md`. (Non-blocking nudge; not a gate.)
 - [ ] **Architecture impact** — did module boundaries or public contracts change?
       If yes, update `docs/architecture.md` AND write an ADR.
+- [ ] **Load-bearing decision (ADR trigger, judgment)** — beyond a boundary
+      change, was a load-bearing design choice with rejected alternatives made?
+      Canonical wording — single-sourced from ADR-0031, drift-tested verbatim
+      across all four surfaces:
+      A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
 - [ ] **Conventions impact** — did this slice introduce or change a rule worth
       recording? If yes, edit `docs/conventions.md` (requires
       `JIG_CONVENTIONS_APPROVED=1`).

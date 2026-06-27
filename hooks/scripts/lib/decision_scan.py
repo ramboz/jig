@@ -113,6 +113,20 @@ def _clip(text):
     return text if len(text) <= _MAX_QUOTE else text[: _MAX_QUOTE - 1] + "…"
 
 
+def clip(text):
+    """Public alias for the quote-clipping helper (reused by decision_scratch)."""
+    return _clip(text)
+
+
+def is_user_override(text):
+    """True iff `text` carries a Tier-2 user override/correction marker.
+
+    The in-flight UserPromptSubmit capture (slice 083-07) reuses the *same*
+    Tier-2 markers the Stop scan uses, so in-flight and end-of-session capture
+    agree on what counts as a user override (no pattern drift)."""
+    return any(p.search(text or "") for p in _TIER2)
+
+
 def _scan_askuserquestion(messages):
     """Tier 1: pair each AskUserQuestion tool_use with its tool_result answer."""
     asked = {}  # tool_use_id -> turn it was asked

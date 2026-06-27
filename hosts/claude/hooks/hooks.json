@@ -64,6 +64,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-decision-inflight.sh",
+            "async": true,
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -101,6 +112,16 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-decision-inflight.sh",
+            "async": true,
             "timeout": 5
           }
         ]

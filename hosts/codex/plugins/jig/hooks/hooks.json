@@ -69,6 +69,17 @@
             "statusMessage": "jig: warn on boundary changes"
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-decision-inflight.sh",
+            "timeout": 5,
+            "statusMessage": "jig: decision inflight"
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -111,6 +122,16 @@
             "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-context-check.sh",
             "timeout": 5,
             "statusMessage": "jig: check context budget"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-decision-inflight.sh",
+            "timeout": 5,
+            "statusMessage": "jig: decision inflight"
           }
         ]
       }
