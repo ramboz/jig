@@ -50,6 +50,7 @@ execute --mode pr: DOES mutate remote state. Runs `git push -u origin
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -577,6 +578,122 @@ def render_servo_advisory(target: Path) -> str:
     return "\n".join(lines)
 
 
+# ---------- servo unscaffolded-suggestion (spec 072-02) ----------
+#
+# The reciprocal of the 072-01 advisory: when servo is available on THIS
+# MACHINE (a host-global breadcrumb servo writes — servo ADR-0013 / spec 014)
+# but the target is NOT servo-scaffolded (`.servo/` absent), `prepare` emits a
+# single, gentle, opt-out-able suggestion to run `/servo:scaffold-init`. It
+# reverses ADR-0022 §5's "absent → no mention" for the slice-land surface, but
+# ONLY for a machine that has actually used servo — a jig user who never
+# touched servo still sees nothing. Filesystem-only (no subprocess); never
+# alters the exit code. The marker is machine-global while the nudge is
+# per-project, so AC6 bounds it: shown at most once per project, the budget
+# consumed only on an interactive land (an unobserved run can't burn it).
+
+# servo's host-global availability marker (servo ADR-0013):
+# `${XDG_STATE_HOME:-$HOME/.local/state}/servo/available.json`, JSON carrying
+# `schema_version: 1`. A best-effort advisory hint — jig only ever reads it.
+_SERVO_MARKER_SCHEMA_VERSION = 1
+# jig's once-per-project "already suggested" breadcrumb (AC6) — working-tree-
+# local, gitignored, presence-only. Distinct from `.jig/no-servo-hint` (the
+# explicit *permanent* opt-out): this one records "jig already mentioned it
+# here once" and is consumed only on an interactive land.
+_SERVO_HINT_SHOWN = (".jig", "servo-hint-shown")
+
+
+def _servo_available_marker_path() -> Path:
+    """Resolve servo's host-global availability marker path (servo ADR-0013) —
+    `XDG_STATE_HOME` if set, else `~/.local/state`. Byte-for-byte the path
+    servo's writers use."""
+    state_home = os.environ.get("XDG_STATE_HOME")
+    if state_home:
+        return Path(state_home).expanduser() / "servo" / "available.json"
+    return Path.home() / ".local" / "state" / "servo" / "available.json"
+
+
+def _servo_available() -> bool:
+    """True iff servo's host-global marker is present, parseable JSON, and
+    declares `schema_version: 1` (AC1/AC2). Best-effort: any read/parse/shape
+    error → False — the marker is an advisory hint, never a hard proof (servo
+    ADR-0013). Read-only; jig never writes this file."""
+    try:
+        data = json.loads(
+            _servo_available_marker_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (isinstance(data, dict)
+            and data.get("schema_version") == _SERVO_MARKER_SCHEMA_VERSION)
+
+
+def _servo_hint_already_shown(target: Path) -> bool:
+    """True iff the `.jig/servo-hint-shown` once-per-project breadcrumb exists
+    at the target root (AC6). Presence is the only state read."""
+    return (target / _SERVO_HINT_SHOWN[0] / _SERVO_HINT_SHOWN[1]).exists()
+
+
+def _output_is_interactive() -> bool:
+    """AC6 seam: True iff stdout is a TTY — i.e. the nudge is actually being
+    surfaced to a human. Isolated as a named function so tests can stub it
+    without a real terminal, and so a non-TTY run (CI / headless / piped /
+    sub-agent) does NOT consume the once-per-project budget ("shown != seen")."""
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _mark_servo_hint_shown(target: Path) -> None:
+    """Best-effort write of the `.jig/servo-hint-shown` breadcrumb (AC6). A
+    failure (read-only tree, `.jig` is a file, …) must NEVER block `prepare`
+    or change its exit code — silently give up (worst case: one extra
+    suggestion next land)."""
+    try:
+        marker = target / _SERVO_HINT_SHOWN[0] / _SERVO_HINT_SHOWN[1]
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(
+            marker,
+            "# jig: `/servo:scaffold-init` already suggested for this project "
+            "(spec 072-02). Delete to allow the suggestion again; use "
+            "`.jig/no-servo-hint` to silence servo permanently.\n",
+        )
+    except OSError:
+        pass
+
+
+def render_servo_suggestion(target: Path, test_status: str) -> str:
+    """Render the trailing `## servo` *suggestion* block (072-02), or "" when
+    it must stay silent. Pure (no side effects — the once-per-project marker
+    write is the caller's job, gated on interactivity).
+
+    Silent unless ALL hold: the slice is not doc-only (a test runner was
+    detected — AC4); the target is NOT servo-scaffolded (`.servo/` absent —
+    mutually exclusive with the 072-01 advisory); servo's host-global marker
+    is available (AC1/AC2); the `.jig/no-servo-hint` opt-out is absent; and the
+    `.jig/servo-hint-shown` once-per-project breadcrumb is absent (AC6)."""
+    if test_status == "warn":              # AC4 — doc-only slice, no runner
+        return ""
+    if _servo_present(target):             # 072-01's case, not this one
+        return ""
+    if _servo_hint_opted_out(target):      # explicit permanent opt-out (AC2)
+        return ""
+    if _servo_hint_already_shown(target):  # already suggested here (AC6)
+        return ""
+    if not _servo_available():             # servo never used on this machine
+        return ""
+
+    return (
+        "## servo\n"
+        "\n"
+        "servo is set up on this machine, but this project isn't "
+        "servo-scaffolded (`.servo/` absent). For oracle-gated / headless "
+        "iteration, consider `/servo:scaffold-init`.\n"
+        "\n"
+        "Advisory only — jig runs no servo command. Silence this permanently "
+        "with `.jig/no-servo-hint`."
+    )
+
+
 # ---------- main pipeline ----------
 
 
@@ -659,10 +776,26 @@ def prepare(spec_path: Path, slice_fragment: str,
     # mode block, so it can never alter the exit code (AC4). Filesystem
     # probe of the target only (AC5); silent when servo is absent or the
     # `.jig/no-servo-hint` opt-out is set (AC2/AC6).
-    servo_advisory = render_servo_advisory(target or Path.cwd())
+    # servo coupling (specs 072-01 / 072-02) — both filesystem-only and
+    # appended after `has_blocker` is computed, so neither can alter the exit
+    # code. Mutually exclusive: the present-case advisory fires iff `.servo/`
+    # is present, the unscaffolded-suggestion iff it is absent.
+    servo_target = target or Path.cwd()
+    servo_advisory = render_servo_advisory(servo_target)
     if servo_advisory:
         parts.append("")
         parts.append(servo_advisory)
+
+    # Spec 072-02 — soft, never-gating servo *suggestion* for an unscaffolded
+    # project (servo available on this machine but `.servo/` absent here). The
+    # once-per-project budget is consumed (`.jig/servo-hint-shown` written)
+    # ONLY on an interactive land (AC6), so an unobserved run can't spend it.
+    servo_suggestion = render_servo_suggestion(servo_target, test_status)
+    if servo_suggestion:
+        parts.append("")
+        parts.append(servo_suggestion)
+        if _output_is_interactive():
+            _mark_servo_hint_shown(servo_target)
 
     report = "\n".join(parts) + "\n"
     return report, (1 if has_blocker else 0)

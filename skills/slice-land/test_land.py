@@ -2570,5 +2570,180 @@ class ServoAdvisoryTests(unittest.TestCase):
         self.assertNotIn("hand-rolled", advisory.lower())
 
 
+class ServoSuggestionTests(unittest.TestCase):
+    """Spec 072-02 — soft, non-gating servo *suggestion* for an unscaffolded
+    project.
+
+    The reciprocal of 072-01's advisory: when servo's host-global availability
+    marker is present (servo ADR-0013) but the target is NOT servo-scaffolded
+    (`.servo/` absent), `prepare` suggests `/servo:scaffold-init`. Suppressed on
+    doc-only slices (AC4), when the marker is absent / unreadable / wrong-schema
+    (AC2), when opted out (`.jig/no-servo-hint`, AC2), and when already shown
+    (`.jig/servo-hint-shown`, AC6). The once-per-project budget is consumed
+    (marker written) ONLY on an interactive land (AC6). Never changes the exit
+    code; never invokes servo.
+    """
+
+    def setUp(self):
+        from unittest.mock import patch
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-land-servo-sugg-")
+        self.target = Path(self.tmpdir) / "proj"
+        self.target.mkdir(parents=True)
+        self.state = Path(self.tmpdir) / "state"  # the XDG_STATE_HOME root
+        self.spec = self.target / "spec.md"
+        # Slice label carries NO "servo" substring so absence assertions are
+        # meaningful (mirrors ServoAdvisoryTests).
+        self.spec.write_text(
+            _spec_with_slice("072-02 — unscaffolded-suggestion", "DONE"))
+        self._env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.state)})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ---- fixtures ----
+
+    def _write_marker(self, schema_version: int = 1, raw=None):
+        """Write servo's host-global `available.json` under XDG_STATE_HOME."""
+        marker = self.state / "servo" / "available.json"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        if raw is not None:
+            marker.write_text(raw)
+        else:
+            marker.write_text(
+                '{"schema_version": %d, "plugin_name": "servo", '
+                '"source_kind": "scaffold-init", "source_path": "/x", '
+                '"source_version": "0.4.0", "updated_at": "2026-06-18T00:00:00Z"}\n'
+                % schema_version)
+        return marker
+
+    def _scaffold_servo_here(self):
+        servo = self.target / ".servo"
+        servo.mkdir(parents=True, exist_ok=True)
+        (servo / "install.json").write_text("{}\n")
+
+    def _opt_out(self):
+        d = self.target / ".jig"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "no-servo-hint").write_text("")
+
+    def _already_shown(self):
+        d = self.target / ".jig"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "servo-hint-shown").write_text("")
+
+    # ---- AC1/AC2: render fires only on the precise state ----
+
+    def test_fires_when_available_and_unscaffolded(self):
+        self._write_marker()
+        out = _land.render_servo_suggestion(self.target, "green")
+        self.assertIn("/servo:scaffold-init", out)
+        self.assertIn("## servo", out)
+
+    def test_silent_on_doc_only_slice(self):
+        """AC4 — no test runner detected (test_status 'warn') → suppressed."""
+        self._write_marker()
+        self.assertEqual(_land.render_servo_suggestion(self.target, "warn"), "")
+
+    def test_silent_when_servo_scaffolded_here(self):
+        """Mutual exclusion with 072-01: `.servo/` present → suggestion
+        stays silent (the present-case advisory owns that state)."""
+        self._write_marker()
+        self._scaffold_servo_here()
+        self.assertEqual(_land.render_servo_suggestion(self.target, "green"), "")
+
+    def test_silent_when_marker_absent(self):
+        """AC2 — no host-global marker → servo never used here → silent."""
+        self.assertEqual(_land.render_servo_suggestion(self.target, "green"), "")
+
+    def test_silent_when_marker_wrong_schema(self):
+        self._write_marker(schema_version=2)
+        self.assertEqual(_land.render_servo_suggestion(self.target, "green"), "")
+
+    def test_silent_when_marker_unparseable(self):
+        self._write_marker(raw="not json at all")
+        self.assertEqual(_land.render_servo_suggestion(self.target, "green"), "")
+
+    def test_silent_when_opted_out(self):
+        self._write_marker()
+        self._opt_out()
+        self.assertEqual(_land.render_servo_suggestion(self.target, "green"), "")
+
+    def test_silent_when_already_shown(self):
+        """AC6 — `.jig/servo-hint-shown` present → already suggested → silent."""
+        self._write_marker()
+        self._already_shown()
+        self.assertEqual(_land.render_servo_suggestion(self.target, "green"), "")
+
+    # ---- AC5: no subprocess on the suggestion path ----
+
+    def test_render_makes_no_subprocess(self):
+        from unittest.mock import patch
+        self._write_marker()
+        with patch.object(_land.subprocess, "run",
+                          side_effect=AssertionError("no subprocess allowed")):
+            out = _land.render_servo_suggestion(self.target, "green")
+        self.assertIn("/servo:scaffold-init", out)
+
+    # ---- AC6: once-per-project budget, consumed only when interactive ----
+
+    def _run_prepare(self, interactive: bool):
+        from unittest.mock import patch
+        with patch.object(_land, "check_tests", return_value=("green", 0)), \
+             patch.object(_land, "_output_is_interactive",
+                          return_value=interactive):
+            return _land.prepare(self.spec, "072-02", target=self.target)
+
+    def test_prepare_interactive_shows_and_writes_marker(self):
+        self._write_marker()
+        report, _code = self._run_prepare(interactive=True)
+        self.assertIn("/servo:scaffold-init", report)
+        self.assertTrue((self.target / ".jig" / "servo-hint-shown").exists(),
+                        "interactive land must consume the once-per-project budget")
+
+    def test_prepare_noninteractive_shows_but_does_not_write_marker(self):
+        self._write_marker()
+        report, _code = self._run_prepare(interactive=False)
+        self.assertIn("/servo:scaffold-init", report)
+        self.assertFalse((self.target / ".jig" / "servo-hint-shown").exists(),
+                         "non-interactive land must NOT burn the budget (shown != seen)")
+
+    def test_prepare_round_trip_interactive_then_silent(self):
+        """The write→silence round-trip: interactive land #1 shows the nudge
+        AND writes the marker; land #2 in the same project then goes silent."""
+        self._write_marker()
+        r1, _ = self._run_prepare(interactive=True)
+        self.assertIn("/servo:scaffold-init", r1)
+        self.assertTrue((self.target / ".jig" / "servo-hint-shown").exists())
+        r2, _ = self._run_prepare(interactive=True)
+        self.assertNotIn("/servo:scaffold-init", r2,
+                         "land #2 must be silent once the budget is consumed")
+
+    def test_prepare_marker_write_failure_is_best_effort(self):
+        """`.jig` exists as a FILE → marker write fails → suggestion still
+        shown, no exception, and the exit code is IDENTICAL to a run where
+        servo stays silent (the write failure must not perturb the exit)."""
+        # Baseline: servo silent (no host marker) → exit reflects checks only.
+        _r0, baseline = self._run_prepare(interactive=False)
+        # Now make the marker available AND block the breadcrumb write.
+        self._write_marker()
+        (self.target / ".jig").write_text("i am a file, not a dir")
+        report, code = self._run_prepare(interactive=True)
+        self.assertIn("/servo:scaffold-init", report)
+        self.assertEqual(code, baseline,
+                         "a best-effort marker-write failure must not change the exit code")
+
+    def test_servo_never_changes_exit_code(self):
+        # marker available (servo suggestion fires) vs absent (silent):
+        # the exit code is identical — servo is purely advisory (AC3).
+        self._write_marker()
+        _r1, code_with = self._run_prepare(interactive=False)
+        (self.state / "servo" / "available.json").unlink()
+        _r2, code_without = self._run_prepare(interactive=False)
+        self.assertEqual(code_with, code_without)
+
+
 if __name__ == "__main__":
     unittest.main()

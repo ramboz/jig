@@ -484,3 +484,25 @@ consumption.
   design-fidelity eval. The **visual** rung still needs servo **ADR-0005 extended
   to multimodal input**, but the jig-side spec-gate *integration* is no longer
   demand-gated — it rides the generic review-evidence rails, no servo coupling.
+
+## Amendments
+
+- **2026-06-27 — §5 "absent → no mention" is reversed for the `slice-land`
+  surface (spec [072-02](../specs/072-servo-pull-hint/slice-02-unscaffolded-suggestion.md),
+  DONE).** §5/§6 originally held that jig mentions servo *only* when its infra is
+  present (the supervised-default boundary). The reciprocal servo-side dependency
+  named in Scope ("A reciprocal servo-side ADR — servo's call") shipped as servo
+  **ADR-0013** + servo **spec 014**: a host-global
+  `${XDG_STATE_HOME:-$HOME/.local/state}/servo/available.json` availability
+  marker. With that breadcrumb existing, slice 072-02 reverses §5 **for the
+  slice-land surface only**: when the marker shows servo is set up *on this
+  machine* but the target project is *not* servo-scaffolded (`.servo/` absent),
+  `land.py prepare` emits a single, opt-out-able `/servo:scaffold-init`
+  suggestion. The reversal is narrow and bounded — it is filesystem-only (no
+  servo invocation, so the no-coupling spine is intact), per-machine not
+  per-project (silent on a machine that never used servo), shown at most once per
+  project (the once-per-project budget consumed only on an interactive land), and
+  honored by the `.jig/no-servo-hint` opt-out. The Option-D oracle binding
+  (§2–§5's exit-code discovery for bug/refactor) is untouched and stays PARKED;
+  this amends only the §5 *advertising* rule for the present/missing-infra
+  advisory pair (072-01 + 072-02).

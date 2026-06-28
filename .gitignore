@@ -15,6 +15,11 @@
 # Per-session in-flight decision stubs (slice 083-07) — ephemeral, cleared after
 # each Stop-hook triage; never tracked.
 .jig/decision-scratch/
+# Once-per-project servo-suggestion breadcrumb (slice 072-02) — local "jig
+# already suggested /servo:scaffold-init here" record; per-checkout, must NOT
+# travel across branches/clones (the explicit opt-out `.jig/no-servo-hint` is
+# the tracked one).
+.jig/servo-hint-shown
 
 .DS_Store
 node_modules/

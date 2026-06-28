@@ -1976,6 +1976,10 @@ _GITIGNORE_SECRET_PATTERNS = (
     ".jig/semantic-index-claude-hook.json",
     ".jig/semantic-index-codex-hook.json",
     ".jig/semantic-index-events.jsonl",
+    # Once-per-project servo-suggestion breadcrumb (slice 072-02) — local
+    # "already suggested /servo:scaffold-init here" record; per-checkout, never
+    # tracked (the explicit opt-out .jig/no-servo-hint is the tracked one).
+    ".jig/servo-hint-shown",
 )
 
 
