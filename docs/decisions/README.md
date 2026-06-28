@@ -35,6 +35,8 @@
 - [ADR-0028: Federation composes with existing repo operating models and access providers](adr-0028-federation-workspace-provider-model.md) — Federation must compose with mature multi-repo operating models instead of replacing them. (2026-06-21, Proposed)
 - [ADR-0029: Reconciliation sweep manifest](adr-0029-reconciliation-sweep-manifest.md) — Reconciliation is already the right phase for documentation cleanup: it runs after implementation and review, when the agent knows what actually changed. (2026-06-21, Accepted)
 - [ADR-0030: Minimum supported Python is 3.9](adr-0030-python-39-floor.md) — jig is distributed as a Claude Code / Codex plugin, not a pip package, so it declares no `requires-python`. (2026-06-26, Accepted)
+- [ADR-0031: Load-bearing-decision ADR trigger, single-sourced](adr-0031-load-bearing-decision-adr-trigger.md) — [Spec 083](../specs/083-lightweight-decision-records/spec.md) (Phase 2) captures decisions settled mid-session. (2026-06-26, Accepted)
+- [ADR-0032: Conformance layer — jig owns the canonical↔implementation graph topology](adr-0032-conformance-layer-topology.md) — A recurring, hard problem when an LLM builds a UI incrementally from a canonical design (e.g. Claude Design `.dc.html` exports + a prose `design-system.md` token contract): **each slice must be locally scoped but globally convergent.** You hold complete final mocks, but specs/slices implement portions — and you need the app to *converge* toward the final design rather than become a pile of individually-correct but collectively-inconsistent screens. (2026-06-27, Proposed)
 
 ## Lightweight decisions
 
