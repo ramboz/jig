@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.3.0](https://github.com/ramboz/jig/compare/v2.2.0...v2.3.0) (2026-06-29)
+
+
+### Features
+
+* **slice-land:** servo unscaffolded-suggestion (spec 072-02) ([e040a45](https://github.com/ramboz/jig/commit/e040a45c91090b69241ce69d8be82b238909730c))
+
+
+### Bug Fixes
+
+* **workflow:** warn on stale branch base ([fe413ce](https://github.com/ramboz/jig/commit/fe413ce5b5fb193907b6d81d82df2a71e0bbed91))
+
+
+### Documentation
+
+* **decisions:** ADR-0024 — add rewrite disposition + emergent-work section (reframe n=2) ([be2ea25](https://github.com/ramboz/jig/commit/be2ea259413db73317e3d357e60ea267bb5be340))
+* **decisions:** ADR-0032 (Proposed) — conformance-layer topology half ([966c870](https://github.com/ramboz/jig/commit/966c870032cb91b76333e58c7c0b72ae057dc1b0))
+
 ## [2.2.0](https://github.com/ramboz/jig/compare/v2.1.0...v2.2.0) (2026-06-27)
 
 
