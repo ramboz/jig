@@ -46,7 +46,9 @@ VALID_BUG_STATUSES = (
     "VERIFIED",
     "DONE",
     "ESCALATED",
+    "RESOLVED_ON_MAIN",
 )
+VALID_MAIN_REPRO_RESULTS = ("reproduces", "resolved_on_main")
 OPEN_STATUSES = {
     "REPORTED",
     "DIAGNOSING",
@@ -204,6 +206,9 @@ def _record_text(number: int, slug: str, claimed_by: str) -> str:
         "severity:",
         f"claimed_by: {claimed_by}",
         "regression_test:",
+        "main_repro_checked_at:",
+        "main_repro_ref:",
+        "main_repro_result:",
         "red_confirmed_at:",
         "green_confirmed_at:",
         "fix_class:",
@@ -545,6 +550,38 @@ def _append_already_tried(text: str, message: str) -> str:
     return text[:insert_at] + "\n" + entry + text[insert_at:]
 
 
+def _append_main_recheck(text: str, ref: str, result: str, evidence: str) -> str:
+    entry = (
+        f"- {_today()} - `{ref}` -> {result}: "
+        f"{evidence.strip() or '(no evidence note)'}\n"
+    )
+    body = text.rstrip("\n")
+    if "## Main recheck" in text:
+        return body + "\n" + entry
+    return body + "\n\n## Main recheck\n\n" + entry
+
+
+def _main_recheck_gaps(fields: dict) -> list[str]:
+    checked_at = str(fields.get("main_repro_checked_at") or "").strip()
+    ref = str(fields.get("main_repro_ref") or "").strip()
+    result = str(fields.get("main_repro_result") or "").strip()
+    gaps = []
+    if not checked_at:
+        gaps.append("main_repro_checked_at")
+    if not ref:
+        gaps.append("main_repro_ref")
+    if not result:
+        gaps.append("main_repro_result")
+    elif result == "resolved_on_main":
+        gaps.append("main recheck says the bug is resolved on main")
+    elif result != "reproduces":
+        gaps.append(
+            "main_repro_result must be reproduces before FIXING "
+            f"(got {result!r})"
+        )
+    return gaps
+
+
 def _validate_order(current: str, new_status: str) -> None:
     if new_status not in VALID_BUG_STATUSES:
         raise BugError(
@@ -579,6 +616,15 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
             )
 
     if new_status == "FIXING":
+        if _gate_enabled("JIG_BUG_MAIN_CHECK_GATE"):
+            gaps = _main_recheck_gaps(fields)
+            if gaps:
+                raise BugError(
+                    "main recheck required before FIXING: " + ", ".join(gaps)
+                    + ". Run `bug.py main-check <id> --result reproduces "
+                    "--ref origin/main@<sha> --evidence \"...\"` after "
+                    "checking fresh origin/main."
+                )
         fix_class = str(fields.get("fix_class") or "").strip()
         if fix_class not in VALID_FIX_CLASSES:
             raise BugError(
@@ -657,6 +703,42 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
             )
 
     text = set_frontmatter_field(text, "status", new_status)
+    atomic_write_text(path, text)
+    return path
+
+
+def record_main_check(
+    project_dir: Path,
+    ident: str,
+    result: str,
+    ref: str,
+    evidence: str,
+) -> Path:
+    result = result.strip().lower().replace("-", "_")
+    if result not in VALID_MAIN_REPRO_RESULTS:
+        raise BugError(
+            "main-check --result must be one of: reproduces, resolved-on-main"
+        )
+    if not evidence.strip():
+        raise BugError(
+            'main-check requires --evidence "<repro command + observed outcome>"'
+        )
+    ref = ref.strip() or "origin/main"
+    path = _resolve_bug(project_dir, ident)
+    text = path.read_text()
+    fields, _ = parse_frontmatter(text)
+    current = str(fields.get("status") or "").strip()
+    if current != "ROOT_CAUSED":
+        raise BugError(
+            "main-check runs after ROOT_CAUSED and before FIXING "
+            f"(current status: {current or '(empty)'})"
+        )
+    text = set_frontmatter_field(text, "main_repro_checked_at", _today())
+    text = set_frontmatter_field(text, "main_repro_ref", ref)
+    text = set_frontmatter_field(text, "main_repro_result", result)
+    text = _append_main_recheck(text, ref, result, evidence)
+    if result == "resolved_on_main":
+        text = set_frontmatter_field(text, "status", "RESOLVED_ON_MAIN")
     atomic_write_text(path, text)
     return path
 
@@ -756,13 +838,14 @@ def _bug_rows(project_dir: Path) -> list[dict[str, str]]:
         bug_id, slug = _bug_id_and_slug(path)
         fields, _ = parse_frontmatter(path.read_text())
         red = str(fields.get("red_confirmed_at") or "").strip()
+        main_result = str(fields.get("main_repro_result") or "").strip()
         rows.append({
             "id": bug_id,
             "slug": slug,
             "severity": str(fields.get("severity") or "").strip(),
             "tier": str(fields.get("tier") or "").strip(),
             "status": str(fields.get("status") or "").strip(),
-            "reproduces": "yes" if red else "no",
+            "reproduces": "yes" if red or main_result == "reproduces" else "no",
             "regression_test": str(fields.get("regression_test") or "").strip(),
             "claimed_by": str(fields.get("claimed_by") or "").strip(),
             "escalated_to": str(fields.get("escalated_to") or "").strip(),
@@ -839,6 +922,35 @@ def _build_parser() -> argparse.ArgumentParser:
     transition_p.add_argument("id")
     transition_p.add_argument("status")
 
+    main_check_p = sub.add_parser(
+        "main-check",
+        parents=[project_parent],
+        help=(
+            "record the post-root-cause check against fresh origin/main "
+            "before FIXING"
+        ),
+    )
+    main_check_p.add_argument("id")
+    main_check_p.add_argument(
+        "--result",
+        required=True,
+        choices=("reproduces", "resolved-on-main"),
+        help=(
+            "whether the original repro still fails on main or has already "
+            "been resolved there"
+        ),
+    )
+    main_check_p.add_argument(
+        "--ref",
+        default="origin/main",
+        help="main ref/SHA that was checked (default: origin/main)",
+    )
+    main_check_p.add_argument(
+        "--evidence",
+        required=True,
+        help="short note naming the repro command or observed outcome",
+    )
+
     escalate_p = sub.add_parser(
         "escalate", parents=[project_parent],
         help="escalate a bug to a spec and mark it ESCALATED",
@@ -876,6 +988,11 @@ def main(argv: list[str] | None = None) -> int:
             print(path.relative_to(project_dir))
         elif ns.command == "transition":
             path = transition_bug(project_dir, ns.id, ns.status)
+            print(path.relative_to(project_dir))
+        elif ns.command == "main-check":
+            path = record_main_check(
+                project_dir, ns.id, ns.result, ns.ref, ns.evidence,
+            )
             print(path.relative_to(project_dir))
         elif ns.command == "escalate":
             path = escalate_bug(project_dir, ns.id, ns.slug)

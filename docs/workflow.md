@@ -41,7 +41,9 @@ different shape of work, plus the no-ceremony floor:
   **trivial** bug (typo, one-liner, mechanical) is bowed out — write the
   failing test with `tdd-loop`, fix, and commit; **no record**. **Standard**
   and **gnarly** bugs get the durable `docs/bugs/NNN-slug.md` record, the
-  diagnose-before-fix gate (≥2 hypotheses), and the red→green teeth.
+  diagnose-before-fix gate (≥2 hypotheses), a fresh-main recheck after
+  `ROOT_CAUSED` so parallel sessions do not duplicate already-landed fixes,
+  and the red→green teeth.
 - **Spec-shaped work** — a hard-to-reverse decision, a cross-layer change, or
   new/ambiguous-scope behaviour: the job is to *specify intended behaviour and
   split it into vertical slices*. This goes through **`spec-workflow`** (the

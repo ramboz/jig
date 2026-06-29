@@ -80,6 +80,9 @@ class BugCoreTests(unittest.TestCase):
             "tier",
             "severity",
             "regression_test",
+            "main_repro_checked_at",
+            "main_repro_ref",
+            "main_repro_result",
             "red_confirmed_at",
             "green_confirmed_at",
             "fix_class",
@@ -200,6 +203,30 @@ class BugCoreTests(unittest.TestCase):
         self.assertIn("tests/test_alpha.py::test_bug", text)
         self.assertIn("keep me", text)
 
+    def test_status_board_counts_main_recheck_as_reproducing(self):
+        write(self._bug("001-alpha.md"), (
+            "---\n"
+            "status: ROOT_CAUSED\n"
+            "severity: high\n"
+            "tier: standard\n"
+            "claimed_by: wt-alpha\n"
+            "regression_test: tests/test_alpha.py::test_bug\n"
+            "main_repro_checked_at: 2026-06-29\n"
+            "main_repro_ref: origin/main@abc123\n"
+            "main_repro_result: reproduces\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            "fix_class: local_patch\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            "---\n\n"
+            "## Symptom\n"
+        ))
+        r = run_bug("status-board", "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = (self.root / "docs" / "bugs" / "README.md").read_text()
+        self.assertIn("| 001 | alpha | high | standard | ROOT_CAUSED | yes |", text)
+
     def test_pickup_refuses_foreign_open_claim(self):
         write(self._bug("001-alpha.md"), (
             "---\n"
@@ -268,7 +295,8 @@ class BugTransitionTests(unittest.TestCase):
                    fix_class: str = "", regression_test: str = "tests/test_alpha.py::test_bug",
                    evidence: str = "trace: log line 7",
                    hypotheses: str = "- [ ] cache race\n- [x] parser bug\n",
-                   security_surface: str = "false") -> Path:
+                   security_surface: str = "false",
+                   main_repro_result: str = "reproduces") -> Path:
         return write(self._bug(), (
             "---\n"
             f"status: {status}\n"
@@ -276,6 +304,9 @@ class BugTransitionTests(unittest.TestCase):
             f"tier: {tier}\n"
             "claimed_by: wt-alpha\n"
             f"regression_test: {regression_test}\n"
+            f"main_repro_checked_at: {'2026-06-29' if main_repro_result else ''}\n"
+            f"main_repro_ref: {'origin/main@abc123' if main_repro_result else ''}\n"
+            f"main_repro_result: {main_repro_result}\n"
             "red_confirmed_at:\n"
             "green_confirmed_at:\n"
             f"fix_class: {fix_class}\n"
@@ -407,6 +438,112 @@ class BugTransitionTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("fix_class", r.stderr)
         self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_fixing_requires_main_recheck_after_root_caused(self):
+        self._write_bug(
+            status="ROOT_CAUSED",
+            fix_class="local_patch",
+            main_repro_result="",
+        )
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("main recheck required", r.stderr)
+        self.assertIn("main_repro_result", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_main_check_reproduces_stamps_fields_and_allows_fixing(self):
+        self._write_bug(
+            status="ROOT_CAUSED",
+            fix_class="local_patch",
+            main_repro_result="",
+        )
+        r = run_bug(
+            "main-check", "001", "--result", "reproduces",
+            "--ref", "origin/main@def456",
+            "--evidence", "original reported repro still fails",
+            "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields = self._fm()
+        self.assertEqual(fields["status"], "ROOT_CAUSED")
+        self.assertEqual(fields["main_repro_ref"], "origin/main@def456")
+        self.assertEqual(fields["main_repro_result"], "reproduces")
+        self.assertRegex(fields["main_repro_checked_at"], r"\d{4}-\d{2}-\d{2}")
+        self.assertIn("original reported repro still fails", self._bug().read_text())
+
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd(1))},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_main_check_requires_evidence_note(self):
+        self._write_bug(
+            status="ROOT_CAUSED",
+            fix_class="local_patch",
+            main_repro_result="",
+        )
+        r = run_bug(
+            "main-check", "001", "--result", "reproduces",
+            "--ref", "origin/main@def456",
+            "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("required", r.stderr)
+        self.assertIn("--evidence", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_main_check_resolved_on_main_marks_terminal_status(self):
+        self._write_bug(
+            status="ROOT_CAUSED",
+            fix_class="local_patch",
+            main_repro_result="",
+        )
+        r = run_bug(
+            "main-check", "001", "--result", "resolved-on-main",
+            "--ref", "origin/main@def456",
+            "--evidence", "original reported repro no longer fails",
+            "--project-dir", str(self.root),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields = self._fm()
+        self.assertEqual(fields["status"], "RESOLVED_ON_MAIN")
+        self.assertEqual(fields["main_repro_result"], "resolved_on_main")
+        self.assertIn("original reported repro no longer fails", self._bug().read_text())
+
+    def test_direct_transition_cannot_mark_resolved_on_main_without_check(self):
+        self._write_bug(
+            status="ROOT_CAUSED",
+            fix_class="local_patch",
+            main_repro_result="",
+        )
+        r = run_bug(
+            "transition", "001", "RESOLVED_ON_MAIN",
+            "--project-dir", str(self.root),
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("invalid transition", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_main_recheck_gate_bypass_allows_fixing_without_stamp(self):
+        self._write_bug(
+            status="ROOT_CAUSED",
+            fix_class="local_patch",
+            main_repro_result="",
+        )
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={
+                "JIG_BUG_MAIN_CHECK_GATE": "0",
+                "JIG_TDD_HELPER": str(self._fake_tdd(1)),
+            },
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
 
     def test_fixing_red_gate_stamps_red_confirmed_at(self):
         self._write_bug(status="ROOT_CAUSED", fix_class="local_patch")

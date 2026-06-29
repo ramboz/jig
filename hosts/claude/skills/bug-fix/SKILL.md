@@ -4,8 +4,8 @@ description: >
   Drive the proportional, teeth-gated bug-fix lifecycle for bug-shaped work —
   a reported defect that needs rigor without spec ceremony. Diagnose the true
   root cause, prove it, prevent regression: REPORTED → DIAGNOSING → ROOT_CAUSED
-  → FIXING → REVIEWED → (VERIFIED) → DONE, with an ESCALATED off-ramp when the
-  "bug" turns out to be a missing behaviour. Backed by `bug.py` (sibling of
+  → FIXING → REVIEWED → (VERIFIED) → DONE, with off-ramps for ESCALATED
+  missing behaviour and RESOLVED_ON_MAIN parallel-session fixes. Backed by `bug.py` (sibling of
   `workflow.py`), a durable `docs/bugs/NNN-slug.md` record, and mechanized
   gates — a diagnose-before-fix gate (≥2 hypotheses) and a red→green gate that
   witnesses the regression test fail before the fix and pass after. Auto-fires
@@ -35,6 +35,8 @@ user-invocable: true
   enforces the teeth gates (diagnose-before-fix; red→green).
 - Coordinates reviewer-subagent passes (bug-review, craft, conditional
   security) at `→ REVIEWED`, validated by the ADR-0014 evidence gate.
+- Rechecks fresh main after `ROOT_CAUSED` and before `FIXING` so a stale
+  parallel session does not re-fix a bug already solved on trunk.
 - Provides the first-class escalation seam (`bug.py escalate`) for when a bug
   turns out to be a missing or under-specified behaviour.
 - Imports the diagnose-first discipline (the diagnostic question,
@@ -82,6 +84,7 @@ it be worth keeping? If yes, it is at least standard.
 
 ```
 REPORTED → DIAGNOSING → ROOT_CAUSED → FIXING → REVIEWED → (VERIFIED) → DONE
+                  │              └─ main already clean → RESOLVED_ON_MAIN
                   └──────────────── escalate → ESCALATED (→ spec NNN)
 ```
 
@@ -92,27 +95,35 @@ FIXING` (review needs changes), and a failed green-check or a
 attempt forward as new evidence (append it to `## Already tried` — it flows
 into `learnings.md` at close).
 
+`RESOLVED_ON_MAIN` is terminal: after the root cause is understood, the
+session checks fresh `origin/main` before starting the fix. If the original
+reported repro no longer fails there, another session already solved it; the
+bug record is closed as resolved on main instead of generating a duplicate
+patch.
+
 ### The teeth gates
 
 `bug.py transition` enforces presence/shape, never quality (quality is the
 reviewer's job). Each gate is bypassable as a deliberate act
-(ADR-0011 lineage) — two separate env vars so one can be relaxed without the
-other.
+(ADR-0011 lineage) — separate env vars so one gate can be relaxed without
+silently relaxing the others.
 
 | Transition | Gate | Bypass |
 |---|---|---|
 | `→ ROOT_CAUSED` | ≥2 candidate hypotheses + a leading one + an evidence pointer | `JIG_BUG_DIAGNOSE_GATE=0` |
-| `→ FIXING` | `fix_class` declared **and** the `regression_test` runs **red** (shells to `tdd.py`, expects exit 1; stamps `red_confirmed_at`) | `JIG_BUG_TEST_GATE=0` |
+| `ROOT_CAUSED → FIXING` | fresh-main recheck recorded as `main_repro_result: reproduces`; `fix_class` declared; `regression_test` runs **red** (shells to `tdd.py`, expects exit 1; stamps `red_confirmed_at`) | `JIG_BUG_MAIN_CHECK_GATE=0` (main recheck), `JIG_BUG_TEST_GATE=0` (test) |
 | `→ REVIEWED` | the same `regression_test` now runs **green** (shells to `tdd.py`, expects exit 0; stamps `green_confirmed_at`) **and** the required review verdicts pass | `JIG_BUG_TEST_GATE=0` (test), `JIG_REVIEW_EVIDENCE_GATE=0` (verdicts) |
 | `→ VERIFIED` | original reported repro re-run clean (gnarly/security only), attested in the record | — |
 | `→ DONE` | required review verdicts pass + a learning recorded in `docs/memory/learnings.md` | `JIG_REVIEW_EVIDENCE_GATE=0` |
 
-**The two distinctive gates** are the diagnose gate (the ≥2-hypotheses
-anti-anchoring rule) and the **red→green teeth**: the helper itself witnesses
-the test fail before the fix and pass after, so "there is a regression test"
-is machine-attested, not claimed. A test already green without the fix does
-not capture the bug — the `→ FIXING` gate refuses it. A `tdd.py` env error
-(exit 2) **fails closed** (gate not satisfied), distinct from red.
+**The three distinctive gates** are the diagnose gate (the ≥2-hypotheses
+anti-anchoring rule), the fresh-main recheck after root cause, and the
+**red→green teeth**: the helper itself witnesses the test fail before the fix
+and pass after, so "there is a regression test" is machine-attested, not
+claimed. A bug already clean on fresh main becomes `RESOLVED_ON_MAIN`; a test
+already green without the fix does not capture the bug — the `→ FIXING` gate
+refuses it. A `tdd.py` env error (exit 2) **fails closed** (gate not
+satisfied), distinct from red.
 
 `fix_class` (declared at `→ FIXING`) is one of `workaround` / `local_patch` /
 `structural_fix` / `guardrail` / `observability`.
@@ -162,13 +173,35 @@ In **`diagnose` mode, stop here** and present the root cause.
 ### 3. Fix (`→ FIXING → REVIEWED`), `diagnose_and_fix` mode
 
 1. Declare `fix_class:` and name the `regression_test:` in the record.
-2. Write the regression test FIRST (it must fail without the fix — that is
+2. Recheck fresh main before writing the fix. Fetch/inspect `origin/main`
+   (usually from a detached worktree) and re-run the original reported repro.
+   Then record the outcome:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" main-check <id> \
+     --result reproduces \
+     --ref origin/main@<sha> \
+     --evidence "<original repro command + observed failure>"
+   ```
+
+   If the bug no longer reproduces on fresh main, record the terminal off-ramp
+   and stop:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" main-check <id> \
+     --result resolved-on-main \
+     --ref origin/main@<sha> \
+     --evidence "<original repro command + observed clean result>"
+   ```
+
+3. Write the regression test FIRST (it must fail without the fix — that is
    what the `→ FIXING` gate witnesses). Use `/jig:tdd-loop` for the red→green
    loop.
-3. `transition <id> FIXING` — the gate shells to `tdd.py` and expects the test
-   **red**; it stamps `red_confirmed_at`.
-4. Implement the smallest change the diagnosis supports. Make the test green.
-5. Run the review passes (below), record their verdicts, then
+4. `transition <id> FIXING` — the gate requires the fresh-main recheck above,
+   then shells to `tdd.py` and expects the test **red**; it stamps
+   `red_confirmed_at`.
+5. Implement the smallest change the diagnosis supports. Make the test green.
+6. Run the review passes (below), record their verdicts, then
    `transition <id> REVIEWED` — the gate shells to `tdd.py` and expects the
    test **green** (stamps `green_confirmed_at`), then validates the verdicts.
 
@@ -266,12 +299,16 @@ commit.
 - **The `→ FIXING` gate refuses an already-green test.** A regression test
   that passes without the fix does not capture the bug. Write the test to fail
   first.
+- **The `→ FIXING` gate also refuses a stale trunk check.** After
+  `ROOT_CAUSED`, record `bug.py main-check … --result reproduces` against
+  fresh `origin/main`; if the repro is clean there, mark
+  `RESOLVED_ON_MAIN` and stop.
 - **`tdd.py` env error fails the gate closed** (exit 2 ≠ red). Fix the
   environment; don't bypass blindly.
 - **Bypass env vars are deliberateness escapes, not the default.**
-  `JIG_BUG_DIAGNOSE_GATE=0` / `JIG_BUG_TEST_GATE=0` /
-  `JIG_REVIEW_EVIDENCE_GATE=0` are for out-of-band flows — using them silently
-  defeats the teeth.
+  `JIG_BUG_DIAGNOSE_GATE=0` / `JIG_BUG_MAIN_CHECK_GATE=0` /
+  `JIG_BUG_TEST_GATE=0` / `JIG_REVIEW_EVIDENCE_GATE=0` are for out-of-band
+  flows — using them silently defeats the teeth.
 - **Escalate, don't grind.** A bug whose fix introduces new routing/landing
   semantics or a missing behaviour is a spec — use the escalation seam.
 - **`bug.py` never spawns subagents.** The host/orchestrator runs the reviewer
