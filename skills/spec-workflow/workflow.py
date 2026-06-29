@@ -1008,6 +1008,54 @@ def _project_root_for_spec(spec_md: Path) -> Path:
     return resolved.parent
 
 
+def _branch_freshness_warning(project_dir: Path) -> str:
+    """Return a one-line warning when HEAD is behind fetched origin/main.
+
+    This is deliberately soft. Review/reconcile may run offline or in local-only
+    repos, so no-origin and git/fetch/count failures do not block transitions.
+    """
+    try:
+        origin = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, cwd=str(project_dir),
+        )
+    except FileNotFoundError:
+        return ""
+    if origin.returncode != 0 or not origin.stdout.strip():
+        return ""
+
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        capture_output=True, text=True, cwd=str(project_dir),
+    )
+    if fetch.returncode != 0:
+        detail = fetch.stderr.strip() or fetch.stdout.strip() or "unknown error"
+        return (
+            "warning: could not fetch `origin/main`; review/reconcile test "
+            f"results are against the local view ({detail})."
+        )
+
+    count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD..origin/main"],
+        capture_output=True, text=True, cwd=str(project_dir),
+    )
+    if count.returncode != 0:
+        return ""
+    try:
+        behind = int(count.stdout.strip())
+    except ValueError:
+        return ""
+    if behind <= 0:
+        return ""
+
+    commits = "commit" if behind == 1 else "commits"
+    return (
+        f"warning: current branch is {behind} {commits} behind `origin/main`; "
+        "integrate before review/reconcile/landing. Test results against a "
+        "stale base may misattribute failures to main."
+    )
+
+
 def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                push: bool = False, pr_mode: bool = False,
                release: bool = False, reason: str | None = None) -> str:
@@ -1066,6 +1114,12 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
             f"invalid transition: DEFERRED → {new_status}. "
             f"From DEFERRED, only DRAFT (re-open) is allowed."
         )
+
+    if new_status in {"REVIEWED", "RECONCILED"}:
+        freshness_warning = _branch_freshness_warning(
+            _project_root_for_spec(spec_md))
+        if freshness_warning:
+            sys.stderr.write(freshness_warning.rstrip() + "\n")
 
     # Slice 049-01: claim context. Claims live in slice frontmatter, so the
     # claim machinery is a no-op for legacy prose-only (no-frontmatter)

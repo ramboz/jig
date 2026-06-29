@@ -6,6 +6,14 @@
 >
 > Update via `/jig:memory-sync` during reconciliation.
 
+## Bug 001: stale-base failures need a branch graph check, not only test output
+
+When review/reconcile tests fail on a long-lived worktree, the first question
+is whether the branch contains current `origin/main`. Test output from a stale
+base can make already-fixed failures look like current main failures. Surface a
+non-blocking `HEAD..origin/main` warning before review/reconcile/land, and
+verify against a freshly fetched base before recording "pre-existing on main."
+
 ## Hook PATH injection does not apply to hook commands
 
 `bin/` scripts are added to PATH for the **Bash tool only**, not for hook `command` fields.

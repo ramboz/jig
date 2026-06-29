@@ -30,15 +30,15 @@ skill provides a deterministic landing path:
   (in `--mode direct` or `--mode pr`) a Next-steps section of suggested
   git commands.
 
-`prepare` is **read-only on git state** (only `git rev-parse
---abbrev-ref HEAD` runs, to populate the branch name in the suggested
-commands).  `execute --mode direct` runs the destructive merge sequence
-by pushing the current branch to `origin/main`, then fast-forwards the
-canonical local `main` worktree to `origin/main` or reports why local sync
-was skipped (slice 007-02 + 081-01); `execute --mode pr` runs the
-destructive push + PR-open sequence
-(slice 007-03).  `git worktree remove` and `gh pr merge` are never
-executed — both stay user-driven post-landing suggestions.
+`prepare` is **non-destructive on git state**: it may read branch state and
+fetch `origin/main` to surface a branch-freshness warning, but it never
+switches branches, merges, pushes, or removes worktrees.  `execute --mode
+direct` runs the destructive merge sequence by pushing the current branch to
+`origin/main`, then fast-forwards the canonical local `main` worktree to
+`origin/main` or reports why local sync was skipped (slice 007-02 + 081-01);
+`execute --mode pr` runs the destructive push + PR-open sequence (slice
+007-03).  `git worktree remove` and `gh pr merge` are never executed — both
+stay user-driven post-landing suggestions.
 
 ## How to use
 

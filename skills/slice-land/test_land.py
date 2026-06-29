@@ -397,6 +397,65 @@ class ModeTests(unittest.TestCase):
         self.assertRegex(out, r"git push origin \S+:main")
 
 
+# -------------------- BranchFreshnessWarningTests --------------------
+
+
+class PrepareBranchFreshnessWarningTests(unittest.TestCase):
+    """Bug 001 / issue #62 — stale feature branches must be visible before
+    reviewers interpret test failures."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-land-freshness-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(_spec_with_slice("062-01 — freshness", "DONE"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_prepare_warns_when_branch_behind_origin_main(self):
+        from unittest.mock import patch
+        warning = (
+            "## Branch freshness\n\n"
+            "warning: current branch is 3 commits behind `origin/main`; "
+            "integrate before review/reconcile/landing. Test results against "
+            "a stale base may misattribute failures to main."
+        )
+        with patch.object(_land, "_branch_freshness_warning",
+                          return_value=warning):
+            report, code = _land.prepare(
+                self.spec, "062-01", target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("## Branch freshness", report)
+        self.assertIn("3 commits behind `origin/main`", report)
+        self.assertIn("stale base", report)
+
+    def test_branch_freshness_warning_fetches_and_counts_origin_gap(self):
+        from unittest.mock import patch
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            if args[:4] == ["git", "config", "--get", "remote.origin.url"]:
+                return _make_subprocess_mock(
+                    returncode=0, stdout="git@github.com:org/repo.git\n")
+            if args[:4] == ["git", "fetch", "origin", "main"]:
+                return _make_subprocess_mock(returncode=0)
+            if args[:4] == ["git", "rev-list", "--count", "HEAD..origin/main"]:
+                return _make_subprocess_mock(returncode=0, stdout="4\n")
+            return _make_subprocess_mock(returncode=1)
+
+        with patch.object(_land.subprocess, "run", side_effect=fake_run):
+            warning = _land._branch_freshness_warning(Path(self.tmpdir))
+
+        self.assertIn("4 commits behind `origin/main`", warning)
+        self.assertIn("stale base", warning)
+        self.assertIn(["git", "fetch", "origin", "main"], calls)
+        self.assertIn(
+            ["git", "rev-list", "--count", "HEAD..origin/main"], calls)
+
+
 # -------------------- PrBodyTests --------------------
 
 

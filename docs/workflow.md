@@ -257,6 +257,12 @@ check is skipped. The 003-04 auto-tick of the two review-passed DoD boxes
 still happens, but now **after** the gate clears, so a ticked box always
 has passing evidence behind it.
 
+Review/reconcile test failures are only evidence about the checked-out base.
+Before recording a failure as "pre-existing on main", fetch `origin/main` and
+verify that the current branch contains it (or merge/rebase and re-run). The
+helpers surface a soft warning when `HEAD..origin/main` is non-empty, because a
+stale base can make already-fixed failures look like current `main` failures.
+
 ### Recovering from a failed review
 
 A `fail` or `needs-changes` verdict blocks the `REVIEWED` transition (and a

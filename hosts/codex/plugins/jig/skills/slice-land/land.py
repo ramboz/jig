@@ -24,12 +24,13 @@ Exit codes:
   1 — at least one check failed (report still emits; blockers listed).
   2 — user error (missing spec, ambiguous fragment, invalid --mode).
 
-prepare: does NOT mutate git state. Mode-specific next-steps appear as
-  suggested commands the user copy-pastes. The only write is the PR body
-  file (mode=pr). Read-only `git rev-parse --abbrev-ref HEAD` is permitted.
-  A soft, never-gating servo advisory (spec 072-01) may trail the report
-  when `.servo/` is present in the target — filesystem-probed only (no
-  subprocess), opt-out via `.jig/no-servo-hint`; it never alters the exit code.
+prepare: does NOT run destructive git operations. Mode-specific next-steps
+  appear as suggested commands the user copy-pastes. The only file write is the
+  PR body file (mode=pr). Read-only git probes are permitted, and prepare may
+  fetch `origin/main` to render a soft branch-freshness warning. A soft,
+  never-gating servo advisory (spec 072-01) may trail the report when `.servo/`
+  is present in the target — filesystem-probed only (no subprocess), opt-out
+  via `.jig/no-servo-hint`; it never alters the exit code.
 
 execute --mode direct: DOES mutate git state. Runs
   `git push origin <branch>:main` from the current worktree, then fetches /
@@ -697,6 +698,58 @@ def render_servo_suggestion(target: Path, test_status: str) -> str:
 # ---------- main pipeline ----------
 
 
+def _branch_freshness_warning(target: Path) -> str:
+    """Best-effort stale-base warning for review/reconcile/land prep.
+
+    Returns a markdown section when the current HEAD is behind freshly fetched
+    `origin/main`; otherwise returns an empty string. This is advisory only:
+    absence of git, no origin remote, missing origin/main, or an unparsable
+    count never blocks landing readiness.
+    """
+    try:
+        origin = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, cwd=str(target),
+        )
+    except FileNotFoundError:
+        return ""
+    if origin.returncode != 0 or not origin.stdout.strip():
+        return ""
+
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        capture_output=True, text=True, cwd=str(target),
+    )
+    if fetch.returncode != 0:
+        detail = fetch.stderr.strip() or fetch.stdout.strip() or "unknown error"
+        return (
+            "## Branch freshness\n\n"
+            "warning: could not fetch `origin/main`; test results are "
+            f"against the local view ({detail})."
+        )
+
+    count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD..origin/main"],
+        capture_output=True, text=True, cwd=str(target),
+    )
+    if count.returncode != 0:
+        return ""
+    try:
+        behind = int(count.stdout.strip())
+    except ValueError:
+        return ""
+    if behind <= 0:
+        return ""
+
+    commits = "commit" if behind == 1 else "commits"
+    return (
+        "## Branch freshness\n\n"
+        f"warning: current branch is {behind} {commits} behind `origin/main`; "
+        "integrate before review/reconcile/landing. Test results against a "
+        "stale base may misattribute failures to main."
+    )
+
+
 def prepare(spec_path: Path, slice_fragment: str,
             mode: str | None = None, target: Path | None = None,
             skip_deviation_log: bool = False) -> tuple:
@@ -737,6 +790,12 @@ def prepare(spec_path: Path, slice_fragment: str,
     if blockers:
         parts.append("")
         parts.append(blockers)
+
+    freshness_target = target or Path.cwd()
+    freshness_warning = _branch_freshness_warning(freshness_target)
+    if freshness_warning:
+        parts.append("")
+        parts.append(freshness_warning)
 
     # Determine pass/fail. Warnings (`warn`) don't block.
     # Slice 019-01: --no-deviation-log demotes the deviation-log

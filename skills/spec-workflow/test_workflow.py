@@ -5691,6 +5691,32 @@ class TransitionReviewedGateTests(_GateFixture):
                          f"design-review should not be required; stderr={r.stderr}")
 
 
+class TransitionBranchFreshnessWarningTests(_GateFixture):
+    """Bug 001 / issue #62 — review/reconcile transitions should surface a
+    stale base before failures are recorded as main breakage."""
+
+    def test_reviewed_emits_branch_freshness_warning_without_blocking(self):
+        self.write_slice("IN_PROGRESS")
+        import io
+        from unittest.mock import patch
+        captured = io.StringIO()
+        warning = (
+            "warning: current branch is 2 commits behind `origin/main`; "
+            "integrate before review/reconcile/landing. Test results against "
+            "a stale base may misattribute failures to main."
+        )
+
+        with patch.dict(os.environ, {"JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             patch.object(_workflow, "_branch_freshness_warning",
+                          return_value=warning), \
+             patch.object(_workflow.sys, "stderr", captured):
+            _workflow.transition(self.spec_md, "045-01", "REVIEWED")
+
+        self.assertEqual(self._status_in_slice(), "REVIEWED")
+        self.assertIn("2 commits behind `origin/main`", captured.getvalue())
+        self.assertIn("stale base", captured.getvalue())
+
+
 class TransitionReconciledGateTests(_GateFixture):
     """AC2: RECONCILED needs the reconciliation verdict, deviation log, and
     reconciliation sweep."""
