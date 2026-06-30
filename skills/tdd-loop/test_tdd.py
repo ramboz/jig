@@ -129,6 +129,23 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "jest")
 
+    # ---- node built-in test runner signals ----
+
+    def test_node_via_package_json_test_script(self):
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "node")
+
+    def test_node_via_shallow_node_test_import(self):
+        write(self.target / "test" / "sample.test.mjs",
+              "import { test } from 'node:test';\n"
+              "test('works', () => {});\n")
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "node")
+
     # ---- priority rules ----
 
     def test_priority_pytest_over_jest(self):
@@ -151,6 +168,22 @@ class DetectTests(unittest.TestCase):
         r = run_tdd("detect", str(self.target))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "vitest")
+
+    def test_priority_vitest_over_node(self):
+        write(self.target / "vitest.config.ts", "")
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "vitest")
+
+    def test_priority_jest_over_node(self):
+        write(self.target / "jest.config.js", "")
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "jest")
 
     # ---- no-signal cases ----
 
@@ -343,12 +376,37 @@ class TargetedRunTests(unittest.TestCase):
             "npx", "jest", "tests/foo.test.js", "-t", "does the thing",
         ])
 
+    def test_node_selector_maps_file_and_test_name(self):
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (0, "")
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.mjs::does the thing")
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv, [
+            "node", "--test", "--test-name-pattern", "does the thing",
+            "tests/foo.test.mjs",
+        ])
+
     def test_js_no_matching_test_output_exits_2(self):
         write(self.target / "vitest.config.ts", "")
         with patch.object(self._tdd, "_run_streaming") as mock_run:
             mock_run.return_value = (1, "No test found")
             code = self._tdd.cmd_run(
                 self.target, None, test_selector="tests/foo.test.ts::missing")
+
+        self.assertEqual(code, 2)
+
+    def test_node_no_matching_test_output_exits_2(self):
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        with patch.object(self._tdd, "_run_streaming") as mock_run:
+            mock_run.return_value = (0, "TAP version 13\n1..0\n")
+            code = self._tdd.cmd_run(
+                self.target, None, test_selector="tests/foo.test.mjs::missing")
 
         self.assertEqual(code, 2)
 

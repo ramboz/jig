@@ -54,6 +54,11 @@ SKIP_DIRS = {
     "node_modules", ".git", "dist", "build", "target",
     "__pycache__", ".venv", "venv", ".tox", ".pytest_cache",
 }
+NODE_TEST_EXTENSIONS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+NODE_TEST_IMPORT_RE = re.compile(
+    r"(?:from\s+[\"']node:test[\"']|require\(\s*[\"']node:test[\"']\s*\))"
+)
+NODE_TEST_SCRIPT_RE = re.compile(r"\bnode\b[^|&]*--test\b")
 
 # Per-tier skill inventory (ADR-0007). The per-skill `installed_skills`
 # field in scaffold.json is derived from this table plus the tier-
@@ -406,6 +411,39 @@ def _detect_ci(target: Path) -> bool:
     return False
 
 
+def _package_test_script_uses_node_test(pkg: dict) -> bool:
+    scripts = pkg.get("scripts") if isinstance(pkg, dict) else {}
+    if not isinstance(scripts, dict):
+        return False
+    test_script = scripts.get("test")
+    if not isinstance(test_script, str):
+        return False
+    return NODE_TEST_SCRIPT_RE.search(test_script) is not None
+
+
+def _file_imports_node_test(path: Path) -> bool:
+    if path.suffix not in NODE_TEST_EXTENSIONS:
+        return False
+    return NODE_TEST_IMPORT_RE.search(_read_text_safe(path)) is not None
+
+
+def _has_node_test_import_shallow(target: Path) -> bool:
+    try:
+        for entry in target.iterdir():
+            if entry.is_file() and _file_imports_node_test(entry):
+                return True
+            if entry.is_dir() and entry.name not in SKIP_DIRS:
+                try:
+                    for sub in entry.iterdir():
+                        if sub.is_file() and _file_imports_node_test(sub):
+                            return True
+                except (PermissionError, OSError):
+                    continue
+    except (PermissionError, OSError, FileNotFoundError):
+        return False
+    return False
+
+
 def _detect_tests(target: Path) -> bool:
     """High-confidence test-framework signals — see spec 001's signal-detection findings."""
     # Python
@@ -430,6 +468,10 @@ def _detect_tests(target: Path) -> bool:
             deps.update((pkg.get(key) or {}).keys())
         if deps & TEST_LIBRARIES_NPM:
             return True
+        if _package_test_script_uses_node_test(pkg):
+            return True
+    if _has_node_test_import_shallow(target):
+        return True
 
     # Go — shallow scan for *_test.go at root only (per spike: ≤2 levels deep)
     for entry in target.iterdir():

@@ -2,7 +2,7 @@
 name: tdd-loop
 description: >
   Drive the red-green-refactor loop for any non-trivial code change. Auto-detect
-  the project's test runner (pytest / vitest / jest), invoke it via the
+  the project's test runner (pytest / vitest / jest / node --test), invoke it via the
   `tdd.py` helper, and act on the normalized exit code. Use when you write a
   test, TDD this feature, let me test-drive a behaviour, are about to
   implement [feature], want to run my tests, ask is my coverage complete, or
@@ -22,7 +22,7 @@ Codifies the red-green-refactor loop that the `implementer` subagent
 The skill:
 
 - Detects the project's test runner from filesystem signals (one of `pytest`,
-  `vitest`, `jest`).
+  `vitest`, `jest`, or Node's built-in `node --test`).
 - Invokes the runner as a subprocess against a target, a focused
   `--test-path`, or a single `--test` selector.
 - Streams the runner's stdout/stderr through to the caller — you see real
@@ -58,7 +58,7 @@ python3 "${PLUGIN_ROOT}/skills/tdd-loop/tdd.py" detect [target]
 ```
 
 - `target` defaults to `.` when omitted.
-- Stdout: `pytest`, `vitest`, or `jest` (one line).
+- Stdout: `pytest`, `vitest`, `jest`, or `node` (one line).
 - Exit 2 with stderr `no test runner detected at <target>` if no signal matches.
 
 Signals checked (priority order — first hit wins):
@@ -70,8 +70,11 @@ Signals checked (priority order — first hit wins):
   `dependencies` / `devDependencies`.
 - **jest** — `jest.config.{ts,js,json}` OR `jest` in `package.json`'s
   `dependencies` / `devDependencies`.
+- **node** — `package.json` `scripts.test` invokes `node --test`, OR a shallow
+  JS/TS file imports from `node:test`.
 
-When multiple runners are detected, priority is **pytest > vitest > jest**.
+When multiple runners are detected, priority is
+**pytest > vitest > jest > node**.
 
 ### Run the suite
 
@@ -85,14 +88,16 @@ python3 "${PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
   - pytest → `python3 -m pytest <path>`
   - vitest → `npx vitest run <path>` (note the `run` — keeps watch mode off)
   - jest → `npx jest <path>`
+  - node → `node --test <path>`
 - Output streams through to the caller's terminal.
 - Exit code is normalized (0 / 1 / 2) per the table above.
 
 Use `--test-path` when you want to run a focused subset (e.g. a single
 test file) while still letting the helper detect which runner to invoke.
 Use `--test` when you want one named test: pytest selectors are passed as
-node ids (`path::test_name`), and vitest/jest selectors map to file plus
-`-t` when shaped as `path::test name`.
+node ids (`path::test_name`), vitest/jest selectors map to file plus `-t`,
+and node selectors map to file plus `--test-name-pattern` when shaped as
+`path::test name`.
 
 ## When NOT to use
 
@@ -132,13 +137,12 @@ the main session) use to actually run the loop. The discipline lives in
 
 ## Gotchas
 
-- **The helper is detect-only for vitest/jest.** Live `npx vitest`/`npx jest`
-  runs require `node_modules` to be installed in the target. If a vitest /
-  jest project has no installed deps, `run` exits 2 with a "binary not found"
-  message — that's an environment issue, not a test failure. (Detection-only
-  fixtures cover vitest/jest in our own test suite; only pytest gets a real
-  subprocess test, because pytest is the only runner with reliable presence
-  in the jig dev environment.)
+- **The helper is detect-only for vitest/jest/node command mapping.** Live
+  `npx vitest`/`npx jest` runs require `node_modules` to be installed in the
+  target; live `node --test` runs require Node on PATH. Missing binaries exit 2
+  as environment errors, not red tests. Detection-only fixtures cover these JS
+  runners in our own test suite; only pytest gets a real subprocess test
+  because pytest is the runner with reliable presence in the jig dev environment.
 - **Shallow scan depth.** The `test_*.py` / `*_test.py` scan only checks the
   root and direct subdirectories (max depth 2 — per spec 001's
   signal-detection rules). Deep test trees (`tests/unit/`, `tests/integration/`) won't be
