@@ -64,6 +64,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "docs/memory/learnings.md",
             "docs/memory/tooling.md",
             "docs/specs/README.md",
+            "docs/bugs/README.md",
             "docs/decisions/README.md",
             "docs/decisions/lightweight-decisions.md",  # spec 083-02
         ]
@@ -185,8 +186,14 @@ class GreenfieldScaffoldTests(unittest.TestCase):
         claude_md = (self.target / "CLAUDE.md").read_text()
         self.assertIn("Hot Cache", claude_md)
         self.assertIn("demo-project", claude_md, "project name not substituted")
+        self.assertIn("docs/bugs/README.md", claude_md)
         # No raw template placeholders left
         self.assertNotIn("{{PROJECT_NAME}}", claude_md)
+
+    def test_bug_board_links_spec_board(self):
+        bug_board = (self.target / "docs/bugs/README.md").read_text()
+        self.assertIn("../specs/README.md", bug_board)
+        self.assertIn("Spec Status Board", bug_board)
 
     def test_claude_phase_mode_guidance_is_host_native(self):
         claude_md = (self.target / "CLAUDE.md").read_text()
@@ -355,6 +362,12 @@ class DocContentTests(unittest.TestCase):
         codenames_block = content[idx:idx + 300]
         self.assertIn("demo-project", codenames_block,
                       "project name not present in codenames section")
+
+    def test_workflow_routes_feedback_against_bug_registry(self):
+        content = (self.target / "docs/workflow.md").read_text()
+        self.assertIn("docs/bugs/README.md", content)
+        self.assertIn("feedback/triage", content)
+        self.assertIn("bug-fix", content)
 
 
 def _git_available() -> bool:

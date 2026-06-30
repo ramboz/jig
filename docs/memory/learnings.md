@@ -456,3 +456,11 @@ The hook-spine subgraph in docs/architecture.md hardcodes the hook count ("Deter
 
 ## Hook-safe / contract modules must not import project_layout
 `skills/_common/lexicon.py` and `scripts/verify_install.py` must stay STDLIB-ONLY. lexicon is run by the memory-scan hook via `python3 -c` (no package root on sys.path; enforced by `test_stdlib_only_no_third_party_imports`), and verify_install is a release-trio contract script that never imports jig internals. When making them layout-aware (spec 084), do NOT `from _common import project_layout` — inline a tiny fail-soft `docs_root` read from scaffold.json instead. Gotcha: the per-module `python3 test_x.py` PASSED while the full `run_tests.py` suite caught the violation (test_hooks + the stdlib-only test went red) — always run the full suite after touching a shared _common module.
+
+## Bug 002: lifecycle registries need cross-discovery from both front doors
+When adding or changing a first-class lifecycle registry, update the other
+workflow's front door too: live status board preambles, scaffolded board
+templates, loaded primer key-document rows, and the authoring procedure in the
+peer skill. Bug 002 showed that documenting `docs/bugs/` only inside
+`bug-fix` left spec authors working from `docs/specs/README.md` and the primer
+blind to existing defect records, causing duplicate/contradictory ownership.

@@ -877,12 +877,18 @@ def regenerate_status_board(project_dir: Path) -> Path:
     bugs_dir = _bugs_dir(project_dir)
     bugs_dir.mkdir(parents=True, exist_ok=True)
     board = bugs_dir / "README.md"
-    existing = board.read_text() if board.exists() else "# Bug Status Board\n\n"
+    default_preamble = (
+        "# Bug Status Board\n\n"
+        "> Related: [Spec Status Board](../specs/README.md). Check both "
+        "boards before folding reported defects into spec acceptance "
+        "criteria.\n\n"
+    )
+    existing = board.read_text() if board.exists() else default_preamble
     notes = _parse_existing_notes(existing)
     table_start = existing.find("| ID |")
     preamble = existing[:table_start].rstrip() if table_start != -1 else existing.rstrip()
     if not preamble:
-        preamble = "# Bug Status Board"
+        preamble = default_preamble.rstrip()
     content = preamble + "\n\n" + _render_board(_bug_rows(project_dir), notes)
     atomic_write_text(board, content)
     return board

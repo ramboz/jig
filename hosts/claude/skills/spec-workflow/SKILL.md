@@ -150,6 +150,13 @@ SKILL.md hand-off is the documented gate.
    of the world. (If there is **no** `## Use cases` section, the layer isn't
    adopted for this project — skip this step; nothing here applies.) You record
    the answer as a trace link in the spec's `use_cases:` frontmatter (step 2a).
+1b. **Cross-check tracked bugs before drafting ACs.** For feedback/triage
+   specs, read `docs/bugs/README.md` and any overlapping `docs/bugs/NNN-*.md`
+   record before turning reported symptoms into acceptance criteria. If an
+   item is a tracked defect with a bug record, route it through `bug-fix`
+   (or link to that bug as an explicit dependency) instead of copying the
+   defect into the spec as a second owner. Keep polish/design/new-behaviour
+   items in the spec.
 2. **Reserve the next free number on origin/main:**
 
    ```bash

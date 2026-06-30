@@ -1,0 +1,12 @@
+# Bug Status Board
+
+> Status: Draft (wizard-generated)
+>
+> Current state of tracked defects for {{PROJECT_NAME}}. Related:
+> [Spec Status Board](../specs/README.md). Check both boards before folding
+> reported defects into spec acceptance criteria.
+
+| ID | slug | severity | tier | status | reproduces? | regression test | claimed_by | escalated_to | Notes |
+|----|------|----------|------|--------|-------------|-----------------|------------|--------------|-------|
+
+<!-- Regenerate with `bug.py status-board`. Add rows as bugs are reported. -->
