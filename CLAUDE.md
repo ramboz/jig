@@ -40,6 +40,7 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 | [docs/conventions.md](docs/conventions.md) | Before authoring any skill / hook / agent |
 | [docs/decisions/](docs/decisions/) | ADR index |
 | [docs/specs/README.md](docs/specs/README.md) | Spec status board — pick up next work |
+| [docs/bugs/README.md](docs/bugs/README.md) | Bug status board — check before folding defects into specs |
 | [docs/roadmap.md](docs/roadmap.md) | Milestone / branch overlay (1.x `main`, 2.0 `v2`) |
 | [docs/refinement-todo.md](docs/refinement-todo.md) | Deferred decisions |
 | [docs/memory/glossary.md](docs/memory/glossary.md) | Domain terms (the on-demand home for the index above) |
@@ -54,7 +55,7 @@ Host packaging details live in [docs/architecture.md](docs/architecture.md); Cod
 
 ## Session workflow
 
-1. Check [docs/specs/README.md](docs/specs/README.md); pick up the next `READY_FOR_IMPLEMENTATION` slice.
+1. Check [docs/specs/README.md](docs/specs/README.md) + [docs/bugs/README.md](docs/bugs/README.md); route reported defects to `bug-fix`, then pick up the next `READY_FOR_IMPLEMENTATION` slice.
 2. Implement (TDD). After the deliverable is on disk, run post-impl review — compliance + craft always, +arch/+code-health/+frame/+design iff the slice flags them. See [docs/workflow.md](docs/workflow.md#post-implementation-review) + [spec-workflow/SKILL.md](skills/spec-workflow/SKILL.md).
 3. Reconcile: deviation log, doc updates, reconciliation review.
 4. `/jig:memory-sync`; update spec status + regenerate the status board.

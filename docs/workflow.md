@@ -161,8 +161,8 @@ All specs are SPIDR-split before implementation begins:
 
 ## Session workflow
 
-1. Check `docs/specs/README.md` for current status board.
-2. Pick up the next `READY_FOR_IMPLEMENTATION` slice.
+1. Check `docs/specs/README.md` and `docs/bugs/README.md`; route feedback/triage defects to `bug-fix` before drafting spec ACs.
+2. Pick up the next `READY_FOR_IMPLEMENTATION` spec slice.
 3. Spawn the `implementer` subagent with the spec path.
 4. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — up to four passes via `jig:independent-review`, `pr-review`, and optionally `arch-review` (`arch_review: true`) + `jig:code-health` (`code_health_review: true`)).
 5. Address reviewer findings; `[blocker]`-tagged craft/arch/code-health findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.

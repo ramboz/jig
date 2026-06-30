@@ -138,6 +138,11 @@ but no `scaffold.json`, route to `/jig:migrate`. Don't hand-roll `docs/bugs/`.
 
 ### 1. Create and triage the record
 
+Before creating a new bug from a feedback/triage batch, scan
+`docs/specs/README.md` for an overlapping active slice. If the work is already
+owned by a spec, link that slice from the bug record or escalate/route instead
+of creating a second owner.
+
 ```bash
 # Reserve the number. Local by default; --push reserves on origin/main
 # (gnarly tier), --pr via PR. Works from any branch/worktree (ADR-0015).

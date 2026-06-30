@@ -370,6 +370,14 @@ class StatusBoardTests(unittest.TestCase):
         new_content = board_path.read_text()
         self.assertIn("42 tests green; reviewed + reconciled", new_content)
 
+    def test_status_board_preamble_links_bug_board(self):
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        preamble = board.split("| Spec |", 1)[0]
+        self.assertIn("../bugs/README.md", preamble)
+        self.assertIn("Bug Status Board", preamble)
+
     def test_status_board_idempotent(self):
         """Re-running on a current board produces no change."""
         run_workflow("status-board", str(self.target))
@@ -409,6 +417,14 @@ class SkillPromotionTests(unittest.TestCase):
         )
         self.assertNotIn("(when implemented)", self.skill,
                          "'when implemented' phrasing must be removed")
+
+    def test_creating_spec_cross_checks_bug_registry(self):
+        creating = self.skill.split("### Creating a new spec", 1)[1].split(
+            "### Picking up a slice", 1,
+        )[0]
+        self.assertIn("docs/bugs/README.md", creating)
+        self.assertIn("feedback/triage", creating)
+        self.assertIn("bug-fix", creating)
 
     def test_skill_reconciliation_checklist_intact(self):
         """Slice 002-04's reconciliation checklist with memory-sync must survive."""

@@ -203,6 +203,33 @@ class BugCoreTests(unittest.TestCase):
         self.assertIn("tests/test_alpha.py::test_bug", text)
         self.assertIn("keep me", text)
 
+    def test_status_board_default_preamble_links_spec_board(self):
+        write(self._bug("001-alpha.md"), (
+            "---\n"
+            "status: REPORTED\n"
+            "severity: high\n"
+            "tier: standard\n"
+            "claimed_by:\n"
+            "regression_test:\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            "fix_class:\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            "---\n\n"
+            "## Symptom\n"
+        ))
+        board = self.root / "docs" / "bugs" / "README.md"
+        self.assertFalse(board.exists(), "test setup should exercise default preamble")
+
+        r = run_bug("status-board", "--project-dir", str(self.root))
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = board.read_text()
+        preamble = text.split("| ID |", 1)[0]
+        self.assertIn("../specs/README.md", preamble)
+        self.assertIn("Spec Status Board", preamble)
+
     def test_status_board_counts_main_recheck_as_reproducing(self):
         write(self._bug("001-alpha.md"), (
             "---\n"

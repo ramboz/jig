@@ -13,6 +13,9 @@
 > primer](../spec-workflow/spidr-primer.md) and `skills/spec-workflow/SKILL.md`
 > for the body shape). The marker is recomputed from each slice's `kind:` field
 > on every regen — it is never stored separately in this file.
+>
+> Related: [Bug Status Board](../bugs/README.md). Check both boards before
+> folding reported defects into spec acceptance criteria.
 
 | Spec | Slice | Status | Notes |
 |------|-------|--------|-------|

@@ -227,6 +227,13 @@ class ScaffoldPrimerIndexShape(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertNotIn(fragment, hot_cache)
 
+    def test_primer_templates_link_bug_status_board(self):
+        for template in (CLAUDE_TEMPLATE, AGENTS_TEMPLATE):
+            with self.subTest(template=template.name):
+                body = template.read_text(encoding="utf-8")
+                self.assertIn("docs/bugs/README.md", body)
+                self.assertIn("Bug status board", body)
+
     def test_agents_template_hot_cache_is_index_form(self):
         hot_cache = self._hot_cache(AGENTS_TEMPLATE)
         self.assertIn("This is an **index**", hot_cache)
