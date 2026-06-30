@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.4.0](https://github.com/ramboz/jig/compare/v2.3.0...v2.4.0) (2026-06-30)
+
+
+### Features
+
+* **layout:** configurable docs_root foundation — ADR-0033 + spec 084-01 ([b620120](https://github.com/ramboz/jig/commit/b620120018dd2cda17d9df9bc47bd0db735aedfc))
+* **layout:** route helpers + discovery through project_layout (spec 084-02) ([bddac71](https://github.com/ramboz/jig/commit/bddac71dd5f74835b6deaa81a551d44f228fe547))
+* **layout:** scaffold-init --docs-root + subtree push-refusal (spec 084-03) ([80d92b4](https://github.com/ramboz/jig/commit/80d92b49cdbbff2ecf14bc208d1246304e68cfa1))
+
+
+### Documentation
+
+* **memory:** sync spec 084 (configurable docs root) ([557775a](https://github.com/ramboz/jig/commit/557775a12ecab194328da4939a01d20be4bc0437))
+
 ## [2.3.0](https://github.com/ramboz/jig/compare/v2.2.0...v2.3.0) (2026-06-29)
 
 
