@@ -746,6 +746,22 @@ class SignalDetectionTests(unittest.TestCase):
         self._scaffold()
         self.assertTrue(self._manifest()["scaffold_signals"]["has_tests"])
 
+    def test_test_signal_via_node_test_script(self):
+        (self.target / "package.json").write_text(json.dumps({
+            "name": "x", "scripts": {"test": "node --test"}
+        }))
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_tests"])
+
+    def test_test_signal_via_node_test_import(self):
+        (self.target / "test" / "sample.test.mjs").parent.mkdir()
+        (self.target / "test" / "sample.test.mjs").write_text(
+            "import { test } from 'node:test';\n"
+            "test('works', () => {});\n"
+        )
+        self._scaffold()
+        self.assertTrue(self._manifest()["scaffold_signals"]["has_tests"])
+
     def test_test_signal_via_go_test_files(self):
         (self.target / "foo_test.go").write_text("package x\n")
         self._scaffold()

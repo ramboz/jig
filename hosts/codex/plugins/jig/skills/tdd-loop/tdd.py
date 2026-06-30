@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -34,6 +35,12 @@ from pathlib import Path
 # Signal sets — kept in module scope so tests can introspect if needed.
 VITEST_DEPS = {"vitest"}
 JEST_DEPS = {"jest"}
+NODE_TEST_EXTENSIONS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+NODE_TEST_IMPORT_RE = re.compile(
+    r"(?:from\s+[\"']node:test[\"']|require\(\s*[\"']node:test[\"']\s*\))"
+)
+NODE_TEST_SCRIPT_RE = re.compile(r"\bnode\b[^|&]*--test\b")
+SHALLOW_SCAN_SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__"}
 
 
 def _read_json_safe(path: Path) -> dict:
@@ -62,6 +69,15 @@ def _pkg_deps(target: Path) -> set:
     return deps
 
 
+def _pkg_test_script(target: Path) -> str:
+    pkg = _read_json_safe(target / "package.json")
+    scripts = pkg.get("scripts") if isinstance(pkg, dict) else {}
+    if not isinstance(scripts, dict):
+        return ""
+    test_script = scripts.get("test")
+    return test_script if isinstance(test_script, str) else ""
+
+
 def _has_test_files_shallow(target: Path) -> bool:
     """Look for `test_*.py` or `*_test.py` at root OR in any DIRECT subdir.
     Shallow scan only (max depth 2) — per spec 001's "no recursion deeper
@@ -79,6 +95,29 @@ def _has_test_files_shallow(target: Path) -> bool:
                 try:
                     for sub in entry.iterdir():
                         if sub.is_file() and _is_test_file(sub.name):
+                            return True
+                except (PermissionError, OSError):
+                    continue
+    except (PermissionError, OSError, FileNotFoundError):
+        return False
+    return False
+
+
+def _file_imports_node_test(path: Path) -> bool:
+    if path.suffix not in NODE_TEST_EXTENSIONS:
+        return False
+    return NODE_TEST_IMPORT_RE.search(_read_text_safe(path)) is not None
+
+
+def _has_node_test_import_shallow(target: Path) -> bool:
+    try:
+        for entry in target.iterdir():
+            if entry.is_file() and _file_imports_node_test(entry):
+                return True
+            if entry.is_dir() and entry.name not in SHALLOW_SCAN_SKIP_DIRS:
+                try:
+                    for sub in entry.iterdir():
+                        if sub.is_file() and _file_imports_node_test(sub):
                             return True
                 except (PermissionError, OSError):
                     continue
@@ -141,10 +180,18 @@ def _is_jest(target: Path) -> bool:
     return False
 
 
+def _is_node(target: Path) -> bool:
+    if NODE_TEST_SCRIPT_RE.search(_pkg_test_script(target)):
+        return True
+    if _has_node_test_import_shallow(target):
+        return True
+    return False
+
+
 def detect_runner(target: Path):
     """Return the detected runner name, or None.
 
-    Priority: custom (.jig/test-command) > pytest > vitest > jest."""
+    Priority: custom (.jig/test-command) > pytest > vitest > jest > node."""
     cmd_file = _custom_command_file(target)
     if cmd_file is not None and _parse_custom_command(cmd_file) is not None:
         return "custom"
@@ -154,6 +201,8 @@ def detect_runner(target: Path):
         return "vitest"
     if _is_jest(target):
         return "jest"
+    if _is_node(target):
+        return "node"
     return None
 
 
@@ -199,11 +248,20 @@ def _build_command(runner: str, path: Path, test_selector: str | None = None) ->
         if selector_name:
             cmd.extend(["-t", selector_name])
         return cmd
+    if runner == "node":
+        cmd = ["node", "--test"]
+        if selector_name:
+            cmd.extend(["--test-name-pattern", selector_name])
+        cmd.append(selector_path or str(path))
+        return cmd
     raise ValueError(f"unknown runner: {runner}")
 
 
 def _selector_missed(runner: str, returncode: int, output: str) -> bool:
     """Return True when a targeted run failed because the selector found no test."""
+    if runner == "node" and returncode == 0:
+        lines = (line.strip().lower() for line in output.splitlines())
+        return any(line in {"1..0", "# tests 0"} for line in lines)
     if returncode == 0:
         return False
     if runner == "pytest" and returncode in {4, 5}:

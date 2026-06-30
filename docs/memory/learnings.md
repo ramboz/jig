@@ -14,6 +14,16 @@ base can make already-fixed failures look like current main failures. Surface a
 non-blocking `HEAD..origin/main` warning before review/reconcile/land, and
 verify against a freshly fetched base before recording "pre-existing on main."
 
+## Bug 003: built-in test runners need explicit first-class signals
+
+Dependency-light projects can use platform test runners without installing a
+test library, so dependency/config-only detection silently misses them. Treat a
+package manager's test script and runner-native imports as first-class signals:
+`node --test` is detected from `package.json` `scripts.test` and shallow
+`node:test` imports in both tdd-loop and scaffold-init. For Node selectors,
+place `--test-name-pattern` before the file path and normalize TAP `1..0`
+missing-pattern output to jig's exit 2 rather than a false green.
+
 ## Hook PATH injection does not apply to hook commands
 
 `bin/` scripts are added to PATH for the **Bash tool only**, not for hook `command` fields.
