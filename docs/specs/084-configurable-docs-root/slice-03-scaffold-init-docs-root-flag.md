@@ -1,8 +1,9 @@
 ---
-status: READY_FOR_REVIEW
+status: DONE
 dependencies: [084-01, 084-02]
-last_verified: 2026-06-29
+last_verified: 2026-06-30
 frame_review: false  # CLI + render wiring on the 084-01/02 contract; no new premise.
+arch_review: true  # touches host packaging + the release-trio contract surface (verify_install).
 ---
 
 ## Slice 084-03 — scaffold-init `--docs-root` flag + layout-aware output
@@ -92,15 +93,52 @@ links are layout-aware. Push-mode reservation in a subtree is refused loudly
    `_render_brief`.
 
 **DoD:**
-- [ ] All ACs pass; full suite green; pyright clean; `uvx ruff check .` clean;
-      scaffold-contract + verify-install drift checks pass (diff the shipped
-      contract files entry-by-entry, expect only intended changes).
-- [ ] Tests cover default-unchanged (the three named suites), `"."` end-to-end
-      scaffold + helper round-trip, primer-link rewriting on BOTH the machinery
-      and plugin-only (`doc_rewrite=None`) paths, CLI escape rejection, the
-      `git_toplevel`/subtree guard (fires for a subproject under an ancestor
-      `.git`; does NOT fire for a repo-root project), and the pinned
-      `"whole-repo dirty check"` caveat string present under non-default layout /
-      absent under default.
-- [ ] Reviewed by `reviewer` subagent (compliance + craft + arch — host
-      packaging / contract surface touched).
+- [x] All ACs pass; full suite green; pyright clean; `uvx ruff check .` clean;
+      host-package drift `--check` in sync (scaffold-contract + verify-install
+      bytes; verify_install ships in the release zip, not under hosts/).
+- [x] Tests (`test_scaffold_docs_root.py`, 13) cover default-unchanged (no layout
+      block / no caveat), `"."` end-to-end scaffold + helper round-trip + a real
+      `status-board` command round-trip, primer-link rewriting on BOTH render
+      paths, CLI escape rejection (no partial), the `git_toplevel`/subtree guard
+      (fires for a subproject under an ancestor `.git`, NOT for a repo-root
+      project) for BOTH `workflow new` and `adr new`, and the pinned
+      `"whole-repo dirty check"` caveat present/absent by layout.
+- [x] Reviewed by `reviewer` subagent (compliance + craft + arch) — all PASS
+      (arch: R1 needs-changes → R2 pass after the adr-guard parity fix). Verdicts
+      under `reviews/slice-03-{compliance,craft,arch}.md`.
+
+### Deviation log
+
+- **Scope grew beyond the grounded inventory (caught by tests/review):**
+  - `_ensure_self_defining_convention_block` + `copy_machinery` (spec 065-04
+    convention block) were emitting a stray `docs/workflow.md` under `"."` — found
+    by the AC2 collapse test, now threaded with `docs_root` (copy_machinery
+    defaults to `"docs"`, so migrate is unaffected).
+  - `verify_install.check_scaffold_seed_present` made layout-aware (inline
+    stdlib `_scaffold_docs_root` read — verify_install never imports jig
+    internals); the `docs` doc-link smoke check is **skipped** for non-default
+    layout (`scaffold_contract.scaffold_doc_problems` is `docs/`-shaped) — a named
+    deferred follow-up, not a silent gap.
+- **Arch parity fix (R1 needs-changes):** `adr new --push` was unguarded in a
+  subtree. Extracted detection into a new `_common/subtree.py` leaf
+  (`git_toplevel` + `detect_subtree`); BOTH `workflow new` and `adr new` now
+  refuse via it (each raising its own error type). `workflow.git_toplevel` is a
+  re-export.
+- **Additive 084-01 extension:** `project_layout.validate_docs_root` (public
+  wrapper of the escape validator) for the CLI pre-write check.
+- **Compliance fixes:** brief.md `people.md` prose line made layout-aware; AC2
+  strengthened with a real `status-board` command round-trip.
+- **Craft fix:** the docs-base ternary DRYed into `_scaffold_docs_base`.
+
+### Reconciliation sweep
+
+- **ADR-0033 / spec 084** — implementation matches; the push-refusal invariant is
+  now enforced symmetrically (both reservation doors). No ADR/spec correction
+  needed (the ADR's scoped-OUT language already covers "push-mode in a subtree").
+- **Deferred follow-ups (logged, non-blocking):** (a) layout-aware doc-link
+  checking in `scaffold_contract`/`verify_install` for non-default layouts;
+  (b) `migrate copy-machinery` into an existing subtree would write
+  `docs/workflow.md` (gated behind the migrate-into-subtree non-goal); (c)
+  `test_compose_default_is_passthrough` object() sentinel cosmetic.
+- **No new `TODO`/`FIXME`.** Glossary candidate ("`--docs-root` / track-local
+  adoption") → session-end `memory-sync`.

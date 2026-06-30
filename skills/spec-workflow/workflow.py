@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import (
     project_layout,
+    subtree,
     team_signal,  # noqa: F401  (re-exported for test monkeypatching)
 )
 from _common.atomic_io import atomic_write_text
@@ -2712,6 +2713,30 @@ def _do_pr_fallback(project_dir: Path, branch_name: str,
 # `HEAD:main`. The caller's cwd, branch, and branch tip are never touched.
 
 
+# Slice 084-03 (AC5): track-local subtree detection lives in `_common.subtree`
+# so the spec-reservation and ADR-reservation push doors share one definition.
+# Re-exported here for back-compat with existing call sites / tests.
+git_toplevel = subtree.git_toplevel
+
+
+def _refuse_push_in_subtree(project_dir: Path) -> None:
+    """Slice 084-03 (AC5): refuse PUSH-mode spec reservation when `project_dir`
+    is a track-local subproject inside a larger git repo. Push-mode would
+    rebuild paths against the enclosing repo root and reserve against a shared
+    `main`. Local mode (`--no-push`) does NOT call this. Detection is shared via
+    `_common.subtree.detect_subtree`; this door raises `WorkflowError`."""
+    found = subtree.detect_subtree(project_dir)
+    if found is not None:
+        repo_root, subproject_root = found
+        raise WorkflowError(
+            f"subtree push-mode unsupported: {project_dir} is a track-local "
+            f"subproject (root {subproject_root}) inside git repo {repo_root}. "
+            f"Push-mode reservation would write to the wrong root and reserve "
+            f"against a shared main — use local mode (--no-push). Subtree push "
+            f"is a spec 084 non-goal."
+        )
+
+
 def _current_branch(project_dir: Path):
     """Return the current branch name, or None if detached / undeterminable.
 
@@ -3014,6 +3039,13 @@ def reserve_spec(slug: str, project_dir: Path,
                 f"refusing: docs/specs/ not found under {project_dir} "
                 f"(not inside a scaffolded jig project)"
             )
+
+    # Slice 084-03 (AC5): refuse PUSH-mode reservation in a track-local subtree
+    # BEFORE routing — covers both the on-main push and the off-main detached-
+    # worktree push (each would write to the enclosing repo root / reserve
+    # against a shared main). Local mode (--no-push) is unaffected.
+    if not no_push:
+        _refuse_push_in_subtree(project_dir)
 
     # Worktree-aware routing (prototype): the original flow below REQUIRES
     # being on `main` (it commits on local main, then pushes `origin main`).

@@ -39,7 +39,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import project_layout
+from _common import project_layout, subtree
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import frontmatter_flag_truthy as _frontmatter_flag_truthy
@@ -713,6 +713,22 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
             raise AdrError(
                 f"refusing: docs/decisions/ not found under {project_dir} "
                 f"(not inside a scaffolded jig project)"
+            )
+
+    # Slice 084-03 (AC5): refuse PUSH-mode ADR reservation in a track-local
+    # subtree — parity with workflow.py `new` (the same shared-`main` /
+    # wrong-root failure applies to `adr new --push`). Shared detection in
+    # `_common.subtree`; this door raises AdrError. Local mode is unaffected.
+    if not no_push:
+        found = subtree.detect_subtree(project_dir)
+        if found is not None:
+            repo_root, subproject_root = found
+            raise AdrError(
+                f"subtree push-mode unsupported: {project_dir} is a track-local "
+                f"subproject (root {subproject_root}) inside git repo "
+                f"{repo_root}. Push-mode reservation would reserve against a "
+                f"shared main — use local mode (--no-push). Subtree push is a "
+                f"spec 084 non-goal."
             )
 
     # Worktree-aware routing (prototype): the original flow below REQUIRES

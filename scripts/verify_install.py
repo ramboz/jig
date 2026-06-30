@@ -548,22 +548,44 @@ _EXPECTED_SEED_FILES = (
 )
 
 
+def _scaffold_docs_root(project_root: Path) -> str:
+    """Read `layout.docs_root` from the scaffolded `scaffold.json` (slice
+    084-03). Stdlib-only + fail-soft to the default `docs` — verify_install
+    never imports jig internals (it hardcodes source-of-truth pointers), so it
+    reads the manifest itself rather than calling `project_layout`."""
+    try:
+        data = json.loads((project_root / "scaffold.json").read_text())
+        root = data.get("layout", {}).get("docs_root")
+        return root if isinstance(root, str) and root else "docs"
+    except Exception:
+        return "docs"
+
+
+def _relocate_docs(rel: str, docs_root: str) -> str:
+    """Rewrite a `docs/<x>` expected path to the configured root (slice
+    084-03): `<x>` for `"."`, `<docs_root>/<x>` otherwise; unchanged default."""
+    if docs_root == "docs" or not rel.startswith("docs/"):
+        return rel
+    suffix = rel[len("docs/"):]
+    return suffix if docs_root == "." else f"{docs_root}/{suffix}"
+
+
 def check_scaffold_seed_present(project_root: Path) -> CheckResult:
-    """The slice 048-05 worked-example seed is present under
-    `docs/specs/`. A populated status board (`README.md`) plus the
-    `001-adopt-jig` spec/slice and the `002-first-spec` stub must all
-    exist; a scaffold missing any of them dropped the worked example."""
-    missing = [
-        rel for rel in _EXPECTED_SEED_FILES
-        if not (project_root / rel).is_file()
-    ]
+    """The slice 048-05 worked-example seed is present under the configured
+    specs dir. A populated status board (`README.md`) plus the `001-adopt-jig`
+    spec/slice and the `002-first-spec` stub must all exist; a scaffold missing
+    any of them dropped the worked example. Layout-aware (slice 084-03): the
+    expected `docs/specs/…` paths relocate to the configured `docs_root`."""
+    docs_root = _scaffold_docs_root(project_root)
+    expected = [_relocate_docs(rel, docs_root) for rel in _EXPECTED_SEED_FILES]
+    missing = [rel for rel in expected if not (project_root / rel).is_file()]
     if missing:
         return False, (
             f"missing seed reference spec file(s): {', '.join(missing)}"
         )
+    base = "specs/" if docs_root == "." else f"{docs_root}/specs/"
     return True, (
-        f"worked-example seed present "
-        f"({len(_EXPECTED_SEED_FILES)} files under docs/specs/)"
+        f"worked-example seed present ({len(expected)} files under {base})"
     )
 
 
@@ -572,6 +594,7 @@ def run_completion_summary(
     *,
     with_machinery: bool,
     seed_expected: bool,
+    docs_root: str = "docs",
     out=None,
 ) -> int:
     """Run the scaffold-completion verification and print a compact,
@@ -617,9 +640,13 @@ def run_completion_summary(
             if name != "docs"
         )
     if seed_expected:
-        if with_machinery:
+        if with_machinery and docs_root == "docs":
             # Seed present → the scaffolded docs' links into the seed resolve,
-            # so the doc/command smoke check is meaningful here.
+            # so the doc/command smoke check is meaningful here. Slice 084-03:
+            # `scaffold_contract.scaffold_doc_problems` is docs/-shaped, so this
+            # smoke check is skipped for a non-default layout (the rewritten
+            # links are covered by scaffold-init's own tests; full layout-aware
+            # doc-link checking is a deferred follow-up).
             checks.append(("docs", check_scaffold_docs))
         checks.append(("seed", check_scaffold_seed_present))
 

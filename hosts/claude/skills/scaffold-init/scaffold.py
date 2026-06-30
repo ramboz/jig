@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import project_layout
 from _common.atomic_io import atomic_write_text
 
 # Team-signal detection + the .jig/no-people-md marker contract live in
@@ -558,7 +559,7 @@ def _hook_profile(signals: Signals) -> str:
 
 
 def _render_brief(template_text: str, signals: Signals, installed: list,
-                  offered: list, subs: dict) -> str:
+                  offered: list, subs: dict, docs_root: str = "docs") -> str:
     """Build the dynamic blocks for brief.md."""
     detected_lines = []
     if signals.has_llm_agent_files:
@@ -574,8 +575,10 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
             "- **Test framework** — Tier 1 (`tdd-loop` and friends) auto-installed."
         )
     if signals.is_team:
+        people_rel = ("memory/people.md" if docs_root == "."
+                      else f"{docs_root}/memory/people.md")
         detected_lines.append(
-            "- **Multiple git contributors** — `docs/memory/people.md` was created."
+            f"- **Multiple git contributors** — `{people_rel}` was created."
         )
     if not detected_lines:
         detected_lines.append("- _(none — solo greenfield project)_")
@@ -588,7 +591,7 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
         if offered else "Add a Tier 2 skill when you start LLM/agent work."
     )
 
-    return render(template_text, {
+    brief = render(template_text, {
         **subs,
         "DETECTED_BLOCK": "\n".join(detected_lines),
         "INSTALLED_BLOCK": "\n".join(installed_lines),
@@ -596,6 +599,21 @@ def _render_brief(template_text: str, signals: Signals, installed: list,
         "HOOK_PROFILE": _hook_profile(signals),
         "NEXT_STEP_HINT": next_hint,
     })
+    # Slice 084-03 (AC6): a track-local (non-default docs_root) project runs
+    # jig's git side-effects against the ENCLOSING repo. Surface that rough edge
+    # so the adopter is not surprised — pinned phrase "whole-repo dirty check".
+    # Default layout emits NO caveat → brief.md byte-identical (AC1).
+    if docs_root != "docs":
+        brief = brief.rstrip("\n") + (
+            "\n\n## Track-local layout\n\n"
+            f"This project uses a custom docs root (`docs_root: \"{docs_root}\"`), "
+            "so its specs/decisions/memory live directly under the project dir. "
+            "jig runs in **local mode** here: spec/ADR reservation commits to the "
+            "**enclosing git repo**, and its **whole-repo dirty check** can refuse "
+            "if anything elsewhere in that repo is uncommitted. Push-mode "
+            "reservation in a subtree is unsupported (spec 084 non-goal).\n"
+        )
+    return brief
 
 
 def _copy_skills_and_agents(
@@ -1833,7 +1851,8 @@ def install_codex_agents(plugin: Path, agents_dir: Path, *,
 def copy_machinery(plugin: Path, target: Path, *,
                    force: bool = False,
                    installed_tiers: "list | None" = None,
-                   host: str = "claude") -> None:
+                   host: str = "claude",
+                   docs_root: str = "docs") -> None:
     """Copy jig's runtime machinery into the target's host-local runtime.
 
     Public façade introduced by slice 021-01 so that `migrate.py
@@ -1893,20 +1912,21 @@ def copy_machinery(plugin: Path, target: Path, *,
     # Spec 065-04: refresh the self-defining-vocabulary convention block into
     # the project's docs/workflow.md (the only path that reaches an EXISTING
     # project — copy-machinery does not otherwise touch docs/). Idempotent.
-    _ensure_self_defining_convention_block(target)
+    _ensure_self_defining_convention_block(target, docs_root)
 
 
-def _specs_dir_has_content(target: Path) -> bool:
+def _specs_dir_has_content(target: Path, docs_root: str = "docs") -> bool:
     """Greenfield guard for the seed reference spec (slice 048-05,
-    Clarification Q1). True iff `target/docs/specs/` already contains a
+    Clarification Q1). True iff the configured specs dir already contains a
     user spec — i.e. any `*/spec.md` under it.
 
-    The empty status board (`docs/specs/README.md`) that the generic doc
+    The empty status board (`<docs_root>/specs/README.md`) that the generic doc
     copy emits is NOT spec content, so its presence does not block the
     seed. Only a `<spec-dir>/spec.md` counts. Erring toward "has content"
     is the safe side: a false positive merely skips the (optional) seed,
     while a false negative would overwrite a real user spec."""
-    specs_dir = target / "docs" / "specs"
+    base = _scaffold_docs_base(target, docs_root)
+    specs_dir = base / "specs"
     if not specs_dir.is_dir():
         return False
     for child in specs_dir.iterdir():
@@ -1915,7 +1935,8 @@ def _specs_dir_has_content(target: Path) -> bool:
     return False
 
 
-def _emit_seed_spec(template_root: Path, target: Path, subs: dict) -> None:
+def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
+                    docs_root: str = "docs") -> None:
     """Emit the worked-example reference spec (slice 048-05) into a
     greenfield `docs/specs/`:
 
@@ -1928,12 +1949,16 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict) -> None:
     work. The seed templates carry only the `{{PROJECT_NAME}}` substitution
     and never leak `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths — they
     read correctly inside the target tree (coordinated with spec 046)."""
-    if _specs_dir_has_content(target):
+    if _specs_dir_has_content(target, docs_root):
         return
     seed_root = template_root / "docs" / "specs" / "seed"
     if not seed_root.is_dir():
         return
-    specs_dst = target / "docs" / "specs"
+    base = _scaffold_docs_base(target, docs_root)
+    specs_dst = base / "specs"
+    # Slice 084-03: the seed status board carries `docs/specs/…` links; rewrite
+    # them to the configured root (no-op for the default "docs").
+    seed_rewrite = _make_layout_rewrite(docs_root)
     for src in sorted(seed_root.rglob("*.md.template")):
         rel = src.relative_to(seed_root)
         dst_name = rel.with_suffix("")  # strip .template, leaves .md
@@ -1941,7 +1966,7 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict) -> None:
         # emitted by the generic doc copy (step 2); the spec/slice files
         # land in their 001-adopt-jig / 002-first-spec subdirs.
         dst = specs_dst / dst_name
-        copy_template(src, dst, subs)
+        copy_template(src, dst, subs, post_render=seed_rewrite)
 
 
 # ---------- Slice 052-02: secret-ignore .gitignore floor (ADR-0013) ----------
@@ -2086,10 +2111,12 @@ def _render_self_defining_block() -> str:
     ))
 
 
-def _ensure_self_defining_convention_block(target: Path) -> None:
+def _ensure_self_defining_convention_block(target: Path,
+                                           docs_root: str = "docs") -> None:
     """Create / append / replace-in-place the self-defining-vocabulary block in
-    `target/docs/workflow.md` (spec 065-04 AC3). Idempotent and
-    non-clobbering, mirroring `_write_gitignore_secret_block`:
+    the project's `workflow.md` under the configured docs root (spec 065-04 AC3;
+    layout-aware per slice 084-03). Idempotent and non-clobbering, mirroring
+    `_write_gitignore_secret_block`:
 
     - No `docs/workflow.md` → create it (parents included) with a minimal
       header + the block.
@@ -2100,7 +2127,8 @@ def _ensure_self_defining_convention_block(target: Path) -> None:
 
     Called by both `scaffold()` (fresh projects) and `copy_machinery()`
     (existing projects' next copy-machinery / tier upgrade)."""
-    workflow = target / "docs" / "workflow.md"
+    base = _scaffold_docs_base(target, docs_root)
+    workflow = base / "workflow.md"
     block = _render_self_defining_block()
 
     if not workflow.exists():
@@ -2132,10 +2160,44 @@ def _ensure_self_defining_convention_block(target: Path) -> None:
     atomic_write_text(workflow, existing + sep + block)
 
 
+def _scaffold_docs_base(target: Path, docs_root: str) -> Path:
+    """`<target>/<docs_root>` at scaffold time (collapsed to `<target>` for
+    `"."`). A build-time mirror of `project_layout.docs_base`: the scaffold.json
+    sentinel isn't on disk yet during render, so the already-validated
+    `docs_root` string is threaded explicitly rather than read back (084-03)."""
+    return target if docs_root == "." else target / docs_root
+
+
+def _make_layout_rewrite(docs_root: str):
+    """Return a text transform that rewrites `docs/<x>` artifact links to
+    `<docs_root>/<x>` (collapsing to `<x>` under `"."`), or `None` for the
+    default `docs` root (no-op). The negative lookbehind `(?<![\\w/])` anchors
+    on a link/path boundary so `templates/docs/` or `subdocs/` are NOT
+    rewritten — only standalone `docs/<x>` references (slice 084-03 AC3)."""
+    if docs_root == "docs":
+        return None
+    repl = "" if docs_root == "." else docs_root + "/"
+    pattern = re.compile(r"(?<![\w/])docs/")
+    return lambda text: pattern.sub(repl, text)
+
+
+def _compose_layout_rewrite(existing, docs_root: str):
+    """Compose the layout rewrite with the machinery-path `existing` transform
+    so the layout rewrite applies on BOTH the machinery path AND the plugin-only
+    path (`existing is None`) — AC3. Default root → `existing` unchanged."""
+    layout = _make_layout_rewrite(docs_root)
+    if layout is None:
+        return existing
+    if existing is None:
+        return layout
+    return lambda text: layout(existing(text))
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides | None = None,
              with_machinery: bool = True,
-             host: str = "claude") -> None:
+             host: str = "claude",
+             docs_root: str = "docs") -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
     already-scaffolded directory unless `force=True`. `overrides` carries the
     Q&A wizard answers from slice 001-05; None fields fall back to filesystem
@@ -2147,6 +2209,12 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     `False` to preserve the pre-016-03 docs-only behavior."""
     if host not in {"claude", "codex"}:
         raise ValueError(f"unsupported scaffold host: {host}")
+
+    # Slice 084-03: validate the configured docs root BEFORE any file write
+    # (AC4 — an absolute / `..`-escaping `--docs-root` must leave no partial
+    # scaffold). `validate_docs_root` returns the lexically-normalized value
+    # (`"."`, `"docs"`, …) or raises LayoutError.
+    docs_root = project_layout.validate_docs_root(docs_root)
 
     target = target.resolve()
     template_root = plugin / "templates"
@@ -2227,6 +2295,14 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     else:
         doc_rewrite = _rewrite_skill_md_paths if with_machinery else None
 
+    # Slice 084-03: layout-aware docs root. Emit the docs tree under
+    # <target>/<docs_root> (collapsed to <target> for "."), and compose the
+    # `docs/<x>` → `<docs_root>/<x>` link rewrite onto the machinery transform
+    # so it applies on BOTH render paths. Default ("docs") is a no-op →
+    # byte-identical output (AC1).
+    docs_dst_base = _scaffold_docs_base(target, docs_root)
+    doc_rewrite = _compose_layout_rewrite(doc_rewrite, docs_root)
+
     # 1. Host primer from the top-level template.
     if host == "codex":
         copy_template(
@@ -2253,7 +2329,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         dst_name = rel.with_suffix("")  # strip .template, leaves .md
         if dst_name.name == "people.md" and not signals.is_team:
             continue
-        dst = target / "docs" / dst_name
+        dst = docs_dst_base / dst_name
         copy_template(src, dst, subs, post_render=doc_rewrite)
 
     # 2b. Slice 048-05: emit the seed reference spec (001-adopt-jig +
@@ -2261,7 +2337,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # docs/specs/. Greenfield-only (Clarification Q1): skipped silently
     # when any spec already exists, so a migrate path / --force re-scaffold
     # never overwrites the user's work.
-    _emit_seed_spec(template_root, target, subs)
+    _emit_seed_spec(template_root, target, subs, docs_root)
 
     # 2c. Slice 050-01: an EXPLICIT `--solo` (overrides.is_team is False)
     # writes the tracked `.jig/no-people-md` opt-out marker so memory-sync's
@@ -2281,7 +2357,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     # 4. brief.md — human-readable summary of detection results
     brief_template = (template_root / "brief.md.template").read_text()
-    brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers, subs)
+    brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers,
+                          subs, docs_root)
     atomic_write_text(target / "brief.md", brief)
 
     # 5. Slice 016-01 + 016-02: copy skills/, agents/, hook scripts, and
@@ -2307,7 +2384,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # covers the --with-machinery path here. The --plugin-only branch
         # below writes it directly since copy_machinery is not called there.
         copy_machinery(plugin, target, force=force,
-                       installed_tiers=installed_tiers, host=host)
+                       installed_tiers=installed_tiers, host=host,
+                       docs_root=docs_root)
     else:
         # 5b. Slice 052-02 (ADR-0013): write/merge the secret-ignore
         # .gitignore floor on the --plugin-only path (with-machinery gets it
@@ -2318,8 +2396,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         _write_gitignore_secret_block(target)
         # Spec 065-04: --with-machinery gets the convention block via
         # copy_machinery above; the --plugin-only path writes it here (the
-        # docs/workflow.md template was already rendered earlier in scaffold()).
-        _ensure_self_defining_convention_block(target)
+        # workflow.md template was already rendered earlier in scaffold()).
+        _ensure_self_defining_convention_block(target, docs_root)
 
     # 6. scaffold.json install-state manifest — the COMPLETION SENTINEL
     # (slice 032-02). Written LAST so a crash before this point leaves
@@ -2348,6 +2426,11 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # when machinery was copied into the target's host-local runtime.
     manifest["scaffold_mode"] = "in-repo" if with_machinery else "plugin-only"
     manifest["host_renderer"] = host
+    # Slice 084-03: record the configured docs root ONLY when non-default, so a
+    # default scaffold's scaffold.json is byte-identical to before (AC1). A
+    # present `layout` block is the read-side signal for `project_layout`.
+    if docs_root != "docs":
+        manifest["layout"] = {"docs_root": docs_root}
     atomic_write_text(
         target / "scaffold.json",
         json.dumps(manifest, indent=2) + "\n",
@@ -2400,6 +2483,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--runtime", default=None,
                    help="runtime/language answer from the Q&A wizard "
                         "(stored in scaffold.json.project_runtime)")
+    p.add_argument(
+        "--docs-root", dest="docs_root", default="docs",
+        help="project-relative root for jig artifacts (default: docs). Use '.' "
+             "for track-local adoption inside a larger repo — specs/decisions/"
+             "memory land directly under the project dir instead of under docs/. "
+             "Must be relative and stay within the project (absolute / '..' "
+             "escapes are rejected).",
+    )
     for flag_name, attr in [
         ("team", "is_team"),
         ("ci", "has_ci"),
@@ -2472,11 +2563,12 @@ def main(argv: list[str]) -> int:
     # tell "seed missing because the scaffold dropped it" (a failure) apart
     # from "seed legitimately skipped because the project wasn't greenfield"
     # (not a failure).
-    seed_expected = not _specs_dir_has_content(target)
+    seed_expected = not _specs_dir_has_content(target, ns.docs_root)
 
     try:
         scaffold(target, plugin_root(ns.host), force=ns.force, overrides=overrides,
-                 with_machinery=ns.with_machinery, host=ns.host)
+                 with_machinery=ns.with_machinery, host=ns.host,
+                 docs_root=ns.docs_root)
     except AlreadyScaffoldedError as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
@@ -2526,6 +2618,7 @@ def main(argv: list[str]) -> int:
         target,
         with_machinery=ns.with_machinery,
         seed_expected=seed_expected,
+        docs_root=ns.docs_root,
     )
     if verdict != 0:
         return 4

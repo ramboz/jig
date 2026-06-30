@@ -108,6 +108,15 @@ def _validate_docs_root(raw: str) -> str:
     return norm
 
 
+def validate_docs_root(raw: str) -> str:
+    """Public validator for a raw `docs_root` string (e.g. a `--docs-root` CLI
+    value), applying the same rules as the scaffold.json path: reject an
+    absolute path or a `..` escape, returning the lexically-normalized root
+    (`"."`, `"docs"`, …). Raises `LayoutError`. Use this to validate a value
+    BEFORE it is written to scaffold.json (slice 084-03)."""
+    return _validate_docs_root(raw)
+
+
 def docs_root(project_dir: Path) -> str:
     """The configured (or default) docs root for `project_dir`, validated.
 

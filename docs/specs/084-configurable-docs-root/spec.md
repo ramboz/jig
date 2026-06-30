@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: [adr-0033]
 last_verified: 2026-06-29
 use_cases: []
