@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.1](https://github.com/ramboz/jig/compare/v2.4.0...v2.4.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **spec-workflow:** surface bug registry ([#66](https://github.com/ramboz/jig/issues/66)) ([c24a9e6](https://github.com/ramboz/jig/commit/c24a9e614fd016b71d74fe82a792fa28b2a045d1))
+* **test-detection:** detect node --test runner ([#68](https://github.com/ramboz/jig/issues/68)) ([027a194](https://github.com/ramboz/jig/commit/027a194d5bbd96aa1b6dee7ca95823b766765ed6))
+
 ## [2.4.0](https://github.com/ramboz/jig/compare/v2.3.0...v2.4.0) (2026-06-30)
 
 
