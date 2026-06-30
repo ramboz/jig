@@ -39,6 +39,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import project_layout
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import frontmatter_flag_truthy as _frontmatter_flag_truthy
@@ -668,7 +669,7 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     # workflow.py 003-03 AC #5).
     _validate_slug(slug)
 
-    adrs_dir = project_dir / "docs" / "decisions"
+    adrs_dir = project_layout.decisions_dir(project_dir)
 
     # Spec 066-01: scaffold-state PRECONDITION (the ADR-creation sibling of
     # 063-01's spec-creation gate). Replaces the weak, dead-end
@@ -1386,8 +1387,8 @@ def cmd_resolve_todo(project_dir: Path, number: str, fragment: str) -> Path:
 
     `project_dir` must contain both `docs/decisions/` and
     `docs/refinement-todo.md`."""
-    adrs_dir = project_dir / "docs" / "decisions"
-    todo_path = project_dir / "docs" / "refinement-todo.md"
+    adrs_dir = project_layout.decisions_dir(project_dir)
+    todo_path = project_layout.refinement_todo_path(project_dir)
 
     if not todo_path.is_file():
         raise AdrError(f"refinement-todo.md not found: {todo_path}")
@@ -1546,12 +1547,12 @@ def main(argv: list) -> int:
             reserve_adr(ns.slug, project_dir, title=ns.title,
                         no_push=ns.no_push, pr_mode=ns.pr)
         elif ns.cmd == "accept":
-            adrs_dir = Path.cwd() / "docs" / "decisions"
+            adrs_dir = project_layout.decisions_dir(Path.cwd())
             target = cmd_accept(adrs_dir, ns.number)
             print(str(target.relative_to(Path.cwd())) if target.is_relative_to(Path.cwd())
                   else str(target))
         elif ns.cmd == "supersede":
-            adrs_dir = Path.cwd() / "docs" / "decisions"
+            adrs_dir = project_layout.decisions_dir(Path.cwd())
             old_path, new_path = cmd_supersede(adrs_dir, ns.old, ns.new)
             for target in (old_path, new_path):
                 print(str(target.relative_to(Path.cwd()))

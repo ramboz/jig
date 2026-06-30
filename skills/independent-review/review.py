@@ -61,6 +61,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import project_layout
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import SliceLookupError
@@ -165,18 +166,29 @@ def _is_declared_surface_bullet(bold_text: str) -> bool:
 
 
 def _find_project_root(spec_path: Path) -> Path | None:
-    """Walk up from `spec_path` looking for a sibling `docs/architecture.md`.
-    Returns the directory containing `docs/` or None on miss.
+    """Project root for `spec_path` — sentinel-anchored (ADR-0033 §5a).
 
-    Conservative: bails on miss rather than guessing. Used to find the
-    project-root so the reviewer-prompt conditional check can read
-    `docs/architecture.md` for a `## Contract surfaces` declaration.
+    The nearest ancestor carrying `scaffold.json` wins (so a track-local
+    subproject with `docs_root="."` resolves to the subproject, never an
+    enclosing repo that happens to have `docs/architecture.md`). When NO
+    sentinel is found, falls back to the legacy up-walk for a sibling
+    `<docs_root>/architecture.md`; still None on miss (conservative — used so
+    the reviewer-prompt conditional can read `architecture.md` for a
+    `## Contract surfaces` declaration).
     """
     spec_path = Path(spec_path).resolve()
-    for candidate in [spec_path.parent, *spec_path.parents]:
-        if (candidate / "docs" / "architecture.md").is_file():
-            return candidate
-    return None
+    # project_root_for requires the fallback to return a Path; use os.devnull
+    # as the "no project root" marker, mapped back to None below.
+    no_root = Path(os.devnull)
+
+    def _legacy(p: Path) -> Path:
+        for candidate in [Path(p).parent, *Path(p).parents]:
+            if project_layout.architecture_path(candidate).is_file():
+                return candidate
+        return no_root
+
+    root = project_layout.project_root_for(spec_path, fallback=_legacy)
+    return None if root == no_root else root
 
 
 def has_declared_contract_surfaces(project_root: Path) -> bool:
@@ -191,7 +203,7 @@ def has_declared_contract_surfaces(project_root: Path) -> bool:
     declared surfaces (per spec 022-02 AC #2's "no surfaces → no check"
     requirement).
     """
-    arch_path = Path(project_root) / "docs" / "architecture.md"
+    arch_path = project_layout.architecture_path(project_root)
     try:
         text = arch_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -1278,7 +1290,7 @@ def _record_adr_review(args) -> int:
 
     # ADRs live at docs/decisions/ relative to cwd (the project root),
     # mirroring adr.py's accept/supersede dispatch.
-    decisions_dir = Path.cwd() / "docs" / "decisions"
+    decisions_dir = project_layout.decisions_dir(Path.cwd())
     try:
         num = f"{int(args.adr):04d}"
         out_path = _evidence.adr_evidence_path(decisions_dir, args.adr,
@@ -1322,7 +1334,7 @@ def _resolve_bug_arg(raw: str) -> Path:
             )
         return candidate
 
-    bugs_dir = Path.cwd() / "docs" / "bugs"
+    bugs_dir = project_layout.docs_base(Path.cwd()) / "bugs"
     if not bugs_dir.is_dir():
         raise ReviewError(f"bug directory not found: {bugs_dir}")
     if re.fullmatch(r"\d+", raw):

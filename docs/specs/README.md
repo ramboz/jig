@@ -273,7 +273,7 @@
 | [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-07 — In-flight decision stubs | **DONE** | Phase 2; `jig-decision-inflight.sh` (PostToolUse·AskUserQuestion + UserPromptSubmit override, async write-only) → `.jig/decision-scratch/`; Stop hook merges + dedups (no double-surface) + prunes (re-surface until recorded). **Resilience** layer over 083-04's Tier-1 cell (payload-loss / abnormal-termination / earlier capture), NOT residue-shrink — frame-critiqued. `lib/decision_scratch.py`; 12th hook |
 | [083-lightweight-decision-records](083-lightweight-decision-records/spec.md) | 083-08 — Codex host validation (HANDOFF — owned by the maintainer on Codex) | DRAFT | Phase 2; **deferred to maintainer on Codex** (out of Codex tokens 2026-06-26). Tracking stub only — full contract in spec.md § 083-08; parity harness + host-capability matrix |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-01 — `_common/project_layout.py` layout helper + validation | **DONE** |  |
-| [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-02 — Route read/write helpers through the layout helper | READY_FOR_REVIEW |  |
+| [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-02 — Route read/write helpers through the layout helper | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-03 — scaffold-init `--docs-root` flag + layout-aware output | READY_FOR_REVIEW |  |
 
 ## Deferred slices

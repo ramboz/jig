@@ -25,7 +25,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import team_signal  # noqa: F401  (re-exported for test monkeypatching)
+from _common import (
+    project_layout,
+    team_signal,  # noqa: F401  (re-exported for test monkeypatching)
+)
 from _common.atomic_io import atomic_write_text
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
@@ -691,8 +694,8 @@ def _validate_dependencies(deps: list, project_dir: Path,
     Unrecognized token shapes are reported as `unknown dependency token`.
     """
     failures = []
-    specs_dir = project_dir / "docs" / "specs"
-    decisions_dir = project_dir / "docs" / "decisions"
+    specs_dir = project_layout.specs_dir(project_dir)
+    decisions_dir = project_layout.decisions_dir(project_dir)
 
     for dep in deps:
         token = dep.strip()
@@ -978,7 +981,7 @@ def _write_spec_ref_marker(spec_md: Path, slice_label: str) -> None:
         if not spec_num:
             return  # no recognizable spec number — nothing useful to stamp
         slice_id = _slice_id_from_label(slice_label)
-        root = spec_md.resolve().parents[3]
+        root = _project_root_for_spec(spec_md)
         jig_dir = root / ".jig"
         jig_dir.mkdir(parents=True, exist_ok=True)
         body = f"spec={spec_num}\n"
@@ -990,22 +993,27 @@ def _write_spec_ref_marker(spec_md: Path, slice_label: str) -> None:
 
 
 def _project_root_for_spec(spec_md: Path) -> Path:
-    """Best-effort project root for a `docs/specs/<dir>/spec.md` path
-    (= `parents[3]`: [0]=<dir>, [1]=specs, [2]=docs, [3]=root). Slice
-    049-01 used a bare `parents[3]`, which raises `IndexError` for a
-    shallow / non-standard path (e.g. a test fixture at `/tmp/x/spec.md`
-    — only three parents). Degrade gracefully so claim bookkeeping never
-    crashes on path depth: fall back to the nearest ancestor containing a
-    `.git`, else the spec's own directory. For a real nested spec path the
-    result is identical to `parents[3]`."""
-    resolved = spec_md.resolve()
-    parents = resolved.parents
-    if len(parents) > 3:
-        return parents[3]
-    for anc in parents:
-        if (anc / ".git").exists():
-            return anc
-    return resolved.parent
+    """Project root for a spec.md path — sentinel-anchored (ADR-0033 §5a).
+
+    The nearest ancestor carrying `scaffold.json` wins, so a track-local
+    subproject (`docs_root="."`, spec at `<root>/specs/<dir>/spec.md`) resolves
+    to the subproject and never climbs into an enclosing repo. When NO sentinel
+    is found, falls back to the legacy depth arithmetic — `parents[3]`
+    ([0]=<dir>, [1]=specs, [2]=docs, [3]=root) for a default-layout spec, then
+    the nearest `.git` ancestor, then the spec's own directory (degrade
+    gracefully on shallow test-fixture paths). The fallback keeps default-layout
+    projects and jig's own repo (no sentinel) identical to before."""
+    def _legacy(p: Path) -> Path:
+        resolved = p.resolve()
+        parents = resolved.parents
+        if len(parents) > 3:
+            return parents[3]
+        for anc in parents:
+            if (anc / ".git").exists():
+                return anc
+        return resolved.parent
+
+    return project_layout.project_root_for(spec_md, fallback=_legacy)
 
 
 def _branch_freshness_warning(project_dir: Path) -> str:
@@ -1144,9 +1152,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
 
     # Pre-flight: DONE transition validates `dependencies:` from frontmatter.
     if new_status == "DONE" and fm_fields.get("dependencies"):
-        # docs/specs/<spec-dir>/spec.md → project root is parents[3]:
-        # [0]=<spec-dir>, [1]=specs, [2]=docs, [3]=project-root.
-        project_dir = spec_md.resolve().parents[3]
+        # Sentinel-anchored project root (ADR-0033 §5a) — nearest scaffold.json
+        # wins, else the legacy `docs/specs/<dir>/spec.md → parents[3]` depth
+        # arithmetic. Keeps default layout identical; a track-local subtree
+        # resolves to the subproject, not the enclosing repo.
+        project_dir = _project_root_for_spec(spec_md)
         failures = _validate_dependencies(
             fm_fields["dependencies"], project_dir, spec_md,
         )
@@ -1386,7 +1396,7 @@ def collect_slices(project_dir: Path) -> list:
     (slice 049-02) is the slice's frontmatter `claimed_by:` value (set by
     `transition … IN_PROGRESS`, spec 049-01; `""` when unclaimed),
     rendered as a suffix on IN_PROGRESS Status cells."""
-    specs_dir = project_dir / "docs" / "specs"
+    specs_dir = project_layout.specs_dir(project_dir)
     if not specs_dir.is_dir():
         return []
     rows = []
@@ -1583,7 +1593,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     check — they touch individual spec.md files (not the README) and
     happen before the race window opens.
     """
-    board_path = project_dir / "docs" / "specs" / "README.md"
+    board_path = project_layout.specs_dir(project_dir) / "README.md"
     if not board_path.is_file():
         raise WorkflowError(f"status board not found: {board_path}")
 
@@ -1603,7 +1613,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     # the board's table text itself changed, so a spec whose frontmatter
     # drifted from its slice states still gets corrected. Idempotent
     # per spec via `_write_spec_rollup`.
-    specs_dir = project_dir / "docs" / "specs"
+    specs_dir = project_layout.specs_dir(project_dir)
     if specs_dir.is_dir():
         for spec_md in sorted(specs_dir.glob("*/spec.md")):
             _write_spec_rollup(spec_md)
@@ -1652,7 +1662,7 @@ def _resolve_dep_path(dep: str, project_dir: Path) -> Path | None:
     adr_m = re.match(r"(?i)^adr-(\d{1,4})$", dep)
     if slice_m:
         spec_num = slice_m.group(1)
-        specs_dir = project_dir / "docs" / "specs"
+        specs_dir = project_layout.specs_dir(project_dir)
         needle = dep.lower()
         for spec_md in sorted(specs_dir.glob(f"{spec_num}-*/spec.md")):
             for loc in _iter_slices_common(spec_md):
@@ -1661,7 +1671,7 @@ def _resolve_dep_path(dep: str, project_dir: Path) -> Path | None:
         return None
     if adr_m:
         num = adr_m.group(1).zfill(4)
-        candidates = sorted((project_dir / "docs" / "decisions").glob(
+        candidates = sorted(project_layout.decisions_dir(project_dir).glob(
             f"adr-{num}-*.md"))
         return candidates[0] if candidates else None
     return None
@@ -1735,7 +1745,7 @@ def find_stale_items(project_dir: Path, days: int = 90) -> list:
     out = []
 
     # Slices: walk every slice in every spec dir, both layouts (018-02).
-    specs_dir = project_dir / "docs" / "specs"
+    specs_dir = project_layout.specs_dir(project_dir)
     if specs_dir.is_dir():
         for spec_md in sorted(specs_dir.glob("*/spec.md")):
             for loc in _iter_slices_common(spec_md):
@@ -1762,7 +1772,7 @@ def find_stale_items(project_dir: Path, days: int = 90) -> list:
                     out.append((display, reason, "last-verified"))
 
     # ADRs: docs/decisions/adr-NNNN-*.md
-    decisions_dir = project_dir / "docs" / "decisions"
+    decisions_dir = project_layout.decisions_dir(project_dir)
     if decisions_dir.is_dir():
         for adr_path in sorted(decisions_dir.glob("adr-*.md")):
             if not re.match(r"^adr-\d{4}-", adr_path.name):
@@ -1986,12 +1996,11 @@ def find_amendment_artifacts(project_dir: Path):
     carries a `## Amendments` section with at least one dated entry.
     Sorted by path; entries within each artifact sorted by date. Read-only
     — never modifies any artifact (ADR-0010: history is preserved)."""
-    docs = project_dir / "docs"
     candidates = []
-    specs_dir = docs / "specs"
+    specs_dir = project_layout.specs_dir(project_dir)
     if specs_dir.is_dir():
         candidates.extend(specs_dir.rglob("*.md"))
-    decisions_dir = docs / "decisions"
+    decisions_dir = project_layout.decisions_dir(project_dir)
     if decisions_dir.is_dir():
         candidates.extend(decisions_dir.glob("*.md"))
 
@@ -2097,7 +2106,7 @@ def coverage(project_dir: Path) -> str:
       4. Coverage gaps = vision use cases not in the covered set (document
          order, rendered with id + goal text).
     """
-    vision = project_dir / "docs" / "product-vision.md"
+    vision = project_layout.docs_base(project_dir) / "product-vision.md"
     if not vision.is_file():
         return (
             "Use-case coverage (advisory, non-blocking) — skipped: "
@@ -2122,7 +2131,7 @@ def coverage(project_dir: Path) -> str:
     scope_creep: list = []        # spec dirnames citing nothing
     unresolvable: list = []       # (spec dirname, [bad UC ids])
 
-    specs_dir = project_dir / "docs" / "specs"
+    specs_dir = project_layout.specs_dir(project_dir)
     # Materialize once: the loop and the `n_specs` summary count share this
     # list (a glob on a missing dir yields [], so no `is_dir()` guard is
     # needed — n_specs is then 0).
@@ -2966,7 +2975,7 @@ def reserve_spec(slug: str, project_dir: Path,
     # cheapest failure to surface and shouldn't waste git invocations.
     _validate_slug(slug)
 
-    specs_dir = project_dir / "docs" / "specs"
+    specs_dir = project_layout.specs_dir(project_dir)
 
     # Spec 063-01: scaffold-state PRECONDITION. Replaces the weak, dead-end
     # `docs/specs/`-presence check with a three-way, scaffold.json-first

@@ -30,6 +30,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from _common import project_layout
 from _common.atomic_io import atomic_write_text
 
 # The team signal fires at >= 2 distinct contributors. Lives here only; both
@@ -119,7 +120,7 @@ def write_no_people_md_marker(target: Path) -> Path:
 def people_md_path(target: Path) -> Path:
     """Path to `docs/memory/people.md` under `target`. The per-person
     context file the team signal nudges toward bootstrapping."""
-    return target / "docs" / "memory" / "people.md"
+    return project_layout.memory_dir(target) / "people.md"
 
 
 def team_context_drift(target: Path) -> "int | None":

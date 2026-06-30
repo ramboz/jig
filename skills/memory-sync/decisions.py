@@ -29,6 +29,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import project_layout  # noqa: E402
+
 # --- Single canonical ADR-trigger sentence (mirrors ADR-0031) ---------------
 # Edit here AND in ADR-0031; the four consumer sites quote this verbatim and
 # test_decisions.py fails CI on drift. The em-dashes (U+2014) are significant.
@@ -46,7 +49,7 @@ _ENTRIES_HEADING = "## Entries"
 
 def lightweight_path(project_dir: Path) -> Path:
     """Path to the project's lightweight-decisions file."""
-    return project_dir / _LIGHTWEIGHT_REL
+    return project_layout.decisions_dir(project_dir) / "lightweight-decisions.md"
 
 
 def _normalize(text: str) -> str:

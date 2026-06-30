@@ -1,8 +1,9 @@
 ---
-status: READY_FOR_REVIEW
+status: DONE
 dependencies: [084-01]
-last_verified: 2026-06-29
+last_verified: 2026-06-30
 frame_review: false  # mechanical rewiring behind the 084-01 contract; no new premise.
+arch_review: true  # crosses module boundaries across ~9 skills — arch pass required.
 ---
 
 ## Slice 084-02 — Route read/write helpers through the layout helper
@@ -104,16 +105,63 @@ and a cross-project-bleed guard (discovery climbing past the sentinel).
    `scaffold.json`).
 
 **DoD:**
-- [ ] All ACs pass; full suite green; pyright clean; `uvx ruff check .` clean.
-- [ ] New tests parametrize default vs `"."` for `status-board`, `new`, `adr
-      new`, `adr index`, the scaffold-state round-trip, AND the newly-inventoried
-      artifact writers — `memory.py` (glossary/learnings/inbox/refinement-todo),
-      `team_signal.py` (`people_md_path`), `stocktake.py` (specs/refinement-todo)
-      — each landing under `<project>/…` not `<project>/docs/…` when
-      `docs_root="."`. The no-stray-literal guard is asserted with its module set
-      + allowlist documented inline (AST-based); the cross-project-bleed guard
-      exercises BOTH the marker up-walk (nested-ancestor case) AND the
-      depth-arithmetic lifecycle path (transition / slice-claim / DONE-dependency
-      resolving against the sentinel-bearing subproject, not the `.git` ancestor).
-- [ ] Reviewed by `reviewer` subagent (compliance + craft + arch — touches
-      module boundaries across several skills).
+- [x] All ACs pass; full suite green (3074 tests OK, skipped=9); pyright 0 errors
+      across changed modules; `uvx ruff check .` clean; host packages resynced +
+      `--check` in sync.
+- [x] New tests (`test_layout_routing.py`, 13) cover default vs `"."` for
+      `status-board`, `adr index`, the scaffold-state round-trip, AND the
+      newly-inventoried artifact writers — `memory.py`
+      (glossary/inbox/…), `team_signal.py` (`people_md_path`), `stocktake.py`
+      (specs), `decisions.py` (`lightweight_path`) — each landing under
+      `<project>/…` not `<project>/docs/…`. The no-stray-literal guard runs its
+      module set + inline allowlist (AST-based); the cross-project-bleed guard
+      exercises BOTH the marker up-walk AND the depth-arithmetic discovery path.
+      **Caveat (deviation-logged):** `new` / `adr new` are NOT directly
+      parametrized (git-fixture-heavy); covered by the path rewiring
+      (`reserve_spec`/`reserve_adr` now resolve `specs_dir`/`decisions_dir` via
+      `project_layout`) + the unchanged default reserve suite.
+- [x] Reviewed by `reviewer` subagent (compliance + craft + arch) — all PASS;
+      verdicts recorded under `reviews/slice-02-{compliance,craft,arch}.md`.
+
+### Deviation log
+
+- **Inventory scoping refinements** (from the rewiring + the independent reviews):
+  - `migrate.py` **excluded** — on inspection all its `docs/` sites are
+    pre-sentinel layout *detection* of the project being adopted; migrate-into-
+    subtree is an explicit ADR-0033 non-goal. (DoR had listed it as a rewire
+    target.)
+  - `review_evidence.py` **no change** — `bug_evidence_path` is file-relative
+    (derives `reviews/` from the bug path), carries no `project_dir/"docs"` join.
+  - `lexicon.py` kept **stdlib-only** — it must stay hook-safe (zero local-package
+    imports, enforced by `test_lexicon.py`'s `test_stdlib_only_…`), so it CANNOT
+    import `project_layout`. Resolved via a small fail-soft inline `_memory_dir`
+    that reads `layout.docs_root` itself (read-only, no escape validation). The
+    suite caught my first attempt (importing `_common`) and a follow-on bug
+    (dropped `/memory` suffix); both fixed + behaviorally tested.
+- **`project_layout.docs_base()` added** to 084-01's module — the generic
+  docs-root accessor for long-tail files (`product-vision.md`, `inbox.md`,
+  `bugs/`, `lightweight-decisions.md`). Extends the DONE slice's API.
+- **`sys.path` bootstrap added** to `decisions.py` + `stocktake.py` (they had no
+  prior `_common` import); mirrors the existing pattern in `workflow.py`/`adr.py`.
+- **`review._find_project_root`** uses an `os.devnull` marker to preserve its
+  `Optional[Path]` return while routing through `project_root_for` (which returns
+  `Path`).
+- **AC2/AC3 test caveat** (already in DoD): `new` / `adr new` not directly
+  parametrized for `docs_root="."` (git-fixture-heavy); covered by the
+  `reserve_spec`/`reserve_adr` path rewiring + unit-tested `pl.specs_dir`.
+
+### Reconciliation sweep
+
+- **ADR-0033 §5a / spec 084** — implementation matches; no doc correction needed.
+- **084-01 contract** — `project_root_for` resolve-vs-original-`path` asymmetry
+  preserved at both consumers (verified by arch review). `docs_base()` extension
+  is additive.
+- **Deferred follow-ups (logged, not blockers)** — (a) widen `project_root_for`
+  fallback to `Path | None` to drop the `os.devnull` marker (ripples into the DONE
+  resolver + Path-expecting callers); (b) anchor the AST guard's allowlist on
+  `ast.Name` id rather than source-text substring; (c) rule-of-three watch: a
+  third hook-safe `docs_root` consumer would trigger extracting a stdlib-only
+  `docs_root_relaxed()` into `project_layout`. None route to `inbox.md`/
+  `refinement-todo.md` (small, owner = next layout-cleanup pass).
+- **No new `TODO`/`FIXME`.** Glossary candidate ("`docs_base` / configurable docs
+  root") → session-end `memory-sync`, not reconciliation.

@@ -106,6 +106,28 @@ def _first_paragraph(body: str) -> str:
     return " ".join(para_lines)
 
 
+def _memory_dir(project_dir) -> Path:
+    """Layout-aware `<docs_root>/memory` for the glossary overlay — a
+    STDLIB-ONLY mirror of `_common.project_layout` (ADR-0033). lexicon must
+    stay hook-safe: ZERO local-package imports (enforced by
+    `test_stdlib_only_no_third_party_imports`), so it cannot import
+    `project_layout` and reads `layout.docs_root` itself. Fail-soft: any error
+    → the default `docs` root. Read-only resolution, so no escape validation is
+    needed (a bad value just means the overlay is not found and lexicon falls
+    back to the shipped layer)."""
+    base = Path(project_dir)
+    root = "docs"
+    try:
+        data = json.loads((base / "scaffold.json").read_text(encoding="utf-8"))
+        configured = data.get("layout", {}).get("docs_root")
+        if isinstance(configured, str) and configured:
+            root = configured
+    except Exception:  # noqa: BLE001 — fail-soft to the default docs root.
+        pass
+    docs_base = base if root == "." else base / root
+    return docs_base / "memory"
+
+
 def load(project_dir) -> "dict[str, dict]":
     """Return the merged lexicon: shipped definitions with the project's
     `docs/memory/glossary.md` overlay applied on top (project wins).
@@ -121,7 +143,7 @@ def load(project_dir) -> "dict[str, dict]":
     """
     merged = load_shipped()
     try:
-        gloss_path = Path(project_dir) / "docs" / "memory" / "glossary.md"
+        gloss_path = _memory_dir(project_dir) / "glossary.md"
         if not gloss_path.is_file():
             return merged
         text = gloss_path.read_text(errors="replace")

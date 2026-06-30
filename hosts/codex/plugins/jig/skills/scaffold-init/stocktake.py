@@ -17,6 +17,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import project_layout  # noqa: E402
+
 # Threshold below which we don't surface the promotion suggestion.
 PROMOTION_THRESHOLD = 3
 
@@ -35,7 +38,7 @@ class DeferredItem:
 def count_reconciled_slices(target: Path) -> int:
     """Count occurrences of **STATUS: DONE** or **STATUS: RECONCILED** across
     all docs/specs/*/spec.md files. Each occurrence = one slice."""
-    specs_dir = target / "docs" / "specs"
+    specs_dir = project_layout.specs_dir(target)
     if not specs_dir.is_dir():
         return 0
     count = 0
@@ -54,7 +57,7 @@ def count_reconciled_slices(target: Path) -> int:
 def parse_deferred_items(target: Path) -> list:
     """Parse `docs/refinement-todo.md` into a list of DeferredItem.
     Returns empty list if the file is missing or malformed."""
-    todo_path = target / "docs" / "refinement-todo.md"
+    todo_path = project_layout.refinement_todo_path(target)
     if not todo_path.is_file():
         return []
     try:

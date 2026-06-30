@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import project_layout
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import (
@@ -89,7 +90,7 @@ def _today() -> str:
 
 
 def _bugs_dir(project_dir: Path) -> Path:
-    return project_dir / "docs" / "bugs"
+    return project_layout.docs_base(project_dir) / "bugs"
 
 
 def _run(argv: list[str], cwd: Path) -> tuple[int, str, str]:
@@ -485,7 +486,7 @@ def _proof_attests_original_repro(text: str) -> bool:
 
 
 def _learning_recorded(project_dir: Path, bug_path: Path) -> bool:
-    learnings = project_dir / "docs" / "memory" / "learnings.md"
+    learnings = project_layout.memory_dir(project_dir) / "learnings.md"
     if not learnings.is_file():
         return False
     try:
@@ -799,7 +800,7 @@ def escalate_bug(project_dir: Path, ident: str, slug: str | None = None) -> Path
         )
     spec_num, spec_path = _parse_reserved_spec(result.stdout)
     if spec_path is None:
-        spec_path = project_dir / "docs" / "specs" / f"{spec_num}-{spec_slug}" / "spec.md"
+        spec_path = project_layout.specs_dir(project_dir) / f"{spec_num}-{spec_slug}" / "spec.md"
     if not spec_path.is_file():
         raise BugError(f"escalated spec was not created: {spec_path}")
     bug_rel = str(path.relative_to(project_dir))

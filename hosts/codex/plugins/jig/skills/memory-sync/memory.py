@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import team_signal
+from _common import project_layout, team_signal
 from _common.atomic_io import atomic_write_text
 
 # Heading marker used to find the Key terms list inside CLAUDE.md Hot Cache.
@@ -199,26 +199,26 @@ def _ensure_file(path: Path, default_content: str) -> None:
 
 
 def _glossary_path(target: Path) -> Path:
-    path = target / "docs" / "memory" / "glossary.md"
+    path = project_layout.memory_dir(target) / "glossary.md"
     _ensure_file(path, "# Glossary\n\n> Status: Draft (self-healed by memory-sync)\n\n")
     return path
 
 
 def _learnings_path(target: Path) -> Path:
-    path = target / "docs" / "memory" / "learnings.md"
+    path = project_layout.memory_dir(target) / "learnings.md"
     _ensure_file(path, "# Learnings\n\n> Status: Draft (self-healed by memory-sync)\n\n")
     return path
 
 
 def _inbox_path(target: Path) -> Path:
-    path = target / "docs" / "inbox.md"
+    path = project_layout.docs_base(target) / "inbox.md"
     _ensure_file(path, "# Inbox\n\n> Status: Draft (self-healed by memory-sync)\n\n")
     return path
 
 
 def _refinement_todo_path(target: Path) -> Path:
     """Self-healing path for docs/refinement-todo.md (per slice 028-02)."""
-    path = target / "docs" / "refinement-todo.md"
+    path = project_layout.refinement_todo_path(target)
     _ensure_file(
         path,
         "# Refinement Todo\n\n> Status: Draft (self-healed by memory-sync)\n\n",
@@ -500,7 +500,7 @@ def _find_in_hot_cache(target: Path, term: str) -> str:
 def _find_in_glossary(target: Path, term: str) -> str:
     """Search docs/memory/glossary.md for an H2 matching `term` (case-insensitive).
     Returns the body prose under the heading, or '' if not found."""
-    path = target / "docs" / "memory" / "glossary.md"
+    path = project_layout.memory_dir(target) / "glossary.md"
     if not path.exists():
         return ""
     text = path.read_text()
@@ -539,9 +539,9 @@ def summary(target: Path) -> str:
             return 0
         return len(re.findall(r"(?m)^- ", path.read_text()))
 
-    g = count_sections(target / "docs/memory/glossary.md")
-    le = count_sections(target / "docs/memory/learnings.md")
-    inb = count_bullets(target / "docs/inbox.md")
+    g = count_sections(project_layout.memory_dir(target) / "glossary.md")
+    le = count_sections(project_layout.memory_dir(target) / "learnings.md")
+    inb = count_bullets(project_layout.docs_base(target) / "inbox.md")
     lines.append(f"- glossary entries: **{g}**")
     lines.append(f"- learnings entries: **{le}**")
     lines.append(f"- inbox items: **{inb}**")

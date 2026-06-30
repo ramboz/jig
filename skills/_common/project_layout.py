@@ -117,9 +117,14 @@ def docs_root(project_dir: Path) -> str:
     return _validate_docs_root(_read_raw_docs_root(project_dir))
 
 
-def _docs_base(project_dir: Path) -> Path:
+def docs_base(project_dir: Path) -> Path:
     """`<project_dir>/<docs_root>`, collapsing to `<project_dir>` when
-    `docs_root` is `"."` (no trailing `./` segment)."""
+    `docs_root` is `"."` (no trailing `./` segment).
+
+    The generic docs-root accessor. Prefer the named helpers below for the
+    well-known artifact dirs; use this directly only for long-tail artifacts
+    under the docs root that have no named helper (e.g. `product-vision.md`,
+    `inbox.md`, `bugs/`, `lightweight-decisions.md`)."""
     root = docs_root(project_dir)
     base = Path(project_dir)
     if root == ".":
@@ -129,32 +134,32 @@ def _docs_base(project_dir: Path) -> Path:
 
 def specs_dir(project_dir: Path) -> Path:
     """`<docs_root>/specs`."""
-    return _docs_base(project_dir) / "specs"
+    return docs_base(project_dir) / "specs"
 
 
 def decisions_dir(project_dir: Path) -> Path:
     """`<docs_root>/decisions`."""
-    return _docs_base(project_dir) / "decisions"
+    return docs_base(project_dir) / "decisions"
 
 
 def workflow_path(project_dir: Path) -> Path:
     """`<docs_root>/workflow.md`."""
-    return _docs_base(project_dir) / "workflow.md"
+    return docs_base(project_dir) / "workflow.md"
 
 
 def architecture_path(project_dir: Path) -> Path:
     """`<docs_root>/architecture.md`."""
-    return _docs_base(project_dir) / "architecture.md"
+    return docs_base(project_dir) / "architecture.md"
 
 
 def memory_dir(project_dir: Path) -> Path:
     """`<docs_root>/memory`."""
-    return _docs_base(project_dir) / "memory"
+    return docs_base(project_dir) / "memory"
 
 
 def refinement_todo_path(project_dir: Path) -> Path:
     """`<docs_root>/refinement-todo.md`."""
-    return _docs_base(project_dir) / "refinement-todo.md"
+    return docs_base(project_dir) / "refinement-todo.md"
 
 
 def project_root_for(path: Path, *, fallback: Callable[[Path], Path]) -> Path:
