@@ -1,0 +1,18 @@
+---
+adr: 0033
+pass: frame-critique
+verdict: pass
+reviewer: jig:reviewer (Opus)
+reviewed_at: 2026-06-29T23:21:51Z
+prompt_source: review.py frame-critique (ADR-0033 + spec 084 + slices 01-03); jig:reviewer subagent; 2 rounds
+---
+
+Adversarial frame-critique of ADR-0033 (configurable docs root) + the paired spec 084 / slices 01–03 (all carry frame_review: true). Two independent jig:reviewer rounds; the orchestrator's pre-critique (spec 084 reviews/frame-critique.md) seeded findings A–F, the independent rounds tested and extended them.
+
+Round 1 — needs-changes: confirmed the frame's core cleavage (artifact-placement vs git-anchoring) and the headline marker-up-walk discovery finding are grounded (verified `_find_project_root` review.py:167, the detached-worktree `wt / "docs" / "specs"` hardcode workflow.py:2852-2868, local-mode `git -C project_dir` anchoring). But found a THIRD discovery category the ADR and the pre-critique both missed: depth-arithmetic root derivation — `_project_root_for_spec` (workflow.py:992-1008) and bare `parents[3]` at `_record_spec_ref` (981) and the DONE-dependency check (1149) assume `docs/specs/<dir>/spec.md` (root = parents[3]), with a `.git` fallback that also climbs to the enclosing repo. Under `docs_root="."` these resolve to the enclosing repo for every transition / slice-claim (`claimed_by`) / DONE-dependency / `.jig/spec-ref` op — the post-`new` lifecycle that slice 084-02's status-board/new/adr ACs never exercise, so the cross-project bleed would surface only when a real adopter runs a full slice lifecycle. Secondary: slice 084-03 AC5's push-refusal guard (`repo_root != project_dir`) only fires if `project_dir` is the subproject root; an un-anchored CLI `ns.project_dir` (workflow.py:3605-3607) would silently disable the guard.
+
+Resolution: ADR §5a reframed from "swap the docs/ marker for the sentinel" to the stronger invariant **project-root discovery is sentinel-anchored, never structure-derived** — a single `project_root_for(path)` resolver (new in slice 084-01 AC5) subsuming BOTH the marker up-walk AND the depth arithmetic, with a sentinel-less fallback preserving default + jig-self behavior. Slice 084-02's discovery inventory + AC7 + cross-project-bleed guard extended to the depth-arithmetic lifecycle path. The push-guard well-definedness pinned: `project_dir` must be the sentinel-anchored subproject root (ADR git-anchoring scope-out + slice 084-03 AC5), not assumed.
+
+Round 2 — pass: all four load-bearing code claims re-grounded independently (marker up-walk review.py:167-179; three depth-arithmetic sites 981/992-1008/1149; detached-worktree hardcode 2852-2868; un-anchored `ns.project_dir` 3605-3607). The round-1 resolutions are genuine, not papered over. The single new assumption the resolution introduces — that one sentinel-anchored resolver subsumes both discovery categories — survives because its fallback fires ONLY for sentinel-less paths (jig's own repo, test fixtures), while every scaffolded adopter carries `scaffold.json` (the spec 063 completion sentinel) and resolves via the sentinel, never the legacy arithmetic. Push-guard well-definedness correctly pinned to the §5a anchor. Multi-jig-per-repo nesting (two sentinels on the up-walk) is explicitly scoped OUT, consistent with "nearest sentinel wins" — no hidden assumption there.
+
+Non-blocking implementer note (round 2): the §5a "single resolver" is really one sentinel-walk wrapping N per-caller legacy fallbacks; coherent, but each legacy path must stay correct — prefer a single `fallback` callable parameter over per-site re-derivation (captured in slice 084-01 AC5).
