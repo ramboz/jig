@@ -554,3 +554,25 @@ language — the back-catalogue escape hatch this convention complements.
 Skills auto-trigger via description matching. No explicit `/command` required for day-to-day work. Slash commands exist for deliberate bulk operations (`/jig:memory-sync`, `/jig:scaffold-init`).
 
 The spec-workflow, independent-review, and contracts skills all auto-trigger via description matching and carry `user-invocable: true` — none carry `disable-model-invocation: true` (promotions: spec 003 / 004 / 022).
+
+<!-- >>> jig reframe-practice >>> -->
+## Bringing in a new load-bearing reference
+
+**Soft, forward-only — a reminder, not a gate, not a detector.** When you
+bring a new **load-bearing reference** into the project — a design system, a
+vendor / API contract, a test-infrastructure choice, a compliance regime, a
+target platform, or a product-positioning / strategic-vision shift — run
+`/jig:reframe <reference>` **before building on it**.
+
+A new reference dropped into the repo otherwise enters as an inert file with
+no authority: the corpus keeps carrying the *old* premise and work patches at
+the edges. `/jig:reframe` re-baselines the corpus onto the new reference
+through one named operation — a keystone reframe-ADR (new reference
+authoritative, old premise superseded) + a re-baselining manifest — instead
+of edge-patching.
+
+This is **best-effort defense-in-depth, not a detector**: it reduces silent
+drift by making the reframe trigger a standing habit; it does **not**
+automatically detect that a reference moved — systematic detection is parked.
+jig recommends; the human acts.
+<!-- <<< jig reframe-practice <<< -->

@@ -87,6 +87,7 @@ _TIER_SKILLS = {
         "code-health",  # spec 060 / ADR-0017 — Tier-1 detect-and-drive linter
         "explain",  # spec 065-03 — on-demand vocabulary/artifact explainer
         "bug-fix",  # spec 058 / ADR-0016 — proportional teeth-gated bug lifecycle
+        "reframe",  # spec 067 / ADR-0024 — re-baseline the corpus on a moved reference
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }
@@ -1955,6 +1956,10 @@ def copy_machinery(plugin: Path, target: Path, *,
     # the project's docs/workflow.md (the only path that reaches an EXISTING
     # project — copy-machinery does not otherwise touch docs/). Idempotent.
     _ensure_self_defining_convention_block(target, docs_root)
+    # Spec 067-03: the reframe noticing-nudge practice rides the same forward-only
+    # managed-block path, so it reaches existing projects on their next
+    # copy-machinery run too. Idempotent.
+    _ensure_reframe_practice_block(target, docs_root)
 
 
 def _specs_dir_has_content(target: Path, docs_root: str = "docs") -> bool:
@@ -2064,17 +2069,52 @@ def _render_gitignore_block() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _upsert_marked_block(existing: str, begin: str, end: str, block: str) -> str:
+    """Insert-or-replace a `begin`…`end` marker-delimited managed `block` in
+    `existing` text, returning the new content (a pure string transform — the
+    caller owns file I/O and the file-absent *create* branch, whose header
+    differs per file).
+
+    - Markers present (well-formed) → **replace** the delimited region in place
+      (including the end-marker's trailing newline, if any), leaving content
+      before/after untouched — so re-runs are idempotent.
+    - Markers absent (or a begin without a matching end) → **append** the block,
+      ensuring exactly one blank line separates prior content:
+      ends with `"\\n\\n"` → add nothing; ends with `"\\n"` → add `"\\n"`;
+      mid-line → add `"\\n\\n"`.
+
+    ADR-0002 rule-of-three extraction: the identical marker-upsert mechanic was
+    inline in the `.gitignore` secret block (052-02) and the
+    self-defining-vocabulary block (065-04); the reframe-practice block (067-03)
+    is the third caller, so the shared core lands here.
+    """
+    begin_at = existing.find(begin)
+    if begin_at != -1:
+        end_at = existing.find(end, begin_at)
+        if end_at != -1:
+            after = end_at + len(end)
+            if after < len(existing) and existing[after] == "\n":
+                after += 1
+            return existing[:begin_at] + block + existing[after:]
+        # Begin marker without a matching end — fall through and append a fresh,
+        # well-formed block rather than corrupt the half-block.
+
+    if existing.endswith("\n\n"):
+        sep = ""
+    elif existing.endswith("\n"):
+        sep = "\n"
+    else:
+        sep = "\n\n"
+    return existing + sep + block
+
+
 def _write_gitignore_secret_block(target: Path) -> None:
     """Write or merge the marker-delimited jig secret-ignore block into
     `target/.gitignore` (slice 052-02, AC #1).
 
     - No existing `.gitignore` → create it with just the jig block.
-    - Existing `.gitignore` without the markers → APPEND the block (a blank
-      line first if the file doesn't already end on one), preserving every
-      pre-existing line verbatim.
-    - Existing `.gitignore` WITH the markers → REPLACE the delimited region in
-      place, leaving content before/after the markers untouched. This makes
-      re-runs idempotent (no duplicate blocks).
+    - Existing `.gitignore` → upsert the marked block via `_upsert_marked_block`
+      (replace-in-place if present, else append), preserving all other lines.
 
     Atomic write via `atomic_write_text`, consistent with the other scaffold
     writes."""
@@ -2086,34 +2126,11 @@ def _write_gitignore_secret_block(target: Path) -> None:
         return
 
     existing = gitignore.read_text()
-    begin = existing.find(_GITIGNORE_BLOCK_BEGIN)
-    if begin != -1:
-        end_marker = existing.find(_GITIGNORE_BLOCK_END, begin)
-        if end_marker != -1:
-            # Replace from the begin marker through the end-marker's line
-            # (including its trailing newline, if present).
-            after = end_marker + len(_GITIGNORE_BLOCK_END)
-            if after < len(existing) and existing[after] == "\n":
-                after += 1
-            merged = existing[:begin] + block + existing[after:]
-            if merged != existing:
-                atomic_write_text(gitignore, merged)
-            return
-        # Begin marker without a matching end marker — fall through and append
-        # a fresh, well-formed block rather than corrupt the half-block.
-
-    # Append, ensuring exactly one blank line separates prior content from
-    # the jig block. Three cases for the existing file's tail:
-    #   ends with "\n\n" → already blank-terminated, add nothing;
-    #   ends with "\n"    → one newline short of a blank line, add "\n";
-    #   no trailing "\n"  → mid-line, add "\n\n" for the blank separator.
-    if existing.endswith("\n\n"):
-        sep = ""
-    elif existing.endswith("\n"):
-        sep = "\n"
-    else:
-        sep = "\n\n"
-    atomic_write_text(gitignore, existing + sep + block)
+    merged = _upsert_marked_block(
+        existing, _GITIGNORE_BLOCK_BEGIN, _GITIGNORE_BLOCK_END, block
+    )
+    if merged != existing:
+        atomic_write_text(gitignore, merged)
 
 
 # --- Self-defining-vocabulary convention block (spec 065-04) --------------
@@ -2179,27 +2196,79 @@ def _ensure_self_defining_convention_block(target: Path,
         return
 
     existing = workflow.read_text()
-    begin = existing.find(_WORKFLOW_BLOCK_BEGIN)
-    if begin != -1:
-        end_marker = existing.find(_WORKFLOW_BLOCK_END, begin)
-        if end_marker != -1:
-            after = end_marker + len(_WORKFLOW_BLOCK_END)
-            if after < len(existing) and existing[after] == "\n":
-                after += 1
-            merged = existing[:begin] + block + existing[after:]
-            if merged != existing:
-                atomic_write_text(workflow, merged)
-            return
-        # Begin marker without a matching end — fall through and append a
-        # fresh, well-formed block rather than corrupt the half-block.
+    merged = _upsert_marked_block(
+        existing, _WORKFLOW_BLOCK_BEGIN, _WORKFLOW_BLOCK_END, block
+    )
+    if merged != existing:
+        atomic_write_text(workflow, merged)
 
-    if existing.endswith("\n\n"):
-        sep = ""
-    elif existing.endswith("\n"):
-        sep = "\n"
-    else:
-        sep = "\n\n"
-    atomic_write_text(workflow, existing + sep + block)
+
+# --- Reframe-practice noticing nudge (spec 067-03) ------------------------
+#
+# A second marker-delimited managed block in `docs/workflow.md` (sibling of the
+# self-defining block above), written by BOTH `scaffold()` and `copy_machinery()`
+# so the soft "reframe before building on a new reference" practice reaches fresh
+# AND already-scaffolded projects. Soft, forward-only, NOT a detector and NOT a
+# gate (ADR-0024 §4 / ADR-0011 defense-in-depth). HTML-comment delimited.
+_REFRAME_BLOCK_BEGIN = "<!-- >>> jig reframe-practice >>> -->"
+_REFRAME_BLOCK_END = "<!-- <<< jig reframe-practice <<< -->"
+
+
+def _render_reframe_practice_block() -> str:
+    """Render the marker-delimited reframe noticing-nudge block (spec 067-03).
+    Soft, best-effort, explicitly NOT a detector and NOT a gate."""
+    return "\n".join((
+        _REFRAME_BLOCK_BEGIN,
+        "## Bringing in a new load-bearing reference",
+        "",
+        "**Soft, forward-only — a reminder, not a gate, not a detector.** When you",
+        "bring a new **load-bearing reference** into the project — a design system, a",
+        "vendor / API contract, a test-infrastructure choice, a compliance regime, a",
+        "target platform, or a product-positioning / strategic-vision shift — run",
+        "`/jig:reframe <reference>` **before building on it**.",
+        "",
+        "A new reference dropped into the repo otherwise enters as an inert file with",
+        "no authority: the corpus keeps carrying the *old* premise and work patches at",
+        "the edges. `/jig:reframe` re-baselines the corpus onto the new reference",
+        "through one named operation — a keystone reframe-ADR (new reference",
+        "authoritative, old premise superseded) + a re-baselining manifest — instead",
+        "of edge-patching.",
+        "",
+        "This is **best-effort defense-in-depth, not a detector**: it reduces silent",
+        "drift by making the reframe trigger a standing habit; it does **not**",
+        "automatically detect that a reference moved — systematic detection is parked.",
+        "jig recommends; the human acts.",
+        _REFRAME_BLOCK_END,
+        "",
+    ))
+
+
+def _ensure_reframe_practice_block(target: Path,
+                                   docs_root: str = "docs") -> None:
+    """Create / append / replace-in-place the reframe-practice block in the
+    project's `workflow.md` under the configured docs root (spec 067-03;
+    layout-aware per slice 084-03). Idempotent and non-clobbering, sharing the
+    marker-upsert core with the self-defining + gitignore blocks
+    (`_upsert_marked_block`, ADR-0002 rule-of-three).
+
+    Called by both `scaffold()` (fresh projects) and `copy_machinery()`
+    (existing projects' next copy-machinery / tier upgrade), mirroring
+    `_ensure_self_defining_convention_block`."""
+    base = _scaffold_docs_base(target, docs_root)
+    workflow = base / "workflow.md"
+    block = _render_reframe_practice_block()
+
+    if not workflow.exists():
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(workflow, "# Workflow\n\n" + block)
+        return
+
+    existing = workflow.read_text()
+    merged = _upsert_marked_block(
+        existing, _REFRAME_BLOCK_BEGIN, _REFRAME_BLOCK_END, block
+    )
+    if merged != existing:
+        atomic_write_text(workflow, merged)
 
 
 def _scaffold_docs_base(target: Path, docs_root: str) -> Path:
@@ -2440,6 +2509,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # copy_machinery above; the --plugin-only path writes it here (the
         # workflow.md template was already rendered earlier in scaffold()).
         _ensure_self_defining_convention_block(target, docs_root)
+        # Spec 067-03: the reframe noticing-nudge practice, same plugin-only path.
+        _ensure_reframe_practice_block(target, docs_root)
 
     # 6. scaffold.json install-state manifest — the COMPLETION SENTINEL
     # (slice 032-02). Written LAST so a crash before this point leaves

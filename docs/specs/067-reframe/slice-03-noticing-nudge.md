@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [067-01, adr-0024]
-last_verified:
+last_verified: 2026-07-02
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -51,16 +51,20 @@ template carries it, with parity to the repo copy; the lifecycle-skill cross-ref
 present; the absence of any newly-registered hook)._
 
 **DoD:**
-- [ ] All ACs pass; full test suite green.
-- [ ] Coverage: a test asserts the standing practice + reference categories in
+- [x] All ACs pass; full test suite green. — 3155 tests OK (9 skipped); ruff clean
+      (whole repo).
+- [x] Coverage: a test asserts the standing practice + reference categories in
       `docs/workflow.md`, the scaffolded-template parity, and the lifecycle-skill
-      cross-reference; no new hook is registered.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation (compliance) review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+      cross-reference; no new hook is registered. — `scripts/test_noticing_nudge.py`
+      (16 tests, incl. the managed-block writer + both call sites + no-hook).
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation (compliance) review passed. — verdict: pass, no issues.
+- [x] Craft (pr-review) pass run; blockers addressed. — verdict: pass; 2 nits
+      folded/deferred (below).
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed. — verdict: pass, no issues.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred. — no new
+      deferrals (the DRY-up wrapper nit is noted below, below rule-of-three).
 
 **Anti-horizontal-phasing check:** After this slice, a dev bringing a new
 design / vendor / infra reference into a jig project meets a standing prompt to
@@ -82,5 +86,78 @@ surfaced as practice, in jig and in every scaffolded project.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape, reviewer
-findings folded back in, doc updates, plan adherence._
+1. **Delivered as planned + an ADR-0002 rule-of-three extraction.** The reframe
+   noticing practice ships as a marker-delimited **managed block** in
+   `docs/workflow.md`, written by BOTH `scaffold()` and `copy_machinery()`
+   (`_render_reframe_practice_block` / `_ensure_reframe_practice_block`), the
+   065-04 forward-only pattern. Adding it made the marker-upsert mechanic its
+   **third** caller (`.gitignore` secret block + self-defining block + reframe),
+   which tripped ADR-0002's rule-of-three → extracted a pure
+   `_upsert_marked_block(existing, begin, end, block) -> str` and refactored all
+   three writers to delegate (file-I/O + per-file create branch left to each
+   caller). Behaviour-preserving — full suite green (3155). Plus the lifecycle
+   cross-refs (spec-workflow + adr-workflow SKILL.md) and **no new hook** (AC4).
+
+2. **AC2 "scaffolded template" realized as a runtime managed block.** AC2's literal
+   wording ("appears in the scaffolded `docs/workflow.md` template") is satisfied
+   via the `copy_machinery` / `scaffold` managed-block injection (mirroring
+   `_ensure_self_defining_convention_block`), **not** a static
+   `templates/docs/workflow.md.template` edit — the sanctioned 065-04 forward-only
+   path, so already-scaffolded projects inherit the practice on their next
+   `copy-machinery` run. Both review passes confirmed this satisfies AC2.
+
+3. **Downstream link-safety fix (caught by the scaffold-verification gate).** The
+   first render carried a `[ADR-0024](decisions/…)` markdown link; a scaffolded
+   downstream target has no such ADR, so the scaffold-completion link-check failed
+   (exit 4 → 109 test failures). Dropped the link to plain prose — the spec 048-03
+   lesson that a downstream managed block must not link repo-only artifacts. The
+   linkless block was re-injected into jig's own `docs/workflow.md` (dogfood
+   byte-identity preserved; a guard test pins it).
+
+4. **Reviewer nits.** (a) [craft] the orphaned-begin-marker fall-through in
+   `_upsert_marked_block` was untested → added
+   `test_upsert_orphaned_begin_marker_appends_fresh`, locking the documented
+   malformed-input behaviour (append a fresh well-formed block, leave the orphan
+   + intervening text verbatim). (b) [craft] a loose test message ("written by
+   BOTH scaffold() and copy_machinery()") tightened to name the actual call sites.
+   (c) [craft, **DEFERRED**] the duplicated `"# Workflow\n\n"` create-branch header
+   across the two workflow-block ensure functions — a shared
+   `_ensure_workflow_managed_block` wrapper would finish the DRY-up; deferred
+   because that *specific* create-branch bit is only a 2nd occurrence (below
+   rule-of-three) while the upsert *core* is already extracted. Fold on a 3rd
+   workflow-block.
+
+5. **Plan adherence.** Soft, forward-only, best-effort, explicitly **not a
+   detector** and **not a gate** (ADR-0024 §4/§7 / ADR-0011). Vertical slice: a
+   dev bringing a new load-bearing reference now meets a standing reframe prompt in
+   jig AND every scaffolded project. Compliance + craft both `pass`.
+
+### Reconciliation sweep
+
+Drift-prone surfaces checked (`updated` / `no-op` / `deferred`):
+
+- **`docs/workflow.md`** — `updated` (reframe-practice managed block, dogfooded).
+- **`skills/scaffold-init/scaffold.py`** — `updated` (`_upsert_marked_block`
+  extraction; 3 writers refactored to delegate; reframe writer + 2 call sites).
+- **`skills/spec-workflow/SKILL.md` + `skills/adr-workflow/SKILL.md`** — `updated`
+  (one-line `/jig:reframe` cross-refs).
+- **`scripts/test_noticing_nudge.py`** — `updated` (new; 16 tests).
+- **Host packages (`hosts/`)** — `updated` (regenerated; `--check` in sync).
+- **`docs/inbox.md`** — `updated` (dated `reframe/occurrence-*` resolution note —
+  the "build 067-01" demand-pull is satisfied; the occurrence-1/2/3 entries are
+  **retained** as the live T1/T2/T3 trigger-watch evidence ledger, not struck).
+- **`docs/architecture.md`** — `no-op` (`_upsert_marked_block` is an internal
+  scaffold helper — no module boundary or public contract changed).
+- **`docs/refinement-todo.md`** — `no-op` (no new deferrals; the DRY-up-wrapper
+  nit is recorded in deviation-log #4, below rule-of-three).
+- **Lightweight decisions / conventions** — `no-op`.
+
+**Closing-slice close-out (all of 067-01/02/03 DONE → spec 067 complete):**
+
+- **`CLAUDE.md` / `AGENTS.md` primer hygiene (spec 025-01)** — `no-op` for
+  Active-specs compression: spec 067 was never added to Active-specs (the primer
+  is lean per spec 076; **Active specs: none**), so there is nothing to compress.
+  `/jig:reframe` discoverability + the **Reframe** hot-cache Key-terms entry were
+  added in 067-01 (present in both primers). Confirmed, not re-added.
+- **Spec close** — with all three slices DONE, spec.md's derived rollup flips to
+  DONE at the final `transition … DONE`; the board records the per-slice Notes.

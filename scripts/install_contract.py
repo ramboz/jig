@@ -69,6 +69,7 @@ EXPECTED_SKILLS: tuple[str, ...] = (
     "code-health",
     "explain",
     "bug-fix",
+    "reframe",
 )
 
 

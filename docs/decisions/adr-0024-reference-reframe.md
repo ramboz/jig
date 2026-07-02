@@ -1,14 +1,15 @@
 ---
 dependencies: [docs/decisions/adr-0023-lifecycle-family-spine.md, docs/decisions/adr-0020-spec-frame-hardening.md, docs/decisions/adr-0010-amendment-scope-records-vs-live-prose.md, docs/decisions/adr-0019-refactor-workflow.md]
-last_verified: 2026-06-09
+last_verified: 2026-07-02
 frame_review: true
+status: Accepted
 ---
 
 # ADR-0024: Reframe on a load-bearing reference shift — a lightweight correction capability over the spine
 
 ## Status
 
-Proposed (2026-06-09)
+Accepted (2026-07-02)
 
 ## Context
 
@@ -166,12 +167,34 @@ fate instead of silent omission.
 But (a)–(c) are necessary, not sufficient. The skill's correctness rests on the
 **completeness of that corpus read** — and finding every artifact that encodes a
 *settled* premise is the hard part the systematic engine is parked for (§7). The
-minimal version does **not** pretend to solve enumeration; it **surfaces** it: the
-skill states *what it scanned and how*, and the keystone manifest carries an
-explicit **coverage statement** (§3) so the human reviewing the reframe confronts
-"did we catch everything?" deliberately — turning the silent omission that caused
-the motivating failure into a checked, human-gated decision. This is the
-load-bearing risk, owned (Assumptions §4), not assumed away.
+minimal version does **not** pretend to solve enumeration; it **raises the floor
+on, and surfaces,** the gap. A *bare free-text* "here's what I scanned" note would
+not: the human confirming it has no independent enumeration to check the claim
+against, so a confident narration of a *partial* scan reads as complete — exactly
+the n=2 servo miss, where the read silently omitted an entire class (`skills/`,
+§3). So the coverage statement is **not** free text; it is a **two-level coverage
+floor** (§3). **Level 1 (whole corpus, class-level):** the skill walks the corpus's
+deterministically-listable **top-level artifact classes** (`docs/decisions/`,
+`docs/specs/`, live-prose docs under the docs root, `skills/*/SKILL.md`, the root
+primer(s), `README`) and marks **each** `scanned` or `excused (reason)` — this
+catches a whole class silently dropped (the servo `skills/` miss). **Level 2
+(artifact-level, within touched classes):** for every class the moved reference
+actually bears on — the classes the keystone supersedes *into* — the floor
+enumerates the **artifacts within** and states the **method** by which the session
+decided which encode the dead premise, so the disposition table's rows are the
+*output* of an explicit within-class read, not a hand-waved "class scanned." Level 2
+confronts the **motivating failure's own shape**: the dead Android design lived
+*inside* `docs/specs/` and `docs/decisions/` entries that a class-level floor would
+mark `scanned` while individual dead-premise files were carried forward — an
+**intra-class miss** a class-level floor cannot see. Together the two levels convert
+"did we catch everything?" from an unanswerable recall question into per-class *and*
+(for touched classes) per-artifact fields the human confronts at `accept`: an
+omission now requires actively writing it down, which is **visible**, not silent. The
+floor **reduces and surfaces** the load-bearing risk (Assumptions §4) — it does
+**not** eliminate it: Level 2 is scoped to the *touched* classes (a class wrongly
+judged untouched gets only L1), and a human can still rubber-stamp a weak `excused`
+reason. **T1** (§7), now two-pronged, is the honest backstop for that residual, not a
+claim of completeness.
 
 ### 3. The artifacts it drafts — keystone ADR + retrofit specs + dispositions
 
@@ -180,10 +203,22 @@ load-bearing risk, owned (Assumptions §4), not assumed away.
   refuses the Proposed→Accepted flip without a passing verdict): declares the new
   reference *authoritative as of `<date>`*, supersedes the old premise, and
   carries the **re-baselining manifest** — a table of every affected artifact with
-  an explicit disposition (no `TBD`), **plus a coverage statement**: what corpus
-  was scanned, by what method, and the residual uncertainty. Coverage is
-  *asserted, not assumed* — and confirmed by the human at `accept` (the
-  frame-critique gate is the natural checkpoint for "did the read miss anything?").
+  an explicit disposition (no `TBD`), **plus a coverage statement in the form of a
+  two-level coverage floor**: **(L1)** a per-class walk of the corpus's
+  deterministically-listable **top-level artifact classes** (`docs/decisions/`,
+  `docs/specs/`, live-prose docs under the docs root, `skills/*/SKILL.md`, the root
+  primer(s), `README`), each marked `scanned` or `excused (reason)`; **(L2)** for
+  each class the reference actually touches (the classes the keystone supersedes
+  *into*), an **artifact-level** enumeration of that class plus the **method** used
+  to decide which artifacts encode the dead premise — so the disposition rows are the
+  output of an explicit within-class read, not a hand-waved "scanned." Plus the
+  overall scan **method** and **residual uncertainty**. L1 makes a whole-class drop
+  (the n=2 servo `skills/` miss) visible; L2 makes an **intra-class** miss (the
+  motivating Android-design failure — dead-premise files inside a `scanned` class)
+  visible. Confirmed by the human at `accept` — but the floor **reduces and surfaces**
+  the miss risk, it does **not** eliminate the residual (a class wrongly scoped as
+  untouched, so it gets only L1; a rubber-stamped `excused`), which **T1's two-pronged
+  evidence** backstops (Assumptions §4 / §7).
 - **Retrofit spec draft(s)** (ride `spec-workflow`): one slice per `retrofit`
   disposition, each goaled "bring `<artifact/code>` in line with `<reference>`."
   Their `## Assumptions` cite the new reference so future frame-critique is
@@ -247,12 +282,19 @@ read against the reference (optionally `references:` frontmatter tagging for
 determinism, sharing the deferred **spec 024-02** corpus-walking helper).
 **Un-park when ANY of:**
 
-- **T1 — the human-checked coverage proves the manual read under-catches:** on a
-  real reframe, the §3 coverage statement (confirmed at `accept`) reveals the
-  model's single-pass read materially missed artifacts. This is gated at the
-  **first** reframe — not deferred to a second miss — because at n=1 the first use
-  is the only evidence the manual read suffices; a demonstrated under-catch pulls
-  in the systematic engine.
+- **T1 — a real reframe proves the manual read under-catches.** The evidence source
+  is **two-pronged** so T1 is not blind to the intra-class miss the accept-time floor
+  can hide: **(a)** the §3 coverage floor itself, confirmed at `accept`, shows the
+  single-pass read materially missed (a whole class dropped, or an `excused` that
+  doesn't hold up); **or (b)** *post-reframe discovery* — a later session building on
+  the new reference finds a surviving dead-premise artifact **inside a class the
+  manifest marked `scanned`** (a demonstrated intra-class under-catch). (b) is the
+  honest catch for the intra-class residual: it needs no spot-checker built now (that
+  is the parked engine) — only the correct definition that the **first** such
+  discovery, whenever it surfaces, un-parks detection. Gated at the **first** reframe
+  for (a) and the **first** discovery for (b) — not deferred to a second miss —
+  because at n=1 the first use is the only evidence the manual read suffices; a
+  demonstrated under-catch pulls in the systematic engine.
 - **T2 — the corpus outgrows a reliable single-pass read:** the spec/ADR corpus is
   large enough that an agentic read can't reliably or affordably cover it in one
   pass (the [spec 055](../specs/055-context-cost-discipline/spec.md) context-cost /
@@ -304,25 +346,55 @@ extraction trigger.
   structurally excludes settled premises — the exact thing a reframe must catch.
   Recorded here so it is not re-proposed; it is why detection is parked, not
   faked.
-- **The binding risk is enumeration completeness over *settled* ground — and it
-  is owned, not assumed.** A reframe re-baselines correctly only if the corpus
-  read finds the artifacts encoding the dead premise; but settled premises are
-  *invisible* (Context), so a single-pass model read may miss some — and a
-  faithfully-executed but *partial* manifest would reproduce the motivating
-  failure under a keystone ADR. The minimal version therefore does **not** assume
-  the read is complete (which would mis-diagnose the failure as a mere
-  vocabulary/authority gap). It **surfaces** coverage: the manifest's coverage
-  statement (§3) is human-confirmed at `accept`, and a demonstrated under-catch
-  un-parks the systematic engine at the *first* reframe (T1). The other pieces —
-  named operation, keystone authority, disposition discipline — are grounded
-  (model judgment over existing lifecycles); the nudge is best-effort (*degrades*,
-  not *misdirects*). The residual — a human who rubber-stamps a weak coverage
-  statement — is a real but **bounded and visible** risk, not a silent one.
+- **The binding risk is enumeration completeness over *settled* ground — reduced
+  and surfaced by the coverage floor, NOT fully owned.** A reframe re-baselines
+  correctly only if the corpus read finds the artifacts encoding the dead premise;
+  but settled premises are *invisible* (Context), so a single-pass model read may
+  miss some — and a faithfully-executed but *partial* manifest would reproduce the
+  motivating failure under a keystone ADR (worse: the dead premise now rides fresh
+  authority + a "coverage confirmed" verdict, harder to re-detect than the inert
+  file). The minimal version does **not** assume the read is complete (which would
+  mis-diagnose the failure as a mere vocabulary/authority gap), and — correcting an
+  earlier draft that said "owned, not assumed" — it does **not** claim to *own* the
+  risk: that language over-claimed a control that would only *narrate*. What the
+  control actually does: the **coverage floor** (§2/§3) forces every
+  deterministically-listable top-level artifact class to a *visible per-class fate*
+  (`scanned` / `excused (reason)`), so the specific miss that bit the n=2 servo
+  reframe — an entire class (`skills/`) silently absent — becomes a field the author
+  must actively mark and the human sees at `accept`. That structure is what makes
+  the residual **bounded and visible** rather than silent — it is *grounded in the
+  floor* (a class cannot be dropped without writing its omission; and within a
+  *touched* class, Level 2 forces an artifact-level read, so the motivating
+  intra-class shape is confronted, not hand-waved), not merely asserted. The
+  residuals that stay genuinely open (NOT closed here): **(i)** L2's artifact-level
+  read covers only the classes scoped as *touched* — a class wrongly judged untouched
+  gets only L1, so an intra-class miss there survives; **(ii)** even within a touched
+  class the session's read can miss an artifact; **(iii)** a human can rubber-stamp a
+  weak `excused`. All are backstopped by **T1's two-pronged evidence** (§7): the
+  accept-time floor for whole-class/weak-excuse misses, and *post-reframe discovery*
+  of a surviving dead-premise artifact for the intra-class case — the honest fallback
+  rather than a completeness claim.
+  The other pieces — named operation, keystone authority, disposition discipline —
+  are grounded (model judgment over existing lifecycles); the nudge is best-effort
+  (*degrades*, not *misdirects*).
+- **Correction is the higher-leverage half than noticing — an n=1 assumption, NOT
+  settled ground.** The "ship correction, park noticing" ordering is drawn from the
+  single motivating case, in which the team had *already noticed* the shift (Context).
+  Whether noticed-vs-silent shifts favour correction *in general* is unevidenced: a
+  settled premise is by definition unquestioned, so silent drift (no one thinks to
+  invoke `/jig:reframe`) is plausibly the more common shape — in which case the parked
+  noticing half is the load-bearing one and the best-effort nudge (§4) is the only
+  guard. Marked here so the kill criteria watch it, not carried as fact.
 
 ## Kill criteria
 
 - If reframes drift *even with good drafts in hand* → the correction recipe is
   insufficient → graduate to a gated lifecycle member (Option B).
+- If real reframes are dominated by *silent* drift (the shift was NOT self-noticed —
+  a nudge or an accident surfaced it, not a deliberate invocation) → the n=1 leverage
+  ordering (correction > noticing) was wrong → re-weight toward the parked *noticing*
+  half (systematic detection / the nudge becomes load-bearing), not more correction
+  machinery.
 - If a reframe's human-checked coverage shows the manual read **under-catches**
   (T1) → un-park systematic detection.
 - If real reframes **always** decompose to a single `adr supersede` + one spec →

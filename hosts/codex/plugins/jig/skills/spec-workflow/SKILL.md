@@ -140,6 +140,12 @@ SKILL.md hand-off is the documented gate.
    structure by hand.
 
 1. Confirm the work needs a spec. Trivial fixes don't.
+   - **Reference moved? Reframe first.** If a *load-bearing reference* changed
+     from outside the system (a design system, vendor / API contract, test infra,
+     compliance regime, platform, or product-positioning / strategic-vision
+     shift), reach for `/jig:reframe` **before** drafting — re-baseline the corpus
+     onto the new reference so you draft against it, not the dead premise (spec
+     067 / [ADR-0024](../../docs/decisions/adr-0024-reference-reframe.md)).
 1a. **Read the vision `## Use cases` section as framing — before drafting
    (spec 068-02 / [ADR-0025](../../docs/decisions/adr-0025-use-cases-breadth-layer.md)).**
    If the project's `docs/product-vision.md` carries a `## Use cases` section

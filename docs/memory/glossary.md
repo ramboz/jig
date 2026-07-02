@@ -16,7 +16,7 @@ Used to split feature specs into implementable vertical slices. Spike is last re
 
 Installation tiers for jig skills:
 - **Tier 0**: Always installed (scaffold-init, spec-workflow, independent-review, contracts, memory-sync). Sibling: `migrate` (adopts an existing spec-driven project to jig).
-- **Tier 1**: Default for most projects. Built: `adr-workflow` (005), `tdd-loop` (006), `slice-land` (007 + 009 close-out fix), `pr-review` (012), `arch-review` (014), `clarify`, `analyze`, `security-review`, `code-health` (060), `explain` (065), `bug-fix` (058). Outstanding candidate: `local-dev-parity` (no signal yet).
+- **Tier 1**: Default for most projects. Built: `adr-workflow` (005), `tdd-loop` (006), `slice-land` (007 + 009 close-out fix), `pr-review` (012), `arch-review` (014), `clarify`, `analyze`, `security-review`, `code-health` (060), `explain` (065), `bug-fix` (058), `reframe` (067). Outstanding candidate: `local-dev-parity` (no signal yet).
 - **Tier 2**: Opt-in by signal (eval-harness, e2e-testing, migration-mode, skill-stocktake) — not yet built.
 
 ## Hot Cache
@@ -140,6 +140,10 @@ EngTip #21's five test *types*, distinguished by **scope** (how much of the syst
 ## Lifecycle-family spine
 
 [ADR-0023](../decisions/adr-0023-lifecycle-family-spine.md) — spec-workflow, `jig:bug-fix` ([ADR-0016](../decisions/adr-0016-bug-fix-lifecycle.md)), and `jig:refactor` ([ADR-0019](../decisions/adr-0019-refactor-workflow.md)) are one gated-evidence lifecycle family sharing a C1–C7 spine contract; the shared code is extracted to `_common/lifecycle.py` only at the *third* concrete `transition` (today only `workflow.py` exists; bug/refactor are Proposed). The pluggable-oracle boundary to servo ([ADR-0022](../decisions/adr-0022-pluggable-oracle-boundary.md), clause C5) is PARKED — don't re-propose it without a real eval case, a servo spec 006, or a built consumer.
+
+## Reframe
+
+[ADR-0024](../decisions/adr-0024-reference-reframe.md) / [spec 067](../specs/067-reframe/spec.md) — re-baseline the corpus when a **load-bearing reference** (design system, vendor / API contract, test infra, compliance regime, target platform, product-positioning / strategic-vision shift) moves *from outside the system*. The `/jig:reframe` skill (Tier-1, judgment-only, no `.py`) reads the accepted corpus against the new reference and drafts a **keystone reframe-ADR** — new reference authoritative as of `<date>`, old premise superseded, a **re-baselining manifest** giving every affected artifact a disposition (`reaffirm`/`amend`/`supersede`/`retire-draft`/`retrofit`/`rewrite`), and a **two-level coverage floor** (L1 per-class scanned/excused; L2 artifact-level within touched classes) that makes an omission *visible* at the frame-critique `accept` gate. A *capability over the spine* (ADR-0023 §4), **not** a gated lifecycle member: no `transition`, it orchestrates the ADR/spec lifecycles it spawns. Systematic blast-radius **detection is parked** (triggers T1/T2/T3); the noticing half is a best-effort nudge, not a detector.
 
 ## Spec-gate model
 
