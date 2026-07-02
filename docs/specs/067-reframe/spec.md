@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: reframe
 ---
 
@@ -68,10 +68,13 @@ which is exactly why it is parked, not faked (ADR-0024).
 3. **Disposition discipline** — every affected artifact gets a deliberate fate
    (no silent omission), each routing to an operation that already exists.
 4. **Surface coverage, don't fake it** — the keystone manifest carries an
-   explicit **coverage statement** (what was scanned, how, residual
-   uncertainty), human-confirmed at the ADR's frame-critique `accept` gate, so
-   "did we catch everything?" becomes a checked decision rather than a silent
-   assumption.
+   explicit **two-level coverage floor** (L1: every deterministically-listable
+   top-level artifact class marked `scanned`/`excused`; L2: an artifact-level
+   read of the classes the reference *touches*), plus method + residual
+   uncertainty, human-confirmed at the ADR's frame-critique `accept` gate — so an
+   omission (whole-class **or** intra-class) must be *written down* and "did we
+   catch everything?" becomes a checked decision rather than a silent assumption
+   ([ADR-0024](../../decisions/adr-0024-reference-reframe.md) §2–§4).
 5. **Best-effort noticing** — a soft standing practice ("reframe before building
    on a new reference"), explicitly not a detector.
 6. **Least machinery** — a judgment skill riding existing lifecycles; **no new
@@ -156,11 +159,20 @@ and ADR-0024 resolved the design.
 - **Enumeration completeness is the binding risk** (ADR-0024 §Assumptions §4 /
   Kill criteria / trigger T1). Finding every artifact that encodes a *settled*
   premise is the hard part — and settled premises are invisible (Overview). The
-  minimal skill does **not** pretend to solve enumeration; it **surfaces** it via
-  the coverage statement, so a faithful-but-partial re-baseline is caught at the
-  `accept` gate rather than reproducing the motivating failure under a keystone
-  ADR. This is why **067-01 carries `frame_review: true`** — the
-  pre-implementation pass pressure-tests whether the SKILL.md actually makes a
+  minimal skill does **not** pretend to solve enumeration; it **reduces and
+  surfaces** it via the **two-level coverage floor** (ADR-0024 §2–§3): **L1** a
+  per-class `scanned`/`excused` walk of the deterministically-listable top-level
+  classes (catches a whole class dropped — the n=2 servo `skills/` miss), and
+  **L2** an artifact-level read within the classes the reference *touches*
+  (catches an **intra-class** miss — the motivating Android-design shape, where a
+  dead-premise file lives inside a class a class-level floor would mark
+  `scanned`). A faithful-but-partial re-baseline is thus caught at the `accept`
+  gate rather than reproducing the motivating failure under a keystone ADR; the
+  irreducible residual (untouched-class misscoping; within-class miss;
+  rubber-stamped `excused`) is backstopped by **T1's two-pronged evidence**
+  (accept-time floor **or** post-reframe discovery of a surviving dead-premise
+  artifact — ADR-0024 §7). This is why **067-01 carries `frame_review: true`** —
+  the pre-implementation pass pressure-tests whether the SKILL.md actually makes a
   weak coverage statement *visible* rather than rubber-stampable.
 - **Disposition vocabulary** (ADR-0024 §3), each routing to an existing
   operation:
@@ -180,10 +192,12 @@ and ADR-0024 resolved the design.
   executed **ad hoc, without this workflow**, and reproduced the exact failure
   067 guards against: the corpus read covered only `docs/` + `README` and **missed
   the flagship skill's description** (still "closed-loop, unattended agent-operations
-  infrastructure"). This **corroborates the binding-risk control** — a mandatory
-  coverage statement (067-01 AC5) would have forced "did we scan `skills/`?" — and
-  is T1-adjacent evidence that an undisciplined single-pass read under-catches
-  (not a clean T1 trip, since the workflow wasn't used). It also surfaced **two
+  infrastructure"). This **corroborates the binding-risk control** — the **L1
+  coverage floor** (067-01 AC5), which lists `skills/` as a top-level class to mark
+  `scanned`/`excused`, would have forced "did we scan `skills/`?" (a *free-text*
+  coverage note would not) — and is T1-adjacent evidence that an undisciplined
+  single-pass read under-catches (not a clean T1 trip, since the workflow wasn't
+  used). It also surfaced **two
   shape refinements**, both folded in above / below: (1) the **`rewrite`
   disposition** for live non-record prose — a documentation-shaped reframe is
   *mostly* prose rewrites, which the original five dispositions don't fit; (2) an
