@@ -201,7 +201,7 @@ Each disposition routes to an operation that already exists (ADR-0024 §3):
 | `amend` | closed record, still valid, needs a pointer | `## Amendments` ([ADR-0010](../../docs/decisions/adr-0010-amendment-scope-records-vs-live-prose.md)) |
 | `supersede` | decision now wrong | `adr.py supersede` / superseding spec |
 | `retire-draft` | future-work on the dead premise | DEFERRED or discard — **do first** |
-| `retrofit` | shipped code must change | a slice in a retrofit spec (minted per slice 067-02) |
+| `retrofit` | shipped code must change | a slice in a retrofit spec `/jig:reframe` mints via `workflow.py new` (see **Retrofit spec drafts**) |
 | `rewrite` | **live, non-record prose** whose framing must change (not a closed record → not `amend`; not a decision → not `supersede`; not code → not `retrofit`) | rewrite in place, citing the keystone ADR |
 
 ## The two-level coverage floor
@@ -262,13 +262,53 @@ claim.
 > down here rather than left silent, per this skill's own "omissions must be
 > visible" ethos.
 
+## Retrofit spec drafts
+
+For **every `retrofit` disposition** in the manifest, `/jig:reframe` also mints a
+**retrofit spec draft** — the shipped-code change the reference forces, queued in
+the spec lifecycle rather than left for the session to hand-author. For each
+`retrofit` row:
+
+1. **Reserve a spec** via `workflow.py new`:
+
+   ```bash
+   python3 "${PLUGIN_ROOT}/skills/spec-workflow/workflow.py" new \
+     retrofit-<artifact>-onto-<reference-slug>
+   ```
+
+   Slugify the substituted parts — lowercase, `[a-z0-9-]` only, no `--`;
+   `workflow.py new` refuses a malformed slug.
+
+2. **Goal the draft on the reference.** The draft's Overview / first-slice goal
+   reads **"bring `<artifact/code>` in line with `<reference>`"**, naming the moved
+   reference explicitly — so the retrofit's purpose is unambiguous and measured
+   against the *new* authority, not the dead premise.
+
+3. **Anchor `## Assumptions` on the new reference.** The retrofit spec's
+   `## Assumptions` cite the new reference as the authority the work is measured
+   against, so a future frame-critique on that spec is anchored correctly
+   ([ADR-0024](../../docs/decisions/adr-0024-reference-reframe.md) §3) — not against
+   the premise the reframe just retired.
+
+4. **Close the loop — no `retrofit` disposition silently dropped.** Every
+   `retrofit` row maps to a drafted spec **or** to an **explicitly-recorded reason
+   it was not drafted** surfaced to the user (e.g. `deferred — <why>`). Update the
+   keystone manifest to **link each `retrofit` row to its drafted spec number**, so
+   the disposition→draft mapping is **complete and visible** — the same "omissions
+   must be visible" ethos as the coverage floor.
+
+The retrofit specs then ride the normal review-gated `spec-workflow` lifecycle:
+`/jig:reframe` *drafts* them, a competent session *implements* them. (This mirrors
+the keystone-ADR flow — reframe reserves + drafts through the real lifecycle so the
+spawned work inherits its gates for free.)
+
 ## No `.py` helper
 
 Like `/jig:clarify` and `/jig:explain`, this skill ships **no helper script**. The
 only determinism it needs runs through existing tooling:
 
 - **reserve the keystone ADR** via `adr.py new` (frame-critique-gated `accept`);
-- **reserve retrofit specs** via `workflow.py new` (slice 067-02);
+- **reserve retrofit specs** via `workflow.py new` (one per `retrofit` disposition);
 - **corpus reading** via the Read tool.
 
 There is no `reframe.py`. The corpus read and the drafting are model judgment; the

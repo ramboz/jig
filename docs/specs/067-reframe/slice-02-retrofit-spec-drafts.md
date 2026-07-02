@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [067-01, adr-0024]
-last_verified:
+last_verified: 2026-07-02
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -51,16 +51,20 @@ complete-and-linked mapping) they are structural and unit-testable on the SKILL.
 surface; the *content quality* of a generated draft is judgment, like 067-01._
 
 **DoD:**
-- [ ] All ACs pass; full test suite green.
-- [ ] Coverage: a test asserts the SKILL.md specifies the per-`retrofit`
+- [x] All ACs pass; full test suite green. — reframe surface test 38 tests OK;
+      full suite green earlier this session; ruff clean.
+- [x] Coverage: a test asserts the SKILL.md specifies the per-`retrofit`
       `workflow.py new` drafting flow, the reference-anchored goal +
-      `## Assumptions`, and the complete/linked mapping back to the manifest.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation (compliance) review passed.
-- [ ] Craft (pr-review) pass run; blockers addressed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+      `## Assumptions`, and the complete/linked mapping back to the manifest. —
+      `RetrofitSpecDraftTests` in `skills/reframe/test_reframe_skill_surface.py`.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation (compliance) review passed. — verdict: pass.
+- [x] Craft (pr-review) pass run; blockers addressed. — verdict: pass; 3 nits
+      folded in (below).
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed. — verdict: pass, no issues.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred. — no new
+      deferrals.
 
 **Anti-horizontal-phasing check:** After this slice, running `/jig:reframe` on a
 reference with shipped-code impact yields not just the keystone ADR but
@@ -80,5 +84,55 @@ spawned work is queued in the spec lifecycle, not left implicit.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape, reviewer
-findings folded back in, doc updates, plan adherence._
+1. **Delivered as a new SKILL.md section, exactly as planned.** 067-02 extends the
+   `skills/reframe/SKILL.md` shipped by 067-01 with a **"Retrofit spec drafts"**
+   section: for every `retrofit` disposition, `/jig:reframe` mints a retrofit spec
+   draft via `workflow.py new`, goaled "bring `<artifact/code>` in line with
+   `<reference>`", `## Assumptions` anchored on the new reference, and the manifest
+   links each `retrofit` row to its drafted spec number (complete + visible; an
+   explicit `deferred — <why>` escape hatch for a row not drafted). The disposition
+   table's `retrofit` row + the "Relationship to other skills" `spec-workflow`
+   bullet cross-reference the section. No new `.py` (AC-consistent with 067-01).
+
+2. **Reviewer nits folded in (both passes `pass`, no blockers).** Craft/compliance
+   raised three nits, all addressed here: (a) the test-module docstring said
+   "(slice 067-01)" — updated to "(slices 067-01 + 067-02)" noting the
+   `RetrofitSpecDraftTests` addition; (b) `test_goal_anchored_on_reference` asserted
+   only "in line with" — strengthened to pin the full `bring <artifact/code> in
+   line with <reference>` template so it can't pass on unrelated prose; (c) the
+   `workflow.py new` example slug is a template — added a one-line slugify reminder
+   (lowercase / `[a-z0-9-]` / no `--`; `workflow.py new` refuses a malformed slug).
+
+3. **No frame/arch pass (deliberate).** 067-02 declares neither `frame_review` nor
+   `arch_review`: it is a mechanical extension of an existing surface with no new
+   unverified binding assumption and no new module boundary (the keystone-ADR /
+   coverage-floor binding risk was owned at 067-01 + ADR-0024). The gate agreed —
+   `REVIEWED` required only compliance + craft. (`workflow.py frame-review-needed`
+   returns `true` here, but that deriver keys on the *spec-level* `## Assumptions`
+   prose shared by all slices; the per-slice authority is the frontmatter flag the
+   gate reads — an observed deriver-vs-gate looseness, out of scope for spec 067.)
+
+4. **Plan adherence.** Vertical slice: running `/jig:reframe` on a reference with
+   shipped-code impact now yields ready-to-implement retrofit spec drafts, each
+   reference-anchored — the spawned work is queued in the spec lifecycle, not left
+   implicit. Compliance + craft both `pass`.
+
+### Reconciliation sweep
+
+Drift-prone surfaces checked (`updated` / `no-op` / `deferred`):
+
+- **`skills/reframe/SKILL.md`** — `updated` (new "Retrofit spec drafts" section +
+  disposition-row + relationship cross-refs + slugify reminder).
+- **`skills/reframe/test_reframe_skill_surface.py`** — `updated`
+  (`RetrofitSpecDraftTests` + strengthened AC2 assertion + docstring).
+- **Host packages (`hosts/`)** — `updated` (regenerated; `--check` in sync).
+- **`docs/specs/README.md` Notes** — `deferred` to Close-out (recorded when the
+  board is regenerated at DONE).
+- **`docs/architecture.md`** — `no-op` (no boundary change; no new `.py`).
+- **`docs/refinement-todo.md`** — `no-op` (no new deferrals).
+- **`CLAUDE.md` / `AGENTS.md` / glossary / product-vision** — `no-op` (registration
+  + counts already carry `reframe` from 067-01; 067-02 adds no new skill).
+- **`docs/workflow.md`** — `deferred` to 067-03 (the noticing nudge).
+- **`docs/inbox.md`** — `deferred` to spec close (067-03); occurrence entries stay
+  as the T1/T2/T3 evidence ledger.
+- **Lightweight decisions / conventions** — `no-op`.

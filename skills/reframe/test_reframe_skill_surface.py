@@ -1,4 +1,8 @@
-"""Surface tests for skills/reframe/SKILL.md (slice 067-01).
+"""Surface tests for skills/reframe/SKILL.md (slices 067-01 + 067-02).
+
+Slice 067-02 adds `RetrofitSpecDraftTests` (the per-`retrofit` `workflow.py new`
+drafting surface). The AC index below is 067-01's; 067-02's four ACs are pinned
+by that class.
 
 Pure-file inspection — no subprocess, no runner. Mirrors the surface-test
 pattern from skills/explain/test_explain_skill_surface.py and
@@ -360,6 +364,58 @@ class ClaudeMdDiscoverabilityTests(unittest.TestCase):
             n, 70,
             f"CLAUDE.md has {n} lines; spec 076 budget is 70 — add reframe by "
             f"extending an existing line, not a new one",
+        )
+
+
+class RetrofitSpecDraftTests(unittest.TestCase):
+    """Slice 067-02 — the SKILL.md specifies that each `retrofit` disposition
+    mints a retrofit spec draft via `workflow.py new`, reference-anchored, with a
+    complete + linked mapping back to the manifest. (The content quality of a
+    generated draft is judgment, like 067-01 — not unit-tested.)"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+        cls.body_norm = _normalize(cls.body)
+
+    def _h2_positions(self):
+        body = _strip_fenced_blocks(self.body)
+        return [(m.group(1).lower(), m.start())
+                for m in re.finditer(r"(?m)^##\s+(.+?)\s*$", body)]
+
+    def test_has_retrofit_spec_drafts_section(self):
+        self.assertTrue(
+            any("retrofit spec drafts" in h for h, _ in self._h2_positions()),
+            "missing 'Retrofit spec drafts' H2 section (067-02)",
+        )
+
+    def test_per_retrofit_workflow_new_flow(self):
+        # AC1 — one retrofit spec per `retrofit` disposition, via workflow.py new.
+        self.assertIn("workflow.py", self.body_norm)
+        self.assertIn("every `retrofit` disposition", self.body_norm)
+
+    def test_goal_anchored_on_reference(self):
+        # AC2 — the draft is goaled "bring <artifact/code> in line with <reference>".
+        # Pin the full template (not just "in line with") so the assertion can't
+        # pass on unrelated prose (067-02 craft nit).
+        self.assertIn(
+            "bring `<artifact/code>` in line with `<reference>`", self.body_norm,
+            "AC2: retrofit draft goal must use the reference-anchored template",
+        )
+
+    def test_assumptions_anchored_on_reference(self):
+        # AC3 — the retrofit spec's `## Assumptions` cite the new reference.
+        self.assertIn("anchor `## assumptions`", self.body_norm)
+
+    def test_complete_and_visible_mapping(self):
+        # AC4 — no retrofit disposition silently dropped; manifest links each
+        # retrofit row to its drafted spec number.
+        self.assertIn("no `retrofit` disposition silently dropped", self.body_norm)
+        self.assertIn("explicitly-recorded reason", self.body_norm)
+        self.assertTrue(
+            "link each `retrofit` row to its drafted spec number" in self.body_norm,
+            "manifest must link each retrofit row to its drafted spec number "
+            "(complete + visible mapping)",
         )
 
 
