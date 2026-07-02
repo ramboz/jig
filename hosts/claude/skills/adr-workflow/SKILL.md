@@ -47,6 +47,14 @@ Consequences, Open questions).
 
 ### 1. Author a new ADR
 
+**Reference moved? Reframe first.** If this ADR is a reaction to a *load-bearing
+reference* changing from outside the system (a design system, vendor / API
+contract, test infra, compliance regime, platform, or product-positioning /
+strategic-vision shift), reach for `/jig:reframe` **before** hand-authoring — it
+drafts the keystone reframe-ADR (new reference authoritative, old premise
+superseded) + the re-baselining manifest for you, so the fallout is dispositioned
+rather than patched (spec 067 / [ADR-0024](../../docs/decisions/adr-0024-reference-reframe.md)).
+
 **Step 0 — confirm the project is scaffolded (spec 066 / ADR-0011).**
 BEFORE reserving an ADR number or drafting ANY `docs/decisions/` structure,
 confirm this project is a scaffolded jig project. If it isn't, **route — do
