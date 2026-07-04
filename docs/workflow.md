@@ -62,8 +62,9 @@ document covers the spec lifecycle.
 ## Spec lifecycle
 
 Every non-trivial piece of work gets a spec in `docs/specs/NNN-name/`. The
-lifecycle is a forward path with three review-driven back-edges and a parked
-sidetrack (`DEFERRED`), with TDD's red→green→refactor cycle nested inside
+lifecycle is a forward path with three review-driven back-edges and two
+parked/dropped sidetracks (`DEFERRED` — resumable; `ABANDONED` — permanent,
+pre-DONE only), with TDD's red→green→refactor cycle nested inside
 `IN_PROGRESS`:
 
 ```mermaid
@@ -74,6 +75,7 @@ stateDiagram-v2
     READY_FOR_REVIEW --> READY_FOR_IMPLEMENTATION: review pass
     READY_FOR_IMPLEMENTATION --> IN_PROGRESS: implementer picks up
     READY_FOR_IMPLEMENTATION --> DEFERRED: parked w/ trigger
+    READY_FOR_IMPLEMENTATION --> ABANDONED: permanently dropped
 
     state IN_PROGRESS {
         [*] --> Red
@@ -89,6 +91,7 @@ stateDiagram-v2
     RECONCILED --> IN_PROGRESS: reconciliation fails
     RECONCILED --> DONE: reconciliation pass
     DEFERRED --> DRAFT: trigger met
+    ABANDONED --> DRAFT: reopened
     DONE --> [*]
 ```
 
@@ -358,7 +361,8 @@ decisions** so the orchestrator dispatches against a plan rather than
 improvising work across many turns.
 
 - **Get the plan deterministically.** `python3 skills/spec-workflow/workflow.py
-  session-plan <spec.md>` enumerates the spec's non-DEFERRED slices and prints,
+  session-plan <spec.md>` enumerates the spec's non-DEFERRED, non-ABANDONED
+  slices and prints,
   per slice, the standard phase sequence — implement → compliance → craft →
   *arch (only when the slice declares `arch_review: true`)* →
   *code-health (only when it declares `code_health_review: true`)* →

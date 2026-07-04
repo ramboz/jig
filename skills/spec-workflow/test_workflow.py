@@ -816,6 +816,282 @@ class DeferredLifecycleTests(unittest.TestCase):
         )
 
 
+class AbandonedLifecycleTests(unittest.TestCase):
+    """Slice 085-01: `ABANDONED` is a recognized state with bounded
+    outbound transitions (mirrors DEFERRED), refused from DONE, a
+    separate status-board section, and a live-dependents warning."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-abandon-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_spec(self, rel_dir: str, label: str, status: str,
+                    reason: str = "", dependencies: str = None) -> Path:
+        """Append a slice to the spec under rel_dir, creating the spec
+        file with a preamble on first call. When `dependencies` is given,
+        writes a file-per-slice fixture (frontmatter carries
+        `dependencies:`, required for the AC8 dependents scan); otherwise
+        an embedded prose-marker `## Slice` section in spec.md."""
+        spec_dir = self.target / "docs/specs" / rel_dir
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        if not spec_md.is_file():
+            spec_md.write_text("# Spec\n")
+        if dependencies is not None:
+            fragment = label.split()[0]
+            slice_file = spec_dir / f"slice-{fragment}.md"
+            body = (
+                f"---\nstatus: {status}\ndependencies: {dependencies}\n"
+                f"last_verified:\n---\n\n## Slice {label}\n\n**Goal:** x.\n"
+            )
+            if reason:
+                body += f"\n**Abandonment reason:** {reason}\n"
+            slice_file.write_text(body)
+            return spec_md
+        slice_block = (
+            f"\n## Slice {label}\n\n**STATUS: {status}**\n\n**Goal:** x.\n"
+        )
+        if reason:
+            slice_block += f"\n**Abandonment reason:** {reason}\n"
+        spec_md.write_text(spec_md.read_text() + slice_block)
+        return spec_md
+
+    # AC1: reachable from every pre-DONE state.
+    def test_transition_from_each_pre_done_state_to_abandoned(self):
+        for i, status in enumerate((
+                "DRAFT", "READY_FOR_REVIEW", "READY_FOR_IMPLEMENTATION",
+                "IN_PROGRESS", "REVIEWED", "RECONCILED", "DEFERRED")):
+            spec_md = self._write_spec(
+                f"51{i}-alpha", f"51{i}-01 alpha", status)
+            result = run_workflow(
+                "transition", str(spec_md), f"51{i}-01", "ABANDONED")
+            self.assertEqual(
+                result.returncode, 0,
+                f"from {status}: stderr: {result.stderr}")
+            self.assertIn("**STATUS: ABANDONED**", spec_md.read_text())
+
+    # AC1: DONE -> ABANDONED refused, names the reason.
+    def test_transition_done_to_abandoned_refused(self):
+        spec_md = self._write_spec("520-alpha", "520-01 alpha", "DONE")
+        result = run_workflow(
+            "transition", str(spec_md), "520-01", "ABANDONED")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DONE", result.stderr)
+        self.assertIn("ABANDONED", result.stderr)
+        self.assertIn("out of scope", result.stderr.lower())
+
+    # AC1: ABANDONED -> ABANDONED idempotent.
+    def test_transition_abandoned_to_abandoned_idempotent(self):
+        spec_md = self._write_spec("521-alpha", "521-01 alpha", "ABANDONED")
+        result = run_workflow(
+            "transition", str(spec_md), "521-01", "ABANDONED")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+    # AC2: ABANDONED -> DRAFT (re-open) succeeds.
+    def test_transition_abandoned_to_draft(self):
+        spec_md = self._write_spec("522-alpha", "522-01 alpha", "ABANDONED")
+        result = run_workflow(
+            "transition", str(spec_md), "522-01", "DRAFT")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("**STATUS: DRAFT**", spec_md.read_text())
+
+    # AC2: every other outbound transition from ABANDONED refused.
+    def test_transition_abandoned_to_other_refused(self):
+        spec_md = self._write_spec("523-alpha", "523-01 alpha", "ABANDONED")
+        result = run_workflow(
+            "transition", str(spec_md), "523-01", "IN_PROGRESS")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ABANDONED", result.stderr)
+        self.assertIn("DRAFT", result.stderr)
+
+    # AC3: status board renders Abandoned section with reason.
+    def test_status_board_renders_abandoned_section(self):
+        self._write_spec("610-alpha", "610-01 active", "IN_PROGRESS")
+        self._write_spec("610-alpha", "610-02 dropped", "ABANDONED",
+                         reason="Approach superseded by ADR-0099.")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        active = board.split("## Abandoned slices")[0]
+        self.assertIn("610-01 active", active)
+        self.assertIn("## Abandoned slices", board)
+        self.assertIn("610-02 dropped", board)
+        self.assertIn("Approach superseded by ADR-0099.", board)
+
+    # AC3: section omitted entirely when no slice is ABANDONED.
+    def test_status_board_omits_abandoned_section_when_empty(self):
+        self._write_spec("710-alpha", "710-01 active", "IN_PROGRESS")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0)
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertNotIn("## Abandoned slices", board)
+
+    # AC3: renders even without a reason (empty cell, not a crash).
+    def test_status_board_renders_abandoned_without_reason(self):
+        self._write_spec("720-alpha", "720-01 dropped", "ABANDONED")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertIn("## Abandoned slices", board)
+        self.assertIn("720-01 dropped", board)
+
+    # AC3 + AC (both sections present): Deferred comes before Abandoned.
+    def test_status_board_deferred_before_abandoned(self):
+        self._write_spec("730-alpha", "730-01 parked", "DEFERRED",
+                         reason="")
+        spec_md = self.target / "docs/specs/730-alpha/spec.md"
+        # Append a Resolution trigger for the deferred slice manually.
+        spec_md.write_text(
+            spec_md.read_text() + "\n**Resolution trigger:** X happens.\n")
+        self._write_spec("730-alpha", "730-02 dropped", "ABANDONED",
+                         reason="No longer needed.")
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        deferred_idx = board.index("## Deferred slices")
+        abandoned_idx = board.index("## Abandoned slices")
+        self.assertLess(deferred_idx, abandoned_idx)
+
+    # AC5: session_plan skips ABANDONED slices.
+    def test_session_plan_skips_abandoned(self):
+        spec_dir = self.target / "docs/specs/740-alpha"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "---\nstatus: IN_PROGRESS\nskill: spec-workflow\n---\n\n"
+            "# Spec X\n\n## Overview\n\nStuff.\n"
+        )
+        (spec_dir / "slice-01-live.md").write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 740-01 live\n\n**Goal:** x.\n"
+        )
+        (spec_dir / "slice-02-dropped.md").write_text(
+            "---\nstatus: ABANDONED\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 740-02 dropped\n\n**Goal:** x.\n"
+        )
+        result = run_workflow("session-plan", str(spec_md))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("740-01 live", result.stdout)
+        self.assertNotIn("740-02 dropped", result.stdout)
+
+    # AC6: auto-tick ticks nothing for -> ABANDONED / ABANDONED -> DRAFT.
+    def test_auto_tick_ticks_nothing_for_abandoned_transitions(self):
+        spec_dir = self.target / "docs/specs/750-alpha"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text(
+            "---\nstatus: DRAFT\n---\n\n"
+            "## Slice 750-01 alpha\n\n**STATUS: IN_PROGRESS**\n\n"
+            "**Goal:** x.\n\n**Definition of Done:**\n\n"
+            "- [ ] Implementation review passed.\n"
+            "- [ ] Reconciliation review passed.\n"
+        )
+        result = run_workflow(
+            "transition", str(spec_md), "750-01", "ABANDONED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = spec_md.read_text()
+        self.assertIn("- [ ] Implementation review passed.", text)
+        self.assertIn("- [ ] Reconciliation review passed.", text)
+
+        result2 = run_workflow(
+            "transition", str(spec_md), "750-01", "DRAFT")
+        self.assertEqual(result2.returncode, 0, msg=result2.stderr)
+        text2 = spec_md.read_text()
+        self.assertIn("- [ ] Implementation review passed.", text2)
+        self.assertIn("- [ ] Reconciliation review passed.", text2)
+
+    # AC8: warns about a live dependent, once, non-blocking.
+    def test_transition_to_abandoned_warns_about_live_dependent(self):
+        # Dependency target: 800-01 in one spec.
+        target_md = self._write_spec("800-target", "800-01 alpha", "DRAFT",
+                                     dependencies="[]")
+        # Dependent: a different spec/slice that depends on 800-01 and is
+        # itself not DONE/ABANDONED (still "live").
+        self._write_spec("801-dependent", "801-01 beta", "DRAFT",
+                         dependencies="[800-01]")
+        result = run_workflow(
+            "transition", str(target_md), "800-01", "ABANDONED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("801-01", result.stderr)
+
+    # AC8: no dependents -> no warning printed.
+    def test_transition_to_abandoned_no_dependents_no_warning(self):
+        target_md = self._write_spec("810-target", "810-01 alpha", "DRAFT",
+                                     dependencies="[]")
+        result = run_workflow(
+            "transition", str(target_md), "810-01", "ABANDONED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stderr.strip(), "")
+
+    # AC8: a dependent that is already DONE or ABANDONED is not "live" —
+    # no warning.
+    def test_transition_to_abandoned_done_dependent_not_warned(self):
+        target_md = self._write_spec("820-target", "820-01 alpha", "DRAFT",
+                                     dependencies="[]")
+        self._write_spec("821-dependent", "821-01 beta", "DONE",
+                         dependencies="[820-01]")
+        result = run_workflow(
+            "transition", str(target_md), "820-01", "ABANDONED")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stderr.strip(), "")
+
+    # AC7 (rollup, mixed DONE+ABANDONED -> DONE)
+    def test_rollup_mixed_done_abandoned_returns_done(self):
+        spec_dir = self.target / "docs/specs/830-alpha"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text("---\nstatus: DRAFT\n---\n\n# Spec X\n")
+        (spec_dir / "slice-01-a.md").write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 830-01 alpha\n\n**Goal:** x.\n"
+        )
+        (spec_dir / "slice-02-b.md").write_text(
+            "---\nstatus: ABANDONED\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 830-02 beta\n\n**Goal:** x.\n"
+        )
+        self.assertEqual(_workflow.compute_spec_status(spec_md), "DONE")
+
+    # AC7 (rollup, unanimous ABANDONED -> ABANDONED)
+    def test_rollup_all_abandoned_returns_abandoned(self):
+        spec_dir = self.target / "docs/specs/831-alpha"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text("---\nstatus: DRAFT\n---\n\n# Spec X\n")
+        (spec_dir / "slice-01-a.md").write_text(
+            "---\nstatus: ABANDONED\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 831-01 alpha\n\n**Goal:** x.\n"
+        )
+        (spec_dir / "slice-02-b.md").write_text(
+            "---\nstatus: ABANDONED\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 831-02 beta\n\n**Goal:** x.\n"
+        )
+        self.assertEqual(
+            _workflow.compute_spec_status(spec_md), "ABANDONED")
+
+    # AC7 (rollup, mixed DEFERRED+ABANDONED only -> DRAFT)
+    def test_rollup_mixed_deferred_abandoned_returns_draft(self):
+        spec_dir = self.target / "docs/specs/832-alpha"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text("---\nstatus: DRAFT\n---\n\n# Spec X\n")
+        (spec_dir / "slice-01-a.md").write_text(
+            "---\nstatus: DEFERRED\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 832-01 alpha\n\n**Goal:** x.\n"
+        )
+        (spec_dir / "slice-02-b.md").write_text(
+            "---\nstatus: ABANDONED\ndependencies: []\nlast_verified:\n"
+            "---\n\n## Slice 832-02 beta\n\n**Goal:** x.\n"
+        )
+        self.assertEqual(
+            _workflow.compute_spec_status(spec_md), "DRAFT")
+
+
 class StaleCheckTests(unittest.TestCase):
     """Slice 014-03: `workflow.py stale` lists items whose last_verified
     is more than N days old AND whose dep file was modified since."""

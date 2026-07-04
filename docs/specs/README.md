@@ -278,6 +278,7 @@
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-01 — `_common/project_layout.py` layout helper + validation | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-02 — Route read/write helpers through the layout helper | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-03 — scaffold-init `--docs-root` flag + layout-aware output | **DONE** |  |
+| [085-abandoned-state](085-abandoned-state/spec.md) | 085-01 — abandoned-as-lifecycle-state | **DONE** | Filed as issue #72 during #71 triage. `ABANDONED` mirrors `DEFERRED` (own status-board section, restricted outbound edges) but reachable only pre-`DONE`; `compute_spec_status` gains a 4th rollup value, resolving spec 036 Q3's "wholly abandoned spec" case. 5 rounds of frame-critique; 17 new tests. |
 
 ## Deferred slices
 

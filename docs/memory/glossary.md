@@ -80,6 +80,23 @@ but parked — the work is identified but not the current priority. Different fr
 aren't silently skipped when a parked slice is picked back up. This is the **first
 FROM-state-restricted transition** in jig's lifecycle.
 
+## ABANDONED
+
+A second terminal-adjacent spec-lifecycle state, added in slice 085-01 (filed as
+[GitHub issue #72](https://github.com/ramboz/jig/issues/72)). Distinct from
+`DEFERRED`: `DEFERRED` means "parked, with a stated resolution trigger that will
+resurface it"; `ABANDONED` means permanently dropped, no intent to resume. Reachable
+from any pre-`DONE` state (`DONE → ABANDONED` is refused — marking already-shipped
+work abandoned is a different, out-of-scope concept, see spec 085 Non-goals).
+Mirrors `DEFERRED`'s restricted outbound edges (`ABANDONED → DRAFT` re-open only)
+and gets its own `## Abandoned slices` status-board section (a `**Abandonment
+reason:**` line, parallel to `**Resolution trigger:**`). `compute_spec_status`
+gained a 4th rollup value: a spec where every slice is `ABANDONED` rolls up to
+`ABANDONED` itself, resolving [spec 036](../specs/036-closed-spec-drift/spec.md)
+Q3's previously-open "specs whose entire scope was abandoned" case. Marking a slice
+`ABANDONED` also emits a one-time, non-blocking warning naming any live dependent
+slice elsewhere in the project — advisory only, no cascade.
+
 ## Resolution trigger
 
 A line (`**Resolution trigger:** <condition>`) under a deferred slice or a deferred
