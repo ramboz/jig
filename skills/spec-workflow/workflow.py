@@ -63,13 +63,22 @@ VALID_STATUSES = (
     "RECONCILED",
     "DONE",
     "DEFERRED",
+    "ABANDONED",
 )
 
 # Slice 014-02: only DRAFT (and DEFERRED itself, idempotent) are valid
 # outbound transitions from DEFERRED. Re-opening means going back to
 # DRAFT and starting the lifecycle over. Other states require explicit
 # DRAFT first to avoid silently skipping review gates.
-_DEFERRED_ALLOWED_NEXT = ("DRAFT", "DEFERRED")
+# Slice 085-01: DEFERRED -> ABANDONED is also allowed — a parked slice can
+# be permanently dropped without first re-opening to DRAFT (AC1 explicitly
+# lists DEFERRED among the pre-DONE states ABANDONED must be reachable
+# from).
+_DEFERRED_ALLOWED_NEXT = ("DRAFT", "DEFERRED", "ABANDONED")
+
+# Slice 085-01: ABANDONED mirrors DEFERRED's restricted outbound edges —
+# only DRAFT (re-open) or ABANDONED itself (idempotent) are valid targets.
+_ABANDONED_ALLOWED_NEXT = ("DRAFT", "ABANDONED")
 
 # Slice 003-04: auto-tick the review-passed DoD box on the gating
 # transition. Maps `new_status` → label-substring (case-insensitive) the
@@ -539,7 +548,8 @@ def _slice_status_from_section(section: str) -> str:
 
 def session_plan(spec_path: Path) -> str:
     """Slice 057-01: emit a deterministic, delegation-first dispatch plan
-    for a spec — each non-DEFERRED slice mapped to its phase sequence
+    for a spec — each non-DEFERRED, non-ABANDONED slice (slice 085-01
+    AC5) mapped to its phase sequence
     ([frame-critique iff `frame_review: true`, PRE-implementation] →
     implement → compliance → craft → [arch iff `arch_review: true`] →
     [code-health iff `code_health_review: true`] → reconcile → land) with
@@ -575,7 +585,7 @@ def session_plan(spec_path: Path) -> str:
         total += 1
         section = loc.text[loc.start:loc.end]
         status = _slice_status_from_section(section)
-        if status == "DEFERRED":
+        if status in ("DEFERRED", "ABANDONED"):
             continue
         fm_fields, _ = _slice_frontmatter(section)
         needs_frame = frontmatter_flag_truthy(fm_fields.get("frame_review", ""))
@@ -617,7 +627,7 @@ def session_plan(spec_path: Path) -> str:
         if total == 0:
             reason = "this spec has no slices"
         else:
-            reason = "every slice is DEFERRED"
+            reason = "every slice is DEFERRED or ABANDONED"
         lines.append(f"No slices to plan ({reason}).")
         return "\n".join(lines) + "\n"
 
@@ -1017,6 +1027,52 @@ def _project_root_for_spec(spec_md: Path) -> Path:
     return project_layout.project_root_for(spec_md, fallback=_legacy)
 
 
+def _find_live_dependents(project_dir: Path, slice_fragment: str,
+                          abandoned_spec_md: Path,
+                          abandoned_slice_path: Path) -> list:
+    """Slice 085-01 (AC8): find every OTHER slice, anywhere in the
+    project, whose `dependencies:` frontmatter list names
+    `slice_fragment` (e.g. "085-01") AND whose own status is not already
+    DONE or ABANDONED. Returns a list of `"<spec_dir> <label> (<status>)"`
+    strings, one per live dependent, in walk order.
+
+    Advisory-only lookup — read-only, never mutates the dependent, never
+    cascades. `abandoned_slice_path` excludes the just-abandoned slice's
+    own file from the scan so a self-referential (or same-file, same-spec)
+    `dependencies:` entry never self-warns.
+    """
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return []
+    needle = slice_fragment.strip().lower()
+    if not needle:
+        return []
+    dependents = []
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        for loc in _iter_slices_common(spec_md):
+            if loc.path.resolve() == abandoned_slice_path.resolve():
+                continue
+            section = loc.text[loc.start:loc.end]
+            fm_fields, _ = _slice_frontmatter(section)
+            deps = fm_fields.get("dependencies") or []
+            if not isinstance(deps, list):
+                continue
+            if not any(str(d).strip().lower() == needle for d in deps):
+                continue
+            status = None
+            if fm_fields.get("status"):
+                status = fm_fields["status"]
+            else:
+                sm = _STATUS_MARKER_RE.search(section)
+                if sm:
+                    status = sm.group(2)
+            if status in ("DONE", "ABANDONED"):
+                continue
+            spec_dir = spec_md.parent.name
+            dependents.append(f"{spec_dir} {loc.label} ({status or 'UNKNOWN'})")
+    return dependents
+
+
 def _branch_freshness_warning(project_dir: Path) -> str:
     """Return a one-line warning when HEAD is behind fetched origin/main.
 
@@ -1122,6 +1178,24 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         raise WorkflowError(
             f"invalid transition: DEFERRED → {new_status}. "
             f"From DEFERRED, only DRAFT (re-open) is allowed."
+        )
+
+    # Slice 085-01: ABANDONED mirrors DEFERRED's restricted outbound edges
+    # (only DRAFT re-open, or ABANDONED itself, idempotent).
+    if current_status == "ABANDONED" and new_status not in _ABANDONED_ALLOWED_NEXT:
+        raise WorkflowError(
+            f"invalid transition: ABANDONED → {new_status}. "
+            f"From ABANDONED, only DRAFT (re-open) is allowed."
+        )
+
+    # Slice 085-01 AC1: DONE -> ABANDONED is refused. Frame-critique found
+    # no case for collapsing "never attempted" and "shipped, then
+    # deliberately removed" into one bucket (see spec 085 Non-goals). The
+    # error names the reason so an author who hits it understands why.
+    if current_status == "DONE" and new_status == "ABANDONED":
+        raise WorkflowError(
+            "cannot transition DONE → ABANDONED: marking already-shipped "
+            "work as abandoned is out of scope (see spec 085 Non-goals)."
         )
 
     if new_status in {"REVIEWED", "RECONCILED"}:
@@ -1291,6 +1365,27 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     if new_status == IN_PROGRESS_STATUS:
         _write_spec_ref_marker(spec_md, slice_name)
 
+    # Slice 085-01 AC8: on a successful transition TO ABANDONED, warn
+    # (stderr, one-time, non-blocking) about any live dependent — another
+    # slice, anywhere in the project, whose `dependencies:` names this
+    # slice and whose own status isn't already DONE/ABANDONED. Advisory
+    # only — never blocks the transition, never modifies the dependent,
+    # never cascades. Mirrors the `_branch_freshness_warning` call
+    # pattern above (best-effort stderr.write, no exception on failure to
+    # find anything).
+    if new_status == "ABANDONED":
+        fragment = _slice_id_from_label(slice_name) or slice_fragment
+        dependents = _find_live_dependents(
+            _project_root_for_spec(spec_md), fragment, spec_md, loc.path,
+        )
+        if dependents:
+            joined = "\n  - ".join(dependents)
+            sys.stderr.write(
+                f"warning: slice {slice_name} was marked ABANDONED; the "
+                f"following live dependent(s) name it in their "
+                f"`dependencies:` and may need attention:\n  - {joined}\n"
+            )
+
     return f"transitioned {slice_name}: {old_status} → {new_status}"
 
 
@@ -1307,15 +1402,33 @@ def _extract_resolution_trigger(section: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+_ABANDONMENT_REASON_RE = re.compile(
+    r"(?im)^\*\*Abandonment reason:\*\*\s*([^\n]+)"
+)
+
+
+def _extract_abandonment_reason(section: str) -> str:
+    """Slice 085-01 (AC3): pull the `**Abandonment reason:** ...` line out
+    of a slice's body — same convention shape as
+    `_extract_resolution_trigger`, different label. Returns "" when
+    absent."""
+    m = _ABANDONMENT_REASON_RE.search(section)
+    return m.group(1).strip() if m else ""
+
+
 def compute_spec_status(spec_path: Path) -> str:
     """Slice 030-01: derive the spec-level rollup from slice states.
+    Widened by slice 085-01 (AC4) to a 4th return value, `"ABANDONED"`.
 
-    Returns one of "DRAFT", "IN_PROGRESS", "DONE":
+    Returns one of "DRAFT", "IN_PROGRESS", "DONE", "ABANDONED":
       - No slices at all                                        → DRAFT
       - All slices DEFERRED                                     → DRAFT
-      - All non-DEFERRED slices are DRAFT                       → DRAFT
-      - At least one non-DEFERRED slice AND every non-DEFERRED
-        slice has status DONE                                   → DONE
+      - All slices DEFERRED + ABANDONED (no DONE/live)          → DRAFT
+      - All slices ABANDONED                                    → ABANDONED
+      - All non-DEFERRED/non-ABANDONED slices are DRAFT         → DRAFT
+      - At least one non-DEFERRED/non-ABANDONED slice AND every
+        such slice has status DONE (mix of DONE + ABANDONED
+        allowed)                                                → DONE
       - Anything else (mix of DONE+DRAFT, any IN_PROGRESS,
         REVIEWED, RECONCILED, READY_FOR_REVIEW, ...)            → IN_PROGRESS
 
@@ -1340,18 +1453,33 @@ def compute_spec_status(spec_path: Path) -> str:
     if not statuses:
         return "DRAFT"
 
+    # Every slice is ABANDONED → ABANDONED (spec 036 Q3's previously-open
+    # "specs whose entire scope was abandoned" case).
+    if all(s == "ABANDONED" for s in statuses):
+        return "ABANDONED"
+
     non_deferred = [s for s in statuses if s != "DEFERRED"]
 
     # Every slice is DEFERRED → DRAFT (no live work)
     if not non_deferred:
         return "DRAFT"
 
-    # Every non-DEFERRED slice is DONE → DONE
-    if all(s == "DONE" for s in non_deferred):
+    non_deferred_or_abandoned = [s for s in non_deferred if s != "ABANDONED"]
+
+    # Every non-DEFERRED slice is ABANDONED (mix of DEFERRED + ABANDONED
+    # only, no DONE/live work) → DRAFT — same human action (reopen the
+    # resumable part, or close it out entirely) as all-DEFERRED today; see
+    # spec 085 Assumptions #4.
+    if not non_deferred_or_abandoned:
+        return "DRAFT"
+
+    # Every non-DEFERRED/non-ABANDONED slice is DONE → DONE (a mix of
+    # DONE + ABANDONED rolls up the same as DONE + DEFERRED today).
+    if all(s == "DONE" for s in non_deferred_or_abandoned):
         return "DONE"
 
-    # Every non-DEFERRED slice is DRAFT → DRAFT (no work begun)
-    if all(s == "DRAFT" for s in non_deferred):
+    # Every non-DEFERRED/non-ABANDONED slice is DRAFT → DRAFT (no work begun)
+    if all(s == "DRAFT" for s in non_deferred_or_abandoned):
         return "DRAFT"
 
     # Mix of DONE + DRAFT, or any active state → IN_PROGRESS
@@ -1387,16 +1515,18 @@ def _write_spec_rollup(spec_path: Path) -> bool:
 
 def collect_slices(project_dir: Path) -> list:
     """Walk docs/specs/*/spec.md and collect (spec_dir, slice_label, status,
-    resolution_trigger, kind, claimed_by) tuples in file order.
-    resolution_trigger is the empty string when the slice is not DEFERRED
-    (or simply has no `**Resolution trigger:**` line). `kind` is the slice's
-    frontmatter `kind:` value (slice 029-01: `"spike"` / `"feature"` / `""`
-    for unset). Slice 029-02 reads this to drive the marker in
-    `render_status_table` — recomputed every regen from the slice's
-    frontmatter, so the marker is never stored separately. `claimed_by`
-    (slice 049-02) is the slice's frontmatter `claimed_by:` value (set by
-    `transition … IN_PROGRESS`, spec 049-01; `""` when unclaimed),
-    rendered as a suffix on IN_PROGRESS Status cells."""
+    resolution_trigger, kind, claimed_by, abandonment_reason) tuples in
+    file order. resolution_trigger is the empty string when the slice is
+    not DEFERRED (or simply has no `**Resolution trigger:**` line).
+    abandonment_reason (slice 085-01) is the empty string when the slice
+    is not ABANDONED (or has no `**Abandonment reason:**` line). `kind` is
+    the slice's frontmatter `kind:` value (slice 029-01: `"spike"` /
+    `"feature"` / `""` for unset). Slice 029-02 reads this to drive the
+    marker in `render_status_table` — recomputed every regen from the
+    slice's frontmatter, so the marker is never stored separately.
+    `claimed_by` (slice 049-02) is the slice's frontmatter `claimed_by:`
+    value (set by `transition … IN_PROGRESS`, spec 049-01; `""` when
+    unclaimed), rendered as a suffix on IN_PROGRESS Status cells."""
     specs_dir = project_layout.specs_dir(project_dir)
     if not specs_dir.is_dir():
         return []
@@ -1420,6 +1550,8 @@ def collect_slices(project_dir: Path) -> list:
                     status = sm.group(2)
             trigger = (_extract_resolution_trigger(section)
                        if status == "DEFERRED" else "")
+            abandonment_reason = (_extract_abandonment_reason(section)
+                                  if status == "ABANDONED" else "")
             # Slice 029-02: read `kind:` from frontmatter (slice 029-01
             # convention). Defaults to "" when unset — same as feature.
             kind = str(fm_fields.get("kind", "")).strip()
@@ -1427,7 +1559,7 @@ def collect_slices(project_dir: Path) -> list:
             claimed_by = str(fm_fields.get(CLAIM_FIELD, "")).strip()
             rows.append(
                 (spec_dir, loc.label, status or "UNKNOWN", trigger, kind,
-                 claimed_by),
+                 claimed_by, abandonment_reason),
             )
     return rows
 
@@ -1572,12 +1704,49 @@ def render_deferred_table(rows: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+_ABANDONED_HEADING = "## Abandoned slices"
+
+
+def render_abandoned_table(rows: list) -> str:
+    """Slice 085-01 (AC3): separate table for `ABANDONED` slices with the
+    Abandonment reason as the per-row context. Mirrors
+    `render_deferred_table`: returns the empty string when no rows are
+    abandoned (section fully omitted, not rendered with an empty table).
+    Tolerates the 7-tuple row shape (`collect_slices`'s
+    `abandonment_reason` element) and prepends the `SPIKE_MARKER` glyph for
+    `kind == "spike"` rows, matching the Deferred table's rendering."""
+    abandoned = [r for r in rows if len(r) >= 3 and r[2] == "ABANDONED"]
+    if not abandoned:
+        return ""
+    lines = [
+        "",
+        _ABANDONED_HEADING,
+        "",
+        "> Slices permanently dropped, with a stated reason. This is "
+        "distinct from Deferred (parked, resumable) — re-open by "
+        "transitioning to DRAFT.",
+        "",
+        "| Spec | Slice | Abandonment reason |",
+        "|------|-------|---------------------|",
+    ]
+    for row in abandoned:
+        spec_dir, label = row[0], row[1]
+        kind = row[4] if len(row) >= 5 else ""
+        reason = row[6] if len(row) >= 7 else ""
+        spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
+        slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
+        lines.append(f"| {spec_link} | {slice_cell} | {reason} |")
+    return "\n".join(lines) + "\n"
+
+
 def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     """Regenerate docs/specs/README.md table from spec.md files.
     Preserves preamble before the first `| Spec` line AND Notes column
     content from the existing table. Slice 014-02: appends a separate
     `## Deferred slices` table after the active table when any slice
-    is in `DEFERRED`. Slice 030-01: also writes the spec.md `status:`
+    is in `DEFERRED`. Slice 085-01: appends a further `## Abandoned
+    slices` table after the Deferred table when any slice is in
+    `ABANDONED`. Slice 030-01: also writes the spec.md `status:`
     rollup for each walked spec (idempotent — only writes when the
     computed value differs from what's currently in spec.md frontmatter,
     and skipped for spec.md files without frontmatter). Idempotent.
@@ -1608,6 +1777,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     rows = collect_slices(project_dir)
     new_table = render_status_table(rows, notes_map)
     deferred_section = render_deferred_table(rows)
+    abandoned_section = render_abandoned_table(rows)
 
     # Slice 030-01: roll up spec-level status to spec.md frontmatter for
     # every spec walked. Side-effect of regen — independent of whether
@@ -1627,7 +1797,7 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
         if not preamble.endswith("\n"):
             preamble += "\n"
 
-    new_content = preamble + new_table + deferred_section
+    new_content = preamble + new_table + deferred_section + abandoned_section
     if new_content == existing:
         return "status board already current; no changes"
     # Slice 028-03 AC #2: re-checksum right before the write. If the file
