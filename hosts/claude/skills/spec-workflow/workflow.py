@@ -1028,7 +1028,6 @@ def _project_root_for_spec(spec_md: Path) -> Path:
 
 
 def _find_live_dependents(project_dir: Path, slice_fragment: str,
-                          abandoned_spec_md: Path,
                           abandoned_slice_path: Path) -> list:
     """Slice 085-01 (AC8): find every OTHER slice, anywhere in the
     project, whose `dependencies:` frontmatter list names
@@ -1376,7 +1375,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     if new_status == "ABANDONED":
         fragment = _slice_id_from_label(slice_name) or slice_fragment
         dependents = _find_live_dependents(
-            _project_root_for_spec(spec_md), fragment, spec_md, loc.path,
+            _project_root_for_spec(spec_md), fragment, loc.path,
         )
         if dependents:
             joined = "\n  - ".join(dependents)

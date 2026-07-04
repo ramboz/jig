@@ -1013,14 +1013,12 @@ class AbandonedLifecycleTests(unittest.TestCase):
                                      dependencies="[]")
         # Dependent: a different spec/slice that depends on 800-01 and is
         # itself not DONE/ABANDONED (still "live").
-        dependent_md = self._write_spec(
-            "801-dependent", "801-01 beta", "DRAFT",
-            dependencies="[800-01]")
+        self._write_spec("801-dependent", "801-01 beta", "DRAFT",
+                         dependencies="[800-01]")
         result = run_workflow(
             "transition", str(target_md), "800-01", "ABANDONED")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("801-01", result.stderr)
-        self.assertNotEqual(dependent_md, None)
 
     # AC8: no dependents -> no warning printed.
     def test_transition_to_abandoned_no_dependents_no_warning(self):
