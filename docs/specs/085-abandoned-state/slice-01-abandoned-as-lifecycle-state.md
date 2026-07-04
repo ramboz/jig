@@ -1,8 +1,9 @@
 ---
-status: READY_FOR_IMPLEMENTATION
+status: IN_PROGRESS
 dependencies: []
 last_verified:
 frame_review: true
+claimed_by: claude/eloquent-heisenberg-ec4ef3
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
