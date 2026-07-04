@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for Codex",
   "author": {
     "name": "ramboz"
