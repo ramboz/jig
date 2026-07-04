@@ -1,7 +1,7 @@
 ---
-status: REVIEWED
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-07-03
 frame_review: true
 ---
 
@@ -114,17 +114,27 @@ same rollup-exclusion mechanism, same status-board section pattern.
    / Assumptions for the reasoning).
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions). **3173 tests,
+      `OK (skipped=9)` — verified independently twice (once immediately
+      post-implementation, once after the craft-review nit fixes).**
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
-      `review.py`.
+      **`AbandonedLifecycleTests` — 17 tests, one or more per AC
+      (transition matrix across every pre-DONE state, DONE-refusal,
+      outbound-restriction refusal, board rendering with/without reason
+      and omitted-when-empty, all 3 rollup permutations, session-plan
+      skip, auto-tick no-op, dependents warning present/absent/DONE-dependent-excluded).**
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
+      `review.py`. **Compliance + craft passes, both `pass`; recorded at
+      `docs/specs/085-abandoned-state/reviews/slice-01-{compliance,craft}.md`.**
 - [x] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. **No new deferral from this slice;
+      added a disambiguating cross-reference to the pre-existing
+      `unreserve` entry (see deviation log §7).**
 
 ### Close-out (post-DONE)
 

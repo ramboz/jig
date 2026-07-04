@@ -278,7 +278,7 @@
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-01 — `_common/project_layout.py` layout helper + validation | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-02 — Route read/write helpers through the layout helper | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-03 — scaffold-init `--docs-root` flag + layout-aware output | **DONE** |  |
-| [085-abandoned-state](085-abandoned-state/spec.md) | 085-01 — abandoned-as-lifecycle-state | REVIEWED |  |
+| [085-abandoned-state](085-abandoned-state/spec.md) | 085-01 — abandoned-as-lifecycle-state | RECONCILED |  |
 
 ## Deferred slices
 
