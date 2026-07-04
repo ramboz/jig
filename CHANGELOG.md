@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.5.0](https://github.com/ramboz/jig/compare/v2.4.1...v2.5.0) (2026-07-04)
+
+
+### Features
+
+* **reframe:** jig:reframe corpus re-baselining — accept ADR-0024 + implement spec 067 ([#70](https://github.com/ramboz/jig/issues/70)) ([25d6c7b](https://github.com/ramboz/jig/commit/25d6c7bedf076233e4a07c87e4380e8efa7f8da3))
+* **spec-workflow:** abandoned as lifecycle state ([#73](https://github.com/ramboz/jig/issues/73)) ([84887d1](https://github.com/ramboz/jig/commit/84887d157c700a4ac2fb9f037c2a0b6a25893999))
+
+
+### Documentation
+
+* **conventions:** document new abandonned state ([143e1e9](https://github.com/ramboz/jig/commit/143e1e9ad27327bd9434961708fd2bc7b9894625))
+* **inbox:** record reframe occurrence-3 (ASV platform-agnostic re-baseline) ([fa1a844](https://github.com/ramboz/jig/commit/fa1a84483224c6a4ff42304b546f6b38e277a309))
+* **specs:** reserve 085-abandoned-state ([d932559](https://github.com/ramboz/jig/commit/d932559969d8cdb58cf14fcbcd4e734a596b4040))
+
 ## [2.4.1](https://github.com/ramboz/jig/compare/v2.4.0...v2.4.1) (2026-06-30)
 
 
