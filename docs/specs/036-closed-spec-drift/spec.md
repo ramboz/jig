@@ -166,3 +166,21 @@ Dated entry + reason + link. Each amendment: `### YYYY-MM-DD — <one-line summa
 | Non-functional Requirements | Clear |
 | Edge Cases & Failure Modes | Resolved |
 | Terminology Consistency | Clear |
+
+## Amendments
+
+> Post-DONE corrections per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+> The original spec above is preserved; dated entries below record reality.
+
+### 2026-07-03 — Q3's "specs whose entire scope was abandoned" case, left unresolved here, is resolved by spec 085
+
+Q3 posed three non-active terminal states — SUPERSEDED, DEFERRED, and "specs
+whose entire scope was abandoned" — but the answer only addressed the first
+two, silently leaving the abandoned case open. [Spec
+085](../085-abandoned-state/spec.md) (filed as [GitHub issue
+#72](https://github.com/ramboz/jig/issues/72)) resolves it: a new `ABANDONED`
+lifecycle state, distinct from `DEFERRED` (permanent vs. resumable). A spec
+where every slice is `ABANDONED` now rolls up to a dedicated `ABANDONED`
+spec-level status via `compute_spec_status` (widened from 3 to 4 return
+values) — this is the machine-readable answer to Q3's abandoned case that
+this spec never landed.

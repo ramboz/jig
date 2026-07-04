@@ -164,7 +164,7 @@ Resolved by [Slice 032-01](specs/032-atomic-writes/slice-01-atomic-write-helper.
 **Mitigation idea:** `--from-branch <branch>` reads the slug + draft from the named branch, opens main, runs the standard reservation flow with the next-free number, then rebases/cherry-picks the branch's content onto the reservation commit.
 
 ### Decision: `workflow.py unreserve <NNN>` for abandoned reservations
-**Deferred:** A reservation that's never drafted leaves a permanent stub `docs/specs/NNN-<slug>/spec.md` on main. No tooling exists to cleanly retract a reservation. Surfaced as a "likely candidate" in slice 003-03's DoD.
+**Deferred:** A reservation that's never drafted leaves a permanent stub `docs/specs/NNN-<slug>/spec.md` on main. No tooling exists to cleanly retract a reservation. Surfaced as a "likely candidate" in slice 003-03's DoD. Distinct from spec 085's `ABANDONED` lifecycle state: this decision is about deleting a stub that was *never drafted* (empty `DRAFT`, zero slices); `ABANDONED` marks a slice that *was* specced (or partially built) as permanently dropped — the two don't overlap.
 **Resolution trigger:** First abandoned reservation in the wild (≥30 days at DRAFT with zero slices and no activity), OR a user explicitly asks how to un-reserve.
 **Mitigation idea:** `unreserve <NNN-slug>` removes the spec directory + commits `docs(specs): unreserve NNN-<slug>` on main with the same push/PR-fallback flow `new` uses. Refuse if the spec has any slices defined or any commits referencing it.
 

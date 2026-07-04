@@ -1,9 +1,8 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified:
 frame_review: true
-claimed_by: claude/eloquent-heisenberg-ec4ef3
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -120,7 +119,7 @@ same rollup-exclusion mechanism, same status-board section pattern.
       fixture. Edge cases listed in the slice are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
 - [ ] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
@@ -153,7 +152,97 @@ value in one slice, no follow-up slice required to make it visible.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO — filled during reconciliation._
+**1. Pre-implementation frame-critique took five rounds, not one.** The
+spec's own Overview and Assumptions sections already document the four
+substantive findings and their resolutions in detail (`DONE → ABANDONED`
+reachability, the cascade-to-dependents analogy, the `compute_spec_status`
+return-type widening audit, and the `DEFERRED`+`ABANDONED` rollup
+decision) — not repeated here to avoid duplicating a durable record with
+itself. Recorded verdicts: `docs/specs/085-abandoned-state/reviews/slice-01-frame-critique.md`.
+
+**2. `_DEFERRED_ALLOWED_NEXT` gained `"ABANDONED"`.** Not called out
+explicitly in the slice text, but required by AC1's own transition list
+("reachable ... from DRAFT, ..., and DEFERRED"): the pre-existing
+FROM-`DEFERRED` outbound restriction would otherwise block
+`DEFERRED → ABANDONED`. A parked slice can now be permanently dropped
+directly, without first re-opening to `DRAFT`.
+
+**3. `collect_slices`'s row tuple grew from 6 to 7 elements** (added
+`abandonment_reason` at index 6), mirroring the earlier 3→4→5→6-tuple
+growth history for `resolution_trigger` / `kind` / `claimed_by`. All
+existing consumers (`render_status_table`, `render_deferred_table`,
+`parse_existing_notes`) access positionally with `len(row) >= N` guards,
+so the new element is additive and non-breaking — confirmed by the full
+test suite (3173 tests, no regressions).
+
+**4. `_find_live_dependents` returns `"<spec_dir> <label> (<status>)"`
+strings**, not a structured type. AC8 named the requirement (warn, name
+the fragment) but not an exact output shape; this format was chosen for
+human-readability in a stderr warning, matching `_branch_freshness_warning`'s
+plain-text style rather than a machine-parseable one (this warning has no
+programmatic consumer).
+
+**5. `session_plan`'s "no slices to plan" message updated** from "every
+slice is DEFERRED" to "every slice is DEFERRED or ABANDONED" — a small
+accuracy fix directly adjacent to the AC5 edit (the function's skip
+condition), not separately specced but necessary so the message stays true.
+
+**6. Two craft-review nits fixed post-review, pre-RECONCILED:**
+`_find_live_dependents`'s unused `abandoned_spec_md` parameter was dropped
+(only `abandoned_slice_path` was ever read), and a vacuous test assertion
+(`assertNotEqual(dependent_md, None)`, which could never fail since
+`_write_spec` never returns `None`) was removed from
+`test_transition_to_abandoned_warns_about_live_dependent`. Neither changed
+behavior; both improved code clarity. Full suite re-run green after the fix
+(3173 tests); host packages regenerated and re-confirmed in sync.
+
+**7. Doc updates from this slice (beyond the code):**
+
+- `skills/spec-workflow/workflow.py` — see compliance review
+  (`docs/specs/085-abandoned-state/reviews/slice-01-compliance.md`) for the
+  full call-site list. Net +~195 lines after the nit cleanup.
+- `skills/spec-workflow/test_workflow.py` — new `AbandonedLifecycleTests`
+  class, 17 tests.
+- `skills/spec-workflow/SKILL.md` — new "ABANDONED state" subsection
+  (mirrors "DEFERRED state"); the lifecycle diagram and the
+  spec-level-rollup paragraph updated to describe the 4th `compute_spec_status`
+  return value (**closed-spec drift fix, live prose — corrected inline
+  per ADR-0010**, not an amendment, since SKILL.md is live not a closed
+  record).
+- `docs/workflow.md` — lifecycle mermaid diagram gained the
+  `ABANDONED ⇄ DRAFT` sidetrack; the `session-plan` description corrected
+  to say "non-DEFERRED, non-ABANDONED" (same live-prose-fix rationale).
+- `docs/memory/glossary.md` — new `## ABANDONED` entry, placed directly
+  after `## DEFERRED`.
+- `docs/refinement-todo.md` — the existing `unreserve <NNN>` deferred
+  decision gained a one-line cross-reference distinguishing it from this
+  slice's mechanism (never-drafted-stub deletion vs. permanently-dropped
+  specced work) — no scope or resolution-trigger change, just a
+  disambiguation note for future readers.
+- `docs/specs/036-closed-spec-drift/spec.md` — **closed-spec drift, ADR-0010
+  Amendments route** (this is a `DONE` record, not live prose): a dated
+  `## Amendments` entry closes the loop on Q3's "specs whose entire scope
+  was abandoned" case, which that spec's answer never actually resolved.
+- No `docs/conventions.md` change (explicit Non-goal — requires
+  `JIG_CONVENTIONS_APPROVED=1` / human approval; a symmetrical `ABANDONED`
+  rule belongs there eventually but is out of scope here).
+- No `docs/architecture.md` change (internal lifecycle-state extension,
+  no module-boundary or public-contract change).
+- No new ADR — same precedent slice 015-02 set when introducing `DEFERRED`
+  ("lifecycle extension, not a directional architecture choice"). The four
+  load-bearing judgment calls this slice made are durably recorded in the
+  spec's own Assumptions section and the frame-critique review file, which
+  is discoverable the same way an ADR would be (linked from the status
+  board), so a dedicated ADR would duplicate rather than add information.
+- `docs/roadmap.md` — no-op (dev-infrastructure spec, not a
+  milestone-tracked feature — same precedent as spec 051).
+- `docs/inbox.md` — checked, nothing to triage (no items referenced this
+  gap).
+- `CLAUDE.md` — checked; no hot-cache entry added. `DEFERRED` itself has
+  no Key-terms bullet despite being a comparably-sized lifecycle addition,
+  so adding one for its sibling `ABANDONED` would be inconsistent bloat —
+  the full definition lives in `SKILL.md` + `docs/workflow.md` +
+  the glossary, which is exactly where `DEFERRED`'s lives.
 
 ### Reconciliation sweep
 
@@ -163,13 +252,13 @@ whether coverage and rationales are honest.
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO_ |
-| `docs/specs/README.md` | `updated` | _TODO_ |
-| `docs/product-vision.md` | `no-op` | _TODO_ |
-| `docs/architecture.md` | `no-op` | _TODO_ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO_ |
-| `docs/inbox.md` | `no-op` | _TODO_ |
-| `docs/refinement-todo.md` | `no-op` | _TODO_ |
-| `docs/memory/**` | `no-op` | _TODO_ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO_ |
-| Additional live prose / generated templates touched by this slice | `deferred` | _TODO_ |
+| `README.md` | `no-op` | Project front door doesn't enumerate lifecycle states; unaffected. |
+| `docs/specs/README.md` | `updated` | Regenerated via `workflow.py status-board`; spec 085 now listed, rollup computed. |
+| `docs/product-vision.md` | `no-op` | Internal dev-workflow mechanism, not a product-facing behavior or use case. |
+| `docs/architecture.md` | `no-op` | No module-boundary or public-contract change — internal lifecycle-state extension inside `workflow.py`. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | Checked; no hot-cache entry warranted (see deviation log §7 — `DEFERRED` itself has none, for consistency). No `AGENTS.md` or scaffold templates reference lifecycle states directly. |
+| `docs/inbox.md` | `no-op` | Checked — no entries referenced this gap. |
+| `docs/refinement-todo.md` | `updated` | Added a one-line cross-reference distinguishing the existing `unreserve` deferred decision from this slice's mechanism — no scope change. |
+| `docs/memory/**` | `updated` | New `## ABANDONED` glossary entry. Broader memory-sync (learnings, MEMORY.md index) runs as a separate post-reconciliation step. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No new ADR — see deviation log §7 for the precedent-consistent reasoning (mirrors slice 015-02's DEFERRED introduction, which also skipped an ADR). |
+| Additional live prose / generated templates touched by this slice | `updated` | `skills/spec-workflow/SKILL.md` (new "ABANDONED state" subsection + corrected lifecycle-rollup prose) and `docs/workflow.md` (mermaid diagram + `session-plan` description) — both live prose, corrected inline per ADR-0010. `docs/specs/036-closed-spec-drift/spec.md` (a `DONE` record) got a dated `## Amendments` entry instead, per the same ADR's records-vs-live-prose split. |

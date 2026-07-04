@@ -538,7 +538,8 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
 DRAFT → READY_FOR_REVIEW → READY_FOR_IMPLEMENTATION → IN_PROGRESS
   → REVIEWED → RECONCILED → DONE
 
-         DEFERRED ⇄ DRAFT  (parked slices with a stated resolution trigger)
+         DEFERRED ⇄ DRAFT   (parked slices with a stated resolution trigger)
+         ABANDONED ⇄ DRAFT  (permanently dropped slices, pre-DONE only)
 ```
 
 Status transitions are mutations on either `spec.md`'s frontmatter `status:`
@@ -547,16 +548,19 @@ field (new convention, slice 015-01) or the prose `**STATUS: ...**` line
 `docs/specs/README.md`. Use `workflow.py transition` for the spec mutation
 and `workflow.py status-board` to re-sync the board.
 
-**Spec-level `status:` is derived, not authored** (slice 030-01). The
-frontmatter `status:` at the top of each `spec.md` overview file is
-computed by `compute_spec_status(spec_path)` from its slices: `DONE` when
-every non-DEFERRED slice is DONE, `DRAFT` when no slices exist or every
-non-DEFERRED slice is DRAFT (and `DRAFT` when every slice is DEFERRED),
-otherwise `IN_PROGRESS`. The rollup write happens automatically inside
-`workflow.py transition` (after the slice mutation) and inside
-`workflow.py status-board` (during regen). Don't set `spec.md`'s
-`status:` by hand — it'll be overwritten on the next transition or
-regen anyway.
+**Spec-level `status:` is derived, not authored** (slice 030-01; widened by
+slice 085-01). The frontmatter `status:` at the top of each `spec.md`
+overview file is computed by `compute_spec_status(spec_path)` from its
+slices: `DONE` when every slice, excluding `DEFERRED`/`ABANDONED` ones, is
+DONE (a mix of `DONE` + `DEFERRED` and/or `ABANDONED` still rolls up to
+`DONE`); `ABANDONED` when every slice is `ABANDONED` (the spec's entire
+scope was dropped); `DRAFT` when no slices exist, every slice is
+`DEFERRED`, every non-`DEFERRED` slice is `DRAFT`, or the only non-`DONE`
+slices are a `DEFERRED`+`ABANDONED` mix with no live work; otherwise
+`IN_PROGRESS`. The rollup write happens automatically inside `workflow.py
+transition` (after the slice mutation) and inside `workflow.py
+status-board` (during regen). Don't set `spec.md`'s `status:` by hand —
+it'll be overwritten on the next transition or regen anyway.
 
 ### DEFERRED state
 
@@ -574,6 +578,34 @@ When transitioning a slice to `DEFERRED`, add a `**Resolution trigger:**`
 line in the slice body (same convention `docs/refinement-todo.md` uses).
 The status-board renders deferred slices in a separate `## Deferred slices`
 section with that trigger as the per-row context.
+
+### ABANDONED state
+
+A slice is `ABANDONED` when it's permanently dropped — scoped, sometimes
+even fully specced, and deliberately decided against with no intent to
+ever resume. Different from `DEFERRED`, which means "parked, with a stated
+resolution trigger that will resurface it." Added in slice 085-01 (filed as
+[GitHub issue #72](https://github.com/ramboz/jig/issues/72)). Transitions:
+
+- Any **pre-`DONE`** state → `ABANDONED` is allowed.
+- `DONE` → `ABANDONED` is **refused** — "never attempted" and "shipped,
+  then deliberately removed" are different events with different audit
+  value; overloading one bucket for both would erase that distinction
+  where an auditor most needs it (see spec 085 Non-goals). Un-shipping
+  already-`DONE` work is a different, unbuilt concept.
+- `ABANDONED` → `DRAFT` (re-open) is allowed.
+- `ABANDONED` → any other state is **refused** — re-open via DRAFT first,
+  mirroring `DEFERRED`'s restriction.
+
+When transitioning a slice to `ABANDONED`, add a `**Abandonment reason:**`
+line in the slice body (same convention shape as `**Resolution
+trigger:**`). The status-board renders abandoned slices in a separate
+`## Abandoned slices` section with that reason as the per-row context.
+The transition also prints a one-time, non-blocking warning naming any
+other slice, anywhere in the project, whose `dependencies:` names the
+now-abandoned slice and whose own status isn't already `DONE`/`ABANDONED`
+— advisory only, it never blocks the transition, modifies the dependent,
+or cascades (a human decides what a live dependent should do next).
 
 ### Slice frontmatter (slice 015-01 convention, file shape per 018-03)
 
