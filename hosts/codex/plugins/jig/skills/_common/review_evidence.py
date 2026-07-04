@@ -366,16 +366,21 @@ def parse_verdict_file(path, required_fields=REQUIRED_FIELDS) -> VerdictRecord:
 _ARCH_REVIEW_TRUTHY = FRONTMATTER_TRUTHY
 
 
-def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
-    """Read the resolved slice's `arch_review:` frontmatter flag.
+def _review_flag(spec_path, slice_fragment: str, field: str) -> bool:
+    """Read a resolved slice's `<field>:` frontmatter flag.
 
-    Returns True iff the slice declares a truthy `arch_review` token
-    (`true`/`yes`/`on`/`1`, case-insensitive — same set as
-    `workflow.py:slice_needs_arch_review`, now via the shared
+    Shared body for the `_arch_review_flag` / `_code_health_review_flag` /
+    `_frame_review_flag` / `_design_review_flag` family (parametrized per
+    the refinement-todo "parametrize the four `_*_review_flag` helpers"
+    entry — folded into spec 078 since it touches this module's gate logic
+    anyway). Returns True iff the slice declares a truthy token
+    (`true`/`yes`/`on`/`1`, case-insensitive — the shared
     `frontmatter_flag_truthy` predicate). Conservative: any miss (no
-    frontmatter, field absent, unrecognized value) returns False. Raises
-    `EvidenceError` only when the slice itself can't be resolved (the caller
-    wants that surfaced as an invalid-target diagnostic).
+    frontmatter, field absent, unrecognized value) returns False, so every
+    existing slice (no flag) stays unaffected — each of these passes is
+    opt-in. Raises `EvidenceError` only when the slice itself can't be
+    resolved (the caller wants that surfaced as an invalid-target
+    diagnostic).
     """
     spec_path = Path(spec_path)
     try:
@@ -384,75 +389,30 @@ def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
         raise EvidenceError(str(exc)) from exc
     body = loc.text[loc.start:loc.end]
     fields, _ = parse_frontmatter(body)
-    return frontmatter_flag_truthy(fields.get("arch_review", ""))
+    return frontmatter_flag_truthy(fields.get(field, ""))
+
+
+def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
+    """`arch_review:` flag — same set as `workflow.py:slice_needs_arch_review`."""
+    return _review_flag(spec_path, slice_fragment, "arch_review")
 
 
 def _code_health_review_flag(spec_path, slice_fragment: str) -> bool:
-    """Read the resolved slice's `code_health_review:` frontmatter flag
-    (slice 060-05). Mirrors `_arch_review_flag` exactly.
-
-    Returns True iff the slice declares a truthy `code_health_review`
-    token (`true`/`yes`/`on`/`1`, case-insensitive — the shared
-    `frontmatter_flag_truthy` predicate). Conservative: any miss (no
-    frontmatter, field absent, unrecognized value) returns False, so
-    every existing slice (no flag) stays unaffected — the code-health
-    pass is opt-in. Raises `EvidenceError` only when the slice itself
-    can't be resolved.
-    """
-    spec_path = Path(spec_path)
-    try:
-        loc = load_slice(spec_path, slice_fragment)
-    except SliceLookupError as exc:
-        raise EvidenceError(str(exc)) from exc
-    body = loc.text[loc.start:loc.end]
-    fields, _ = parse_frontmatter(body)
-    return frontmatter_flag_truthy(fields.get("code_health_review", ""))
+    """`code_health_review:` flag (slice 060-05)."""
+    return _review_flag(spec_path, slice_fragment, "code_health_review")
 
 
 def _frame_review_flag(spec_path, slice_fragment: str) -> bool:
-    """Read the resolved slice's `frame_review:` frontmatter flag
-    (slice 064-03 / ADR-0020). Mirrors `_arch_review_flag` exactly.
-
-    Returns True iff the slice declares a truthy `frame_review` token
-    (`true`/`yes`/`on`/`1`, case-insensitive — the shared
-    `frontmatter_flag_truthy` predicate). Conservative: any miss (no
-    frontmatter, field absent, unrecognized value) returns False, so
-    every existing slice (no flag) stays unaffected — the frame-critique
-    pass is opt-in. Raises `EvidenceError` only when the slice itself
-    can't be resolved.
-    """
-    spec_path = Path(spec_path)
-    try:
-        loc = load_slice(spec_path, slice_fragment)
-    except SliceLookupError as exc:
-        raise EvidenceError(str(exc)) from exc
-    body = loc.text[loc.start:loc.end]
-    fields, _ = parse_frontmatter(body)
-    return frontmatter_flag_truthy(fields.get("frame_review", ""))
+    """`frame_review:` flag (slice 064-03 / ADR-0020)."""
+    return _review_flag(spec_path, slice_fragment, "frame_review")
 
 
 def _design_review_flag(spec_path, slice_fragment: str) -> bool:
-    """Read the resolved slice's `design_review:` frontmatter flag
-    (slice 071-01). Mirrors `_arch_review_flag` exactly.
-
-    Returns True iff the slice declares a truthy `design_review` token
-    (`true`/`yes`/`on`/`1`, case-insensitive — the shared
-    `frontmatter_flag_truthy` predicate, same source as
-    `workflow.py:slice_needs_design_review`). Conservative: any miss (no
-    frontmatter, field absent, unrecognized value) returns False, so every
-    existing slice (no flag) stays unaffected — the design-review pass is
-    opt-in. This is the no-drift invariant: the gate reads the flag itself
-    (the same flag the orchestrator reads to spawn the pass). Raises
-    `EvidenceError` only when the slice itself can't be resolved.
-    """
-    spec_path = Path(spec_path)
-    try:
-        loc = load_slice(spec_path, slice_fragment)
-    except SliceLookupError as exc:
-        raise EvidenceError(str(exc)) from exc
-    body = loc.text[loc.start:loc.end]
-    fields, _ = parse_frontmatter(body)
-    return frontmatter_flag_truthy(fields.get("design_review", ""))
+    """`design_review:` flag (slice 071-01), same source as
+    `workflow.py:slice_needs_design_review` — the no-drift invariant: the
+    gate reads the flag itself, the same flag the orchestrator reads to
+    spawn the pass."""
+    return _review_flag(spec_path, slice_fragment, "design_review")
 
 
 def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:

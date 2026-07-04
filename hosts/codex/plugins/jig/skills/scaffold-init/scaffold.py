@@ -1494,6 +1494,7 @@ def _rewrite_hook_command(command: str) -> str:
 
 _CODEX_HOOK_STATUS_MESSAGES = {
     "jig-boundary-change-warn.sh": "jig: warn on boundary changes",
+    "jig-claim-check.sh": "jig: verify spec/slice/ADR claims",
     "jig-context-check.sh": "jig: check context budget",
     "jig-memory-scan.sh": "jig: scan memory references",
     "jig-post-edit-verify.sh": "jig: verify edit landed",

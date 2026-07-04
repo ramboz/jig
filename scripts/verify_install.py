@@ -203,6 +203,7 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 # PreToolUse trace hook — which hooks.json has registered since spec 030).
 _EXPECTED_HOOK_SCRIPTS = (
     "jig-boundary-change-warn.sh",
+    "jig-claim-check.sh",  # refinement-todo "memory-recall verification" — Stop claim-scan
     "jig-context-check.sh",
     "jig-decision-capture.sh",  # slice 083-04 — Stop decision-scan (sibling of task-capture)
     "jig-decision-inflight.sh",  # slice 083-07 — in-flight AskUserQuestion/override capture

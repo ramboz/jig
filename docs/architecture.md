@@ -110,7 +110,7 @@ flowchart TB
     subs --> specs
     subs --> memory[(CLAUDE.md<br/>+ docs/memory/)]
 
-    subgraph hookspine["Deterministic spine — 12 hooks"]
+    subgraph hookspine["Deterministic spine — 13 hooks"]
         direction TB
         h1["SessionStart · UserPromptSubmit · PreToolUse·Read<br/>jig-context-check<br/>context-fill + in-session growth/compact nudge"]
         h2["UserPromptSubmit<br/>jig-memory-scan<br/>surface unknown references"]
@@ -124,6 +124,7 @@ flowchart TB
         h10["SessionStart<br/>jig-semantic-index<br/>ready opted-in provider or suggest once"]
         h11["Stop<br/>jig-decision-capture<br/>surface decision candidates next turn"]
         h12["PostToolUse·AskUserQuestion · UserPromptSubmit<br/>jig-decision-inflight<br/>async write-only: in-flight decision stubs to scratch"]
+        h13["Stop<br/>jig-claim-check<br/>flag unresolved spec/slice/ADR claims next turn"]
     end
 
     h1 -. additionalContext .-> claude
@@ -135,12 +136,13 @@ flowchart TB
     h10 -. additionalContext .-> claude
     h9 -. next-turn context .-> claude
     h11 -. next-turn context .-> claude
+    h13 -. next-turn context .-> claude
 ```
 
 - **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
 - **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only. `pr-review` and `arch-review` stay judgment-only as skills, but are *invoked* deterministically from the post-implementation flow via `review.py pr-review` / `review.py arch-review` prompt builders (see [skills/spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) § "After implementation").
 - **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
-- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via twelve hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); one is async write-only — captures in-flight decision stubs to a per-session scratch log, never blocks or injects (`decision-inflight`, spec 083-07); seven can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `task-capture`, `decision-capture`, `jig-semantic-index`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`). The two Stop hooks (`task-capture`, `decision-capture`) are siblings — same scan-and-surface pattern, one for tasks, one for decisions (spec 083-04); `decision-inflight` is the deterministic fast path feeding `decision-capture`'s triage (spec 083-07).
+- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via thirteen hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); one is async write-only — captures in-flight decision stubs to a per-session scratch log, never blocks or injects (`decision-inflight`, spec 083-07); eight can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `task-capture`, `decision-capture`, `jig-semantic-index`, `claim-check`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`). The three Stop hooks (`task-capture`, `decision-capture`, `claim-check`) are siblings — same scan-and-surface pattern applied to a different signal (tasks, decisions, and — per the refinement-todo "memory-recall verification" mitigation — spec/slice/ADR claims that don't resolve on disk); `decision-inflight` is the deterministic fast path feeding `decision-capture`'s triage (spec 083-07).
 
 Scaffold-mode wiring is identical in shape — only path strings differ
 (`${CLAUDE_PROJECT_DIR}/.claude/...` instead of `${CLAUDE_PLUGIN_ROOT}/...`).

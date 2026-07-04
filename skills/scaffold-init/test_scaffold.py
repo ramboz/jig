@@ -232,6 +232,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "cwd": str(self.target),
         })
         env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
         env.pop("JIG_CONVENTIONS_APPROVED", None)  # ensure not approved
         result = subprocess.run(
             ["bash", str(gate)],
@@ -243,6 +244,8 @@ class GreenfieldScaffoldTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2,
                          f"gate should block; got {result.returncode}, stderr={result.stderr}")
         self.assertIn("conventions.md", result.stderr.lower() + result.stdout.lower())
+        # Spec 078-01 AC3: the normal (blocked) path emits no bypass event.
+        self.assertEqual(self._read_gate_bypass_events(), [])
 
     def test_conventions_gate_allows_with_approval(self):
         gate = REPO_ROOT / "hooks" / "scripts" / "jig-spec-gate.sh"
@@ -256,6 +259,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "cwd": str(self.target),
         })
         env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
         env["JIG_CONVENTIONS_APPROVED"] = "1"
         result = subprocess.run(
             ["bash", str(gate)],
@@ -265,6 +269,43 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             env=env,
         )
         self.assertEqual(result.returncode, 0, "gate should allow with approval")
+        # Spec 078-01 AC2: the bypass emits one content-free event.
+        events = self._read_gate_bypass_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["gate"], "conventions")
+        self.assertEqual(events[0]["env_var"], "JIG_CONVENTIONS_APPROVED")
+        self.assertNotIn("conventions.md", json.dumps(events[0]))
+
+    def test_conventions_gate_bypass_telemetry_fails_open(self):
+        """Spec 078-01 AC4: an unwritable telemetry sink must not block the
+        edit — make .claude/skill-usage.jsonl a directory so the write raises,
+        and confirm the gate still allows."""
+        gate = REPO_ROOT / "hooks" / "scripts" / "jig-spec-gate.sh"
+        log_dir = self.target / ".claude"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "skill-usage.jsonl").mkdir()
+        hook_input = json.dumps({
+            "session_id": "test",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(self.target / "docs/conventions.md"),
+            },
+            "cwd": str(self.target),
+        })
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
+        env["JIG_CONVENTIONS_APPROVED"] = "1"
+        result = subprocess.run(
+            ["bash", str(gate)],
+            input=hook_input,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"gate must still allow when telemetry sink is "
+                         f"unwritable; stderr={result.stderr}")
 
     def test_conventions_gate_resists_path_traversal(self):
         """Regression: foo/docs/conventions.md/../conventions.md must still be gated."""
@@ -278,6 +319,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "cwd": str(self.target),
         })
         env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
         env.pop("JIG_CONVENTIONS_APPROVED", None)
         result = subprocess.run(
             ["bash", str(gate)],
@@ -300,6 +342,7 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             "cwd": str(self.target),
         })
         env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
         env.pop("JIG_CONVENTIONS_APPROVED", None)
         result = subprocess.run(
             ["bash", str(gate)],
@@ -309,6 +352,44 @@ class GreenfieldScaffoldTests(unittest.TestCase):
             env=env,
         )
         self.assertEqual(result.returncode, 0, "gate should ignore non-conventions files")
+        # Spec 078-01 AC3: the normal (ungated-file) path emits no bypass event.
+        self.assertEqual(self._read_gate_bypass_events(), [])
+
+    def test_conventions_gate_approval_on_other_file_emits_nothing(self):
+        """Spec 078-01 AC3 (emit-scoping): an approval token present while
+        editing an UNRELATED file must not fire the gate's bypass telemetry
+        — emit is scoped to the actual gated file, not to the env var alone."""
+        gate = REPO_ROOT / "hooks" / "scripts" / "jig-spec-gate.sh"
+        hook_input = json.dumps({
+            "session_id": "test",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(self.target / "docs/architecture.md"),
+            },
+            "cwd": str(self.target),
+        })
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(self.target)
+        env["JIG_CONVENTIONS_APPROVED"] = "1"
+        result = subprocess.run(
+            ["bash", str(gate)],
+            input=hook_input,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self._read_gate_bypass_events(), [])
+
+    def _read_gate_bypass_events(self):
+        log = self.target / ".claude" / "skill-usage.jsonl"
+        if not log.is_file():
+            return []
+        return [
+            json.loads(line) for line in log.read_text().splitlines()
+            if line.strip()
+        ]
 
 
 class DocContentTests(unittest.TestCase):

@@ -267,11 +267,13 @@ the target document. The exact shape:
 
 ### Q1: <verbatim question>
 _(category: <category-name>)_
+_(provenance: [grounded: ADR-NNNN | path/to/doc] or [judgment])_
 
 <verbatim user answer>
 
 ### Q2: <verbatim question>
 _(category: <category-name>)_
+_(provenance: [grounded: ADR-NNNN | path/to/doc] or [judgment])_
 
 <verbatim user answer>
 
@@ -301,6 +303,16 @@ _(category: <category-name>)_
   the user deferred, or no question was reached.
 - **Skipped** — the user explicitly skipped the question or the
   category.
+
+**Provenance tag (measurement, non-gating).** Before writing each answered
+question, self-assess whether it could have been answered from an
+existing artifact already in the repo: `[grounded: ADR-NNNN | path]` when
+the answer restates (or was clearly derivable from) a named ADR or doc
+you could have read first, `[judgment]` when it's a genuine trade-off call
+that needed the user's input. Best-effort and non-blocking — it exists so
+a future rollup can measure whether clarify is asking already-answerable
+questions before building a grounding pass (docs/refinement-todo.md
+"Instrument the review→learnings→clarify loop before building it").
 
 **Append-only behavior.** The skill does not modify any existing section
 in the spec body above the `## Clarifications` heading. If

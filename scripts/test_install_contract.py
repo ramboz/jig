@@ -498,17 +498,18 @@ class RealHooksJsonTests(unittest.TestCase):
         )
         self.assertEqual(problems, [], problems)
 
-    def test_real_hooks_json_references_twelve_scripts(self):
+    def test_real_hooks_json_references_thirteen_scripts(self):
         data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
         names = install_contract.parse_hook_script_names(data)
-        # Registration source of truth currently lists 12 scripts
-        # (jig-decision-inflight.sh added on PostToolUse(AskUserQuestion) +
-        # UserPromptSubmit in slice 083-07).
-        self.assertEqual(len(names), 12, sorted(names))
+        # Registration source of truth currently lists 13 scripts
+        # (jig-claim-check.sh added on Stop for the refinement-todo
+        # "memory-recall verification" mitigation).
+        self.assertEqual(len(names), 13, sorted(names))
         self.assertIn("jig-skill-trace.sh", names)
         self.assertIn("jig-semantic-index.sh", names)
         self.assertIn("jig-decision-capture.sh", names)
         self.assertIn("jig-decision-inflight.sh", names)
+        self.assertIn("jig-claim-check.sh", names)
 
 
 # ---------------------------------------------------------------------------

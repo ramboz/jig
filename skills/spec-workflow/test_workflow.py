@@ -1569,6 +1569,123 @@ class RoutingStatsTests(unittest.TestCase):
         self.assertIn("other", r.stdout)
 
 
+class GateStatsTests(unittest.TestCase):
+    """Slice 078-02: `workflow.py gate-stats` renders a per-gate bypass
+    histogram from the shared `.claude/skill-usage.jsonl` trace written by
+    078-01's gate instrumentation."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-gatestats-")
+        self.project = Path(self.tmpdir) / "proj"
+        (self.project / ".claude").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _iso_days_ago(self, days: int) -> str:
+        import datetime as _dt
+        return (_dt.datetime.now(_dt.timezone.utc)
+                - _dt.timedelta(days=days)).isoformat()
+
+    def _write_log(self, entries: list) -> None:
+        import json as _json
+        log = self.project / ".claude" / "skill-usage.jsonl"
+        lines = []
+        for e in entries:
+            lines.append(e["__raw__"] if "__raw__" in e else _json.dumps(e))
+        log.write_text("\n".join(lines) + "\n")
+
+    def _bypass(self, gate, *, days_ago=0):
+        return {
+            "timestamp": self._iso_days_ago(days_ago),
+            "event": "gate_bypassed",
+            "gate": gate,
+            "env_var": f"JIG_{gate.upper().replace('-', '_')}_GATE",
+        }
+
+    def _skill(self, name, *, days_ago=0):
+        # A skill_invoked row (spec 041) — must NOT count as a gate bypass.
+        return {
+            "timestamp": self._iso_days_ago(days_ago),
+            "event": "skill_invoked",
+            "skill_name": name,
+        }
+
+    def _run(self, *extra):
+        return run_workflow("gate-stats", "--project-dir",
+                            str(self.project), *extra)
+
+    def _row(self, stdout: str, gate: str) -> str:
+        return next(ln for ln in stdout.splitlines()
+                    if ln.strip().startswith(gate + " "))
+
+    def test_missing_log_friendly_message(self):
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("no gate-bypass data", r.stdout)
+
+    def test_empty_log_friendly_message(self):
+        (self.project / ".claude" / "skill-usage.jsonl").write_text("")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("no gate bypasses", r.stdout)
+
+    def test_counts_per_gate(self):
+        entries = [self._bypass("review-evidence") for _ in range(3)]
+        entries += [self._bypass("conventions") for _ in range(2)]
+        self._write_log(entries)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "review-evidence"),
+                         r"\breview-evidence\b.*\b3\b")
+        self.assertRegex(self._row(r.stdout, "conventions"),
+                         r"\bconventions\b.*\b2\b")
+
+    def test_excludes_skill_invoked_rows(self):
+        # Load-bearing shared-file invariant: skill_invoked / task_spawned
+        # rows must NOT count as gate bypasses.
+        self._write_log([self._skill("jig:analyze"),
+                         self._bypass("conventions")])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "conventions"),
+                         r"\bconventions\b.*\b1\b")
+        self.assertNotIn("analyze", r.stdout)
+
+    def test_days_window_excludes_old_entries(self):
+        self._write_log([
+            self._bypass("conventions", days_ago=60),
+            self._bypass("conventions", days_ago=0),
+        ])
+        r = self._run("--days", "30")
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "conventions"),
+                         r"\bconventions\b.*\b1\b")
+        self.assertIn("1 outside window", r.stdout)
+
+    def test_malformed_line_skipped(self):
+        self._write_log([
+            {"__raw__": "{ not valid json"},
+            self._bypass("review-evidence"),
+            {"__raw__": "12345"},
+        ])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertRegex(self._row(r.stdout, "review-evidence"),
+                         r"\breview-evidence\b.*\b1\b")
+
+    def test_sorted_by_count_descending(self):
+        entries = [self._bypass("review-evidence") for _ in range(5)]
+        entries += [self._bypass("conventions")]
+        self._write_log(entries)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertLess(r.stdout.index("review-evidence"),
+                        r.stdout.index("conventions"),
+                        "higher-count gate should sort first")
+
+
 class SliceTemplateTests(unittest.TestCase):
     """Slice 014-01: a new slice template exists with the right frontmatter."""
 
@@ -6253,6 +6370,86 @@ class TransitionGateBypassTests(_GateFixture):
         self.assertNotEqual(r.returncode, 0,
                             "dependency check must still fire under bypass")
         self.assertIn("dependen", r.stderr.lower())
+
+
+class TransitionGateBypassTelemetryTests(_GateFixture):
+    """Spec 078-01: the review-evidence gate's bypass emits a content-free
+    `gate_bypassed` event to .claude/skill-usage.jsonl (project root =
+    `_project_root_for_spec(spec_md)`, same tree `_GateFixture` builds)."""
+
+    def _run_with_gate_env(self, value, *args):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        if value is None:
+            env.pop("JIG_REVIEW_EVIDENCE_GATE", None)
+        else:
+            env["JIG_REVIEW_EVIDENCE_GATE"] = value
+        return subprocess.run(
+            [sys.executable, str(WORKFLOW), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def _read_events(self):
+        log = self.tmpdir / ".claude" / "skill-usage.jsonl"
+        if not log.is_file():
+            return []
+        import json as _json
+        return [_json.loads(line) for line in log.read_text().splitlines()
+                if line.strip()]
+
+    def test_bypass_emits_one_content_free_event(self):
+        self.write_slice("IN_PROGRESS")
+        r = self._run_with_gate_env(
+            "0", "transition", str(self.spec_md), "045-01", "REVIEWED",
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        events = self._read_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "gate_bypassed")
+        self.assertEqual(events[0]["gate"], "review-evidence")
+        self.assertEqual(events[0]["env_var"], "JIG_REVIEW_EVIDENCE_GATE")
+        # content-free: never the target status or slice body.
+        import json as _json
+        self.assertNotIn("REVIEWED", _json.dumps(events[0]))
+
+    def test_normal_path_emits_nothing(self):
+        # Gate ON (no bypass) with full evidence present — a clean pass,
+        # not a bypass — must emit no event.
+        self.write_slice("IN_PROGRESS")
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        r = self._run_with_gate_env(
+            None, "transition", str(self.spec_md), "045-01", "REVIEWED",
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertEqual(self._read_events(), [])
+
+    def test_ungated_transition_emits_nothing(self):
+        # DRAFT -> READY_FOR_IMPLEMENTATION is not an evidence-gated state
+        # at all — the gate function no-ops before ever checking bypass.
+        self.write_slice("DRAFT")
+        r = self._run_with_gate_env(
+            "0", "transition", str(self.spec_md), "045-01",
+            "READY_FOR_IMPLEMENTATION",
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertEqual(self._read_events(), [])
+
+    def test_bypass_telemetry_fails_open(self):
+        # Unwritable sink (a directory in place of the file) must not
+        # block the transition.
+        claude_dir = self.tmpdir / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "skill-usage.jsonl").mkdir()
+        self.write_slice("IN_PROGRESS")
+        r = self._run_with_gate_env(
+            "0", "transition", str(self.spec_md), "045-01", "REVIEWED",
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"unwritable telemetry sink must not block transition; "
+            f"stderr={r.stderr}",
+        )
 
 
 class ArchReviewTruthyUnificationTests(unittest.TestCase):

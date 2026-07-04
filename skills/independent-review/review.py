@@ -562,11 +562,17 @@ REASONING:
 <2-4 sentences>
 
 SPECIFIC ISSUES:
-- [blocker] <file:line> — <description>
-- [nit] <file:line> — <description>
-- [strength] <file:line> — <description>
+- [blocker][spec] <file:line> — <description>
+- [nit][impl] <file:line> — <description>
+- [strength][impl] <file:line> — <description>
 (omit section if none; tag every entry with one of [blocker] / [nit] /
- [strength] so the workflow can decide what blocks vs. logs)
+ [strength] so the workflow can decide what blocks vs. logs — AND with
+ [spec] (an acceptance-criteria / spec-frame issue a smarter clarify pass
+ could have prevented) or [impl] (an implementation-discipline issue —
+ untested edge, brittle fixture, drift — clarify can't help with). The
+ second tag is a self-classification for a future rule-of-three count;
+ see docs/refinement-todo.md "Instrument the review→learnings→clarify
+ loop before building it")
 
 RECONCILIATION NOTES:
 <nits and strengths that should land in the deviation log rather than

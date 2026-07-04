@@ -404,6 +404,14 @@ when `code_health_review: true`) must pass before
   block the `REVIEWED` transition; `[nit]`-tagged entries become
   reconciliation-log items.
 
+**Measurement tag (non-gating).** The craft/arch/code-health passes also
+self-classify each SPECIFIC ISSUES entry `[spec]` (an acceptance-criteria /
+spec-frame issue a smarter clarify pass could have prevented) or `[impl]`
+(implementation-discipline — untested edge, brittle fixture, drift). This
+carries no gating consequence — it exists purely so a future rollup can
+count `[spec]`-tagged themes across specs (docs/refinement-todo.md
+"Instrument the review→learnings→clarify loop before building it").
+
 **The gate is mechanical, not advisory (slice 045-03 / [ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md) §5).**
 `workflow.py transition` now *refuses* the `REVIEWED` / `RECONCILED` /
 `DONE` moves unless the required review evidence — recorded with

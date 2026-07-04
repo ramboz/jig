@@ -31,6 +31,7 @@ from _common import (
     team_signal,  # noqa: F401  (re-exported for test monkeypatching)
 )
 from _common.atomic_io import atomic_write_text
+from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
@@ -886,6 +887,14 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
     if new_status not in _EVIDENCE_GATED_STATES:
         return
     if not _evidence_gate_enabled():
+        # Spec 078-01: the gate is honoring its deliberateness override —
+        # log that fact (gate name, env var, best-effort spec-ref) so the
+        # bypass leaves an auditable trail. Fail-open / content-free by
+        # construction (emit_gate_bypass never raises, never logs the
+        # transition's target status or slice content).
+        root = _project_root_for_spec(spec_md)
+        emit_gate_bypass(root, "review-evidence", "JIG_REVIEW_EVIDENCE_GATE",
+                          spec_ref=read_spec_ref(root))
         return
 
     diagnostics: list = []
@@ -2116,6 +2125,86 @@ def routing_stats(project_dir: Path, days: int = 30) -> str:
         "(typically a richer user-installed) skill in that category fired. "
         "Where jig\nships a deferring baseline, 'other' > 0 with 'jig' = 0 means "
         "routing chose\nthe richer skill over jig's."
+    )
+    return "\n".join(lines) + "\n"
+
+
+# ---------- Slice 078-02: gate-bypass stats digest ----------
+#
+# Read surface for the bypass events 078-01's gates emit when they honor
+# their env-var override. Shares .claude/skill-usage.jsonl with the
+# `skill_invoked` / `task_spawned` rows (routing_stats above); only
+# `event == "gate_bypassed"` rows carry a `gate` field, so — mirroring
+# routing_stats's own filter — everything else is silently skipped.
+# Stdout-only, read-only, never gates; empty/absent sink is exit 0.
+
+
+def gate_stats(project_dir: Path, days: int = 30) -> str:
+    """Render a per-gate bypass histogram to a string (spec 078-02).
+
+    Reads .claude/skill-usage.jsonl, filters to `gate_bypassed` events
+    within the last `days`, and counts occurrences per gate name. Always
+    informational (the caller exits 0); never gates."""
+    log_path = project_dir / ".claude" / "skill-usage.jsonl"
+    if not log_path.is_file():
+        return (
+            f"no gate-bypass data — {log_path} not found.\n"
+            "gate-bypass events are written when a gate honors its "
+            "env-var override (spec 078-01).\n"
+        )
+
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(days=days))
+    counts: dict = {}  # gate -> count
+    total = 0
+    outside_window = 0
+
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (ValueError, TypeError):
+            continue  # malformed line — skip, never crash
+        if not isinstance(entry, dict) or entry.get("event") != "gate_bypassed":
+            continue  # skill_invoked / task_spawned rows and noise
+        gate = str(entry.get("gate") or "").strip()
+        if not gate:
+            continue
+        dt = _parse_iso_utc(str(entry.get("timestamp") or ""))
+        if dt is None:
+            continue  # can't window an unparseable timestamp
+        if dt < cutoff:
+            outside_window += 1
+            continue
+        counts[gate] = counts.get(gate, 0) + 1
+        total += 1
+
+    if total == 0:
+        plural = "y" if outside_window == 1 else "ies"
+        return (
+            f"no gate bypasses in the last {days} days "
+            f"({outside_window} older entr{plural} outside the window).\n"
+        )
+
+    rows = sorted(counts.items(), key=lambda r: (-r[1], r[0]))
+    gate_w = max(len("gate"), max(len(r[0]) for r in rows))
+    lines = [
+        f"gate-bypass stats (last {days} days) — {log_path}",
+        f"  {total} bypass(es) across {len(rows)} gate(s); "
+        f"{outside_window} outside window.",
+        "",
+        f"  {'gate':<{gate_w}}  {'count':>5}",
+        f"  {'-' * gate_w}  {'-' * 5}",
+    ]
+    for gate, count in rows:
+        lines.append(f"  {gate:<{gate_w}}  {count:>5}")
+    lines.append("")
+    lines.append(
+        "each row is a gate that honored its env-var override at least "
+        "once in the window — this answers 'is the gate catching\n"
+        "anything, or is it deadweight?' from data, not vibes."
     )
     return "\n".join(lines) + "\n"
 
@@ -3689,6 +3778,19 @@ def _build_parser() -> argparse.ArgumentParser:
     prs.add_argument("--days", type=int, default=30,
                      help="window in days (default: 30)")
 
+    # Slice 078-02: read-only per-gate bypass histogram from
+    # .claude/skill-usage.jsonl — answers "is this gate catching anything?"
+    pgs = sub.add_parser(
+        "gate-stats",
+        help="histogram of gate-bypass events (which gates honored their "
+             "env-var override, and how often) from .claude/skill-usage.jsonl "
+             "(slice 078-02)",
+    )
+    pgs.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+    pgs.add_argument("--days", type=int, default=30,
+                     help="window in days (default: 30)")
+
     pn = sub.add_parser(
         "new",
         help="reserve the next free spec number on origin/main (slice 003-03)",
@@ -3810,6 +3912,10 @@ def main(argv: list) -> int:
         elif ns.command == "routing-stats":
             sys.stdout.write(
                 routing_stats(Path(ns.project_dir), days=ns.days)
+            )
+        elif ns.command == "gate-stats":
+            sys.stdout.write(
+                gate_stats(Path(ns.project_dir), days=ns.days)
             )
         elif ns.command == "new":
             return reserve_spec(

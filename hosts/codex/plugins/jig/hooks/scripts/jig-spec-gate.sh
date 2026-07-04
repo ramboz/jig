@@ -19,8 +19,20 @@
 # only. A project using a different constitution path (e.g. root CONVENTIONS.md)
 # gets no gate. A configurable gated set (JIG_GATED_FILES) is a deferred
 # enhancement (ADR-0011 Scope).
-python3 -c "
+#
+# Spec 078-01: an approved edit emits a content-free `gate_bypassed` event to
+# .codex/skill-usage.jsonl (gate name, env var, timestamp, best-effort
+# spec-ref) via skills/_common/gate_telemetry.py, so the override leaves an
+# auditable trail. Resolved relative to this script's own location (works
+# whether jig runs as a plugin or a scaffolded install — same idiom as
+# jig-memory-scan.sh's lexicon import). Fail-open: any telemetry error is
+# swallowed and never turns an allowed edit into a block.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SCRIPT_DIR="$SCRIPT_DIR" python3 -c "
 import sys, json, os
+
+script_dir = os.environ.get('SCRIPT_DIR', '.')
 
 try:
     data = json.load(sys.stdin)
@@ -47,6 +59,16 @@ try:
     # two token sets in sync. Widened from a bare '1' for cross-gate
     # consistency; '1' still works (backward-compatible).
     if (os.environ.get('JIG_CONVENTIONS_APPROVED') or '').strip().lower() in ('1', 'true', 'yes', 'on'):
+        try:
+            common_dir = os.path.join(script_dir, '..', '..', 'skills', '_common')
+            if common_dir not in sys.path:
+                sys.path.insert(0, common_dir)
+            from gate_telemetry import emit_gate_bypass, read_spec_ref
+            project_dir = os.environ.get('CODEX_PROJECT_DIR', '.')
+            emit_gate_bypass(project_dir, 'conventions', 'JIG_CONVENTIONS_APPROVED',
+                              spec_ref=read_spec_ref(project_dir))
+        except Exception:
+            pass
         sys.exit(0)
 
     sys.stderr.write(
