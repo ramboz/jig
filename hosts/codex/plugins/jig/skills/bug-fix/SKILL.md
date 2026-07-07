@@ -230,8 +230,11 @@ is read-only — `bug.py` validates the durable verdict artifacts they produce
    creep? If `fix_class: workaround`, is it honestly labelled and justified?
 
 2. **craft** (`pr-review`, always) — **defers** to a richer installed
-   `pr-review` skill on disk; falls back to jig's baseline buckets. Build with
-   `review.py pr-review`.
+   `pr-review` skill on disk; falls back to jig's baseline `pr-review` skill.
+   Run that skill's methodology against the bug's deliverables — it is
+   diff-shaped, not spec-shaped, so there is **no** `review.py pr-review` call
+   for a bug (that builder requires a spec + slice). Record the verdict with
+   `prompt_source: pr-review skill craft pass` (as bugs 001–003 did).
 
 3. **security** (`security-review`, conditional on `security_surface: true` in
    the record — mirrors how `arch_review: true` gates the arch pass) —
@@ -316,6 +319,13 @@ commit.
   flows — using them silently defeats the teeth.
 - **Escalate, don't grind.** A bug whose fix introduces new routing/landing
   semantics or a missing behaviour is a spec — use the escalation seam.
+- **`ESCALATED` and `RESOLVED_ON_MAIN` are terminal — closed, not
+  unfinished.** A bug in a terminal non-`DONE` state was reclassified to a
+  spec (`ESCALATED`) or already fixed on trunk (`RESOLVED_ON_MAIN`); it was
+  never fixed as a bug, so its blank fix/test columns are *expected*. Don't
+  flag it as stale or try to advance it to `DONE`. The status board
+  segregates these rows under a `## Terminal` section (parity with the spec
+  board's `## Deferred slices` / `## Abandoned slices`) so closure is legible.
 - **`bug.py` never spawns subagents.** The host/orchestrator runs the reviewer
   passes; `bug.py` only validates the recorded verdict artifacts (ADR-0016
   Scope).

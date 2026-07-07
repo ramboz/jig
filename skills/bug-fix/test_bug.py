@@ -992,5 +992,124 @@ class BugReservationTests(unittest.TestCase):
         )
 
 
+class TerminalSegregationTests(unittest.TestCase):
+    """Bug 004 (issue #76): the status board must segregate terminal
+    non-DONE rows (ESCALATED / RESOLVED_ON_MAIN) into a dedicated section,
+    mirroring the spec board's `## Deferred slices` / `## Abandoned slices`
+    split, so closure is legible at a glance. DONE stays in the active table
+    (terminal-success, never the confusing case)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self, rel: str) -> Path:
+        return self.root / "docs" / "bugs" / rel
+
+    def _write_bug(self, rel: str, *, status: str, slug: str,
+                   escalated_to: str = "", severity: str = "medium",
+                   tier: str = "standard") -> None:
+        write(self._bug(rel), (
+            "---\n"
+            f"status: {status}\n"
+            f"severity: {severity}\n"
+            f"tier: {tier}\n"
+            "claimed_by:\n"
+            "regression_test:\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            "fix_class:\n"
+            "security_surface: false\n"
+            f"escalated_to: {escalated_to}\n"
+            "---\n\n"
+            f"# Bug: {slug}\n\n## Symptom\n"
+        ))
+
+    def _board_text(self) -> str:
+        r = run_bug("status-board", "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return (self.root / "docs" / "bugs" / "README.md").read_text()
+
+    def test_escalated_bug_rendered_under_terminal_section(self):
+        self._write_bug("001-alpha.md", status="REPORTED", slug="alpha")
+        self._write_bug("002-beta.md", status="ESCALATED", slug="beta",
+                        escalated_to="099")
+        text = self._board_text()
+
+        self.assertIn("## Terminal", text,
+                      "escalated bug must produce a Terminal section heading")
+        heading_at = text.index("## Terminal")
+        active_at = text.index("| 001 | alpha |")
+        terminal_at = text.index("| 002 | beta |")
+        self.assertLess(active_at, heading_at,
+                        "active REPORTED row must stay above the Terminal heading")
+        self.assertLess(heading_at, terminal_at,
+                        "ESCALATED row must appear below the Terminal heading")
+        # escalated_to context stays visible on the segregated row
+        self.assertRegex(text[heading_at:], r"\| 002 \| beta \|[^\n]*\| 099 \|")
+
+    def test_resolved_on_main_bug_segregated(self):
+        self._write_bug("001-gamma.md", status="RESOLVED_ON_MAIN", slug="gamma")
+        text = self._board_text()
+
+        self.assertIn("## Terminal", text)
+        self.assertLess(text.index("## Terminal"), text.index("| 001 | gamma |"),
+                        "RESOLVED_ON_MAIN row must appear below the Terminal heading")
+
+    def test_no_terminal_section_when_all_active_or_done(self):
+        # DONE is terminal-success, NOT a terminal-non-DONE row: it stays in
+        # the active table and must not trigger the Terminal section.
+        self._write_bug("001-alpha.md", status="REPORTED", slug="alpha")
+        self._write_bug("002-delta.md", status="DONE", slug="delta")
+        text = self._board_text()
+
+        self.assertNotIn("## Terminal", text,
+                         "no Terminal section when every bug is active or DONE")
+        self.assertIn("| 002 | delta |", text,
+                      "DONE row stays in the active table")
+
+    def test_all_terminal_renders_empty_active_table(self):
+        # Edge: every bug is terminal-non-DONE. The active table still renders
+        # its header+separator (zero rows) and the Terminal section carries the
+        # rows — valid markdown, no crash, header always present.
+        self._write_bug("001-alpha.md", status="ESCALATED", slug="alpha",
+                        escalated_to="099")
+        text = self._board_text()
+
+        self.assertIn("## Terminal", text)
+        header_line = ("| ID | slug | severity | tier | status | reproduces? | "
+                       "regression test | claimed_by | escalated_to | Notes |")
+        self.assertIn(header_line, text, "active header stays present")
+        # The only data row lives below the Terminal heading, not above it.
+        self.assertLess(text.index("## Terminal"), text.index("| 001 | alpha |"))
+        active_region = text[:text.index("## Terminal")]
+        self.assertNotIn("| 001 | alpha |", active_region,
+                         "no data row in the (empty) active table")
+
+    def test_terminal_row_note_preserved_across_regen(self):
+        # A curated Note on an escalated row, seeded inline in a flat legacy
+        # board, must survive regeneration into the Terminal section.
+        self._write_bug("001-beta.md", status="ESCALATED", slug="beta",
+                        escalated_to="099")
+        board = self.root / "docs" / "bugs" / "README.md"
+        write(board, (
+            "# Bug Status Board\n\n"
+            "| ID | slug | severity | tier | status | reproduces? | "
+            "regression test | claimed_by | escalated_to | Notes |\n"
+            "|----|------|----------|------|--------|-------------|"
+            "-----------------|------------|--------------|-------|\n"
+            "| 001 | beta | medium | standard | ESCALATED | no | "
+            " |  | 099 | keep me |\n"
+        ))
+        text = self._board_text()
+
+        self.assertIn("## Terminal", text)
+        self.assertIn("keep me", text,
+                      "curated Note must survive migration into Terminal section")
+
+
 if __name__ == "__main__":
     unittest.main()
