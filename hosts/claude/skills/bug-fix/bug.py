@@ -58,6 +58,13 @@ OPEN_STATUSES = {
     "REVIEWED",
     "VERIFIED",
 }
+# Bug 004 (issue #76): terminal non-DONE states. A bug here is *closed* — it
+# was reclassified to a spec (ESCALATED) or fixed by another session on trunk
+# (RESOLVED_ON_MAIN), never fixed as a bug — so its blank fix/test columns are
+# expected. The status board segregates these into a dedicated section so
+# closure is legible (see `_render_board`). DONE is deliberately excluded: it
+# is terminal-*success* and stays in the active table.
+TERMINAL_NON_DONE_STATUSES = frozenset({"ESCALATED", "RESOLVED_ON_MAIN"})
 _ORDERED_TRANSITIONS = {
     "REPORTED": {"DIAGNOSING"},
     "DIAGNOSING": {"ROOT_CAUSED"},
@@ -854,23 +861,60 @@ def _bug_rows(project_dir: Path) -> list[dict[str, str]]:
     return rows
 
 
+_BOARD_HEADER = (
+    "| ID | slug | severity | tier | status | reproduces? | "
+    "regression test | claimed_by | escalated_to | Notes |"
+)
+_BOARD_SEPARATOR = (
+    "|----|------|----------|------|--------|-------------|"
+    "-----------------|------------|--------------|-------|"
+)
+_TERMINAL_HEADING = "## Terminal — closed (not fixed as bugs)"
+_TERMINAL_BLURB = (
+    "> Bugs in a terminal non-DONE state: **ESCALATED** (reclassified to a "
+    "spec — see `escalated_to`) or **RESOLVED_ON_MAIN** (fixed by another "
+    "session on trunk). These are closed, not unfinished — blank "
+    "`reproduces?` / `regression test` columns are expected. Don't flag them "
+    "stale or advance them to DONE."
+)
+
+
+def _render_row(row: dict[str, str],
+                notes: dict[tuple[str, str], str]) -> str:
+    note = notes.get((row["id"], row["slug"]), "")
+    return (
+        f"| {row['id']} | {row['slug']} | {row['severity']} | "
+        f"{row['tier']} | {row['status']} | {row['reproduces']} | "
+        f"{row['regression_test']} | {row['claimed_by']} | "
+        f"{row['escalated_to']} | {note} |"
+    )
+
+
 def _render_board(rows: list[dict[str, str]],
                   notes: dict[tuple[str, str], str]) -> str:
-    lines = [
-        "| ID | slug | severity | tier | status | reproduces? | "
-        "regression test | claimed_by | escalated_to | Notes |",
-        "|----|------|----------|------|--------|-------------|"
-        "-----------------|------------|--------------|-------|",
-    ]
-    for row in rows:
-        note = notes.get((row["id"], row["slug"]), "")
-        lines.append(
-            f"| {row['id']} | {row['slug']} | {row['severity']} | "
-            f"{row['tier']} | {row['status']} | {row['reproduces']} | "
-            f"{row['regression_test']} | {row['claimed_by']} | "
-            f"{row['escalated_to']} | {note} |"
-        )
-    return "\n".join(lines) + "\n"
+    """Bug 004 (issue #76): render the active table first, then — only when
+    present — a segregated `## Terminal` section for bugs in a terminal
+    non-DONE state (ESCALATED / RESOLVED_ON_MAIN). DONE is terminal-*success*
+    and stays in the active table (never the confusing case), mirroring how
+    the spec board keeps DONE inline and splits out `## Deferred slices` /
+    `## Abandoned slices`. The terminal table keeps the same 10-column shape
+    so `_parse_existing_notes` continues to preserve curated Notes on rows in
+    either table. Empty terminal set → the section is fully omitted (no bare
+    heading), matching `render_deferred_table`/`render_abandoned_table`."""
+    active = [r for r in rows if r["status"] not in TERMINAL_NON_DONE_STATUSES]
+    terminal = [r for r in rows if r["status"] in TERMINAL_NON_DONE_STATUSES]
+
+    lines = [_BOARD_HEADER, _BOARD_SEPARATOR]
+    lines.extend(_render_row(row, notes) for row in active)
+    board = "\n".join(lines) + "\n"
+
+    if terminal:
+        section = ["", _TERMINAL_HEADING, "", _TERMINAL_BLURB, "",
+                   _BOARD_HEADER, _BOARD_SEPARATOR]
+        section.extend(_render_row(row, notes) for row in terminal)
+        board += "\n".join(section) + "\n"
+
+    return board
 
 
 def regenerate_status_board(project_dir: Path) -> Path:

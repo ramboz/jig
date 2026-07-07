@@ -477,3 +477,22 @@ blind to existing defect records, causing duplicate/contradictory ownership.
 
 ## Mirroring a lifecycle state's mechanism ≠ mirroring its semantics
 When slice 085-01 added ABANDONED by mirroring DEFERRED's mechanism (restricted outbound edges, rollup exclusion, own status-board section), five rounds of frame-critique found the surface-level mirror masked real semantic divergences: (1) DEFERRED's unrestricted inbound edges (any state, including DONE) don't automatically transfer — DONE->ABANDONED conflates 'never attempted' with 'shipped, then removed', two events with different audit value; (2) DEFERRED's 'no cascade to dependents' precedent relied on spike Outcome prose never tripping the hard DONE dependency check, which doesn't hold for a permanent state like ABANDONED; (3) widening a function's documented return-type (compute_spec_status: 3 values -> 4) needs an actual audit of every consumer, not just an appeal to how DEFERRED handled a narrower case (pure exclusion, never a new return value). Lesson: when extending an existing mechanism to a new-but-different concept, treat each inherited behavior as its own claim to verify, not a free pass by analogy.
+
+## Bug 004: terminal lifecycle states need status-board segregation, not just a distinct status word
+A correctly-terminal state (`ESCALATED`/`RESOLVED_ON_MAIN`) read as "unfinished"
+across sessions because `bug.py`'s `_render_board` rendered every row in one
+flat table — the only closure signal was one word in the status column, and the
+blank fix/test columns pattern-matched as open work. The spec board had already
+solved this (`render_deferred_table`/`render_abandoned_table` split out
+`DEFERRED`/`ABANDONED`); the bug board never inherited the pattern even though
+`OPEN_STATUSES` already encoded the open/closed seam. Lesson: when a lifecycle
+registry gains a terminal-but-not-success state, giving it a status *value* is
+not enough — the surfaced artifact (status board) must make closure legible by
+segregating those rows, at parity with peer registries. Keep `DONE` (terminal-
+*success*) in the active table; only the "closed, not completed" states need the
+separate section. Tooling gotcha hit while fixing this: `.jig/test-command`
+(`python3 scripts/run_tests.py`) ignores any appended test selector and runs the
+FULL suite + a `uvx pyright` gate, so `bug.py transition FIXING/REVIEWED` runs
+the whole repo suite (~4min, network on first pyright fetch), not the named
+regression test in isolation — the red→green teeth are repo-wide here; warm the
+pyright cache and budget minutes.
