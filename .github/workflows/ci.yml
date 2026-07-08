@@ -20,7 +20,10 @@ jobs:
         # stdlib compat. Keep `X | None` behind `from __future__ import
         # annotations` and avoid 3.10-only runtime APIs (e.g. zip(strict=)) so this
         # job stays green; `ruff target-version=py39` enforces the syntax floor.
-        python-version: ["3.9", "3.11", "3.12"]
+        # We bracket the supported range — the 3.9 floor and the latest 3.x
+        # (3.12) — rather than test every minor. 3.12 already exercises the
+        # tomllib-gated (3.11+) code paths, so a middle 3.11 job is redundant.
+        python-version: ["3.9", "3.12"]
     steps:
       - uses: actions/checkout@v7
         with:
