@@ -935,7 +935,7 @@ class ExecuteDryRunTests(unittest.TestCase):
     def test_dry_run_skips_ff_viable_check(self):
         """Inbox 2026-05-14 regression: dry-run must not call _check_ff_viable,
         which requires a real `main` branch in the local repo. CI's
-        actions/checkout@v4 leaves HEAD on the PR's branch with `main` only
+        actions/checkout@v7 leaves HEAD on the PR's branch with `main` only
         as `origin/main`, so the pre-flight would fail with 'branch main not
         found'. Dry-run prints would-be commands without verifying state.
         """
