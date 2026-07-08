@@ -22,6 +22,14 @@
 **Why:** An unimplemented skill that auto-triggers is worse than no skill — it interrupts the user with a DRAFT warning.
 **How to apply:** All skills without a corresponding implemented spec use `disable-model-invocation: true`.
 
+**Rule:** Skills are host-neutral and never restate agent hygiene the host prelude already guarantees on **both** Claude Code and Codex.
+**Why:** jig renders one skill source per host. Content both host base prompts already enforce — batching independent tool calls, citing code as file:line, bias-to-action, skipping tool-call preamble — is pure context cost with zero marginal effect (cost = context × turns), and restating only one host's guarantee breaks host-neutrality.
+**How to apply:** Write to the *intersection*: assume the host handles generic tool-use hygiene; spend prose only on jig-specific procedure and judgment. Do state things *not* in the intersection when they matter (e.g. reversibility caution — Codex's prelude is more action-biased than Claude's). Instructing a subagent/reviewer on the exact output format it must emit is an output contract, not a restatement — keep it.
+
+**Rule:** A skill steers the *shape and length* of the output it induces, not just the process it follows.
+**Why:** jig's conventions govern skill *triggering* but not the verbosity of the agent output a skill produces when it runs — which spends the context × turns budget unpriced. The review and scan families already enforce this ad hoc; this rule promotes it from per-skill habit to convention.
+**How to apply:** If a skill's natural output can balloon (reviews, scans, explainers, reports), give it one of: a hard numeric cap with a truncation note (`analyze`), a "shape to content — don't default to bullets" clause, or "emit findings only, `None.` over omission" (`pr-review`). Never instruct "define every term" / "no hard cap".
+
 ## Hook authoring
 
 **Rule:** Hooks use `bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/<name>.sh` — never bare names.
@@ -39,6 +47,10 @@
 **Rule:** All hooks are non-blocking in the starting move. Gates are introduced per spec.
 **Why:** A premature block with no escape hatch is worse than no block.
 **How to apply:** Wire the gate hooks; implement their blocking logic only when the corresponding spec slice is done.
+
+**Rule:** Hook messages are terse, single-concern, and self-labeling.
+**Why:** A hook's `additionalContext` lands directly in the agent's context every turn it fires (context × turns again), and an unlabeled injection reads as if the user authored it. Production agent prompts cap machine-surface messages hard and flag injected context explicitly.
+**How to apply:** One concern per message — no multi-paragraph essays in `additionalContext`. Lead with what it is (`jig gate:` / `jig hint:`) so the agent doesn't attribute it to the user. Blocking-hook stderr (exit 2) states the reason **and** the escape hatch in one or two lines, no markdown.
 
 ## Agent authoring
 

@@ -201,8 +201,9 @@ links, and produce a **junior-grade walkthrough** with this **fixed shape**:
    single plain sentence a newcomer can hold onto.
 2. **Why it exists.** The problem or pressure that made someone write this — the
    motivation, not the mechanism.
-3. **Words you'll need first.** **Every jig term** the artifact uses, defined
-   inline from the merged lexicon (the `plain` field). This is the
+3. **Words you'll need first.** The jig terms **a newcomer won't know**, defined
+   inline from the merged lexicon (the `plain` field) — the ones load-bearing for
+   this artifact, not a glossary dump of every term it uses. This is the
    vocabulary-barrier fix: the reader gets the words *before* the prose that
    uses them. If a term the artifact uses is **not** in the lexicon, flag the
    gap (don't invent) and define it from the artifact's own context if you can,
@@ -235,11 +236,10 @@ then explain the snippet:
 1. **Load the merged lexicon** (the same inline loader recipe shown under Term
    mode) and **scan the passage for jig terms** — the "Words you'll need first"
    primitive, applied to the pasted text instead of a file. Define each jig term
-   present, inline, from the `plain` field. **No hard cap** on how many terms you
-   define (clarify Q4): define the ones that matter for understanding the
-   passage — lean, but not artificially limited to N. (This is an explicit,
-   on-demand request, unlike the 065-02 hook's bounded per-prompt nudge, so the
-   hook's cap rationale does not apply here.)
+   present, inline, from the `plain` field. Not capped at the 065-02 hook's
+   per-prompt N (clarify Q4): this is an explicit, on-demand request, so define
+   as many as the passage genuinely needs — but scope to the terms that are
+   **load-bearing for understanding it**, not every term present.
 2. **Say what the passage is and what to do.** In plain language: what this
    snippet is telling the reader, and what — if anything — they should do next
    (e.g. *"this is a review verdict saying the slice passed; nothing to do"* or
