@@ -472,8 +472,11 @@ class PassageModeTests(unittest.TestCase):
 
     def test_no_hard_term_cap(self):
         # clarify Q4 — passage mode does not impose a hard cap on inline term
-        # definitions.
-        self.assertIn("no hard cap", self.body_norm)
+        # definitions; it is "not capped at the 065-02 hook's per-prompt N".
+        # (The literal "no hard cap" phrasing was refined out by the
+        # conventions output-shape pass, which now forbids that wording — see
+        # docs/conventions.md — but the no-cap decision itself is preserved.)
+        self.assertIn("not capped", self.body_norm)
 
 
 if __name__ == "__main__":
