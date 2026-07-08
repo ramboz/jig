@@ -1,7 +1,8 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: []
-last_verified:
+frame_review: true
+last_verified: 2026-07-08
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -40,14 +41,15 @@ bypasses leave an auditable trail instead of being silent.
    (mirrors `.claude/skill-usage.jsonl`); nothing leaves the machine.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Coverage exercises each AC with ≥1 fixture (each gate bypass emits;
+- [x] All ACs pass; full test suite green (no regressions). (3399 tests green
+      + pyright clean, 2026-07-08.)
+- [x] Coverage exercises each AC with ≥1 fixture (each gate bypass emits;
       normal path silent; write-failure fail-open).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 **Implementation notes (non-binding):**
 - Reuse the existing telemetry writer; a sibling JSONL is acceptable only
@@ -64,6 +66,56 @@ bypasses leave an auditable trail instead of being silent.
 the local telemetry sink and see every gate bypass — observable artifact,
 independent of 078-02's digest.
 
-### Deviation log (after reconciliation)
+### Deviation log
 
-_Produced during reconciliation._
+**Shipped ahead of slicing (process deviation).** The implementation landed
+on `main` in commit `5c31da0` ("feat(078): gate-bypass telemetry +
+refinement-todo cleanup pass") *before* the lifecycle ceremony — the slice
+sat at DRAFT while the code was live and tested. This record was reconciled
+retroactively (2026-07-08): the full lifecycle (frame-critique → compliance
+→ craft → reconciliation) was run against the shipped code, same pattern as
+spec 041 ("shipped ahead of slicing; closed record"). No code was
+re-implemented; only doc/evidence artifacts were produced.
+
+**Bundled commit.** `5c31da0` also carried an unrelated "refinement-todo
+cleanup pass": (a) the `jig-claim-check.sh` hook + `lib/claim_check.py` (the
+memory-recall-verification refinement-todo entry), and (b) a
+behavior-preserving `review_evidence.py` refactor parametrizing the four
+`_*_review_flag` helpers onto a shared `_review_flag(...)` — the "parametrize
+the four `_*_review_flag` helpers" refinement-todo entry, resolved because
+078-01's bypass-emit touched `review_evidence.py`'s gate logic anyway. Both
+are outside spec 078's ACs and were scoped out of this slice's review;
+disclosed here for completeness.
+
+**Nits carried from review (non-blocking):**
+- [corrected] An earlier compliance-review note suggested the review-evidence
+  emit could fire *before* the DONE dependency check (a benign over-count on
+  dep-check failure). Reconciliation verified the opposite: `_gate_evidence`
+  and its `emit_gate_bypass` call run *after* the DONE dependency check (the
+  gate's own comment in `workflow.py` states "Runs AFTER the DONE dependency
+  check"), so a transition that fails the dep check raises before the emit and
+  logs nothing — no over-count occurs.
+- [accepted] The review-evidence emit also fires on a transition into a gated
+  state whose required-pass set is *empty* (e.g. READY_FOR_REVIEW without
+  `frame_review`), recording a "phantom" bypass that slightly inflates the
+  078-02 digest. Acceptable — the disable flag was honored on a transition the
+  gate owns.
+- [deferred] `gate_telemetry.py`'s `project_dir` param is untyped while the
+  return type is annotated; annotate `project_dir: str | os.PathLike` next
+  time the file is touched (pyright-floor polish, non-blocking).
+
+### Reconciliation sweep
+
+- **`docs/memory/learnings.md`** — `updated`: the "skill-usage.jsonl has two
+  writers" note corrected to three writers (078 adds the `gate_bypassed`
+  event); noted that 078 followed the note's own `event`-discriminator rule.
+- **Host packages** (`hosts/claude/`, `hosts/codex/`) — `updated`:
+  regenerated via `scripts/build_host_packages.py`; `--check` drift-clean.
+- **`docs/inbox.md`** — `no-op`: no 078-01-resolved items.
+- **`docs/refinement-todo.md`** — `updated`: the bundled cleanup in `5c31da0`
+  marked two entries RESOLVED (the memory-recall claim-check linter; the
+  "parametrize the four `_*_review_flag` helpers" entry). Outside 078's ACs,
+  recorded here for sweep completeness.
+- **Architecture / conventions** — `no-op`: no module-boundary or public-
+  contract change (a new event type on an existing sink; ADR-0011 posture
+  unchanged).

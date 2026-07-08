@@ -2203,8 +2203,10 @@ def gate_stats(project_dir: Path, days: int = 30) -> str:
     lines.append("")
     lines.append(
         "each row is a gate that honored its env-var override at least "
-        "once in the window — this answers 'is the gate catching\n"
-        "anything, or is it deadweight?' from data, not vibes."
+        "once in the window — an audit trail of how often each gate is\n"
+        "bypassed (spec 078 / EngTip #19). Counts are bypasses only (no "
+        "denominator of respected fires), so read them as override "
+        "frequency, not a 'gate is deadweight' verdict."
     )
     return "\n".join(lines) + "\n"
 
@@ -3779,7 +3781,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="window in days (default: 30)")
 
     # Slice 078-02: read-only per-gate bypass histogram from
-    # .claude/skill-usage.jsonl — answers "is this gate catching anything?"
+    # .claude/skill-usage.jsonl — how often each gate is bypassed (an
+    # override-frequency audit trail, not a gate-value verdict).
     pgs = sub.add_parser(
         "gate-stats",
         help="histogram of gate-bypass events (which gates honored their "

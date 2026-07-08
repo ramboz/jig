@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 use_cases: []
 ---
@@ -20,9 +20,11 @@ enforcement** — each carries an env-var escape (`JIG_REVIEW_EVIDENCE_GATE=0`,
 is honest, but the escapes are **un-instrumented**: when a gate is
 bypassed, nothing is logged. So a maintainer can't tell after the fact
 that a slice reached DONE with the evidence gate off, and nobody can
-answer "how often is each gate bypassed?" — exactly the data that tells
-you whether a gate earns its keep or is pure friction. A bypass that
-leaves no trace is the EngTip #19 "silent heroics" failure mode.
+answer "how often is each gate bypassed?" — an override-frequency audit
+trail that *informs* (though a bypass count alone, lacking a respected-fire
+denominator, cannot by itself *settle*) whether a gate earns its keep or is
+pure friction. A bypass that leaves no trace is the EngTip #19 "silent
+heroics" failure mode.
 
 jig already has the infrastructure: `jig-telemetry`, the skill-routing
 trace (`.claude/skill-usage.jsonl`, spec 041), and `workflow.py
@@ -53,9 +55,11 @@ the bypass, never the diff, secret, or prompt content.
 
 - **Depth (resolved 2026-06-19):** spec.md + SPIDR slice files now.
 - **Gates in scope for v1 (resolved):** start with the **review-evidence
-  gate** (highest value) and the **conventions spec-gate** (directly
-  answers the parent brief-08 open question — "is the gate catching
-  anything?"). Secret-scan + context bands follow.
+  gate** (highest value) and the **conventions spec-gate** (feeds the
+  parent brief-08 open question — "is the gate catching anything?" — with
+  override-frequency evidence; a full answer needs the deferred
+  respected-fire denominator, per the refinement-todo entry). Secret-scan +
+  context bands follow.
 - **Event vs. counter (guidance):** per-event append (matches the JSONL
   pattern); aggregate at read time in the digest.
 - **No fail-closed (hard rule):** a telemetry write failure must never
@@ -70,8 +74,10 @@ aggregation), with a **Path** seam (the bypass code path in each gate).
   review-evidence gate + conventions spec-gate; reuse the telemetry sink;
   fail-open; gitignored; content-free. Delivers an auditable trail today.
 - **078-02 (digest):** a read-only per-gate bypass histogram over `--days
-  N` (extend `routing-stats` or a sibling `gate-stats`), so "is this gate
-  deadweight?" becomes answerable.
+  N` (extend `routing-stats` or a sibling `gate-stats`) — an
+  override-frequency audit trail answering "how often is each gate
+  bypassed?" (a bypass count has no respected-fire denominator, so it is
+  deliberately not a "gate is deadweight" verdict).
 
 ## Slices
 

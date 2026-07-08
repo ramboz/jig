@@ -35,6 +35,10 @@ user-invocable: true
   links that reports use cases with no implementing spec (coverage gap) and
   specs citing no parent use case (scope creep). No-op when the project has no
   `## Use cases` section.
+- Surfaces gate-bypass telemetry via `workflow.py gate-stats [--days N]` — a
+  read-only per-gate histogram of how often each gate honored its env-var
+  override (an override-frequency audit trail, not a gate-value verdict) from
+  `.claude/skill-usage.jsonl` (slice 078-02).
 
 ## SPIDR splitting
 
