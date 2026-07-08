@@ -1,5 +1,5 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: []
 last_verified: 2026-07-08
 frame_review: true
@@ -102,16 +102,16 @@ in their most defensible form:
    `ruff` (target py39) and `pyright`.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one fixture
       (engine units on synthetic corpora + real-data invariants).
-- [ ] Reviewed by `reviewer` subagent (compliance). Prompt built by `review.py`.
-- [ ] Craft pass (`pr-review`) passed.
-- [ ] Frame-critique (adversarial) pass passed — `frame_review: true`.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] Reviewed by `reviewer` subagent (compliance). Prompt built by `review.py`.
+- [x] Craft pass (`pr-review`) passed.
+- [x] Frame-critique (adversarial) pass passed — `frame_review: true`.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [x] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 **Anti-horizontal-phasing check:** After this slice, a maintainer runs one
 command and sees which skill descriptions collide and whether realistic prompts

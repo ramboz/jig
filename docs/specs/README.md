@@ -279,9 +279,9 @@
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-02 — Route read/write helpers through the layout helper | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-03 — scaffold-init `--docs-root` flag + layout-aware output | **DONE** |  |
 | [085-abandoned-state](085-abandoned-state/spec.md) | 085-01 — abandoned-as-lifecycle-state | **DONE** | Filed as issue #72 during #71 triage. `ABANDONED` mirrors `DEFERRED` (own status-board section, restricted outbound edges) but reachable only pre-`DONE`; `compute_spec_status` gains a 4th rollup value, resolving spec 036 Q3's "wholly abandoned spec" case. 5 rounds of frame-critique; 17 new tests. |
-| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-01 — routing-eval harness (collision + trigger + ratchet) | DRAFT |  |
-| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-02 — sharpen eval-flagged descriptions | DRAFT |  |
-| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-03 — register the eval as a named ci_check gate | DRAFT |  |
+| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-01 — routing-eval harness (collision + trigger + ratchet) | **DONE** |  |
+| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-02 — sharpen eval-flagged descriptions | **DONE** |  |
+| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-03 — register the eval as a named ci_check gate | **DONE** |  |
 
 ## Deferred slices
 

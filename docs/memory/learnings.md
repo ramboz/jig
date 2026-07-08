@@ -496,3 +496,31 @@ FULL suite + a `uvx pyright` gate, so `bug.py transition FIXING/REVIEWED` runs
 the whole repo suite (~4min, network on first pyright fetch), not the named
 regression test in isolation — the red→green teeth are repo-wide here; warm the
 pyright cache and budget minutes.
+
+## Spec 086: an adversarial frame-critique catches metric-gradient bugs the deterministic gates can't
+Spec 086 added a deterministic Tier-2 skill-routing eval (`scripts/skill_routing.py`)
+— TF-IDF cosine over SKILL.md descriptions for collision + trigger-routing. The
+first cut vectorized the *whole* description, including the shared negative-
+disambiguation boilerplate ("Do not use for … use `/jig:X` instead", "Defers to
+…"). The adversarial **frame-critique** pass (064-03) caught what the compliance
+and craft passes did not: that boilerplate is exactly what teaches the *model* to
+route siblings apart, so counting it as lexical *similarity* **inverted the
+metric's gradient** — the correct fix (add a pointer) would *raise* the collision
+score while the rewarded move (strip it) degrades real routing. Fix:
+`routing_surface()` vectorizes the **positive surface only**. Effect: top
+collision 0.44→0.22, rank-1 93→95%, negatives 97→100% — the fix validated the
+diagnosis. Lessons:
+1. For a lexical similarity/routing metric over jig descriptions, vectorize the
+   **positive** surface; the disambiguation tail is shared scaffolding that
+   inverts similarity among the hardest-to-route cluster.
+2. The frame-critique earns its cost on **premise** bugs a conformance review
+   steps over. It took 3 cycles (gradient inversion → Overview overclaim →
+   inoperable kill-criterion), each a distinct real finding — not doubt-theater.
+3. A self-authored eval measures author *self-consistency*, not ground truth:
+   green catches *regression against the pinned case set*, NOT "vocabulary real
+   users say." Scope the claim honestly; the durable fix (real-usage-sourced
+   prompts + a semantic Tier-3 eval) is deferred in refinement-todo.
+4. `.claude/skill-usage.jsonl` logs only which skill *fired* — not the prompt or
+   correctness — so `routing-stats` cannot detect a mis-route. Kill criteria that
+   need mis-route detection are **manual**, not automatic, until the trace hook
+   captures the invoking prompt.

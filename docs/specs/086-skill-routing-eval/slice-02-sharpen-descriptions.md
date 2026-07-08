@@ -1,5 +1,5 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [086-01]
 last_verified: 2026-07-08
 ---
@@ -47,11 +47,11 @@ packages in sync.
    stuffing.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Reviewed by `reviewer` subagent (compliance). Prompt built by `review.py`.
-- [ ] Craft pass (`pr-review`) passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Reviewed by `reviewer` subagent (compliance). Prompt built by `review.py`.
+- [x] Craft pass (`pr-review`) passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [x] Reconciliation review passed.
 
 **Anti-horizontal-phasing check:** After this slice, a real routing
