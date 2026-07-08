@@ -1,0 +1,14 @@
+{
+  "skill_name": "scaffold-init",
+  "trigger": {
+    "positive": [
+      { "prompt": "Set up the AI-native development workflow on this new project", "top_k": 3 },
+      { "prompt": "Onboard this repo and initialize the spec-driven infrastructure", "top_k": 3 },
+      { "prompt": "Scaffold jig here from scratch", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "This repo already has specs — adopt jig into the existing codebase", "owner": "migrate" },
+      { "prompt": "Define what we're building and capture the product vision", "owner": "vision-elicitation" }
+    ]
+  }
+}

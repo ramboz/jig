@@ -1,0 +1,14 @@
+{
+  "skill_name": "independent-review",
+  "trigger": {
+    "positive": [
+      { "prompt": "The implementer finished the slice — spawn a fresh reviewer to check it against the acceptance criteria", "top_k": 3 },
+      { "prompt": "Evaluate the completed work against the spec with a reviewer that hasn't seen the implementation", "top_k": 3 },
+      { "prompt": "Verify the deviation log matches what actually changed for this reconciliation", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Find the ambiguities and open questions in this spec before we start building", "owner": "clarify" },
+      { "prompt": "Check the spec and ADRs for cross-artifact drift", "owner": "analyze" }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "skill_name": "adr-workflow",
+  "trigger": {
+    "positive": [
+      { "prompt": "Record this decision as an ADR so we don't relitigate it later", "top_k": 3 },
+      { "prompt": "Write an architectural decision record for the choice we just landed on", "top_k": 3 },
+      { "prompt": "Mark that deferred item resolved and link back to the decision record", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Poke holes in this design proposal before we commit to it", "owner": "arch-review" },
+      { "prompt": "Check whether the decision records still agree with the spec", "owner": "analyze" }
+    ]
+  }
+}

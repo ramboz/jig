@@ -1,0 +1,14 @@
+{
+  "skill_name": "security-review",
+  "trigger": {
+    "positive": [
+      { "prompt": "Do a security pass on this diff", "top_k": 3 },
+      { "prompt": "Are there any vulnerabilities in this code?", "top_k": 3 },
+      { "prompt": "Is this change secure? check it for security issues", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Lint this project and report code health", "owner": "code-health" },
+      { "prompt": "Give this PR a general craft review — scope, blockers, nits", "owner": "pr-review" }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "skill_name": "explain",
+  "trigger": {
+    "positive": [
+      { "prompt": "I'm new here — walk me through this spec in plain language", "top_k": 3 },
+      { "prompt": "What does this term mean? break it down for me", "top_k": 3 },
+      { "prompt": "Explain what this VERDICT output chunk is saying", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Save this term to the project glossary so we remember it", "owner": "memory-sync" },
+      { "prompt": "Audit this spec for inconsistencies and drift", "owner": "analyze" }
+    ]
+  }
+}

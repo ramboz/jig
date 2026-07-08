@@ -1,0 +1,14 @@
+{
+  "skill_name": "slice-land",
+  "trigger": {
+    "positive": [
+      { "prompt": "Land this slice and merge it back to main", "top_k": 3 },
+      { "prompt": "The slice is done — what now? give me the landing checklist", "top_k": 3 },
+      { "prompt": "Create a PR for this finished slice", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Review the finished slice against its acceptance criteria with a fresh reviewer", "owner": "independent-review" },
+      { "prompt": "Fix this reported bug that regressed", "owner": "bug-fix" }
+    ]
+  }
+}

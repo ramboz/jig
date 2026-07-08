@@ -6,6 +6,7 @@ description: >
   duplication, ambiguity, underspecification, principle violations,
   coverage gaps, and terminology drift. Auto-triggers when you say
   analyze this spec, check for inconsistencies, audit ADR vs spec drift,
+  check whether the decision records still agree with the spec,
   cross-artifact alignment, find drift in this spec, or audit this spec
   for principle violations. Do not use for: pre-DRAFT ambiguity scanning
   (use `/jig:clarify` instead); structural frontmatter or slice-numbering

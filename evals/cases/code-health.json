@@ -1,0 +1,14 @@
+{
+  "skill_name": "code-health",
+  "trigger": {
+    "positive": [
+      { "prompt": "Lint this project and tell me if the code is clean", "top_k": 3 },
+      { "prompt": "Run a static analysis pass over the codebase", "top_k": 3 },
+      { "prompt": "Are there any lint issues in this repo?", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Run my tests and tell me if they are green", "owner": "tdd-loop" },
+      { "prompt": "Check this diff for security vulnerabilities", "owner": "security-review" }
+    ]
+  }
+}

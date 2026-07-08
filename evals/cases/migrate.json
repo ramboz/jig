@@ -1,0 +1,14 @@
+{
+  "skill_name": "migrate",
+  "trigger": {
+    "positive": [
+      { "prompt": "Adopt jig in this existing repo that already has specs", "top_k": 3 },
+      { "prompt": "Migrate my flat slice files into the nested spec layout", "top_k": 3 },
+      { "prompt": "Introduce jig to this codebase — scaffold-init refused, what now?", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Initialize the AI workflow on this brand-new empty project", "owner": "scaffold-init" },
+      { "prompt": "We changed direction — re-baseline the project onto the new reference", "owner": "reframe" }
+    ]
+  }
+}

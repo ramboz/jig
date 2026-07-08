@@ -1,0 +1,14 @@
+{
+  "skill_name": "clarify",
+  "trigger": {
+    "positive": [
+      { "prompt": "Is this spec ready for review or are there still open questions to answer first?", "top_k": 3 },
+      { "prompt": "Scan my spec for ambiguities and ask me the unresolved questions before we build", "top_k": 3 },
+      { "prompt": "What's still unclear or unspecified in this scope?", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "The implementer finished the slice — review the code against its acceptance criteria", "owner": "independent-review" },
+      { "prompt": "Check whether the ADR and the spec still agree with each other", "owner": "analyze" }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "skill_name": "pr-review",
+  "trigger": {
+    "positive": [
+      { "prompt": "Review this PR and give me scope, blockers, and nits", "top_k": 3 },
+      { "prompt": "Check the diff on this branch before I share it with the team", "top_k": 3 },
+      { "prompt": "What do you think of these code changes?", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Review this architecture proposal and RFC for soundness", "owner": "arch-review" },
+      { "prompt": "Review the finished slice against its spec now that the implementer is done", "owner": "independent-review" }
+    ]
+  }
+}

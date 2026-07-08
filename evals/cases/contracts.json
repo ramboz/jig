@@ -1,0 +1,14 @@
+{
+  "skill_name": "contracts",
+  "trigger": {
+    "positive": [
+      { "prompt": "What contract artifact should I use for this HTTP API?", "top_k": 3 },
+      { "prompt": "Do we have an OpenAPI spec for this endpoint, and how do I validate it?", "top_k": 3 },
+      { "prompt": "Recommend a schema for these events and the tool to check it", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Review this API design doc for soundness", "owner": "arch-review" },
+      { "prompt": "Review the diff on this API branch", "owner": "pr-review" }
+    ]
+  }
+}

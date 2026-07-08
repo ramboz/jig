@@ -1,0 +1,14 @@
+{
+  "skill_name": "arch-review",
+  "trigger": {
+    "positive": [
+      { "prompt": "Poke holes in this architecture proposal and tell me if the design is sound", "top_k": 3 },
+      { "prompt": "Critique the RFC I wrote for the new system design", "top_k": 3 },
+      { "prompt": "Review this technical design doc and list the concerns and open questions", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Review the diff on this branch before I open the PR", "owner": "pr-review" },
+      { "prompt": "Record the decision we made as an ADR", "owner": "adr-workflow" }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "skill_name": "tdd-loop",
+  "trigger": {
+    "positive": [
+      { "prompt": "Test-drive this feature with a red-green-refactor loop", "top_k": 3 },
+      { "prompt": "Write a failing test first, then implement the behaviour to make it pass", "top_k": 3 },
+      { "prompt": "Run my tests and let me know if they're green", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Why is this failing? root-cause the regression before fixing", "owner": "bug-fix" },
+      { "prompt": "Lint this code and run static analysis", "owner": "code-health" }
+    ]
+  }
+}

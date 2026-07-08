@@ -1,0 +1,14 @@
+{
+  "skill_name": "analyze",
+  "trigger": {
+    "positive": [
+      { "prompt": "Check my spec and ADRs for drift and inconsistencies between them", "top_k": 3 },
+      { "prompt": "Audit this spec for principle violations and coverage gaps", "top_k": 3 },
+      { "prompt": "Are there contradictions or duplication across the decision records and the spec?", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "What questions should I answer before this spec is ready to build?", "owner": "clarify" },
+      { "prompt": "Review the implemented slice against its spec now that it's done", "owner": "independent-review" }
+    ]
+  }
+}

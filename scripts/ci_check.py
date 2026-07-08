@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TextIO
 
+import skill_routing  # sibling in scripts/ — single-sources the routing floor
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -31,6 +33,17 @@ class CheckStep:
 
 def ci_steps(python: str = sys.executable) -> tuple[CheckStep, ...]:
     return (
+        # Named routing gate FIRST (spec 086-03): it is fast (<1s) and, running
+        # before the bundled suite (which also enforces the floors via
+        # test_skill_routing.py), it is the step that fails — *by name* — on a
+        # routing regression, instead of the anonymous "Run test suite". The
+        # floor is single-sourced from skill_routing.MIN_RANK1_RATE so this gate
+        # cannot lag a future ratchet.
+        CheckStep(
+            "Skill-routing eval",
+            (python, "scripts/skill_routing.py",
+             "--min-rank1", str(skill_routing.MIN_RANK1_RATE)),
+        ),
         CheckStep("Run test suite", (python, "scripts/run_tests.py")),
         CheckStep("Lint specs", (python, "scripts/spec_lint.py", "--all")),
         CheckStep("Validate manifests", (python, "scripts/validate_manifests.py")),

@@ -1,0 +1,14 @@
+{
+  "skill_name": "bug-fix",
+  "trigger": {
+    "positive": [
+      { "prompt": "This regressed again — root-cause it and fix it, prove the root cause first", "top_k": 3 },
+      { "prompt": "Investigate this reported defect and add a regression test so it can't come back", "top_k": 3 },
+      { "prompt": "Why is this broken? diagnose before fixing", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Start this new non-trivial feature with a spec split into vertical slices", "owner": "spec-workflow" },
+      { "prompt": "Land the finished slice and merge it back to main", "owner": "slice-land" }
+    ]
+  }
+}

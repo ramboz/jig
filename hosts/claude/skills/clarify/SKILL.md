@@ -5,8 +5,9 @@ description: >
   ambiguity audit that asks up to five prioritized questions and appends
   them to the spec's `## Clarifications` section. Auto-triggers when you
   say clarify this spec, audit this spec for ambiguities, is this spec
-  ready for review, find unknowns in this scope, scan for unanswered
-  questions, or what's missing from this spec. Do not use for:
+  ready for review, find unknowns in this scope, surface what's still
+  unclear or unspecified, scan for unanswered questions, or what's
+  missing from this spec. Do not use for:
   spec-compliance review of a finished slice (use
   `/jig:independent-review` instead); cross-artifact consistency
   analysis or drift detection (use `/jig:analyze` instead); project-vision

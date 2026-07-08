@@ -1,0 +1,14 @@
+{
+  "skill_name": "reframe",
+  "trigger": {
+    "positive": [
+      { "prompt": "We swapped in a new design system — re-baseline the whole project onto it", "top_k": 3 },
+      { "prompt": "The vendor API contract moved; re-anchor the specs and decisions to the new one", "top_k": 3 },
+      { "prompt": "Our product direction changed and we need to retrofit everything to the new premise", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Adopt jig in this existing repo that already has specs", "owner": "migrate" },
+      { "prompt": "Detect drift and inconsistencies between the spec and the ADRs", "owner": "analyze" }
+    ]
+  }
+}

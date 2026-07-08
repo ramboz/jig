@@ -279,6 +279,9 @@
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-02 — Route read/write helpers through the layout helper | **DONE** |  |
 | [084-configurable-docs-root](084-configurable-docs-root/spec.md) | 084-03 — scaffold-init `--docs-root` flag + layout-aware output | **DONE** |  |
 | [085-abandoned-state](085-abandoned-state/spec.md) | 085-01 — abandoned-as-lifecycle-state | **DONE** | Filed as issue #72 during #71 triage. `ABANDONED` mirrors `DEFERRED` (own status-board section, restricted outbound edges) but reachable only pre-`DONE`; `compute_spec_status` gains a 4th rollup value, resolving spec 036 Q3's "wholly abandoned spec" case. 5 rounds of frame-critique; 17 new tests. |
+| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-01 — routing-eval harness (collision + trigger + ratchet) | DRAFT |  |
+| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-02 — sharpen eval-flagged descriptions | DRAFT |  |
+| [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-03 — register the eval as a named ci_check gate | DRAFT |  |
 
 ## Deferred slices
 
@@ -292,7 +295,7 @@
 | [007-slice-land](007-slice-land/spec.md) | 007-04 — scaffold-json-integration-flag | User reports the `--mode` flag is genuinely annoying in repeated invocations (≥3 instances), OR the first project using jig that has BOTH a direct-merge skill and a PR-merge skill in the same repo. |
 | [008-migrate-existing-project](008-migrate-existing-project/spec.md) | 008-04 — slice-to-spec-mapping | Either (a) 008-01 + 008-02 + 008-03 all DONE and the validator migration is actively in progress, OR (b) a second project with similar flat-slice topology surfaces. |
 | [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-03 — scaffold-json-self-install-marker | First caller that needs to branch on "jig is installed locally" AND can't get the signal from the runtime directly. |
-| [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-04 — subagentstart-reachability | OBSOLETE (2026-07-04) — real telemetry to replace the Task-spawn proxy shipped via `jig-skill-trace.sh` + `routing-stats` (spec 041), without needing the undocumented `SubagentStart` event. Will not be built as specified; see `docs/refinement-todo.md` "SubagentStart hook event" (closed 2026-07-04). |
+| [011-plugin-self-install](011-plugin-self-install/spec.md) | 011-04 — subagentstart-reachability | First skill that needs to react to subagent start (e.g. reviewer-pass logging, effort-scaling enforcement, real telemetry to replace the Task-spawn proxy). |
 | [012-pr-review](012-pr-review/spec.md) | 012-02 — pr-review-gather-helper | Three `pr-review/gather-friction:` inbox entries naming specific sessions where Claude had to re-derive determinism inline. Count today: 0 (per inbox 2026-05-13 entry). |
 | [012-pr-review](012-pr-review/spec.md) | 012-03 — security-lens-integration | OBSOLETE (2026-06-01) — superseded by spec 052 / ADR-0013. Security review shipped as a standalone `jig:security-review` skill, NOT a `security_lens` field consulted by `pr-review`, so this slice's plug-in surface was never built. Will not be built as specified; the remaining lever (a `security_review: true` review pass) is tracked in docs/refinement-todo.md. |
 | [012-pr-review](012-pr-review/spec.md) | 012-04 — language-specific-references | Multi-language-codebase user reports a concrete gap that the lightweight baseline doesn't cover, AND no user-installed `~/.claude/skills/pr-review` deferral target exists for them. |

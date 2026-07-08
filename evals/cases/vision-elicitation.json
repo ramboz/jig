@@ -1,0 +1,14 @@
+{
+  "skill_name": "vision-elicitation",
+  "trigger": {
+    "positive": [
+      { "prompt": "Set up the project vision and define what we're building", "top_k": 3 },
+      { "prompt": "Capture the product scope and elicit the architecture slots", "top_k": 3 },
+      { "prompt": "Run the vision wizard to refresh the project pitch", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Initialize jig and scaffold the workspace on this new repo", "owner": "scaffold-init" },
+      { "prompt": "Create a spec for this new feature and split it into slices", "owner": "spec-workflow" }
+    ]
+  }
+}
