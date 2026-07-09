@@ -1,10 +1,12 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-02"]
 last_verified:
 ---
 
 ## Slice 034-08 — repo-registry-remove-update-audit
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Ship the second half of registry CRUD — `remove` (archive,
 don't delete), `update` (metadata changes), and `audit` (drift +

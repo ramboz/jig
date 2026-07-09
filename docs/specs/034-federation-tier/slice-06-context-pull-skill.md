@@ -1,10 +1,12 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-02"]
 last_verified:
 ---
 
 ## Slice 034-06 — context-pull-skill
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Ship `jig:context-pull` — a declarative "load the hot caches
 for repos X, Y, Z" skill that protects the ~40% context ceiling by

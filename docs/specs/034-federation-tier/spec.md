@@ -43,27 +43,40 @@ the single-repo assumption breaks in seven ways:
    tags, and doc-placement rules. Federation must import and adapt that
    substrate rather than creating a second stale registry.
 
-This spec introduces a **Federation tier (Tier 2)** — a
-conditionally-scaffolded skill bundle plus federation-aware tweaks
-to existing Tier 0/1 skills — that lets one repo act as the simple
-**central** for an org and the others as **members**, while also
-supporting mature multi-repo installs where the registry,
-architecture/spec authority, guidelines authority, and workspace
-operations authority are separate repos. Solo / standalone projects
-remain unchanged.
+This spec supports **two federation topologies** (see
+[ADR-0028](../../decisions/adr-0028-federation-workspace-provider-model.md)),
+differing in *where jig state lives*, and ships the lighter one first:
 
-The Federation tier is the first promotion *into* Tier 2 from its
-deliberately-empty state, and the first that responds to a named
-user signal rather than speculation. See vision §"How new work
-enters jig" for the bar. The revised workspace/provider boundary is
-recorded in [ADR-0028](../../decisions/adr-0028-federation-workspace-provider-model.md).
-Spacecat/Mysticat is the validation fixture for scale and realism, not
-the normative product shape; federation must stay a general workflow
-with project-specific import, access, and verification choices.
+- **Hub-and-referenced (first-supported).** One *hub* repo holds all jig
+  state — tracks, specs, ADRs, glossary, routing primer — organized as
+  multiple **tracks** (per-track subprojects via
+  [ADR-0033](../../decisions/adr-0033-configurable-docs-root.md) / spec 084
+  `layout.docs_root="."`). Other repos are **referenced work targets** in a
+  `repos.yaml` manifest (`scope:`-tagged to tracks), checked out on demand,
+  carrying **no jig state**. Genuinely multi-repo and multi-host, but
+  nothing distributed to keep coherent. Grounded in a running project
+  (`personalization-workspace`: one hub, ~8 referenced repos across two
+  GitHub hosts, three tracks) — the **first consumer**.
+- **Peer-members-and-central (escalation — deferred).** Every repo is a
+  scaffolded jig *member*; a *central* coordinates them via a membership
+  registry, cross-repo specs, read-through authority, and pull-based drift.
+  The Spacecat/Mysticat shape. This is the model this spec originally
+  assumed as the *only* shape; it is re-scoped as escalation and its slices
+  are DEFERRED until a real distributed consumer starts building.
+
+The hub topology answers most of the seven breakages by centralizing jig
+state and referencing the rest; the peer topology answers them by
+distributing and coordinating state — the heavier contract, deferred until
+demanded. Spacecat/Mysticat remains the *peer-tier* validation fixture, not
+the normative product shape. Solo / standalone projects remain unchanged.
 
 ## Why now
 
-- **First named Tier 2 user signal.** A real 35+ repo / 40–60
+- **A running hub consumer (2026-07-08).** `personalization-workspace` is
+  a live hub-and-referenced federation (one hub repo, ~8 referenced repos,
+  three tracks) already migrating flat `docs/` into `tracks/` — the hub
+  tier's first real consumer, and why the hub tier ships first.
+- **First named Tier 2 user signal (peer tier).** A real 35+ repo / 40–60
   engineer organization with existing repo inventory, split
   spec/architecture homes, and multiple GitHub auth paths asked for
   federation. Vision §"How new work enters jig" reserves Tier 2 for
@@ -78,6 +91,17 @@ with project-specific import, access, and verification choices.
   avoids two retrofits.
 
 ## Goals
+
+> **Two-topology note (2026-07-08, [ADR-0028](../../decisions/adr-0028-federation-workspace-provider-model.md)):**
+> the goals below were authored for the peer-members model. In the
+> **hub tier** (first to build), the relevant goals are: a `hub` role +
+> track layout on 084 (goal 1, minus `central`/`member`); a `repos.yaml`
+> **reference** manifest (goal 4, minus membership/authority); a multi-host
+> repo-**checkout** provider (goal 5); discovery/import (goal 3); migrate
+> flat→hub (goal 9); and workspace status across tracks. Goals 6, 10, 11
+> apply *cross-track* in the hub tier and *cross-repo* in the peer tier.
+> Goals 2 (Tier-2 skill bundle), 7 (member lifecycle), and 8 (pull-based
+> drift) are peer-tier only and deferred.
 
 1. **Three roles** — `standalone` / `central` / `member` — supported
    via `.jig/scaffold.json`. Existing standalone users see no
@@ -162,22 +186,26 @@ with project-specific import, access, and verification choices.
   an early-warning surface, not a codeowner replacement and not a
   default hard block on parallel implementation.
 
-## Role model
+## Topology model
 
-| Role | Where used | Tier 2 skills installed | Role-active subset |
+Federation `role` in `.jig/scaffold.json` selects the topology:
+
+| Role | Topology | Where used | jig state |
 |---|---|---|---|
-| `standalone` | Today's default | None | — |
-| `central` | One repo per org | All Tier 2 | `repo-registry`, `cross-repo-spec`, `federated-status`, `context-pull`, `collision-radar` |
-| `member` | The other ~39 repos | All Tier 2 | `cross-repo-spec`, `context-pull`, `repo-sync`, `collision-radar` |
+| `standalone` | — | Today's default | this repo only (unchanged) |
+| `hub` | **Hub-and-referenced** (first-supported) | the one coordination repo | all here (multi-track); other repos referenced, no jig state |
+| `central` / `member` | **Peer-members** (deferred escalation) | central + N scaffolded members | distributed across members |
 
-Tier 2 *installs* uniformly when `role != standalone`; individual
-skills refuse with a clear message when invoked in the wrong role
-(`federated-status` on a member, etc.).
+**Hub tier:** only the hub is a jig citizen. It carries the `repos.yaml`
+reference manifest (repos + host + `scope:`→track) and checks referenced
+work repos out on demand; there are no member repos to register, no
+per-member drift, no cross-repo spec pinning. Tracks (084) organize
+concurrent workstreams inside the hub.
 
-Registry membership is tracked separately from role: `status` is one
-of `pending` / `active` / `archived`. `role: pending` is invalid.
-This avoids overloading the runtime behavior (`role`) with onboarding
-state (`status`).
+**Peer tier (deferred):** the original `central` / `member` roles,
+membership registry (`status` = `pending` / `active` / `archived`, tracked
+separately from `role`), and read-through authority. Retained in this spec
+for when a distributed consumer builds; not installed by the hub tier.
 
 ## SPIDR analysis
 
@@ -258,22 +286,48 @@ state (`status`).
 
 ## Slices
 
-- [034-00 — discovery-and-import-framework](slice-00-workspace-discovery-and-import.md)
-- [034-01 — registry-schema-and-host-adapter](slice-01-registry-schema-and-host-adapter.md)
-- [034-02 — repo-registry-add-and-list](slice-02-repo-registry-add-and-list.md)
-- [034-03 — scaffold-init-role-member](slice-03-scaffold-init-role-member.md)
-- [034-04 — cross-repo-spec-skill](slice-04-cross-repo-spec-skill.md)
-- [034-05 — federated-status-aggregator](slice-05-federated-status-aggregator.md)
-- [034-06 — context-pull-skill](slice-06-context-pull-skill.md)
-- [034-07 — tier0-1-federation-aware-tweaks](slice-07-tier0-1-federation-aware-tweaks.md)
-- [034-08 — repo-registry-remove-update-audit](slice-08-repo-registry-remove-update-audit.md)
-- [034-09 — repo-sync-and-drift-hook](slice-09-repo-sync-and-drift-hook.md)
-- [034-10 — migrate-to-federation](slice-10-migrate-to-federation.md)
-- [034-11 — cross-repo-impact-hook](slice-11-cross-repo-impact-hook.md)
-- [034-12 — touchset-frontmatter-and-preflight](slice-12-touchset-frontmatter-and-preflight.md)
-- [034-13 — federated-collision-radar](slice-13-federated-collision-radar.md)
-- [034-14 — touchset-closeout-drift-check](slice-14-touchset-closeout-drift-check.md)
-- [034-15 — federation-verification-profile](slice-15-federation-verification-profile.md)
+Re-dispositioned 2026-07-08 into the two topologies (ADR-0028). Hub-tier
+slices are the active DRAFT set (re-scoped to hub semantics — the slice
+*bodies* still carry peer-model detail and are refined to hub semantics on
+pickup); peer-tier slices are **DEFERRED** with the shared resolution
+trigger below.
+
+### Hub tier (active — first to build)
+
+> **084 dependency (not free):** the hub layout builds on spec 084
+> `docs_root="."`, which delivers layout-aware artifact *paths* only.
+> Multi-jig-per-repo coordination, **subtree-aware git anchoring** (per-track
+> reserve/land against a shared `main`), and migrate-into-subtree are
+> **explicitly deferred by [ADR-0033](../../decisions/adr-0033-configurable-docs-root.md)**
+> and must be closed by 034-01 / 034-03 / 034-10 — ADR-0033 flags per-track
+> reserve/land as a possible *category mismatch* (the hub tier's biggest
+> risk). Cross-repo collision (034-12/13) is computed *locally* over
+> referenced-repo paths, not distributed (ADR-0028 A4).
+
+- [034-00 — discovery-and-import-framework](slice-00-workspace-discovery-and-import.md) — import an existing repo inventory into `repos.yaml`.
+- [034-01 — registry-schema-and-host-adapter](slice-01-registry-schema-and-host-adapter.md) — `repos.yaml` **reference** manifest schema + multi-host repo **checkout** access (drop roles / membership / authority-mapping).
+- [034-02 — repo-registry-add-and-list](slice-02-repo-registry-add-and-list.md) — add / list referenced work repos + `scope:`→track binding.
+- [034-03 — scaffold-init-role-member](slice-03-scaffold-init-role-member.md) — re-scope to **hub scaffold**: tracks + `docs_root="."` + routing primer; **must close ADR-0033's deferred multi-jig-per-repo + subtree git-anchoring gaps** (per-track reserve/land — the *category-mismatch* risk).
+- [034-05 — federated-status-aggregator](slice-05-federated-status-aggregator.md) — workspace status **across tracks** (local, no network).
+- [034-10 — migrate-to-federation](slice-10-migrate-to-federation.md) — migrate a flat repo → hub (carve `docs/` into `tracks/`, author `repos.yaml`).
+- [034-12 — touchset-frontmatter-and-preflight](slice-12-touchset-frontmatter-and-preflight.md) — **cross-repo** touchset metadata over referenced-repo paths (`repo:path`), computed hub-local.
+- [034-13 — federated-collision-radar](slice-13-federated-collision-radar.md) — **cross-repo** collision radar over referenced-repo paths, computed hub-local (no network), advisory.
+- [034-15 — federation-verification-profile](slice-15-federation-verification-profile.md) — per-track / per-referenced-repo verification profile.
+
+### Peer tier (DEFERRED — escalation)
+
+**Resolution trigger (all peer-tier slices):** a real distributed-peer /
+multi-member consumer starts *building* (not just a named signal) — i.e. an
+org needs jig state scaffolded into many member repos coordinated by a
+central. Until then these stay parked.
+
+- [034-04 — cross-repo-spec-skill](slice-04-cross-repo-spec-skill.md) — cross-*repo* spec pinning (distributed jig state).
+- [034-06 — context-pull-skill](slice-06-context-pull-skill.md) — pull context from other member repos.
+- [034-07 — tier0-1-federation-aware-tweaks](slice-07-tier0-1-federation-aware-tweaks.md) — read-through to authority repos.
+- [034-08 — repo-registry-remove-update-audit](slice-08-repo-registry-remove-update-audit.md) — member membership lifecycle.
+- [034-09 — repo-sync-and-drift-hook](slice-09-repo-sync-and-drift-hook.md) — member pulls central drift.
+- [034-11 — cross-repo-impact-hook](slice-11-cross-repo-impact-hook.md) — cross-*repo* impact hook.
+- [034-14 — touchset-closeout-drift-check](slice-14-touchset-closeout-drift-check.md) — cross-repo touchset closeout drift.
 
 ## Clarifications
 

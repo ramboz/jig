@@ -1,11 +1,13 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-02"]
 last_verified:
 arch_review: true
 ---
 
 ## Slice 034-04 — cross-repo-spec-skill
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Ship `jig:cross-repo-spec` for authoring an org-level epic
 that touches N member repos — creates a parent spec in the declared

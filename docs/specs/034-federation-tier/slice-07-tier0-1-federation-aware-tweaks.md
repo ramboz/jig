@@ -1,11 +1,13 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-01"]
 last_verified:
 arch_review: true
 ---
 
 ## Slice 034-07 — tier0-1-federation-aware-tweaks
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Extend existing Tier 0/1 skills + hooks with minimal,
 federation-aware read-through behaviors that activate only when

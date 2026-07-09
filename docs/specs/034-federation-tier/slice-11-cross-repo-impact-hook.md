@@ -1,11 +1,13 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-01"]
 last_verified:
 arch_review: true
 ---
 
 ## Slice 034-11 — cross-repo-impact-hook
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Ship `jig-cross-repo-impact` — a PreToolUse hook on
 Edit/Write that warns when the user is editing a file declared as a

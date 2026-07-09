@@ -1,11 +1,13 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-12"]
 last_verified:
 arch_review: true
 ---
 
 ## Slice 034-14 — touchset-closeout-drift-check
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Add a close-out/review guard that compares declared
 `touches:` metadata with the actual files changed by the branch, so

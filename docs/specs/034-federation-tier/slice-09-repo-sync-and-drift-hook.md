@@ -1,11 +1,13 @@
 ---
-status: DRAFT
+status: DEFERRED
 dependencies: ["034-02", "034-07"]
 last_verified:
 arch_review: true
 ---
 
 ## Slice 034-09 — repo-sync-and-drift-hook
+
+**Resolution trigger:** A real distributed-peer / multi-member consumer starts *building* (see spec.md § Peer tier) — jig state scaffolded into many member repos coordinated by a central. Re-open via DEFERRED → DRAFT.
 
 **Goal:** Ship `jig:repo-sync` (member-side pull / check / update) and
 `jig-federation-drift` (SessionStart hook in member mode) so members
