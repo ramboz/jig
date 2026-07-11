@@ -1111,5 +1111,75 @@ class TerminalSegregationTests(unittest.TestCase):
                       "curated Note must survive migration into Terminal section")
 
 
+class DiagnoseGateListShapeTests(unittest.TestCase):
+    """Regression coverage for bug 005 / issue 80: the diagnose gate must
+    count candidate hypotheses across every Markdown list marker and must
+    count only *top-level* items, so numbered lists are visible and nested
+    confirm/falsify sub-bullets are not mistaken for hypotheses."""
+
+    def setUp(self):
+        self.mod = load_bug_module()
+
+    def _gaps(self, hypotheses: str, evidence: str = "some evidence") -> list:
+        text = (
+            f"## Evidence\n\n{evidence}\n\n"
+            f"## Hypotheses\n\n{hypotheses}\n\n"
+            "## Root cause\n\n"
+        )
+        return self.mod._diagnosis_gaps(text)
+
+    def test_numbered_list_hypotheses_count(self):
+        """False negative: `1.`/`2.` ordered lists must count toward >=2."""
+        gaps = self._gaps(
+            "1. [ ] H1: an alternative explanation\n"
+            "2. [x] H2 (leading): the leading explanation\n"
+        )
+        self.assertNotIn(
+            "at least two candidate hypotheses",
+            "\n".join(gaps),
+            "numbered-list hypotheses must be counted",
+        )
+
+    def test_star_and_plus_bullets_count(self):
+        """`*` and `+` are valid Markdown bullets and must count."""
+        gaps = self._gaps("* [ ] H1: alt\n+ [x] H2 (leading): main\n")
+        self.assertNotIn("at least two candidate hypotheses", "\n".join(gaps))
+
+    def test_nested_subbullets_do_not_count_as_hypotheses(self):
+        """False positive: nested `- Confirm:`/`- Falsify:` sub-bullets under a
+        single hypothesis must NOT satisfy the >=2 check on their own."""
+        gaps = self._gaps(
+            "1. [x] H1 (leading): the only real hypothesis\n"
+            "   - Confirm: do X\n"
+            "   - Falsify: do Y\n"
+        )
+        self.assertIn(
+            "at least two candidate hypotheses",
+            "\n".join(gaps),
+            "indented sub-bullets must not be counted as top-level hypotheses",
+        )
+
+    def test_parenthetical_leading_marker_satisfies_leading(self):
+        """SKILL.md says 'mark the leading one'; `**(leading)**` must satisfy
+        the leading check, not only `[x]` / `Leading:`."""
+        gaps = self._gaps("- H1: alt explanation\n- **(leading)** H2: main\n")
+        self.assertNotIn("a leading hypothesis", "\n".join(gaps))
+
+    def test_dash_bullet_hypotheses_still_count(self):
+        """Backward compatibility: the original `- [x]` shape keeps working."""
+        gaps = self._gaps("- [ ] H1: alt\n- [x] H2 (leading): main\n")
+        joined = "\n".join(gaps)
+        self.assertNotIn("at least two candidate hypotheses", joined)
+        self.assertNotIn("a leading hypothesis", joined)
+
+    def test_gap_messages_name_the_expected_shape(self):
+        """The gap strings (surfaced in the warning and the gnarly error) must
+        name the list-item shape and the leading marker, not just the gap."""
+        gaps = self._gaps("", evidence="")
+        joined = "\n".join(gaps)
+        self.assertIn("list item", joined, "must name the list-item shape")
+        self.assertIn("[x]", joined, "must name the leading marker shape")
+
+
 if __name__ == "__main__":
     unittest.main()
