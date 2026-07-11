@@ -18,6 +18,8 @@ scars, how jig thinks, and the honest objections.
 
 ## What it does
 
+Idea → Spec → Vertical slice → Implementation → Independent review → Reconciliation → Done
+
 jig installs a focused, opinionated workflow layer into your project:
 
 - **Spec-driven development** — SPIDR-split vertical slices, each with its own
