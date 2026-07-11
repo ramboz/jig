@@ -524,3 +524,29 @@ diagnosis. Lessons:
    correctness — so `routing-stats` cannot detect a mis-route. Kill criteria that
    need mis-route detection are **manual**, not automatic, until the trace hook
    captures the invoking prompt.
+
+## Bug 005: a Markdown-parsing gate must accept every shape the docs invite — and be precise about structure
+The diagnose gate (`bug.py:_diagnosis_gaps`) counted candidate hypotheses with
+`line.strip().startswith("-")`. That single line was both **too narrow** (ordered
+`1.` and `*`/`+` bullets counted as zero — a false negative that hard-blocks
+gnarly tier) and **too loose** (stripping indentation let nested `- Confirm:` /
+`- Falsify:` sub-bullets count as top-level hypotheses — a false *positive* that
+green-lit records with zero real hypotheses). Neither `SKILL.md` nor the record
+template ever stated the dash-bullet/`[x]` convention, so good-faith records
+failed. Fix: `_top_level_list_items` matches every Markdown marker but only at
+`indent < 2`; `_has_leading_marker` accepts `[x]`/`(leading)`/`Leading:`; the gap
+messages name the shape; the template ships a worked example. Lessons:
+1. A machine-checked gate over free-form Markdown must be **liberal in what it
+   accepts** (all list markers, all documented leading tokens) yet **precise
+   about structure** (top-level only) — the same rewrite fixes both a false
+   negative and a false positive.
+2. When a false negative's only escape is a **total bypass**
+   (`JIG_BUG_DIAGNOSE_GATE=0`), a cosmetic parse nit pressures users into
+   disabling a real safety gate. Precision keeps the gate credible.
+3. A presence/shape gate and its scaffold must teach the same shape — put the
+   convention in the **template** and in the **gate message**, or the
+   machine-checked shape and the human-taught shape drift apart.
+4. Scoped out (logged to `docs/inbox.md`): `_section`'s exact-match heading regex
+   is the same class of fragility (`### Hypotheses`, `## Hypotheses (…)`, and
+   `## Hypotheses` inside a fenced code block all read empty) but it is a shared
+   helper — widen it in its own change with its own tests.

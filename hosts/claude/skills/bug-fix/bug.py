@@ -234,6 +234,12 @@ def _record_text(number: int, slug: str, claimed_by: str) -> str:
         "",
         "## Hypotheses",
         "",
+        "<!-- Anti-anchoring: >=2 candidates, mark the leading one. Any Markdown",
+        "     list works (-, *, +, or 1.); the gate counts top-level items only",
+        "     (indented sub-bullets are notes, not hypotheses). -->",
+        "- [ ] H1: <alternative explanation>, falsify by <check>",
+        "- [x] H2 (leading): <leading explanation>, confirm by <check>",
+        "",
         "## Root cause",
         "",
         "## Fix class",
@@ -512,22 +518,58 @@ def _requires_verified(fields: dict) -> bool:
     )
 
 
+# A top-level Markdown list item: unordered (`-`, `*`, `+`) or ordered
+# (`1.`, `1)`) marker followed by content. Every Markdown list marker counts,
+# not just `-`, so ordered-list hypotheses are visible to the gate.
+_LIST_ITEM_RE = re.compile(r"^([-*+]|\d+[.)])\s+\S")
+
+
+def _top_level_list_items(section: str) -> list[str]:
+    """Return the top-level list items in a section.
+
+    Indented lines (two or more columns, tabs expanded) are treated as nested
+    sub-bullets — e.g. `- Confirm:` / `- Falsify:` under a hypothesis — and are
+    excluded, so they are never miscounted as candidate hypotheses.
+    """
+    items = []
+    for line in section.splitlines():
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip(" "))
+        if indent >= 2:
+            continue
+        stripped = expanded.strip()
+        if _LIST_ITEM_RE.match(stripped):
+            items.append(stripped)
+    return items
+
+
+def _has_leading_marker(hypotheses: str, items: list[str]) -> bool:
+    """A hypothesis is marked leading by `[x]`, an inline `(leading)` tag, or a
+    line beginning `Leading:` — matching how SKILL.md tells authors to 'mark
+    the leading one' rather than forcing one exact token."""
+    lowered = [item.lower() for item in items]
+    if any("[x]" in item for item in lowered):
+        return True
+    if any("(leading)" in item for item in lowered):
+        return True
+    return re.search(r"(?im)^\s*leading\s*:", hypotheses) is not None
+
+
 def _diagnosis_gaps(text: str) -> list[str]:
     gaps = []
     hypotheses = _section(text, "Hypotheses")
     evidence = _section(text, "Evidence")
-    hypothesis_lines = [
-        line.strip() for line in hypotheses.splitlines()
-        if line.strip().startswith("-")
-    ]
-    if len(hypothesis_lines) < 2:
-        gaps.append("at least two candidate hypotheses")
-    has_leading = any("[x]" in line.lower() for line in hypothesis_lines)
-    has_leading = has_leading or re.search(
-        r"(?im)^leading\s*:", hypotheses
-    ) is not None
-    if not has_leading:
-        gaps.append("a leading hypothesis")
+    items = _top_level_list_items(hypotheses)
+    if len(items) < 2:
+        gaps.append(
+            "at least two candidate hypotheses (top-level '-', '*', '+', "
+            "or '1.' list items under '## Hypotheses')"
+        )
+    if not _has_leading_marker(hypotheses, items):
+        gaps.append(
+            "a leading hypothesis (mark it '- [x] …', add '(leading)', "
+            "or a line starting 'Leading:')"
+        )
     if not evidence:
         gaps.append("an evidence pointer")
     return gaps

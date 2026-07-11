@@ -166,7 +166,11 @@ Fill the record body — `## Symptom`, `## Repro`, `## Evidence`,
 `## Hypotheses`, `## Root cause`. **Anti-anchoring: write ≥2 candidate
 hypotheses** with confirm/falsify framing and mark the leading one (mandatory
 for gnarly, advisory for standard, but always good practice — the first
-explanation is rarely the right one). Then:
+explanation is rarely the right one). Write the hypotheses as a Markdown list
+under `## Hypotheses` — any marker works (`-`, `*`, `+`, or `1.`) and the gate
+counts **top-level** items only, so indented `- Confirm:` / `- Falsify:`
+sub-bullets read as notes, not as extra hypotheses. Mark the leading one with
+`[x]`, an inline `(leading)` tag, or a `Leading:` line. Then:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> DIAGNOSING
