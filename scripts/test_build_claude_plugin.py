@@ -63,8 +63,8 @@ class ClaudePackageContentsTests(unittest.TestCase):
     def test_copies_optional_top_level_files_when_present(self):
         self.assertTrue((self.out_dir / "README.md").is_file())
         self.assertTrue((self.out_dir / "LICENSE").is_file())
-        # The README logo asset ships so `![jig](./jig.png)` resolves on install.
-        self.assertTrue((self.out_dir / "jig.png").is_file())
+        # The README logo asset ships so `![jig](./jig.jpg)` resolves on install.
+        self.assertTrue((self.out_dir / "jig.jpg").is_file())
 
     # AC #2 — runtime-only excludes
     def test_excludes_source_only_top_level_dirs(self):

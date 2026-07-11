@@ -1,4 +1,4 @@
-![jig](./jig.png)
+![jig](./jig.jpg)
 
 > A Claude Code and Codex workflow layer that scaffolds AI-native development practices into new projects.
 

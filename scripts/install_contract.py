@@ -473,13 +473,13 @@ RELEASE_INCLUDE_ROOTS: tuple[str, ...] = (
 )
 
 # Top-level files copied into the release/package when present (optional:
-# missing → warn, build anyway). `jig.png` is the README logo asset — the
-# packaged README references it (`![jig](./jig.png)`), so it must ship
+# missing → warn, build anyway). `jig.jpg` is the README logo asset — the
+# packaged README references it (`![jig](./jig.jpg)`), so it must ship
 # alongside README.md or the logo renders broken on install.
 RELEASE_INCLUDE_FILES: tuple[str, ...] = (
     "README.md",
     "LICENSE",
-    "jig.png",
+    "jig.jpg",
 )
 
 # Individual files under `scripts/` that must ship in the release zip.
