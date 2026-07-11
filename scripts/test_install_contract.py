@@ -104,7 +104,7 @@ class ReleaseFileSetTests(unittest.TestCase):
         )
         self.assertEqual(
             install_contract.RELEASE_INCLUDE_FILES,
-            ("README.md", "LICENSE"),
+            ("README.md", "LICENSE", "jig.png"),
         )
         self.assertEqual(
             install_contract.RELEASE_INCLUDE_SCRIPT_FILES,

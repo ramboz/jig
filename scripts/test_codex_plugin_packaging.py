@@ -187,6 +187,11 @@ class CodexPluginBuilderTests(unittest.TestCase):
     def test_builder_renders_plugin_manifest(self):
         self.assertTrue((self.plugin_dir / ".codex-plugin" / "plugin.json").is_file())
 
+    def test_builder_ships_readme_logo_asset(self):
+        # The packaged README references `![jig](./jig.png)`, so the logo asset
+        # must ship in the Codex package or the image renders broken on install.
+        self.assertTrue((self.plugin_dir / "jig.png").is_file())
+
     def test_builder_renders_codex_skill_copy_from_shared_source(self):
         skill = self.plugin_dir / "skills" / "scaffold-init" / "SKILL.md"
         text = skill.read_text()

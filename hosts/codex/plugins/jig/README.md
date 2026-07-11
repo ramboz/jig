@@ -1,4 +1,4 @@
-# jig
+![jig](./jig.png)
 
 > A Claude Code and Codex workflow layer that scaffolds AI-native development practices into new projects.
 
@@ -17,6 +17,8 @@ rediscover it session by session.**
 scars, how jig thinks, and the honest objections.
 
 ## What it does
+
+Idea → Spec → Vertical slice → Implementation → Independent review → Reconciliation → Done
 
 jig installs a focused, opinionated workflow layer into your project:
 

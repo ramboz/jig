@@ -37,6 +37,9 @@ _ROOT_DIRS: tuple[str, ...] = (
 _ROOT_FILES: tuple[str, ...] = (
     "README.md",
     "LICENSE",
+    # README logo asset — the packaged README references `./jig.png`, so it
+    # must ship in the Codex package too or the logo renders broken.
+    "jig.png",
 )
 
 _EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({
