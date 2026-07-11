@@ -139,3 +139,24 @@ Two slices, sequenced. SPIDR Rules-axis split.
 - **Doctrine:** Spec 028's "add locks narrowly where the failure
   mode was empirically observed." Slice-claim qualifies because the
   user empirically runs parallel worktrees against the same project.
+
+## Amendments
+
+> Post-DONE corrections/extensions per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+> The original spec above is preserved; dated entries below record reality.
+
+### 2026-07-11 — `→ IN_PROGRESS` is no longer network-free (spec 051-04 start-collision guard)
+
+049-01 established that the claim is **local by default (no network)** —
+"preserves the everyday 'start a slice' UX." [Spec 051-04](../051-worktree-aware-reservation/slice-04-start-time-collision-guard.md)
+(originating from [issue 81](https://github.com/ramboz/jig/issues/81)) **narrows
+that default**: `transition … → IN_PROGRESS` now runs `git fetch origin main`
++ `git show origin/main:<slice>` to consult the authoritative origin/main copy
+and hard-block a start-time collision (slice already `DONE`, or `IN_PROGRESS`
+under a foreign `claimed_by`). The **claim stamp itself stays local** — only
+the collision *check* fetches, and it degrades softly offline (silent for a
+local-only repo / a fresh slice, a warning on a genuine fetch failure), so
+starting a slice still works without a network. The reversal is deliberate:
+issue 81 showed the "trust the local file" default let a parallel worktree
+duplicate an entire landed slice, colliding only at merge. Bypass the new
+fetch with `JIG_START_COLLISION_GATE=0`.
