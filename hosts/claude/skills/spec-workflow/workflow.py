@@ -38,6 +38,7 @@ from _common.parsing import (
     check_deviation_log,
     check_reconciliation_sweep,
     clear_frontmatter_field,
+    env_gate_enabled,
     frontmatter_flag_truthy,
     parse_frontmatter,
     set_frontmatter_field,
@@ -1152,7 +1153,15 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     reserve the claim on origin/main so parallel worktrees see it (local
     by default). → REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT clear the
     claim. `release` (with a `reason`) force-clears a stale claim and
-    appends a `## Release log` entry. Returns a summary string."""
+    appends a `## Release log` entry.
+
+    Slice 051-04: → IN_PROGRESS also consults the AUTHORITATIVE
+    origin/main copy of the slice (`git fetch` + `git show
+    origin/main:<path>`) and hard-blocks a start-time collision — the
+    slice already DONE on origin/main (duplicate landed work) or
+    IN_PROGRESS under a foreign `claimed_by`. Soft on reachability
+    (offline/local-only degrades to proceed). Bypass with
+    `JIG_START_COLLISION_GATE=0`. Returns a summary string."""
     if new_status not in VALID_STATUSES:
         raise WorkflowError(
             f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
@@ -1232,6 +1241,35 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                 f"    workflow.py transition <spec> {loc.label} "
                 f'READY_FOR_IMPLEMENTATION --release --reason "..."'
             )
+
+        # Slice 051-04: the on-disk guard above trusts a possibly-stale local
+        # file. Consult the AUTHORITATIVE origin/main copy before building
+        # starts — hard-block if the slice is already DONE (duplicate landed
+        # work) or IN_PROGRESS under a foreign claim on origin/main. Soft on
+        # reachability (warns/proceeds offline). Only meaningful for a
+        # dedicated slice file (`loc.path` == spec.md ⇒ embedded slice, whose
+        # origin copy is the spec, not this slice — skip, as before 051-04).
+        #
+        # Only on the DEFAULT (local) path: with `--push`/`--pr`,
+        # `_reserve_claim_on_main` already fetches + reads the origin/main copy
+        # and refuses the same DONE / foreign-IN_PROGRESS collisions, so
+        # running this guard too would double-fetch for no gain.
+        if loc.path.name != "spec.md" and not (push or pr_mode):
+            try:
+                start_rel_path = loc.path.resolve().relative_to(
+                    claim_project_dir).as_posix()
+            except ValueError:
+                # Unexpected layout (slice outside the resolved project root):
+                # degrade to a loud warning rather than a silent skip, per AC5
+                # ("read failures degrade to a warning, never a false block").
+                start_rel_path = None
+                sys.stderr.write(
+                    "warning: start-collision check skipped: could not locate "
+                    f"{loc.path} under project root {claim_project_dir}\n")
+            if start_rel_path is not None:
+                _refuse_start_collision(
+                    claim_project_dir, start_rel_path, claim_identifier,
+                    loc.label)
 
     # Pre-flight: DONE transition validates `dependencies:` from frontmatter.
     if new_status == "DONE" and fm_fields.get("dependencies"):
@@ -3604,6 +3642,20 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
     fields, _ = parse_frontmatter(content)
     existing = str(fields.get(CLAIM_FIELD) or "").strip()
     origin_status = str(fields.get("status") or "").strip()
+    # Slice 051-04 AC6: refuse to reserve a claim on a slice already DONE on
+    # origin/main. Without this, a `--push`/`--pr` claim (and, a fortiori, any
+    # future push-by-default) would flip the origin/main copy DONE →
+    # IN_PROGRESS, regressing a landed slice's status on the shared trunk.
+    # This is an integrity guard on origin/main and is NOT covered by
+    # JIG_START_COLLISION_GATE (which only relaxes the transition-time block);
+    # you may force a local start, but never a trunk regression.
+    if origin_status == "DONE":
+        raise WorkflowError(
+            f"slice {slice_label} is already DONE on origin/main — refusing to "
+            f"reserve a claim, which would regress its status to IN_PROGRESS on "
+            f"the shared trunk. Your local copy is stale; integrate origin/main "
+            f"before starting new work."
+        )
     if existing and existing != identifier and origin_status == "IN_PROGRESS":
         raise WorkflowError(
             f"slice {slice_label} is already claimed by {existing!r} on "
@@ -3706,6 +3758,109 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
              cwd=project_dir)
         shutil.rmtree(wt, ignore_errors=True)
         _run(["git", "worktree", "prune"], cwd=project_dir)
+
+
+# ---- Slice 051-04: start-time claim-collision guard (→ IN_PROGRESS) --------
+#
+# Issue 81 (twice observed): a parallel worktree built an entire slice already
+# DONE on origin/main and only collided at merge, because → IN_PROGRESS did
+# ZERO network work and the on-disk claim guard trusted a possibly-stale local
+# file. This guard reuses `_reserve_claim_on_main`'s remote-read shape
+# (`git show origin/main:<rel_path>` + `parse_frontmatter`) to consult the
+# authoritative origin/main copy BEFORE building starts, and hard-blocks a
+# DONE / foreign-IN_PROGRESS collision. It is deliberately soft on
+# reachability (parity with `_branch_freshness_warning`): a local-only repo or
+# an unreachable origin degrades to proceed (silent for no-origin, a loud
+# warning for a genuine fetch/read failure), never a false block. Gated ON by
+# default; `JIG_START_COLLISION_GATE=0` (also false/off/no) bypasses it.
+
+START_COLLISION_GATE_ENV = "JIG_START_COLLISION_GATE"
+
+
+def _origin_slice_state(project_dir: Path, rel_path: str) -> tuple:
+    """Fetch origin/main and read the slice's origin/main frontmatter.
+
+    Returns `(kind, payload)`:
+      - `("no-origin", "")`       — no `origin` remote (local-only repo).
+      - `("fetch-failed", err)`   — `git fetch origin main` failed.
+      - `("absent", "")`          — slice not present on origin/main (a
+                                     brand-new local slice — the normal case).
+      - `("unreadable", reason)`  — present but no parseable `status:`.
+      - `("present", (status, claimed_by))` — the authoritative remote copy.
+
+    Never raises: every git failure maps to a `kind` the caller degrades on.
+    Mirrors `_branch_freshness_warning`'s no-origin short-circuit and
+    `_reserve_claim_on_main`'s `git show origin/main:<rel>` read.
+    """
+    origin = _run(["git", "config", "--get", "remote.origin.url"], project_dir)
+    if origin[0] != 0 or not origin[1].strip():
+        return ("no-origin", "")
+
+    fetch = _run(["git", "fetch", "origin", "main"], project_dir)
+    if fetch[0] != 0:
+        return ("fetch-failed",
+                fetch[2].strip() or fetch[1].strip() or "unknown error")
+
+    rc, content, _err = _run(["git", "show", f"origin/main:{rel_path}"],
+                             project_dir)
+    if rc != 0:
+        # git show fails when the path is absent on origin/main — the
+        # brand-new-local-slice case (AC4), not an error.
+        return ("absent", "")
+
+    fields, _ = parse_frontmatter(content)
+    status = str(fields.get("status") or "").strip()
+    if not status:
+        return ("unreadable",
+                f"{rel_path} on origin/main has no parseable status")
+    claimed_by = str(fields.get(CLAIM_FIELD) or "").strip()
+    return ("present", (status, claimed_by))
+
+
+def _refuse_start_collision(project_dir: Path, rel_path: str,
+                            identifier: str, slice_label: str) -> None:
+    """Slice 051-04: hard-block a → IN_PROGRESS that would duplicate landed
+    work (slice DONE on origin/main) or collide with a foreign active claim
+    (IN_PROGRESS under a different `claimed_by` on origin/main). Warns and
+    proceeds when origin is unreachable; silent-proceeds for a local-only repo
+    or a brand-new (absent-on-origin) slice. No-op when the gate is bypassed.
+
+    Raises `WorkflowError` (CLI exit 2) on a confirmed collision.
+    """
+    if not env_gate_enabled(START_COLLISION_GATE_ENV):
+        # Deliberateness override honored — leave a content-free audit trail
+        # (parity with the review-evidence gate's emit_gate_bypass).
+        emit_gate_bypass(project_dir, "start-collision", START_COLLISION_GATE_ENV,
+                         spec_ref=read_spec_ref(project_dir))
+        return
+
+    kind, payload = _origin_slice_state(project_dir, rel_path)
+    if kind in ("no-origin", "absent"):
+        return
+    if kind in ("fetch-failed", "unreadable"):
+        sys.stderr.write(
+            f"warning: start-collision check skipped: {payload}\n")
+        return
+
+    origin_status, origin_claim = payload
+    if origin_status == "DONE":
+        raise WorkflowError(
+            f"slice {slice_label} is already DONE on origin/main — starting it "
+            f"here would duplicate landed work. Your local copy is stale; "
+            f"integrate origin/main (e.g. `git merge origin/main`) before "
+            f"picking up new work. To override this guard for a deliberate "
+            f"re-open, set {START_COLLISION_GATE_ENV}=0."
+        )
+    if (origin_status == "IN_PROGRESS" and origin_claim
+            and origin_claim != identifier):
+        raise WorkflowError(
+            f"slice {slice_label} is claimed by {origin_claim!r} on "
+            f"origin/main (status IN_PROGRESS). Have the owner release it, or "
+            f"force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+            f"To override this guard, set {START_COLLISION_GATE_ENV}=0."
+        )
 
 
 def _append_release_log(section: str, released_from: str, reason: str) -> str:

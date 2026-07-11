@@ -167,6 +167,7 @@ mirrors it into `adr.py`; 051-03 is the independent backstop.
 - [051-01 — worktree-aware spec reservation](slice-01-worktree-aware-spec-reservation.md) — DONE
 - [051-02 — worktree-aware ADR reservation](slice-02-worktree-aware-adr-reservation.md) — DONE
 - [051-03 — land-time collision guardrail](slice-03-land-time-collision-guardrail.md) — DEFERRED
+- [051-04 — start-time claim-collision guard (→ IN_PROGRESS)](slice-04-start-time-collision-guard.md) — DRAFT
 
 ## References
 
@@ -189,3 +190,30 @@ mirrors it into `adr.py`; 051-03 is the independent backstop.
 - **Dogfood note:** this spec was itself hand-numbered (051) because
   `workflow.py new` refused to run in the authoring worktree — the
   exact defect it fixes.
+
+## Amendments
+
+> Post-DONE corrections/extensions per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+> The original spec above is preserved; dated entries below record reality.
+
+### 2026-07-11 — scope extended to the claim path (`transition → IN_PROGRESS`) via slice 051-04
+
+The original Non-goals said "**No change to `transition`** … Scoped to the
+`new` reservation path + the land guardrail" — but the same Non-goal
+parenthetical and the References ("Enables") already flagged that spec 049's
+reserve-on-`IN_PROGRESS` claim *inherits the same worktree flaw and should
+adopt this mechanism*. [Issue 81](https://github.com/ramboz/jig/issues/81)
+turned that forecast into an observed failure (twice): a parallel worktree
+built a full slice already `DONE` on `origin/main`, colliding only at merge,
+because `→ IN_PROGRESS` does zero network work and the on-disk claim guard
+reads a possibly-stale local file.
+
+Slice **051-04** (start-time claim-collision guard) therefore **consciously
+supersedes the "No change to `transition`" non-goal for the narrow
+start-time-collision case**: it applies spec 051's reserve-on-`origin/main`
+read to `transition … → IN_PROGRESS` (hard-block on a `DONE` or foreign-
+`IN_PROGRESS` remote copy; warn-and-proceed when the remote is unreachable),
+and closes a latent `DONE` gap in `_reserve_claim_on_main` (which today
+refuses only a foreign `IN_PROGRESS` claim). Push-by-default claims and a
+`session-plan` claim-check report are explicitly left as follow-ups (051-04
+Non-goals). This spec's rollup re-opens to IN_PROGRESS while 051-04 is live.

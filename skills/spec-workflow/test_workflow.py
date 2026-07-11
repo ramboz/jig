@@ -5641,6 +5641,383 @@ class SliceClaimTests(unittest.TestCase):
         self.assertIn("unreachable", str(ctx.exception).lower())
 
 
+class StartCollisionGuardTests(unittest.TestCase):
+    """Slice 051-04: → IN_PROGRESS consults the authoritative origin/main copy
+    and hard-blocks a start-time collision — the slice already DONE (duplicate
+    landed work) or IN_PROGRESS under a foreign claim on origin/main. Soft on
+    reachability (offline degrades to proceed). The transition-level guard runs
+    on the DEFAULT (local) path; --push/--pr delegate to _reserve_claim_on_main
+    (which grew the AC6 DONE refusal)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-startcol-")
+        self.root = Path(self.tmpdir)
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.rel = "docs/specs/200-demo/slice-01-demo.md"
+        self.slice = self.spec_dir / "slice-01-demo.md"
+        self._write_slice()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, status="READY_FOR_IMPLEMENTATION"):
+        self.slice.write_text(
+            f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 200-01 — demo\n\n**Goal:** placeholder.\n\n"
+            "**DoD:**\n- [ ] placeholder.\n")
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def _transition(self, **kw):
+        return _workflow.transition(self.spec, "200-01", "IN_PROGRESS", **kw)
+
+    # ---- AC2: DONE on origin/main hard-blocks ------------------------------
+
+    def test_blocks_when_slice_done_on_origin(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("DONE", ""))):
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition()
+        msg = str(ctx.exception)
+        self.assertIn("DONE on origin/main", msg)
+        self.assertIn("duplicate", msg.lower())
+        # A refusal leaves the local file untouched (no status flip, no claim).
+        self.assertEqual(self._fm()["status"], "READY_FOR_IMPLEMENTATION")
+        self.assertNotIn("claimed_by", self._fm())
+
+    def test_done_block_wins_over_stale_foreign_claim(self):
+        """Edge case: origin copy is DONE but still carries a stale claim —
+        the clearer DONE message must win."""
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("DONE", "wt-other"))):
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition()
+        self.assertIn("DONE on origin/main", str(ctx.exception))
+
+    # ---- AC3: foreign IN_PROGRESS on origin/main hard-blocks ---------------
+
+    def test_blocks_when_foreign_claim_on_origin(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("IN_PROGRESS", "wt-other"))):
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition()
+        msg = str(ctx.exception)
+        self.assertIn("wt-other", msg)
+        self.assertIn("--release", msg)
+        self.assertEqual(self._fm()["status"], "READY_FOR_IMPLEMENTATION")
+
+    # ---- AC4: no false block on normal cases -------------------------------
+
+    def test_proceeds_when_absent_on_origin(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("absent", "")):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    def test_proceeds_when_origin_draft(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("DRAFT", ""))):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_proceeds_on_idempotent_same_owner_in_progress(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("IN_PROGRESS", "wt-me"))):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    # ---- AC5: offline-degrade ----------------------------------------------
+
+    def test_warns_and_proceeds_on_fetch_failure(self):
+        import io
+        from unittest.mock import patch
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("fetch-failed", "unable to access")), \
+             patch.object(_workflow.sys, "stderr", cap):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertIn("start-collision check skipped", cap.getvalue())
+        self.assertIn("unable to access", cap.getvalue())
+
+    def test_silent_proceed_on_no_origin(self):
+        import io
+        from unittest.mock import patch
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("no-origin", "")), \
+             patch.object(_workflow.sys, "stderr", cap):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertNotIn("start-collision", cap.getvalue())
+
+    # ---- AC8: explicit, audited bypass -------------------------------------
+
+    def test_bypass_skips_origin_read_and_proceeds(self):
+        from unittest.mock import patch
+
+        def _boom(*a, **k):
+            raise AssertionError("origin read must not run when bypassed")
+
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_START_COLLISION_GATE": "0"}), \
+             patch.object(_workflow, "_origin_slice_state", _boom):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    # ---- AC1: the guard fetches + reads the origin/main copy ---------------
+
+    def test_origin_slice_state_reads_origin_via_git(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "fetch", "origin", "main"), returncode=0)
+        rec.stub(_matches("git", "show"), returncode=0,
+                 stdout=("---\nstatus: DONE\ndependencies: []\n---\n\n"
+                         "## Slice 200-01 — demo\n"))
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            kind, payload = _workflow._origin_slice_state(self.root, self.rel)
+        self.assertEqual(kind, "present")
+        self.assertEqual(payload, ("DONE", ""))
+        flat = " | ".join(rec.argv_log())
+        self.assertIn("git fetch origin main", flat)
+        self.assertIn(f"git show origin/main:{self.rel}", flat)
+
+    def test_origin_slice_state_absent_when_show_fails(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "fetch", "origin", "main"), returncode=0)
+        rec.stub(_matches("git", "show"), returncode=128,
+                 stderr="fatal: path does not exist in 'origin/main'\n")
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            kind, _payload = _workflow._origin_slice_state(self.root, self.rel)
+        self.assertEqual(kind, "absent")
+
+    def test_origin_slice_state_no_origin_short_circuits(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=1, stderr="")
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            kind, _payload = _workflow._origin_slice_state(self.root, self.rel)
+        self.assertEqual(kind, "no-origin")
+        # No fetch attempted when there is no origin remote.
+        self.assertNotIn("git fetch", " | ".join(rec.argv_log()))
+
+    def test_origin_slice_state_fetch_failed(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "fetch", "origin", "main"),
+                 returncode=1, stderr="fatal: unable to access origin\n")
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            kind, payload = _workflow._origin_slice_state(self.root, self.rel)
+        self.assertEqual(kind, "fetch-failed")
+        self.assertIn("unable to access", payload)
+        # git show is never attempted once the fetch fails.
+        self.assertNotIn("git show", " | ".join(rec.argv_log()))
+
+    def test_origin_slice_state_unreadable_when_no_status(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
+                 returncode=0, stdout="git@github.com:u/r.git\n")
+        rec.stub(_matches("git", "fetch", "origin", "main"), returncode=0)
+        # present on origin/main, but the frontmatter carries no `status:`.
+        rec.stub(_matches("git", "show"), returncode=0,
+                 stdout="---\ndependencies: []\n---\n\n## Slice 200-01 — demo\n")
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            kind, payload = _workflow._origin_slice_state(self.root, self.rel)
+        self.assertEqual(kind, "unreadable")
+        self.assertIn("no parseable status", payload)
+
+    # ---- AC6: _reserve_claim_on_main refuses a DONE origin copy ------------
+
+    def test_reserve_claim_refuses_done_origin(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "fetch", "origin", "main"), returncode=0)
+        rec.stub(_matches("git", "show"), returncode=0,
+                 stdout=("---\nstatus: DONE\ndependencies: []\n---\n\n"
+                         "## Slice 200-01 — demo\n"))
+        from unittest.mock import patch
+        with patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow._reserve_claim_on_main(
+                    self.root, self.rel, "wt-me", "200-01")
+        self.assertIn("DONE on origin/main", str(ctx.exception))
+        flat = " | ".join(rec.argv_log())
+        # Refuses BEFORE building any worktree / commit / push.
+        self.assertNotIn("git worktree add", flat)
+        self.assertNotIn("git push", flat)
+
+    # ---- AC7: prose-only slice takes no remote read ------------------------
+
+    def test_prose_only_slice_no_remote_read(self):
+        prose = self.spec_dir / "spec.md"
+        prose.write_text(
+            "# Spec 200\n\n## Slice 200-09 — legacy\n\n"
+            "**STATUS: READY_FOR_IMPLEMENTATION**\n")
+        from unittest.mock import patch
+
+        def _boom(*a, **k):
+            raise AssertionError("no origin read for a prose-only slice")
+
+        with patch.object(_workflow, "_origin_slice_state", _boom):
+            _workflow.transition(prose, "200-09", "IN_PROGRESS")
+
+    # ---- push path delegates to reserve (no double origin read) ------------
+
+    def test_push_path_does_not_run_transition_guard(self):
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "show"), returncode=0,
+                 stdout=self.slice.read_text())
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="abc\n")
+        from unittest.mock import patch
+
+        def _boom(*a, **k):
+            raise AssertionError("transition guard must not run on push path")
+
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state", _boom), \
+             patch.object(_workflow, "subprocess") as sp:
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS", push=True)
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    # ---- AC8: bypass leaves a content-free audit event ---------------------
+
+    def test_bypass_emits_start_collision_telemetry(self):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        env["JIG_CLAIM_ID"] = "wt-me"
+        env["JIG_START_COLLISION_GATE"] = "0"
+        r = subprocess.run(
+            [sys.executable, str(WORKFLOW), "transition", str(self.spec),
+             "200-01", "IN_PROGRESS"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        log = self.root / ".claude" / "skill-usage.jsonl"
+        import json as _json
+        events = ([_json.loads(x) for x in log.read_text().splitlines()
+                   if x.strip()] if log.is_file() else [])
+        start = [e for e in events if e.get("gate") == "start-collision"]
+        self.assertEqual(len(start), 1, f"events={events}")
+        self.assertEqual(start[0]["event"], "gate_bypassed")
+        self.assertEqual(start[0]["env_var"], "JIG_START_COLLISION_GATE")
+
+
+@unittest.skipUnless(_git_on_path(), "git not available")
+class StartCollisionGuardE2E(unittest.TestCase):
+    """Real-git proof of the 051-04 guard: a working tree whose local slice is
+    a stale READY_FOR_IMPLEMENTATION while origin/main already has it DONE —
+    `transition ... IN_PROGRESS` must refuse after a real `git fetch` +
+    `git show origin/main:<path>`. Unlike the recorder tests, this drives REAL
+    git against a `file://`-style bare origin (parity with 051-01's E2E)."""
+
+    def _git(self, *args, cwd):
+        return subprocess.run(["git", *args], cwd=str(cwd),
+                              capture_output=True, text=True)
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-startcol-e2e-"))
+        self.work = self.tmp / "work"
+        self._git("init", str(self.work), cwd=self.tmp)
+        self._git("symbolic-ref", "HEAD", "refs/heads/main", cwd=self.work)
+        for k, v in (("user.email", "t@e.x"), ("user.name", "T"),
+                     ("commit.gpgsign", "false")):
+            self._git("config", k, v, cwd=self.work)
+        self.spec_dir = self.work / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.slice = self.spec_dir / "slice-01-demo.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_slice(self, status):
+        self.slice.write_text(
+            f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 200-01 — demo\n\n**Goal:** x.\n\n**DoD:**\n- [ ] x.\n")
+
+    def _commit_all(self, msg):
+        self._git("add", "-A", cwd=self.work)
+        self._git("commit", "-m", msg, cwd=self.work)
+
+    def _add_origin_and_push(self):
+        self.origin = self.tmp / "origin.git"
+        self._git("init", "--bare", str(self.origin), cwd=self.tmp)
+        self._git("remote", "add", "origin", str(self.origin), cwd=self.work)
+        push = self._git("push", "-u", "origin", "main", cwd=self.work)
+        self.assertEqual(push.returncode, 0, f"push failed: {push.stderr}")
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def test_refuses_when_origin_has_slice_done(self):
+        from unittest.mock import patch
+        self._write_slice("DONE")
+        self._commit_all("land slice DONE")
+        self._add_origin_and_push()
+        # Local working copy rewound to a stale READY — the issue-81 scenario.
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}):
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertIn("DONE on origin/main", str(ctx.exception))
+        self.assertEqual(self._fm()["status"], "READY_FOR_IMPLEMENTATION")
+        self.assertNotIn("claimed_by", self._fm())
+
+    def test_proceeds_when_slice_absent_on_origin(self):
+        from unittest.mock import patch
+        # origin/main carries only spec.md; the slice is a local-only file.
+        self._commit_all("seed spec only")
+        self._add_origin_and_push()
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+
 class StatusBoardClaimRenderTests(unittest.TestCase):
     """Slice 049-02: the status board renders `IN_PROGRESS (<claimed_by>)`
     for claimed in-progress slices; everything else is byte-identical to the

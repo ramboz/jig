@@ -166,6 +166,7 @@
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-01 — worktree-aware spec reservation | **DONE** |  |
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-02 — worktree-aware ADR reservation | **DONE** |  |
 | [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-03 — land-time collision guardrail | DEFERRED |  |
+| [051-worktree-aware-reservation](051-worktree-aware-reservation/spec.md) | 051-04 — start-time claim-collision guard (→ IN_PROGRESS) | **DONE** | Invariant: `transition … → IN_PROGRESS` now consults `origin/main` (real `git fetch` + `git show origin/main:<slice>`) and HARD-BLOCKS a start-time collision — slice already `DONE` (duplicate landed work) or `IN_PROGRESS` under a foreign `claimed_by`. Default (local) path only; `--push`/`--pr` delegate to `_reserve_claim_on_main` (which grew a matching, non-bypassable `DONE` refusal). Soft offline (silent for no-origin/absent, warns on fetch-fail). Bypass `JIG_START_COLLISION_GATE=0`. Reverses 049-01's network-free default (spec 049 `## Amendments`). From issue 81. |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-01 — security-floor-policy-adr | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-02 — secret-prevention-floor | **DONE** |  |
 | [052-security-scaffold](052-security-scaffold/spec.md) | 052-03 — destructive-command-guardrail | **DONE** |  |
