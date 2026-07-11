@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.6.0](https://github.com/ramboz/jig/compare/v2.5.0...v2.6.0) (2026-07-11)
+
+
+### Features
+
+* **051-04:** start-time claim-collision guard on → IN_PROGRESS ([#83](https://github.com/ramboz/jig/issues/83)) ([000c836](https://github.com/ramboz/jig/commit/000c836d83a64f31d35d69b7cf6f24fcebd47e89))
+* **078:** gate-bypass telemetry + refinement-todo cleanup pass ([5c31da0](https://github.com/ramboz/jig/commit/5c31da069fa1559c33198477cc1ea9409aac60c6))
+* **086:** skill-routing eval harness + description sharpening + CI gate ([fbee6a7](https://github.com/ramboz/jig/commit/fbee6a7f73a58f511f5f2a468f7881c66282dadc))
+* **087-01:** narrow-first investigation guidance in reviewer prompts + agent ([8d999b5](https://github.com/ramboz/jig/commit/8d999b57cdb68a1c58c49d2bf37a1b39d37617fe))
+
+
+### Bug Fixes
+
+* **bug-004:** segregate terminal bug-board rows + document terminal invariant ([#77](https://github.com/ramboz/jig/issues/77)) ([9ee24a9](https://github.com/ramboz/jig/commit/9ee24a9090c2b59c970a3184539c3cd033c68aaf))
+* **bug-005:** count top-level markdown list items in diagnose gate ([#82](https://github.com/ramboz/jig/issues/82)) ([bebefd7](https://github.com/ramboz/jig/commit/bebefd781e68db6d8622fd7804b7bbfaa6eb3384)), closes [#80](https://github.com/ramboz/jig/issues/80)
+* **build:** swap README logo asset jig.png → jig.jpg ([772664c](https://github.com/ramboz/jig/commit/772664c33c0515872e33b73228130a7b1630a54c))
+* **explain:** sync no-cap surface test with reworded SKILL.md prose ([8273ec9](https://github.com/ramboz/jig/commit/8273ec9d3a485b1015ee75579051696e396990c4))
+
+
+### Documentation
+
+* **034:** reframe federation into two topologies — hub-first (ADR-0028) ([6cc57d2](https://github.com/ramboz/jig/commit/6cc57d2bb8dc514119a2fb39508cb22944962b11))
+* **bug-fix:** fix craft-pass instruction (pr-review skill, not review.py pr-review) ([1f828cf](https://github.com/ramboz/jig/commit/1f828cfd4c7c599cc71b00a082df897070ff9d43))
+* **conventions:** add output-shape + host-neutral skill rules; bound explain term-lists ([ff4191c](https://github.com/ramboz/jig/commit/ff4191c2c143126b72214e7ab5578546f70aae97))
+* **decisions:** add ADR-0034 (interaction altitude) + ADR-0035 (active plan-mode driving) ([6cee6d1](https://github.com/ramboz/jig/commit/6cee6d1dede49e754fba3c22b49dde5047196264))
+* **readme:** add logo ([8ae9c4c](https://github.com/ramboz/jig/commit/8ae9c4c8204011f25186341afcce3cd5942a4508))
+* **readme:** add logo ([0f02bc4](https://github.com/ramboz/jig/commit/0f02bc47d4aca5985a0e1e0bf976697d4cb485ca))
+* **specs:** reserve 086-skill-routing-eval ([888557d](https://github.com/ramboz/jig/commit/888557da4643c5f752ded093a2c0079e6da72592))
+* **specs:** reserve 087-narrow-first-review ([272ce01](https://github.com/ramboz/jig/commit/272ce01b4978badc33d2c7b6449108fd7eef8188))
+
 ## [2.5.0](https://github.com/ramboz/jig/compare/v2.4.1...v2.5.0) (2026-07-04)
 
 
