@@ -128,6 +128,37 @@ RECONCILIATION NOTES:
 Be terse but specific. Cite file:line when flagging issues."""
 
 
+# Slice 087-01: narrow-first, deliverable-anchored investigation discipline.
+# Included by the CODE-review builders (implementation / pr-review / bug-review
+# / arch-review / code-health) — where the read-only reviewer navigates a code
+# deliverable — and deliberately WITHHELD from the prose/framing builders
+# (reconciliation / frame-critique / design-review), where there is no diff to
+# anchor to and "grep before read / focused ranges" would be the wrong instinct.
+# Task-shaped guidance, not blanket: a general toolset gives the agent a
+# repo-explorer's instincts (browse broad → read whole files → accumulate); the
+# fix is to make the prompt tell it to investigate like a reviewer. Directly
+# serves the context-cost thesis (specs 055/057: cost ≈ context × turns).
+_INVESTIGATION = """\
+## How to investigate (read efficiently)
+
+Review like a reviewer, not a repo explorer. Anchor every step to the
+deliverable under review and narrow before you read — broad browsing and
+whole-file reads inflate cost without improving the review.
+
+- Anchor to the deliverable. Start from the listed files and the change under
+  review; treat them as the review surface. Reach into the wider repo only to
+  answer a specific question the change raises.
+- Locate before you read. Use Grep/Glob to find the exact symbol, call site,
+  definition, or sibling test you need, then open only that.
+- Batch discovery. Run the searches you know you need together, before opening
+  files — not one search per read.
+- Read focused ranges, not whole files, once a search has pointed you at the
+  lines that matter. Widen only when the surrounding context is load-bearing.
+- If a search returns nothing, retry with a simpler query before guessing at
+  adjacent paths — a miss usually means the term is wrong, not the file.
+"""
+
+
 # -------- Contract-surface check (slice 022-02) --------
 
 # Matches the H2 heading that the `/jig:vision-elicitation` skill writes
@@ -489,6 +520,7 @@ acceptance criteria.
 3. The deliverables:
 {deliverable_lines}
 
+{_INVESTIGATION}
 {_PROHIBITIONS}
 ## Evaluate
 
@@ -657,6 +689,7 @@ implementation: scope, blockers, nits, and strengths.
 3. Any related files in the repo you need to verify whether the new
    code follows existing patterns (read-only).
 
+{_INVESTIGATION}
 {_PROHIBITIONS}
 ## Evaluate
 
@@ -697,6 +730,7 @@ Evaluate whether the fix resolves the recorded bug honestly and narrowly.
 3. Any related files needed to verify the behavior and blast radius
    (read-only).
 
+{_INVESTIGATION}
 {_PROHIBITIONS}
 ## Evaluate
 
@@ -801,6 +835,7 @@ boundaries, public contracts, and design coherence?
 4. Any related files in the repo needed to understand how the change
    composes with existing architecture (read-only).
 
+{_INVESTIGATION}
 {_PROHIBITIONS}
 ## Evaluate
 
@@ -889,6 +924,7 @@ provided below; judge THAT summary (and the deliverables), never raw logs.
 3. Any related files in the repo you need to judge whether a flagged
    pattern is acceptable (read-only).
 
+{_INVESTIGATION}
 {_PROHIBITIONS}
 ## Evaluate (the judgment a tool can't)
 

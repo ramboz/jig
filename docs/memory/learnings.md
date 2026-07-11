@@ -550,3 +550,19 @@ messages name the shape; the template ships a worked example. Lessons:
    is the same class of fragility (`### Hypotheses`, `## Hypotheses (…)`, and
    `## Hypotheses` inside a fenced code block all read empty) but it is a shared
    helper — widen it in its own change with its own tests.
+
+## `## Assumptions` is a frame_review sentinel — bare `None`, not "None + explanation"
+`workflow.py frame-review-needed` derives `frame_review: true` from the spec's
+`## Assumptions` body via `_assumptions_are_real`: it skips only fully
+emphasis-wrapped stubs and lines whose *whole* content is a bare placeholder
+token (`None`/`TBD`/`TODO`/`N/A`). A line that merely *begins* with "None" but
+continues with prose ("None — every claim was verified …") counts as a **real
+assumption** (deliberate, per the 064-04 craft fix that stopped a first-token
+heuristic from false-negativing real assumptions like "None of the dates are
+tz-aware"). Consequence (spec 087): listing *probe-verified premises* as bullets
+under `## Assumptions` — even under a "None." lead — flips `frame_review` on and
+drags in the adversarial frame-critique pass for a low-risk change. Fix: put
+verified facts in a `## Current state (verified)` section and keep `## Assumptions`
+a bare `None.` when there are no *unverified* load-bearing claims. Lesson: the
+risk-gate is for **unverified** assumptions only; verified facts are grounding,
+not assumptions, and belong elsewhere or the trigger over-fires.

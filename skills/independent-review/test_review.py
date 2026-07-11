@@ -110,6 +110,86 @@ class ImplementationPromptTests(unittest.TestCase):
         self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
 
 
+class InvestigationGuidanceTests(unittest.TestCase):
+    """Spec 087-01: narrow-first, deliverable-anchored investigation guidance
+    is present in the CODE-review prompts and absent from the PROSE/framing
+    prompts (task-shaped, not blanket)."""
+
+    # Stable distinctive marker for the investigation-discipline block.
+    HEADING = "How to investigate (read efficiently)"
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-invest-"))
+        self.spec = self.tmpdir / "spec.md"
+        write_synthetic_spec(self.spec, "001-01 alpha")
+        self.bug = self.tmpdir / "docs" / "bugs" / "001-x.md"
+        self.bug.parent.mkdir(parents=True)
+        self.bug.write_text(
+            "---\nstatus: FIXING\nsecurity_surface: false\n---\n\n"
+            "# Bug 001\n\n## Symptom\n\nx\n"
+        )
+        self.summary = self.tmpdir / "health.txt"
+        self.summary.write_text("duplication: 0\ncomplexity: ok\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self, mode, *extra):
+        result = run_review(mode, str(self.spec), "001-01",
+                            "skills/foo/foo.py", *extra)
+        self.assertEqual(result.returncode, 0, f"{mode} stderr: {result.stderr}")
+        return result.stdout
+
+    # --- AC1: compliance prompt carries the block + the five narrow-first moves
+    def test_implementation_includes_investigation_block(self):
+        prompt = self._prompt("implementation")
+        self.assertIn(self.HEADING, prompt)
+        self.assertRegex(prompt, r"(?i)anchor")
+        self.assertRegex(prompt, r"(?i)locate before you read|Grep/Glob")
+        self.assertRegex(prompt, r"(?i)batch")
+        self.assertRegex(prompt, r"(?i)focused ranges")
+        self.assertRegex(prompt, r"(?i)simpler query|retry")
+
+    # --- AC2: every other code-review pass carries the block
+    def test_pr_review_includes_investigation_block(self):
+        self.assertIn(self.HEADING, self._prompt("pr-review"))
+
+    def test_arch_review_includes_investigation_block(self):
+        self.assertIn(self.HEADING, self._prompt("arch-review"))
+
+    def test_code_health_includes_investigation_block(self):
+        self.assertIn(self.HEADING,
+                      self._prompt("code-health", "--summary-file", str(self.summary)))
+
+    def test_bug_review_includes_investigation_block(self):
+        result = run_review("bug-review", str(self.bug), "skills/foo/foo.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(self.HEADING, result.stdout)
+
+    # --- AC3: prose/framing passes do NOT carry the block
+    def test_reconciliation_excludes_investigation_block(self):
+        result = run_review("reconciliation", str(self.spec), "001-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(self.HEADING, result.stdout)
+
+    def test_frame_critique_excludes_investigation_block(self):
+        self.assertNotIn(self.HEADING, self._prompt("frame-critique"))
+
+    def test_design_review_excludes_investigation_block(self):
+        self.assertNotIn(self.HEADING, self._prompt("design-review"))
+
+
+class ReviewerAgentInvestigationTests(unittest.TestCase):
+    """Spec 087-01 AC4: the standing reviewer agent definition carries an
+    equivalent investigation-efficiency section."""
+
+    def test_reviewer_agent_has_investigation_section(self):
+        text = (REPO_ROOT / "agents" / "reviewer.md").read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?i)how to investigate")
+        self.assertRegex(text, r"(?i)focused ranges|locate before you read")
+
+
 class ReconciliationPromptTests(unittest.TestCase):
     """`review.py reconciliation <spec> <slice>` shape."""
 
