@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.7.0](https://github.com/ramboz/jig/compare/v2.6.0...v2.7.0) (2026-07-12)
+
+
+### Features
+
+* **spec-workflow:** orient existing projects on pickup ([0c57970](https://github.com/ramboz/jig/commit/0c57970111d4c5ba94c0f35ba7bb2c0feeadb0f2))
+
+
+### Documentation
+
+* **specs:** reserve 088-project-orientation ([3e14298](https://github.com/ramboz/jig/commit/3e14298e7f3dbda5faa3f250ea4f878cc9f9ac55))
+
 ## [2.6.0](https://github.com/ramboz/jig/compare/v2.5.0...v2.6.0) (2026-07-11)
 
 
