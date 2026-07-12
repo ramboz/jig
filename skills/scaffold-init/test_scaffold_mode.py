@@ -506,6 +506,7 @@ EXPECTED_HOOK_SCRIPTS = (
     "jig-boundary-change-warn.sh",
     "jig-context-check.sh",
     "jig-memory-scan.sh",
+    "jig-project-orient.sh",
     "jig-post-edit-verify.sh",
     "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
     "jig-skill-trace.sh",
@@ -743,6 +744,20 @@ class CopyHooksAndRegisterTests(unittest.TestCase):
         for c in ctx_cmds:
             self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/", c)
             self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", c)
+
+    def test_sessionstart_registers_project_orientation(self):
+        settings = json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+        commands = [
+            h.get("command", "")
+            for entry in settings["hooks"]["SessionStart"]
+            for h in entry.get("hooks", [])
+        ]
+        orient = [c for c in commands if "jig-project-orient.sh" in c]
+        self.assertEqual(len(orient), 1, commands)
+        self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/", orient[0])
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", orient[0])
 
 
 class MergeExistingSettingsTests(unittest.TestCase):
@@ -1528,6 +1543,42 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertTrue(
             (self.target / ".jig" / "semantic-index-codex-hook.json").is_file()
         )
+
+    def test_codex_project_orientation_hook_executes_generated_runtime(self):
+        r = self._run_codex_scaffold()
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+        spec_dir = self.target / "docs" / "specs" / "002-first"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "spec.md").write_text("---\nstatus: DRAFT\n---\n")
+        (spec_dir / "slice-01-start.md").write_text(
+            "---\nstatus: DRAFT\ndependencies: []\n---\n\n"
+            "## Slice 002-01 - start\n"
+        )
+
+        script = (
+            self.target / ".codex" / "hooks" / "scripts"
+            / "jig-project-orient.sh"
+        )
+        env = os.environ.copy()
+        env.pop("PYTHONDONTWRITEBYTECODE", None)
+        env["CODEX_PROJECT_DIR"] = str(self.target)
+        result = subprocess.run(
+            ["bash", str(script)],
+            input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s1"}),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["additionalContext"],
+            "jig hint: Scaffolded jig project · active specs: 002 DRAFT · "
+            "focus: 002-01 DRAFT",
+        )
+        self.assertFalse(any(self.target.rglob("__pycache__")))
 
     def test_codex_semantic_index_internal_overlay_fixture_activates_scout(self):
         r = self._run_codex_scaffold()

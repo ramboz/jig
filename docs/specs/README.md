@@ -284,6 +284,7 @@
 | [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-02 — sharpen eval-flagged descriptions | **DONE** |  |
 | [086-skill-routing-eval](086-skill-routing-eval/spec.md) | 086-03 — register the eval as a named ci_check gate | **DONE** |  |
 | [087-narrow-first-review](087-narrow-first-review/spec.md) | 087-01 — investigation guidance in code-review prompts + reviewer agent | **DONE** |  |
+| [088-project-orientation](088-project-orientation/spec.md) | 088-01 — computed orientation at project pickup | **DONE** |  |
 
 ## Deferred slices
 

@@ -28,14 +28,18 @@ and deliver end-to-end value.
 
 ## Session workflow
 
-1. Check `docs/specs/README.md` and `docs/bugs/README.md`; route feedback/triage defects to `bug-fix` before drafting spec ACs.
-2. Pick up next `READY_FOR_IMPLEMENTATION` spec slice.
-3. Spawn the `implementer` subagent with the spec path.
-4. After the deliverable is on disk, run the post-implementation review (three passes — see below).
-5. Address findings; `[blocker]`-tagged craft/arch entries block the REVIEWED transition, `[nit]`-tagged ones become reconciliation-log items.
-6. Reconcile: update docs, write deviation log, run reconciliation review.
-7. Run `/jig:memory-sync` to consolidate learnings.
-8. Update spec status to DONE.
+1. Read the automatic `jig hint:` orientation injected at `SessionStart`, or run
+   `python3 .claude/skills/jig-spec-workflow/workflow.py orient --project-dir .`
+   to refresh it. Host rendering rewrites this to the Codex-local path.
+   Architecture/spec artifacts outrank shallow source-tree inference.
+2. Check `docs/specs/README.md` and `docs/bugs/README.md`; route feedback/triage defects to `bug-fix` before drafting spec ACs.
+3. Pick up the focused or next `READY_FOR_IMPLEMENTATION` spec slice.
+4. Spawn the `implementer` subagent with the spec path.
+5. After the deliverable is on disk, run the post-implementation review (three passes — see below).
+6. Address findings; `[blocker]`-tagged craft/arch entries block the REVIEWED transition, `[nit]`-tagged ones become reconciliation-log items.
+7. Reconcile: update docs, write deviation log, run reconciliation review.
+8. Run `/jig:memory-sync` to consolidate learnings.
+9. Update spec status to DONE.
 
 ## Phase-Mode Guidance
 

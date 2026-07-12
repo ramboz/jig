@@ -1,0 +1,132 @@
+---
+status: DONE
+dependencies: []
+last_verified: 2026-07-12
+arch_review: true
+code_health_review: true
+---
+
+## Slice 088-01 — computed orientation at project pickup
+
+**Goal:** An agent picking up any jig project can run one read-only command and see
+the durable project state and next lifecycle continuation before interpreting the
+source-code filesystem or reopening recorded decisions.
+
+**DoR:**
+- ✅ Project-state classification is available through
+  `_common.scaffold_state.classify_scaffold_state()`.
+- ✅ Slice and spec lifecycle state can be read through `collect_slices()` and
+  `compute_spec_status()` without creating a second parser.
+- ✅ The CLI parser and subprocess test harness already cover adjacent
+  `status-board` and `session-plan` commands.
+- ✅ The pickup instructions that must invoke the command are identified in
+  `skills/spec-workflow/SKILL.md` and `docs/workflow.md`.
+
+**Acceptance Criteria:**
+
+1. **Computed project headline.** `workflow.py orient --project-dir <dir>` exits 0
+   and prints exactly one newline-terminated headline containing the title-cased
+   scaffold classification, an `active specs:` summary, and a `focus:` summary.
+   The fixed grammar begins `jig hint:` so injected context cannot be mistaken for
+   user-authored text.
+2. **Compact active-spec rollup.** A spec appears only when it contains at least one
+   live slice in the focus states from AC3; fully parked (`DEFERRED`) and terminal
+   specs do not. Active specs appear in numeric order, with consecutive numeric specs
+   sharing the same computed rollup compressed as a range (for example,
+   `002-007 DRAFT`). At most eight groups render, followed by `+N more` when
+   necessary; no active specs renders `active specs: none`.
+3. **Lifecycle-aware focus selection.** The focus slice is selected
+   deterministically in lifecycle-continuation order: `IN_PROGRESS`, `REVIEWED`,
+   `RECONCILED`, `READY_FOR_IMPLEMENTATION`, `READY_FOR_REVIEW`, then `DRAFT`, with
+   corpus order breaking ties. Terminal and parked states are excluded. Any non-empty
+   `claimed_by` value is reduced to the safe grammar `[A-Za-z0-9._/-]`, replacement
+   marker `?`, and at most 30 characters before rendering as `(claimed by <id>)`, so
+   repository-controlled text cannot escape the one-line hint and a foreign
+   in-progress slice is not presented as available work. Focus uses only the canonical
+   numeric slice ID, never the free-form title. When no live slice exists, the headline
+   renders `focus: none`.
+4. **No filesystem-state guess.** The headline does not claim whether an application
+   skeleton, implementation, or technology stack exists. A scaffolded fixture with
+   architecture/spec artifacts and no application source still reports
+   `Scaffolded jig project` from `scaffold.json` and lifecycle evidence.
+5. **Read-only behavior.** Running `orient` does not create, modify, or remove project
+   files, including the status board and spec rollups.
+6. **Automatic pickup boundary.** A non-blocking `SessionStart` hook emits the exact
+   orientation headline as `additionalContext`, is silent for non-SessionStart or
+   malformed payloads, degrades silently when orientation fails, and can be disabled
+   with `JIG_PROJECT_ORIENT=0`.
+7. **Pickup flow integration.** `skills/spec-workflow/SKILL.md`, `docs/workflow.md`,
+   and the scaffold workflow template document the automatic headline and instruct
+   manual `workflow.py orient --project-dir .` use before selecting or transitioning
+   a slice. They state that architecture/spec artifacts outrank shallow source-tree
+   inference.
+8. **Hook contract integration.** `docs/architecture.md` describes the fourteenth hook
+   and its injection boundary; `scripts/verify_install.py` expects the hook script;
+   scaffold-mode tests verify Claude/Codex registration; injection-attribution tests
+   record metadata without storing the headline body.
+9. **Host packages consistent.** Generated Claude and Codex host packages match the
+   edited source after `scripts/build_host_packages.py` runs; the drift check passes.
+
+**DoD:**
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one fixture.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred during implementation (none were deferred).
+
+**Anti-horizontal-phasing check:** After this slice lands, an agent can invoke the
+documented pickup command and immediately observe the project's durable lifecycle
+state and next work item; the slice ships that complete command-to-guidance behavior.
+
+### Close-out (post-DONE)
+
+- [x] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+- [x] Primer hygiene checked; because this slice opens and closes spec 088 in one
+      session, no active-spec hot-cache entry should remain.
+
+### Deviation log (after reconciliation)
+
+- No intentional scope or contract deviations from the reviewed slice.
+- Compliance review found that an all-unsafe `claimed_by` value could disappear
+  and that installed Python imports could create project-local bytecode. The
+  sanitizer now preserves `?`; `workflow.py` disables bytecode writes before
+  `_common` imports; the hook invokes the child with `-B`; installed CLI and
+  generated Codex runtime tests cover both cases.
+- Craft review found stale hook-count prose, duplicate Codex-rendered guidance,
+  and missing generated-Codex runtime coverage. Each was corrected.
+- Architecture review found stale seven-hook documentation and mechanically
+  duplicated Codex lookup candidates. The documentation now states fourteen
+  hooks and the source renders one canonical candidate set per host.
+- Reconciliation review found an undocumented
+  `JIG_PROJECT_ORIENT_WORKFLOW` test override. It was removed; failure coverage
+  now runs an isolated hook whose normal workflow candidates are absent.
+- The implementer subagent produced the initial implementation and was
+  interrupted during broad verification; the orchestrator completed review
+  fixes, integration coverage, and final verification in the same worktree.
+
+### Reconciliation sweep
+
+- **Implementation vs ACs:** `orient` emits the fixed one-line grammar from
+  canonical scaffold/lifecycle readers, bounds active groups and claims,
+  selects focus in continuation order, and performs no source-tree guessing.
+- **Pickup boundary:** the fail-open SessionStart hook injects the exact
+  headline, supports opt-out, records metadata-only attribution, and suppresses
+  project-local bytecode in both parent and child interpreters.
+- **Host and install surfaces:** hook registration, scaffold status text,
+  install verification, the fourteen-script contract, Claude/Codex generated
+  packages, and generated Codex execution coverage agree.
+- **Docs:** `skills/spec-workflow/SKILL.md`, live and scaffold workflow docs,
+  the synchronized `templates/AGENTS.md.template` and
+  `templates/CLAUDE.md.template` primer sources, and `docs/architecture.md`
+  describe orientation and artifact precedence. The dogfood root `AGENTS.md`
+  is not a scaffold source and remains user-maintained per its project
+  constraint; its automatic SessionStart hook supplies the pickup headline.
+  The generated status board was intentionally unchanged until the post-DONE
+  close-out step and now records 088-01 as `DONE`.
+- **Verification:** 13 final focused runtime/orientation tests passed; the full
+  gate passed 3,450 tests with six skips and clean Pyright; pinned Ruff and host
+  package drift checks are clean.
+- **Deferred work:** none. No refinement-todo entry or ADR is required.

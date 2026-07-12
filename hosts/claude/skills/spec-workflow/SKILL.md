@@ -294,9 +294,19 @@ SKILL.md hand-off is the documented gate.
 
 ### Picking up a slice
 
-1. Check `docs/specs/README.md` for the next slice in `READY_FOR_IMPLEMENTATION`
+1. Read the automatic `jig hint:` project-orientation headline injected at
+   `SessionStart`, or refresh it manually before choosing work:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" orient \
+     --project-dir .
+   ```
+   The headline is computed from `scaffold.json` and lifecycle artifacts. Treat
+   `docs/architecture.md`, the spec corpus, and the status board as authoritative;
+   a shallow source-tree listing is not evidence that a scaffolded project is
+   greenfield or that recorded stack decisions are absent.
+2. Check `docs/specs/README.md` for the next slice in `READY_FOR_IMPLEMENTATION`
    (or `DRAFT` for a slice you intend to plan now).
-2. Run:
+3. Run:
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" transition \
      "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" IN_PROGRESS
@@ -313,8 +323,8 @@ SKILL.md hand-off is the documented gate.
    `READY_FOR_IMPLEMENTATION` / `DRAFT`. To force-release a stale claim:
    `transition <spec> <slice> READY_FOR_IMPLEMENTATION --release --reason
    "<why>"` (clears `claimed_by:`, logs to the slice's `## Release log`).
-3. Fill in / refresh `plan.md` and `tasks.md` for the slice.
-4. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
+4. Fill in / refresh `plan.md` and `tasks.md` for the slice.
+5. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
    with `[jig:phase=implementation] [jig:spec=NNN] [jig:slice=NNN-NN]` so
    `jig-telemetry.sh` can attribute implementation-phase cost. Implementer
    writes the deliverable to disk (TDD — failing tests first).

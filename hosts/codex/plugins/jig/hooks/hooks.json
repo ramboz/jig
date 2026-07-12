@@ -97,6 +97,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-project-orient.sh",
+            "timeout": 5,
+            "statusMessage": "jig: orient project state"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-semantic-index.sh",
             "timeout": 25,
             "statusMessage": "jig: semantic index"

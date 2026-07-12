@@ -209,6 +209,7 @@ _EXPECTED_HOOK_SCRIPTS = (
     "jig-decision-inflight.sh",  # slice 083-07 — in-flight AskUserQuestion/override capture
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
+    "jig-project-orient.sh",  # slice 088-01 — SessionStart project orientation
     "jig-secret-scan.sh",  # slice 052-02 — secret-prevention floor (ADR-0013)
     "jig-semantic-index.sh",  # slice 080-02 — semantic-index activation
     "jig-skill-trace.sh",  # Skill PreToolUse trace hook (registered in hooks.json)

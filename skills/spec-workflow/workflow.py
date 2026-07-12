@@ -24,6 +24,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Commands such as `orient` must remain read-only even when this helper and
+# `_common` are installed inside the target project.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import (
     project_layout,
@@ -1530,6 +1533,144 @@ def compute_spec_status(spec_path: Path) -> str:
 
     # Mix of DONE + DRAFT, or any active state → IN_PROGRESS
     return "IN_PROGRESS"
+
+
+_ORIENT_FOCUS_ORDER = (
+    "IN_PROGRESS",
+    "REVIEWED",
+    "RECONCILED",
+    "READY_FOR_IMPLEMENTATION",
+    "READY_FOR_REVIEW",
+    "DRAFT",
+)
+_ORIENT_FOCUS_RANK = {
+    status: idx for idx, status in enumerate(_ORIENT_FOCUS_ORDER)
+}
+_ORIENT_CLASSIFICATION_LABELS = {
+    "scaffolded": "Scaffolded jig project",
+    "adoptable": "Adoptable jig project",
+    "greenfield": "Greenfield jig project",
+}
+_ORIENT_MAX_GROUPS = 8
+_ORIENT_SAFE_CLAIM_RE = re.compile(r"[^A-Za-z0-9._/-]+")
+
+
+def _spec_num_from_dirname(spec_dir: str) -> tuple[int, str]:
+    """Return (numeric value, zero-padded label) from a spec directory name."""
+    m = re.match(r"^(\d{3})\b", spec_dir)
+    if not m:
+        return (10**9, spec_dir)
+    return (int(m.group(1)), m.group(1))
+
+
+def _sanitize_orient_claim(value: str) -> str:
+    """Collapse repository-controlled claim text to the one-line safe grammar."""
+    cleaned = _ORIENT_SAFE_CLAIM_RE.sub("?", str(value or ""))
+    return cleaned[:30]
+
+
+def _render_orient_groups(groups: list[tuple[int, int, str]]) -> str:
+    rendered = []
+    for start, end, status in groups:
+        if start == end:
+            rendered.append(f"{start:03d} {status}")
+        else:
+            rendered.append(f"{start:03d}-{end:03d} {status}")
+    return ", ".join(rendered)
+
+
+def _active_spec_summary(project_dir: Path, rows: list[tuple]) -> str:
+    """Render the compact active-spec rollup for `orient`.
+
+    A spec is active iff it has at least one slice in a lifecycle-continuation
+    state. Its displayed rollup is still the canonical computed spec rollup,
+    read-only via `compute_spec_status()`.
+    """
+    active_dirs = {
+        spec_dir for spec_dir, _label, status, *_rest in rows
+        if status in _ORIENT_FOCUS_RANK
+    }
+    if not active_dirs:
+        return "none"
+
+    specs_dir = project_layout.specs_dir(project_dir)
+    specs = []
+    for spec_dir in active_dirs:
+        num, label = _spec_num_from_dirname(spec_dir)
+        spec_md = specs_dir / spec_dir / "spec.md"
+        rollup = compute_spec_status(spec_md) if spec_md.is_file() else "UNKNOWN"
+        specs.append((num, label, rollup))
+    specs.sort(key=lambda item: (item[0], item[1]))
+
+    groups: list[tuple[int, int, str]] = []
+    for num, _label, rollup in specs:
+        if num >= 10**9:
+            # Defensive fallback for non-canonical dirs: no range compression,
+            # but keep the value stable in numeric-order position.
+            groups.append((num, num, rollup))
+            continue
+        if groups and groups[-1][2] == rollup and num == groups[-1][1] + 1:
+            start, _end, status = groups[-1]
+            groups[-1] = (start, num, status)
+        else:
+            groups.append((num, num, rollup))
+
+    more = max(0, len(groups) - _ORIENT_MAX_GROUPS)
+    if more:
+        # Keep the newest active groups visible; project pickup usually cares
+        # about the current tail of the numbered spec stream.
+        groups = groups[-_ORIENT_MAX_GROUPS:]
+    summary = _render_orient_groups(groups)
+    if more:
+        summary += f", +{more} more"
+    return summary
+
+
+def _focus_summary(rows: list[tuple]) -> str:
+    best = None
+    for order, (_spec_dir, label, status, _trigger, _kind, claimed_by,
+                _abandonment_reason) in enumerate(rows):
+        rank = _ORIENT_FOCUS_RANK.get(status)
+        if rank is None:
+            continue
+        slice_id = _slice_id_from_label(label)
+        if not slice_id:
+            continue
+        candidate = (rank, order, slice_id, status, claimed_by)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    if best is None:
+        return "none"
+
+    _rank, _order, slice_id, status, claimed_by = best
+    focus = f"{slice_id} {status}"
+    if claimed_by:
+        safe_claim = _sanitize_orient_claim(claimed_by)
+        if safe_claim:
+            focus += f" (claimed by {safe_claim})"
+    return focus
+
+
+def orient(project_dir: Path) -> str:
+    """Read-only project pickup headline (slice 088-01).
+
+    The headline is deliberately one line and starts with `jig hint:` so hook
+    injections cannot be confused for user-authored text. It uses durable jig
+    artifacts only: `scaffold.json` / spec-driven layout classification plus
+    spec and slice lifecycle state. It never infers application skeleton or
+    technology-stack state from the shallow source tree.
+    """
+    project_dir = Path(project_dir)
+    state = classify_scaffold_state(project_dir)
+    classification = _ORIENT_CLASSIFICATION_LABELS.get(
+        state, f"{state.title()} jig project")
+    rows = collect_slices(project_dir)
+    active_specs = _active_spec_summary(project_dir, rows)
+    focus = _focus_summary(rows)
+    return (
+        f"jig hint: {classification} · active specs: {active_specs} · "
+        f"focus: {focus}\n"
+    )
 
 
 def _write_spec_rollup(spec_path: Path) -> bool:
@@ -3949,6 +4090,14 @@ def _build_parser() -> argparse.ArgumentParser:
     pgs.add_argument("--days", type=int, default=30,
                      help="window in days (default: 30)")
 
+    po = sub.add_parser(
+        "orient",
+        help="print one read-only project pickup headline from scaffold and "
+             "lifecycle artifacts (slice 088-01)",
+    )
+    po.add_argument("--project-dir", default=".",
+                    help="project root directory (default: cwd)")
+
     pn = sub.add_parser(
         "new",
         help="reserve the next free spec number on origin/main (slice 003-03)",
@@ -4075,6 +4224,8 @@ def main(argv: list) -> int:
             sys.stdout.write(
                 gate_stats(Path(ns.project_dir), days=ns.days)
             )
+        elif ns.command == "orient":
+            sys.stdout.write(orient(Path(ns.project_dir)))
         elif ns.command == "new":
             return reserve_spec(
                 ns.slug,

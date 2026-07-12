@@ -21,6 +21,7 @@ MEMORY_SCAN = HOOK_DIR / "jig-memory-scan.sh"
 POST_EDIT_VERIFY = HOOK_DIR / "jig-post-edit-verify.sh"
 TASK_CAPTURE = HOOK_DIR / "jig-task-capture.sh"
 BOUNDARY_WARN = HOOK_DIR / "jig-boundary-change-warn.sh"
+PROJECT_ORIENT = HOOK_DIR / "jig-project-orient.sh"
 LOG_NAME = "context-growth-read-events.jsonl"
 
 
@@ -83,6 +84,14 @@ class HookInjectionAttributionTests(unittest.TestCase):
         marker = self.project / ".jig"
         marker.mkdir()
         (marker / "spec-ref").write_text("spec=070\nslice=070-02\n")
+        (self.project / "scaffold.json").write_text("{}\n")
+        spec_dir = self.project / "docs" / "specs" / "088-orient"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "spec.md").write_text("---\nstatus: DRAFT\n---\n")
+        (spec_dir / "slice-01-work.md").write_text(
+            "---\nstatus: DRAFT\ndependencies: []\n---\n\n"
+            "## Slice 088-01 — work\n"
+        )
 
     def tearDown(self):
         import shutil
@@ -234,6 +243,19 @@ class HookInjectionAttributionTests(unittest.TestCase):
         assert_warning_shape(self, result)
         self._assert_one_injection(
             "jig-boundary-change-warn", "boundary_change", "PostToolUse")
+
+    def test_project_orientation_logs_metadata_only_injection_event(self):
+        result = run_hook(PROJECT_ORIENT, {
+            "session_id": "sess-070",
+            "hook_event_name": "SessionStart",
+        }, self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = assert_warning_shape(self, result)
+        event = self._assert_one_injection(
+            "jig-project-orient", "project_orientation", "SessionStart")
+        self.assertEqual(
+            event["bytes"], len(out["additionalContext"].encode("utf-8")))
+        self.assertNotIn(out["additionalContext"], json.dumps(event))
 
     def test_silent_hooks_write_no_injection_events(self):
         cases = [

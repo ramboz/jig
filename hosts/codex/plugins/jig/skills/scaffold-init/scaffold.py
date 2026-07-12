@@ -1498,6 +1498,7 @@ _CODEX_HOOK_STATUS_MESSAGES = {
     "jig-context-check.sh": "jig: check context budget",
     "jig-memory-scan.sh": "jig: scan memory references",
     "jig-post-edit-verify.sh": "jig: verify edit landed",
+    "jig-project-orient.sh": "jig: orient project state",
     "jig-secret-scan.sh": "jig: scan for secrets",
     "jig-skill-trace.sh": "jig: record skill usage",
     "jig-spec-gate.sh": "jig: enforce spec gate",

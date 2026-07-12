@@ -34,12 +34,20 @@ Always-loaded primer, kept lean per jig's context-cost discipline. This is an **
 | [docs/workflow.md](docs/workflow.md) | How we build: spec lifecycle, session workflow | Start of every session |
 | [docs/architecture.md](docs/architecture.md) | Tech stack, module boundaries | Before touching module interfaces |
 | [docs/conventions.md](docs/conventions.md) | Coding rules and authoring standards | Before writing code or skills |
-| [docs/specs/README.md](docs/specs/README.md) | Spec status board | To pick up next work |
+| [docs/specs/README.md](docs/specs/README.md) | Spec status board | After orientation, to inspect active work |
 | [docs/bugs/README.md](docs/bugs/README.md) | Bug status board | Before folding reported defects into a spec |
 | [docs/refinement-todo.md](docs/refinement-todo.md) | Deferred decisions | When hitting an undefined case |
 | [docs/memory/glossary.md](docs/memory/glossary.md) | Domain terms | When encountering unknown terms |
 | [docs/inbox.md](docs/inbox.md) | Parked ideas | During reconciliation |
 | [docs/adoption-readiness.md](docs/adoption-readiness.md) | Getting started with jig here: first 30 min + readiness check | Right after scaffolding |
+
+## Session Pickup
+
+Read the automatic `jig hint:` orientation injected at `SessionStart`, or run
+`python3 .codex/skills/jig-spec-workflow/workflow.py orient --project-dir .`
+before selecting work. Architecture and spec artifacts outrank shallow
+source-tree inference. Host rendering rewrites the command to the Codex-local
+skill path.
 
 ## Current Sprint Focus
 

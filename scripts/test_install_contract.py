@@ -498,13 +498,11 @@ class RealHooksJsonTests(unittest.TestCase):
         )
         self.assertEqual(problems, [], problems)
 
-    def test_real_hooks_json_references_thirteen_scripts(self):
+    def test_real_hooks_json_references_fourteen_scripts(self):
         data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
         names = install_contract.parse_hook_script_names(data)
-        # Registration source of truth currently lists 13 scripts
-        # (jig-claim-check.sh added on Stop for the refinement-todo
-        # "memory-recall verification" mitigation).
-        self.assertEqual(len(names), 13, sorted(names))
+        # Registration source of truth currently lists 14 scripts.
+        self.assertEqual(len(names), 14, sorted(names))
         self.assertIn("jig-skill-trace.sh", names)
         self.assertIn("jig-semantic-index.sh", names)
         self.assertIn("jig-decision-capture.sh", names)

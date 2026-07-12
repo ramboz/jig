@@ -164,14 +164,18 @@ All specs are SPIDR-split before implementation begins:
 
 ## Session workflow
 
-1. Check `docs/specs/README.md` and `docs/bugs/README.md`; route feedback/triage defects to `bug-fix` before drafting spec ACs.
-2. Pick up the next `READY_FOR_IMPLEMENTATION` spec slice.
-3. Spawn the `implementer` subagent with the spec path.
-4. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — up to four passes via `jig:independent-review`, `pr-review`, and optionally `arch-review` (`arch_review: true`) + `jig:code-health` (`code_health_review: true`)).
-5. Address reviewer findings; `[blocker]`-tagged craft/arch/code-health findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.
-6. Run reconciliation: update `architecture.md` if module boundaries changed; annotate spec with deviation log and reconciliation sweep; run + `record-review` the reconciliation review, then `workflow.py transition … RECONCILED` (gated on that evidence + the deviation log + the sweep).
-7. `workflow.py transition … DONE` (re-validates the full review-evidence set + dependencies). Update `docs/specs/README.md`.
-8. Run `memory-sync` to consolidate learnings.
+1. Read the automatic `jig hint:` orientation injected at `SessionStart`, or run
+   `python3 skills/spec-workflow/workflow.py orient --project-dir .` to refresh it.
+   Architecture/spec artifacts outrank shallow source-tree inference about whether
+   the project is greenfield or decisions are absent.
+2. Check `docs/specs/README.md` and `docs/bugs/README.md`; route feedback/triage defects to `bug-fix` before drafting spec ACs.
+3. Pick up the focused or next `READY_FOR_IMPLEMENTATION` spec slice.
+4. Spawn the `implementer` subagent with the spec path.
+5. After the deliverable is on disk, run the post-implementation review (see "Post-implementation review" below — up to four passes via `jig:independent-review`, `pr-review`, and optionally `arch-review` (`arch_review: true`) + `jig:code-health` (`code_health_review: true`)).
+6. Address reviewer findings; `[blocker]`-tagged craft/arch/code-health findings block the REVIEWED transition; `[nit]`-tagged ones become reconciliation-log items.
+7. Run reconciliation: update `architecture.md` if module boundaries changed; annotate spec with deviation log and reconciliation sweep; run + `record-review` the reconciliation review, then `workflow.py transition … RECONCILED` (gated on that evidence + the deviation log + the sweep).
+8. `workflow.py transition … DONE` (re-validates the full review-evidence set + dependencies). Update `docs/specs/README.md`.
+9. Run `memory-sync` to consolidate learnings.
 
 ## Post-implementation review
 
