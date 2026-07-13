@@ -4,6 +4,6 @@
 - [x] Document skill authoring and every current registration mirror/guard.
 - [x] Document host regeneration and final validation commands.
 - [x] Point the historical learning at the contributor-facing runbook.
-- [ ] Run focused and full verification.
-- [ ] Complete compliance, craft, and reconciliation reviews.
+- [x] Run focused and full verification.
+- [x] Complete compliance, craft, and reconciliation reviews.
 - [ ] Reconcile lifecycle artifacts and open the PR.

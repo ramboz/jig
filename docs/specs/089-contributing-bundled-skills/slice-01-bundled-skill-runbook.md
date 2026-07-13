@@ -1,7 +1,7 @@
 ---
-status: REVIEWED
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-07-13
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -50,15 +50,15 @@ reverse-engineering failed tests or internal memory notes.
    carrying a second, already-stale checklist.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Documentation links and named commands resolve in the current tree.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Documentation links and named commands resolve in the current tree.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [x] Implementation review passed.
-- [ ] Craft review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during
+- [x] Craft review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred during
       implementation.
 
 ### Close-out (post-DONE)
@@ -73,8 +73,40 @@ path, from product-fit check through the same CI gate used before a PR.
 
 ### Deviation log (after reconciliation)
 
-_To be completed after implementation and review._
+1. **Planned shape:** No implementation deviation. The change adds the planned
+   contributor-facing admission gate and author-register-validate runbook, then
+   compresses the historical memory entry into rationale, provenance, and a
+   pointer to that canonical source.
+2. **Review findings:** The compliance and craft passes both returned `pass`
+   without blockers or nits. The craft reviewer called out the direct lean
+   admission framing, executable source-to-CI ordering, and single-source-of-
+   truth treatment as strengths.
+3. **Current-main integration:** Before reconciliation, the branch rebased onto
+   `origin/main` through bug 007 / PR 93, which made the public skill install
+   contract exact rather than subset-only. The documented canonical registry
+   and validator-mirror steps already cover that guard, so no scope or wording
+   change was required.
+4. **Verification:** `scripts/spec_lint.py` reports no contradictions;
+   `scripts/build_host_packages.py` produced no tracked drift; and
+   `scripts/ci_check.py` passed against the integrated base with 3,455 tests
+   (6 skipped), clean Pyright, clean routing, valid manifests, and synchronized
+   host packages. An earlier sandboxed run passed all tests but could not read
+   uv's external cache for Pyright; the approved unsandboxed rerun resolved that
+   environment-only failure.
+5. **Deferred work:** None. No product decision or follow-up was moved to
+   `docs/refinement-todo.md`.
 
 ### Reconciliation sweep
 
-_To be completed after implementation and review._
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | Contributor policy does not change the current user-facing skill inventory or count. |
+| `docs/specs/README.md` | `deferred` | Regenerate after the final `DONE` transition, as required by close-out. |
+| `docs/product-vision.md` | `no-op` | The lean admission gate reinforces the existing scope boundary; no product behavior changed. |
+| `docs/architecture.md` | `no-op` | No module boundary, runtime contract, or packaging architecture changed. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | No always-loaded fact is needed for this contributor-only runbook; primer hygiene checked. |
+| `docs/inbox.md` | `no-op` | No parked idea was resolved or introduced. |
+| `docs/refinement-todo.md` | `no-op` | No decision was deferred. |
+| `docs/memory/**` | `updated` | Replaced the duplicated live checklist with its historical rationale, provenance, and canonical contributor-guide link. |
+| `docs/decisions/README.md` / ADR index | `no-op` | The docs-only flow adds no hard-to-reverse architectural decision. |
+| `CONTRIBUTING.md` | `updated` | Added the canonical lean exception policy and complete bundled-skill contribution flow. |
