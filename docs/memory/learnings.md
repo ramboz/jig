@@ -569,3 +569,6 @@ not assumptions, and belong elsewhere or the trigger over-fires.
 
 ## Bug 006: normalize permissive path aliases without erasing validation
 When a command accepts a canonical overview path but child lookup also makes a child-file path appear valid, normalize once at the command boundary before downstream writes. Validate the original caller-supplied path before normalization; otherwise a typo can be reinterpreted and mutate a different artifact selected by a secondary fragment. Test both the successful alias and fail-before-mutation typo path.
+
+## Tier-gated packaging contracts need exact sets
+When plugin packaging recursively ships every public skills/*/SKILL.md but scaffold copying is gated by _TIER_SKILLS, checking only EXPECTED_SKILLS ⊆ present permits accidental plugin-only skills. Validate both directions: the public skill set must exactly match the tier-derived contract, excluding private _... infrastructure. See bug 007 and GitHub issue #89.
