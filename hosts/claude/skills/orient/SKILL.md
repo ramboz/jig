@@ -1,37 +1,71 @@
 ---
-name: compass
+name: orient
 description: >-
-  Answer "what's next" / "where do things stand" for a code project run with
-  jig/servo/shaper, in one fixed, readable shape. Use whenever the user invokes
-  /compass, or asks "what's next", "what's the status", "what should I do next",
-  "where are we", "what's outstanding", "what's blocked", "what should I work on",
-  or wants a grounded menu of pickable work for a spec-driven code repo. Surveys the
-  project's own artifacts — spec status boards and slice STATUS markers, ADRs in
-  docs/decisions/, DEFERRED slices and their triggers, servo's refinement-todo,
-  shaper's release plans, the inbox, and any standalone bugs — then renders a briefing
-  with an honest headline, titled sections, one recommendation, and an offer to start.
-  Read-only with respect to project work: it never transitions lifecycle state, edits
-  specs, or accepts ADRs. Its ONE write is an append-only run log — after each briefing
-  it appends a single JSON line to docs/status/compass-history.jsonl (timestamp, headline,
-  recommendation, blockers, open counts) so runs become trackable data points over time.
-  Hands off to jig/servo/shaper skills to actually do the work. Assumes a spec-driven code
-  project; if none is found, say so and point at the right setup skill. For non-code studio
-  projects, defer to studio:project-desk instead.
+  Orient yourself in a spec-driven code project (run with jig/servo/shaper):
+  survey the project's own artifacts and answer "where do things stand, and what
+  should I pick up?" in one fixed, readable shape. Use when the user runs
+  `/jig:orient` or explicitly asks to be oriented — "orient me to this project",
+  "where do we stand", "give me a project briefing", "what's outstanding",
+  "what's blocked", "what should I work on in this repo", or comes back after
+  time away and wants a grounded menu of pickable work. Starts from the
+  deterministic headline `workflow.py orient` prints (project-state
+  classification, active-spec rollup, current focus), then layers a judgment
+  survey on top — DEFERRED slices
+  and their triggers, Proposed ADRs, servo's refinement-todo, shaper's release
+  plans, the inbox, and standalone bugs — and renders an honest headline, titled
+  sections, one recommendation, and an offer to start. Read-only about project
+  work: it never transitions lifecycle state, edits specs, accepts ADRs, or
+  writes any file — it just renders the briefing to chat/stdout, which a
+  scheduled job or a dashboard can capture. Hands off to jig/servo/shaper skills
+  to actually do the work.
+  Do not use for: a bare conversational "what's next?" inside an active
+  implementation flow — that continues the current slice and does NOT request a
+  whole-project rescan; non-code studio projects (defer to
+  `studio:project-desk`); spec authoring or lifecycle transitions (use
+  `/jig:spec-workflow`); persisting a new glossary term (use `/jig:memory-sync`).
+  Defers to any other installed skill whose description identifies it as handling
+  project orientation or "what's next" status briefings.
 ---
 
-# Compass
+# Orient
 
-**One job: tell the user what to do next, in a shape they can actually read.**
+**One job: tell the user where the project stands and what to do next, in a shape
+they can actually read.**
 
-The user comes back to a project after time away and asks the calm manager's question —
-*"what's next?"* Compass answers it by reading the project's own truth (not guessing),
-and presenting it in **one fixed, scannable layout**: a headline that tells the honest
-state, then a short stack of **titled sections**, each a list of **titled bullets** —
-never a wall of inline prose with items buried mid-sentence.
+The user runs `/jig:orient` (or asks to be oriented) — the calm manager's question,
+*"where do things stand, and what should I pick up?"* Orient answers it by reading
+the project's own truth (not guessing), and presenting it in **one fixed, scannable
+layout**: a headline that tells the honest state, then a short stack of **titled
+sections**, each a list of **titled bullets** — never a wall of inline prose with
+items buried mid-sentence.
 
 The substance is grounded; the **format is the point**. If the answer reads like a
 paragraph with five things crammed into it, the skill has failed even if every fact is
 right.
+
+This is a **project-level rescan**, not a mid-flow nudge. A bare conversational
+*"what's next?"* while actively implementing a slice is asking to continue that slice
+— not to re-survey the whole project. Orient is for the deliberate "step back and take
+stock" moment (an explicit `/jig:orient`, a session pickup, a "where are we overall").
+
+---
+
+## Start from the deterministic headline
+
+Do not re-derive the project's lifecycle state by hand — jig already computes it.
+Run the read-only command spec 088 added and use its line as your factual base:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" orient --project-dir .
+# → jig hint: <scaffold state> · active specs: <rollup> · focus: <slice needing attention>
+```
+
+That single `jig hint:` line — scaffold classification, active-spec rollup, and the
+slice currently requiring lifecycle attention — is the **deterministic headline**.
+Reusing it (rather than re-implementing a second lifecycle-focus algorithm) keeps
+Orient's headline from drifting away from jig's own computed state. Orient's job is to
+**layer judgment on top**: the ADRs, deferrals, release plans, refinement-todo, inbox,
+and standalone bugs that the one-line command does not weigh, then recommend one thing.
 
 ---
 
@@ -59,13 +93,16 @@ If you honor nothing else here, honor this section.
 
 ## What it reads (the survey)
 
-Compass is **read-only reconnaissance**. Before answering, scan the project for its
-truth. Projects vary — look for these, use what exists, don't assume exact paths:
+Orient is **read-only reconnaissance**. The deterministic headline (above) already
+gives you scaffold state, active-spec rollup, and current focus. Layer the judgment
+survey on top — projects vary, so look for these, use what exists, don't assume exact
+paths:
 
 - **Spec status** — `docs/specs/<MNN-slug>/` slice files (and any `STATUS.md` /
   status-board). Read each slice's STATUS marker: `DRAFT`, `READY_FOR_REVIEW`,
   `READY_FOR_IMPLEMENTATION`, `IN_PROGRESS`, `REVIEWED`, `RECONCILED`, `DONE`,
-  `DEFERRED`. This is the spine of "what's shipped vs. open."
+  `DEFERRED`. This is the spine of "what's shipped vs. open." (`workflow.py orient`
+  already summarizes the active rollup — use it rather than recounting from scratch.)
 - **DEFERRED slices + their triggers** — a DEFERRED slice carries a *resolution trigger*
   ("revisit once X"). Check whether that trigger is now met — a met trigger is often the
   best "obvious next step."
@@ -101,10 +138,10 @@ next step, deferred bets, and a recommendation.
 
 ### 1. Headline — the honest state (always)
 
-One to three sentences. What's the overall state? Is there **required** work outstanding,
-or is "what's next" a **prioritization call** among optional items? Be honest about both
-"we're further than you think" and "this is quietly slipping." Cite a proof point if one
-is cheap (e.g. "252 tests green").
+One to three sentences, seeded by the `workflow.py orient` line. What's the overall state?
+Is there **required** work outstanding, or is "what's next" a **prioritization call**
+among optional items? Be honest about both "we're further than you think" and "this is
+quietly slipping." Cite a proof point if one is cheap (e.g. "252 tests green").
 
 > *The MVP is fully shipped — slices 002-01 through 002-06 are DONE, plus 002-08 and 002-09
 > just landed (252 tests green). There's no required work outstanding; "what's next" is a
@@ -157,57 +194,27 @@ End with a concrete either/or that hands off to the real work:
 
 ---
 
-## Logging the run — the one write
+## Orient writes nothing
 
-Compass is read-only about **project work**, but it keeps a memory of **itself**. After
-you have rendered the briefing in chat, append exactly **one JSON line** to the project's
-run log so each run becomes a trackable data point (morning + evening runs draw a
-progress-over-time curve; a dashboard can read this file directly).
+Orient is **entirely read-only** — it renders its briefing to chat (stdout) and writes
+**no file at all**: nothing under `docs/`, no `.jig/` cache, no history log. This keeps the
+skill lean and ephemeral and keeps *specs* the only source of project state.
 
-- **File:** `docs/status/compass-history.jsonl` — one JSON object per line, **append-only**.
-  Create `docs/status/` if it doesn't exist. **Never** rewrite, reorder, or truncate the
-  file; only append. If the append fails, say so in one line — don't retry destructively.
-- **Timestamp:** get a real one, don't guess — `date -u +%Y-%m-%dT%H:%M:%SZ`.
-- **Schema** (stable — keep these keys so the dashboard can rely on them):
+If you want the briefing captured — a scheduled evening run you can read the next morning,
+or a dashboard that tracks orientation over time — **capture Orient's output from the job
+that runs it** (redirect stdout to a file, or let the dashboard ingest it). A deliberate
+machine-readable export / persistence contract is being designed separately; Orient itself
+stays zero-write.
 
-  | key | value |
-  | --- | --- |
-  | `ts` | ISO-8601 UTC timestamp of the run |
-  | `project` | the repo/dir basename |
-  | `headline` | the one-line honest state you led with |
-  | `recommendation` | the single next action you recommended |
-  | `blockers` | array of short strings — the decisions/triggers blocking progress (`[]` if none) |
-  | `counts` | small object of open-item tallies for trend lines, e.g. `{"deferred":4,"draft":6,"polish":3,"bugs":2}` |
+## Handoff — Orient points, it doesn't do
 
-- **Robust append** (quoting-safe — build the object with `jq`, don't hand-concatenate JSON):
-
-  ```bash
-  mkdir -p docs/status
-  jq -c -n \
-    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg project "$(basename "$PWD")" \
-    --arg headline "MVP shipped; what's next is a prioritization call" \
-    --arg rec "Start 002-07 recents" \
-    --argjson blockers '["ADR-0012 awaiting acceptance"]' \
-    --argjson counts '{"deferred":4,"draft":6,"polish":3,"bugs":2}' \
-    '{ts:$ts, project:$project, headline:$headline, recommendation:$rec, blockers:$blockers, counts:$counts}' \
-    >> docs/status/compass-history.jsonl
-  ```
-
-- **Mention it in one line** at the end of the chat briefing (e.g. *"Logged to
-  docs/status/compass-history.jsonl — run #7."*), so the write is never silent.
-
-This is the **only** thing Compass writes. It touches nothing under `docs/specs/`,
-`docs/decisions/`, or any source file.
-
-## Handoff — Compass points, it doesn't do
-
-Compass is a **map, not the journey**. It never transitions a slice, edits a spec, accepts
-an ADR, or writes a file. When the user picks a direction, hand off cleanly to the skill
+Orient is a **map, not the journey**. It never transitions a slice, edits a spec, accepts
+an ADR, or writes any file. When the user picks a direction, hand off cleanly to the skill
 that owns that work:
 
-- Start / split / transition a spec → **jig:spec-workflow**
-- Implement a ready slice → **jig:implementer** (or servo's loop for unattended runs)
+- Start / split / transition a spec, or implement a ready slice → **jig:spec-workflow**
+  (it coordinates the `implementer` subagent; there is no directly invocable
+  `jig:implementer` skill). For unattended runs, servo's loop.
 - Accept / write the blocking decision → **jig:adr-workflow**
 - Fix a standalone bug → **jig:bug-fix**
 - Re-shape release scope → **shaper:shape-release** / **shaper:cutline**
@@ -221,16 +228,17 @@ Name the handoff in the offer; let the user green-light it.
 - **Format over completeness.** A readable briefing of the top ~8 items beats an exhaustive
   unreadable dump. If the list is long, group and cap it — and *say* you capped it ("plus 6
   smaller items in the inbox") rather than silently truncating.
-- **Grounded, never guessed.** Every item traces to something you actually read. If you're
-  unsure whether a trigger is met or a board is stale, say so ("b08a627 just landed 036-05,
-  so this row may be stale") rather than asserting.
+- **Grounded, never guessed.** Every item traces to something you actually read (starting
+  from the `workflow.py orient` line). If you're unsure whether a trigger is met or a board
+  is stale, say so ("b08a627 just landed 036-05, so this row may be stale") rather than
+  asserting.
 - **Honest headline.** Surface slippage and shipped-more-than-expected with equal candor.
   Don't cheerlead; don't doom.
 - **One recommendation, not a shrug.** The user came for direction. Pick one, say why, and
   offer to start it — keep the rest available if they ask.
-- **Stay read-only about the work.** The moment the user says "do it," hand off. Compass's
-  honesty depends on it never being the thing that changes *project* state — specs, ADRs,
-  lifecycle. The append-only run log (`docs/status/compass-history.jsonl`) is the sole
-  exception: it records what Compass said, never what the project is.
+- **Stay read-only.** The moment the user says "do it," hand off. Orient's honesty depends
+  on it never being the thing that changes state — it writes nothing at all (not even a
+  cache); persisting or exporting what it said is a separate, deliberate concern. Its job is
+  to *say* the truth, never to *become* it.
 - **Adapt the sections to the project.** The order is fixed; the *presence* of each section
   is not. Show only what's real.

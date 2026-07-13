@@ -16,7 +16,7 @@ Used to split feature specs into implementable vertical slices. Spike is last re
 
 Installation tiers for jig skills:
 - **Tier 0**: Always installed (scaffold-init, spec-workflow, independent-review, contracts, memory-sync). Sibling: `migrate` (adopts an existing spec-driven project to jig).
-- **Tier 1**: Default for most projects. Built: `adr-workflow` (005), `tdd-loop` (006), `slice-land` (007 + 009 close-out fix), `pr-review` (012), `arch-review` (014), `clarify`, `analyze`, `security-review`, `code-health` (060), `explain` (065), `bug-fix` (058), `reframe` (067), `compass` (read-only "what's next" briefing). Outstanding candidate: `local-dev-parity` (no signal yet).
+- **Tier 1**: Default for most projects. Built: `adr-workflow` (005), `tdd-loop` (006), `slice-land` (007 + 009 close-out fix), `pr-review` (012), `arch-review` (014), `clarify`, `analyze`, `security-review`, `code-health` (060), `explain` (065), `bug-fix` (058), `reframe` (067), `orient` (read-only project-orientation briefing, the judgment layer over `workflow.py orient`). Outstanding candidate: `local-dev-parity` (no signal yet).
 - **Tier 2**: Opt-in by signal (eval-harness, e2e-testing, migration-mode, skill-stocktake) — not yet built.
 
 ## Hot Cache

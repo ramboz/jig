@@ -1,0 +1,15 @@
+{
+  "skill_name": "orient",
+  "trigger": {
+    "positive": [
+      { "prompt": "Orient me to this project — where do things stand and what should I pick up?", "top_k": 3 },
+      { "prompt": "Give me a grounded project briefing — survey where we stand and recommend one thing to pick up", "top_k": 3 },
+      { "prompt": "I'm back on this repo after time away — what's outstanding and what's blocked across the whole project?", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "I just got the failing test written — what's next?", "owner": "tdd-loop" },
+      { "prompt": "Fix this bug — diagnose the root cause before writing the fix", "owner": "bug-fix" },
+      { "prompt": "Transition this slice to REVIEWED and run the reconciliation checklist", "owner": "spec-workflow" }
+    ]
+  }
+}
