@@ -252,6 +252,71 @@ NOT copy `test_skill_surface.py` verbatim — rename to
 
 Surfaced by spec 014-01 deviation §1.
 
+## Contributing a bundled skill
+
+jig is intentionally lean. Adding a bundled skill expands the default routing
+and maintenance surface, so treat it as an exception rather than the normal
+extension path. Before proposing one, establish all three of these conditions:
+
+- the capability addresses recurring user pain, not a one-off workflow;
+- it belongs in jig's spec, decision, review, or delivery workflow; and
+- no existing jig skill already owns the job.
+
+If those conditions do not hold, prefer a standalone skill that users can opt
+into separately.
+
+When a bundled skill is justified, use this author-register-validate flow:
+
+1. Read the [skill-authoring conventions](docs/conventions.md#skill-authoring),
+   then author the canonical source at `skills/<name>/SKILL.md` with any helper,
+   examples, and focused tests beside it. Follow the existing
+   [globally unique test-file naming rule](#test-file-naming--avoid-bare-module-collisions).
+   Files under `hosts/` are generated package output; never edit them by hand.
+2. Add the skill to its tier in `scaffold._TIER_SKILLS` in
+   [`skills/scaffold-init/scaffold.py`](skills/scaffold-init/scaffold.py). This
+   is the canonical per-tier inventory.
+3. Update the two validator mirrors:
+   `install_contract.EXPECTED_SKILLS` in
+   [`scripts/install_contract.py`](scripts/install_contract.py) and
+   `scaffold_contract._TIER_SKILLS` in
+   [`scripts/scaffold_contract.py`](scripts/scaffold_contract.py). These
+   validators deliberately restate the inventory to preserve their stdlib-only
+   package-validation boundary; consistency tests pin both mirrors to the
+   canonical table.
+4. Update the two intentionally pinned test inventories for the selected tier:
+   `TierSkillSetTests.EXPECTED_TIER_<N>` in
+   [`skills/scaffold-init/test_scaffold.py`](skills/scaffold-init/test_scaffold.py)
+   and `TierUpgradeTests.TIER<N>` in
+   [`skills/migrate/test_migrate.py`](skills/migrate/test_migrate.py).
+5. Add `evals/cases/<name>.json` with realistic positive and negative routing
+   prompts. [`scripts/test_skill_routing.py`](scripts/test_skill_routing.py)
+   enforces a one-to-one mapping between routable `SKILL.md` descriptions and
+   these case files, so the skill must arrive with routing coverage.
+6. Reconcile every product-facing inventory and count affected by the new
+   skill: [`docs/product-vision.md`](docs/product-vision.md),
+   [`README.md`](README.md),
+   [`skills/vision-elicitation/worked-example-jig.md`](skills/vision-elicitation/worked-example-jig.md),
+   and the Tier list in [`docs/memory/glossary.md`](docs/memory/glossary.md).
+   If the skill has a Python helper, also update the helper rosters in
+   [`CLAUDE.md`](CLAUDE.md) and [`AGENTS.md`](AGENTS.md). Check both counts and
+   enumerations; some prose mirrors are not fully protected by tests.
+7. Iterate with the fast wrapper:
+
+   ```bash
+   python3 scripts/run_tests.py
+   ```
+
+8. Regenerate both committed host packages, then run the final CI-equivalent
+   gate:
+
+   ```bash
+   python3 scripts/build_host_packages.py
+   python3 scripts/ci_check.py
+   ```
+
+   Commit the regenerated `hosts/` trees with the canonical source. The final
+   gate covers routing, tests, manifests, lint, and host-package drift.
+
 ## Versioning
 
 The plugin's published version lives in

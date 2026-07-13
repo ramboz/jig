@@ -357,36 +357,19 @@ Distinct from "the bootstrap paradox for self-enforcing hooks" above (that one i
 Provenance: slice 052-02 implementation + review, 2026-06-01.
 
 ## Adding a jig tier skill touches more hardcoded lists than `_TIER_SKILLS`
-Adding `security-review` to Tier 1 (slice 052-05) required updating **three** hardcoded skill lists — `_TIER_SKILLS["tier-1"]` (`skills/scaffold-init/scaffold.py`, the source of truth), `TierSkillSetTests.EXPECTED_TIER_1` (`skills/scaffold-init/test_scaffold.py`), and **`TierUpgradeTests.TIER1`** (`skills/migrate/test_migrate.py`, easy to miss because it lives in the *migrate* suite, not scaffold's) — plus **three doc sites**: `docs/product-vision.md` (the "7 Tier 0 + N Tier 1" count *and* the numbered skill list), `skills/vision-elicitation/worked-example-jig.md` (count + two separate Tier-1 enumerations, one pinned by `test_..._tier_line_in_sync`), and `README.md` ("N skills total" / "all N skills" counts). The tier-gated *copy* tests read `_TIER_SKILLS` directly so they don't need touching, but the two upgrade/inventory tests keep parallel hardcoded copies. Miss any one and either `TierSkillSetTests` / `TierUpgradeTests` or a doc-sync test fails.
+Adding `security-review` in slice 052-05 exposed the first hidden inventory and
+prose mirrors beyond the canonical tier table. Adding `bug-fix` in slice 058-06
+exposed two more stdlib-only validator mirrors plus helper rosters and
+enumerations that count-pinned tests could not fully protect. The recurring
+lesson is that a bundled skill changes a product surface, not just one registry.
 
-**Generalizable rule:** when adding a Tier-1 skill, the checklist is `_TIER_SKILLS` + `EXPECTED_TIER_1` + `TierUpgradeTests.TIER1` + product-vision (count + list) + worked-example-jig (count + 2 lists) + README (counts) + the CLAUDE.md Skills table row. Run the full suite — the consistency tests name the location you missed. (Related but narrower: "Hook-count callouts in docs drift on hook additions" above.)
+The canonical, current checklist now lives in
+[CONTRIBUTING § Contributing a bundled skill](../../CONTRIBUTING.md#contributing-a-bundled-skill).
+Keep the live flow there rather than duplicating it in this historical note.
 
-Provenance: slice 052-05 implementation + reconciliation, 2026-06-01.
+Provenance: slice 052-05 implementation + reconciliation, 2026-06-01; updated
+from slice 058-06 implementation + review, 2026-06-25.
 
-**Update (slice 058-06, 2026-06-25 — adding `bug-fix`):** the list has grown
-since 052-05. Two more **restated tier tables** now exist under `scripts/`,
-each pinned-equal to `scaffold._TIER_SKILLS` by a consistency test and each
-producing a hard failure if missed: `install_contract.EXPECTED_SKILLS`
-(`scripts/install_contract.py`, pinned by `test_install_contract`) and
-`scaffold_contract._TIER_SKILLS` (`scripts/scaffold_contract.py`, pinned by
-`test_scaffold_contract`). Two more **doc surfaces** drift silently (no test):
-`docs/memory/glossary.md` (Tier-1 "Built" list) and **`AGENTS.md`** — the
-`.py`-helper roster paragraph is mirrored line-for-line in *both* `CLAUDE.md`
-and `AGENTS.md`, so a skill with a helper must be added to both primers (the
-053-05 learning only named CLAUDE.md). So the **current full checklist** is:
-`scaffold._TIER_SKILLS` + `install_contract.EXPECTED_SKILLS` +
-`scaffold_contract._TIER_SKILLS` + `test_scaffold.EXPECTED_TIER_1` +
-`test_migrate.TIER1` + product-vision (count + numbered list) +
-worked-example-jig (count + 2 lists) + README (2 counts) + glossary (Tier-1
-list) + CLAUDE.md **and** AGENTS.md helper rosters + regenerate host packages
-(`build_host_packages.py` — the SKILL.md + any shipped worked-example/glossary
-edits change `hosts/`). The three `scripts/test_*contract` + `test_scaffold` +
-`test_migrate` consistency tests catch the code/test lists; the doc surfaces
-are caught only by the *count*-pinned tests (worked-example tier line,
-product-vision count line), so the glossary/AGENTS/README *enumerations* and
-the product-vision *numbered list* can still pass tests while being stale —
-the post-impl craft + arch reviewers caught exactly those two enumeration
-misses on 058-06.
 ## Scaffold doc templates render into two install shapes — `${CLAUDE_PLUGIN_ROOT}` paths break in scaffold mode
 The `templates/docs/*.md.template` + `CLAUDE.md.template` files render for BOTH
 install shapes: `--plugin-only` (machinery stays under the plugin root) and the
