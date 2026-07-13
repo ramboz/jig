@@ -7,7 +7,7 @@ Covers the plugin/release install contract as data + pure helpers:
     including relative-source-path enforcement.
   - AC #2: hook-command shape (`bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/...`),
     no bare names, and dangling-script-reference detection.
-  - AC #3: explicit expected skill set + excluded-path predicate.
+  - AC #3: exact public skill set + excluded-path predicate.
   - AC #4: every helper's diagnostics name the offending path/field and rule.
 
 Plus the two consistency tests the restate-with-pointer convention requires:
@@ -588,6 +588,30 @@ class PresenceHelperTests(unittest.TestCase):
         self.assertIn("skills/analyze", joined)
         self.assertIn("SKILL.md", joined)
 
+    def test_unregistered_public_skill_named_with_tier_rule(self):
+        self._seed_all_skills()
+        extra = self.tmp / "skills" / "unregistered"
+        extra.mkdir()
+        (extra / "SKILL.md").write_text("# x\n")
+
+        problems = install_contract.skill_contract_problems(self.tmp)
+
+        self.assertTrue(problems)
+        joined = " ".join(problems)
+        self.assertIn("skills/unregistered", joined)
+        self.assertIn("_TIER_SKILLS", joined)
+
+    def test_private_skill_infrastructure_is_not_public(self):
+        self._seed_all_skills()
+        private = self.tmp / "skills" / "_common"
+        private.mkdir()
+        (private / "SKILL.md").write_text("# internal fixture\n")
+
+        self.assertEqual(
+            install_contract.skill_contract_problems(self.tmp),
+            [],
+        )
+
     def test_missing_agents_empty_when_all_present(self):
         self._seed_all_agents()
         self.assertEqual(install_contract.missing_agents(self.tmp), [])
@@ -627,8 +651,11 @@ class RealRepoContractTests(unittest.TestCase):
             install_contract.validate_marketplace_manifest(data), []
         )
 
-    def test_real_repo_has_all_expected_skills(self):
-        self.assertEqual(install_contract.missing_skills(REPO_ROOT), [])
+    def test_real_repo_skill_set_matches_contract(self):
+        self.assertEqual(
+            install_contract.skill_contract_problems(REPO_ROOT),
+            [],
+        )
 
     def test_real_repo_has_all_required_agents(self):
         self.assertEqual(install_contract.missing_agents(REPO_ROOT), [])

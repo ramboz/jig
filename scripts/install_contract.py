@@ -590,6 +590,41 @@ def missing_skills(plugin_root: Path) -> list[str]:
     return problems
 
 
+def skill_contract_problems(plugin_root: Path) -> list[str]:
+    """Return diagnostics when the public skill set differs from the contract.
+
+    A public skill is a direct child of ``skills/`` with a ``SKILL.md`` whose
+    directory name does not start with ``_``. Private shared infrastructure
+    such as ``skills/_common`` is deliberately outside the tier inventory.
+
+    ``EXPECTED_SKILLS`` is pinned to the union of ``scaffold._TIER_SKILLS`` by
+    ``test_install_contract.py``. Checking both missing and unexpected names
+    therefore keeps plugin packaging and tier-gated scaffold copying on the
+    same exact public-skill set.
+    """
+    problems = missing_skills(plugin_root)
+    skills_dir = plugin_root / "skills"
+    if not skills_dir.is_dir():
+        return problems
+
+    expected = set(EXPECTED_SKILLS)
+    public = {
+        path.name
+        for path in skills_dir.iterdir()
+        if path.is_dir()
+        and not path.name.startswith("_")
+        and (path / "SKILL.md").is_file()
+    }
+    for skill in sorted(public - expected):
+        problems.append(
+            f"skills/{skill}: unexpected public skill; every "
+            "skills/*/SKILL.md must be registered in "
+            "skills/scaffold-init/scaffold.py::_TIER_SKILLS and mirrored "
+            "in install_contract.EXPECTED_SKILLS"
+        )
+    return problems
+
+
 def missing_agents(plugin_root: Path) -> list[str]:
     """Return diagnostics for any REQUIRED agent missing under
     `plugin_root/agents/`. Empty == all present (AC #4-style messages)."""
@@ -626,7 +661,8 @@ def validate_claude_package(plugin_root: Path) -> list[str]:
     Requires (AC #5):
       - `.claude-plugin/plugin.json` present and satisfying the plugin
         manifest contract;
-      - every EXPECTED skill and REQUIRED agent present;
+      - the public skill set exactly matches EXPECTED_SKILLS and every
+        REQUIRED agent is present;
       - NO `.claude-plugin/marketplace.json` (the remote-install pointer lives
         at the repo root, not inside the package);
       - NO `.codex-plugin/` content (the Claude package is runtime-only and
@@ -665,6 +701,6 @@ def validate_claude_package(plugin_root: Path) -> list[str]:
             "(the package is host-specific and runtime-only)"
         )
 
-    problems.extend(missing_skills(plugin_root))
+    problems.extend(skill_contract_problems(plugin_root))
     problems.extend(missing_agents(plugin_root))
     return problems

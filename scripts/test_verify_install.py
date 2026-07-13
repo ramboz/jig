@@ -433,8 +433,8 @@ class HookScriptDriftConsistencyTests(unittest.TestCase):
 
 
 class PluginModeSkillContractTests(unittest.TestCase):
-    """AC #3 — plugin-mode skill check asserts the FULL expected skill set,
-    not just 'at least one'. AC #4 — a missing skill is named."""
+    """AC #3 — plugin-mode skill check asserts the exact public skill set,
+    not just 'at least one'. AC #4 — contract mismatches are named."""
 
     def test_full_skill_set_passes(self):
         import tempfile
@@ -456,6 +456,21 @@ class PluginModeSkillContractTests(unittest.TestCase):
             self.assertFalse(passed)
             self.assertIn("analyze", msg)
             self.assertIn("SKILL.md", msg)
+
+    def test_unregistered_public_skill_fails_and_is_named(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = _make_fake_plugin_root(Path(td))
+            extra = root / "skills" / "unregistered"
+            extra.mkdir()
+            (extra / "SKILL.md").write_text("# unexpected\n")
+
+            passed, msg = verify_install.check_active_skills_present(root)
+
+            self.assertFalse(passed)
+            self.assertIn("skills/unregistered", msg)
+            self.assertIn("_TIER_SKILLS", msg)
 
     def test_real_repo_has_full_skill_set(self):
         passed, msg = verify_install.check_active_skills_present(REPO_ROOT)
