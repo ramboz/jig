@@ -110,19 +110,21 @@ def check_agents_present(plugin_root: Path) -> CheckResult:
 
 
 def check_active_skills_present(plugin_root: Path) -> CheckResult:
-    """Every skill in the install contract has a SKILL.md under skills/.
+    """The public skills under skills/ exactly match the install contract.
 
-    Slice 047-01 (AC #3): tightened from "at least one skill" to the full
-    declared set (`install_contract.EXPECTED_SKILLS`). Any missing skill is
-    named with the expected rule (AC #4)."""
+    Slice 047-01 (AC #3) tightened "at least one skill" to the full declared
+    set (`install_contract.EXPECTED_SKILLS`). Bug 007 makes that contract
+    exact: missing and unexpected public skills are named with the expected
+    rule, while private `_...` infrastructure remains outside the set."""
     skills_dir = plugin_root / "skills"
     if not skills_dir.is_dir():
         return False, f"skills/ dir missing at {skills_dir}"
-    missing = install_contract.missing_skills(plugin_root)
-    if missing:
-        return False, "; ".join(missing)
+    problems = install_contract.skill_contract_problems(plugin_root)
+    if problems:
+        return False, "; ".join(problems)
     return True, (
-        f"all {len(install_contract.EXPECTED_SKILLS)} contract skills present"
+        f"public skill set matches all "
+        f"{len(install_contract.EXPECTED_SKILLS)} contract skills"
     )
 
 

@@ -227,7 +227,7 @@ def _validate_generated_package(plugin_dir: Path, marketplace_root: Path) -> Smo
         )
         problems.extend(_validate_codex_hooks(hooks))
 
-    problems.extend(install_contract.missing_skills(plugin_dir))
+    problems.extend(install_contract.skill_contract_problems(plugin_dir))
     problems.extend(_validate_codex_marketplace(marketplace_root, plugin_dir))
 
     if problems:
