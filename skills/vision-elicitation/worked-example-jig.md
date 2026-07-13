@@ -187,7 +187,7 @@ template drops the article for terseness.
 | Hand-rolled team CLAUDE.md | Tailored to one team | Expensive, non-portable |
 
 **Where jig fits:** between atomic skills and maximalist packs — a
-fixed-size opinionated workflow layer (7 Tier 0 + 12 Tier 1 skills,
+fixed-size opinionated workflow layer (7 Tier 0 + 13 Tier 1 skills,
 3 subagents) that ships with templates, hooks, and helpers.
 ```
 

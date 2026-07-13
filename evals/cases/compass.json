@@ -1,0 +1,14 @@
+{
+  "skill_name": "compass",
+  "trigger": {
+    "positive": [
+      { "prompt": "What's next on this project, and where do things stand?", "top_k": 3 },
+      { "prompt": "I've been away a few days — what should I work on next, and what's blocked?", "top_k": 3 },
+      { "prompt": "Give me a grounded status briefing of where we are and what to pick up", "top_k": 3 }
+    ],
+    "negative": [
+      { "prompt": "Fix this bug — diagnose the root cause before writing the fix", "owner": "bug-fix" },
+      { "prompt": "Split this new feature into vertical slices and drive the spec lifecycle", "owner": "spec-workflow" }
+    ]
+  }
+}

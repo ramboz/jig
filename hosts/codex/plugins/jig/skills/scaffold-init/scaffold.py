@@ -88,6 +88,7 @@ _TIER_SKILLS = {
         "explain",  # spec 065-03 — on-demand vocabulary/artifact explainer
         "bug-fix",  # spec 058 / ADR-0016 — proportional teeth-gated bug lifecycle
         "reframe",  # spec 067 / ADR-0024 — re-baseline the corpus on a moved reference
+        "compass",  # read-only "what's next" briefing; one append-only run-log write
     ],
     "tier-2": [],  # no Tier 2 skills land in jig yet
 }

@@ -81,7 +81,7 @@ not three "Deferred — no signal" stanzas.
 | **claude-code-templates-style boilerplate** | Solves day-1 layout | Static — no living workflow, no reviewer subagent, no spec lifecycle |
 
 **Where jig fits:** between "atomic skills" and "maximalist packs" —
-a fixed-size opinionated workflow layer (7 Tier 0 + **12** Tier 1
+a fixed-size opinionated workflow layer (7 Tier 0 + **13** Tier 1
 skills, 3 subagents) that ships with the templates, hooks, and helpers
 to enforce it, and that defers to richer user-installed skills where
 they exist.
@@ -122,6 +122,7 @@ drivers once Tier 0 is in place.
 17. **`explain`** — on-demand vocabulary/artifact explainer (third consumer of the shipped lexicon): term mode defines a single jig term from the merged lexicon (shipped + project-glossary overlay) and flags an absent term rather than inventing one; artifact mode produces a junior-grade walkthrough of a spec/ADR, auto-pulling the refs it links. Ephemeral (chat-only), judgment-only/no-`.py`; defers to a richer installed plain-language/onboarding/walkthrough skill (per spec 065)
 18. **`bug-fix`** — proportional, teeth-gated bug-fix workflow (peer of `spec-workflow`, owns its orchestration) backed by `bug.py`: diagnose-before-fix gate (≥2 hypotheses) + red→green teeth that witness the regression test fail before the fix and pass after, a durable `docs/bugs/NNN-slug.md` record + board, and de-escalation (trivial bugs bow out to `tdd-loop`). Reuses the ADR-0014 evidence gate; only the craft (`pr-review`) and conditional security (`security-review`) passes defer (per [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md))
 19. **`reframe`** — re-baseline the corpus when a load-bearing reference moves (a design system, vendor / API contract, test infra, compliance regime, target platform, or product-positioning / strategic-vision shift): reads the accepted corpus against the new reference and drafts a **keystone reframe-ADR** (new reference authoritative, old premise superseded) + a re-baselining manifest assigning every affected artifact a disposition + a two-level coverage floor; a competent session then executes through the existing ADR / spec lifecycles. A lightweight correction *capability over the spine* (not a gated lifecycle member); judgment-only, no `.py`; defers to a richer installed re-baselining skill (per spec 067 / [ADR-0024](decisions/adr-0024-reference-reframe.md))
+20. **`compass`** — the calm "what's next" briefing: surveys the project's own artifacts (spec status boards + slice STATUS markers, `Proposed` ADRs, DEFERRED slices and their triggers, refinement-todo, release plans, the inbox, standalone bugs) and answers in one fixed, readable shape — an honest headline, titled sections, a single recommendation, and an offer to hand off to the skill that owns the work. Read-only about lifecycle/spec state; its one write is an append-only run log at `docs/status/compass-history.jsonl` so runs become a trackable data point over time. Judgment-only, no `.py`; defers to a richer installed "status / what's next" skill
 
 ### Tier 2 — opt-in by signal (deferred until pain reported)
 
@@ -130,9 +131,9 @@ user signal yet. Tier 2 stays empty until pain is reported.
 
 ### MVP scope (already shipped)
 
-Tier 0 + Tier 1 are both **complete** — all 19 skills ship today
+Tier 0 + Tier 1 are both **complete** — all 20 skills ship today
 (the original floor plus later Tier 1 additions: `code-health`,
-`explain`, `bug-fix`, `reframe`, and the rest). See [docs/specs/README.md](specs/README.md)
+`explain`, `bug-fix`, `reframe`, `compass`, and the rest). See [docs/specs/README.md](specs/README.md)
 for the live status board.
 
 ### Out of scope (deliberately)

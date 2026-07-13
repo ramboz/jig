@@ -70,6 +70,7 @@ EXPECTED_SKILLS: tuple[str, ...] = (
     "explain",
     "bug-fix",
     "reframe",
+    "compass",
 )
 
 

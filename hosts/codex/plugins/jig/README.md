@@ -32,7 +32,7 @@ jig installs a focused, opinionated workflow layer into your project:
 - **Deterministic gates** — hooks enforce what *must* happen; skills carry
   judgment.
 
-A fixed, opinionated set — **7 Tier 0 skills** at the floor and 12 more on by
+A fixed, opinionated set — **7 Tier 0 skills** at the floor and 13 more on by
 default (Tier 1) — not a hundred-skill marketplace. For the full picture, see
 [product-vision.md](docs/product-vision.md) (vision, target users, principles)
 and [architecture.md](docs/architecture.md) (mechanics).
@@ -221,7 +221,7 @@ is owned — lives in
 
 ## Status
 
-Tier 0 and Tier 1 are complete — all 19 skills, 3 subagents, and the jig hooks
+Tier 0 and Tier 1 are complete — all 20 skills, 3 subagents, and the jig hooks
 ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
 state, see the **[status board](docs/specs/README.md)**.
 
