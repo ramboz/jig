@@ -1133,6 +1133,29 @@ def _branch_freshness_warning(project_dir: Path) -> str:
     )
 
 
+def _canonical_transition_spec_path(path: Path) -> Path:
+    """Resolve a file-per-slice input to its canonical spec overview.
+
+    `transition` historically documented a `spec.md` first argument, but the
+    shared dual-layout slice loader also accepts a sibling `slice-*.md` path.
+    Normalize that permissive input once so evidence checks, rollups, and all
+    other transition concerns agree on the overview's identity. A recognized
+    slice path without its overview is an invalid file-per-slice layout and
+    must fail before any mutation.
+    """
+    path = Path(path)
+    if path.match("slice-*.md"):
+        if not path.is_file():
+            raise WorkflowError(f"slice file not found: {path}")
+        overview = path.with_name("spec.md")
+        if not overview.is_file():
+            raise WorkflowError(
+                f"slice file requires a sibling spec.md overview: {path}"
+            )
+        return overview
+    return path
+
+
 def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                push: bool = False, pr_mode: bool = False,
                release: bool = False, reason: str | None = None) -> str:
@@ -1169,6 +1192,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         raise WorkflowError(
             f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
         )
+    spec_md = _canonical_transition_spec_path(spec_md)
     if not spec_md.is_file():
         raise WorkflowError(f"spec file not found: {spec_md}")
 
@@ -4023,7 +4047,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     pt = sub.add_parser("transition", help="transition a slice's STATUS marker")
-    pt.add_argument("spec", help="path to spec.md")
+    pt.add_argument(
+        "spec",
+        help="path to spec.md or a sibling slice-*.md file",
+    )
     pt.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pt.add_argument("status", help=f"new status; one of: {', '.join(VALID_STATUSES)}")
     # Slice 049-01: slice-claim flags (meaningful on the IN_PROGRESS

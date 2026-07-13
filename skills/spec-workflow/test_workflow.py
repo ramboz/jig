@@ -106,6 +106,78 @@ class TransitionTests(unittest.TestCase):
         content = self.spec.read_text()
         self.assertIn("**STATUS: DONE**", content)
 
+    def test_slice_path_transition_is_not_overwritten_by_spec_rollup(self):
+        """Issue #86: a slice-file input must resolve its sibling overview.
+
+        Before the fix, the requested status was written to the slice and then
+        `_write_spec_rollup()` treated that same slice path as `spec.md`,
+        overwriting `status:` back to the computed spec rollup. The
+        `last_verified` stamp survived because the rollup only writes status.
+        """
+        self.spec.write_text(
+            "---\nstatus: IN_PROGRESS\n---\n\n# Spec 002\n"
+        )
+        target = self.spec.parent / "slice-01-add-and-view.md"
+        sibling = self.spec.parent / "slice-02-more.md"
+        target.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 002-01 — add and view\n\nBody.\n"
+        )
+        sibling.write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 002-02 — more\n\nBody.\n"
+        )
+
+        expected_old = "IN_PROGRESS"
+        for new_status in ("REVIEWED", "RECONCILED", "DONE"):
+            result = run_workflow(
+                "transition", str(target), "002-01", new_status,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"failed at {new_status}: {result.stderr}",
+            )
+            self.assertIn(
+                f"{expected_old} → {new_status}", result.stdout,
+            )
+            self.assertRegex(
+                target.read_text(),
+                rf"(?m)^status:\s*{new_status}\s*$",
+            )
+            self.assertRegex(
+                self.spec.read_text(),
+                r"(?m)^status:\s*IN_PROGRESS\s*$",
+            )
+            expected_old = new_status
+
+        today = __import__("datetime").date.today().isoformat()
+        self.assertIn(f"last_verified: {today}", target.read_text())
+        self.assertRegex(
+            sibling.read_text(), r"(?m)^status:\s*DRAFT\s*$",
+        )
+
+    def test_missing_slice_path_is_rejected_before_fragment_lookup(self):
+        """A typo in the path must not fall through to a real sibling slice."""
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 002\n"
+        )
+        target = self.spec.parent / "slice-01-real.md"
+        target.write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 002-01 — real\n\nBody.\n"
+        )
+        missing = self.spec.parent / "slice-99-typo.md"
+
+        result = run_workflow(
+            "transition", str(missing), "002-01", "IN_PROGRESS",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not found", result.stderr.lower())
+        self.assertRegex(
+            target.read_text(), r"(?m)^status:\s*DRAFT\s*$",
+        )
+
     def test_transition_refuses_invalid_status(self):
         write_synthetic_spec(self.spec, [("001-01 alpha", "DRAFT")])
         result = run_workflow("transition", str(self.spec), "001-01", "BOGUS")

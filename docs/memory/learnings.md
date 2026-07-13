@@ -566,3 +566,6 @@ verified facts in a `## Current state (verified)` section and keep `## Assumptio
 a bare `None.` when there are no *unverified* load-bearing claims. Lesson: the
 risk-gate is for **unverified** assumptions only; verified facts are grounding,
 not assumptions, and belong elsewhere or the trigger over-fires.
+
+## Bug 006: normalize permissive path aliases without erasing validation
+When a command accepts a canonical overview path but child lookup also makes a child-file path appear valid, normalize once at the command boundary before downstream writes. Validate the original caller-supplied path before normalization; otherwise a typo can be reinterpreted and mutate a different artifact selected by a secondary fragment. Test both the successful alias and fail-before-mutation typo path.
