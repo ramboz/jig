@@ -6,4 +6,4 @@
 - [x] Point the historical learning at the contributor-facing runbook.
 - [x] Run focused and full verification.
 - [x] Complete compliance, craft, and reconciliation reviews.
-- [ ] Reconcile lifecycle artifacts and open the PR.
+- [x] Reconcile lifecycle artifacts and prepare the PR.
