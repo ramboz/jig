@@ -146,7 +146,12 @@ def _validate_output_dir(source_root: Path, output_dir: Path) -> tuple[bool, str
     return True, ""
 
 
-def build(source_root: Path, output_dir: Path, out=None) -> int:
+def build(
+    source_root: Path,
+    output_dir: Path,
+    out=None,
+    trace: dict[str, object] | None = None,
+) -> int:
     """Build the runtime-only Claude package at `output_dir` from `source_root`.
 
     Returns 0 on success, 1 on failure (missing manifest / unsafe output)."""
@@ -168,6 +173,13 @@ def build(source_root: Path, output_dir: Path, out=None) -> int:
     _warn_missing_optional_files(source_root, out)
 
     entries = _iter_package_files(source_root)
+    if trace is not None:
+        trace["manifest_enumerated"] = (
+            Path(".claude-plugin/plugin.json") in entries
+        )
+        trace["include_roots"] = _INCLUDE_ROOTS
+        trace["builder_module"] = __file__
+        trace["exclusion_module"] = build_release_zip.__file__
 
     # Atomic-enough replace for a repeatable build: wipe a stale tree fully so
     # it is replaced, not merged (mirrors build_codex_plugin).

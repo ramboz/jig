@@ -10,11 +10,14 @@ assertion, and CI enforcement.
 """
 
 import io
+import os
+import re
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -104,12 +107,147 @@ class DriftCheckTests(unittest.TestCase):
         return hosts
 
     def test_check_passes_when_in_sync(self):
-        hosts = self._seed_committed()
-        out = io.StringIO()
-        code = build_host_packages.check_drift(
-            source_root=REPO_ROOT, hosts_root=hosts, out=out
+        diagnostics_enabled = (
+            os.environ.get(build_host_packages.DIAGNOSTICS_ENV) == "1"
         )
-        self.assertEqual(code, 0, out.getvalue())
+        source_manifest = REPO_ROOT / build_host_packages.CLAUDE_MANIFEST_REL
+        source_before_seed = (
+            build_host_packages._file_diagnostic(source_manifest)
+            if diagnostics_enabled
+            else ""
+        )
+        hosts = self._seed_committed()
+        source_between_builds = (
+            build_host_packages._file_diagnostic(source_manifest)
+            if diagnostics_enabled
+            else ""
+        )
+        out = io.StringIO()
+        if diagnostics_enabled:
+            with patch.dict(
+                os.environ,
+                {build_host_packages.PRESERVE_SCRATCH_ENV: "1"},
+            ):
+                code = build_host_packages.check_drift(
+                    source_root=REPO_ROOT, hosts_root=hosts, out=out
+                )
+        else:
+            code = build_host_packages.check_drift(
+                source_root=REPO_ROOT, hosts_root=hosts, out=out
+            )
+        message = out.getvalue()
+        if code != 0 and diagnostics_enabled:
+            message += (
+                "Seed-build diagnostics:\n"
+                f"  source-before-seed: {source_before_seed}\n"
+                f"  source-between-builds: {source_between_builds}\n"
+            )
+        self.assertEqual(code, 0, message)
+
+    def test_diagnostic_mode_preserves_and_describes_manifest_omission(self):
+        hosts = self._seed_committed()
+        original_iter = build_host_packages.build_claude_plugin._iter_package_files
+
+        def omit_manifest(source_root):
+            return [
+                rel
+                for rel in original_iter(source_root)
+                if rel.as_posix() != ".claude-plugin/plugin.json"
+            ]
+
+        out = io.StringIO()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "JIG_HOST_DRIFT_DIAGNOSTICS": "1",
+                    "JIG_HOST_DRIFT_PRESERVE_SCRATCH": "1",
+                },
+            ),
+            patch.object(
+                build_host_packages.build_claude_plugin,
+                "_iter_package_files",
+                side_effect=omit_manifest,
+            ),
+        ):
+            code = build_host_packages.check_drift(
+                source_root=REPO_ROOT, hosts_root=hosts, out=out
+            )
+
+        self.assertEqual(code, 1)
+        log = out.getvalue()
+        self.assertIn("Host drift diagnostics:", log)
+        self.assertRegex(
+            log,
+            r"source-before: present size=\d+ sha256=[0-9a-f]{64} mtime_ns=\d+",
+        )
+        self.assertRegex(
+            log,
+            r"source-after: present size=\d+ sha256=[0-9a-f]{64} mtime_ns=\d+",
+        )
+        self.assertIn("scratch: absent", log)
+        self.assertRegex(
+            log,
+            r"committed: present size=\d+ sha256=[0-9a-f]{64} mtime_ns=\d+",
+        )
+        self.assertIn("claude-manifest-enumerated: no", log)
+
+        match = re.search(r"scratch-preserved: (.+)", log)
+        self.assertIsNotNone(match, log)
+        scratch = Path(match.group(1).strip())
+        try:
+            self.assertTrue(scratch.is_dir())
+            self.assertFalse(
+                (scratch / "claude" / ".claude-plugin" / "plugin.json").exists()
+            )
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    def test_diagnostic_mode_cleans_scratch_without_preserve_opt_in(self):
+        hosts = self._seed_committed()
+        original_iter = build_host_packages.build_claude_plugin._iter_package_files
+        scratch = self.tmp / "controlled-scratch"
+
+        def omit_manifest(source_root):
+            return [
+                rel
+                for rel in original_iter(source_root)
+                if rel.as_posix() != ".claude-plugin/plugin.json"
+            ]
+
+        def make_scratch(prefix):
+            self.assertEqual(prefix, "jig-host-drift-")
+            scratch.mkdir()
+            return str(scratch)
+
+        out = io.StringIO()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "JIG_HOST_DRIFT_DIAGNOSTICS": "1",
+                    "JIG_HOST_DRIFT_PRESERVE_SCRATCH": "0",
+                },
+            ),
+            patch.object(
+                build_host_packages.build_claude_plugin,
+                "_iter_package_files",
+                side_effect=omit_manifest,
+            ),
+            patch.object(
+                build_host_packages.tempfile,
+                "mkdtemp",
+                side_effect=make_scratch,
+            ),
+        ):
+            code = build_host_packages.check_drift(
+                source_root=REPO_ROOT, hosts_root=hosts, out=out
+            )
+
+        self.assertEqual(code, 1)
+        self.assertIn("Host drift diagnostics:", out.getvalue())
+        self.assertIn("scratch-preserved: no", out.getvalue())
+        self.assertFalse(scratch.exists())
 
     def test_check_does_not_mutate_committed_tree(self):
         hosts = self._seed_committed()

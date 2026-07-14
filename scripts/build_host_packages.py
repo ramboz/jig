@@ -32,6 +32,8 @@ Default hosts root: <source-root>/hosts
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 import shutil
 import sys
 import tempfile
@@ -45,7 +47,12 @@ import build_claude_plugin  # noqa: E402
 import build_codex_plugin  # noqa: E402
 
 
-def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
+def build_all(
+    source_root: Path,
+    hosts_root: Path,
+    out=None,
+    trace: dict[str, object] | None = None,
+) -> int:
     """Build the Claude and Codex committed packages under `hosts_root`.
 
     Returns 0 only if BOTH builders succeed; the first non-zero builder exit
@@ -59,8 +66,16 @@ def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
     claude_out = hosts_root / "claude"
     codex_out = hosts_root / "codex" / "plugins" / "jig"
 
+    claude_trace: dict[str, object] | None = None
+    if trace is not None:
+        claude_trace = {}
+        trace["claude"] = claude_trace
+
     claude_code = build_claude_plugin.build(
-        source_root=source_root, output_dir=claude_out, out=out
+        source_root=source_root,
+        output_dir=claude_out,
+        out=out,
+        trace=claude_trace,
     )
     codex_code = build_codex_plugin.build(
         source_root=source_root, output_dir=codex_out
@@ -74,6 +89,9 @@ def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
 
 
 REGEN_COMMAND = "python3 scripts/build_host_packages.py"
+DIAGNOSTICS_ENV = "JIG_HOST_DRIFT_DIAGNOSTICS"
+PRESERVE_SCRATCH_ENV = "JIG_HOST_DRIFT_PRESERVE_SCRATCH"
+CLAUDE_MANIFEST_REL = Path(".claude-plugin/plugin.json")
 
 
 def _is_ephemeral(rel: Path) -> bool:
@@ -117,6 +135,59 @@ def _diff_packages(expected_root: Path, committed_root: Path) -> list[str]:
     return sorted(drifted)
 
 
+def _file_diagnostic(path: Path) -> str:
+    """Return presence + stable metadata without exposing file contents."""
+    try:
+        data = path.read_bytes()
+        stat = path.stat()
+    except FileNotFoundError:
+        return "absent"
+    except OSError as exc:
+        return f"error={type(exc).__name__}: {exc}"
+    return (
+        f"present size={len(data)} sha256={hashlib.sha256(data).hexdigest()} "
+        f"mtime_ns={stat.st_mtime_ns}"
+    )
+
+
+def _write_diagnostics(
+    *,
+    out,
+    source_before: str,
+    source_root: Path,
+    scratch: Path,
+    hosts_root: Path,
+    trace: dict[str, object],
+    scratch_preserved: bool,
+) -> None:
+    claude_trace = trace.get("claude")
+    claude = claude_trace if isinstance(claude_trace, dict) else {}
+    enumerated = "yes" if claude.get("manifest_enumerated") is True else "no"
+    roots = claude.get("include_roots", ())
+    roots_text = ",".join(str(root) for root in roots) if isinstance(roots, tuple) else ""
+
+    out.write("Host drift diagnostics:\n")
+    out.write(f"  source-before: {source_before}\n")
+    out.write(
+        "  source-after: "
+        f"{_file_diagnostic(source_root / CLAUDE_MANIFEST_REL)}\n"
+    )
+    out.write(
+        "  scratch: "
+        f"{_file_diagnostic(scratch / 'claude' / CLAUDE_MANIFEST_REL)}\n"
+    )
+    out.write(
+        "  committed: "
+        f"{_file_diagnostic(hosts_root / 'claude' / CLAUDE_MANIFEST_REL)}\n"
+    )
+    out.write(f"  claude-manifest-enumerated: {enumerated}\n")
+    out.write(f"  claude-include-roots: {roots_text}\n")
+    out.write(f"  claude-builder-module: {claude.get('builder_module', '')}\n")
+    out.write(f"  claude-exclusion-module: {claude.get('exclusion_module', '')}\n")
+    preserved_value = str(scratch) if scratch_preserved else "no"
+    out.write(f"  scratch-preserved: {preserved_value}\n")
+
+
 def check_drift(source_root: Path, hosts_root: Path, out=None) -> int:
     """Regenerate both packages into a scratch dir and diff against the
     committed `hosts_root`. Returns 0 when in sync; 1 with an actionable
@@ -128,13 +199,29 @@ def check_drift(source_root: Path, hosts_root: Path, out=None) -> int:
         out = sys.stdout
     source_root = source_root.resolve()
     hosts_root = hosts_root.resolve()
+    diagnostics_enabled = os.environ.get(DIAGNOSTICS_ENV) == "1"
+    preserve_requested = (
+        diagnostics_enabled and os.environ.get(PRESERVE_SCRATCH_ENV) == "1"
+    )
+    source_before = (
+        _file_diagnostic(source_root / CLAUDE_MANIFEST_REL)
+        if diagnostics_enabled
+        else ""
+    )
+    trace: dict[str, object] = {}
 
     scratch = Path(tempfile.mkdtemp(prefix="jig-host-drift-"))
+    preserve_scratch = False
     try:
         # Swallow the builders' progress chatter — the drift summary is the
         # only signal a `--check` caller (CI, contributors) needs.
         sink = type("_Sink", (), {"write": staticmethod(lambda *_a, **_k: None)})()
-        code = build_all(source_root=source_root, hosts_root=scratch, out=sink)
+        code = build_all(
+            source_root=source_root,
+            hosts_root=scratch,
+            out=sink,
+            trace=trace if diagnostics_enabled else None,
+        )
         if code != 0:
             out.write(
                 "ERROR: could not regenerate host packages for the drift "
@@ -158,9 +245,21 @@ def check_drift(source_root: Path, hosts_root: Path, out=None) -> int:
             f"    {REGEN_COMMAND}\n"
             "    git add hosts/\n"
         )
+        if diagnostics_enabled:
+            preserve_scratch = preserve_requested
+            _write_diagnostics(
+                out=out,
+                source_before=source_before,
+                source_root=source_root,
+                scratch=scratch,
+                hosts_root=hosts_root,
+                trace=trace,
+                scratch_preserved=preserve_scratch,
+            )
         return 1
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        if not preserve_scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _build_parser() -> argparse.ArgumentParser:
