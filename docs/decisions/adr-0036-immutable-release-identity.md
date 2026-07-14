@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: []
-last_verified:
+last_verified: 2026-07-14
 frame_review: true
 ---
 
@@ -9,7 +9,7 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-07-14)
+Accepted (2026-07-14)
 
 ## Context
 

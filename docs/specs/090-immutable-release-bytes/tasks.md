@@ -20,7 +20,7 @@
 - [x] Draft spec 090 and SPIDR decomposition.
 - [x] Draft ADR-0036.
 - [x] Run ADR frame critique and record the passing evidence.
-- [ ] Accept ADR-0036 after maintainer approval.
+- [x] Accept ADR-0036 after maintainer approval.
 - [ ] Obtain maintainer approval for the GitHub immutable-release setting.
 - [ ] Review the spec and transition 090-01 to `READY_FOR_IMPLEMENTATION`.
 
