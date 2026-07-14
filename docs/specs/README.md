@@ -286,6 +286,7 @@
 | [087-narrow-first-review](087-narrow-first-review/spec.md) | 087-01 — investigation guidance in code-review prompts + reviewer agent | **DONE** |  |
 | [088-project-orientation](088-project-orientation/spec.md) | 088-01 — computed orientation at project pickup | **DONE** |  |
 | [089-contributing-bundled-skills](089-contributing-bundled-skills/spec.md) | 089-01 — bundled-skill contributor runbook | **DONE** |  |
+| [090-immutable-release-bytes](090-immutable-release-bytes/spec.md) | 090-01 — immutable stable-release contract | DRAFT |  |
 
 ## Deferred slices
 
