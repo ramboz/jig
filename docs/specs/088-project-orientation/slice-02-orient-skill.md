@@ -25,8 +25,6 @@ the `workflow.py orient` command shipped by slice 088-01.
   `workflow.py orient --project-dir .` (088-01, DONE).
 - ✅ The Tier-1 registration surface is known (`_TIER_SKILLS`, install/scaffold
   contracts, tier tests, routing eval, product prose, host packages).
-- ✅ jig's per-checkout runtime dir `.jig/` is an established home for gitignored,
-  non-tracked local state (e.g. `.jig/semantic-index-events.jsonl`).
 
 **Acceptance Criteria:**
 

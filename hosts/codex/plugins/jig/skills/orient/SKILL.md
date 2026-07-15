@@ -1,20 +1,18 @@
 ---
 name: orient
 description: >-
-  Project-orientation briefing for a spec-driven repo (jig/servo/shaper). On a
-  deliberate step-back — a session pickup, coming back after time away, or an
-  explicit `/jig:orient` — it answers "where does the whole project stand, and
-  what should I pick up next?" in one readable shape (headline, titled sections,
-  one recommendation, a hand-off). Use for project-level orientation: "orient me
-  to this project", "catch me up on where the whole project stands, the big
-  picture, and one thing to start". Starts from the `workflow.py orient` headline,
-  then layers judgment: Proposed ADRs, DEFERRED triggers, refinement-todo, release
-  plans, the inbox, the bug board. Read-only — writes nothing, rendering to stdout
-  (a scheduled job or dashboard can capture it). Hands off to jig/servo/shaper
-  skills.
-  Not for a mid-implementation question about the current slice ("what's next?",
-  "what's blocking this test?") — that continues the work, not a project-wide
-  rescan; or non-code projects (use `studio:project-desk`).
+  Orient a spec-driven jig/servo/shaper repository with a read-only, project-wide
+  briefing: start from the `workflow.py orient` headline, then survey Proposed
+  ADRs, DEFERRED triggers, refinement items, release plans, the inbox, and the bug
+  board; render one readable headline, titled sections, one recommendation, and an
+  owning-skill handoff. Use when the user invokes `/jig:orient` or explicitly asks
+  for a whole-project session pickup, a return-after-time-away briefing, the overall
+  project status or big picture, or what to pick up next across the repository. Do
+  not use for mid-implementation questions about the current slice such as "what's
+  next?" or "what's blocking this test?"; those continue current work rather than
+  requesting a project-wide rescan. Also do not use for non-code projects; use
+  `studio:project-desk`. Never write files or lifecycle state; scheduled jobs and
+  dashboards may capture stdout.
 ---
 
 # Orient
@@ -244,3 +242,12 @@ Name the handoff in the offer; let the user green-light it.
   to *say* the truth, never to *become* it.
 - **Adapt the sections to the project.** The order is fixed; the *presence* of each section
   is not. Show only what's real.
+
+## Gotchas
+
+- Resolve `layout.docs_root` before looking for specs, decisions, bugs, the inbox, or
+  releases; `docs_root="."` collapses the docs layer to the repository root.
+- Treat a bare mid-flow "what's next?" as a continuation of the current slice, not a
+  request to rescan the whole project.
+- Keep Orient zero-write. Scheduled jobs and dashboards may capture its stdout, but the
+  skill itself never creates a cache, history log, or lifecycle mutation.
