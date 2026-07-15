@@ -1,32 +1,20 @@
 ---
 name: orient
 description: >-
-  Orient yourself in a spec-driven code project (run with jig/servo/shaper) — a
-  project-wide "where does the whole project stand, and what should I pick up
-  next?" briefing for a deliberate step-back moment: a session pickup, coming
-  back to a repo after time away, or an explicit `/jig:orient`. Use when the user
-  runs `/jig:orient` or asks for the lay of the land across the whole project —
-  "orient me to this project", "catch me up on where things stand overall", "I've
-  been away a while, what's the big picture and where do I jump back in", "give me
-  a grounded project briefing and one thing to start on". It takes stock of the
-  entire project, not the slice in front of you. Starts from the deterministic
-  headline `workflow.py orient` prints (project-state classification, active-spec
-  rollup, current focus), then layers a judgment survey on top — DEFERRED slices
-  and their triggers, Proposed ADRs, servo's refinement-todo, shaper's release
-  plans, the inbox, and standalone bugs — and renders an honest headline, titled
-  sections, one recommendation, and an offer to start. Entirely read-only: it
-  never transitions lifecycle state, edits specs, accepts ADRs, or writes any
-  file — it just renders the briefing to chat/stdout, which a scheduled job or a
-  dashboard can capture. Hands off to jig/servo/shaper skills to actually do the
-  work.
-  Do not use for: a mid-implementation question about the slice in front of you —
-  "what's next?", "what's blocking this test?", "what's left on this slice?" —
-  which continues the current work rather than requesting a whole-project rescan;
-  non-code studio projects (defer to `studio:project-desk`); spec authoring or
-  lifecycle transitions (use `/jig:spec-workflow`); persisting a new glossary
-  term (use `/jig:memory-sync`). Defers to any other installed skill whose
-  description identifies it as handling project orientation or session-pickup
-  briefings.
+  Project-orientation briefing for a spec-driven repo (jig/servo/shaper). On a
+  deliberate step-back — a session pickup, coming back after time away, or an
+  explicit `/jig:orient` — it answers "where does the whole project stand, and
+  what should I pick up next?" in one readable shape (headline, titled sections,
+  one recommendation, a hand-off). Use for project-level orientation: "orient me
+  to this project", "catch me up on where the whole project stands, the big
+  picture, and one thing to start". Starts from the `workflow.py orient` headline,
+  then layers judgment: Proposed ADRs, DEFERRED triggers, refinement-todo, release
+  plans, the inbox, the bug board. Read-only — writes nothing, rendering to stdout
+  (a scheduled job or dashboard can capture it). Hands off to jig/servo/shaper
+  skills.
+  Not for a mid-implementation question about the current slice ("what's next?",
+  "what's blocking this test?") — that continues the work, not a project-wide
+  rescan; or non-code projects (use `studio:project-desk`).
 ---
 
 # Orient
