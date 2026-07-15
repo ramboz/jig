@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow
 use_cases: []
 ---
@@ -7,8 +7,6 @@ use_cases: []
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on first use and link the term to docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "Self-defining vocabulary". -->
 
 # Spec 093: Semantic-index provider discovery
-
-> Reserved on 2026-07-15 via `workflow.py new`. Body to be drafted in a feature branch.
 
 ## Overview
 

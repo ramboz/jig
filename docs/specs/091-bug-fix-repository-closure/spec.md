@@ -8,7 +8,9 @@ use_cases: []
 
 # Spec 091: Bug-fix repository closure
 
-> Reserved on 2026-07-15 via `workflow.py new`. Body to be drafted in a feature branch.
+> **Status: recorded, not yet built.** [ADR-0037](../../decisions/adr-0037-bug-fix-repository-closure-evidence.md)
+> is Proposed and this spec is reserved; the bug-fix lifecycle changes below are
+> not implemented in the PR that introduced this record. Left DRAFT deliberately.
 
 ## Overview
 

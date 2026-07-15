@@ -289,8 +289,8 @@
 | [089-contributing-bundled-skills](089-contributing-bundled-skills/spec.md) | 089-01 — bundled-skill contributor runbook | **DONE** |  |
 | [090-immutable-release-bytes](090-immutable-release-bytes/spec.md) | 090-01 — immutable stable-release contract | DRAFT |  |
 | [091-bug-fix-repository-closure](091-bug-fix-repository-closure/spec.md) | 091-01 — repository-closure evidence and gates | DRAFT |  |
-| [092-existing-subtree-layout-adoption](092-existing-subtree-layout-adoption/spec.md) | 092-01 — adopt an existing custom-root corpus | DRAFT |  |
-| [093-semantic-index-provider-discovery](093-semantic-index-provider-discovery/spec.md) | 093-01 — discover installed providers and explain absence | DRAFT |  |
+| [092-existing-subtree-layout-adoption](092-existing-subtree-layout-adoption/spec.md) | 092-01 — adopt an existing custom-root corpus | **DONE** |  |
+| [093-semantic-index-provider-discovery](093-semantic-index-provider-discovery/spec.md) | 093-01 — discover installed providers and explain absence | **DONE** |  |
 
 ## Deferred slices
 
