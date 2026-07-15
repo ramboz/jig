@@ -229,7 +229,13 @@ def _split_test_selector(selector: str | None) -> tuple[str | None, str | None]:
     return None, selector
 
 
-def _build_command(runner: str, path: Path, test_selector: str | None = None) -> list:
+def _build_command(
+    runner: str,
+    path: Path,
+    test_selector: str | None = None,
+    *,
+    explicit_path: bool = False,
+) -> list:
     """Map runner name to argv. pytest goes via `python3 -m pytest` to avoid
     PATH-dependent shims; vitest + jest go via `npx` because we don't assume
     a local `vitest`/`jest` binary."""
@@ -252,7 +258,10 @@ def _build_command(runner: str, path: Path, test_selector: str | None = None) ->
         cmd = ["node", "--test"]
         if selector_name:
             cmd.extend(["--test-name-pattern", selector_name])
-        cmd.append(selector_path or str(path))
+        if selector_path:
+            cmd.append(selector_path)
+        elif explicit_path:
+            cmd.append(str(path))
         return cmd
     raise ValueError(f"unknown runner: {runner}")
 
@@ -371,7 +380,12 @@ def cmd_run(
         sys.stderr.write("pytest module is not installed (try: pip install pytest)\n")
         return 2
 
-    cmd = _build_command(runner, test_path or target, test_selector)
+    cmd = _build_command(
+        runner,
+        test_path or target,
+        test_selector,
+        explicit_path=test_path is not None,
+    )
     return _run_command(cmd, target, runner, test_selector)
 
 
