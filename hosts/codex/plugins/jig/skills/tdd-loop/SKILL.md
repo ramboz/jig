@@ -88,7 +88,8 @@ python3 "${PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
   - pytest → `python3 -m pytest <path>`
   - vitest → `npx vitest run <path>` (note the `run` — keeps watch mode off)
   - jest → `npx jest <path>`
-  - node → `node --test <path>`
+  - node → `node --test` for the full suite; `node --test <path>` with
+    `--test-path`
 - Output streams through to the caller's terminal.
 - Exit code is normalized (0 / 1 / 2) per the table above.
 
