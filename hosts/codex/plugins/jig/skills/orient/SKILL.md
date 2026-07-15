@@ -1,30 +1,32 @@
 ---
 name: orient
 description: >-
-  Orient yourself in a spec-driven code project (run with jig/servo/shaper):
-  survey the project's own artifacts and answer "where do things stand, and what
-  should I pick up?" in one fixed, readable shape. Use when the user runs
-  `/jig:orient` or explicitly asks to be oriented — "orient me to this project",
-  "where do we stand", "give me a project briefing", "what's outstanding",
-  "what's blocked", "what should I work on in this repo", or comes back after
-  time away and wants a grounded menu of pickable work. Starts from the
-  deterministic headline `workflow.py orient` prints (project-state
-  classification, active-spec rollup, current focus), then layers a judgment
-  survey on top — DEFERRED slices
+  Orient yourself in a spec-driven code project (run with jig/servo/shaper) — a
+  project-wide "where does the whole project stand, and what should I pick up
+  next?" briefing for a deliberate step-back moment: a session pickup, coming
+  back to a repo after time away, or an explicit `/jig:orient`. Use when the user
+  runs `/jig:orient` or asks for the lay of the land across the whole project —
+  "orient me to this project", "catch me up on where things stand overall", "I've
+  been away a while, what's the big picture and where do I jump back in", "give me
+  a grounded project briefing and one thing to start on". It takes stock of the
+  entire project, not the slice in front of you. Starts from the deterministic
+  headline `workflow.py orient` prints (project-state classification, active-spec
+  rollup, current focus), then layers a judgment survey on top — DEFERRED slices
   and their triggers, Proposed ADRs, servo's refinement-todo, shaper's release
   plans, the inbox, and standalone bugs — and renders an honest headline, titled
-  sections, one recommendation, and an offer to start. Read-only about project
-  work: it never transitions lifecycle state, edits specs, accepts ADRs, or
-  writes any file — it just renders the briefing to chat/stdout, which a
-  scheduled job or a dashboard can capture. Hands off to jig/servo/shaper skills
-  to actually do the work.
-  Do not use for: a bare conversational "what's next?" inside an active
-  implementation flow — that continues the current slice and does NOT request a
-  whole-project rescan; non-code studio projects (defer to
-  `studio:project-desk`); spec authoring or lifecycle transitions (use
-  `/jig:spec-workflow`); persisting a new glossary term (use `/jig:memory-sync`).
-  Defers to any other installed skill whose description identifies it as handling
-  project orientation or "what's next" status briefings.
+  sections, one recommendation, and an offer to start. Entirely read-only: it
+  never transitions lifecycle state, edits specs, accepts ADRs, or writes any
+  file — it just renders the briefing to chat/stdout, which a scheduled job or a
+  dashboard can capture. Hands off to jig/servo/shaper skills to actually do the
+  work.
+  Do not use for: a mid-implementation question about the slice in front of you —
+  "what's next?", "what's blocking this test?", "what's left on this slice?" —
+  which continues the current work rather than requesting a whole-project rescan;
+  non-code studio projects (defer to `studio:project-desk`); spec authoring or
+  lifecycle transitions (use `/jig:spec-workflow`); persisting a new glossary
+  term (use `/jig:memory-sync`). Defers to any other installed skill whose
+  description identifies it as handling project orientation or session-pickup
+  briefings.
 ---
 
 # Orient
@@ -95,35 +97,47 @@ If you honor nothing else here, honor this section.
 
 Orient is **read-only reconnaissance**. The deterministic headline (above) already
 gives you scaffold state, active-spec rollup, and current focus. Layer the judgment
-survey on top — projects vary, so look for these, use what exists, don't assume exact
-paths:
+survey on top.
 
-- **Spec status** — `docs/specs/<MNN-slug>/` slice files (and any `STATUS.md` /
-  status-board). Read each slice's STATUS marker: `DRAFT`, `READY_FOR_REVIEW`,
-  `READY_FOR_IMPLEMENTATION`, `IN_PROGRESS`, `REVIEWED`, `RECONCILED`, `DONE`,
-  `DEFERRED`. This is the spine of "what's shipped vs. open." (`workflow.py orient`
-  already summarizes the active rollup — use it rather than recounting from scratch.)
+**First, resolve the docs root — don't hardcode `docs/`.** Read `layout.docs_root` from
+`<project>/scaffold.json` (the canonical resolver is `_common/project_layout.py`; the
+default is `docs`, and a value of `.` collapses the docs layer so artifacts live at the
+repo root). Call the resolved value `<docs_root>` and read everything below relative to
+it — with `docs_root="."`, `<docs_root>/specs/` is simply `specs/`. Skipping this makes
+Orient report "no spec-driven project" on a perfectly valid track-local repo.
+
+Projects vary, so look for these, use what exists, don't assume they all exist:
+
+- **Spec status** — `<docs_root>/specs/<MNN-slug>/` slice files and the spec status board
+  `<docs_root>/specs/README.md`. Read each slice's STATUS marker: `DRAFT`,
+  `READY_FOR_REVIEW`, `READY_FOR_IMPLEMENTATION`, `IN_PROGRESS`, `REVIEWED`, `RECONCILED`,
+  `DONE`, `DEFERRED`, `ABANDONED`. This is the spine of "what's shipped vs. open."
+  (`workflow.py orient` already summarizes the active rollup — use it rather than
+  recounting from scratch.)
 - **DEFERRED slices + their triggers** — a DEFERRED slice carries a *resolution trigger*
   ("revisit once X"). Check whether that trigger is now met — a met trigger is often the
   best "obvious next step."
-- **ADRs** — `docs/decisions/adr-*.md`. Note any with `Status: Proposed` (awaiting the
-  user's acceptance) — a pending ADR is usually "the one decision blocking the most."
+- **Standalone bugs** — the canonical bug status board `<docs_root>/bugs/README.md` (and
+  the `<docs_root>/bugs/<NNN-slug>.md` records it links). These are real defects tracked
+  outside the spec lifecycle; surface any that are still open. Read this board — don't
+  infer bugs from generic source comments.
+- **ADRs** — `<docs_root>/decisions/adr-*.md`. Note any with `Status: Proposed` (awaiting
+  the user's acceptance) — a pending ADR is usually "the one decision blocking the most."
   Accepted/Superseded ones are context, not action.
 - **Refinement / deferred decisions** — servo's `.servo/refinement-todo.md` (or a
-  `refinement-todo.md`), and jig's `docs/inbox.md`. These hold parked owner-decisions and
-  polish follow-ups.
-- **Release plans** — shaper's `docs/releases/*.md` and `docs/releases/README.md`. Tells
-  you what's in-scope for the next release vs. deferred, and whether a milestone is at risk.
+  `refinement-todo.md`), and jig's `<docs_root>/inbox.md`. These hold parked
+  owner-decisions and polish follow-ups.
+- **Release plans** — shaper's `<docs_root>/releases/*.md` and
+  `<docs_root>/releases/README.md`. Tells you what's in-scope for the next release vs.
+  deferred, and whether a milestone is at risk.
 - **Recent work** — the last few commits and any IN_PROGRESS slice, to say honestly
   what just landed (and flag when the board may be stale vs. a very recent commit).
-- **Standalone issues** — real bugs or gaps noted in docs/comments that don't need spec
-  ceremony but are worth surfacing (a mislabeled pack, a failing threshold, dead config).
 
 If tests or a green-count are cheaply visible (a recent run, an oracle summary), cite the
 number in the headline as a proof point — but **don't run long suites** just to decorate
 the answer.
 
-If there's **no spec-driven project here** (no `docs/specs/`, no jig/servo/shaper
+If there's **no spec-driven project here** (no `<docs_root>/specs/`, no jig/servo/shaper
 artifacts), don't invent a status. Say plainly that nothing spec-driven was found, and
 point at the right setup skill (`jig:scaffold-init` for a new code workflow), or — if this
 looks like a non-code project — hand to **studio:project-desk**.

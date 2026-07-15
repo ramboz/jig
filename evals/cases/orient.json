@@ -2,14 +2,15 @@
   "skill_name": "orient",
   "trigger": {
     "positive": [
-      { "prompt": "Orient me to this project — where do things stand and what should I pick up?", "top_k": 3 },
-      { "prompt": "Give me a grounded project briefing — survey where we stand and recommend one thing to pick up", "top_k": 3 },
-      { "prompt": "I'm back on this repo after time away — what's outstanding and what's blocked across the whole project?", "top_k": 3 }
+      { "prompt": "I've been off this repo for two weeks — bring me up to speed on where the whole project stands and where to dive back in", "top_k": 3 },
+      { "prompt": "Give me the big-picture read on this project before I dig in, and the first thing to tackle", "top_k": 3 },
+      { "prompt": "Zoom out from the current task — orient me across the whole project and recommend one place to start", "top_k": 3 }
     ],
     "negative": [
-      { "prompt": "I just got the failing test written — what's next?", "owner": "tdd-loop" },
-      { "prompt": "Fix this bug — diagnose the root cause before writing the fix", "owner": "bug-fix" },
-      { "prompt": "Transition this slice to REVIEWED and run the reconciliation checklist", "owner": "spec-workflow" }
+      { "prompt": "I just wrote the failing test — what's next?", "owner": "tdd-loop" },
+      { "prompt": "I'm stuck — what's blocking this test from going green?", "owner": "tdd-loop" },
+      { "prompt": "What's left to finish on the slice I'm implementing right now?", "owner": "spec-workflow" },
+      { "prompt": "Fix this bug — diagnose the root cause before writing the fix", "owner": "bug-fix" }
     ]
   }
 }
