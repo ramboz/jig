@@ -2104,6 +2104,22 @@ class LookupAdrAcceptedTests(unittest.TestCase):
         ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0106")
         self.assertTrue(ok, f"expected satisfied; reason={reason}")
 
+    def test_inline_status_line_only_names_both_encodings(self):
+        # Reported gap: a bare inline `**Status:** Accepted` line (a common
+        # pre-jig house style) is neither frontmatter `status:` nor a
+        # `## Status` section → not satisfied. The reason must name BOTH
+        # accepted encodings, not only the prose section, so the fix is
+        # discoverable.
+        self._write_adr(
+            "0111", "inline-status-only",
+            "# ADR-0111\n\n- **Status:** Accepted\n- **Date:** 2026-01-01\n\n"
+            "## Context\n\nbody.\n",
+        )
+        ok, reason = _workflow._lookup_adr_accepted(self.decisions, "0111")
+        self.assertFalse(ok, "inline-status-only ADR must not be satisfied")
+        self.assertIn("status:", reason)
+        self.assertIn("## Status", reason)
+
     # --- AC4: prose fallback recognizes Superseded (the bug fix) ---
     def test_prose_fallback_superseded_with_accepted_line_not_satisfied(self):
         # Mirrors real adr-0002 / adr-0008: no frontmatter `status:`, prose
