@@ -287,6 +287,7 @@
 | [088-project-orientation](088-project-orientation/spec.md) | 088-01 — computed orientation at project pickup | **DONE** |  |
 | [088-project-orientation](088-project-orientation/spec.md) | 088-02 — the `/jig:orient` judgment skill | IN_PROGRESS |  |
 | [089-contributing-bundled-skills](089-contributing-bundled-skills/spec.md) | 089-01 — bundled-skill contributor runbook | **DONE** |  |
+| [090-immutable-release-bytes](090-immutable-release-bytes/spec.md) | 090-01 — immutable stable-release contract | DRAFT |  |
 
 ## Deferred slices
 

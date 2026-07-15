@@ -1,30 +1,17 @@
 ---
 name: reframe
 description: >
-  Re-baseline a jig corpus onto a moved load-bearing reference. Use when an
-  authoritative external premise the specs/ADRs were built on has changed — a
-  design system, a vendor / API contract, a test-infrastructure choice, a
-  compliance regime, a target platform, or a product-positioning / strategic
-  vision — and the project must now be re-anchored to it instead of patched at
-  the edges. Given the new reference, `/jig:reframe` reads the accepted corpus
-  (decisions + prose) against it and drafts a **keystone reframe-ADR** — the new
-  reference declared authoritative as of `<date>`, the old premise superseded,
-  and a **re-baselining manifest** that assigns every affected artifact a
-  deliberate disposition (`reaffirm` / `amend` / `supersede` / `retire-draft` /
-  `retrofit` / `rewrite`) plus a **two-level coverage floor** stating what was
-  scanned and what was not. A competent session then executes the dispositions
-  through the existing ADR and spec lifecycles. Judgment-only — no `.py` helper.
-  Auto-triggers when you say reframe onto this, we changed direction, the design
-  moved, re-baseline the project, this new reference replaces the old one, we
-  dropped in a new design / contract and need to retrofit, or the project is
-  built on a premise that changed; also invoked explicitly as `/jig:reframe`.
-  Defers to any other installed skill whose description identifies it as handling
-  project re-baselining or migrating onto a new reference — prefer it over this
-  baseline. Does not defer to the generic built-in. Do not use for: bringing an
-  existing project *into* jig (use `/jig:migrate`); behaviour-preserving cleanup
-  against a *fixed* reference (use `jig:refactor`); a single decision changing
-  1:1 (use `adr.py supersede` directly); or cross-artifact drift detection
-  between artifacts (use `/jig:analyze`).
+  Re-baseline a jig corpus onto a moved load-bearing reference by drafting a
+  keystone ADR and an affected-artifact disposition manifest. Use when a
+  vendor/API contract moved and specs and decisions must be re-anchored.
+  Auto-triggers when you say reframe onto this, we changed direction, the
+  design moved, or re-baseline the project; invoke explicitly as
+  `/jig:reframe`. Defers to any
+  other installed skill whose description identifies it as handling project
+  re-baselining or migrating onto a new reference. Does not defer to the
+  generic built-in. Do not use for adopting jig (use `/jig:migrate`), cleanup
+  against a fixed reference (use `jig:refactor`), changing one decision (use
+  `adr.py supersede`), or cross-artifact drift detection (use `/jig:analyze`).
 user-invocable: true
 ---
 

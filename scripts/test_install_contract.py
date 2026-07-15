@@ -612,6 +612,67 @@ class PresenceHelperTests(unittest.TestCase):
             [],
         )
 
+    def test_overlong_skill_description_named_with_codex_limit(self):
+        self._seed_all_skills()
+        skill_md = self.tmp / "skills" / "analyze" / "SKILL.md"
+        skill_md.write_text(
+            "---\nname: analyze\ndescription: "
+            + ("x" * 1025)
+            + "\n---\n"
+        )
+
+        problems = install_contract.skill_contract_problems(self.tmp)
+
+        self.assertTrue(problems)
+        joined = " ".join(problems)
+        self.assertIn("skills/analyze/SKILL.md", joined)
+        self.assertIn("1025", joined)
+        self.assertIn("1024", joined)
+
+    def test_skill_description_at_codex_limit_is_valid(self):
+        self._seed_all_skills()
+        skill_md = self.tmp / "skills" / "analyze" / "SKILL.md"
+        skill_md.write_text(
+            "---\nname: analyze\ndescription: "
+            + ("x" * 1024)
+            + "\n---\n"
+        )
+
+        self.assertEqual(
+            install_contract.skill_contract_problems(self.tmp),
+            [],
+        )
+
+    def test_folded_description_at_limit_is_valid_after_sanitizing(self):
+        self._seed_all_skills()
+        skill_md = self.tmp / "skills" / "analyze" / "SKILL.md"
+        skill_md.write_text(
+            "---\nname: analyze\ndescription: >\n  "
+            + ("x" * 1024)
+            + "\n---\n"
+        )
+
+        self.assertEqual(
+            install_contract.skill_contract_problems(self.tmp),
+            [],
+        )
+
+    def test_sanitized_whitespace_cannot_hide_overlong_description(self):
+        self._seed_all_skills()
+        skill_md = self.tmp / "skills" / "analyze" / "SKILL.md"
+        skill_md.write_text(
+            "---\nname: analyze\ndescription: |+\n  "
+            + ("x" * 512)
+            + "\n\n  "
+            + ("x" * 512)
+            + "\n---\n"
+        )
+
+        problems = install_contract.skill_contract_problems(self.tmp)
+
+        self.assertTrue(problems)
+        self.assertIn("1025", " ".join(problems))
+
     def test_missing_agents_empty_when_all_present(self):
         self._seed_all_agents()
         self.assertEqual(install_contract.missing_agents(self.tmp), [])

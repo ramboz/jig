@@ -40,6 +40,7 @@
 - [ADR-0033: Configurable docs root (single knob), git-machinery scoped out](adr-0033-configurable-docs-root.md) — jig assumes every project artifact lives under `<project_dir>/docs/…`: `docs/specs/`, `docs/decisions/`, `docs/workflow.md`, `docs/architecture.md`, `docs/memory/`, `docs/refinement-todo.md`. (2026-06-29, Accepted)
 - [ADR-0034: Lower the interaction altitude for non-expert adopters](adr-0034-lower-interaction-altitude.md) — A recurring, multi-source signal says jig is too much mental burden for some non-expert adopters. (2026-07-06, Proposed)
 - [ADR-0035: Active Plan-mode driving for the plan phase (extends ADR-0027)](adr-0035-active-plan-mode-driving.md) — [ADR-0027](adr-0027-host-native-phase-modes.md) adopted **mode-aware, not mode-dependent**: host planning/implementation modes are *advisory* affordances, never lifecycle state or gate inputs. (2026-07-06, Proposed)
+- [ADR-0036: Immutable Release Identity](adr-0036-immutable-release-identity.md) — Jig publishes semantic versions and release tags, but its root Claude marketplace currently fetches `hosts/claude` from the repository default branch without a `ref` or `sha`. (2026-07-14, Accepted)
 
 ## Lightweight decisions
 

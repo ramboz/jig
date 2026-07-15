@@ -391,6 +391,29 @@ class TargetedRunTests(unittest.TestCase):
             "tests/foo.test.mjs",
         ])
 
+    def test_node_default_run_uses_builtin_discovery(self):
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            code = self._tdd.cmd_run(self.target, None)
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv, ["node", "--test"])
+
+    def test_node_explicit_test_path_is_passed_to_runner(self):
+        write(self.target / "package.json",
+              json.dumps({"scripts": {"test": "node --test"}}))
+        test_path = self.target / "test" / "sample.test.mjs"
+        with patch.object(self._tdd.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            code = self._tdd.cmd_run(self.target, test_path)
+
+        self.assertEqual(code, 0)
+        argv = mock_run.call_args[0][0]
+        self.assertEqual(argv, ["node", "--test", str(test_path)])
+
     def test_js_no_matching_test_output_exits_2(self):
         write(self.target / "vitest.config.ts", "")
         with patch.object(self._tdd, "_run_streaming") as mock_run:

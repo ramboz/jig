@@ -555,3 +555,9 @@ When a command accepts a canonical overview path but child lookup also makes a c
 
 ## Tier-gated packaging contracts need exact sets
 When plugin packaging recursively ships every public skills/*/SKILL.md but scaffold copying is gated by _TIER_SKILLS, checking only EXPECTED_SKILLS ⊆ present permits accidental plugin-only skills. Validate both directions: the public skill set must exactly match the tier-derived contract, excluding private _... infrastructure. See bug 007 and GitHub issue #89.
+
+## Bug 009: host-normalized skill description limits
+When validating SKILL.md metadata, enforce host limits on the normalized value the host checks. Codex applies split_whitespace().join(" ") to YAML description text before its 1024-character limit, so raw source length and YAML chomping semantics are not the contract. Keep every public description comfortably below the cap and validate the generated package.
+
+## Bug 010: Node default discovery needs no directory operand
+Runner adapters must preserve the distinction between an implicit project target and an explicit test path. Node test default discovery is cwd-based: bare `node --test` discovers the suite, while a positional directory is treated as a module entry point and can fail with MODULE_NOT_FOUND. Keep explicit file/path and name-selector behavior covered separately.

@@ -575,6 +575,39 @@ def iter_release_files(source_root: Path) -> Iterable[Path]:
 # ---------------------------------------------------------------------------
 
 
+MAX_SKILL_DESCRIPTION_CHARS = 1024
+
+
+def _read_skill_description(skill_md_text: str) -> str:
+    """Decode and sanitize the SKILL.md description as Codex does.
+
+    Jig uses inline YAML strings or indented folded/literal scalars. Keeping
+    this parser local preserves install_contract's stdlib-only runtime. Codex
+    applies ``split_whitespace().join(" ")`` before its 1024-character check,
+    so YAML folding/chomping whitespace does not count toward the limit.
+    """
+    if skill_md_text.startswith("---\n"):
+        closing = skill_md_text.find("\n---\n", 4)
+        block = skill_md_text[4:closing] if closing >= 0 else skill_md_text[4:]
+    else:
+        block = skill_md_text
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("description:"):
+            continue
+        value = line[len("description:"):].strip()
+        block_markers = (">", "|", ">-", "|-", ">+", "|+")
+        if value and value not in block_markers:
+            return " ".join(value.strip("\"'").split())
+        parts: list[str] = []
+        for continuation in lines[index + 1:]:
+            if continuation.strip() and not continuation.startswith((" ", "\t")):
+                break
+            parts.extend(continuation.split())
+        return " ".join(parts)
+    return ""
+
+
 def missing_skills(plugin_root: Path) -> list[str]:
     """Return diagnostics for any EXPECTED skill missing its SKILL.md under
     `plugin_root/skills/`. Empty == every expected skill present (AC #3)."""
@@ -622,6 +655,15 @@ def skill_contract_problems(plugin_root: Path) -> list[str]:
             "skills/scaffold-init/scaffold.py::_TIER_SKILLS and mirrored "
             "in install_contract.EXPECTED_SKILLS"
         )
+    for skill in sorted(public):
+        skill_md = skills_dir / skill / "SKILL.md"
+        description = _read_skill_description(skill_md.read_text(encoding="utf-8"))
+        if len(description) > MAX_SKILL_DESCRIPTION_CHARS:
+            problems.append(
+                f"skills/{skill}/SKILL.md: description is "
+                f"{len(description)} characters; Codex maximum is "
+                f"{MAX_SKILL_DESCRIPTION_CHARS}"
+            )
     return problems
 
 

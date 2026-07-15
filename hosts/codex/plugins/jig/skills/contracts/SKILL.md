@@ -1,24 +1,17 @@
 ---
 name: contracts
 description: >
-  Team baseline for external-interface contract artifacts — recommends
-  the canonical industry-standard schema per surface (OpenAPI for HTTP
-  APIs, JSON Schema for internal data shapes, AsyncAPI for events,
-  .proto for gRPC, GraphQL SDL) and orchestrates ecosystem validation
-  tools (spectral, ajv, buf, graphql-inspector). Nudges devs toward
-  contract-first artifacts; never writes them, never scaffolds a
-  contracts/ directory. Auto-triggers when you say what contract
-  should I use for this API, do we have an OpenAPI spec, add a JSON
-  schema for this, recommend a schema for this endpoint, validate
-  this API contract, or what's the right artifact for events. Defers
-  to any other installed skill whose description identifies it as
-  handling external-interface contract artifacts, API schema design,
-  or contract-first workflow — if such a skill is present, prefer it
-  over this one (jig's version is a slim baseline). Do not use for:
-  internal module-boundary refactoring (out of scope per ADR-0002 /
-  ADR-0005); scaffolding a contracts/ directory (explicitly rejected
-  per ADR-0005); auto-generating schemas from code (the skill
-  recommends artifacts, devs author them).
+  Team baseline for external-interface contract artifacts: OpenAPI, JSON
+  Schema, AsyncAPI, .proto, and GraphQL SDL, with spectral, ajv, buf, and
+  graphql-inspector validation. Nudges devs toward contract-first artifacts;
+  never writes them and never scaffolds a contracts/ directory. Auto-triggers
+  for what contract should I use for this API, do we have an OpenAPI spec, add
+  a JSON schema for this, recommend a schema for this endpoint, validate this
+  API contract, or what's the right artifact for events. Defers to any other
+  installed skill whose description identifies it as handling
+  external-interface contract artifacts, API schema design, or contract-first
+  workflow. Do not use for internal module-boundary refactoring, scaffolding a
+  contracts/ directory, or auto-generating schemas from code.
 user-invocable: true
 ---
 
