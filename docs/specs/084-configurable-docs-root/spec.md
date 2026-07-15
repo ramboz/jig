@@ -89,3 +89,13 @@ enclosing repo (cross-project bleed), so discovery switches to the **sentinel**
   subtree under a non-default root is out of scope (no `migrate.py` layout entry
   point). (Risk: contested if the first real adopter already has specs in the
   subtree — then a migrate path is needed before this is usable there.)
+
+## Amendments
+
+### 2026-07-15 — Existing-subtree trigger occurred
+
+Mystique's CWV corpus is the contested case named above: it already has
+track-local specs, decisions, workflow, and architecture, so greenfield
+scaffolding cannot adopt it. Spec 092 adds the deferred `migrate.py
+adopt-layout --docs-root .` entry point. It preserves ADR-0033's artifact-root
+model and subtree push refusal; it does not reopen git anchoring.

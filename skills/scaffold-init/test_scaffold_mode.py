@@ -1259,7 +1259,9 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertIn("jig-semantic-index", workflow)
         self.assertIn(".jig/semantic-index.json", workflow)
         self.assertIn("auto_attach: true", workflow)
-        self.assertIn('"provider": "tokensave"', workflow)
+        self.assertIn("discovers the first installed supported", workflow)
+        self.assertNotIn('"provider": "tokensave"', workflow)
+        self.assertIn("none is installed", workflow)
         self.assertIn("never installs providers", workflow)
         self.assertNotIn("Scout", workflow)
 

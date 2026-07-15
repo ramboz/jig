@@ -60,6 +60,7 @@ class SemanticIndexStateTests(unittest.TestCase):
         self.assertEqual(state.provider, "tokensave")
         self.assertEqual(state.allowed_overlays, ())
         self.assertFalse(state.per_worktree_indexing)
+        self.assertFalse(state.provider_explicit)
 
     def test_state_round_trips_explicit_opt_in(self):
         state = ActivationState(
@@ -74,6 +75,27 @@ class SemanticIndexStateTests(unittest.TestCase):
 
         self.assertEqual(path, self.tmpdir / ".jig" / "semantic-index.json")
         self.assertEqual(load_state(self.tmpdir), state)
+
+    def test_implicit_default_round_trip_preserves_provider_discovery(self):
+        state = ActivationState(auto_attach=True)
+
+        path = write_state(self.tmpdir, state)
+        raw = json.loads(path.read_text())
+        loaded = load_state(self.tmpdir)
+
+        self.assertNotIn("provider", raw)
+        self.assertFalse(loaded.provider_explicit)
+        installed = FakeProvider(name="symdex", detected=True, status="ready")
+        result = activate(
+            self.tmpdir,
+            providers={
+                "tokensave": FakeProvider(name="tokensave", detected=False),
+                "symdex": installed,
+            },
+            emit_telemetry=False,
+        )
+        self.assertEqual(result.provider, "symdex")
+        self.assertEqual(result.provider_selection, "auto_discovered")
 
     def test_state_requires_json_boolean_true_for_attach_flags(self):
         path = self.tmpdir / ".jig" / "semantic-index.json"
@@ -117,19 +139,42 @@ class SemanticIndexActivationTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_no_provider_returns_clean_missing_result(self):
+    def test_no_provider_returns_actionable_missing_result(self):
         result = activate(
             self.tmpdir,
             providers={"fake": FakeProvider(detected=False)},
             emit_telemetry=False,
         )
 
-        self.assertEqual(result.action, "detect")
+        self.assertEqual(result.action, "recommend")
         self.assertEqual(result.outcome, "provider_missing")
-        self.assertIsNone(result.recommendation)
+        self.assertIn(".jig/semantic-index.json", result.recommendation)
+        self.assertEqual(result.provider_selection, "absent")
+
+    def test_unconfigured_project_discovers_later_public_candidate(self):
+        missing = FakeProvider(name="tokensave", detected=False)
+        installed = FakeProvider(name="symdex", detected=True)
+
+        result = activate(
+            self.tmpdir,
+            providers={"tokensave": missing, "symdex": installed},
+            emit_telemetry=False,
+        )
+
+        self.assertEqual(result.provider, "symdex")
+        self.assertEqual(result.action, "recommend")
+        self.assertEqual(result.outcome, "not_opted_in")
+        self.assertEqual(result.provider_selection, "auto_discovered")
 
     def test_explicit_empty_provider_registry_disables_builtins(self):
-        write_state(self.tmpdir, ActivationState(auto_attach=True, provider="tokensave"))
+        write_state(
+            self.tmpdir,
+            ActivationState(
+                auto_attach=True,
+                provider="tokensave",
+                provider_explicit=True,
+            ),
+        )
 
         with mock.patch("semantic_index.shutil.which", return_value="/bin/tokensave"):
             result = activate(self.tmpdir, providers={}, emit_telemetry=False)
@@ -149,6 +194,7 @@ class SemanticIndexActivationTests(unittest.TestCase):
 
         self.assertEqual(result.provider, "missing")
         self.assertEqual(result.outcome, "provider_missing")
+        self.assertEqual(result.provider_selection, "explicit")
         self.assertEqual(fallback.ensure_calls, [])
 
     def test_public_provider_present_without_opt_in_recommends_once(self):
@@ -292,6 +338,7 @@ class SemanticIndexActivationTests(unittest.TestCase):
         self.assertEqual(event["host"], "claude")
         self.assertNotIn("considered_root", event)
         self.assertNotIn("command_output", event)
+        self.assertEqual(event["provider_selection"], "unknown")
 
         with mock.patch("semantic_index.Path.open", side_effect=OSError("readonly")):
             record_telemetry(self.tmpdir, result)

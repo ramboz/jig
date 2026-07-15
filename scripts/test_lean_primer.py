@@ -84,7 +84,7 @@ RELOCATED_TERMS = [
 # rule applied at authoring/memory-sync time + caught in review — not by this
 # test alone.
 KEEP_INLINE_MARKERS = [
-    "MERGING main→v2 (not rebase)",    # branch-routing directive (not just "v2")
+    "integration/maintenance branch for the 2.0 line",  # branch-routing directive
     "PARKED — don't re-propose",       # don't re-propose the servo oracle boundary
     "only at the *third*",             # extract-at-third-transition rule
     "Do not modify [docs/conventions.md](docs/conventions.md) without explicit human approval",

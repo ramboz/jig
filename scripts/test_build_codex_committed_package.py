@@ -101,7 +101,8 @@ class CodexCommittedPackageBuildTests(unittest.TestCase):
         self.assertNotIn("CLAUDE_PLUGIN_ROOT", workflow_template)
         self.assertNotIn("CLAUDE_PROJECT_DIR", workflow_template)
         self.assertIn(".jig/semantic-index.json", workflow_template)
-        self.assertIn('"provider": "tokensave"', workflow_template)
+        self.assertIn("discovers the first installed supported", workflow_template)
+        self.assertNotIn('"provider": "tokensave"', workflow_template)
         semantic_hook = (
             self.plugin_dir / "hooks" / "scripts" / "jig-semantic-index.sh"
         ).read_text()

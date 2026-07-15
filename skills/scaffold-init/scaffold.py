@@ -1094,10 +1094,13 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             )
         out = CodexScaffoldRenderer.replace_rendered_section(
             out,
-            "`migrate.py` exposes four subcommands:",
+            "`migrate.py` exposes five subcommands:",
             "## How to use",
-            "`migrate.py` exposes four subcommands:\n\n"
+            "`migrate.py` exposes five subcommands:\n\n"
             "- `report` — strictly read-only inventory + plan.\n"
+            "- `adopt-layout` — validates an existing custom-root corpus "
+            "and writes only its `scaffold.json` sentinel/config; supports "
+            "`--dry-run`.\n"
             "- `rename-decisions` — applies ADR-0004's rename. Idempotent; "
             "refuses on conflict; has a `--dry-run` mode; use "
             "`--host codex` when running from Codex-facing source or plugin "
@@ -2307,6 +2310,79 @@ def _compose_layout_rewrite(existing, docs_root: str):
     return lambda text: layout(existing(text))
 
 
+def _scaffold_manifest(
+    template_root: Path,
+    substitutions: dict,
+    signals: Signals,
+    installed_tiers: list,
+    offered_tiers: list,
+    *,
+    hook_profile: str,
+    with_machinery: bool,
+    host: str,
+    docs_root: str,
+    overrides: "Overrides | None" = None,
+) -> dict:
+    """Build the canonical scaffold manifest without writing it.
+
+    Greenfield scaffold and migrate-into-existing-layout must produce the same
+    sentinel contract. Keeping assembly here prevents the adoption path from
+    growing a second definition of scaffold metadata.
+    """
+    template = (template_root / "scaffold.json.template").read_text()
+    manifest = json.loads(render(template, substitutions))
+    manifest["installed_tiers"] = installed_tiers
+    manifest["installed_skills"] = _enumerate_skills(installed_tiers)
+    manifest["scaffold_signals"] = asdict(signals)
+    manifest["hook_profile"] = hook_profile
+    if offered_tiers:
+        manifest["offered_tiers"] = offered_tiers
+    if overrides is not None and overrides.runtime is not None:
+        manifest["project_runtime"] = overrides.runtime
+    manifest["scaffold_mode"] = "in-repo" if with_machinery else "plugin-only"
+    manifest["host_renderer"] = host
+    if docs_root != "docs":
+        manifest["layout"] = {"docs_root": docs_root}
+    return manifest
+
+
+def adoption_manifest(
+    target: Path,
+    plugin: Path,
+    *,
+    docs_root: str,
+    host: str,
+) -> dict:
+    """Build canonical plugin-only metadata for an existing jig corpus.
+
+    This is compute-only. ``migrate.py adopt-layout`` owns corpus validation,
+    dry-run behavior, and the atomic write; this function reuses scaffold's
+    signal, tier, version, and manifest rules.
+    """
+    if host not in {"claude", "codex"}:
+        raise ValueError(f"unsupported scaffold host: {host}")
+    docs_root = project_layout.validate_docs_root(docs_root)
+    target = target.resolve()
+    signals = detect_signals(target)
+    installed_tiers, offered_tiers = _select_tiers(signals)
+    substitutions = {
+        "PROJECT_NAME": target.name,
+        "JIG_VERSION": _read_plugin_version(plugin),
+        "TIMESTAMP": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    return _scaffold_manifest(
+        plugin / "templates",
+        substitutions,
+        signals,
+        installed_tiers,
+        offered_tiers,
+        hook_profile=_hook_profile(signals),
+        with_machinery=False,
+        host=host,
+        docs_root=docs_root,
+    )
+
+
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides | None = None,
              with_machinery: bool = True,
@@ -2520,33 +2596,18 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # no scaffold.json; the next run treats the partial state as
     # un-scaffolded and re-attempts. scaffold.py is the single source of
     # truth for installed_tiers — the template carries a placeholder.
-    manifest_template = (template_root / "scaffold.json.template").read_text()
-    rendered = render(manifest_template, subs)
-    manifest = json.loads(rendered)
-    manifest["installed_tiers"] = installed_tiers
-    # ADR-0007 — derive the per-skill list from `installed_tiers` and the
-    # `_TIER_SKILLS` table. Invariant:
-    #   set(s.split("/")[0] for s in installed_skills) == set(installed_tiers)
-    manifest["installed_skills"] = _enumerate_skills(installed_tiers)
-    manifest["scaffold_signals"] = asdict(signals)
-    manifest["hook_profile"] = hook_profile
-    if offered_tiers:
-        manifest["offered_tiers"] = offered_tiers
-    # project_runtime is recorded only when the wizard explicitly captured an answer.
-    # `is not None` rather than truthy — empty string "" is still an explicit answer
-    # the wizard chose to record, not the same as "skipped".
-    if overrides is not None and overrides.runtime is not None:
-        manifest["project_runtime"] = overrides.runtime
-    # Slice 016-01: record which install shape was used. "plugin-only"
-    # leaves machinery under the installed plugin/runtime; "in-repo" is set
-    # when machinery was copied into the target's host-local runtime.
-    manifest["scaffold_mode"] = "in-repo" if with_machinery else "plugin-only"
-    manifest["host_renderer"] = host
-    # Slice 084-03: record the configured docs root ONLY when non-default, so a
-    # default scaffold's scaffold.json is byte-identical to before (AC1). A
-    # present `layout` block is the read-side signal for `project_layout`.
-    if docs_root != "docs":
-        manifest["layout"] = {"docs_root": docs_root}
+    manifest = _scaffold_manifest(
+        template_root,
+        subs,
+        signals,
+        installed_tiers,
+        offered_tiers,
+        hook_profile=hook_profile,
+        with_machinery=with_machinery,
+        host=host,
+        docs_root=docs_root,
+        overrides=overrides,
+    )
     atomic_write_text(
         target / "scaffold.json",
         json.dumps(manifest, indent=2) + "\n",

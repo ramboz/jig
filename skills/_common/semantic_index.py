@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -44,6 +44,10 @@ class ActivationState:
     allowed_overlays: tuple[str, ...] = ()
     per_worktree_indexing: bool = False
     timeout_seconds: float = 5.0
+    # Runtime-only provenance. Excluded from equality/serialization so the
+    # public state schema remains unchanged; load_state sets it from key
+    # presence to distinguish an explicit choice from the legacy default.
+    provider_explicit: bool = field(default=False, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,7 @@ class ActivationResult:
     considered_root: str
     auto_attach: bool
     recommendation: str | None = None
+    provider_selection: str = "unknown"
 
 
 class Provider:
@@ -237,6 +242,11 @@ def load_state(project_root: Path) -> ActivationState:
         allowed_overlays=tuple(str(item) for item in overlays),
         per_worktree_indexing=_json_bool(raw.get("per_worktree_indexing", False)),
         timeout_seconds=timeout_value,
+        provider_explicit=(
+            "provider" in raw
+            and isinstance(raw.get("provider"), str)
+            and bool(raw.get("provider"))
+        ),
     )
 
 
@@ -250,6 +260,9 @@ def write_state(project_root: Path, state: ActivationState) -> Path:
     path = project_root / STATE_RELATIVE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(state)
+    payload.pop("provider_explicit", None)
+    if not state.provider_explicit and state.provider == PUBLIC_DEFAULT_PROVIDER:
+        payload.pop("provider", None)
     payload["allowed_overlays"] = list(state.allowed_overlays)
     atomic_write_text(
         path,
@@ -318,21 +331,55 @@ def _scout_overlay_allowed(state: ActivationState) -> bool:
 
 def _select_provider(
     state: ActivationState, providers: dict[str, Provider]
-) -> tuple[Provider | None, str | None]:
+) -> tuple[Provider | None, str | None, str]:
     requested = state.provider or PUBLIC_DEFAULT_PROVIDER
-    provider = providers.get(requested)
-    if provider is not None:
-        overlay = _provider_overlay_name(requested, provider)
-        if _provider_requires_overlay(requested, provider) and not _overlay_allowed(
-            state, overlay
-        ):
-            return None, "overlay_disabled"
-        return provider, None
-    if requested == "scout":
-        return None, "overlay_disabled"
-    if requested == PUBLIC_DEFAULT_PROVIDER:
-        return None, "provider_missing"
-    return None, "provider_missing"
+    if state.provider_explicit:
+        provider = providers.get(requested)
+        if provider is not None:
+            overlay = _provider_overlay_name(requested, provider)
+            if _provider_requires_overlay(requested, provider) and not _overlay_allowed(
+                state, overlay
+            ):
+                return None, "overlay_disabled", "explicit"
+            return provider, None, "explicit"
+        if requested == "scout":
+            return None, "overlay_disabled", "explicit"
+        return None, "provider_missing", "explicit"
+
+    # No provider key means capability discovery, not an implicit permanent
+    # choice of tokensave. Prefer the documented public order, then any
+    # injected public provider (test/extension seam), then an allowed overlay.
+    ordered_names: list[str] = list(PUBLIC_PROVIDER_CANDIDATES)
+    ordered_names.extend(
+        name for name, provider in providers.items()
+        if name not in ordered_names
+        and not _provider_requires_overlay(name, provider)
+    )
+    for name in ordered_names:
+        provider = providers.get(name)
+        if provider is not None and provider.detect():
+            return provider, None, "auto_discovered"
+    for name, provider in providers.items():
+        if not _provider_requires_overlay(name, provider):
+            continue
+        overlay = _provider_overlay_name(name, provider)
+        if _overlay_allowed(state, overlay) and provider.detect():
+            return provider, None, "auto_discovered"
+    return None, "provider_missing", "absent"
+
+
+def _missing_provider_recommendation(provider: str | None = None) -> str:
+    candidates = ", ".join(PUBLIC_PROVIDER_CANDIDATES)
+    if provider:
+        return (
+            f"Configured semantic index provider '{provider}' is not installed. "
+            f"Install it or update {STATE_RELATIVE_PATH}; supported public "
+            f"candidates: {candidates}."
+        )
+    return (
+        "No supported semantic index provider is installed. Install one of "
+        f"{candidates}, then opt in through {STATE_RELATIVE_PATH}."
+    )
 
 
 def _provider_requires_overlay(requested: str, provider: Provider) -> bool:
@@ -368,6 +415,7 @@ def record_telemetry(
         "action": result.action,
         "outcome": result.outcome,
         "repo_root_class": result.repo_root_class,
+        "provider_selection": result.provider_selection,
     }
     try:
         path = project_root / TELEMETRY_RELATIVE_PATH
@@ -402,26 +450,42 @@ def activate(
         if providers is not None
         else builtin_registry(allow_internal_overlays=_scout_overlay_allowed(state))
     )
-    provider, selection_error = _select_provider(state, registry)
+    provider, selection_error, provider_selection = _select_provider(state, registry)
     if provider is None:
+        explicit_missing = (
+            provider_selection == "explicit"
+            and selection_error == "provider_missing"
+        )
+        missing = selection_error == "provider_missing"
         result = ActivationResult(
-            provider=state.provider,
+            provider=state.provider if state.provider_explicit else None,
             provider_profile="internal-overlay" if state.provider == "scout" else "unknown",
-            action="detect",
+            action="recommend" if missing else "detect",
             outcome=selection_error or "provider_missing",
             repo_root_class=roots.root_class,
             considered_root=str(roots.selected),
             auto_attach=state.auto_attach,
+            recommendation=(
+                _missing_provider_recommendation(
+                    state.provider if explicit_missing else None
+                )
+                if missing else None
+            ),
+            provider_selection=provider_selection,
         )
     elif not provider.detect():
         result = ActivationResult(
             provider=provider.metadata.name,
             provider_profile=provider.metadata.profile,
-            action="detect",
+            action="recommend",
             outcome="provider_missing",
             repo_root_class=roots.root_class,
             considered_root=str(roots.selected),
             auto_attach=state.auto_attach,
+            recommendation=_missing_provider_recommendation(
+                provider.metadata.name if state.provider_explicit else None
+            ),
+            provider_selection=provider_selection,
         )
     elif not state.auto_attach:
         result = ActivationResult(
@@ -433,6 +497,7 @@ def activate(
             considered_root=str(roots.selected),
             auto_attach=False,
             recommendation=provider.recommendation(project_root),
+            provider_selection=provider_selection,
         )
     else:
         outcome = provider.ensure_ready(roots.selected, state.timeout_seconds)
@@ -447,6 +512,7 @@ def activate(
             repo_root_class=roots.root_class,
             considered_root=str(roots.selected),
             auto_attach=True,
+            provider_selection=provider_selection,
         )
     if emit_telemetry:
         record_telemetry(project_root, result, host=host)

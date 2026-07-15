@@ -56,7 +56,7 @@ class SemanticIndexHookTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_provider_missing_is_silent_and_non_blocking(self):
+    def test_provider_missing_emits_one_actionable_non_blocking_recommendation(self):
         common = _write_fake_common(
             self.tmpdir,
             """
@@ -66,17 +66,23 @@ class SemanticIndexHookTests(unittest.TestCase):
                 return SimpleNamespace(
                     provider='tokensave',
                     provider_profile='public',
-                    action='detect',
+                    action='recommend',
                     outcome='provider_missing',
-                    recommendation=None,
+                    recommendation=(
+                        'No supported semantic index provider is installed. '
+                        'Configure .jig/semantic-index.json.'
+                    ),
                 )
             """,
         )
 
         result = run_hook(self.project, common)
+        second = run_hook(self.project, common)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIsNone(parse_stdout(result))
+        out = parse_stdout(result)
+        self.assertIn(".jig/semantic-index.json", out["additionalContext"])
+        self.assertIsNone(parse_stdout(second))
 
     def test_public_recommendation_emits_once(self):
         common = _write_fake_common(

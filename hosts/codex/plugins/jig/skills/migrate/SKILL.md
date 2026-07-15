@@ -2,8 +2,8 @@
 name: migrate
 description: >
   Inventory an existing spec-driven project and apply bounded migrations to
-  jig defaults: `report`, `rename-decisions`, `split-slices`, slice-to-spec,
-  and `copy-machinery`. Use when the user says migrate this project to jig,
+  jig defaults: `report`, `adopt-layout`, `rename-decisions`, `split-slices`,
+  slice-to-spec, and `copy-machinery`. Use when the user says migrate this project to jig,
   adopt jig here, this repo already has specs — set up jig,
   scaffold-init refused — what now; introduce jig to an existing codebase;
   apply ADR-0004 to
@@ -35,9 +35,10 @@ tree.
 a migration plan, then (in later slices) apply the rename / restructure
 operations.
 
-`migrate.py` exposes four subcommands:
+`migrate.py` exposes five subcommands:
 
 - `report` — strictly read-only inventory + plan.
+- `adopt-layout` — validates an existing custom-root corpus and writes only its `scaffold.json` sentinel/config; supports `--dry-run`.
 - `rename-decisions` — applies ADR-0004's rename. Idempotent; refuses on conflict; has a `--dry-run` mode; use `--host codex` when running from Codex-facing source or plugin paths.
 - `split-slices` — extracts embedded slice sections into sibling slice files.
 - `copy-machinery` — copies jig runtime machinery into the target's Codex scaffold runtime under `.codex/`; use `--host codex` from source or plugin paths.
@@ -48,11 +49,31 @@ operations.
 
 ```bash
 python3 "${PLUGIN_ROOT}/skills/migrate/migrate.py" report \
-  <project-dir>
+  <project-dir> [--docs-root <relative-root>]
 ```
 
 - `<project-dir>` — path to the project root (e.g. `/path/to/repo`,
   `.` for cwd).
+- `--docs-root .` — inventory a track-local corpus whose `specs/`,
+  `decisions/`, `workflow.md`, and `architecture.md` live directly under the
+  selected subproject instead of under `docs/`.
+
+### Adopt an existing custom-root corpus
+
+Preview first, then apply:
+
+```bash
+python3 "${PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  adopt-layout <subproject-dir> --docs-root . --dry-run
+python3 "${PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  adopt-layout <subproject-dir> --docs-root .
+```
+
+The operation refuses incomplete/ambiguous corpora and existing or malformed
+sentinels before mutation. Apply writes only `<subproject-dir>/scaffold.json`
+using scaffold-init's canonical manifest builder; it does not move or rewrite
+the existing artifacts. Afterward, `workflow.py transition`, status-board,
+and ADR helpers discover the subproject through that sentinel.
 
 ### Run the rename-decisions migration
 
@@ -495,12 +516,9 @@ verification report.
 - **Custom skills and agents are inventoried but never migrated.**
   Out of 008's scope by explicit non-goal. The Inventory row lists
   them; the Ambiguity row asks the user how to reconcile.
-- **The report scans jig's canonical docs shape only.** Other
-  directories (e.g. `documentation/`, `proposals/`, `architecture/`) are
-  not inspected. A future slice may add `--docs-root` to broaden the
-  scan — for 008-01, projects with non-standard layouts get a
-  `not-yet-spec-driven` verdict and a recommendation to either rename
-  their dirs or use `/jig:scaffold-init`.
+- **The report scans one validated docs root.** It defaults to `docs`; pass
+  `--docs-root .` (or another safe project-relative path) for an existing
+  custom-root corpus. Arbitrary per-directory maps remain out of scope.
 - **Spikes are inventoried but not migrated.** jig has no
   spike-workflow skill yet (separate gap; tracked in inbox/refinement
   -todo). The Ambiguity section notes the count and recommends

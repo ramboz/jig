@@ -16,6 +16,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATE_PY = REPO_ROOT / "skills" / "migrate" / "migrate.py"
+WORKFLOW_PY = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SKILL_MD = REPO_ROOT / "skills" / "migrate" / "SKILL.md"
 FIXTURES = REPO_ROOT / "skills" / "migrate" / "fixtures"
 
@@ -49,6 +50,140 @@ def _load_migrate():
 
 
 _migrate = _load_migrate()
+
+
+def _write_track_local_corpus(root: Path) -> Path:
+    """CWV-shaped minimal corpus: artifacts live directly under ``root``."""
+    spec_dir = root / "specs" / "001-example"
+    spec_dir.mkdir(parents=True)
+    spec = spec_dir / "spec.md"
+    spec.write_text(
+        "---\nstatus: DRAFT\nuse_cases: []\n---\n\n"
+        "# Spec 001: Example\n\n## Overview\nExample.\n\n"
+        "## Assumptions\n\nNone.\n\n## Slices\n"
+        "- [001-01 — example](slice-01-example.md)\n"
+    )
+    (spec_dir / "slice-01-example.md").write_text(
+        "---\nstatus: DRAFT\ndependencies: []\nlast_verified: 2026-07-15\n---\n\n"
+        "## Slice 001-01 — example\n\n**Goal:** Example.\n\n"
+        "**DoR:**\n- ✅ Ready.\n\n**Acceptance Criteria:**\n\n"
+        "1. Example.\n\n**DoD:**\n- [ ] Example.\n\n"
+        "**Anti-horizontal-phasing check:** Example.\n"
+    )
+    (root / "specs" / "README.md").write_text("# Spec status board\n")
+    (root / "decisions").mkdir()
+    (root / "decisions" / "adr-0001-example.md").write_text("# ADR-0001\n")
+    (root / "workflow.md").write_text("# Workflow\n")
+    (root / "architecture.md").write_text("# Architecture\n")
+    return spec
+
+
+class AdoptLayoutTests(unittest.TestCase):
+    """Spec 092 — existing custom-root corpus adoption."""
+
+    def setUp(self):
+        import tempfile
+        self.root = Path(tempfile.mkdtemp(prefix="jig-adopt-layout-"))
+        self.spec = _write_track_local_corpus(self.root)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.root)
+
+    def test_report_under_dot_root_is_adoptable_and_uses_real_paths(self):
+        r = run_migrate("report", str(self.root), "--docs-root", ".")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("**Verdict:** adoptable", r.stdout)
+        self.assertIn("`specs/*/spec.md`", r.stdout)
+        self.assertNotIn("`docs/specs/*/spec.md`", r.stdout)
+        self.assertIn("adopt-layout", r.stdout)
+
+    def test_report_scans_contract_surfaces_under_custom_root(self):
+        (self.root / "architecture.md").write_text(
+            "# Architecture\n\n## API\n\n| Method | Path |\n|---|---|\n"
+            "| GET | /v1/example |\n\n```json\n{}\n```\n"
+        )
+
+        r = run_migrate("report", str(self.root), "--docs-root", ".")
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Prose API contract", r.stdout)
+        self.assertIn("`architecture.md` §API", r.stdout)
+
+    def test_dry_run_writes_nothing(self):
+        before = {p.relative_to(self.root): p.read_bytes()
+                  for p in self.root.rglob("*") if p.is_file()}
+        r = run_migrate(
+            "adopt-layout", str(self.root), "--docs-root", ".", "--dry-run",
+            "--host", "codex",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("[dry-run]", r.stdout)
+        self.assertFalse((self.root / "scaffold.json").exists())
+        after = {p.relative_to(self.root): p.read_bytes()
+                 for p in self.root.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
+
+    def test_apply_preserves_corpus_and_enables_workflow_transition(self):
+        before = {p.relative_to(self.root): p.read_bytes()
+                  for p in self.root.rglob("*") if p.is_file()}
+        r = run_migrate(
+            "adopt-layout", str(self.root), "--docs-root", ".",
+            "--host", "codex",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        manifest = __import__("json").loads(
+            (self.root / "scaffold.json").read_text()
+        )
+        self.assertEqual(manifest["layout"]["docs_root"], ".")
+        self.assertEqual(manifest["scaffold_mode"], "plugin-only")
+        after = {p.relative_to(self.root): p.read_bytes()
+                 for p in self.root.rglob("*")
+                 if p.is_file() and p.name != "scaffold.json"}
+        self.assertEqual(before, after)
+
+        board = subprocess.run(
+            [sys.executable, str(WORKFLOW_PY), "status-board", str(self.root)],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(board.returncode, 0, board.stderr)
+        self.assertIn(
+            "001-01 — example",
+            (self.root / "specs" / "README.md").read_text(),
+        )
+
+        transition = subprocess.run(
+            [sys.executable, str(WORKFLOW_PY), "transition", str(self.spec),
+             "001-01", "READY_FOR_REVIEW"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(transition.returncode, 0, transition.stderr)
+        slice_text = (self.spec.parent / "slice-01-example.md").read_text()
+        self.assertIn("status: READY_FOR_REVIEW", slice_text)
+
+        reverse = subprocess.run(
+            [sys.executable, str(WORKFLOW_PY), "transition", str(self.spec),
+             "001-01", "DRAFT"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(reverse.returncode, 0, reverse.stderr)
+
+    def test_refuses_incomplete_or_escaping_layout_without_write(self):
+        import tempfile
+        incomplete = Path(tempfile.mkdtemp(prefix="jig-adopt-incomplete-"))
+        try:
+            bad = run_migrate(
+                "adopt-layout", str(incomplete), "--docs-root", ".")
+            self.assertEqual(bad.returncode, 2)
+            self.assertFalse((incomplete / "scaffold.json").exists())
+        finally:
+            import shutil
+            shutil.rmtree(incomplete)
+
+        escaping = run_migrate(
+            "adopt-layout", str(self.root), "--docs-root", "../escape")
+        self.assertEqual(escaping.returncode, 2)
+        self.assertFalse((self.root / "scaffold.json").exists())
 
 
 # -------------------- InventoryTests --------------------
