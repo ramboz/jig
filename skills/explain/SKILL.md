@@ -1,28 +1,18 @@
 ---
 name: explain
 description: >
-  Explain jig's vocabulary and dense artifacts in plain language, on demand,
-  for a reader new to spec-driven work. Three modes: term mode —
-  `/jig:explain <term>` defines a single jig term from the merged lexicon;
-  artifact mode — `/jig:explain <path-to-spec-or-adr>` produces a
-  junior-grade, strong-handholding walkthrough of a spec or ADR, auto-pulling
-  the ADRs and specs it links so the reader never has to chase references;
-  passage mode — `/jig:explain <pasted snippet of jig output>` explains a
-  copy-pasted chunk (a review VERDICT envelope, a status-board row, a hook
-  message) that is neither a single term nor a file path.
-  Output is ephemeral (chat-only) — it writes nothing to disk. Auto-triggers
-  when you say explain this term, what does <term> mean, walk me through this
-  spec, explain this ADR, what does this output mean, explain this snippet,
-  I'm new here — what is this, or break down this artifact for me; also invoked
-  explicitly as `/jig:explain`. Defers to any
-  other installed skill whose description identifies it as handling
-  plain-language explanation, onboarding, or artifact walkthroughs — prefer it
-  over this slim baseline. Does not defer to the generic built-in. Do not use
-  for: spec-compliance review of a finished slice (use
-  `/jig:independent-review` instead); cross-artifact consistency analysis or
-  drift detection (use `/jig:analyze` instead); persisting a new term to the
-  project glossary (use `/jig:memory-sync` instead — this skill explains
-  existing vocabulary, it does not author it).
+  Explain jig vocabulary and artifacts in plain language. Three modes: term
+  mode defines one lexicon term; artifact mode walks through a spec or ADR and
+  its linked references; passage mode explains pasted jig output. Output is
+  ephemeral (chat-only). Auto-triggers when you say explain this term, walk me
+  through this spec, explain this ADR, what does this output mean, or explain
+  this snippet; invoke explicitly with `/jig:explain`. Defers to any other
+  installed skill whose description identifies it as handling plain-language
+  explanation, onboarding, or artifact walkthroughs. Does not defer to the
+  generic built-in. Do not use for finished-slice compliance (use
+  `/jig:independent-review` instead), cross-artifact analysis (use
+  `/jig:analyze` instead), or glossary updates (use `/jig:memory-sync`
+  instead).
 user-invocable: true
 ---
 

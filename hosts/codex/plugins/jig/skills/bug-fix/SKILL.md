@@ -1,23 +1,16 @@
 ---
 name: bug-fix
 description: >
-  Drive the proportional, teeth-gated bug-fix lifecycle for bug-shaped work —
-  a reported defect that needs rigor without spec ceremony. Diagnose the true
-  root cause, prove it, prevent regression: REPORTED → DIAGNOSING → ROOT_CAUSED
-  → FIXING → REVIEWED → (VERIFIED) → DONE, with off-ramps for ESCALATED
-  missing behaviour and RESOLVED_ON_MAIN parallel-session fixes. Backed by `bug.py` (sibling of
-  `workflow.py`), a durable `docs/bugs/NNN-slug.md` record, and mechanized
-  gates — a diagnose-before-fix gate (≥2 hypotheses) and a red→green gate that
-  witnesses the regression test fail before the fix and pass after. Auto-fires
-  on "fix this bug", "debug this", "root-cause this", "this regressed", "this
-  broke again", "why is this failing", "diagnose before fixing", or
-  "investigate this failure". Two modes: `diagnose` (stop at ROOT_CAUSED) and
-  `diagnose_and_fix` (run through DONE). Owns its orchestration — only the
-  reused craft (`pr-review`) and conditional security (`security-review`)
-  passes defer to a richer installed skill. Do not use for spec-shaped work
-  (hard-to-reverse decisions, cross-layer, ambiguous scope) — that goes
-  through `spec-workflow`; or for trivial one-liners — `triage` bows out and
-  routes you to `tdd-loop` + commit.
+  Drive the teeth-gated lifecycle for reported defects: diagnose root cause,
+  prove it, and prevent regression through REPORTED → DIAGNOSING → ROOT_CAUSED
+  → FIXING → REVIEWED → DONE, with VERIFIED, ESCALATED, and RESOLVED_ON_MAIN
+  paths where needed. Auto-fires on fix this bug, debug this, root-cause this,
+  this regressed, this broke again, why is this failing, diagnose before
+  fixing, or investigate this failure. Two modes: `diagnose` stops at
+  ROOT_CAUSED; `diagnose_and_fix` runs through DONE. Uses a durable bug record,
+  multiple hypotheses, a fresh-main recheck, and a witnessed red→green test.
+  Do not use for spec-shaped work (use `spec-workflow`) or trivial one-liners
+  (use `tdd-loop`).
 user-invocable: true
 ---
 

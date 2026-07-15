@@ -2,21 +2,15 @@
 name: security-review
 description: >
   Team baseline for security review — a best-effort heuristic security
-  pass over a diff or change-set, producing summary, blockers, nits, and
-  strengths. Auto-triggers when you say review this for security, any
-  vulnerabilities here, security pass on this diff, is this code secure,
-  check this for security issues, or security review this. Orchestrates
-  installed scanners (semgrep, bandit, gosec, npm audit / osv-scanner)
-  when they are on PATH and degrades to a heuristic-only pass when none
-  is present — it installs nothing. Defers to any other installed skill
-  whose description identifies it as handling security review, SAST, or
-  vulnerability analysis — the user's own, Adobe's `adobe-security-*`
-  family, or a built-in `security-review` — prefer it over this slim
-  baseline. Do not use for: spec-compliance review of a finished slice
-  (use `/jig:independent-review` instead); general PR craft review (use
-  `/jig:pr-review` instead); preventing secrets from being committed
-  (that is the `jig-secret-scan` PreToolUse hook, not this skill — this
-  skill reviews, it does not prevent).
+  pass over a diff or change-set. Auto-triggers for review this for security,
+  any vulnerabilities here, security pass on this diff, is this code secure,
+  check this for security issues, or security review this. Uses installed
+  scanners when available; installs nothing. Defers to any other installed
+  skill whose description identifies it as handling security review, SAST, or
+  vulnerability analysis, including `adobe-security-*`; prefer it over this
+  slim baseline. Do not use for spec-compliance review (use
+  `/jig:independent-review`), general PR craft (use `/jig:pr-review`), or
+  secret prevention (`jig-secret-scan`).
 user-invocable: true
 ---
 
