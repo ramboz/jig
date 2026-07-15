@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import os
 import re
 import sys
@@ -77,7 +78,8 @@ def _resolve_host(host: 'str | None') -> str:
 class Inventory:
     """Aggregated read-only observations about <project-dir>."""
 
-    def __init__(self):
+    def __init__(self, docs_root: str = "docs"):
+        self.docs_root = docs_root
         self.slices: list[Path] = []          # under docs/slices/
         self.specs: list[Path] = []           # docs/specs/*/spec.md
         self.decisions: list[Path] = []       # under docs/decisions/
@@ -142,11 +144,35 @@ def _safe_stat_size(p: Path) -> int:
 MILESTONE_RE = re.compile(r"\*\*Milestone:\*\*\s*(M\d+)")
 
 
-def scan(project_dir: Path) -> Inventory:
-    """Build the inventory by reading <project-dir>. No mutations."""
-    inv = Inventory()
+def _validated_docs_root(raw: str) -> str:
+    """Validate a requested layout through spec 084's shared helper."""
+    import importlib.util
 
-    docs = project_dir / "docs"
+    helper = Path(__file__).resolve().parents[1] / "_common" / "project_layout.py"
+    spec = importlib.util.spec_from_file_location("jig_project_layout_for_migrate", helper)
+    if spec is None or spec.loader is None:
+        raise MigrateError(f"cannot load project-layout helper at {helper}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.validate_docs_root(raw)
+
+
+def _docs_base(project_dir: Path, docs_root: str) -> Path:
+    return project_dir if docs_root == "." else project_dir / docs_root
+
+
+def _docs_label(docs_root: str, suffix: str = "") -> str:
+    prefix = "" if docs_root == "." else docs_root.rstrip("/") + "/"
+    return prefix + suffix
+
+
+def scan(project_dir: Path, docs_root: str = "docs") -> Inventory:
+    """Build the inventory by reading <project-dir>. No mutations."""
+    docs_root = _validated_docs_root(docs_root)
+    inv = Inventory(docs_root)
+
+    docs = _docs_base(project_dir, docs_root)
 
     # Slices (flat) — docs/slices/slice-*.md
     slices_dir = docs / "slices"
@@ -255,27 +281,33 @@ def render_inventory(inv: Inventory, project_dir: Path) -> str:
     rows.append("| Path | Count | Note |")
     rows.append("|------|-------|------|")
     if inv.slices:
-        rows.append(f"| `docs/slices/` | {len(inv.slices)} | "
+        rows.append(f"| `{_docs_label(inv.docs_root, 'slices/')}` | {len(inv.slices)} | "
                     f"flat slice files (validator-style) |")
     if inv.specs:
-        rows.append(f"| `docs/specs/*/spec.md` | {len(inv.specs)} | "
+        rows.append(f"| `{_docs_label(inv.docs_root, 'specs/*/spec.md')}` | {len(inv.specs)} | "
                     f"nested specs (jig-style) |")
     if inv.decisions:
-        rows.append(f"| `docs/decisions/` | {len(inv.decisions)} | "
+        rows.append(f"| `{_docs_label(inv.docs_root, 'decisions/')}` | {len(inv.decisions)} | "
                     f"decision records (ADR-0004 aligned) |")
     if inv.adrs:
-        rows.append(f"| `docs/adrs/` | {len(inv.adrs)} | "
+        rows.append(f"| `{_docs_label(inv.docs_root, 'adrs/')}` | {len(inv.adrs)} | "
                     f"ADRs (pre-ADR-0004 layout — will be renamed) |")
     if inv.spikes:
-        rows.append(f"| `docs/spikes/` | {len(inv.spikes)} | "
+        rows.append(f"| `{_docs_label(inv.docs_root, 'spikes/')}` | {len(inv.spikes)} | "
                     f"spike memos (inventoried only; spike workflow is a "
                     f"separate jig gap) |")
     if inv.workflow is not None:
-        rows.append("| `docs/workflow.md` | 1 | workflow doc present |")
+        rows.append(f"| `{_docs_label(inv.docs_root, 'workflow.md')}` | 1 | workflow doc present |")
     if inv.architecture is not None:
-        rows.append("| `docs/architecture.md` | 1 | architecture doc present |")
+        rows.append(
+            f"| `{_docs_label(inv.docs_root, 'architecture.md')}` | 1 | "
+            "architecture doc present |"
+        )
     if inv.product_vision is not None:
-        rows.append("| `docs/product-vision.md` | 1 | product-vision doc present |")
+        rows.append(
+            f"| `{_docs_label(inv.docs_root, 'product-vision.md')}` | 1 | "
+            "product-vision doc present |"
+        )
     if inv.custom_skills:
         names = ", ".join(f"`{p.name}`" for p in inv.custom_skills)
         rows.append(f"| `.claude/skills/` | {len(inv.custom_skills)} | "
@@ -335,15 +367,22 @@ def render_mapping(inv: Inventory) -> str:
     rows.append("| Current | jig target | Note |")
     rows.append("|---------|------------|------|")
 
+    adrs_dir = _docs_label(inv.docs_root, "adrs/")
+    decisions_dir = _docs_label(inv.docs_root, "decisions/")
+    specs_glob = _docs_label(inv.docs_root, "specs/NNN-*/spec.md")
+    slices_glob = _docs_label(inv.docs_root, "slices/slice-NN-*.md")
+    workflow = _docs_label(inv.docs_root, "workflow.md")
+    architecture = _docs_label(inv.docs_root, "architecture.md")
+
     # Decision dir mapping
     if inv.adrs and not inv.decisions:
-        rows.append("| `docs/adrs/` | `docs/decisions/` | "
+        rows.append(f"| `{adrs_dir}` | `{decisions_dir}` | "
                     "directory rename per ADR-0004 |")
     elif inv.decisions and not inv.adrs:
-        rows.append("| `docs/decisions/` | `docs/decisions/` | "
+        rows.append(f"| `{decisions_dir}` | `{decisions_dir}` | "
                     "kept (already matches ADR-0004) |")
     elif inv.adrs and inv.decisions:
-        rows.append("| `docs/adrs/` + `docs/decisions/` | `docs/decisions/` | "
+        rows.append(f"| `{adrs_dir}` + `{decisions_dir}` | `{decisions_dir}` | "
                     "**CONFLICT** — see Conflicts section |")
 
     # ADR file renames
@@ -352,26 +391,26 @@ def render_mapping(inv: Inventory) -> str:
         target_name = _map_adr_filename(current_name)
         if current_name == target_name:
             continue
-        current_dir = "docs/adrs" if adr_path in inv.adrs else "docs/decisions"
+        current_dir = adrs_dir.rstrip("/") if adr_path in inv.adrs else decisions_dir.rstrip("/")
         rows.append(f"| `{current_dir}/{current_name}` | "
-                    f"`docs/decisions/{target_name}` | "
+                    f"`{decisions_dir}{target_name}` | "
                     f"pad to 4-digit + ensure `adr-` prefix |")
 
     # Slice topology
     if inv.slices:
-        rows.append(f"| `docs/slices/slice-NN-*.md` ({len(inv.slices)} files) | "
+        rows.append(f"| `{slices_glob}` ({len(inv.slices)} files) | "
                     "topology question — see Ambiguities (slice 008-04) | "
                     "no automated mapping in 008-01 |")
     if inv.specs:
-        rows.append("| `docs/specs/NNN-*/spec.md` | "
+        rows.append(f"| `{specs_glob}` | "
                     "kept (already nested) | no change required |")
 
     # Other landmarks
     if inv.workflow is not None:
-        rows.append("| `docs/workflow.md` | `docs/workflow.md` | "
+        rows.append(f"| `{workflow}` | `{workflow}` | "
                     "kept — manual review against jig's template recommended |")
     if inv.architecture is not None:
-        rows.append("| `docs/architecture.md` | `docs/architecture.md` | "
+        rows.append(f"| `{architecture}` | `{architecture}` | "
                     "kept — manual review against jig's template recommended |")
 
     if len(rows) == 2:
@@ -386,8 +425,10 @@ def render_conflicts(inv: Inventory) -> str:
 
     # Dual decisions/adrs dirs
     if inv.adrs and inv.decisions:
+        adrs_dir = _docs_label(inv.docs_root, "adrs/")
+        decisions_dir = _docs_label(inv.docs_root, "decisions/")
         conflicts.append(
-            "- **Both `docs/adrs/` and `docs/decisions/` exist.** "
+            f"- **Both `{adrs_dir}` and `{decisions_dir}` exist.** "
             "Migration would need to merge them, but `migrate.py "
             "rename-decisions` (slice 008-02) refuses on this "
             "configuration. Resolve manually: pick one canonical "
@@ -420,7 +461,7 @@ def render_ambiguities(inv: Inventory) -> str:
             ambiguities.append(
                 f"- **Flat slices reference {len(milestones)} milestone(s) "
                 f"({', '.join(milestones)}).** Under jig's nested model "
-                f"(`docs/specs/NNN-name/spec.md`), each milestone could "
+                f"(`{_docs_label(inv.docs_root, 'specs/NNN-name/spec.md')}`), each milestone could "
                 f"become a parent spec. The user must decide the milestone-"
                 f"to-parent-spec mapping; `migrate.py slice-to-spec` (slice "
                 f"008-04, deferred) will accept that mapping as input."
@@ -465,7 +506,7 @@ def render_ambiguities(inv: Inventory) -> str:
     if inv.spikes:
         ambiguities.append(
             f"- **{len(inv.spikes)} spike file(s) present** under "
-            f"`docs/spikes/`. jig does not yet have a spike-workflow "
+            f"`{_docs_label(inv.docs_root, 'spikes/')}`. jig does not yet have a spike-workflow "
             f"skill — spikes are inventoried but not migrated by any "
             f"008 slice. Keep as-is; revisit when jig adds the skill."
         )
@@ -486,6 +527,13 @@ def render_operations(inv: Inventory, verdict: str) -> str:
 
     header = "Suggested order (each operation is `--dry-run` first):\n"
     items = []  # list of body strings; numbered at render time
+
+    if inv.docs_root != "docs":
+        items.append(
+            "**`migrate.py adopt-layout <project-dir> --docs-root "
+            f"{inv.docs_root}`** — write the scaffold sentinel/config for "
+            "this existing custom-root corpus without moving its artifacts."
+        )
 
     # rename-decisions
     if inv.adrs:
@@ -525,7 +573,9 @@ def render_operations(inv: Inventory, verdict: str) -> str:
     # the target's `.claude/skills/` has no pre-existing `jig-*` skill
     # dir (the marker scaffold-mode leaves behind). Suppressed once the
     # machinery is in place, otherwise the suggestion is redundant.
-    if verdict in {"adoptable", "partial"} and not inv.jig_skill_dirs:
+    if (verdict in {"adoptable", "partial"}
+            and inv.docs_root == "docs"
+            and not inv.jig_skill_dirs):
         items.append(
             "**`migrate.py copy-machinery <project-dir>`** — copy "
             "jig's hooks / agents / skill helpers into the target's "
@@ -579,7 +629,7 @@ def render_report(inv: Inventory, verdict: str, project_dir: Path) -> str:
     parts.append("")
     parts.append(render_ambiguities(inv))
     parts.append("")
-    parts.append(render_contract_surfaces(project_dir))
+    parts.append(render_contract_surfaces(project_dir, inv.docs_root))
     parts.append("")
     parts.append(render_operations(inv, verdict))
     parts.append("")
@@ -692,7 +742,9 @@ _HTTP_VERB_ROW_RE = re.compile(
 _JSONC_FENCE_RE = re.compile(r"```(?:jsonc|json)\b")
 
 
-def _detect_prose_api_in_architecture(project_dir: Path) -> list:
+def _detect_prose_api_in_architecture(
+    project_dir: Path, docs_root: str = "docs"
+) -> list:
     """AC #3(b) — flag prose API contracts in canonical doc files.
 
     Two-tier heuristic:
@@ -711,7 +763,7 @@ def _detect_prose_api_in_architecture(project_dir: Path) -> list:
     For per-section matches, the bullet cites the matching §<heading>;
     for whole-doc matches, the bullet cites just the file.
     """
-    docs_dir = project_dir / "docs"
+    docs_dir = _docs_base(project_dir, docs_root)
     hits = []
 
     # Tier 1: per-section detection for architecture.md
@@ -765,11 +817,12 @@ def _detect_prose_api_in_architecture(project_dir: Path) -> list:
     return hits
 
 
-def _detect_env_contract_pattern(project_dir: Path) -> list:
+def _detect_env_contract_pattern(project_dir: Path, docs_root: str = "docs") -> list:
     """AC #3(c) — flag the bespoke env-contract triple (markdown doc +
     .env.example seed + checker). Emit one line summarizing which parts
     of the triple are present and what's missing."""
-    doc = (project_dir / "docs" / "env-contract.md").is_file()
+    doc_label = _docs_label(docs_root, "env-contract.md")
+    doc = (_docs_base(project_dir, docs_root) / "env-contract.md").is_file()
     seed = (project_dir / ".env.example").is_file()
     # Checker heuristic, layered:
     #   1. ANY file inside `tools/env-contract/` — the directory name
@@ -815,7 +868,7 @@ def _detect_env_contract_pattern(project_dir: Path) -> list:
     if present == 3:
         return [
             "- **env-contract pattern** detected (full triple: "
-            "`docs/env-contract.md` + `.env.example` + checker script). "
+            f"`{doc_label}` + `.env.example` + checker script). "
             "Bespoke alternative to JSON Schema for env vars; well-shaped, "
             "no migration recommended. See `skills/contracts/SKILL.md` "
             "Config / env vars row for the rationale."
@@ -823,7 +876,7 @@ def _detect_env_contract_pattern(project_dir: Path) -> list:
     # Partial — name what's missing.
     missing = []
     if not doc:
-        missing.append("`docs/env-contract.md`")
+        missing.append(f"`{doc_label}`")
     if not seed:
         missing.append("`.env.example`")
     if not checker:
@@ -857,12 +910,14 @@ def _detect_handtyped_boundary_types(project_dir: Path) -> list:
     return hits
 
 
-def render_contract_surfaces(project_dir: Path) -> str:
+def render_contract_surfaces(
+    project_dir: Path, docs_root: str = "docs"
+) -> str:
     """AC #3 of slice 022-02 — `## Contract surfaces detected` section."""
     bullets = []
     bullets.extend(_detect_schema_artifacts(project_dir))
-    bullets.extend(_detect_prose_api_in_architecture(project_dir))
-    bullets.extend(_detect_env_contract_pattern(project_dir))
+    bullets.extend(_detect_prose_api_in_architecture(project_dir, docs_root))
+    bullets.extend(_detect_env_contract_pattern(project_dir, docs_root))
     bullets.extend(_detect_handtyped_boundary_types(project_dir))
 
     if not bullets:
@@ -891,7 +946,7 @@ def render_contract_surfaces(project_dir: Path) -> str:
     )
 
 
-def report(project_dir: Path) -> tuple:
+def report(project_dir: Path, docs_root: str = "docs") -> tuple:
     """Run the inventory, compute the verdict, render the report.
 
     Returns (report_text, exit_code)."""
@@ -900,7 +955,7 @@ def report(project_dir: Path) -> tuple:
     if not project_dir.is_dir():
         raise MigrateError(f"not a directory: {project_dir}")
 
-    inv = scan(project_dir)
+    inv = scan(project_dir, docs_root)
     verdict = compute_verdict(inv)
     text = render_report(inv, verdict, project_dir)
 
@@ -1700,6 +1755,76 @@ def copy_machinery(
 # ---------- end copy-machinery ----------
 
 
+# ---------- adopt-layout (spec 092) ----------
+
+
+def adopt_layout(
+    project_dir: Path,
+    *,
+    docs_root: str,
+    dry_run: bool = False,
+    host: str = "claude",
+) -> tuple:
+    """Adopt an existing jig corpus without moving or overwriting artifacts.
+
+    The operation writes only ``<project_dir>/scaffold.json``. The requested
+    root is validated by spec 084's shared layout helper, the corpus must be
+    independently adoptable, and scaffold-init owns manifest construction.
+    """
+    if not project_dir.exists():
+        raise MigrateError(f"project directory not found: {project_dir}")
+    if not project_dir.is_dir():
+        raise MigrateError(f"not a directory: {project_dir}")
+    project_dir = project_dir.resolve()
+    manifest_path = project_dir / "scaffold.json"
+    if manifest_path.exists():
+        raise MigrateError(
+            f"refusing to overwrite existing scaffold.json at {manifest_path}"
+        )
+
+    try:
+        normalized_root = _validated_docs_root(docs_root)
+    except ValueError as exc:
+        raise MigrateError(str(exc)) from exc
+    inv = scan(project_dir, normalized_root)
+    verdict = compute_verdict(inv)
+    if verdict != "adoptable":
+        raise MigrateError(
+            f"layout is not adoptable under docs_root={normalized_root!r}: "
+            f"migration report verdict is {verdict}; expected at least three "
+            "of specs/slices, decisions/adrs, workflow.md, architecture.md"
+        )
+
+    resolved_host = _resolve_host(host)
+    plugin = _resolve_plugin_root()
+    scaffold_mod = _load_scaffold_module(plugin)
+    try:
+        manifest = scaffold_mod.adoption_manifest(
+            project_dir,
+            plugin,
+            docs_root=normalized_root,
+            host=resolved_host,
+        )
+    except ValueError as exc:
+        raise MigrateError(str(exc)) from exc
+    rendered = json.dumps(manifest, indent=2) + "\n"
+    if dry_run:
+        return (
+            f"[dry-run] write {manifest_path}\n"
+            f"layout.docs_root={normalized_root!r}; scaffold_mode='plugin-only'\n",
+            0,
+        )
+    _atomic_write(manifest_path, rendered)
+    return (
+        f"adopted existing jig corpus at {project_dir}\n"
+        f"wrote {manifest_path} with layout.docs_root={normalized_root!r}\n",
+        0,
+    )
+
+
+# ---------- end adopt-layout ----------
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="migrate.py",
@@ -1712,6 +1837,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit a read-only migration report for an existing project",
     )
     rp.add_argument("project_dir", help="path to the project to inventory")
+    rp.add_argument(
+        "--docs-root", default="docs",
+        help="project-relative root containing existing jig artifacts "
+             "(default: docs; use '.' for a track-local corpus)",
+    )
 
     rd = sub.add_parser(
         "rename-decisions",
@@ -1766,6 +1896,25 @@ def _build_parser() -> argparse.ArgumentParser:
              "copies only the newly-added tier's skills, leaving existing "
              "tiers untouched (repeatable; slice 038-04)",
     )
+    al = sub.add_parser(
+        "adopt-layout",
+        help="write a scaffold.json sentinel for an existing jig corpus "
+             "without moving or overwriting its artifacts",
+    )
+    al.add_argument("project_dir", help="existing jig project/subproject root")
+    al.add_argument(
+        "--docs-root", required=True,
+        help="project-relative root containing artifacts; use '.' when specs/ "
+             "and decisions/ are directly under project_dir",
+    )
+    al.add_argument(
+        "--dry-run", action="store_true",
+        help="validate and report the sentinel write without mutating files",
+    )
+    al.add_argument(
+        "--host", choices=("auto", "claude", "codex"), default="auto",
+        help="host recorded in the plugin-only manifest (default: auto)",
+    )
     return p
 
 
@@ -1778,7 +1927,7 @@ def main(argv: list) -> int:
 
     try:
         if ns.cmd == "report":
-            text, code = report(Path(ns.project_dir))
+            text, code = report(Path(ns.project_dir), docs_root=ns.docs_root)
             sys.stdout.write(text)
             return code
         if ns.cmd == "rename-decisions":
@@ -1797,6 +1946,13 @@ def main(argv: list) -> int:
             text, code = copy_machinery(
                 Path(ns.project_dir), force=ns.force, add_tiers=ns.add_tier,
                 host=ns.host,
+            )
+            sys.stdout.write(text)
+            return code
+        if ns.cmd == "adopt-layout":
+            text, code = adopt_layout(
+                Path(ns.project_dir), docs_root=ns.docs_root,
+                dry_run=ns.dry_run, host=ns.host,
             )
             sys.stdout.write(text)
             return code

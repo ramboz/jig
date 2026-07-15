@@ -178,3 +178,16 @@ SPIDR split: **Interface + Path + Data**.
 - [spec 056: Token-usage tracking](../056-token-usage-tracking/spec.md)
 - [spec 057: Thin-orchestrator](../057-thin-orchestrator/spec.md)
 - [spec 079: Semantic-index guidance](../079-semantic-index-guidance/spec.md)
+
+## Amendments
+
+### 2026-07-15 — Provider discovery and missing-provider guidance
+
+Dogfooding in Mystique recorded repeated `provider_missing` events while Scout
+was installed and the public registry advertised multiple candidates. The
+implementation had treated the default `tokensave` value as an implicit pin
+and never probed later candidates; missing-provider telemetry was also silent.
+Spec 093 changes only the unconfigured path: discover eligible installed public
+providers in stable order and emit one actionable recommendation when none is
+available. Explicit provider choices remain authoritative, Scout remains behind
+the internal-overlay allowlist, and jig still installs/downloads nothing.

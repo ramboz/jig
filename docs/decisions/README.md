@@ -41,6 +41,7 @@
 - [ADR-0034: Lower the interaction altitude for non-expert adopters](adr-0034-lower-interaction-altitude.md) — A recurring, multi-source signal says jig is too much mental burden for some non-expert adopters. (2026-07-06, Proposed)
 - [ADR-0035: Active Plan-mode driving for the plan phase (extends ADR-0027)](adr-0035-active-plan-mode-driving.md) — [ADR-0027](adr-0027-host-native-phase-modes.md) adopted **mode-aware, not mode-dependent**: host planning/implementation modes are *advisory* affordances, never lifecycle state or gate inputs. (2026-07-06, Proposed)
 - [ADR-0036: Immutable Release Identity](adr-0036-immutable-release-identity.md) — Jig publishes semantic versions and release tags, but its root Claude marketplace currently fetches `hosts/claude` from the repository default branch without a `ref` or `sha`. (2026-07-14, Accepted)
+- [ADR-0037: Bug-fix repository closure evidence](adr-0037-bug-fix-repository-closure-evidence.md) — The bug lifecycle proves diagnose-before-fix, fresh-main reproduction, and a red-to-green regression test. (2026-07-15, Proposed)
 
 ## Lightweight decisions
 
