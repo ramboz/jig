@@ -9,9 +9,8 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 
 ### Project codenames / active work
 - **jig** = this skill pack repo (the plugin itself).
-- **Branch routing** — 1.x ships on `main`; 2.0 multi-host on `v2`. Build v2 work on `v2`, keep it current by MERGING main→v2 (not rebase). See [docs/roadmap.md](docs/roadmap.md).
-- **Active specs:** 088-02 — `/jig:orient` skill (adopting contributed `compass`; arch review on [#90](https://github.com/ramboz/jig/pull/90)). See [docs/specs/README.md](docs/specs/README.md). Deferred decisions → [docs/refinement-todo.md](docs/refinement-todo.md).
-- **Recorded, not yet built:** spec 091 — bug-fix repository-closure evidence ([ADR-0037](docs/decisions/adr-0037-bug-fix-repository-closure-evidence.md), Proposed). Decision captured + spec reserved; the `bug.py`/`bug-fix` lifecycle changes are unimplemented (left DRAFT deliberately). Don't assume the closure gates exist yet.
+- **Branch routing** — 1.x shipped on `main`; 2.0 multi-host also lives on `main` after the v2 merge. `v2` remains the integration/maintenance branch for the 2.0 line. See [docs/roadmap.md](docs/roadmap.md).
+- **Active specs:** 088-02 — `/jig:orient` skill (adopting contributed `compass`; arch review on [#90](https://github.com/ramboz/jig/pull/90)). **Recorded, not yet built:** spec 091 — bug-fix repository-closure evidence ([ADR-0037](docs/decisions/adr-0037-bug-fix-repository-closure-evidence.md), Proposed); gates don't exist yet. See [docs/specs/README.md](docs/specs/README.md). Deferred → [docs/refinement-todo.md](docs/refinement-todo.md).
 
 ### Key terms (one-line index — full defs via `/jig:explain <term>`)
 - **Configurable docs root** — [ADR-0033](docs/decisions/adr-0033-configurable-docs-root.md) / [spec 084](docs/specs/084-configurable-docs-root/spec.md) — `layout.docs_root` in scaffold.json (default `docs`); `.` = track-local adoption inside a larger repo; discovery sentinel-anchored; subtree push-mode refused. Read via `_common/project_layout.py`.
