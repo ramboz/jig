@@ -11,6 +11,7 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 - **jig** = this skill pack repo (the plugin itself).
 - **Branch routing** — 1.x shipped on `main`; 2.0 multi-host also lives on `main` after the v2 merge. `v2` remains the integration/maintenance branch for the 2.0 line. See [docs/roadmap.md](docs/roadmap.md).
 - **Active specs:** none — see [docs/specs/README.md](docs/specs/README.md). Deferred decisions -> [docs/refinement-todo.md](docs/refinement-todo.md).
+- **Recorded, not yet built:** spec 091 — bug-fix repository-closure evidence ([ADR-0037](docs/decisions/adr-0037-bug-fix-repository-closure-evidence.md), Proposed). Decision captured + spec reserved; the `bug.py`/`bug-fix` lifecycle changes are unimplemented (left DRAFT deliberately). Don't assume the closure gates exist yet.
 
 ### Key terms (one-line index — full defs via `/jig:explain <term>`)
 - **Subagent permission** — In this jig project, the user explicitly permits Codex to use subagents when they materially help implementation, review, reconciliation, or coordination work.
