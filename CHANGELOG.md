@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.7.1](https://github.com/ramboz/jig/compare/v2.7.0...v2.7.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **install-contract:** reject unregistered public skills ([#93](https://github.com/ramboz/jig/issues/93)) ([6769508](https://github.com/ramboz/jig/commit/67695085467fc80032af35cc7041c465e4cf7fd8)), closes [#89](https://github.com/ramboz/jig/issues/89) [#91](https://github.com/ramboz/jig/issues/91)
+* **skills:** enforce codex description limit ([#101](https://github.com/ramboz/jig/issues/101)) ([7d538ea](https://github.com/ramboz/jig/commit/7d538ea068db8cd8f1a1d381abf8935b516df8c7))
+* **spec-workflow:** preserve slice status through rollup ([#87](https://github.com/ramboz/jig/issues/87)) ([a247f76](https://github.com/ramboz/jig/commit/a247f76a17804f702cdb9963b59bcb51774de7f7))
+* **tdd-loop:** preserve node default test discovery ([#102](https://github.com/ramboz/jig/issues/102)) ([950242d](https://github.com/ramboz/jig/commit/950242d9e5cf3da39feabd86cddd310b75ba2400))
+
+
+### Documentation
+
+* **bugs:** reserve 008-flaky-host-package-drift-guard ([de9f171](https://github.com/ramboz/jig/commit/de9f17158df3809eceaf89838eeba82a94a39b7d))
+* **contributing:** document bundled skill workflow ([#94](https://github.com/ramboz/jig/issues/94)) ([53d66c3](https://github.com/ramboz/jig/commit/53d66c31a0920b23da35cd68fe58de05b44c79f9)), closes [#92](https://github.com/ramboz/jig/issues/92)
+* **decisions:** accept adr-0036 ([2a5497f](https://github.com/ramboz/jig/commit/2a5497fda331a399df289e744321c7923fa18ab5))
+* **spec-090:** draft immutable release contract ([b2a6182](https://github.com/ramboz/jig/commit/b2a6182d2d5520bed9aac413d259b4bc7cbeadca))
+* **spec-090:** refine immutable release contract ([6978213](https://github.com/ramboz/jig/commit/69782133f4d852acc6330ec1c6a688682bb1be93))
+
 ## [2.7.0](https://github.com/ramboz/jig/compare/v2.6.0...v2.7.0) (2026-07-12)
 
 
