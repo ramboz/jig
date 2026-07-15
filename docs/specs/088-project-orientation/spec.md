@@ -1,5 +1,5 @@
 ---
-status: DONE
+status: IN_PROGRESS
 skill: spec-workflow
 use_cases: []
 ---
@@ -47,13 +47,22 @@ None.
 
 ## Decomposition
 
-SPIDR — **Rules** axis. The missing behavior is one orientation rule applied at the
-project pickup boundary. A single vertical slice delivers the complete user-visible
-path: the CLI computes the headline, tests prove its selection rules and purity,
-and the pickup documentation invokes it. Splitting CLI, tests, and guidance into
-separate slices would be horizontal phasing. No Spike is needed because the relevant
-classifier, lifecycle readers, and command surface were verified directly.
+SPIDR — **Rules** axis, delivered as two vertical slices at the project-pickup
+boundary, each shipping a complete user-visible path:
+
+- **088-01 — computed orientation.** The deterministic `workflow.py orient` command:
+  the CLI computes the one-line headline, tests prove its selection rules and purity,
+  and the pickup documentation invokes it. Splitting CLI, tests, and guidance apart
+  would be horizontal phasing. No Spike is needed — the classifier, lifecycle readers,
+  and command surface were verified directly.
+- **088-02 — the `/jig:orient` judgment skill.** Layers a read-only, zero-write
+  judgment briefing on top of the 088-01 headline (Proposed ADRs, DEFERRED triggers,
+  refinement-todo, release plans, inbox, standalone bugs), rendering one fixed, readable
+  "where do things stand, what to pick up?" answer and handing off to the skill that
+  owns the work. Adopted from a contributed skill per the
+  [#90](https://github.com/ramboz/jig/pull/90) review.
 
 ## Slices
 
 - [088-01 — computed orientation at project pickup](slice-01-project-orientation.md)
+- [088-02 — the `/jig:orient` judgment skill](slice-02-orient-skill.md)
