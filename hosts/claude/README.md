@@ -86,22 +86,6 @@ horizon is **coordination across a multi-repo workspace** (a federation tier —
 **[adoption & readiness guide](docs/adoption-readiness.md)** first — who jig is
 for, what your repo needs, and your first 30 minutes.
 
-Then, in a Claude Code or Codex session at your project root:
-
-```text
-Set up this project for AI-native development.
-```
-
-(or the explicit `/jig:scaffold-init`). This copies jig's docs, skills, hooks,
-and host config into your repo: Claude gets `CLAUDE.md` + `.claude/`; Codex gets
-`AGENTS.md` + `.codex/`. The scaffold seeds a worked-example spec and runs a
-"scaffold complete and verified" check. Follow it with `/jig:vision-elicitation`
-to set the vision every later slice is judged against.
-
-**Copy-paste prompts** live in the **[prompt cookbook](docs/prompts.md)**, in
-the order you run them: scaffold the repo once, then repeat the idea-to-landed
-loop for every feature.
-
 ### Install
 
 **Claude plugin**
@@ -131,6 +115,18 @@ codex plugin add jig@jig
 git clone https://github.com/ramboz/jig.git
 python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex <your-project>
 ```
+
+### Project setup
+
+Once installed, open a new project directory in Claude Code and say:
+> "Set up this project for AI-native development"
+
+The `scaffold-init` skill will run and produce the docs/ scaffolding.
+
+
+**Copy-paste prompts** live in the **[prompt cookbook](docs/prompts.md)**, in
+the order you run them: scaffold the repo once, then repeat the idea-to-landed
+loop for every feature.
 
 ## Extension points
 
@@ -162,13 +158,6 @@ prove the other installs and runs:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-marketplace
 workflow used during development.
-
-## Getting started
-
-Once installed, open a new project directory in Claude Code and say:
-> "Set up this project for AI-native development"
-
-The `scaffold-init` skill will run and produce the docs/ scaffolding.
 
 ## Repository structure (for contributors)
 
