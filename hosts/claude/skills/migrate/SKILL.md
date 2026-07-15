@@ -1,26 +1,16 @@
 ---
 name: migrate
 description: >
-  Inventory an existing spec-driven project (read-only report) and apply
-  bounded migration operations to bring it under jig's defaults. Slice
-  008-01 added `report`; slice 008-02 added `rename-decisions` (apply
-  ADR-0004's `docs/adrs/` → `docs/decisions/` rename + filename shape).
-  Slice 018-04 added `split-slices` (extract `## Slice` sections out of
-  spec.md into sibling slice files). Slice 020-01 added an agentic
-  slice-to-spec migration workflow — judgment-driven, no helper — for
-  projects with flat `docs/slices/*.md` files that need to be grouped
-  into nested `docs/specs/MNN-slug/slice-NN-*.md` form. Slice 021-01
-  added `copy-machinery` (copy jig's skills + agents + hooks into the
-  target's host-local runtime, reusing scaffold-mode's helpers). Use
-  when the user says "migrate this project to jig",
-  "adopt jig here", "this repo already has specs — set up jig",
-  "scaffold-init refused — what now", "introduce jig to an existing
-  codebase", "apply ADR-0004 to my project", "migrate flat slices into
-  nested specs", or "copy jig's machinery into my project". The report
-  is read-only; mutating subcommands have a `--dry-run` mode (where
-  available) and refuse on conflict before any write; the agentic
-  slice-to-spec workflow never deletes originals (caller decides when
-  to clean up).
+  Inventory an existing spec-driven project and apply bounded migrations to
+  jig defaults: `report`, `rename-decisions`, `split-slices`, slice-to-spec,
+  and `copy-machinery`. Use when the user says migrate this project to jig,
+  adopt jig here, this repo already has specs — set up jig,
+  scaffold-init refused — what now; introduce jig to an existing codebase;
+  apply ADR-0004 to
+  my project; migrate flat slices into nested specs; or copy jig's machinery
+  into my project. Reports are read-only; mutations support dry runs where
+  available, refuse conflicts before writing, and preserve originals in the
+  agentic slice-to-spec workflow.
 user-invocable: true
 ---
 

@@ -555,3 +555,6 @@ When a command accepts a canonical overview path but child lookup also makes a c
 
 ## Tier-gated packaging contracts need exact sets
 When plugin packaging recursively ships every public skills/*/SKILL.md but scaffold copying is gated by _TIER_SKILLS, checking only EXPECTED_SKILLS ⊆ present permits accidental plugin-only skills. Validate both directions: the public skill set must exactly match the tier-derived contract, excluding private _... infrastructure. See bug 007 and GitHub issue #89.
+
+## Bug 009: host-normalized skill description limits
+When validating SKILL.md metadata, enforce host limits on the normalized value the host checks. Codex applies split_whitespace().join(" ") to YAML description text before its 1024-character limit, so raw source length and YAML chomping semantics are not the contract. Keep every public description comfortably below the cap and validate the generated package.

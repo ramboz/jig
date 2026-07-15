@@ -12,3 +12,5 @@
 | 005 | diagnose-gate-list-shape | medium | standard | DONE | yes | skills/bug-fix/test_bug.py::DiagnoseGateListShapeTests | claude/jig-issue-80-review-dd7b12 |  |  |
 | 006 | slice-path-status-rollup | medium | standard | DONE | yes | skills/spec-workflow/test_workflow.py::TransitionTests::test_slice_path_transition_is_not_overwritten_by_spec_rollup | codex/issue-86-status-rollup |  |  |
 | 007 | unregistered-plugin-skill-contract | low | standard | DONE | yes | scripts/test_verify_install.py::PluginModeSkillContractTests::test_unregistered_public_skill_fails_and_is_named | codex/issue-89-skill-contract |  |  |
+| 008 | flaky-host-package-drift-guard |  |  | REPORTED | no |  | detached |  |  |
+| 009 | codex-skill-description-limit | medium | standard | DONE | yes | python3 -m unittest scripts.test_install_contract.PresenceHelperTests scripts.test_install_contract.RealRepoContractTests | detached |  |  |
