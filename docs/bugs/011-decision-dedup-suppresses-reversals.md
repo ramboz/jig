@@ -1,23 +1,23 @@
 ---
-status: ROOT_CAUSED
+status: FIXING
 tier: gnarly
 severity: medium
-regression_test:
+regression_test: hooks/scripts/lib/test_decision_scan.py::TestFlagDuplicates::test_recorded_decision_reversal_is_flagged_not_dropped
 main_repro_checked_at: 2026-07-16
 main_repro_ref: origin/main@91427b4
 main_repro_result: reproduces
-red_confirmed_at:
+red_confirmed_at: 2026-07-16
 green_confirmed_at:
-fix_class:
+fix_class: structural_fix
 security_surface: false
 escalated_to:
 ---
 
 # Bug 011: decision-dedup-suppresses-reversals
 
-Reported as [issue #109](https://github.com/ramboz/jig/issues/109) (finding 2). Diagnose-only:
-this record stops at ROOT_CAUSED because the fix is a design choice for the maintainer — see
-`## Fix class`. Finding 1 of the same issue (no backfill seeds
+Reported as [issue #109](https://github.com/ramboz/jig/issues/109) (finding 2). Diagnosed first
+and held at ROOT_CAUSED because the remedy was a design choice for the maintainer; fixed once he
+made the call — see `## Fix class`. Finding 1 of the same issue (no backfill seeds
 `docs/decisions/lightweight-decisions.md`) is a separate defect and is not covered here.
 
 Owner check (per `skills/bug-fix/SKILL.md`, "scan for an overlapping active slice"): spec 083
@@ -140,8 +140,31 @@ genuine reversal that lands under the threshold.
 
 ## Fix class
 
-**Deferred — maintainer decision.** The root cause is proven; the remedy is a design choice with
-a real trade-off, so this record stops here rather than pre-empt it. Options, neutrally:
+`structural_fix` — **decided 2026-07-16 by the maintainer (Julien).**
+
+> "drop the dedup logic, the human can do it. you can flag duplicates, and ask the human to
+> triage."
+
+Suppression is removed outright. Containment survives as a *signal*, not a verdict: a candidate
+whose tokens are largely contained by a recorded decision is **flagged** as a possible duplicate
+and still surfaced, and the nudge asks the owner to triage it. Nothing is dropped **against the
+recorded corpus**, so the defect class this record describes cannot recur on those paths — and
+option 4 below is subsumed there, because no silent suppression remains to log.
+
+This resolves the trade-off that made the remedy a decision. Re-surfacing was the cost of
+option 1; it is now uniform (every candidate re-surfaces every Stop, as scan hits already did —
+the transcript keeps the quote regardless), so it becomes a triage-noise question the owner
+owns, not a correctness one.
+
+Scope, decided in the same exchange: **both** recorded-corpus suppression paths are fixed —
+`decision_scan.dedup` and `decision_scratch.prune_recorded_stubs`, whose docstring already
+declares it "mirrors `decision_scan.dedup`'s containment rule" and which therefore carried the
+identical defect on the in-flight stub path. `decision_scratch.dedup_scan_against_stubs` is
+deliberately **kept**: it collapses the *same* decision captured both in-flight and in the
+transcript into one line, which is double-surfacing with no triage value — a different concern
+from suppressing against a recorded decision.
+
+The options as they stood before the decision, kept for the record:
 
 1. **Never dedup Tier-2.** Cheapest and most targeted — `dedup()` already receives `cand.tier`.
    The tier already encodes "the user is correcting something", so overlap with a recorded
@@ -159,6 +182,52 @@ a real trade-off, so this record stops here rather than pre-empt it. Options, ne
 
 ## Fix
 
+Both recorded-corpus suppression paths now flag instead of drop. The containment rule itself is
+unchanged (`_DUPLICATE_CONTAINMENT = 0.6`, `_DUPLICATE_MIN_TOKENS = 3`); only its consequence
+changed.
+
+| File | Change |
+|---|---|
+| `hooks/scripts/lib/decision_scan.py` | `dedup()` → `flag_duplicates()`; sets `Candidate.possible_duplicate`, never drops. Containment extracted to `is_contained()` / `token_sets()` — the rule's single home. `render_summary()` marks flagged items and asks the owner to check each. |
+| `hooks/scripts/lib/decision_scratch.py` | `prune_recorded_stubs()` → `flag_recorded_stubs()`; same change on the in-flight stub path. Both it and `dedup_scan_against_stubs()` route through `is_contained()`. |
+| `hooks/scripts/jig-decision-capture.sh` | Call sites + header contract. |
+| `hosts/` (claude + codex) | Regenerated; drift `--check` green. |
+| spec 083 | `spec.md` live prose corrected inline; `## Amendments` on slice-04 (AC5) and slice-07 (AC5), per ADR-0010. |
+
+**Deliberately kept.**
+
+`dedup_scan_against_stubs` still drops on containment, per the scope decision in `## Fix class`.
+It fires only when a covering stub exists *and is surfaced in the same nudge*, so the decision
+still reaches the owner — with the Tier-3 residual noted below.
+
+**Deviations / residuals.** Items 1-4 accepted; item 5 is a process breach, not accepted.
+
+1. **Residual reversal-suppression, Tier 3 only.** Because agent prose never produces a stub of
+   its own, a Tier-3 *agent* statement that reverses an in-flight stub is still dropped by
+   `dedup_scan_against_stubs` (e.g. stub "Use Redis instead of Memcached for the cache" vs agent
+   "going with Memcached for the cache instead" → 3/4 = 0.75). Low value — Tier 3 is low-confidence by
+   construction — so the claim is scoped rather than the code extended. Parked in
+   `refinement-todo.md`.
+2. **Scratch-log format change.** Stubs persisted to `.jig/decision-scratch/<sid>.log` now carry
+   a `possible_duplicate` key. Additive; `read_stubs` is tolerant of unknown keys.
+3. **New public seams on a DONE-slice module.** `decision_scan.is_contained()` and
+   `token_sets()` are new cross-module API, following the `is_user_override` precedent
+   (public function over private constants) that slice 083-07 set. Behaviour-preserving —
+   see `## Proof`.
+4. **Scratch-log retention change.** `flag_recorded_stubs` never shortens the list, so
+   `write_stubs` never receives `[]` for a populated session and `clear_scratch` is unreachable
+   in production. A per-session log now outlives its session on disk. Bounded (append-only,
+   240-char clip, git-ignored) and unreported; parked in `refinement-todo.md`.
+5. **Broke the no-`git stash` rule (process deviation, surfaced by craft review).** The red state
+   was obtained with `git stash push -- <impl files>` then `git stash pop`.
+   [learnings.md](../memory/learnings.md) is explicit: agents must **not** `git stash` in jig's
+   worktree-per-task setup — copy aside (`cp`) or delete-and-recreate instead — because all
+   worktrees share one stash stack, so a bare `pop` can apply a sibling worktree's WIP (slice
+   056-01: 5 files corrupted). This session ran in a linked worktree alongside four others, and
+   the `pop` carried no explicit ref. It happened to restore the right stash because nothing else
+   was pushed in between — luck, not correctness. Recorded rather than quietly reworded: the rule
+   is right and was simply not followed. No corruption resulted; the stash stack is empty.
+
 ## Already tried
 
 Dead ends from the investigation, recorded so they are not re-walked (from issue #109's own
@@ -173,7 +242,41 @@ Dead ends from the investigation, recorded so they are not re-walked (from issue
 
 ## Regression test
 
+`hooks/scripts/lib/test_decision_scan.py::TestFlagDuplicates::test_recorded_decision_reversal_is_flagged_not_dropped`
+
+Uses this record's own repro quote (`actually make the settings button border 0.09 alpha`)
+against the LD-3 text. Against the old `dedup()` it returns `[]` — failing both the length
+assertion and `out[0]` — so it captures the bug rather than the mechanism. Reversal-specific,
+not a generic dedup case.
+
+Backed end-to-end by
+`hooks/scripts/test_jig_decision_capture.py::DecisionCaptureHookTests::test_reversal_of_recorded_decision_reaches_the_owner`
+(through the real hook), and on the stub path by
+`hooks/scripts/lib/test_decision_scratch.py::FlagRecordedTests::test_stub_reversing_a_recorded_decision_survives`.
+
 ## Proof
+
+- **Red witnessed by the gate, not asserted.** The implementation was set aside (see deviation 5 —
+  done the wrong way) and `bug.py transition 011 FIXING` ran the regression test itself: it
+  refuses the transition if the test passes without a fix. `red_confirmed_at: 2026-07-16` is that
+  gate's stamp, not a claim — `JIG_BUG_TEST_GATE=0` was never used.
+- **Green is witnessed by the same gate** on the REVIEWED transition, which stamps
+  `green_confirmed_at` only after re-running the test — see the frontmatter for the date
+  rather than this bullet.
+- Suites green: `test_decision_scan` (19) + `test_decision_scratch` (24), and
+  `test_jig_decision_capture` (11) through the real hook.
+- Full suite green via `scripts/run_tests.py`. Note: an intermittent failure on
+  `hosts/claude/.claude-plugin/plugin.json` is [bug 008](008-flaky-host-package-drift-guard.md),
+  not this change — the file is untouched here, `build_host_packages.py --check` passes on the
+  same tree, and three consecutive re-runs pass.
+- **The `is_contained()` / `token_sets()` extraction is behaviour-preserving**, verified by
+  differential-testing old-vs-new at all three call sites across the floor boundary, empty
+  quotes and the threshold — all match. Two premises worth pinning so the question is not
+  re-litigated: the `_DUPLICATE_MIN_TOKENS` floor already existed in
+  `dedup_scan_against_stubs` (added as a slice 083-07 craft nit) and *kept* below-floor
+  candidates, which `not is_contained(...)` reproduces exactly; and `token_sets()` dropping
+  empty sets is a no-op, since `0/len >= 0.6` is never true and `any([])` is False anyway.
+- Independent `bug-review` + `craft` verdicts recorded under `docs/bugs/reviews/`.
 
 ## Learning
 

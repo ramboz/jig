@@ -561,3 +561,7 @@ When validating SKILL.md metadata, enforce host limits on the normalized value t
 
 ## Bug 010: Node default discovery needs no directory operand
 Runner adapters must preserve the distinction between an implicit project target and an explicit test path. Node test default discovery is cwd-based: bare `node --test` discovers the suite, while a positional directory is treated as a module entry point and can fail with MODULE_NOT_FOUND. Keep explicit file/path and name-selector behavior covered separately.
+
+## Bug 011: correct withdrawn prose by sweeping, not by chasing cited lines
+When a fix withdraws a documented rationale, correcting only the lines a reviewer names leaves siblings behind — a stale `spec.md` constraint survived three consecutive review passes that way. Grep the withdrawn *phrasing* across `docs/` instead (here: "repeat runs stay quiet", "dedup-against-recorded", "until recorded", "then pruned"). Two traps make this worse than ordinary doc drift: prose under a heading like "Design constraints (locked in, all phases)" reads as binding and can license re-introducing the bug, and `workflow.py status-board` *preserves* the Notes column across regeneration, so a stale note there never self-corrects.
+

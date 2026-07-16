@@ -2,7 +2,8 @@
 
 Unit tests for the scan logic live at hooks/scripts/lib/test_decision_scan.py;
 these cover the hook wrapper: stdin payload parsing, owner-gated additionalContext
-output, dedup against the project's recorded decisions, and fail-open behavior.
+output, duplicate-flagging against the project's recorded decisions, and
+fail-open behavior.
 
 Run from the repo root:
     python3 hooks/scripts/test_jig_decision_capture.py
@@ -67,8 +68,10 @@ class DecisionCaptureHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "")
 
-    def test_dedup_against_recorded_lightweight_decision(self):
-        # Record the decision first; the scan must then stay quiet.
+    def test_recorded_decision_is_flagged_not_silenced(self):
+        # Bug 011 / issue #109: an already-recorded decision used to be silenced.
+        # It is now surfaced and flagged, because the containment rule that drove
+        # the silencing cannot tell a restatement from a reversal.
         decisions = self.project / "docs" / "decisions"
         decisions.mkdir(parents=True)
         (decisions / "lightweight-decisions.md").write_text(
@@ -79,8 +82,30 @@ class DecisionCaptureHookTests(unittest.TestCase):
         result = run_hook(self.project, self._payload(
             [{"role": "user", "content": "English should not be the default language."}]))
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "",
-                         "already-recorded decision must be deduped to silence")
+        ctx = additional_context(result)
+        self.assertIsNotNone(ctx, "a recorded decision must still reach the owner")
+        self.assertIn("possible duplicate", ctx.lower())
+        self.assertRegex(ctx, r"(?i)reversal|changes a recorded decision")
+
+    def test_reversal_of_recorded_decision_reaches_the_owner(self):
+        # The bug's headline case, end-to-end through the hook: a Tier-2 override
+        # that overturns a recorded decision must never be silenced.
+        decisions = self.project / "docs" / "decisions"
+        decisions.mkdir(parents=True)
+        (decisions / "lightweight-decisions.md").write_text(
+            "## Entries\n\n"
+            "### 2026-07-15 — Settings button\n"
+            "**Decision:** knob circles fill with var(--surface) not the mockup "
+            "per-frame hex; the app --border 0.07 alpha light was kept over the "
+            "mockup 0.09. Scope: Home settings button.\n")
+        result = run_hook(self.project, self._payload(
+            [{"role": "user",
+              "content": "actually make the settings button border 0.09 alpha"}]))
+        self.assertEqual(result.returncode, 0)
+        ctx = additional_context(result)
+        self.assertIsNotNone(
+            ctx, "a reversal of a recorded decision must never be suppressed")
+        self.assertIn("0.09", ctx)
 
     def test_logs_additional_context_event(self):
         run_hook(self.project, self._payload(
@@ -128,7 +153,10 @@ class DecisionCaptureHookTests(unittest.TestCase):
         self.assertIsNotNone(second)
         self.assertIn("Postgres", second)  # re-surfaces, like the scan does
 
-    def test_recorded_stub_is_pruned(self):
+    def test_recorded_stub_is_flagged_not_pruned(self):
+        # Bug 011 / issue #109: this stub used to be pruned to silence. The
+        # in-flight surface is the highest-fidelity capture there is, so a stub
+        # that looks recorded is flagged for triage and kept, never dropped.
         ds.append_stub(self.project, "sess-1", "user",
                        "Use Postgres instead of MySQL for the primary store",
                        "user-override")
@@ -138,11 +166,12 @@ class DecisionCaptureHookTests(unittest.TestCase):
             "## Entries\n\n"
             "### 2026-06-26 — Primary store\n"
             "**Decision:** Use Postgres instead of MySQL for the primary store.\n")
-        result = run_hook(self.project, self._payload([]))
-        self.assertEqual(result.stdout.strip(), "",
-                         "recorded decision must be deduped to silence")
-        self.assertFalse(ds.scratch_path(self.project, "sess-1").exists(),
-                         "a now-recorded stub must be pruned (file removed)")
+        ctx = additional_context(run_hook(self.project, self._payload([])))
+        self.assertIsNotNone(ctx, "a stub is never silenced for looking recorded")
+        self.assertIn("Postgres", ctx)
+        self.assertIn("possible duplicate", ctx.lower())
+        self.assertTrue(ds.scratch_path(self.project, "sess-1").exists(),
+                        "the stub must persist — the owner has not triaged it yet")
 
     def test_malformed_json_never_crashes(self):
         result = run_hook(self.project, None, raw="{not valid json")

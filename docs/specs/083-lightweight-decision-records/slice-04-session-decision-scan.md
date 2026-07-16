@@ -105,3 +105,32 @@ as designed.
 | `docs/architecture.md` | updated | hook-spine diagram + prose (ten→eleven; sibling Stop hooks) |
 | `hosts/` (claude + codex) | updated | regenerated; hook + lib + verify_install ship in release zip; drift `--check` green |
 | `docs/conventions.md` | no-op | no convention change |
+
+## Amendments
+
+### 2026-07-16 — AC5 inverted by bug 011 (dedup → flag)
+
+**AC5 ("Dedup against recorded decisions … are suppressed, so repeat runs stay
+quiet") no longer describes shipped behaviour.** This is an amendment record,
+not an edit to the AC, per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+
+[Bug 011](../../bugs/011-decision-dedup-suppresses-reversals.md) (reported as
+[issue #109](https://github.com/ramboz/jig/issues/109)) found the suppression
+silently dropped decisions that *reverse* a recorded one: containment measures
+topical overlap, not agreement, and a reversal shares the record's component,
+property and vocabulary, so it scores *high*. The mechanism was strongest
+exactly where it was most wrong — the better a decision was recorded, the more
+reliably its reversal was suppressed.
+
+The maintainer's decision: drop suppression outright; flag instead and let the
+owner triage. Effective behaviour as of bug 011:
+
+- `dedup()` → `flag_duplicates()`. Nothing is dropped against the recorded
+  corpus; overlap sets `Candidate.possible_duplicate`.
+- `render_summary()` marks flagged items `possible duplicate` and asks the owner
+  to check each, since overlap cannot tell a repeat from a reversal.
+- Repeat runs are consequently **noisier**, not quiet — an accepted trade.
+  AC5's "so repeat runs stay quiet" rationale is withdrawn.
+
+The `_DUPLICATE_CONTAINMENT = 0.6` threshold and the `_DUPLICATE_MIN_TOKENS`
+floor survive unchanged; only their consequence changed (flag, not drop).

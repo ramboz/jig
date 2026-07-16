@@ -10,10 +10,13 @@ in-flight hook points append one-line JSON stubs to a per-session scratch log:
   and end-of-session capture agree on what counts.
 
 At session end the Stop hook (`jig-decision-capture.sh`) reads the stubs, merges
-them with the scan, and dedups so a decision captured *both* ways surfaces once.
-It then prunes the stubs whose decision is now recorded and persists the rest, so
-an un-recorded stub re-surfaces on the next Stop — durability parity with a scan
-candidate. The scratch log is per-session, ephemeral, and git-ignored.
+them with the scan, and collapses a decision captured *both* ways into one line.
+Stubs whose decision looks already recorded are *flagged*, never pruned (bug 011
+/ issue #109 — overlap cannot distinguish a reversal from a restatement, so the
+owner triages), and every stub persists and re-surfaces on the next Stop —
+durability parity with a scan candidate. The scratch log is per-session and
+git-ignored; since nothing is pruned it is rewritten rather than emptied, so a
+populated log outlives its session on disk.
 
 Composes with 083-04: the Tier-1 subset is already caught recall-free by the
 scan; this is a *resilience* layer over that cell — it survives a Stop payload
@@ -32,21 +35,19 @@ from pathlib import Path
 # dir on sys.path).
 try:  # pragma: no cover - exercised by both import paths
     from decision_scan import (
-        _DEDUP_CONTAINMENT,
-        _DEDUP_MIN_TOKENS,
         Candidate,
         clip,
+        is_contained,
         is_user_override,
-        normalize_tokens,
+        token_sets,
     )
 except ImportError:  # pragma: no cover
     from lib.decision_scan import (
-        _DEDUP_CONTAINMENT,
-        _DEDUP_MIN_TOKENS,
         Candidate,
         clip,
+        is_contained,
         is_user_override,
-        normalize_tokens,
+        token_sets,
     )
 
 _SCRATCH_DIR = Path(".jig") / "decision-scratch"
@@ -135,8 +136,8 @@ def write_stubs(project_dir, session_id, stubs) -> None:
     """Rewrite the session's scratch log to exactly `stubs` (fail-open).
 
     Removes the file when `stubs` is empty so an emptied scratch leaves no
-    residue. Used by the Stop-hook triage to prune recorded stubs while keeping
-    un-recorded ones for re-surfacing.
+    residue. The Stop-hook triage writes back the full flagged list, so in
+    practice a populated scratch is rewritten, never emptied (bug 011).
     """
     try:
         if not stubs:
@@ -150,32 +151,21 @@ def write_stubs(project_dir, session_id, stubs) -> None:
         pass
 
 
-def prune_recorded_stubs(stubs, recorded_texts) -> list:
-    """Keep only stubs whose decision is NOT yet recorded.
+def flag_recorded_stubs(stubs, recorded_texts) -> list:
+    """Flag stubs overlapping a recorded decision. Never drops one.
 
-    Mirrors `decision_scan.dedup`'s containment rule (and its terse-quote floor)
-    on the raw stub dicts: a stub is dropped when >= `_DEDUP_CONTAINMENT` of its
-    stopword-filtered tokens appear in some recorded decision. Un-recorded stubs
-    survive so they re-surface on the next Stop — same durability as a scan
-    candidate (a stub is not silently dropped after a single surfacing).
+    Same rule and same reason as `decision_scan.flag_duplicates`: overlap cannot
+    tell a restatement from a reversal, so the owner triages (bug 011). Stubs
+    with no usable quote are skipped — `read_stubs` already filters those.
     """
-    recorded_token_sets = [normalize_tokens(t) for t in (recorded_texts or [])]
-    kept = []
+    recorded = token_sets(recorded_texts)
+    flagged = []
     for stub in stubs or []:
         if not isinstance(stub, dict) or not stub.get("quote"):
             continue
-        tokens = normalize_tokens(stub.get("quote"))
-        if len(tokens) < _DEDUP_MIN_TOKENS:
-            kept.append(stub)
-            continue
-        recorded = False
-        for rec in recorded_token_sets:
-            if rec and len(tokens & rec) / len(tokens) >= _DEDUP_CONTAINMENT:
-                recorded = True
-                break
-        if not recorded:
-            kept.append(stub)
-    return kept
+        flagged.append(dict(stub,
+                            possible_duplicate=is_contained(stub["quote"], recorded)))
+    return flagged
 
 
 def stubs_to_candidates(stubs) -> list:
@@ -196,6 +186,7 @@ def stubs_to_candidates(stubs) -> list:
             quote=quote,
             turn=turn if isinstance(turn, int) else -1,
             confidence="high",
+            possible_duplicate=bool(stub.get("possible_duplicate")),
         ))
     return candidates
 
@@ -203,29 +194,18 @@ def stubs_to_candidates(stubs) -> list:
 def dedup_scan_against_stubs(scan_candidates, stub_candidates) -> list:
     """Drop scan candidates already captured in-flight (no double-surface).
 
-    A scan candidate is suppressed when >= `_DEDUP_CONTAINMENT` of its
-    stopword-filtered tokens appear in some stub candidate's tokens — the same
-    containment rule `decision_scan.dedup` uses against recorded decisions.
+    Deliberately still a *drop*, unlike the recorded-corpus paths: this collapses
+    one decision captured both ways into a single line — duplication with no
+    triage value, not suppression of a distinct decision. The covering stub is
+    surfaced in the same nudge, so the decision still reaches the owner.
+
+    Residual (bug 011, accepted): a Tier-3 *agent* restatement that in fact
+    reverses a stub is dropped here, since agent prose never produces a stub of
+    its own to survive as. Low value — Tier 3 is low-confidence by construction.
     """
-    stub_token_sets = [normalize_tokens(c.quote) for c in (stub_candidates or [])]
-    kept = []
-    for cand in scan_candidates or []:
-        cand_tokens = normalize_tokens(cand.quote)
-        if len(cand_tokens) < _DEDUP_MIN_TOKENS:
-            # Mirror decision_scan.dedup's terse-quote floor: too few tokens to
-            # dedup confidently — keep (a re-surface is cheaper than a silent drop).
-            kept.append(cand)
-            continue
-        suppressed = False
-        for stub_tokens in stub_token_sets:
-            if not stub_tokens:
-                continue
-            if len(cand_tokens & stub_tokens) / len(cand_tokens) >= _DEDUP_CONTAINMENT:
-                suppressed = True
-                break
-        if not suppressed:
-            kept.append(cand)
-    return kept
+    stubs = token_sets(c.quote for c in (stub_candidates or []))
+    return [c for c in (scan_candidates or [])
+            if not is_contained(c.quote, stubs)]
 
 
 def _collect_strings(obj, out, budget=40):
