@@ -4,11 +4,14 @@
     "positive": [
       { "prompt": "Remember this for later and save it to the project memory", "top_k": 3 },
       { "prompt": "Add this term to the glossary", "top_k": 3 },
-      { "prompt": "Consolidate what we learned this session into the memory layer", "top_k": 3 }
+      { "prompt": "Consolidate what we learned this session into the memory layer", "top_k": 3 },
+      { "prompt": "Remember this decision so we don't rewrite it tomorrow", "top_k": 3 },
+      { "prompt": "Record this decision: we shortened the cards, the old cap was too tall for laptops", "top_k": 3 }
     ],
     "negative": [
       { "prompt": "What does this jig term mean? explain it to me", "owner": "explain" },
-      { "prompt": "Record this decision as an ADR", "owner": "adr-workflow" }
+      { "prompt": "Record this decision as an ADR", "owner": "adr-workflow" },
+      { "prompt": "Write an ADR for this decision and its rejected alternatives", "owner": "adr-workflow" }
     ]
   }
 }
