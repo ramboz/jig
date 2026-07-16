@@ -95,6 +95,11 @@ class Inventory:
         self.jig_skill_dirs: list[Path] = []
         self.claude_md_size: int | None = None
         self.milestones_referenced: set[str] = set()
+        # ADRs whose status is encoded in a format the `→ DONE` dependency
+        # gate cannot read (neither frontmatter `status:` nor a `## Status`
+        # section — e.g. a bare inline `**Status:** Accepted` prose line).
+        # See `_adr_status_readable` and render_ambiguities.
+        self.unreadable_adr_status: list[Path] = []
 
 
 def _safe_iterdir(p: Path) -> list:
@@ -142,6 +147,30 @@ def _safe_stat_size(p: Path) -> int:
 
 
 MILESTONE_RE = re.compile(r"\*\*Milestone:\*\*\s*(M\d+)")
+
+# Readability of an ADR's status *as the `→ DONE` dependency gate reads it*
+# (workflow.py::_lookup_adr_accepted, per ADR-0026). The gate resolves status
+# frontmatter-first (`status:` key at column 0 of a leading `---` block), then
+# falls back to a prose `## Status` section. A bare inline `**Status:** Accepted`
+# line — a common pre-jig / hand-rolled house style — satisfies NEITHER branch,
+# so the gate reads such an ADR as not-Accepted and refuses the transition even
+# though the decision is genuinely Accepted. `report` cannot judge Accepted vs
+# Superseded (that needs section content), but it CAN cheaply flag ADRs whose
+# status the gate can't read at all — turning a silent false-positive
+# ("adoptable") into an explicit heads-up. Detection mirrors the gate's *presence*
+# check, deliberately coarse: a leading frontmatter block with a top-level
+# `status:` key, OR a `## Status` heading.
+_FM_BLOCK_RE = re.compile(r"(?s)\A---\s*\n(.*?)\n---\s*(?:\n|\Z)")
+_FM_STATUS_KEY_RE = re.compile(r"(?m)^status\s*:")
+_STATUS_HEADING_RE = re.compile(r"(?m)^##\s+Status\s*$")
+
+
+def _adr_status_readable(text: str) -> bool:
+    """True iff the `→ DONE` gate could resolve a status from this ADR text."""
+    fm = _FM_BLOCK_RE.match(text)
+    if fm and _FM_STATUS_KEY_RE.search(fm.group(1)):
+        return True
+    return bool(_STATUS_HEADING_RE.search(text))
 
 
 def _validated_docs_root(raw: str) -> str:
@@ -243,6 +272,14 @@ def scan(project_dir: Path, docs_root: str = "docs") -> Inventory:
         text = _safe_read_text(slice_path)
         for m in MILESTONE_RE.finditer(text):
             inv.milestones_referenced.add(m.group(1))
+
+    # ADR status-format conformance. Both `docs/decisions/` and legacy
+    # `docs/adrs/` are scanned — `rename-decisions` moves adrs/ into
+    # decisions/ but never touches internal status format, so an unreadable
+    # status survives the rename and would still trip the `→ DONE` gate.
+    for adr_path in inv.decisions + inv.adrs:
+        if not _adr_status_readable(_safe_read_text(adr_path)):
+            inv.unreadable_adr_status.append(adr_path)
 
     return inv
 
@@ -453,6 +490,26 @@ def render_conflicts(inv: Inventory) -> str:
 def render_ambiguities(inv: Inventory) -> str:
     """Render the Ambiguities section."""
     ambiguities = []
+
+    # ADR status the `→ DONE` gate can't read. This is NOT a filename/dir
+    # question (which `report`'s verdict already covers) — it is deep
+    # per-artifact format conformance the lifecycle depends on. Flag it so
+    # `adoptable` isn't misread as "the lifecycle will run clean end to end":
+    # the first ADR-dependent `→ DONE` transition is where an unreadable
+    # status silently refuses.
+    if inv.unreadable_adr_status:
+        names = ", ".join(f"`{p.name}`" for p in inv.unreadable_adr_status)
+        ambiguities.append(
+            f"- **{len(inv.unreadable_adr_status)} ADR(s) use a status format "
+            f"the `→ DONE` gate can't read:** {names}. `workflow.py` resolves "
+            f"ADR status frontmatter-first (`status:` field), then a prose "
+            f"`## Status` section (ADR-0026). An ADR with only a bare inline "
+            f"`**Status:** Accepted` line matches neither, so its first "
+            f"ADR-dependent slice `→ DONE` transition refuses — even when the "
+            f"decision is genuinely Accepted. Fix each by adding a `status:` "
+            f"frontmatter field **or** a `## Status` section (guard against "
+            f"stamping a Superseded ADR as Accepted)."
+        )
 
     # Flat slices + milestones
     if inv.slices:

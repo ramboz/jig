@@ -835,7 +835,16 @@ def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
 
     # (2) Prose fallback (legacy ADRs with no frontmatter `status:`).
     if section is None:
-        return False, f"{name} has no '## Status' section"
+        # Name BOTH accepted encodings (ADR-0026): the refusal is not
+        # "you must add a `## Status` section" — a `status:` frontmatter
+        # field satisfies branch (1) equally. A bare inline
+        # `**Status:** Accepted` prose line (a common pre-jig house style)
+        # matches neither branch, so this is the message that repo sees.
+        return (
+            False,
+            f"{name} has no readable status — add a `status:` frontmatter "
+            f"field or a '## Status' section",
+        )
     if superseder:
         return False, f"{name} is Superseded by {superseder}"
     if re.search(r"(?m)^Accepted\b", section):

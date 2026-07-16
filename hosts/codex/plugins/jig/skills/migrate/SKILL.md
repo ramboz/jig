@@ -169,7 +169,13 @@ Six sections, in fixed order:
    "flat slices reference M1–M6 milestones — map each to a parent
    spec?"; "custom skills overlap jig's stock set — replace or
    layer?"; "AGENTS.md is 59KB with sprint log — port subset or
-   leave?".
+   leave?"; "N ADRs use a status format the `→ DONE` gate can't read"
+   (a bare inline `**Status:** Accepted` line is neither frontmatter
+   `status:` nor a `## Status` section, so the first ADR-dependent
+   `→ DONE` transition would refuse — add one of those two encodings).
+   Note that `adoptable` attests to directory/filename **structure**,
+   not deep per-artifact format conformance; this Ambiguities entry is
+   how the report surfaces the ADR-status gap the verdict alone can't.
 5. **Contract surfaces detected** — *(added by spec 022-02)* flags
    external-interface artifacts already on disk and prose API contracts
    that would benefit from standard schemas (OpenAPI / JSON Schema /

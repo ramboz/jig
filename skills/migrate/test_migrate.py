@@ -334,6 +334,61 @@ class AmbiguityTests(unittest.TestCase):
         # or named in Ambiguities. Either is acceptable for 008-01.
         self.assertIn("custom-skill", out)
 
+    def test_adr_status_readable_helper(self):
+        """`_adr_status_readable` mirrors the `→ DONE` gate's *presence*
+        check: frontmatter `status:` OR a prose `## Status` section is
+        readable; a bare inline `**Status:** Accepted` line is not."""
+        # Frontmatter status → readable.
+        self.assertTrue(_migrate._adr_status_readable(
+            "---\nstatus: Accepted\n---\n\n# ADR\n\nbody\n"))
+        # Prose `## Status` section → readable.
+        self.assertTrue(_migrate._adr_status_readable(
+            "# ADR\n\n## Status\n\nAccepted (2026-01-01)\n"))
+        # Frontmatter present but no status key, with a prose section → readable.
+        self.assertTrue(_migrate._adr_status_readable(
+            "---\ndependencies: []\n---\n\n# ADR\n\n## Status\n\nAccepted\n"))
+        # Bare inline `**Status:**` line, no frontmatter, no section → NOT readable.
+        self.assertFalse(_migrate._adr_status_readable(
+            "# ADR\n\n- **Status:** Accepted\n- **Date:** 2026-01-01\n"))
+        # A `status:` key inside the body (not the leading frontmatter block)
+        # must NOT be mistaken for readable frontmatter.
+        self.assertFalse(_migrate._adr_status_readable(
+            "# ADR\n\nprose then a line\nstatus: Accepted\n"))
+
+    def test_unreadable_adr_status_flagged_in_ambiguities(self):
+        """Reported gap: the tiny-validator fixture's ADRs use a bare inline
+        `**Status:** Accepted` line — a format the `→ DONE` gate can't read.
+        `report` must surface this in Ambiguities so `adoptable` isn't
+        misread as full lifecycle conformance."""
+        r = run_migrate("report", str(FIXTURES / "tiny-validator"))
+        out = r.stdout
+        self.assertIn("## Ambiguities", out)
+        self.assertRegex(out, r"(?i)status format the.*DONE.*gate can'?t read")
+        self.assertIn("adr-001-foo.md", out)
+        self.assertIn("adr-002-bar.md", out)
+
+    def test_readable_adr_status_not_flagged(self):
+        """An ADR whose status the gate CAN read (frontmatter or `## Status`)
+        must not be flagged."""
+        import shutil
+        import tempfile
+        tmpdir = Path(tempfile.mkdtemp(prefix="jig-mig-adr-status-"))
+        try:
+            decisions = tmpdir / "docs" / "decisions"
+            decisions.mkdir(parents=True)
+            (decisions / "adr-0001-fm.md").write_text(
+                "---\nstatus: Accepted\n---\n\n# ADR-0001\n\nbody\n")
+            (decisions / "adr-0002-prose.md").write_text(
+                "# ADR-0002\n\n## Status\n\nAccepted (2026-01-01)\n")
+            (tmpdir / "docs" / "workflow.md").write_text("# wf")
+            (tmpdir / "docs" / "architecture.md").write_text("# arch")
+            r = run_migrate("report", str(tmpdir))
+            self.assertNotRegex(
+                r.stdout, r"status format the.*DONE.*gate can'?t read",
+                f"readable ADRs wrongly flagged:\n{r.stdout}")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
     def test_readme_excluded_from_slices_count(self):
         """Reviewer-flagged latent bug: prior version filtered README only
         for decisions/adrs/skills/agents; slices/spikes were unfiltered.
