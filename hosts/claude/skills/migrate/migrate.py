@@ -75,6 +75,17 @@ def _resolve_host(host: 'str | None') -> str:
 # ---------- Inventory model ----------
 
 
+# Bug 012 — the lightweight-decisions home and the template that seeds it.
+# `seed-decisions` renders the same template scaffold-init's init-time walk
+# does, so a backfilled project and a greenfield one get identical homes.
+LIGHTWEIGHT_DECISIONS_NAME = "lightweight-decisions.md"
+LIGHTWEIGHT_ENTRIES_HEADING = "## Entries"
+LIGHTWEIGHT_TEMPLATE_RELATIVE = (
+    Path("templates") / "docs" / "decisions"
+    / "lightweight-decisions.md.template"
+)
+
+
 class Inventory:
     """Aggregated read-only observations about <project-dir>."""
 
@@ -93,6 +104,11 @@ class Inventory:
         # Slice 021-01 — used by report's operations section to suppress the
         # `copy-machinery` suggestion when the machinery is already in place.
         self.jig_skill_dirs: list[Path] = []
+        # Bug 012 — the lightweight-decisions home, when present. Absent in
+        # every project that adopted jig before the feature landed, because
+        # scaffold-init only seeds it at init; report's Operations section
+        # suggests `seed-decisions` to close that gap.
+        self.lightweight_decisions: Path | None = None
         self.claude_md_size: int | None = None
         self.milestones_referenced: set[str] = set()
         # ADRs whose status is encoded in a format the `→ DONE` dependency
@@ -222,6 +238,13 @@ def scan(project_dir: Path, docs_root: str = "docs") -> Inventory:
     for entry in _safe_iterdir(decisions_dir):
         if _is_content_md(entry):
             inv.decisions.append(entry)
+
+    # Lightweight-decisions home (bug 012) — tracked separately from the
+    # decisions list because its absence is actionable on its own: a project
+    # can have a full docs/decisions/ of ADRs and still be missing it.
+    lightweight = decisions_dir / LIGHTWEIGHT_DECISIONS_NAME
+    if lightweight.is_file():
+        inv.lightweight_decisions = lightweight
 
     # ADRs (legacy/jig-pre-ADR-0004) — docs/adrs/*.md
     adrs_dir = docs / "adrs"
@@ -638,6 +661,23 @@ def render_operations(inv: Inventory, verdict: str) -> str:
             "jig's hooks / agents / skill helpers into the target's "
             "`.claude/` (scaffold-mode parity). Mirrors what "
             "`scaffold-init` does by default for greenfield projects."
+        )
+
+    # Bug 012 — seed-decisions. Gated on a jig-shaped verdict because a
+    # not-yet-spec-driven project should be routed to scaffold-init (which
+    # seeds the home itself), not handed a backfill op for a tree it lacks.
+    if (verdict in {"adoptable", "partial"}
+            and inv.lightweight_decisions is None):
+        ld_label = _docs_label(inv.docs_root,
+                               "decisions/" + LIGHTWEIGHT_DECISIONS_NAME)
+        items.append(
+            "**`migrate.py seed-decisions <project-dir>`** — this project "
+            f"has no `{ld_label}`. That file is seeded only by "
+            "`scaffold-init` at init time, so a project that adopted jig "
+            "before the lightweight-decisions feature landed never received "
+            "it, and `/jig:memory-sync`'s `decisions.py add-lightweight` has "
+            "nowhere to record. Seeds jig's template; never overwrites an "
+            "existing file."
         )
 
     if not items:
@@ -1094,6 +1134,72 @@ class RenamePlan:
         return (self.dir_rename is None
                 and not self.file_renames
                 and not self.cross_ref_rewrites)
+
+
+def seed_decisions(project_dir: Path, docs_root: str = "docs",
+                   dry_run: bool = False) -> tuple:
+    """Render the lightweight-decisions template into a project that lacks it.
+
+    The backfill half of bug 012 / #109 finding 1. `scaffold-init` seeds this
+    file only during init, and cannot be re-run on an already-scaffolded
+    project, so a project that adopted jig before the feature landed has no
+    supported way to obtain the record home its hooks and skills reference.
+
+    Idempotent. Never overwrites: an existing file may be the owner's
+    hand-rolled record, and the whole point of this home is to not lose
+    decisions. A file that exists but is not in jig's format is an unresolved
+    state, not a no-op — it is reported loudly with exit 1, matching
+    `decisions.py`'s refusal on the same condition.
+
+    Returns (text, exit_code)."""
+    if not project_dir.exists():
+        raise MigrateError(f"project directory not found: {project_dir}")
+    if not project_dir.is_dir():
+        raise MigrateError(f"not a directory: {project_dir}")
+
+    docs_root = _validated_docs_root(docs_root)
+    target = (_docs_base(project_dir, docs_root) / "decisions"
+              / LIGHTWEIGHT_DECISIONS_NAME)
+    label = _docs_label(docs_root, "decisions/" + LIGHTWEIGHT_DECISIONS_NAME)
+
+    template = _resolve_plugin_root() / LIGHTWEIGHT_TEMPLATE_RELATIVE
+    if not template.is_file():
+        # Symmetry with decisions.py's `seed_lightweight`: a copied
+        # `.claude/skills/jig-migrate/migrate.py` has no templates/ tree
+        # beside it, and a bare "not found" would strand exactly the user
+        # decisions.py just redirected here.
+        raise MigrateError(
+            f"lightweight-decisions template not found: {template}\n"
+            "jig ships it at templates/docs/decisions/. This usually means "
+            "migrate.py is running from copied machinery (scaffold mode), "
+            "which has no templates/ tree. Point CLAUDE_PLUGIN_ROOT at a jig "
+            "plugin/checkout root and re-run.")
+
+    if target.is_file():
+        if LIGHTWEIGHT_ENTRIES_HEADING in _safe_read_text(target):
+            return (f"{label} already present — nothing to do.\n", 0)
+        return (
+            f"{label} exists but is not in jig's lightweight-decisions "
+            f"format: no `{LIGHTWEIGHT_ENTRIES_HEADING}` heading. Refusing to "
+            "overwrite it — it may hold decisions this project cannot afford "
+            "to lose.\n\n"
+            "Fix it either way:\n"
+            f"  1. add an `{LIGHTWEIGHT_ENTRIES_HEADING}` heading to the "
+            "existing file — entries append at end-of-file, so your content "
+            "stays where it is; or\n"
+            "  2. move the file aside, re-run this command, and port the "
+            "existing entries into the seeded template.\n",
+            1,
+        )
+
+    if dry_run:
+        return (f"[dry-run] would seed {label} from jig's template "
+                f"({template.name}); no files written.\n", 0)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(target, template.read_text(encoding="utf-8"))
+    return (f"seeded {label} from jig's template. Record entries with "
+            "`decisions.py add-lightweight` (see the file's own rubric).\n", 0)
 
 
 def _normalize_adr_filename(name: str) -> 'str | None':
@@ -1953,6 +2059,24 @@ def _build_parser() -> argparse.ArgumentParser:
              "copies only the newly-added tier's skills, leaving existing "
              "tiers untouched (repeatable; slice 038-04)",
     )
+    sd = sub.add_parser(
+        "seed-decisions",
+        help="seed docs/decisions/lightweight-decisions.md from jig's "
+             "template into a project that lacks it (backfill for projects "
+             "scaffolded before the feature landed)",
+    )
+    sd.add_argument("project_dir",
+                    help="path to the project to receive the record home")
+    sd.add_argument(
+        "--docs-root", default="docs",
+        help="project-relative root containing existing jig artifacts "
+             "(default: docs; use '.' for a track-local corpus)",
+    )
+    sd.add_argument(
+        "--dry-run", action="store_true",
+        help="report what would be seeded without writing anything",
+    )
+
     al = sub.add_parser(
         "adopt-layout",
         help="write a scaffold.json sentinel for an existing jig corpus "
@@ -1985,6 +2109,13 @@ def main(argv: list) -> int:
     try:
         if ns.cmd == "report":
             text, code = report(Path(ns.project_dir), docs_root=ns.docs_root)
+            sys.stdout.write(text)
+            return code
+        if ns.cmd == "seed-decisions":
+            text, code = seed_decisions(
+                Path(ns.project_dir), docs_root=ns.docs_root,
+                dry_run=ns.dry_run,
+            )
             sys.stdout.write(text)
             return code
         if ns.cmd == "rename-decisions":

@@ -25,6 +25,7 @@ step can copy the skill tree whole without a cross-tree dependency.
 
 import argparse
 import datetime
+import os
 import re
 import sys
 from pathlib import Path
@@ -56,10 +57,129 @@ _ENTRIES_HEADING = "## Entries"
 _ENTRIES_PLACEHOLDER_RE = re.compile(r"^_No entries yet\..*?_$\n?",
                                      re.MULTILINE | re.DOTALL)
 
+# Resolved the same way `adr.py` resolves its ADR template. Both host packages
+# ship `templates/` as a sibling of `skills/`, and the Codex build pre-renders
+# the plugin-root paths inside `*.md.template` (build_codex_plugin.py
+# `_copy_templates`), so the text read here is already host-correct. A data
+# read, not an import — the module docstring's no-cross-tree-import rule holds.
+# NOT reachable in Claude scaffold mode, which copies skills/ but not
+# templates/ — see `seed_lightweight` and bug 012's Remaining risk.
+_TEMPLATE_RELATIVE = (
+    Path("templates") / "docs" / "decisions"
+    / "lightweight-decisions.md.template"
+)
+
+
+def _plugin_root() -> Path:
+    env = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if env:
+        return Path(env).resolve()
+    return Path(__file__).resolve().parents[2]
+
+
+def _template_path() -> Path:
+    return _plugin_root() / _TEMPLATE_RELATIVE
+
 
 def lightweight_path(project_dir: Path) -> Path:
     """Path to the project's lightweight-decisions file."""
     return project_layout.decisions_dir(project_dir) / "lightweight-decisions.md"
+
+
+def _display_path(project_dir: Path) -> str:
+    """Project-relative path for messages. Resolves through project_layout, so
+    a `layout.docs_root: "."` corpus (spec 084) is reported where the file
+    actually lands rather than at the hardcoded default.
+
+    Falls back to the absolute path when the docs root resolves outside
+    `project_dir`: unusual, but naming the real location beats printing a
+    relative default that is then certainly wrong.
+    """
+    target = lightweight_path(project_dir)
+    try:
+        return str(target.relative_to(project_dir))
+    except ValueError:
+        return str(target)
+
+
+def _require_entry_fields(title: str, decision: str) -> None:
+    """Validate the two mandatory fields. Shared by `add_lightweight` and the
+    CLI, which checks up-front so a rejected call cannot seed as a side
+    effect."""
+    if not (title or "").strip():
+        raise ValueError("title is required")
+    if not (decision or "").strip():
+        raise ValueError("decision is required")
+
+
+def _foreign_format_error(project_dir: Path) -> str:
+    """The loud refusal for a file that exists but is not in jig's format.
+
+    Must name the expected shape AND a remedy: an agent told only that
+    `## Entries` is missing will hand-roll a format rather than fix one.
+
+    Takes `project_dir` so the offending file is named where it actually lives
+    — a `layout.docs_root: "."` corpus (spec 084) is not at docs/decisions/.
+    """
+    return (
+        "%s exists but is not in jig's lightweight-decisions format: no `%s` "
+        "heading, so there is nowhere to place the entry. Nothing was "
+        "written.\n\n"
+        "Expected shape — an `%s` section holding one block per decision:\n\n"
+        "    %s\n\n"
+        "    ### 2026-07-16 — Short title\n\n"
+        "    **Decision:** what was decided\n\n"
+        "    **Context:** why — constraint, user feedback, design call\n\n"
+        "    **Scope:** which screen / component / string / asset\n\n"
+        # Host-neutral on purpose: skills/*.py ship verbatim to the Codex
+        # package (only hooks/ and *.md.template get plugin-root rewrites),
+        # so naming ${CLAUDE_PLUGIN_ROOT} here would hand a Codex user a
+        # Claude-only variable.
+        "Remedy — either:\n"
+        "  1. add an `%s` heading to the existing file (entries append at "
+        "end-of-file, so your existing content is left where it is); or\n"
+        "  2. move the file aside, seed jig's template with `/jig:migrate`'s "
+        "seed-decisions op (`migrate.py seed-decisions <project-dir>`), then "
+        "port the existing entries across."
+        % (_display_path(project_dir), _ENTRIES_HEADING, _ENTRIES_HEADING,
+           _ENTRIES_HEADING, _ENTRIES_HEADING)
+    )
+
+
+def seed_lightweight(project_dir: Path) -> bool:
+    """Create the lightweight-decisions home from the shipped template.
+
+    Returns True when the file was created, False when it already exists
+    (never overwrites — the existing file may be the owner's hand-rolled
+    record, and clobbering it would destroy the very decisions this home is
+    meant to preserve).
+
+    Raises FileNotFoundError when the plugin's template is unreachable.
+    """
+    path = lightweight_path(project_dir)
+    if path.exists():
+        return False
+    template = _template_path()
+    if not template.is_file():
+        # Reachable in Claude scaffold mode: `copy-machinery` copies skills/
+        # and hooks/ but not templates/ (only Codex copies templates — see
+        # scaffold.py `_copy_codex_templates`), so a copied helper's
+        # parents[2] lands on `<project>/.claude`, which has no templates/.
+        # Not fixed here (see bug 012's Remaining risk); but it must name a
+        # remedy that works, or it is the original bug wearing a new costume.
+        raise FileNotFoundError(
+            "lightweight-decisions template not found: %s\n\n"
+            "jig ships it at templates/docs/decisions/. This usually means "
+            "the helper is running from copied machinery (scaffold mode), "
+            "which has no templates/ tree. Either:\n"
+            "  1. point CLAUDE_PLUGIN_ROOT at a jig plugin/checkout root and "
+            "re-run this command; or\n"
+            "  2. seed the file from a jig install with `/jig:migrate`'s "
+            "seed-decisions op (`migrate.py seed-decisions <project-dir>`)."
+            % template)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+    return True
 
 
 def _normalize(text: str) -> str:
@@ -114,32 +234,35 @@ def add_lightweight(project_dir: Path, title: str, decision: str, context: str,
 
     Returns True when an entry was appended, False when it was a no-op because an
     entry with the same normalized `date — title` heading already exists.
-    Raises FileNotFoundError when the project has no lightweight-decisions file
-    (it is seeded by scaffold-init / Phase 1; this helper does not create it).
+
+    Seeds the lightweight-decisions home from the shipped template when the
+    project has none. This reverses an earlier contract ("seeded by
+    scaffold-init; this helper does not create it") — scaffold-init cannot be
+    re-run on a scaffolded project, so refusing left the recording path
+    unrecoverable (bug 012).
+
+    Raises ValueError when the file exists but is not in jig's format — that
+    case stays loud (see `_foreign_format_error`), because appending jig
+    entries to a foreign document would silently split the record in two.
     """
-    title = (title or "").strip()
-    decision = (decision or "").strip()
+    _require_entry_fields(title, decision)
+    title = title.strip()
+    decision = decision.strip()
     context = (context or "").strip()
     scope = (scope or "").strip()
-    if not title:
-        raise ValueError("title is required")
-    if not decision:
-        raise ValueError("decision is required")
     date = date.strip() if date else _today()
 
     path = lightweight_path(project_dir)
-    if not path.exists():
-        raise FileNotFoundError(
-            "no %s — scaffold the lightweight-decisions home first "
-            "(jig:scaffold-init seeds it)" % _LIGHTWEIGHT_REL)
+    seed_lightweight(project_dir)
 
     text = path.read_text(encoding="utf-8")
+    # Format gate BEFORE the idempotency no-op: a foreign file that happens to
+    # carry a matching `### <date> — <title>` heading would otherwise return a
+    # silent "already recorded" and the divergence would never surface.
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
     if _entry_key(date, title) in _existing_keys(text):
         return False
-    if _ENTRIES_HEADING not in text:
-        raise ValueError(
-            "%s is missing its `%s` heading — cannot place the entry"
-            % (_LIGHTWEIGHT_REL, _ENTRIES_HEADING))
 
     entry = render_entry(title, decision, context, scope, commit, date)
     body = _ENTRIES_PLACEHOLDER_RE.sub("", text, count=1)
@@ -154,13 +277,23 @@ def add_lightweight(project_dir: Path, title: str, decision: str, context: str,
 def _cmd_add_lightweight(args) -> int:
     project_dir = Path(args.project_dir).resolve()
     try:
+        # Validate BEFORE seeding: a rejected call must not leave a record
+        # home behind as a side effect. add_lightweight would seed too, but
+        # seeding here lets the creation be reported — a file appearing with
+        # no signal is the same silence bug 012 is about.
+        _require_entry_fields(args.title, args.decision)
+        seeded = seed_lightweight(project_dir)
         appended = add_lightweight(
             project_dir, args.title, args.decision, args.context, args.scope,
             commit=args.commit or "", date=args.date or "")
     except (FileNotFoundError, ValueError) as exc:
         print("error: %s" % exc, file=sys.stderr)
         return 1
-    rel = _LIGHTWEIGHT_REL
+    # Report the real path, not the default: under `layout.docs_root: "."`
+    # (spec 084) the file is NOT at docs/decisions/.
+    rel = _display_path(project_dir)
+    if seeded:
+        print("seeded %s from jig's template (this project had none)" % rel)
     if appended:
         print("recorded lightweight decision in %s: %s" % (rel, args.title))
     else:
