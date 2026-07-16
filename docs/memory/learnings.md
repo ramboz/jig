@@ -559,5 +559,22 @@ When plugin packaging recursively ships every public skills/*/SKILL.md but scaff
 ## Bug 009: host-normalized skill description limits
 When validating SKILL.md metadata, enforce host limits on the normalized value the host checks. Codex applies split_whitespace().join(" ") to YAML description text before its 1024-character limit, so raw source length and YAML chomping semantics are not the contract. Keep every public description comfortably below the cap and validate the generated package.
 
+## Bug 012: an init-time-only seed is a permanent gap for every existing project
+`scaffold-init`'s template walk runs at init and cannot be re-run on a scaffolded
+project, so anything it is the *sole* seeder of silently never reaches projects
+that adopted jig earlier — and a helper that refuses to create what it needs
+("scaffold it first") converts that gap into an unrecoverable dead path. Two
+consequences worth generalizing. First: **any new scaffolded artifact needs a
+backfill op from day one**, or every existing project is excluded by construction;
+`migrate.py` is where that lives. Second: **an error message that states a fact
+without naming a remedy is the actual defect.** The reported project's agent was
+handed a path with no shape, invented an LD table, and `decisions.py` refused it
+forever — zero successful writes across the repo's entire jig lifetime, with no
+signal. A nudge that names only a destination will get a format invented for it.
+Related: a helper's template lookup is host-shaped — `templates/` ships in both
+plugin packages and in Codex scaffold mode, but *not* in Claude scaffold mode
+(`copy_machinery` omits it), so `parents[2]/templates/` is reachable in three of
+four install modes and `adr.py` inherits the same gap.
+
 ## Bug 010: Node default discovery needs no directory operand
 Runner adapters must preserve the distinction between an implicit project target and an explicit test path. Node test default discovery is cwd-based: bare `node --test` discovers the suite, while a positional directory is treated as a module entry point and can fail with MODULE_NOT_FOUND. Keep explicit file/path and name-selector behavior covered separately.

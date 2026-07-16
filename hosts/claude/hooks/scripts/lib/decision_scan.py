@@ -224,4 +224,22 @@ def render_summary(candidates):
         "(load-bearing / rejected alternatives), park in refinement-todo.md "
         "(still open), or drop (ephemeral). Low-confidence (?) items are "
         "best-effort guesses — confirm before recording. Nothing has been "
-        "written; this is a triage prompt only." % (len(candidates), body))
+        "written; this is a triage prompt only.\n\n"
+        # Names the command, not a path. This string is agent-facing in every
+        # install mode, and a plugin-root env literal resolves in only one of
+        # them — scaffold installs leave it unset, and the host packages use
+        # different roots. Sibling hooks resolve modes at runtime via
+        # SCRIPT_DIR for the same reason (see jig-decision-capture.sh); a
+        # literal here would hand the agent an unusable path, which is the
+        # defect this nudge exists to fix.
+        "To record a lightweight decision, use /jig:memory-sync's "
+        "`decisions.py add-lightweight` helper — it is idempotent, and it "
+        "seeds the record home from jig's template if this project has none:\n"
+        "    decisions.py add-lightweight --title \"<short title>\" "
+        "--decision \"<what>\" \\\n"
+        "      --context \"<why>\" --scope \"<where>\"\n\n"
+        "Do NOT hand-write the file in your own format. Entries live under an "
+        "`## Entries` heading, one block each:\n"
+        "    ### <YYYY-MM-DD> — <short title>\n"
+        "    **Decision:** ...  **Context:** ...  **Scope:** ...\n"
+        % (len(candidates), body))

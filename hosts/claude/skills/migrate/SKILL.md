@@ -3,11 +3,12 @@ name: migrate
 description: >
   Inventory an existing spec-driven project and apply bounded migrations to
   jig defaults: `report`, `adopt-layout`, `rename-decisions`, `split-slices`,
-  slice-to-spec, and `copy-machinery`. Use when the user says migrate this project to jig,
+  slice-to-spec, `seed-decisions`, and `copy-machinery`. Use when the user says migrate this project to jig,
   adopt jig here, this repo already has specs — set up jig,
   scaffold-init refused — what now; introduce jig to an existing codebase;
   apply ADR-0004 to
-  my project; migrate flat slices into nested specs; or copy jig's machinery
+  my project; migrate flat slices into nested specs; seed the
+  lightweight-decisions home; or copy jig's machinery
   into my project. Reports are read-only; mutations support dry runs where
   available, refuse conflicts before writing, and preserve originals in the
   agentic slice-to-spec workflow.
@@ -33,7 +34,7 @@ tree.
 a migration plan, then (in later slices) apply the rename / restructure
 operations.
 
-`migrate.py` exposes five subcommands:
+`migrate.py` exposes six subcommands:
 
 - `report` — strictly read-only inventory + plan.
 - `adopt-layout` — validates an existing custom-root corpus and writes only
@@ -44,6 +45,9 @@ operations.
   `AGENTS.md`/`.codex/`.
 - `split-slices` — extracts embedded slice sections into sibling
   slice files.
+- `seed-decisions` — seeds `docs/decisions/lightweight-decisions.md` from
+  jig's template. Idempotent; supports `--dry-run` and `--docs-root`; never
+  overwrites an existing file.
 - `copy-machinery` — copies jig runtime machinery into the target's
   host-local scaffold runtime; `--host claude` writes `.claude/`, and
   `--host codex` writes `.codex/`.
@@ -115,6 +119,40 @@ No-op cases (exit 0):
 
 - Neither dir present, OR all files already on the canonical shape —
   emits "already aligned: nothing to do" and returns.
+
+### Run the seed-decisions operation
+
+`seed-decisions` backfills `docs/decisions/lightweight-decisions.md` — the
+home `/jig:memory-sync`'s `decisions.py add-lightweight` records into, and
+the one the Stop-hook decision nudge points at.
+
+Reach for it when `report` flags the gap, or when a project's
+`add-lightweight` fails because the file is missing. Every project that
+adopted jig **before** the lightweight-decisions feature landed needs it:
+`scaffold-init` seeds the file only at init and cannot be re-run on an
+already-scaffolded project, so there was previously no supported way to
+obtain it (bug 012 / [#109](https://github.com/ramboz/jig/issues/109)).
+
+```bash
+# preview
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  seed-decisions <project-dir> --dry-run
+
+# apply
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/migrate/migrate.py" \
+  seed-decisions <project-dir>
+```
+
+Idempotent — a second run reports "already present" and exits 0.
+
+**It never overwrites.** If the file exists but is not in jig's format (no
+`## Entries` heading — typically a hand-rolled table an agent invented from
+the old shapeless nudge), the command refuses with exit 1 and names both
+ways out: add an `## Entries` heading to the existing file (entries append
+at end-of-file, so existing content is undisturbed), or move it aside,
+re-run, and port the entries into the seeded template. Deciding which is a
+judgment call about the owner's content — make it with the owner, not for
+them.
 
 ### Run the copy-machinery operation
 
