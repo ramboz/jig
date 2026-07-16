@@ -5,7 +5,7 @@
       { "prompt": "Remember this for later and save it to the project memory", "top_k": 3 },
       { "prompt": "Add this term to the glossary", "top_k": 3 },
       { "prompt": "Consolidate what we learned this session into the memory layer", "top_k": 3 },
-      { "prompt": "Remember this decision so we don't rewrite it tomorrow", "top_k": 3 },
+      { "prompt": "Remember this decision so we don't rewrite it tomorrow", "top_k": 1 },
       { "prompt": "Record this decision: we shortened the cards, the old cap was too tall for laptops", "top_k": 3 }
     ],
     "negative": [

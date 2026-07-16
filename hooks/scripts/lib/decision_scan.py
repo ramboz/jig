@@ -67,19 +67,19 @@ _MACHINE_TAGS = (
     "local-command-stderr",
     "system-reminder",
 )
+# `(?![-\w])` rather than `\b`: `-` is a non-word character, so `\b` would let
+# `<command-name-extra>` match a wrapper we never named.
 _MACHINE_BLOCK = re.compile(
-    r"<(%s)\b[^>]*>.*?</\1\s*>" % "|".join(_MACHINE_TAGS),
+    r"<(%s)(?![-\w])[^>]*>.*?</\1\s*>" % "|".join(_MACHINE_TAGS),
     re.IGNORECASE | re.DOTALL,
 )
-# Openers/closers left over once paired blocks are gone — a truncated or
-# unclosed injection is still an injection.
+# Tags with no matching partner — an orphan closer, or an opener whose content
+# was never wrapped. Only the tag goes; anything around it is left standing,
+# because we cannot tell an unpaired opener from the owner naming one in prose
+# ("the <command-args> block should not be scanned"), and dropping their words
+# is the failure #108 is about.
 _MACHINE_TAG = re.compile(
-    r"</?(%s)\b[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
-# An opener with no closer swallows the rest: a truncated injection is still an
-# injection. Applied only after paired blocks are gone, so a well-formed block
-# followed by typed prose keeps the prose.
-_MACHINE_UNCLOSED = re.compile(
-    r"<(%s)\b[^>]*>.*" % "|".join(_MACHINE_TAGS), re.IGNORECASE | re.DOTALL)
+    r"</?(%s)(?![-\w])[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
 
 _DEDUP_CONTAINMENT = 0.6
 # Candidates with fewer meaningful tokens than this are never deduped away — a
@@ -157,37 +157,26 @@ def is_user_override(text):
 
 
 def strip_machine_text(text):
-    """Return `text` with harness-injected wrappers and their contents removed.
-
-    What survives is what a human plausibly typed, whitespace-normalized. Empty
-    when the payload was nothing but machinery.
-    """
-    if not text:
-        return ""
-    out = _MACHINE_BLOCK.sub(" ", text)
-    out = _MACHINE_UNCLOSED.sub(" ", out)
-    out = _MACHINE_TAG.sub(" ", out)
-    return " ".join(out.split())
-
-
-def is_machine_text(text):
-    """True iff `text` is harness output rather than something the owner typed.
+    """Return only what the owner plausibly typed, whitespace-normalized.
 
     The in-flight capture (slice 083-07) stamps `who: "user"` on everything
     arriving via `UserPromptSubmit`, but the host delivers its own notifications
     and command expansions through that same field — so issue #108 found
     `<task-notification>` blobs recorded as the owner's words. Attribution has to
-    be earned by the text.
+    be earned by the text, and so does the quote: a caller both gates on this
+    (empty means the payload was nothing but machinery, so there is no owner to
+    attribute it to) and stores it (so an injection riding along with typed prose
+    is not quoted back as theirs).
 
-    Requires a *named* wrapper and no human remainder, which keeps the two ways
-    of being wrong asymmetric: prose the owner writes about the machinery ("the
-    `<command-args>` block should not be scanned") stays theirs, and a wrapper
-    with typed prose beside it is still the owner speaking.
+    Removing paired blocks before unpaired tags is what makes both halves work:
+    a well-formed block is dropped whole, contents included, while a bare tag the
+    owner mentioned in passing loses only the tag.
     """
-    raw = (text or "").strip()
-    if not raw or not _MACHINE_TAG.search(raw):
-        return False
-    return not strip_machine_text(raw)
+    if not text:
+        return ""
+    out = _MACHINE_BLOCK.sub(" ", text)
+    out = _MACHINE_TAG.sub(" ", out)
+    return " ".join(out.split())
 
 
 def _scan_askuserquestion(messages):

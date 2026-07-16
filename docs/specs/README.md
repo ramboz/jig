@@ -291,6 +291,9 @@
 | [091-bug-fix-repository-closure](091-bug-fix-repository-closure/spec.md) | 091-01 — repository-closure evidence and gates | DRAFT |  |
 | [092-existing-subtree-layout-adoption](092-existing-subtree-layout-adoption/spec.md) | 092-01 — adopt an existing custom-root corpus | **DONE** |  |
 | [093-semantic-index-provider-discovery](093-semantic-index-provider-discovery/spec.md) | 093-01 — discover installed providers and explain absence | **DONE** |  |
+| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-01 — machine text is never attributed to the owner | IN_PROGRESS (claude/capture-hygiene-mech…) |  |
+| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-02 — a dismissed dialog produces no stub | IN_PROGRESS (claude/capture-hygiene-mech…) |  |
+| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-03 — decision vocabulary on the routing surface | IN_PROGRESS (claude/capture-hygiene-mech…) |  |
 
 ## Deferred slices
 

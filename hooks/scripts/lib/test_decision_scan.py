@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from decision_scan import (  # noqa: E402
     Candidate,
     dedup,
-    is_machine_text,
     normalize_tokens,
     render_summary,
     scan,
@@ -164,11 +163,14 @@ class TestMachineText(unittest.TestCase):
     `who: "user"` in a real scratch log. Harness injections reach the in-flight
     capture through the same field a typed prompt does, so the attribution has
     to be earned by the text, not assumed from the event.
+
+    `strip_machine_text` returning "" *is* the machine-text verdict: nothing
+    typed means nobody to attribute it to.
     """
 
     # AC #1 — every harness wrapper #108 names, each carrying a Tier-2 marker so
-    # the test fails for the right reason (marker present, stub still refused).
-    def test_harness_wrappers_are_machine_text(self):
+    # the test fails for the right reason (marker present, nothing left to stub).
+    def test_harness_wrappers_leave_nothing(self):
         for blob in (
             "<task-notification>Agent finished; it used a banner instead of a "
             "modal.</task-notification>",
@@ -181,47 +183,67 @@ class TestMachineText(unittest.TestCase):
             "</system-reminder>",
         ):
             with self.subTest(blob=blob[:40]):
-                self.assertTrue(is_machine_text(blob))
+                self.assertEqual(strip_machine_text(blob), "")
 
-    def test_multiple_blocks_with_whitespace_are_machine_text(self):
-        self.assertTrue(is_machine_text(
+    def test_multiple_blocks_with_whitespace_leave_nothing(self):
+        self.assertEqual(strip_machine_text(
             "<command-name>/jig:orient</command-name>\n"
-            "  <command-args>do it the other way instead</command-args>\n"))
+            "  <command-args>do it the other way instead</command-args>\n"), "")
 
-    def test_unclosed_and_attributed_tags_still_machine_text(self):
-        self.assertTrue(is_machine_text(
-            '<task-notification id="7" status="done">use a banner instead'))
+    def test_attributed_tags_leave_nothing(self):
+        self.assertEqual(strip_machine_text(
+            '<task-notification id="7" status="done">use a banner instead'
+            '</task-notification>'), "")
 
     # AC #2 — genuine prose is untouched, including prose *about* the tags.
-    def test_typed_prose_is_not_machine_text(self):
+    def test_typed_prose_survives_whole(self):
         for prose in (
             "Actually, use a banner instead of a modal.",
             "it's too long for laptop views",
-            "",
-            "   ",
         ):
             with self.subTest(prose=prose):
-                self.assertFalse(is_machine_text(prose))
+                self.assertEqual(strip_machine_text(prose), prose)
 
-    def test_prose_mentioning_a_tag_name_is_not_machine_text(self):
-        # The owner talking about the machinery is still the owner talking.
-        self.assertFalse(is_machine_text(
-            "the <command-args> block should not be scanned"))
+    def test_blank_input_is_empty(self):
+        for blank in ("", "   ", None):
+            with self.subTest(blank=blank):
+                self.assertEqual(strip_machine_text(blank), "")
 
-    # AC #3 — a harness block appended to typed prose leaves the prose.
-    def test_mixed_prose_keeps_its_human_half(self):
-        mixed = ("Use a banner instead of a modal.\n"
-                 "<system-reminder>Tool budget is low.</system-reminder>")
-        self.assertFalse(is_machine_text(mixed))
-        self.assertEqual(strip_machine_text(mixed),
-                         "Use a banner instead of a modal.")
-
-    def test_strip_returns_empty_for_pure_machine_text(self):
+    def test_prose_mentioning_a_tag_keeps_the_prose(self):
+        # The owner talking about the machinery is still the owner talking — and
+        # the words themselves survive, not just some non-empty residue. An
+        # unpaired tag is indistinguishable from one named in passing, so only
+        # the tag is dropped: losing the owner's words is the failure #108 is
+        # about, and a stray noise stub is the cheaper way to be wrong here.
         self.assertEqual(
-            strip_machine_text("<task-notification>done</task-notification>"), "")
+            strip_machine_text("the <command-args> block should not be scanned"),
+            "the block should not be scanned")
 
-    def test_strip_leaves_plain_prose_alone(self):
-        self.assertEqual(strip_machine_text("just prose"), "just prose")
+    def test_prose_opening_with_a_tag_keeps_the_prose(self):
+        # Regression: an earlier cut had an unclosed opener swallow the rest of
+        # the payload, which silently dropped a genuine override whose first
+        # token happened to be a tag.
+        self.assertEqual(
+            strip_machine_text("<command-args> should not be scanned"),
+            "should not be scanned")
+
+    def test_lookalike_tag_is_not_a_wrapper(self):
+        # `\b` would let an unnamed `<command-name-extra>` pass as a wrapper.
+        text = "<command-name-extra>use a banner instead</command-name-extra>"
+        self.assertEqual(strip_machine_text(text), text)
+
+    # AC #3 — a harness block beside typed prose leaves exactly the prose,
+    # whichever side it lands on.
+    def test_mixed_prose_keeps_its_human_half(self):
+        for mixed in (
+            "Use a banner instead of a modal.\n"
+            "<system-reminder>Tool budget is low.</system-reminder>",
+            "<system-reminder>Tool budget is low.</system-reminder>\n"
+            "Use a banner instead of a modal.",
+        ):
+            with self.subTest(mixed=mixed[:30]):
+                self.assertEqual(strip_machine_text(mixed),
+                                 "Use a banner instead of a modal.")
 
 
 if __name__ == "__main__":

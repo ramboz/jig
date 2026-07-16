@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified: 2026-07-16
-claimed_by: claude/capture-hygiene-mechanical-noise-40bf2b
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -58,17 +57,17 @@ cheap.
    the next reader sees why the asymmetry flipped rather than re-deriving it.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. _(two entries: stale rationale corrected, response-shape residual tracked.)_
 
 ### Close-out (post-DONE)
 
@@ -89,19 +88,78 @@ fallback fixes the evidenced defect without depending on that shape.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO_
+1. **Shipped as planned:** the fallback is gone and the `tool_input` parameter
+   with it, so the question is unreachable by construction rather than merely
+   unused. The craft review named this the right call ("the type system enforces
+   the policy, so no future reviewer has to catch it"). Suppression rides
+   `append_stub`'s existing blank-quote guard — no new mechanism, as promised.
+
+2. **AC #4's docstring was written twice and cut back hard.** The first cut ran
+   ~21 lines on a 3-line function, re-arguing the whole reversal (the 17-of-27
+   count, 083-07 durability, the 055/057 attention cost). The craft review was
+   right that this is the *slice's* job, not the function's — it "ages into a
+   puzzle once #108 is closed and nobody remembers the fallback existed" — and
+   named the call site's own two-line comment as the correct density. AC #4 asks
+   the next reader to *see why the asymmetry flipped*, which is three lines and a
+   pointer, not thirteen. The docstring now carries only what the code cannot
+   say: that `""` is a contract with `append_stub`'s guard, that it reads the
+   response by construction, and that the parameter must not come back. The
+   argument lives here and in the slice body. The test comment was cut the same
+   way, to the two facts the docstring cannot carry.
+
+3. **The unit tests do not witness the reversal, and structurally cannot.** Both
+   `extract_askuserquestion_answer({})` assertions would likely have passed
+   pre-slice too, since with the parameter deleted there is nothing to pass. The
+   real witness is `test_dismissed_askuserquestion_writes_nothing`, which replays
+   #108's reported payload — question text plus the "Enforcement / Hard block"
+   option labels — and asserts an empty scratch log end-to-end. Both reviewers
+   examined this and judged the coverage adequate in aggregate; recording it
+   rather than papering over it.
+
+4. **A deferred decision was surfaced by review and is now tracked** (both
+   reviewers, independently). `_collect_strings` still harvests every string leaf
+   of the response, so a dismissed response carrying *any* string (a `status`,
+   a `tool_use_error`) would still stub `who: "user"` at Tier 1 — the same defect
+   class through a different payload shape. The slice deliberately does not
+   pattern-match the dismissed-response shape (not probeable here; ADR-0020), and
+   #108's evidence shows the observed host returns no string leaves on dismissal,
+   so the *evidenced* defect is closed. The residual now has a
+   `docs/refinement-todo.md` entry with a resolution trigger tied to the same
+   083-08 unknown that blocks the neighbouring per-answer split. The DoD requires
+   this; the first cut left it only in a slice file that closes.
+
+5. **`docs/refinement-todo.md:54` was resting on the premise this slice
+   reverses** ("Acceptable given owner-gated triage + the 'noisy stub is cheap'
+   rationale") and also described the function as reading the whole PostToolUse
+   payload. Corrected inline rather than amended: spec 083 is IN_PROGRESS, and
+   ADR-0010 corrects live prose in place. The deferral still stands on its
+   surviving half (per-answer parsing needs a stable payload shape) — a
+   concatenated multi-answer stub is still *the owner's own words*, so it is
+   noise, not misattribution. That distinction is why it stays deferred rather
+   than becoming a defect.
+
+6. **No breaking change** (checked at review request): every caller — the source
+   hook and both host mirrors — passes one argument; no test mirrors exist under
+   `hosts/`; a downstream install ships hook and lib together; and a hypothetical
+   stale two-arg caller fails open through the wrapper's blanket `except`.
+
+7. **Spec 083-07 needs no `## Amendments` block** (reviewer-confirmed): its
+   closed record does not document the fallback premise, and its AC #3
+   ("Ephemera produce no stub") is *better* satisfied now than before.
+
+8. **Host mirrors rebuilt**; drift check clean.
 
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO_ |
-| `docs/specs/README.md` | `updated` | _TODO_ |
-| `docs/product-vision.md` | `no-op` | _TODO_ |
-| `docs/architecture.md` | `no-op` | _TODO_ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO_ |
-| `docs/inbox.md` | `no-op` | _TODO_ |
-| `docs/refinement-todo.md` | `no-op` | _TODO_ |
-| `docs/memory/**` | `no-op` | _TODO_ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO_ |
-| Additional live prose / generated templates touched by this slice | `no-op` | _TODO_ |
+| `README.md` | `no-op` | Front door unaffected; internal to the capture path. |
+| `docs/specs/README.md` | `updated` | Regenerated by `workflow.py status-board`; 094-02 row added. |
+| `docs/product-vision.md` | `no-op` | No scope change — capture still surfaces rather than writes. |
+| `docs/architecture.md` | `no-op` | No module-boundary change; the hook-spine description of `decision-inflight` remains accurate. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | Spec in flight; no template documents the extraction rule. |
+| `docs/inbox.md` | `no-op` | No parked idea resolved or added. |
+| `docs/refinement-todo.md` | `updated` | Two changes (deviation §4, §5): the stale multi-question rationale corrected inline, and a new tracked deferral for narrowing extraction to the answer key. Flipped from the `no-op` this table originally pre-filled — the reviewers were right that it was wrong. |
+| `docs/memory/**` | `no-op` | No new durable term; the reversal is recorded in the slice + refinement-todo, which are its proper homes. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No ADR introduced. Reversing an implementation comment's premise on measured evidence is a defect fix inside spec 083, not a new hard-to-reverse decision — the frame question that *would* warrant one is #108's, and is the maintainer's to call. |
+| Additional live prose / generated templates touched by this slice | `updated` | `hosts/claude/**` + `hosts/codex/plugins/jig/**` mirrors rebuilt in lockstep. |

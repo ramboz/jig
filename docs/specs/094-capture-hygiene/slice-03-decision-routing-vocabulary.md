@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified: 2026-07-16
-claimed_by: claude/capture-hygiene-mechanical-noise-40bf2b
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -23,8 +22,9 @@ reaches the lightweight-decisions path that 083-05 already built, because
 **DoR:**
 - ✅ `memory-sync`'s `description:` names "remember this, save this for later,
   add to glossary, note this down" and never mentions decisions, while its body
-  routes exactly that case (`SKILL.md:110-116`, non-spec shipped decisions → UI
-  strings / visual / CSS choices → `decisions.py`) — read 2026-07-16.
+  routes exactly that case (the lightweight-decision flow: non-spec shipped
+  decisions → UI strings / visual / CSS choices → `decisions.py`, not
+  `memory.py`) — read 2026-07-16.
 - ✅ `decisions.py add-lightweight` exists, is idempotent and templated, and is
   scaffolded at Tier 0 (083-05).
 - ✅ `scripts/skill_routing.py` guards this surface and `evals/cases/memory-sync.json`
@@ -53,21 +53,23 @@ rejected alternatives → `adr-workflow`.
    gains a positive trigger for the owner's actual phrasing ("remember this
    decision" / a shipped non-spec UI decision), so a future description edit that
    drops the vocabulary again fails the eval instead of silently regressing.
-4. **Description and body agree.** The `description:` promises only what the body
-   already routes (`SKILL.md:110-116`) — no new capability is implied.
+4. **Description and body agree.** The `description:` promises only what the
+   body's lightweight-decision flow already routes — no new capability is
+   implied, and it does not file `docs/decisions/` under the memory layer the
+   body reserves for `docs/memory/`.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. _(no new deferrals.)_
 
 ### Close-out (post-DONE)
 
@@ -87,19 +89,96 @@ touch `decisions.py` — those are #108 / Track-B design questions.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO_
+1. **Measured, and the first draft was too greedy.** Baseline for the reported
+   phrasings (`scripts/skill_routing.py`, before this slice): "Remember this
+   decision so we don't rewrite it tomorrow" ranked **2**; "Record this decision:
+   we shortened the cards, the old cap was too tall for laptops" ranked **12**,
+   with `adr-workflow` at 0.44. The first description draft fixed those but stole
+   from siblings — `adr-workflow`'s own positive ("Record this decision as an ADR
+   so we don't relitigate it later") fell to rank 2, `reframe`'s fell to 2, and
+   `memory-sync`'s own glossary case fell to 2 — because the draft echoed
+   "relitigate" and "changed our mind". Trimmed to the vocabulary #108 actually
+   asks for. Shipped: reported phrasings at **rank 1** and **rank 2**; every
+   sibling's rank-1 restored; negatives 44/44; `adr-workflow` × `memory-sync`
+   collision **0.20**, against a 0.50 warn / 0.75 error threshold.
+
+2. **The headline "97% → 95%" is denominator dilution, not sibling damage** —
+   established by the compliance review, correcting an in-flight claim of mine
+   that turned out to describe the discarded first draft rather than what
+   shipped. The corpus went 60 → 62 positives; the rank-1 **count went up, 58 →
+   59**. The two new cases contributed one rank-1 and one rank-2. Had a sibling
+   lost rank-1 the ratio would read 94%.
+
+3. **The "cards" case ships at rank 2, and that is the honest ceiling.**
+   `adr-workflow`'s description advertises the phrase "record this decision"
+   verbatim, and the prompt's lightweight-ness lives in content words ("cards",
+   "cap", "tall", "laptops") absent from both descriptions — so the TF-IDF proxy
+   has nothing to discriminate on. The discriminator that does the real work sits
+   after "Do not use", which `routing_surface()` strips **by design**
+   (frame-critique 086-01). Winning that tie would mean keyword-stuffing, which
+   `skill_routing.py`'s own docstring names as the failure mode the harness
+   exists to prevent ("invites gaming the descriptions rather than improving
+   them"). Recorded as a known limitation rather than tuned away: on the lexical
+   proxy, the owner's most natural phrasing still ranks behind `adr-workflow`.
+   The real routing surface is a model reading both descriptions, and the
+   discriminator is explicit for it.
+
+4. **Pins strengthened after review.** Both new positives were `top_k: 3`, which
+   the craft review showed was weaker than AC #3 implies: the "cards" case passes
+   *while the reported bug is live*, since rank 2 clears top-3. The reported
+   phrasing is now pinned at `top_k: 1`, so a future edit that drops the
+   vocabulary fails on the **rank-1 loss** that is the actual symptom, not merely
+   on a top-3 drop. The "cards" case stays at `top_k: 3` deliberately (see §3).
+
+5. **The collision guard was one-directional; it is now closed.**
+   `memory-sync.json` pinned the ADR direction, but nothing stopped a future
+   `adr-workflow` edit from re-swallowing "remember this decision" with every
+   test green. `evals/cases/adr-workflow.json` gains the reverse negative. This
+   is outside the slice's declared deliverables — taken anyway because it guards
+   precisely the hazard the slice's own DoR names as "the hazard this slice must
+   not create".
+
+6. **A category error in the description, caught by review.** The first cut filed
+   `docs/decisions/lightweight-decisions.md` under "the memory layer" — a label
+   the body explicitly reserves for `docs/memory/` ("the file lives in
+   `docs/decisions/`, not `docs/memory/`"), against AC #4's "description and body
+   agree". Rewritten as two sentences: memory-layer work to the memory layer,
+   decisions to `docs/decisions/…` via `decisions.py`. This also fixed a dangling
+   `which` clause and *lowered* the collision from 0.23 → 0.20.
+
+7. **The slice's own line citations were invalidated by the slice.** The DoR and
+   AC #4 cited `SKILL.md:110-116`; the description grew six lines, moving that
+   block to 116-128. Now cited by name ("the lightweight-decision flow") rather
+   than by line number.
+
+8. **Watch-item, not fixed:** `analyze`'s positive ("Are there contradictions or
+   duplication across the decision records and the spec?") sits at rank 3, one
+   place off the hard gate, because the "decision" stem is denser in
+   `memory-sync`'s positive surface now. It was already non-rank-1 before this
+   slice (rank 2), so no rank-1 was lost. The reviewer's warning stands and is
+   recorded: *the next* skill to add decision vocabulary will break it.
+
+9. **Checked, no action:** the compliance reviewer could not run git and asked
+   whether this slice silently restated `skill_routing.py`'s "rank-1 95%"
+   baseline comment to match its own result. It did not — `git show --stat
+   a63f501` does not touch that file, and the comment dates to `fbee6a7`
+   (2026-07-08, spec 086). It is stale from corpus growth and predates this work.
+   The ratchet floors (`MIN_RANK1_RATE`) were deliberately not touched.
+
+10. **Host mirrors rebuilt**; the Codex mirror correctly substitutes `AGENTS.md`
+    for the `CLAUDE.md` hot cache.
 
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO_ |
-| `docs/specs/README.md` | `updated` | _TODO_ |
-| `docs/product-vision.md` | `no-op` | _TODO_ |
-| `docs/architecture.md` | `no-op` | _TODO_ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO_ |
-| `docs/inbox.md` | `no-op` | _TODO_ |
-| `docs/refinement-todo.md` | `no-op` | _TODO_ |
-| `docs/memory/**` | `no-op` | _TODO_ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO_ |
-| Additional live prose / generated templates touched by this slice | `no-op` | _TODO_ |
+| `README.md` | `no-op` | Front door unaffected; no new skill or command — this is a description edit on an existing Tier-0 skill. |
+| `docs/specs/README.md` | `updated` | Regenerated by `workflow.py status-board`; 094-03 row added. |
+| `docs/product-vision.md` | `no-op` | No scope change; `decisions.py` gains no capability, it only becomes reachable by the phrasing owners actually use. |
+| `docs/architecture.md` | `no-op` | No module-boundary change; routing-by-description is the documented mechanism (spec 076) and is unchanged. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | Per EngTip #23 / spec 076 the primer deliberately does *not* re-list skill descriptions — the host surfaces them each session — so a description edit has no primer surface to update. Spec still in flight, so no 025-01 compression. |
+| `docs/inbox.md` | `no-op` | No parked idea resolved or added. |
+| `docs/refinement-todo.md` | `no-op` | No decision deferred by this slice. §8's watch-item is a measurement that will trip its own eval gate, not a decision awaiting an owner. |
+| `docs/memory/**` | `no-op` | No new durable term; "lightweight decision" is already in the glossary via 083. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No ADR. Whether the owner-facing path should instead be an explicit `/jig:decide` command is #108 / Track-B design work and explicitly out of scope here. |
+| Additional live prose / generated templates touched by this slice | `updated` | `hosts/claude/skills/memory-sync/SKILL.md` + `hosts/codex/plugins/jig/skills/memory-sync/SKILL.md` mirrors rebuilt (deviation §10); `evals/cases/adr-workflow.json` gains the reverse-direction negative (§5). |

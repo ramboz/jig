@@ -8,7 +8,8 @@
     ],
     "negative": [
       { "prompt": "Poke holes in this design proposal before we commit to it", "owner": "arch-review" },
-      { "prompt": "Check whether the decision records still agree with the spec", "owner": "analyze" }
+      { "prompt": "Check whether the decision records still agree with the spec", "owner": "analyze" },
+      { "prompt": "Remember this decision so we don't rewrite it tomorrow", "owner": "memory-sync" }
     ]
   }
 }

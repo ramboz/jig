@@ -36,9 +36,9 @@ try:  # pragma: no cover - exercised by both import paths
         _DEDUP_MIN_TOKENS,
         Candidate,
         clip,
-        is_machine_text,
         is_user_override,
         normalize_tokens,
+        strip_machine_text,
     )
 except ImportError:  # pragma: no cover
     from lib.decision_scan import (
@@ -46,9 +46,9 @@ except ImportError:  # pragma: no cover
         _DEDUP_MIN_TOKENS,
         Candidate,
         clip,
-        is_machine_text,
         is_user_override,
         normalize_tokens,
+        strip_machine_text,
     )
 
 _SCRATCH_DIR = Path(".jig") / "decision-scratch"
@@ -250,23 +250,15 @@ def extract_askuserquestion_answer(tool_response) -> str:
     """The owner's answer from a PostToolUse(AskUserQuestion) payload, or "".
 
     Defensive across host payload shapes: collects string leaves from the tool
-    response, which is where the selection lives. A response with no answer text
-    means the dialog was dismissed, and that yields "" — so `append_stub`'s
-    blank-quote guard drops it and nothing is recorded.
+    response, which is where the selection lives. Returning "" is a contract,
+    not an accident — it is how a dismissed dialog reaches `append_stub`'s
+    blank-quote guard and records nothing.
 
-    This reads only the response *by construction* (slice 094-02). It previously
-    also took the tool input and fell back to it, quoting the agent's own
-    question when no answer came back, on the premise that "a noisy stub is
-    cheap; a missed one is not". Issue #108 measured that premise: 17 of 27
-    unique scratch entries were the agent's own dialog, and the reported one
-    quoted a dialog the owner had explicitly dismissed. The asymmetry runs the
-    other way — a fallback stub is not merely noisy but wrong about who spoke,
-    it is durable (083-07 re-surfaces un-recorded stubs until something covering
-    them is written), and it costs agent attention every Stop, which specs
-    055/057 price as the dominant cost. Nor is a dismissed dialog a missed
-    decision: dismissal is the owner declining to decide, so there is nothing
-    to miss. Dropping the parameter keeps the fallback from being re-introduced
-    by accident.
+    Takes the response and *not* the tool input on purpose: the input holds the
+    agent's own question, which is not the owner's words even when no answer
+    comes back. An earlier cut fell back to it and #108 measured the result, so
+    the parameter is gone rather than merely unused — see slice 094-02 for the
+    reasoning. Do not re-add it for robustness.
     """
     parts: list = []
     _collect_strings(tool_response, parts)
@@ -278,10 +270,11 @@ def is_override(text) -> bool:
     return is_user_override(text)
 
 
-def is_machine(text) -> bool:
-    """True iff `text` is harness output, not the owner (reuses the scan's rule).
+def typed_by_owner(text) -> str:
+    """The part of `text` the owner typed, harness injections removed.
 
     Same reason `is_override` delegates: one home for the markers, so in-flight
     capture and the Stop scan cannot drift apart on what counts (slice 094-01).
+    Empty means nothing was typed — so there is nobody to attribute it to.
     """
-    return is_machine_text(text)
+    return strip_machine_text(text)

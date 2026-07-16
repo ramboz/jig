@@ -148,19 +148,12 @@ class AnswerExtractionTests(unittest.TestCase):
         self.assertIn("Pair 05+06", text)
         self.assertIn("together", text)
 
-    # Slice 094-02 — a dismissed dialog produces no stub.
-    #
-    # These replace `test_falls_back_to_input_when_response_empty`, which pinned
-    # the opposite. The old fallback quoted the *question* when the response
-    # carried no answer, on the documented premise that "a noisy stub is cheap;
-    # a missed one is not". Issue #108 measured it: 17 of 27 unique scratch
-    # entries were the agent's own dialog. A dismissed dialog is not a missed
-    # decision — dismissal is the owner declining to decide — so the fallback
-    # only ever manufactured words they never said.
-    #
+    # Slice 094-02 — a dismissed dialog produces no stub. These replace
+    # `test_falls_back_to_input_when_response_empty`, which pinned the opposite.
     # The question is now unreachable by construction (the input is no longer a
-    # parameter); `test_dismissed_askuserquestion_writes_nothing` in
-    # test_jig_decision_inflight.py guards that end-to-end on a full payload.
+    # parameter), so the guard that matters is end-to-end on a full payload:
+    # `test_dismissed_askuserquestion_writes_nothing` in
+    # test_jig_decision_inflight.py.
     def test_dismissed_dialog_yields_no_text(self):
         self.assertEqual(ds.extract_askuserquestion_answer({}), "")
         self.assertEqual(ds.extract_askuserquestion_answer({"answers": []}), "")
@@ -186,6 +179,27 @@ class OverrideMatchTests(unittest.TestCase):
     def test_plain_prose_does_not_match(self):
         self.assertFalse(ds.is_override("let me run the tests"))
         self.assertFalse(ds.is_override(""))
+
+
+class TypedByOwnerTests(unittest.TestCase):
+    """Slice 094-01 — the re-export the hook actually imports.
+
+    Thin by design (it delegates to `decision_scan.strip_machine_text`, which is
+    tested there), but the hook's only import surface is this module, so the
+    delegation is worth pinning here rather than only end-to-end.
+    """
+
+    def test_harness_payload_leaves_nothing(self):
+        self.assertEqual(
+            ds.typed_by_owner("<task-notification>done instead</task-notification>"),
+            "")
+
+    def test_typed_prose_survives(self):
+        self.assertEqual(ds.typed_by_owner("use a banner instead"),
+                         "use a banner instead")
+
+    def test_blank_is_empty(self):
+        self.assertEqual(ds.typed_by_owner(None), "")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified: 2026-07-16
-claimed_by: claude/capture-hygiene-mechanical-noise-40bf2b
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -43,25 +42,27 @@ with `who: "user"`.
    `source: "user-override"`. Prose that merely *mentions* a tag name in passing
    (e.g. "the `<command-args>` block should not be scanned") is human text and is
    still captured.
-3. **Mixed prose keeps its human half.** A prompt with human prose *and* an
-   appended harness block is the owner speaking, so it still stubs — the filter
-   suppresses only payloads with no human text at all.
-4. **One home for the rule.** The predicate lives in `decision_scan.py` beside
+3. **Mixed prose keeps its human half, and only that.** A prompt with human prose
+   *and* a harness block (either side) is the owner speaking, so it still stubs —
+   and the recorded quote is the prose alone. Harness text riding along is never
+   quoted back as their words, which the Goal forbids just as much as a wholly
+   machine stub does.
+4. **One home for the rule.** The rule lives in `decision_scan.py` beside
    `is_user_override` and is re-exported through `decision_scratch`, so in-flight
    capture and the Stop scan cannot drift apart on what counts as machine text.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+- [x] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation. _(no new deferrals — the two open questions go to #108, their owner.)_
 
 ### Close-out (post-DONE)
 
@@ -95,19 +96,84 @@ either way.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO_
+1. **AC #3 was rewritten mid-slice, because the reviewers were right and the AC
+   was wrong.** As drafted it promised only that a mixed payload still *stubs*.
+   Both reviewers independently found that the hook then stored the **raw**
+   prompt: with a `<system-reminder>` *prepended* — the common shape — `clip()`'s
+   240-char window could fill with pure harness text stamped `who: "user"`. That
+   is #108's exact defect surviving inside a slice written to remove it. The
+   Goal's absolute phrasing and the AC disagreed; the **Goal is authoritative**,
+   so the AC now also requires the recorded quote to be the prose alone.
+
+2. **`is_machine_text` was designed out, not just fixed.** The first cut had a
+   predicate (`is_machine_text`) plus a helper (`strip_machine_text`), and the
+   hook gated on the predicate while quoting the raw prompt. Making the quote
+   honest (§1) meant the hook needed the *stripped text* anyway — at which point
+   the predicate was derivable, unused in production, and (per the craft review)
+   left `strip_machine_text` with no production caller. Shipped shape: one
+   primitive. Empty output *is* the machine-text verdict — nothing typed means
+   nobody to attribute it to. AC #4's word "predicate" is therefore stale; the
+   rule still has exactly one home, which is what AC #4 exists to guarantee.
+
+3. **A speculative guard was deleted after it caused a real defect.** The first
+   cut had `_MACHINE_UNCLOSED` swallow everything after an unclosed opener, to
+   catch a *truncated* injection. No evidence in #108 says truncated injections
+   occur — it was invented during implementation. The compliance review found it
+   silently dropped any genuine override whose first token was a tag mention
+   (`"<command-args> should not be scanned"` → suppressed). That trade is exactly
+   backwards: it bought a speculative capture with a real recall failure, the
+   very class #108 reports. Deleted; both orderings and the sentence-initial case
+   are now tested. An unpaired opener now loses only the tag.
+
+4. **The re-export is `typed_by_owner`, not `is_machine`.** The craft review
+   noted the alias would be a pure rename that costs grep discoverability
+   (`is_machine` at the call site never finds `is_machine_text`). The re-export
+   itself is kept — it mirrors the established `is_override` → `is_user_override`
+   precedent and `decision_scratch` is the hook's only import surface — but named
+   for what the caller wants (the owner's text) rather than restating the callee.
+
+5. **Precision leak closed:** `\b` after the tag alternation admitted
+   `<command-name-extra>` as a wrapper, since `-` is a non-word character. Now
+   `(?![-\w])`, with a test.
+
+6. **Test rigor findings folded back.** The reviewers showed three tests passed
+   for weak reasons: the tag-mention fixture survived only on the stopword "the"
+   (now asserts the prose itself); AC #3 was tested with the block appended only
+   (both orderings now); and, because the hook is fail-open, every "writes
+   nothing" assertion was vacuously satisfiable by a dead hook — so
+   `test_hook_discriminates_rather_than_just_failing` now feeds both payload
+   kinds to one session and asserts exactly the typed one survives.
+
+7. **Known limit, accepted with measurements (reviewer finding 8).**
+   `_MACHINE_BLOCK` is quadratic on payloads with many unpaired openers: a
+   synthetic 95KB opener-spam prompt takes ~1.1s. Not ReDoS — no nested
+   quantifiers. Measured on realistic inputs: a 50KB pasted log and 50KB of prose
+   plus a reminder both run in 0.0003s. The hook is registered `async: true,
+   timeout: 5` (`hooks.json`), so it cannot block a turn, and the input is the
+   owner's own prompt, not an untrusted source. Not optimised; recorded here.
+
+8. **Open question carried to #108, not answered.** Whether the same rule should
+   gate the Stop scan's `role == "user"` branch stays unasked-and-unanswered by
+   design (see Scope boundary): the Stop payload shape is not probeable from this
+   repo, so asserting harness text appears there would breach ADR-0020's
+   grounding rule. The compliance reviewer independently raised the same limit
+   about other wrapper families (`<bash-input>`, `<ide_selection>`) and correctly
+   declined to claim they occur. Both go to #108 as questions for the maintainer.
+
+9. **Host mirrors rebuilt** via `scripts/build_host_packages.py`; drift check
+   clean. Not in the deliverable list, but part of the change set.
 
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO_ |
-| `docs/specs/README.md` | `updated` | _TODO_ |
-| `docs/product-vision.md` | `no-op` | _TODO_ |
-| `docs/architecture.md` | `no-op` | _TODO_ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO_ |
-| `docs/inbox.md` | `no-op` | _TODO_ |
-| `docs/refinement-todo.md` | `no-op` | _TODO_ |
-| `docs/memory/**` | `no-op` | _TODO_ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO_ |
-| Additional live prose / generated templates touched by this slice | `no-op` | _TODO_ |
+| `README.md` | `no-op` | Project front door unaffected; the change is internal to the decision-capture hook path. |
+| `docs/specs/README.md` | `updated` | Regenerated by `workflow.py status-board`; 094-01 row added. |
+| `docs/product-vision.md` | `no-op` | No scope change — capture still surfaces, never writes; owner-gating untouched. |
+| `docs/architecture.md` | `no-op` | No module-boundary change. The hook-spine prose describes `decision-inflight` as async write-only feeding `decision-capture`'s triage — still exactly true. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | Spec 094 is in flight (per 025-01, entries are compressed only when a slice *closes* the spec); no template describes the attribution rule. |
+| `docs/inbox.md` | `no-op` | No parked idea resolved or added. |
+| `docs/refinement-todo.md` | `no-op` | No decision deferred by *this* slice — §8's two open questions go to #108, which is their owner (this is 083's frame review, not a jig-internal deferral). 094-02 updates this file for its own reasons. |
+| `docs/memory/**` | `no-op` | Nothing load-bearing beyond the existing decision-capture context; no new term. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No ADR introduced. The rule is a defect fix under spec 083's existing decisions, not a new hard-to-reverse choice. |
+| Additional live prose / generated templates touched by this slice | `updated` | `hosts/claude/**` + `hosts/codex/plugins/jig/**` mirrors rebuilt in lockstep (deviation §9). |
