@@ -148,16 +148,33 @@ class AnswerExtractionTests(unittest.TestCase):
         self.assertIn("Pair 05+06", text)
         self.assertIn("together", text)
 
-    def test_falls_back_to_input_when_response_empty(self):
-        text = ds.extract_askuserquestion_answer({}, {"question": "Which DB?"})
-        self.assertIn("Which DB?", text)
+    # Slice 094-02 — a dismissed dialog produces no stub.
+    #
+    # These replace `test_falls_back_to_input_when_response_empty`, which pinned
+    # the opposite. The old fallback quoted the *question* when the response
+    # carried no answer, on the documented premise that "a noisy stub is cheap;
+    # a missed one is not". Issue #108 measured it: 17 of 27 unique scratch
+    # entries were the agent's own dialog. A dismissed dialog is not a missed
+    # decision — dismissal is the owner declining to decide — so the fallback
+    # only ever manufactured words they never said.
+    #
+    # The question is now unreachable by construction (the input is no longer a
+    # parameter); `test_dismissed_askuserquestion_writes_nothing` in
+    # test_jig_decision_inflight.py guards that end-to-end on a full payload.
+    def test_dismissed_dialog_yields_no_text(self):
+        self.assertEqual(ds.extract_askuserquestion_answer({}), "")
+        self.assertEqual(ds.extract_askuserquestion_answer({"answers": []}), "")
+
+    def test_answered_dialog_still_extracts(self):
+        text = ds.extract_askuserquestion_answer({"answers": [{"value": "Postgres"}]})
+        self.assertIn("Postgres", text)
 
     def test_string_response(self):
         self.assertEqual(ds.extract_askuserquestion_answer("just a string"),
                          "just a string")
 
     def test_empty_everything(self):
-        self.assertEqual(ds.extract_askuserquestion_answer(None, None), "")
+        self.assertEqual(ds.extract_askuserquestion_answer(None), "")
 
 
 class OverrideMatchTests(unittest.TestCase):

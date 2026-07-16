@@ -31,8 +31,9 @@ try:
     event = data.get('hook_event_name') or ''
 
     if event == 'PostToolUse' and data.get('tool_name') == 'AskUserQuestion':
-        answer = extract_askuserquestion_answer(
-            data.get('tool_response'), data.get('tool_input'))
+        # Response only: a dismissed dialog answers nothing, and the question is
+        # the agent's words, not the owner's (094-02/#108).
+        answer = extract_askuserquestion_answer(data.get('tool_response'))
         append_stub(project_dir, session_id, 'user', answer, 'askuserquestion')
     elif event == 'UserPromptSubmit':
         prompt = data.get('prompt') or ''

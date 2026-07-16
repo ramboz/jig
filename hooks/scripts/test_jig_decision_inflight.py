@@ -67,6 +67,25 @@ class InflightHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(ds.read_stubs(self.project, "s1"), [])
 
+    # Slice 094-02 — a dismissed dialog produces no stub.
+    def test_dismissed_askuserquestion_writes_nothing(self):
+        """#108's reported session, reproduced: the owner dismissed the dialog
+        and the log filled with the agent's own question."""
+        payload = {
+            "session_id": "s5", "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{
+                "question": "How hard should the guardrail be on ad-hoc edits "
+                            "to this project's source (public/, src/)?",
+                "header": "Enforcement",
+                "options": [{"label": "Hard block"}, {"label": "Warn only"}],
+            }]},
+            "tool_response": {"answers": []},
+        }
+        result = run_hook(self.project, payload)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(ds.read_stubs(self.project, "s5"), [])
+
     def test_non_askuserquestion_posttooluse_ignored(self):
         payload = {
             "session_id": "s1", "hook_event_name": "PostToolUse",

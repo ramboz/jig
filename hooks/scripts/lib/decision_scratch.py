@@ -246,18 +246,30 @@ def _collect_strings(obj, out, budget=40):
             _collect_strings(item, out, budget)
 
 
-def extract_askuserquestion_answer(tool_response, tool_input=None) -> str:
-    """Best-effort answer text from a PostToolUse(AskUserQuestion) payload.
+def extract_askuserquestion_answer(tool_response) -> str:
+    """The owner's answer from a PostToolUse(AskUserQuestion) payload, or "".
 
     Defensive across host payload shapes: collects string leaves from the tool
-    response (the user's selection), falling back to the tool input (the
-    question) when the response carries no text. Over-permissive on purpose —
-    the surfacing is owner-gated, so a noisy stub is cheap; a missed one is not.
+    response, which is where the selection lives. A response with no answer text
+    means the dialog was dismissed, and that yields "" — so `append_stub`'s
+    blank-quote guard drops it and nothing is recorded.
+
+    This reads only the response *by construction* (slice 094-02). It previously
+    also took the tool input and fell back to it, quoting the agent's own
+    question when no answer came back, on the premise that "a noisy stub is
+    cheap; a missed one is not". Issue #108 measured that premise: 17 of 27
+    unique scratch entries were the agent's own dialog, and the reported one
+    quoted a dialog the owner had explicitly dismissed. The asymmetry runs the
+    other way — a fallback stub is not merely noisy but wrong about who spoke,
+    it is durable (083-07 re-surfaces un-recorded stubs until something covering
+    them is written), and it costs agent attention every Stop, which specs
+    055/057 price as the dominant cost. Nor is a dismissed dialog a missed
+    decision: dismissal is the owner declining to decide, so there is nothing
+    to miss. Dropping the parameter keeps the fallback from being re-introduced
+    by accident.
     """
     parts: list = []
     _collect_strings(tool_response, parts)
-    if not parts and tool_input is not None:
-        _collect_strings(tool_input, parts)
     return clip(" ".join(parts))
 
 

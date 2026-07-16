@@ -1,7 +1,8 @@
 ---
-status: READY_FOR_IMPLEMENTATION
+status: IN_PROGRESS
 dependencies: []
 last_verified: 2026-07-16
+claimed_by: claude/capture-hygiene-mechanical-noise-40bf2b
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
