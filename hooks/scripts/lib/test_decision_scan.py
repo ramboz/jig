@@ -200,6 +200,57 @@ class TestRenderSummary(unittest.TestCase):
     def test_empty_summary_for_no_candidates(self):
         self.assertEqual(render_summary([]), "")
 
+    # Bug 012 / #109 finding 1 fix 3 — the nudge used to name a bare path and
+    # nothing else. An agent told only a path invents a format: the reported
+    # project got a hand-rolled LD table that decisions.py then refused
+    # forever. The nudge must carry the helper and the shape, not just the
+    # destination.
+    def test_summary_names_the_helper_command(self):
+        summary = render_summary(scan([_user("X should not be the default.")]))
+        self.assertIn("decisions.py", summary)
+        self.assertIn("add-lightweight", summary)
+
+    def test_summary_names_the_required_entry_shape(self):
+        summary = render_summary(scan([_user("X should not be the default.")]))
+        self.assertIn("## Entries", summary)
+        self.assertIn("###", summary)
+
+    def test_summary_still_names_the_record_home(self):
+        summary = render_summary(scan([_user("X should not be the default.")]))
+        self.assertIn("docs/decisions/lightweight-decisions.md", summary)
+
+    def test_summary_command_is_host_neutral(self):
+        """The nudge must not hand the agent a path that only resolves in one
+        install mode. `CLAUDE_PLUGIN_ROOT` is unset in Claude scaffold mode
+        (the helper lives at `.claude/skills/jig-memory-sync/`), and Codex
+        plugin skills sit under a different root again — so an env-var path
+        here would expand to nonsense in 2 of 3 modes. That is this bug's own
+        failure shape: naming a destination the agent can't act on.
+
+        Every sibling hook resolves both modes at runtime via SCRIPT_DIR
+        rather than emitting a plugin-root literal (see
+        jig-decision-capture.sh) — the nudge names the command, not a path.
+        """
+        summary = render_summary(scan([_user("X should not be the default.")]))
+        for token in ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT", "CODEX_HOME"):
+            self.assertNotIn(token, summary,
+                             "nudge must not emit a host-specific root")
+
+    def test_summary_entry_shape_matches_the_shipped_template(self):
+        """Drift guard: the nudge restates the LD format contract, which is
+        really owned by the template. Nothing tied the two together, so a
+        template heading rename would leave the nudge quietly lying."""
+        template = (
+            Path(__file__).resolve().parents[3] / "templates" / "docs"
+            / "decisions" / "lightweight-decisions.md.template"
+        ).read_text(encoding="utf-8")
+        summary = render_summary(scan([_user("X should not be the default.")]))
+        self.assertIn("## Entries", template,
+                      "template no longer has the heading the nudge teaches")
+        self.assertIn("## Entries", summary)
+        self.assertIn("add-lightweight", template,
+                      "template no longer names the helper the nudge points at")
+
 
 if __name__ == "__main__":
     unittest.main()

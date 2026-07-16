@@ -2720,5 +2720,107 @@ class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
         self.assertEqual(twice.count(self.BLOCK_BEGIN), 1, "no duplicate block")
 
 
+# -------------------- SeedDecisionsTests --------------------
+
+
+_LD_TEMPLATE = (
+    REPO_ROOT / "templates" / "docs" / "decisions"
+    / "lightweight-decisions.md.template"
+)
+
+_FOREIGN_TABLE = """# Lightweight Decisions
+
+| ID | Date | Decision |
+|----|------|----------|
+| LD-1 | 2026-07-15 | Knob fill uses var(--surface) |
+"""
+
+
+class SeedDecisionsTests(unittest.TestCase):
+    """Bug 012 / #109 finding 1 fix 1 — the backfill op. A project scaffolded
+    before the lightweight-decisions feature landed never received the LD
+    home, and no migrate subcommand could give it one; `scaffold-init` only
+    seeds at init and cannot be re-run on a scaffolded project.
+    """
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        # A project that is unambiguously spec-driven (4 verdict triggers →
+        # 'adoptable' → report exits 0) but has no lightweight-decisions.md.
+        (self.project / "docs" / "specs" / "001-foo").mkdir(parents=True)
+        (self.project / "docs" / "specs" / "001-foo" / "spec.md").write_text(
+            "# Spec 001\n")
+        (self.project / "docs" / "decisions").mkdir(parents=True)
+        (self.project / "docs" / "decisions" / "adr-0001-foo.md").write_text(
+            "# ADR-0001\n")
+        (self.project / "docs" / "workflow.md").write_text("# Workflow\n")
+        (self.project / "docs" / "architecture.md").write_text("# Arch\n")
+        self.ld = self.project / "docs" / "decisions" / "lightweight-decisions.md"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_seed_creates_the_ld_home(self):
+        r = run_migrate("seed-decisions", str(self.project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertTrue(self.ld.is_file())
+        self.assertIn("## Entries", self.ld.read_text())
+
+    def test_seeded_file_is_the_shipped_template(self):
+        run_migrate("seed-decisions", str(self.project))
+        self.assertEqual(self.ld.read_text(), _LD_TEMPLATE.read_text())
+
+    def test_seed_is_idempotent(self):
+        first = run_migrate("seed-decisions", str(self.project))
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        once = self.ld.read_text()
+        second = run_migrate("seed-decisions", str(self.project))
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        self.assertEqual(self.ld.read_text(), once,
+                         "second seed-decisions run must not rewrite the file")
+
+    def test_dry_run_writes_nothing(self):
+        r = run_migrate("seed-decisions", str(self.project), "--dry-run")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse(self.ld.exists(),
+                         "--dry-run must not create the file")
+
+    def test_refuses_to_clobber_a_foreign_format_file(self):
+        self.ld.write_text(_FOREIGN_TABLE)
+        r = run_migrate("seed-decisions", str(self.project))
+        self.assertNotEqual(r.returncode, 0,
+                            "a foreign-format LD home is an unresolved state "
+                            "— seed must fail loud, not exit 0")
+        self.assertEqual(self.ld.read_text(), _FOREIGN_TABLE,
+                         "must never overwrite the owner's file")
+        combined = r.stdout + r.stderr
+        self.assertIn("## Entries", combined)
+
+    def test_report_flags_the_missing_ld_home(self):
+        r = run_migrate("report", str(self.project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("seed-decisions", r.stdout)
+        self.assertIn("lightweight-decisions.md", r.stdout)
+
+    def test_seed_honours_track_local_docs_root(self):
+        """spec 084 — `--docs-root .` puts decisions/ directly under the
+        project root. The only docs_root with a distinct output path."""
+        r = run_migrate("seed-decisions", str(self.project), "--docs-root", ".")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        track_local = self.project / "decisions" / "lightweight-decisions.md"
+        self.assertTrue(track_local.is_file(),
+                        "--docs-root . must seed <project>/decisions/")
+        self.assertIn("## Entries", track_local.read_text())
+
+    def test_report_stops_flagging_once_seeded(self):
+        run_migrate("seed-decisions", str(self.project))
+        r = run_migrate("report", str(self.project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("seed-decisions", r.stdout,
+                         "suggestion must be suppressed once the home exists")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,3 +16,4 @@
 | 009 | codex-skill-description-limit | medium | standard | DONE | yes | python3 -m unittest scripts.test_install_contract.PresenceHelperTests scripts.test_install_contract.RealRepoContractTests | detached |  |  |
 | 010 | node-default-discovery | medium | standard | DONE | yes | skills/tdd-loop/test_tdd.py::TargetedRunTests::test_node_default_run_uses_builtin_discovery | codex/issue-100-node-default-discovery |  |  |
 | 011 | decision-dedup-suppresses-reversals | medium | gnarly | DONE | yes | hooks/scripts/lib/test_decision_scan.py::TestFlagDuplicates::test_recorded_decision_reversal_is_flagged_not_dropped |  |  |  |
+| 012 | decisions-no-template-backfill | medium | standard | DONE | yes | skills/memory-sync/test_decisions.py::SeedFromTemplateTests::test_missing_file_is_seeded_and_entry_appended | claude/session-a2-decisions-template-7c3341 |  |  |
