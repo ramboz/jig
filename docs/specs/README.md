@@ -291,9 +291,9 @@
 | [091-bug-fix-repository-closure](091-bug-fix-repository-closure/spec.md) | 091-01 — repository-closure evidence and gates | DRAFT |  |
 | [092-existing-subtree-layout-adoption](092-existing-subtree-layout-adoption/spec.md) | 092-01 — adopt an existing custom-root corpus | **DONE** |  |
 | [093-semantic-index-provider-discovery](093-semantic-index-provider-discovery/spec.md) | 093-01 — discover installed providers and explain absence | **DONE** |  |
-| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-01 — machine text is never attributed to the owner | IN_PROGRESS (claude/capture-hygiene-mech…) |  |
-| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-02 — a dismissed dialog produces no stub | IN_PROGRESS (claude/capture-hygiene-mech…) |  |
-| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-03 — decision vocabulary on the routing surface | IN_PROGRESS (claude/capture-hygiene-mech…) |  |
+| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-01 — machine text is never attributed to the owner | **DONE** | `who: "user"` is earned by the text, never assumed from the event: harness wrappers reach `UserPromptSubmit` too. One home — `decision_scan.strip_machine_text` (re-exported `typed_by_owner`); empty output *is* the machine-text verdict. Whether the Stop scan's `role == "user"` branch needs the same rule is asked on [#108](https://github.com/ramboz/jig/issues/108), not decided. |
+| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-02 — a dismissed dialog produces no stub | **DONE** | **Reverses 083-07's "a noisy stub is cheap" premise on measured evidence** ([#108](https://github.com/ramboz/jig/issues/108): 17 of 27 entries were the agent's own dialog). Owner-gating does not make a *wrong* stub free — it is durable and costs agent attention every Stop. Don't re-argue from the old premise; `extract_askuserquestion_answer` takes no `tool_input` by design. |
+| [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-03 — decision vocabulary on the routing surface | **DONE** | `memory-sync` and `adr-workflow` both advertise "record this decision"; the split is lightweight/shipped vs load-bearing-with-alternatives. Guarded both ways in `evals/cases/`. Watch-item: `analyze`'s "decision records" positive sits at rank 3, one off the gate — the next skill to add decision vocabulary breaks it. |
 
 ## Deferred slices
 
