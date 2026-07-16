@@ -46,6 +46,16 @@ ADR_TRIGGER = (
 _LIGHTWEIGHT_REL = Path("docs/decisions/lightweight-decisions.md")
 _ENTRIES_HEADING = "## Entries"
 
+# The `## Entries` placeholder the template ships (honest copy for an empty
+# file, stale the moment an entry lands — entries append at end-of-file, so
+# nothing else clears it). Anchored on the template's own opening words and
+# closed at the first line-terminal `_`, so it cannot swallow a project's own
+# italic note under the same heading. Keyed to the template's wording, so
+# test_decisions.py drift-guards this pattern against the shipped file: reword
+# the template and the strip silently stops working.
+_ENTRIES_PLACEHOLDER_RE = re.compile(r"^_No entries yet\..*?_$\n?",
+                                     re.MULTILINE | re.DOTALL)
+
 
 def lightweight_path(project_dir: Path) -> Path:
     """Path to the project's lightweight-decisions file."""
@@ -132,7 +142,8 @@ def add_lightweight(project_dir: Path, title: str, decision: str, context: str,
             % (_LIGHTWEIGHT_REL, _ENTRIES_HEADING))
 
     entry = render_entry(title, decision, context, scope, commit, date)
-    new_text = text.rstrip("\n") + "\n\n" + entry
+    body = _ENTRIES_PLACEHOLDER_RE.sub("", text, count=1)
+    new_text = body.rstrip("\n") + "\n\n" + entry
     # Plain write (not _common.atomic_io) — deliberate: this helper is
     # self-contained by DoR (no cross-tree import), and the file is an
     # owner-gated, single-writer, human-browsable doc, not a hot concurrent path.
