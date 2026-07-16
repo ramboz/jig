@@ -387,5 +387,90 @@ class SingleSourceDriftTests(unittest.TestCase):
         self._assert_contains_trigger(ADR_0031)
 
 
+class EntriesPlaceholderTests(unittest.TestCase):
+    """The template seeds `## Entries` with a "_No entries yet._" placeholder,
+    and `add_lightweight` appends at end-of-file without clearing it — so the
+    moment a real decision is recorded, the file says "No entries yet"
+    directly above the entries it lists. Affects every jig project, since
+    scaffold-init seeds this same template.
+
+    These start from the shipped template verbatim, which is exactly what a
+    scaffolded project's file looks like before its first entry.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(TEMPLATE.read_text(encoding="utf-8"),
+                               encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _text(self) -> str:
+        return self.target.read_text(encoding="utf-8")
+
+    def test_placeholder_is_dropped_when_the_first_entry_lands(self):
+        decisions.add_lightweight(self.project, "Knob fill", "Use var(--surface)",
+                                  "mockup hex rejected", "Home settings",
+                                  date="2026-07-16")
+        text = self._text()
+        self.assertNotIn("_No entries yet.", text)
+        self.assertIn("### 2026-07-16 — Knob fill", text)
+
+    def test_entries_heading_survives_the_drop(self):
+        """Strip the placeholder, not the section it sits in."""
+        decisions.add_lightweight(self.project, "T", "d", "c", "s")
+        self.assertEqual(self._text().count("## Entries"), 1)
+
+    def test_placeholder_kept_while_the_file_has_no_entries(self):
+        """It is useful copy for an empty file — the defect is only that it
+        outlives the first entry. A no-op append must not strip it either."""
+        self.assertIn("_No entries yet.", self._text())
+        decisions.add_lightweight(self.project, "Dupe", "d", "c", "s",
+                                  date="2026-07-16")
+        before = self._text()
+        appended = decisions.add_lightweight(self.project, "Dupe", "d2", "c2",
+                                             "s2", date="2026-07-16")
+        self.assertFalse(appended)
+        self.assertEqual(self._text(), before, "no-op must not rewrite")
+
+    def test_second_entry_appends_normally(self):
+        decisions.add_lightweight(self.project, "One", "d", "c", "s",
+                                  date="2026-07-16")
+        decisions.add_lightweight(self.project, "Two", "d", "c", "s",
+                                  date="2026-07-17")
+        text = self._text()
+        self.assertIn("### 2026-07-16 — One", text)
+        self.assertIn("### 2026-07-17 — Two", text)
+        self.assertNotIn("_No entries yet.", text)
+        self.assertEqual(text.count("## Entries"), 1)
+
+    def test_template_fence_example_heading_survives(self):
+        """`_existing_keys` deliberately scans every `### ` heading, including
+        the `### [Date] — [Short title]` line inside the `## Template` fence.
+        Stripping the placeholder must not disturb it."""
+        decisions.add_lightweight(self.project, "T", "d", "c", "s")
+        self.assertIn("### [Date] — [Short title]", self._text())
+
+    def test_unrelated_italics_are_not_stripped(self):
+        """Only the placeholder goes — not any italic line that happens to sit
+        under `## Entries` (e.g. a project's own illustrative note)."""
+        self.target.write_text(_SEED, encoding="utf-8")
+        decisions.add_lightweight(self.project, "T", "d", "c", "s")
+        text = self._text()
+        self.assertIn("> _Illustrative only._", text)
+        self.assertIn("### 2026-01-15 — Example entry", text)
+
+    def test_template_still_ships_the_placeholder_we_strip(self):
+        """Drift guard: the matcher keys off the template's own wording. If the
+        template's copy is reworded, the strip silently stops working and the
+        defect returns with no test failing anywhere else."""
+        self.assertRegex(TEMPLATE.read_text(encoding="utf-8"),
+                         decisions._ENTRIES_PLACEHOLDER_RE)
+
+
 if __name__ == "__main__":
     unittest.main()
