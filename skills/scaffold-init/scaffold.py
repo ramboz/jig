@@ -1094,9 +1094,9 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             )
         out = CodexScaffoldRenderer.replace_rendered_section(
             out,
-            "`migrate.py` exposes five subcommands:",
+            "`migrate.py` exposes six subcommands:",
             "## How to use",
-            "`migrate.py` exposes five subcommands:\n\n"
+            "`migrate.py` exposes six subcommands:\n\n"
             "- `report` — strictly read-only inventory + plan.\n"
             "- `adopt-layout` — validates an existing custom-root corpus "
             "and writes only its `scaffold.json` sentinel/config; supports "
@@ -1107,6 +1107,10 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             "paths.\n"
             "- `split-slices` — extracts embedded slice sections into "
             "sibling slice files.\n"
+            "- `seed-decisions` — seeds "
+            "`docs/decisions/lightweight-decisions.md` from jig's template. "
+            "Idempotent; supports `--dry-run` and `--docs-root`; never "
+            "overwrites an existing file.\n"
             "- `copy-machinery` — copies jig runtime machinery into the "
             "target's Codex scaffold runtime under `.codex/`; use "
             "`--host codex` from source or plugin paths.\n\n",

@@ -123,6 +123,12 @@ time, then persist now.
      --title "<short title>" --decision "<what>" --context "<why>" \
      --scope "<which screen / component / string / asset>" [--commit "<SHA/PR>"]
    ```
+   The helper seeds `lightweight-decisions.md` from jig's template when the
+   project has none (bug 012) and says so — a project that adopted jig before
+   the feature landed never received the file. **Never hand-write the file
+   yourself:** if the helper refuses because an existing file is not in jig's
+   format, it names both remedies — follow one, don't invent a third.
+
    Confirm with the user before writing — it's their decision to record, not
    yours to infer. If the decision clears the ADR trigger above, route it to an
    ADR (`adr.py new`) instead of here.
