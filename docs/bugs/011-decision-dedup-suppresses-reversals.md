@@ -1,5 +1,5 @@
 ---
-status: FIXING
+status: DONE
 tier: gnarly
 severity: medium
 regression_test: hooks/scripts/lib/test_decision_scan.py::TestFlagDuplicates::test_recorded_decision_reversal_is_flagged_not_dropped
@@ -7,7 +7,7 @@ main_repro_checked_at: 2026-07-16
 main_repro_ref: origin/main@91427b4
 main_repro_result: reproduces
 red_confirmed_at: 2026-07-16
-green_confirmed_at:
+green_confirmed_at: 2026-07-16
 fix_class: structural_fix
 security_surface: false
 escalated_to:
@@ -256,6 +256,26 @@ Backed end-to-end by
 
 ## Proof
 
+- **The original reported repro re-run against the fix (2026-07-16).** Issue #109's snippet no
+  longer runs verbatim — `from lib.decision_scan import dedup` now raises `ImportError`, because
+  the suppression it demonstrates is gone. The same scenario on the current API:
+
+  ```
+  kept   | flagged=True  | actually make the settings button border 0.09 alpha
+  kept   | flagged=False | the settings icon knob fill should use accent not surface
+  ```
+
+  The reported reversal was `SUPPRESSED` at 0.75 containment; it is now kept and flagged. End to
+  end through the real Stop hook, against LD-3 in a project's `lightweight-decisions.md`, the
+  quote that previously produced **silence** now surfaces:
+
+  ```
+  Decision-capture scan found 1 candidate decision(s) this session:
+  - [tier 2, user, high, possible duplicate] actually make the settings button border 0.09 alpha
+  ```
+
+  …followed by the triage ask. The owner now sees the correction, why it is flagged, and what to
+  do — which is the whole of what the bug denied them.
 - **Red witnessed by the gate, not asserted.** The implementation was set aside (see deviation 5 —
   done the wrong way) and `bug.py transition 011 FIXING` ran the regression test itself: it
   refuses the transition if the test passes without a fix. `red_confirmed_at: 2026-07-16` is that
