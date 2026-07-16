@@ -36,6 +36,7 @@ try:  # pragma: no cover - exercised by both import paths
         _DEDUP_MIN_TOKENS,
         Candidate,
         clip,
+        is_machine_text,
         is_user_override,
         normalize_tokens,
     )
@@ -45,6 +46,7 @@ except ImportError:  # pragma: no cover
         _DEDUP_MIN_TOKENS,
         Candidate,
         clip,
+        is_machine_text,
         is_user_override,
         normalize_tokens,
     )
@@ -262,3 +264,12 @@ def extract_askuserquestion_answer(tool_response, tool_input=None) -> str:
 def is_override(text) -> bool:
     """True iff `text` is a user default-override (reuses the scan's markers)."""
     return is_user_override(text)
+
+
+def is_machine(text) -> bool:
+    """True iff `text` is harness output, not the owner (reuses the scan's rule).
+
+    Same reason `is_override` delegates: one home for the markers, so in-flight
+    capture and the Stop scan cannot drift apart on what counts (slice 094-01).
+    """
+    return is_machine_text(text)

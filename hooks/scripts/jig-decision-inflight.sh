@@ -23,7 +23,7 @@ if script_dir not in sys.path:
 
 try:
     from lib.decision_scratch import (
-        append_stub, extract_askuserquestion_answer, is_override)
+        append_stub, extract_askuserquestion_answer, is_machine, is_override)
 
     data = json.load(sys.stdin)
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
@@ -36,7 +36,9 @@ try:
         append_stub(project_dir, session_id, 'user', answer, 'askuserquestion')
     elif event == 'UserPromptSubmit':
         prompt = data.get('prompt') or ''
-        if is_override(prompt):
+        # The host delivers its own notifications and command expansions through
+        # this same field, so 'user' is not a safe default for it (094-01/#108).
+        if is_override(prompt) and not is_machine(prompt):
             append_stub(project_dir, session_id, 'user', prompt, 'user-override')
 except Exception:
     pass

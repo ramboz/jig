@@ -95,6 +95,41 @@ class InflightHookTests(unittest.TestCase):
         run_hook(self.project, payload)
         self.assertEqual(ds.read_stubs(self.project, "s2"), [])
 
+    # Slice 094-01 — machine text is never attributed to the owner.
+    def test_task_notification_prompt_writes_nothing(self):
+        """#108's evidence, reproduced: a harness blob carrying a Tier-2 marker
+        arrives on UserPromptSubmit and must not be signed `who: "user"`."""
+        payload = {
+            "session_id": "s3", "hook_event_name": "UserPromptSubmit",
+            "prompt": "<task-notification>Background agent finished: it used a "
+                      "banner instead of a modal.</task-notification>",
+        }
+        result = run_hook(self.project, payload)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(ds.read_stubs(self.project, "s3"), [])
+
+    def test_slash_command_expansion_writes_nothing(self):
+        payload = {
+            "session_id": "s3", "hook_event_name": "UserPromptSubmit",
+            "prompt": "<command-name>/jig:memory-sync</command-name>"
+                      "<command-args>actually do it the other way</command-args>",
+        }
+        run_hook(self.project, payload)
+        self.assertEqual(ds.read_stubs(self.project, "s3"), [])
+
+    def test_typed_prompt_with_appended_reminder_still_stubs(self):
+        """Mixed payload: the owner did speak, so the stub survives."""
+        payload = {
+            "session_id": "s4", "hook_event_name": "UserPromptSubmit",
+            "prompt": "Use a banner instead of a modal.\n"
+                      "<system-reminder>Tool budget is low.</system-reminder>",
+        }
+        run_hook(self.project, payload)
+        stubs = ds.read_stubs(self.project, "s4")
+        self.assertEqual(len(stubs), 1)
+        self.assertEqual(stubs[0]["who"], "user")
+        self.assertIn("banner", stubs[0]["quote"])
+
     def test_malformed_json_never_crashes(self):
         result = run_hook(self.project, None, raw="{not valid json")
         self.assertEqual(result.returncode, 0, msg=result.stderr)

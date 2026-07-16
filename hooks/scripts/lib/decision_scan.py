@@ -52,6 +52,35 @@ _TIER3 = [
     re.compile(r"\bdecided\s+(?:to|on|against)\b", re.IGNORECASE),
 ]
 
+# Harness-injected wrappers (slice 094-01). Text arriving inside these was not
+# typed by the owner: the host generates it and delivers it through the same
+# field a real prompt uses, so `who: "user"` has to be earned by the text rather
+# than assumed from the event. Precision-first, like the tier markers above —
+# only wrappers we can name, so prose the owner writes *about* them still counts
+# as theirs.
+_MACHINE_TAGS = (
+    "task-notification",
+    "command-name",
+    "command-message",
+    "command-args",
+    "local-command-stdout",
+    "local-command-stderr",
+    "system-reminder",
+)
+_MACHINE_BLOCK = re.compile(
+    r"<(%s)\b[^>]*>.*?</\1\s*>" % "|".join(_MACHINE_TAGS),
+    re.IGNORECASE | re.DOTALL,
+)
+# Openers/closers left over once paired blocks are gone — a truncated or
+# unclosed injection is still an injection.
+_MACHINE_TAG = re.compile(
+    r"</?(%s)\b[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
+# An opener with no closer swallows the rest: a truncated injection is still an
+# injection. Applied only after paired blocks are gone, so a well-formed block
+# followed by typed prose keeps the prose.
+_MACHINE_UNCLOSED = re.compile(
+    r"<(%s)\b[^>]*>.*" % "|".join(_MACHINE_TAGS), re.IGNORECASE | re.DOTALL)
+
 _DEDUP_CONTAINMENT = 0.6
 # Candidates with fewer meaningful tokens than this are never deduped away — a
 # 1-2 token quote trivially clears the containment threshold against any recorded
@@ -125,6 +154,40 @@ def is_user_override(text):
     Tier-2 markers the Stop scan uses, so in-flight and end-of-session capture
     agree on what counts as a user override (no pattern drift)."""
     return any(p.search(text or "") for p in _TIER2)
+
+
+def strip_machine_text(text):
+    """Return `text` with harness-injected wrappers and their contents removed.
+
+    What survives is what a human plausibly typed, whitespace-normalized. Empty
+    when the payload was nothing but machinery.
+    """
+    if not text:
+        return ""
+    out = _MACHINE_BLOCK.sub(" ", text)
+    out = _MACHINE_UNCLOSED.sub(" ", out)
+    out = _MACHINE_TAG.sub(" ", out)
+    return " ".join(out.split())
+
+
+def is_machine_text(text):
+    """True iff `text` is harness output rather than something the owner typed.
+
+    The in-flight capture (slice 083-07) stamps `who: "user"` on everything
+    arriving via `UserPromptSubmit`, but the host delivers its own notifications
+    and command expansions through that same field — so issue #108 found
+    `<task-notification>` blobs recorded as the owner's words. Attribution has to
+    be earned by the text.
+
+    Requires a *named* wrapper and no human remainder, which keeps the two ways
+    of being wrong asymmetric: prose the owner writes about the machinery ("the
+    `<command-args>` block should not be scanned") stays theirs, and a wrapper
+    with typed prose beside it is still the owner speaking.
+    """
+    raw = (text or "").strip()
+    if not raw or not _MACHINE_TAG.search(raw):
+        return False
+    return not strip_machine_text(raw)
 
 
 def _scan_askuserquestion(messages):

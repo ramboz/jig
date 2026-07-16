@@ -15,9 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from decision_scan import (  # noqa: E402
     Candidate,
     dedup,
+    is_machine_text,
     normalize_tokens,
     render_summary,
     scan,
+    strip_machine_text,
 )
 
 
@@ -153,6 +155,73 @@ class TestRenderSummary(unittest.TestCase):
 
     def test_empty_summary_for_no_candidates(self):
         self.assertEqual(render_summary([]), "")
+
+
+class TestMachineText(unittest.TestCase):
+    """Slice 094-01 — machine text is never attributed to the owner.
+
+    Evidence: issue #108 counted 3 `<task-notification>` blobs recorded with
+    `who: "user"` in a real scratch log. Harness injections reach the in-flight
+    capture through the same field a typed prompt does, so the attribution has
+    to be earned by the text, not assumed from the event.
+    """
+
+    # AC #1 — every harness wrapper #108 names, each carrying a Tier-2 marker so
+    # the test fails for the right reason (marker present, stub still refused).
+    def test_harness_wrappers_are_machine_text(self):
+        for blob in (
+            "<task-notification>Agent finished; it used a banner instead of a "
+            "modal.</task-notification>",
+            "<command-name>/jig:memory-sync</command-name>",
+            "<command-message>memory-sync is running</command-message>",
+            "<command-args>should not matter</command-args>",
+            "<local-command-stdout>actually, 3 tests failed</local-command-stdout>",
+            "<local-command-stderr>error: use --force instead</local-command-stderr>",
+            "<system-reminder>You should not forget to run the tests."
+            "</system-reminder>",
+        ):
+            with self.subTest(blob=blob[:40]):
+                self.assertTrue(is_machine_text(blob))
+
+    def test_multiple_blocks_with_whitespace_are_machine_text(self):
+        self.assertTrue(is_machine_text(
+            "<command-name>/jig:orient</command-name>\n"
+            "  <command-args>do it the other way instead</command-args>\n"))
+
+    def test_unclosed_and_attributed_tags_still_machine_text(self):
+        self.assertTrue(is_machine_text(
+            '<task-notification id="7" status="done">use a banner instead'))
+
+    # AC #2 — genuine prose is untouched, including prose *about* the tags.
+    def test_typed_prose_is_not_machine_text(self):
+        for prose in (
+            "Actually, use a banner instead of a modal.",
+            "it's too long for laptop views",
+            "",
+            "   ",
+        ):
+            with self.subTest(prose=prose):
+                self.assertFalse(is_machine_text(prose))
+
+    def test_prose_mentioning_a_tag_name_is_not_machine_text(self):
+        # The owner talking about the machinery is still the owner talking.
+        self.assertFalse(is_machine_text(
+            "the <command-args> block should not be scanned"))
+
+    # AC #3 — a harness block appended to typed prose leaves the prose.
+    def test_mixed_prose_keeps_its_human_half(self):
+        mixed = ("Use a banner instead of a modal.\n"
+                 "<system-reminder>Tool budget is low.</system-reminder>")
+        self.assertFalse(is_machine_text(mixed))
+        self.assertEqual(strip_machine_text(mixed),
+                         "Use a banner instead of a modal.")
+
+    def test_strip_returns_empty_for_pure_machine_text(self):
+        self.assertEqual(
+            strip_machine_text("<task-notification>done</task-notification>"), "")
+
+    def test_strip_leaves_plain_prose_alone(self):
+        self.assertEqual(strip_machine_text("just prose"), "just prose")
 
 
 if __name__ == "__main__":
