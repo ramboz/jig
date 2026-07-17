@@ -56,6 +56,9 @@ class InflightHookTests(unittest.TestCase):
         self.assertEqual(stubs[0]["source"], "askuserquestion")
         self.assertEqual(stubs[0]["who"], "user")
         self.assertIn("Redis", stubs[0]["quote"])
+        self.assertNotIn("Which cache?", stubs[0]["quote"])
+        # ...and an answered dialog is still Tier 1 through the hook path.
+        self.assertEqual(ds.stubs_to_candidates(stubs)[0].tier, 1)
 
     def test_blank_askuserquestion_answer_writes_nothing(self):
         payload = {
@@ -66,6 +69,25 @@ class InflightHookTests(unittest.TestCase):
         result = run_hook(self.project, payload)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(ds.read_stubs(self.project, "s1"), [])
+
+    # Slice 094-02 — a dismissed dialog produces no stub.
+    def test_dismissed_askuserquestion_writes_nothing(self):
+        """#108's reported session, reproduced: the owner dismissed the dialog
+        and the log filled with the agent's own question."""
+        payload = {
+            "session_id": "s5", "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{
+                "question": "How hard should the guardrail be on ad-hoc edits "
+                            "to this project's source (public/, src/)?",
+                "header": "Enforcement",
+                "options": [{"label": "Hard block"}, {"label": "Warn only"}],
+            }]},
+            "tool_response": {"answers": []},
+        }
+        result = run_hook(self.project, payload)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(ds.read_stubs(self.project, "s5"), [])
 
     def test_non_askuserquestion_posttooluse_ignored(self):
         payload = {
@@ -85,6 +107,7 @@ class InflightHookTests(unittest.TestCase):
         stubs = ds.read_stubs(self.project, "s2")
         self.assertEqual(len(stubs), 1)
         self.assertEqual(stubs[0]["source"], "user-override")
+        self.assertEqual(stubs[0]["who"], "user")
         self.assertIn("banner", stubs[0]["quote"])
 
     def test_plain_prompt_writes_nothing(self):
@@ -94,6 +117,60 @@ class InflightHookTests(unittest.TestCase):
         }
         run_hook(self.project, payload)
         self.assertEqual(ds.read_stubs(self.project, "s2"), [])
+
+    # Slice 094-01 — machine text is never attributed to the owner.
+    def test_task_notification_prompt_writes_nothing(self):
+        """#108's evidence, reproduced: a harness blob carrying a Tier-2 marker
+        arrives on UserPromptSubmit and must not be signed `who: "user"`."""
+        payload = {
+            "session_id": "s3", "hook_event_name": "UserPromptSubmit",
+            "prompt": "<task-notification>Background agent finished: it used a "
+                      "banner instead of a modal.</task-notification>",
+        }
+        result = run_hook(self.project, payload)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(ds.read_stubs(self.project, "s3"), [])
+
+    def test_slash_command_expansion_writes_nothing(self):
+        payload = {
+            "session_id": "s3", "hook_event_name": "UserPromptSubmit",
+            "prompt": "<command-name>/jig:memory-sync</command-name>"
+                      "<command-args>actually do it the other way</command-args>",
+        }
+        run_hook(self.project, payload)
+        self.assertEqual(ds.read_stubs(self.project, "s3"), [])
+
+    def test_typed_prompt_with_appended_reminder_stubs_only_the_prose(self):
+        """Mixed payload: the owner did speak, so the stub survives — but the
+        harness text riding along is not quoted back as their words."""
+        payload = {
+            "session_id": "s4", "hook_event_name": "UserPromptSubmit",
+            "prompt": "<system-reminder>Tool budget is low.</system-reminder>\n"
+                      "Use a banner instead of a modal.",
+        }
+        run_hook(self.project, payload)
+        stubs = ds.read_stubs(self.project, "s4")
+        self.assertEqual(len(stubs), 1)
+        self.assertEqual(stubs[0]["who"], "user")
+        self.assertEqual(stubs[0]["quote"], "Use a banner instead of a modal.")
+        self.assertNotIn("Tool budget", stubs[0]["quote"])
+
+    def test_hook_discriminates_rather_than_just_failing(self):
+        """The 'writes nothing' assertions above would also pass if the hook
+        died outright (it is fail-open). Feed both kinds of payload to one
+        session: exactly the typed one must survive."""
+        for prompt in (
+            "<task-notification>finished: used a banner instead."
+            "</task-notification>",
+            "Actually, use a banner instead of a modal.",
+        ):
+            run_hook(self.project, {
+                "session_id": "s6", "hook_event_name": "UserPromptSubmit",
+                "prompt": prompt,
+            })
+        stubs = ds.read_stubs(self.project, "s6")
+        self.assertEqual(len(stubs), 1)
+        self.assertEqual(stubs[0]["quote"], "Actually, use a banner instead of a modal.")
 
     def test_malformed_json_never_crashes(self):
         result = run_hook(self.project, None, raw="{not valid json")

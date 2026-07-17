@@ -23,7 +23,7 @@ if script_dir not in sys.path:
 
 try:
     from lib.decision_scratch import (
-        append_stub, extract_askuserquestion_answer, is_override)
+        append_stub, extract_askuserquestion_answer, is_override, typed_by_owner)
 
     data = json.load(sys.stdin)
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
@@ -31,13 +31,17 @@ try:
     event = data.get('hook_event_name') or ''
 
     if event == 'PostToolUse' and data.get('tool_name') == 'AskUserQuestion':
-        answer = extract_askuserquestion_answer(
-            data.get('tool_response'), data.get('tool_input'))
+        # Response only: a dismissed dialog answers nothing, and the question is
+        # the agent's words, not the owner's (094-02/#108).
+        answer = extract_askuserquestion_answer(data.get('tool_response'))
         append_stub(project_dir, session_id, 'user', answer, 'askuserquestion')
     elif event == 'UserPromptSubmit':
-        prompt = data.get('prompt') or ''
-        if is_override(prompt):
-            append_stub(project_dir, session_id, 'user', prompt, 'user-override')
+        # The host delivers its own notifications and command expansions through
+        # this same field, so 'user' is not a safe default for it (094-01/#108).
+        # Match and quote what the owner typed, never what arrived around it.
+        typed = typed_by_owner(data.get('prompt'))
+        if is_override(typed):
+            append_stub(project_dir, session_id, 'user', typed, 'user-override')
 except Exception:
     pass
 "

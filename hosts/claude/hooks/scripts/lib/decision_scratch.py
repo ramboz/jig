@@ -38,6 +38,7 @@ try:  # pragma: no cover - exercised by both import paths
         clip,
         is_user_override,
         normalize_tokens,
+        strip_machine_text,
     )
 except ImportError:  # pragma: no cover
     from lib.decision_scan import (
@@ -47,6 +48,7 @@ except ImportError:  # pragma: no cover
         clip,
         is_user_override,
         normalize_tokens,
+        strip_machine_text,
     )
 
 _SCRATCH_DIR = Path(".jig") / "decision-scratch"
@@ -244,21 +246,35 @@ def _collect_strings(obj, out, budget=40):
             _collect_strings(item, out, budget)
 
 
-def extract_askuserquestion_answer(tool_response, tool_input=None) -> str:
-    """Best-effort answer text from a PostToolUse(AskUserQuestion) payload.
+def extract_askuserquestion_answer(tool_response) -> str:
+    """The owner's answer from a PostToolUse(AskUserQuestion) payload, or "".
 
     Defensive across host payload shapes: collects string leaves from the tool
-    response (the user's selection), falling back to the tool input (the
-    question) when the response carries no text. Over-permissive on purpose —
-    the surfacing is owner-gated, so a noisy stub is cheap; a missed one is not.
+    response, which is where the selection lives. Returning "" is a contract,
+    not an accident — it is how a dismissed dialog reaches `append_stub`'s
+    blank-quote guard and records nothing.
+
+    Takes the response and *not* the tool input on purpose: the input holds the
+    agent's own question, which is not the owner's words even when no answer
+    comes back. An earlier cut fell back to it and #108 measured the result, so
+    the parameter is gone rather than merely unused — see slice 094-02 for the
+    reasoning. Do not re-add it for robustness.
     """
     parts: list = []
     _collect_strings(tool_response, parts)
-    if not parts and tool_input is not None:
-        _collect_strings(tool_input, parts)
     return clip(" ".join(parts))
 
 
 def is_override(text) -> bool:
     """True iff `text` is a user default-override (reuses the scan's markers)."""
     return is_user_override(text)
+
+
+def typed_by_owner(text) -> str:
+    """The part of `text` the owner typed, harness injections removed.
+
+    Same reason `is_override` delegates: one home for the markers, so in-flight
+    capture and the Stop scan cannot drift apart on what counts (slice 094-01).
+    Empty means nothing was typed — so there is nobody to attribute it to.
+    """
+    return strip_machine_text(text)
