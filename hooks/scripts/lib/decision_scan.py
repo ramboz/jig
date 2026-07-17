@@ -52,6 +52,62 @@ _TIER3 = [
     re.compile(r"\bdecided\s+(?:to|on|against)\b", re.IGNORECASE),
 ]
 
+# Harness-injected wrappers (slice 094-01). Text arriving inside these was not
+# typed by the owner: the host generates it and delivers it through the same
+# field a real prompt uses, so `who: "user"` has to be earned by the text rather
+# than assumed from the event. Precision-first, like the tier markers above —
+# only wrappers we can name, so prose the owner writes *about* them still counts
+# as theirs.
+_MACHINE_TAGS = (
+    "task-notification",
+    "command-name",
+    "command-message",
+    "command-args",
+    "local-command-stdout",
+    "local-command-stderr",
+    "system-reminder",
+)
+# `(?![-\w])` rather than `\b`: `-` is a non-word character, so `\b` would let
+# `<command-name-extra>` match a wrapper we never named.
+_MACHINE_ANY_TAG = re.compile(
+    r"<(/?)(%s)(?![-\w])[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
+# Tags with no matching partner — an orphan closer, or an opener whose content
+# was never wrapped. Only the tag goes; anything around it is left standing,
+# because we cannot tell an unpaired opener from the owner naming one in prose
+# ("the <command-args> block should not be scanned"), and dropping their words
+# is the failure #108 is about.
+_MACHINE_TAG = re.compile(
+    r"</?(%s)(?![-\w])[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
+
+
+def _machine_block_spans(text):
+    """Half-open spans of the well-formed wrapper blocks in `text`.
+
+    Depth-counted per tag name rather than matched to the *first* closer: a
+    wrapper can contain its own tag name — the host quotes an edited file back
+    inside a `<system-reminder>`, and files in this repo contain the literal tag
+    — and pairing the opener with the first closer would leave the outer block's
+    tail standing as if the owner had typed it.
+
+    An opener that never balances is left for `_MACHINE_TAG`, which keeps the
+    unpaired-tag policy above intact.
+    """
+    spans = []
+    depth = {}
+    start = {}
+    for m in _MACHINE_ANY_TAG.finditer(text):
+        name = m.group(2).lower()
+        if not m.group(1):
+            if not depth.get(name):
+                start[name] = m.start()
+            depth[name] = depth.get(name, 0) + 1
+        elif depth.get(name):
+            depth[name] -= 1
+            if not depth[name]:
+                spans.append((start[name], m.end()))
+    return spans
+
+
 _DUPLICATE_CONTAINMENT = 0.6
 # Candidates with fewer meaningful tokens than this are never flagged — a 1-2
 # token quote trivially clears the containment threshold against any recorded
@@ -126,6 +182,45 @@ def is_user_override(text):
     Tier-2 markers the Stop scan uses, so in-flight and end-of-session capture
     agree on what counts as a user override (no pattern drift)."""
     return any(p.search(text or "") for p in _TIER2)
+
+
+def strip_machine_text(text):
+    """Return only what the owner plausibly typed, whitespace-normalized.
+
+    The in-flight capture (slice 083-07) stamps `who: "user"` on everything
+    arriving via `UserPromptSubmit`, but the host delivers its own notifications
+    and command expansions through that same field — so issue #108 found
+    `<task-notification>` blobs recorded as the owner's words. Attribution has to
+    be earned by the text, and so does the quote: a caller both gates on this
+    (empty means the payload was nothing but machinery, so there is no owner to
+    attribute it to) and stores it (so an injection riding along with typed prose
+    is not quoted back as theirs).
+
+    Removing paired blocks before unpaired tags is what makes both halves work:
+    a well-formed block is dropped whole, contents included, while a bare tag the
+    owner mentioned in passing loses only the tag.
+
+    The asymmetry is deliberate and unavoidable: a *paired* `<tag>…</tag>` the
+    owner merely names in prose ("wrap it in <system-reminder> … </system-reminder>")
+    is byte-for-byte indistinguishable from a real injection, so it is dropped
+    like one — costing a few words of quote fidelity in that rare case. A
+    heuristic to tell them apart would be the same evidence-free guard slice
+    094-01 already deleted (`_MACHINE_UNCLOSED`), trading a real recall risk for
+    a speculative one. A lone tag stays cheap to keep; a balanced pair does not.
+    """
+    if not text:
+        return ""
+    kept = []
+    cursor = 0
+    for begin, end in sorted(_machine_block_spans(text)):
+        # Spans of different tag names can interleave; a span starting inside
+        # one already dropped is part of it.
+        if begin >= cursor:
+            kept.append(text[cursor:begin])
+        cursor = max(cursor, end)
+    kept.append(text[cursor:])
+    out = _MACHINE_TAG.sub(" ", " ".join(kept))
+    return " ".join(out.split())
 
 
 def _scan_askuserquestion(messages):
