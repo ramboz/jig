@@ -71,8 +71,7 @@ def _bootstrap_people_md(target: Path) -> tuple:
 
     Since slice 095-01 (ADR-0038) both scaffold hosts copy `templates/` beside
     the copied machinery, so a scaffold-mode target resolves this too — this is
-    a fourth member of the template-reading family (with `decisions.py`,
-    `adr.py`, and `workflow.py`'s slice-template render). The degrade path now
+    one of the template-reading family ADR-0038 enumerates. The degrade path now
     means a broken install, not an expected mode."""
     people = team_signal.people_md_path(target)
     if people.exists():

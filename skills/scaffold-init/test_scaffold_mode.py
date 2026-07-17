@@ -465,10 +465,10 @@ class WithMachineryTests(unittest.TestCase):
 
 # --------------------------------------------------------------------------
 # Spec 095-01 — Claude scaffold mode copies `templates/` into `.claude/`,
-# mirroring the Codex side's `_copy_codex_templates`, so the copied record
-# helpers' existing `parents[2]/templates/` fallback resolves with no helper
-# changes. Before this slice, `copy_machinery` copied `skills/` and `hooks/`
-# only, so `decisions.py` and `adr.py` could not reach a template in the one
+# mirroring the Codex side's `_copy_codex_templates`, so the copied helpers'
+# existing `parents[2]/templates/` fallback resolves with no change to any
+# helper's template resolution. Before this slice, `copy_machinery` copied
+# `skills/` and `hooks/` only, so no helper could reach a template in the one
 # install mode that has no plugin root to fall back on.
 # --------------------------------------------------------------------------
 
@@ -669,18 +669,73 @@ class ClaudeScaffoldTemplatesTests(unittest.TestCase):
             checked += 1
         self.assertTrue(checked, "fixture check: no byte-copied templates found")
 
-    def test_slice_template_is_reachable_by_the_third_family_consumer(self):
-        """The spec frames this as a two-helper family; it is three.
-        `workflow.py`'s `_render_stub_slice` reads
-        `parents[2]/templates/docs/specs/slice-template.md` with the same
-        shape, so in a scaffolded project the copy makes it stop falling back
-        to its degraded inline template. Not an AC — recorded as evidence
-        (deviation log §2) that copying the whole tree beat an allowlist of
-        the two templates the ACs happened to name."""
-        copied = (self.target / ".claude" / "templates" / "docs" / "specs"
-                  / "slice-template.md")
-        self.assertTrue(copied.is_file(),
-                        f"slice-template.md not reachable at {copied}")
+    # ----- The other two consumers (deviation log §2) ------------------------
+    # The spec framed this as a two-helper family; it is five, and two of the
+    # others silently change behaviour here. AC3 pins that their template files
+    # are copied; these pin that the helpers actually USE them — which is the
+    # claim, and the evidence that copying the whole tree beat an allowlist of
+    # the two templates the ACs happened to name.
+
+    def test_workflow_renders_the_real_slice_template_not_the_fallback(self):
+        """`workflow.py` `_render_stub_slice` reads
+        `parents[2]/templates/docs/specs/slice-template.md`, falling back to a
+        degraded inline template when unreachable. In scaffold mode it now
+        finds the real one. Distinguished by a marker only the on-disk
+        template carries — asserting `is_file()` on the copy would prove
+        nothing AC3 doesn't."""
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        env = self._scaffold_mode_env()
+        for args in (["init", "-q"],
+                     ["config", "commit.gpgsign", "false"],
+                     ["checkout", "-q", "-b", "probe-branch"]):
+            subprocess.run(["git", *args], cwd=str(self.target),
+                           capture_output=True, text=True, env=env, check=True)
+
+        helper = self._copied_helper("jig-spec-workflow", "workflow.py")
+        r = subprocess.run(
+            [sys.executable, str(helper), "new", "probe-spec", "--no-push",
+             "--project-dir", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0,
+                         f"copied workflow.py new failed:\nstderr={r.stderr}")
+        slices = sorted(
+            (self.target / "docs" / "specs").glob("*-probe-spec/slice-01-*.md")
+        )
+        self.assertEqual(len(slices), 1, f"expected one slice, got {slices}")
+        body = slices[0].read_text()
+        marker = "kind: spike"
+        self.assertIn(
+            marker, body,
+            "rendered from the degraded inline fallback, not the copied "
+            "template — the fallback carries no spike-slice section",
+        )
+
+    def test_memory_bootstraps_people_md_from_the_copied_template(self):
+        """`memory.py`'s people.md bootstrap reads
+        `plugin_root()/templates/docs/memory/people.md.template`. Before this
+        slice its degrade path fired in scaffold mode — its own message said
+        the failure was "expected for a scaffold-mode target"."""
+        people = self.target / "docs" / "memory" / "people.md"
+        if people.exists():
+            people.unlink()
+        helper = self._copied_helper("jig-memory-sync", "memory.py")
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; from pathlib import Path;"
+             f"sys.path.insert(0, {str(helper.parent)!r});"
+             f"sys.path.insert(0, {str(helper.parent.parent)!r});"
+             "import memory;"
+             f"w, m = memory._bootstrap_people_md(Path({str(self.target)!r}));"
+             "print(w); print(m)"],
+            capture_output=True, text=True, env=self._scaffold_mode_env(),
+        )
+        self.assertEqual(r.returncode, 0,
+                         f"copied memory.py failed:\nstderr={r.stderr}")
+        self.assertTrue(r.stdout.startswith("True"),
+                        f"bootstrap did not write people.md: {r.stdout}")
+        self.assertTrue(people.is_file(), "people.md was not created")
     # ----- AC5: idempotent re-run -------------------------------------------
     def test_ac5_rerun_leaves_templates_byte_identical(self):
         """AC5 — `migrate copy-machinery` re-runs over an existing project to

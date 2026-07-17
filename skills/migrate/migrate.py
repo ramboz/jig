@@ -658,8 +658,8 @@ def render_operations(inv: Inventory, verdict: str) -> str:
             and not inv.jig_skill_dirs):
         items.append(
             "**`migrate.py copy-machinery <project-dir>`** — copy "
-            "jig's hooks / agents / skill helpers into the target's "
-            "`.claude/` (scaffold-mode parity). Mirrors what "
+            "jig's hooks / agents / skill helpers / templates into the "
+            "target's `.claude/` (scaffold-mode parity). Mirrors what "
             "`scaffold-init` does by default for greenfield projects."
         )
 
@@ -2039,8 +2039,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cm = sub.add_parser(
         "copy-machinery",
-        help="copy jig's skills, agents, hooks, and hook configuration "
-             "into the target's host-local runtime (scaffold-mode parity)",
+        help="copy jig's skills, agents, hooks, templates, and hook "
+             "configuration into the target's host-local runtime "
+             "(scaffold-mode parity)",
     )
     cm.add_argument("project_dir",
                     help="path to the project to receive jig's machinery")

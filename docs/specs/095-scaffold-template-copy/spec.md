@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: scaffold-init
 use_cases: []
 ---

@@ -365,10 +365,10 @@ What it does:
 4. Copies jig's `templates/` tree into the host runtime
    (`.claude/templates/` or `.codex/templates/`), rewriting helper paths in
    `*.md.template` bodies to that runtime. This is what lets the copied
-   record helpers seed from a template with no plugin root —
-   `decisions.py` (lightweight-decisions), `adr.py new`, and
-   `workflow.py`'s slice-template render all resolve
-   `parents[2]/templates/`. Claude gained this in
+   helpers seed from a template with no plugin root — `decisions.py`
+   (lightweight-decisions), `adr.py new`, `migrate.py seed-decisions`,
+   `workflow.py`'s slice-template render, and `memory.py`'s people.md
+   bootstrap all resolve `parents[2]/templates/`. Claude gained this in
    [slice 095-01](../../docs/specs/095-scaffold-template-copy/spec.md);
    Codex has always had it. **Re-run `copy-machinery` from a jig install to
    refresh a project scaffolded before 095-01** — it is the repair path

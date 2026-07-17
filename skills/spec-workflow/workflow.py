@@ -2946,14 +2946,20 @@ def _render_stub_slice(num_str: str, slice_num: str = "01",
 
     Since slice 095-01 both scaffold hosts copy `templates/` beside the copied
     machinery, so `parents[2]` reaches the real template in a scaffolded
-    project too — this helper is a third member of the template-reading family
-    ADR-0038 describes, and it silently stopped needing the fallback there."""
+    project too — this helper is one of the template-reading family ADR-0038
+    enumerates, and it silently stopped needing the fallback there."""
     template_path = (Path(__file__).resolve().parents[2]
                      / "templates" / "docs" / "specs" / "slice-template.md")
     fragment = f"{num_str}-{slice_num}"
     try:
-        body = template_path.read_text()
-    except OSError:
+        # Explicit utf-8: slice-template.md carries em-dashes, ✅ and →. Slice
+        # 095-01 makes this path reach a real file in scaffold mode for the
+        # first time, so a default-encoding read would newly raise
+        # UnicodeDecodeError under LANG=C — a ValueError, which would escape
+        # the OSError fallback below and crash where the old behaviour cleanly
+        # degraded.
+        body = template_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         # Inline fallback — keeps the helper functional even when the
         # template file isn't on disk (e.g. minimal scaffold smoke tests, or a
         # project scaffolded before slice 095-01, which is when copied

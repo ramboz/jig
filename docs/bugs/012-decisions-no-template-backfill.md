@@ -326,7 +326,9 @@ call this record deferred to the maintainer — should `copy-machinery` ship
 `templates/`, or should record helpers embed their templates? — came back as
 **option (a)**: `copy_machinery` now copies `templates/` into `.claude/templates/`,
 mirroring `_copy_codex_templates`. The copied helpers' `parents[2]/templates/`
-fallback therefore resolves, with no helper changes.
+fallback therefore resolves, with no change to any helper's template
+*resolution* (several helpers' comments and error messages — including this
+bug's — were re-premised; that is prose, not behaviour).
 
 What that changes in the record above:
 

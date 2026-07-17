@@ -809,8 +809,9 @@ def _copy_claude_templates(plugin: Path, target: Path) -> None:
     `<project>/.claude`, so without this copy scaffold mode — the one install
     mode with no plugin root to fall back on — cannot seed the
     lightweight-decisions home or open an ADR. Copying the tree makes the
-    existing fallback resolve; no helper changes (ADR-0038; the option the
-    maintainer picked over embedding templates in each helper).
+    existing fallback resolve, with no change to any helper's template
+    *resolution* (ADR-0038; the option the maintainer picked over embedding
+    templates in each helper).
 
     `.md.template` bodies get the same `${CLAUDE_PLUGIN_ROOT}/skills/<name>/`
     rewrite SKILL.md bodies and rendered docs already get in scaffold mode — a
@@ -1187,7 +1188,14 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             "3. Copies Codex agents into `.codex/agents/jig-*.toml`.\n"
             "4. Copies hook scripts into `.codex/hooks/scripts/`, pinning "
             "each script's mode to `0o755`.\n"
-            "5. Generates or merges Codex hook registration in "
+            "5. Copies jig's `templates/` tree into `.codex/templates/`, "
+            "rewriting `*.md.template` bodies to that runtime. This is what "
+            "lets the copied helpers seed from a template with no plugin "
+            "root — `decisions.py` (lightweight-decisions), `adr.py new`, "
+            "`migrate.py seed-decisions`, `workflow.py`'s slice-template "
+            "render, and `memory.py`'s people.md bootstrap all resolve "
+            "`parents[2]/templates/`.\n"
+            "6. Generates or merges Codex hook registration in "
             "`.codex/hooks.json` using Codex's native top-level `hooks` "
             "schema.\n\n"
             "Subsequent runs are idempotent: re-running `copy-machinery` "

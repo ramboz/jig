@@ -349,7 +349,8 @@ What it does:
 2. Copies non-discoverable helper aliases under `.codex/skills/<name>/` so peer helper imports continue to resolve without duplicate discoverable skills.
 3. Copies Codex agents into `.codex/agents/jig-*.toml`.
 4. Copies hook scripts into `.codex/hooks/scripts/`, pinning each script's mode to `0o755`.
-5. Generates or merges Codex hook registration in `.codex/hooks.json` using Codex's native top-level `hooks` schema.
+5. Copies jig's `templates/` tree into `.codex/templates/`, rewriting `*.md.template` bodies to that runtime. This is what lets the copied helpers seed from a template with no plugin root — `decisions.py` (lightweight-decisions), `adr.py new`, `migrate.py seed-decisions`, `workflow.py`'s slice-template render, and `memory.py`'s people.md bootstrap all resolve `parents[2]/templates/`.
+6. Generates or merges Codex hook registration in `.codex/hooks.json` using Codex's native top-level `hooks` schema.
 
 Subsequent runs are idempotent: re-running `copy-machinery` overwrites copied runtime files in place and regenerates jig-managed `.codex/hooks.json` as a whole.
 

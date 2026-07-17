@@ -295,7 +295,8 @@ scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 files. **Both** scaffold hosts copy `templates/`: it is runtime support for
 scaffolded helpers whose source fallback resolves template paths relative to
 the materialized jig runtime (`parents[2]/templates/` — `decisions.py`,
-`adr.py`, and `workflow.py`'s slice-template render all read it there). Codex
+`adr.py`, `migrate.py seed-decisions`, `workflow.py`'s slice-template render,
+and `memory.py`'s people.md bootstrap all read it there). Codex
 has copied templates since its adapter shipped, because its rewrite table
 redirects `${CLAUDE_PLUGIN_ROOT}/templates/` into `.codex/templates/`; the
 Claude side gained the copy in [slice 095-01](specs/095-scaffold-template-copy/spec.md)
