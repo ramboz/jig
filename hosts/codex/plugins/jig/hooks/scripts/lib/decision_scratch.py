@@ -39,7 +39,6 @@ try:  # pragma: no cover - exercised by both import paths
         clip,
         is_contained,
         is_user_override,
-        normalize_tokens,
         strip_machine_text,
         token_sets,
     )
@@ -49,7 +48,6 @@ except ImportError:  # pragma: no cover
         clip,
         is_contained,
         is_user_override,
-        normalize_tokens,
         strip_machine_text,
         token_sets,
     )
