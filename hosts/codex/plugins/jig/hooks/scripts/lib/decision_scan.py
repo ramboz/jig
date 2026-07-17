@@ -198,7 +198,7 @@ def is_contained(quote, others):
     if len(tokens) < _DUPLICATE_MIN_TOKENS:
         return False
     return any(len(tokens & other) / len(tokens) >= _DUPLICATE_CONTAINMENT
-               for other in others)
+               for other in (others or []))
 
 
 def flag_duplicates(candidates, recorded_texts):
@@ -211,7 +211,7 @@ def flag_duplicates(candidates, recorded_texts):
     """
     recorded = token_sets(recorded_texts)
     return [replace(c, possible_duplicate=is_contained(c.quote, recorded))
-            for c in candidates]
+            for c in (candidates or [])]
 
 
 def render_summary(candidates):

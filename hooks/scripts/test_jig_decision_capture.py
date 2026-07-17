@@ -85,7 +85,7 @@ class DecisionCaptureHookTests(unittest.TestCase):
         ctx = additional_context(result)
         self.assertIsNotNone(ctx, "a recorded decision must still reach the owner")
         self.assertIn("possible duplicate", ctx.lower())
-        self.assertRegex(ctx, r"(?i)reversal|changes a recorded decision")
+        self.assertRegex(ctx, r"(?i)tell a repeat from a reversal")
 
     def test_reversal_of_recorded_decision_reaches_the_owner(self):
         # The bug's headline case, end-to-end through the hook: a Tier-2 override

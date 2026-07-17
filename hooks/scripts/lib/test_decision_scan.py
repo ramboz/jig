@@ -13,11 +13,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from decision_scan import (  # noqa: E402
+    _DUPLICATE_MIN_TOKENS,
     Candidate,
     flag_duplicates,
+    is_contained,
     normalize_tokens,
     render_summary,
     scan,
+    token_sets,
 )
 
 
@@ -114,6 +117,55 @@ class TestAdversarialMiss(unittest.TestCase):
             "that case is owned by 083-06, not 083-04")
 
 
+class TestContainmentRule(unittest.TestCase):
+    # `is_contained` / `token_sets` are the sole home of the containment rule
+    # (bug 011) — all three call sites route through them, across two modules.
+    # Tested directly: via flag_duplicates alone the terse-quote floor could be
+    # retuned with the whole suite green, because every other fixture sits far
+    # from the boundary.
+
+    def test_floor_boundary_is_the_documented_value(self):
+        # Pins _DUPLICATE_MIN_TOKENS at its boundary rather than trusting the
+        # constant: a quote one token BELOW the floor is never contained, and
+        # the same quote AT the floor is. Retuning the floor fails this.
+        corpus = token_sets(["we use dark mode always everywhere in the codebase"])
+        below = "use dark"          # 2 meaningful tokens
+        at_floor = "use dark mode"  # 3 — fully contained
+        self.assertEqual(len(normalize_tokens(below)), _DUPLICATE_MIN_TOKENS - 1)
+        self.assertEqual(len(normalize_tokens(at_floor)), _DUPLICATE_MIN_TOKENS)
+        self.assertFalse(is_contained(below, corpus),
+                         "below the floor a quote is too thin to call a duplicate")
+        self.assertTrue(is_contained(at_floor, corpus),
+                        "at the floor the containment rule applies normally")
+
+    def test_containment_threshold_separates_over_and_under(self):
+        # 3/4 = 0.75 >= 0.6 flags; 1/4 = 0.25 does not.
+        corpus = token_sets(["use postgres primary store for everything"])
+        self.assertTrue(is_contained("use postgres primary cache", corpus))
+        self.assertFalse(is_contained("adopt hexagonal architecture edges", corpus))
+
+    def test_containment_is_per_entry_not_pooled(self):
+        # A candidate is contained only when one SINGLE entry covers it — the
+        # per-entry split is what stops a large corpus over-flagging.
+        pooled = token_sets(["use postgres for the store",
+                             "adopt hexagonal architecture at the edges"])
+        self.assertFalse(
+            is_contained("postgres hexagonal", pooled),
+            "tokens spread across two entries must not add up to containment")
+
+    def test_token_sets_drops_entries_with_no_meaningful_tokens(self):
+        self.assertEqual(token_sets(["", "   ", "the a of"]), [])
+        self.assertEqual(len(token_sets(["use postgres store", "the a of"])), 1)
+
+    def test_fail_open_on_none_inputs(self):
+        # The module contracts fail-open throughout; None must not raise.
+        self.assertEqual(token_sets(None), [])
+        self.assertFalse(is_contained("use postgres primary store", []))
+        self.assertFalse(is_contained("", token_sets(["anything at all here"])))
+        self.assertEqual(flag_duplicates(None, ["recorded thing here"]), [])
+        self.assertEqual(flag_duplicates([], None), [])
+
+
 class TestFlagDuplicates(unittest.TestCase):
     # Bug 011 / issue #109: suppression was removed outright. Containment is a
     # signal, not a verdict — overlap flags a candidate for owner triage and
@@ -146,6 +198,7 @@ class TestFlagDuplicates(unittest.TestCase):
 
     def test_novel_candidate_is_not_flagged(self):
         cands = scan([_user("Dark mode should not be the default.")])
+        self.assertTrue(cands, "guard: a vacuous [] would pass every assertion below")
         recorded = ["English is not the default language."]
         out = flag_duplicates(cands, recorded)
         self.assertEqual(len(out), len(cands))
@@ -162,6 +215,7 @@ class TestFlagDuplicates(unittest.TestCase):
 
     def test_no_recorded_corpus_flags_nothing(self):
         cands = scan([_user("English should not be the default language.")])
+        self.assertTrue(cands, "guard: a vacuous [] would pass every assertion below")
         out = flag_duplicates(cands, [])
         self.assertEqual(len(out), len(cands))
         self.assertFalse(any(c.possible_duplicate for c in out))
@@ -190,7 +244,11 @@ class TestRenderSummary(unittest.TestCase):
                             turn=0, confidence="high", possible_duplicate=True)
         summary = render_summary([flagged])
         self.assertIn("possible duplicate", summary.lower())
-        self.assertRegex(summary, r"(?i)triage")
+        # Assert on the note's OWN words. A generic /triage/ here matches the
+        # unconditional "Please triage each" boilerplate every summary carries,
+        # so the note could be deleted with this suite still green.
+        self.assertRegex(summary, r"(?i)tell a repeat from a reversal")
+        self.assertRegex(summary, r"(?i)check each")
 
     def test_unflagged_candidate_carries_no_duplicate_marker(self):
         plain = Candidate(tier=2, who="user", quote="X should not be the default.",

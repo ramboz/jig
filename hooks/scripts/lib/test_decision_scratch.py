@@ -138,6 +138,19 @@ class StubCandidateTests(unittest.TestCase):
     def test_skips_quoteless_stub(self):
         self.assertEqual(ds.stubs_to_candidates([{"who": "user"}]), [])
 
+    def test_possible_duplicate_flag_carries_onto_the_candidate(self):
+        # The stub path's half of bug 011: flag_recorded_stubs marks the dict,
+        # but the flag only reaches the owner if the Candidate carries it. An
+        # unflagged stub must default to False, not to a missing attribute.
+        flagged, plain = ds.stubs_to_candidates([
+            {"quote": "use postgres for the store", "who": "user",
+             "source": "user-override", "possible_duplicate": True},
+            {"quote": "adopt hexagonal edges", "who": "user",
+             "source": "user-override"},
+        ])
+        self.assertTrue(flagged.possible_duplicate)
+        self.assertFalse(plain.possible_duplicate)
+
 
 class DedupScanVsStubsTests(unittest.TestCase):
     def _scan(self, quote, tier=1):
