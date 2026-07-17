@@ -24,10 +24,61 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:  # Python < 3.11 (e.g. default macOS 3.9)
-    tomllib = None  # codex-packaging paths require 3.11+; gated below
+    tomllib = None  # no tomli fallback (jig is zero-dependency); see _load_agent_toml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
+
+
+def _load_agent_toml(text: str) -> dict:
+    """Parse a jig-rendered Codex agent TOML into a dict.
+
+    Uses `tomllib` when available (Python 3.11+). Below that — jig's documented
+    floor is 3.9, the default macOS `python3` — there is no `tomli` fallback
+    because jig ships zero dependencies, so this parses the exact shape
+    `CodexScaffoldRenderer.render_codex_agent_toml` emits: a `#`-comment managed
+    marker, scalar keys rendered as JSON strings (`json.dumps`), and a trailing
+    `developer_instructions` as a `'''…'''` multiline literal (or a JSON string
+    when the body itself contains `'''`). Writer and reader are both jig's and
+    kept in step — this is not a general TOML parser. It exists so these tests
+    RUN and PASS on 3.9 rather than being skipped there (the whole file used to
+    skip below 3.11 for these two assertions, silently dropping ~90 tests that
+    have nothing to do with TOML)."""
+    if tomllib is not None:
+        return tomllib.loads(text)
+    data: dict = {}
+    lines = text.splitlines(keepends=True)
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        key, sep, rest = lines[i].partition(" = ")
+        if not sep:
+            i += 1
+            continue
+        key = key.strip()
+        value = rest.lstrip()
+        if value.startswith("'''"):
+            # Multiline literal: everything from the opening `'''` to the next
+            # `'''` is opaque (may contain `=`, `#`, blank lines).
+            after = value[3:]
+            if "'''" in after:
+                data[key] = after[: after.index("'''")]
+            else:
+                buf = after
+                i += 1
+                while i < len(lines) and "'''" not in lines[i]:
+                    buf += lines[i]
+                    i += 1
+                if i < len(lines):
+                    buf += lines[i][: lines[i].index("'''")]
+                data[key] = buf
+        else:
+            data[key] = json.loads(rest.strip())
+        i += 1
+    return data
 
 
 def run_scaffold_with_args(target: Path, *args: str) -> subprocess.CompletedProcess:
@@ -1687,7 +1738,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         for role, sandbox in expected_sandbox.items():
             agent = self.target / ".codex" / "agents" / f"jig-{role}.toml"
             self.assertTrue(agent.is_file(), f"missing Codex agent: {agent}")
-            data = tomllib.loads(agent.read_text())
+            data = _load_agent_toml(agent.read_text())
             self.assertEqual(data["name"], f"jig-{role}")
             self.assertEqual(data["sandbox_mode"], sandbox)
             self.assertIn("Codex adapter note", data["developer_instructions"])
@@ -1717,7 +1768,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
 
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertIn("installed 3 Codex agent(s)", r.stdout)
-        data = tomllib.loads((agents_dir / "jig-reviewer.toml").read_text())
+        data = _load_agent_toml((agents_dir / "jig-reviewer.toml").read_text())
         self.assertEqual(data["name"], "jig-reviewer")
         self.assertEqual(data["sandbox_mode"], "read-only")
 
@@ -2637,14 +2688,3 @@ class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-def load_tests(loader, tests, pattern):  # unittest discover hook
-    # Codex packaging validation needs tomllib (Python 3.11+). jig is
-    # zero-dependency, so there is no tomli fallback — skip the whole module
-    # below the 3.9 floor rather than error on a missing stdlib import.
-    import sys as _sys
-    import unittest as _unittest
-    if _sys.version_info < (3, 11):
-        return _unittest.TestSuite()
-    return tests
