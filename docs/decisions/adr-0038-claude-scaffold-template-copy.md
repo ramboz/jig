@@ -283,10 +283,16 @@ decision, not a formality:
   That is the honest limit of (a): it fixes every project scaffolded *after* it,
   not the ones already out there.
 
-  Whether the re-run is the sanctioned backfill, and whether `migrate report`
-  should flag the gap so an affected project learns about it before the failure
-  rather than after, is out of scope for spec 095 and posted as a question on
-  [#109](https://github.com/ramboz/jig/issues/109).
+  **Resolved (maintainer's call on [#119](https://github.com/ramboz/jig/pull/119)):**
+  the `migrate copy-machinery` re-run **is** the sanctioned backfill, and
+  `migrate report` now flags the gap so an affected project learns about it
+  before a record helper fails rather than after. Implemented in this slice:
+  the inventory records whether `.claude/templates/` is present, and
+  `render_operations` routes a project that has jig machinery but no templates
+  tree to `copy-machinery` (pinned by `TemplatesBackfillOperationsTests`). The
+  honest limit above is unchanged and stated in the nudge itself — the backfill
+  runs **from a jig install**, because a scaffolded project cannot repair itself
+  from its own copied files.
 
 - **Tier gating (discharging `dependencies: [adr-0012]`).** ADR-0012 makes tier
   gating a promise-integrity decision: a project's on-disk skill set must match

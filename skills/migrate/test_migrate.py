@@ -2193,15 +2193,22 @@ class CopyMachineryOperationsTests(unittest.TestCase):
 
     # ----- AC #9 — suppressed when jig-* skill dir already present --------
     def test_operations_section_suppresses_when_jig_skills_present(self):
-        """AC #9 — same project, but with at least one
-        `.claude/skills/jig-*/` dir present, must NOT mention
+        """AC #9 — same project, but with a COMPLETE jig install present
+        (`.claude/skills/jig-*/` AND `.claude/templates/`), must NOT mention
         `copy-machinery` in Operations. The Inventory row may still
         reference `copy-machinery` as the refresh path; the suppression
         rule is scoped to the Operations section.
+
+        Slice 095-01: templates are part of a complete install, so the
+        fixture seeds them too — without a templates tree this is the
+        pre-095 shape the backfill nudge (below) deliberately flags.
         """
         jig_dir = self.tmpdir / ".claude" / "skills" / "jig-migrate"
         jig_dir.mkdir(parents=True)
         (jig_dir / "SKILL.md").write_text("seed\n")
+        templates = self.tmpdir / ".claude" / "templates" / "docs" / "decisions"
+        templates.mkdir(parents=True)
+        (templates / "lightweight-decisions.md.template").write_text("seed\n")
         r = run_migrate("report", str(self.tmpdir))
         self.assertEqual(r.returncode, 0,
                          f"stderr: {r.stderr}")
@@ -2274,6 +2281,77 @@ class CopyMachineryOperationsTests(unittest.TestCase):
             self.assertIn("copy-machinery", r.stdout)
         finally:
             shutil.rmtree(partial_root, ignore_errors=True)
+
+
+class TemplatesBackfillOperationsTests(unittest.TestCase):
+    """Slice 095-01 — `migrate.py report` flags a project that has jig
+    machinery copied but no `.claude/templates/` (the shape of a project
+    scaffolded before 095-01) and routes it to `copy-machinery` to backfill
+    the tree. The retrofit itself already works — `copy-machinery` carries
+    `templates/` since 095-01; this is the discoverability half, resolving
+    ADR-0038's retrofit open question so an affected project learns about the
+    gap before a record helper fails on it."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-095-backfill-"))
+        _seed_spec_driven_project(self.tmpdir)
+        # A project scaffolded before 095-01: machinery copied, but no
+        # `.claude/templates/` tree beside it.
+        jig_dir = self.tmpdir / ".claude" / "skills" / "jig-memory-sync"
+        jig_dir.mkdir(parents=True)
+        (jig_dir / "SKILL.md").write_text("seed\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _ops_section(self, stdout: str) -> str:
+        self.assertIn("## Operations", stdout)
+        return stdout[stdout.index("## Operations"):]
+
+    def test_report_flags_missing_templates_and_routes_to_copy_machinery(self):
+        """Machinery present + `.claude/templates/` absent → Operations names
+        `copy-machinery` and the missing templates tree."""
+        r = run_migrate("report", str(self.tmpdir))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        ops = self._ops_section(r.stdout)
+        self.assertIn("copy-machinery", ops)
+        self.assertIn(".claude/templates/", ops)
+
+    def test_backfill_nudge_names_the_jig_install_caveat(self):
+        """The nudge must say the retrofit runs from a jig install — a
+        scaffolded project cannot repair itself from its own copied files
+        (ADR-0038 Open questions)."""
+        r = run_migrate("report", str(self.tmpdir))
+        ops = self._ops_section(r.stdout)
+        self.assertIn("jig install", ops)
+
+    def test_report_stops_flagging_once_templates_present(self):
+        """Backfill the templates tree → the nudge disappears."""
+        templates = self.tmpdir / ".claude" / "templates" / "docs" / "decisions"
+        templates.mkdir(parents=True)
+        (templates / "lightweight-decisions.md.template").write_text("seed\n")
+        r = run_migrate("report", str(self.tmpdir))
+        ops = self._ops_section(r.stdout)
+        self.assertNotIn(
+            ".claude/templates/", ops,
+            "templates present → the backfill nudge must be suppressed",
+        )
+
+    def test_no_backfill_nudge_without_jig_machinery(self):
+        """A project with no `.claude/skills/jig-*` gets the full copy-machinery
+        suggestion, not the templates-backfill variant — the backfill is
+        scoped to projects that already have machinery."""
+        plain = Path(tempfile.mkdtemp(prefix="jig-095-nomach-"))
+        try:
+            _seed_spec_driven_project(plain)
+            r = run_migrate("report", str(plain))
+            ops = self._ops_section(r.stdout)
+            self.assertNotIn(
+                "predates the templates copy", ops,
+                "no machinery → no templates-backfill nudge (full copy instead)",
+            )
+        finally:
+            shutil.rmtree(plain, ignore_errors=True)
 
 
 class CopyMachinerySkillSurfaceTests(unittest.TestCase):
