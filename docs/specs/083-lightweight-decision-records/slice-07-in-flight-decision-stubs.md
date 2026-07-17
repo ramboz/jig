@@ -134,3 +134,35 @@ judgment prompts (no regression). 083-08 records the Codex capability cells.
   mis-dispositioned as no-op.)*)
 - `docs/refinement-todo.md` — **deferred** (the two low-value nits above are candidates; not logged as blocking).
 - `CLAUDE.md` / `docs/specs/README.md` — board updated at close-out; primer Active-specs entry stays (spec 083 still open via 083-08, deferred).
+
+## Amendments
+
+### 2026-07-16 — AC5 lifecycle inverted by bug 011 (prune → flag)
+
+**AC5 ("Lifecycle: re-surface until recorded, then pruned") no longer describes
+shipped behaviour.** Amendment record, not an AC edit, per
+[ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+
+`prune_recorded_stubs` mirrored `decision_scan.dedup`'s containment rule — by
+design, so the two surfaces agreed — and therefore inherited the same defect
+found in [bug 011](../../bugs/011-decision-dedup-suppresses-reversals.md): an
+in-flight user override that *reverses* a recorded decision overlaps it heavily
+and was silently pruned, on the highest-fidelity capture surface there is. The
+maintainer extended the fix to this path in the same exchange.
+
+Effective behaviour as of bug 011:
+
+- `prune_recorded_stubs()` → `flag_recorded_stubs()`. A stub whose decision
+  looks recorded is flagged `possible_duplicate` and **kept**; nothing is pruned
+  against the recorded corpus.
+- Stubs therefore persist for the life of the session and re-surface on every
+  Stop, recorded or not — durability parity with a scan candidate is preserved,
+  and the "then pruned" half of AC5 is withdrawn.
+- Consequence worth naming: `clear_scratch` is no longer reachable for a
+  populated scratch log, so a per-session log now outlives its session on disk.
+  Parked in [refinement-todo.md](../../refinement-todo.md); it is bounded
+  (append-only, 240-char clip, git-ignored) and no one has reported it.
+
+AC4's `dedup_scan_against_stubs` (scan-vs-stub, no-double-surface) is
+**unchanged** and still drops: it collapses one decision captured both ways into
+a single line, which is duplication with no triage value.

@@ -225,8 +225,10 @@ The `decisions.py` helper still exists (083-05) for the **write** side
   key call was the *user's* correction, not the agent's — a log that blurs that
   is worth less.
 - **Precision over recall on the filter.** Better to miss a marginal decision
-  than bury real ones under "let's do X" chatter. The dedup-against-recorded
-  step keeps repeat runs quiet.
+  than bury real ones under "let's do X" chatter. This locks the *trigger
+  patterns* only. It once also licensed suppressing candidates that matched a
+  recorded decision; bug 011 withdrew that, because overlap cannot tell a
+  restatement from a reversal. Repeat runs are noisier as a result.
 
 ### Slice 083-04 — Session decision scan (Stop hook)
 
@@ -248,10 +250,12 @@ Output: candidate list, each with a quoted evidence line, turn reference, and
 *who decided*. **Provenance requires per-role tracking** — unlike
 `jig-task-capture.sh`, which flattens all content into one string (line 35) and
 so cannot say *who* decided; 083-04 must preserve message role/turn boundaries.
-Dedups against already-recorded decisions (existing ADRs,
-`lightweight-decisions.md`, `refinement-todo.md`) via an explicit matching
-strategy (normalized-substring / title match — stated in the slice, not assumed)
-so triaged-away items don't re-surface. The scan logic lives in
+Candidates overlapping an already-recorded decision (existing ADRs,
+`lightweight-decisions.md`, `refinement-todo.md`) are matched by an explicit
+strategy (normalized-substring / title match — stated in the slice, not
+assumed) and **flagged for triage, never dropped**: bug 011 removed the
+suppression, because overlap cannot tell a restatement from a reversal. Repeat
+runs are consequently noisier, not quiet. The scan logic lives in
 `decisions.py scan-session` invoked **by the hook** (testable in isolation).
 
 **Per-host grounding task:** verify the Stop payload exposes the **AskUserQuestion
@@ -337,9 +341,10 @@ with the scan and dedups so a decision settled both ways surfaces once.
 > shrink or a new coverage cell: (1) it does not depend on the Stop payload
 > retaining the AskUserQuestion tool blocks (a documented scan risk — see
 > Assumptions); (2) it persists *before* Stop, so a decision survives an abnormal
-> session end; (3) un-recorded stubs re-surface until recorded (durability parity
-> with the scan). It does **not** touch the discursive load-bearing residue,
-> which stays owned by 083-06's judgment prompts.
+> session end; (3) every stub re-surfaces until the owner triages it — bug 011
+> withdrew the narrower "until recorded" (durability parity with the scan). It
+> does **not** touch the discursive load-bearing residue, which stays owned by
+> 083-06's judgment prompts.
 
 **Deliverables:**
 
@@ -349,7 +354,8 @@ with the scan and dedups so a decision settled both ways surfaces once.
 2. Triage reads the scratch log at session-end (feeds the same owner-gated
    surfacing as 083-04), and the scratch log is deduped against it so a decision
    isn't surfaced twice (in-flight stub + end-of-session scan).
-3. Scratch-log lifecycle: created per session, cleared/rotated after triage.
+3. Scratch-log lifecycle: created per session; since bug 011 nothing is pruned,
+   so a populated log is rewritten rather than cleared (parked in refinement-todo).
 
 **AC:** an AskUserQuestion answer and a user default-override each produce a
 scratch-log stub with correct provenance (who + quote) at decision time, before
@@ -429,8 +435,10 @@ completion without blocking the Claude-side Phase-2 build.
   is real but smaller than before 083-07 was promoted; closing it further would
   require semantic (LLM-judged) in-flight detection, explicitly out of scope.
 - **Scan noise.** Many "let's do X" lines aren't durable decisions. Mitigated by
-  precision-first patterns, dedup-against-recorded, and the owner-gate (never
-  auto-writes). Not a hard guarantee.
+  precision-first patterns and the owner-gate (never auto-writes). Not a hard
+  guarantee — and deliberately noisier since bug 011: overlap with a recorded
+  decision now flags for triage rather than suppressing, because suppressing it
+  silently dropped reversals.
 - **Token cost of scanning.** Real *if the agent reads the transcript* — which is
   why the scan runs in the Stop hook out-of-band (only the candidate list reaches
   context). This is the design correction over the food-log proposal.

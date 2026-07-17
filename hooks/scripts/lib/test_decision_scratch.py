@@ -82,8 +82,13 @@ class ScratchIOTests(unittest.TestCase):
         self.assertFalse(ds.scratch_path(self.project, "s").exists())
 
 
-class PruneRecordedTests(unittest.TestCase):
-    def test_recorded_stub_dropped_unrecorded_kept(self):
+class FlagRecordedTests(unittest.TestCase):
+    # Bug 011 / issue #109: this path mirrored the scan's containment rule (then
+    # `decision_scan.dedup`, now `flag_duplicates`) and so carried the identical
+    # defect — a stub that *reverses* a recorded decision was silently pruned.
+    # Stubs are now flagged, never dropped, matching the scan path.
+
+    def test_recorded_stub_flagged_unrecorded_untouched(self):
         stubs = [
             {"quote": "Use Postgres instead of MySQL for the store",
              "who": "user", "source": "user-override"},
@@ -92,14 +97,32 @@ class PruneRecordedTests(unittest.TestCase):
         ]
         recorded = ["### 2026-06-26 — Store\n**Decision:** Use Postgres instead "
                     "of MySQL for the store."]
-        kept = ds.prune_recorded_stubs(stubs, recorded)
-        self.assertEqual(len(kept), 1)
-        self.assertIn("hexagonal", kept[0]["quote"])
+        kept = ds.flag_recorded_stubs(stubs, recorded)
+        self.assertEqual(len(kept), 2, "a stub is never dropped against recorded")
+        by_quote = {s["quote"]: s for s in kept}
+        self.assertTrue(
+            by_quote["Use Postgres instead of MySQL for the store"]
+            ["possible_duplicate"])
+        self.assertFalse(
+            by_quote["Adopt a hexagonal architecture at the edges"]
+            .get("possible_duplicate", False))
 
-    def test_no_recorded_keeps_all(self):
+    def test_stub_reversing_a_recorded_decision_survives(self):
+        stubs = [{"quote": "actually use MySQL instead of Postgres for the store",
+                  "who": "user", "source": "user-override"}]
+        recorded = ["### 2026-06-26 — Store\n**Decision:** Use Postgres instead "
+                    "of MySQL for the store."]
+        kept = ds.flag_recorded_stubs(stubs, recorded)
+        self.assertEqual(len(kept), 1,
+                         "a reversal captured in-flight must reach the owner")
+        self.assertTrue(kept[0]["possible_duplicate"])
+
+    def test_no_recorded_flags_nothing(self):
         stubs = [{"quote": "some decision here", "who": "user",
                   "source": "user-override"}]
-        self.assertEqual(ds.prune_recorded_stubs(stubs, []), stubs)
+        kept = ds.flag_recorded_stubs(stubs, [])
+        self.assertEqual(len(kept), 1)
+        self.assertFalse(kept[0].get("possible_duplicate", False))
 
 
 class StubCandidateTests(unittest.TestCase):
@@ -114,6 +137,19 @@ class StubCandidateTests(unittest.TestCase):
 
     def test_skips_quoteless_stub(self):
         self.assertEqual(ds.stubs_to_candidates([{"who": "user"}]), [])
+
+    def test_possible_duplicate_flag_carries_onto_the_candidate(self):
+        # The stub path's half of bug 011: flag_recorded_stubs marks the dict,
+        # but the flag only reaches the owner if the Candidate carries it. An
+        # unflagged stub must default to False, not to a missing attribute.
+        flagged, plain = ds.stubs_to_candidates([
+            {"quote": "use postgres for the store", "who": "user",
+             "source": "user-override", "possible_duplicate": True},
+            {"quote": "adopt hexagonal edges", "who": "user",
+             "source": "user-override"},
+        ])
+        self.assertTrue(flagged.possible_duplicate)
+        self.assertFalse(plain.possible_duplicate)
 
 
 class DedupScanVsStubsTests(unittest.TestCase):
@@ -139,6 +175,21 @@ class DedupScanVsStubsTests(unittest.TestCase):
     def test_no_stubs_keeps_all_scan(self):
         scan_cands = [self._scan("anything at all here")]
         self.assertEqual(ds.dedup_scan_against_stubs(scan_cands, []), scan_cands)
+
+    def test_short_scan_candidate_below_floor_is_kept(self):
+        # The terse-quote floor applies here too: a 1-2 token quote clears any
+        # containment threshold against a stub sharing those tokens. Pinned when
+        # the rule moved to decision_scan.is_contained (bug 011).
+        scan_cands = [self._scan("Use it.")]
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "we use it everywhere across the codebase",
+             "who": "user", "source": "user-override"}])
+        self.assertEqual(ds.dedup_scan_against_stubs(scan_cands, stub_cands),
+                         scan_cands)
+
+    def test_none_scan_candidates_is_fail_open(self):
+        # The module contracts fail-open throughout; None must not raise.
+        self.assertEqual(ds.dedup_scan_against_stubs(None, []), [])
 
 
 class AnswerExtractionTests(unittest.TestCase):

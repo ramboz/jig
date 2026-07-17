@@ -23,9 +23,9 @@ Python 3.9 compatible.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-# Common words dropped before dedup token-matching. Decision-bearing words
+# Common words dropped before containment token-matching. Decision-bearing words
 # ("not", "default", "instead") are deliberately NOT stopwords.
 STOPWORDS = frozenset({
     "a", "an", "the", "be", "is", "are", "was", "were", "to", "of", "on", "in",
@@ -108,11 +108,11 @@ def _machine_block_spans(text):
     return spans
 
 
-_DEDUP_CONTAINMENT = 0.6
-# Candidates with fewer meaningful tokens than this are never deduped away — a
-# 1-2 token quote trivially clears the containment threshold against any recorded
-# entry sharing those tokens, which would over-suppress terse novel decisions.
-_DEDUP_MIN_TOKENS = 3
+_DUPLICATE_CONTAINMENT = 0.6
+# Candidates with fewer meaningful tokens than this are never flagged — a 1-2
+# token quote trivially clears the containment threshold against any recorded
+# entry sharing those tokens, so the hint would be noise rather than signal.
+_DUPLICATE_MIN_TOKENS = 3
 _MAX_QUOTE = 240
 
 
@@ -123,6 +123,7 @@ class Candidate:
     quote: str
     turn: int
     confidence: str   # "high" | "low"
+    possible_duplicate: bool = False   # overlaps a recorded decision — owner triages
 
 
 def normalize_tokens(text):
@@ -273,32 +274,39 @@ def scan(messages):
     return candidates
 
 
-def dedup(candidates, recorded_texts):
-    """Drop candidates already covered by a recorded decision.
+def token_sets(texts):
+    """Stopword-filtered token sets for `texts`, dropping any that come out empty."""
+    return [t for t in (normalize_tokens(x) for x in (texts or [])) if t]
 
-    Containment match: a candidate is suppressed when >= 60% of its
-    stopword-filtered tokens appear in some recorded decision's tokens.
+
+def is_contained(quote, others):
+    """True iff >= `_DUPLICATE_CONTAINMENT` of `quote`'s tokens appear in some set.
+
+    Below `_DUPLICATE_MIN_TOKENS` the answer is always False: a 1-2 token quote
+    clears any threshold against a set that happens to share those tokens.
+
+    Sole home of the containment rule: every caller — this module against recorded
+    decisions, `decision_scratch` against recorded decisions and against in-flight
+    stubs — comes through here, so the sites cannot drift apart.
     """
-    recorded_token_sets = [normalize_tokens(t) for t in (recorded_texts or [])]
-    kept = []
-    for cand in candidates:
-        cand_tokens = normalize_tokens(cand.quote)
-        if len(cand_tokens) < _DEDUP_MIN_TOKENS:
-            # Too few tokens to dedup confidently — keep (favor a re-surface over
-            # a silent drop; the owner-gate makes a duplicate cheap).
-            kept.append(cand)
-            continue
-        suppressed = False
-        for rec in recorded_token_sets:
-            if not rec:
-                continue
-            containment = len(cand_tokens & rec) / len(cand_tokens)
-            if containment >= _DEDUP_CONTAINMENT:
-                suppressed = True
-                break
-        if not suppressed:
-            kept.append(cand)
-    return kept
+    tokens = normalize_tokens(quote)
+    if len(tokens) < _DUPLICATE_MIN_TOKENS:
+        return False
+    return any(len(tokens & other) / len(tokens) >= _DUPLICATE_CONTAINMENT
+               for other in (others or []))
+
+
+def flag_duplicates(candidates, recorded_texts):
+    """Flag candidates overlapping a recorded decision. Never drops one.
+
+    Overlap cannot distinguish a restatement from a reversal — a decision that
+    overturns a recorded one shares its vocabulary — so the flag is a hint for
+    the owner, never a verdict. Dropping on it silently loses reversals
+    (bug 011).
+    """
+    recorded = token_sets(recorded_texts)
+    return [replace(c, possible_duplicate=is_contained(c.quote, recorded))
+            for c in (candidates or [])]
 
 
 def render_summary(candidates):
@@ -306,11 +314,19 @@ def render_summary(candidates):
     if not candidates:
         return ""
     lines = []
+    any_flagged = False
     for c in candidates:
         marker = "?" if c.confidence == "low" else "-"
-        lines.append(
-            "%s [tier %d, %s, %s] %s" % (marker, c.tier, c.who, c.confidence, c.quote))
+        tags = "tier %d, %s, %s" % (c.tier, c.who, c.confidence)
+        if c.possible_duplicate:
+            tags += ", possible duplicate"
+            any_flagged = True
+        lines.append("%s [%s] %s" % (marker, tags, c.quote))
     body = "\n".join(lines)
+    duplicate_note = (
+        " `possible duplicate` = overlaps a recorded decision; overlap cannot "
+        "tell a repeat from a reversal, so check each."
+        if any_flagged else "")
     return (
         "Decision-capture scan found %d candidate decision(s) this session:\n"
         "%s\n\n"
@@ -318,7 +334,7 @@ def render_summary(candidates):
         "docs/decisions/lightweight-decisions.md (lightweight), write an ADR "
         "(load-bearing / rejected alternatives), park in refinement-todo.md "
         "(still open), or drop (ephemeral). Low-confidence (?) items are "
-        "best-effort guesses — confirm before recording. Nothing has been "
+        "best-effort guesses — confirm before recording.%s Nothing has been "
         "written; this is a triage prompt only.\n\n"
         # Names the command, not a path. This string is agent-facing in every
         # install mode, and a plugin-root env literal resolves in only one of
@@ -337,4 +353,4 @@ def render_summary(candidates):
         "`## Entries` heading, one block each:\n"
         "    ### <YYYY-MM-DD> — <short title>\n"
         "    **Decision:** ...  **Context:** ...  **Scope:** ...\n"
-        % (len(candidates), body))
+        % (len(candidates), body, duplicate_note))
