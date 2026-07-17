@@ -173,6 +173,29 @@ class DecisionCaptureHookTests(unittest.TestCase):
         self.assertTrue(ds.scratch_path(self.project, "sess-1").exists(),
                         "the stub must persist — the owner has not triaged it yet")
 
+    def test_dedup_drop_writes_a_suppression_log_line(self):
+        # Bug 011 option 4, end-to-end: the one path that still *drops* silently
+        # (a scan hit collapsed into its in-flight stub) must leave one
+        # inspectable line under .jig/ — 'nothing found' and 'found and dropped'
+        # must differ on disk. The decision still surfaces once via the stub.
+        ds.append_stub(self.project, "sess-1", "user",
+                       "English should not be the default language", "user-override")
+        run_hook(self.project, self._payload(
+            [{"role": "user", "content": "English should not be the default language."}]))
+        log = ds.suppression_log_path(self.project)
+        self.assertTrue(log.exists(), "a silent drop must be recorded")
+        lines = [json.loads(ln) for ln in log.read_text().splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["call_site"], "dedup_scan_against_stubs")
+        self.assertIn("default language", lines[0]["candidate"]["quote"])
+
+    def test_no_suppression_log_when_nothing_dropped(self):
+        # The distinguishing half: a plain surfacing with no drop writes no log,
+        # so a present line always means a real suppression.
+        run_hook(self.project, self._payload(
+            [{"role": "user", "content": "Use a banner instead of a modal."}]))
+        self.assertFalse(ds.suppression_log_path(self.project).exists())
+
     def test_malformed_json_never_crashes(self):
         result = run_hook(self.project, None, raw="{not valid json")
         self.assertEqual(result.returncode, 0, msg="stderr: %s" % result.stderr)

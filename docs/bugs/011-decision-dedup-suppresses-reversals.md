@@ -148,8 +148,11 @@ genuine reversal that lands under the threshold.
 Suppression is removed outright. Containment survives as a *signal*, not a verdict: a candidate
 whose tokens are largely contained by a recorded decision is **flagged** as a possible duplicate
 and still surfaced, and the nudge asks the owner to triage it. Nothing is dropped **against the
-recorded corpus**, so the defect class this record describes cannot recur on those paths — and
-option 4 below is subsumed there, because no silent suppression remains to log.
+recorded corpus**, so the defect class this record describes cannot recur on those paths.
+
+Option 4 below is **not** fully subsumed, contrary to this record's first framing:
+`dedup_scan_against_stubs` still drops silently against in-flight stubs (Residual 1), so one
+silent suppression path outlives the fix. That path is now logged — see [`## Amendments`](#amendments).
 
 This resolves the trade-off that made the remedy a decision. Re-surfacing was the cost of
 option 1; it is now uniform (every candidate re-surfaces every Stop, as scan hits already did —
@@ -316,3 +319,19 @@ similarity to that record is evidence *for* surfacing, not against.
 ## Release log
 
 - 2026-07-16 - released claim from claude/bug-109-c7b049: diagnose-only; fix choice deferred to maintainer (see issue #109)
+
+## Amendments
+
+Additions after this record closed `DONE`, per [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
+(closed records get amendments; live prose corrected inline).
+
+- **2026-07-17 — option 4 (suppression logging) implemented for the surviving drop path.**
+  This record's `## Fix class` claimed "no silent suppression remains to log," but Residual 1
+  (`dedup_scan_against_stubs` still drops a Tier-3 agent reversal of an in-flight stub) is exactly
+  such a path. That overclaim is corrected inline above. Option 4 is now delivered *for that path
+  only*: every drop in `dedup_scan_against_stubs` appends one JSON line to
+  `.jig/decision-suppressions.log` (dropped candidate, covering stub, containment score, call
+  site). **Additive observability only — the drop itself is unchanged**, and the residual stays a
+  residual: the fix class (whether that path should drop at all) remains the maintainer's call and
+  is not decided here. The bug stays `DONE`; this removes the silence, not the residual. See
+  issue [#109](https://github.com/ramboz/jig/issues/109) and `refinement-todo.md`.

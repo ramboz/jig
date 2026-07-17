@@ -15,6 +15,9 @@
 # Per-session in-flight decision stubs (slice 083-07) — ephemeral, cleared after
 # each Stop-hook triage; never tracked.
 .jig/decision-scratch/
+# Suppression audit log (bug 011 option 4) — one line per silent drop in
+# `dedup_scan_against_stubs`; local observability, per-checkout, never tracked.
+.jig/decision-suppressions.log
 # Once-per-project servo-suggestion breadcrumb (slice 072-02) — local "jig
 # already suggested /servo:scaffold-init here" record; per-checkout, must NOT
 # travel across branches/clones (the explicit opt-out `.jig/no-servo-hint` is

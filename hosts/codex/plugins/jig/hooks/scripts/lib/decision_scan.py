@@ -279,21 +279,32 @@ def token_sets(texts):
     return [t for t in (normalize_tokens(x) for x in (texts or [])) if t]
 
 
+def containment(quote, others):
+    """Highest fraction of `quote`'s tokens contained in any set in `others`.
+
+    Below `_DUPLICATE_MIN_TOKENS` the score is always 0.0: a 1-2 token quote
+    clears any threshold against a set that happens to share those tokens.
+
+    Sole home of the containment *measure*: `is_contained` is a threshold over
+    it, and suppression logging reports the raw score it returns — so the number
+    that decides a drop and the number written to the log cannot drift apart.
+    """
+    tokens = normalize_tokens(quote)
+    if len(tokens) < _DUPLICATE_MIN_TOKENS:
+        return 0.0
+    return max((len(tokens & other) / len(tokens)
+                for other in (others or []) if other),
+               default=0.0)
+
+
 def is_contained(quote, others):
     """True iff >= `_DUPLICATE_CONTAINMENT` of `quote`'s tokens appear in some set.
-
-    Below `_DUPLICATE_MIN_TOKENS` the answer is always False: a 1-2 token quote
-    clears any threshold against a set that happens to share those tokens.
 
     Sole home of the containment rule: every caller — this module against recorded
     decisions, `decision_scratch` against recorded decisions and against in-flight
     stubs — comes through here, so the sites cannot drift apart.
     """
-    tokens = normalize_tokens(quote)
-    if len(tokens) < _DUPLICATE_MIN_TOKENS:
-        return False
-    return any(len(tokens & other) / len(tokens) >= _DUPLICATE_CONTAINMENT
-               for other in (others or []))
+    return containment(quote, others) >= _DUPLICATE_CONTAINMENT
 
 
 def flag_duplicates(candidates, recorded_texts):
