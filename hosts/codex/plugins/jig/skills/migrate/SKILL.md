@@ -310,7 +310,8 @@ python3 .../migrate.py report /path/to/existing-project
 `copy-machinery` brings a migrated project to scaffold-mode parity —
 the same host-local runtime shape `/jig:scaffold-init` produces by
 default for greenfield projects. After running it, the project owns its
-own copy of jig's skills, agents, hook scripts, and hook registration.
+own copy of jig's skills, agents, hook scripts, templates, and hook
+registration.
 The dev can edit those files in their own repo, and they ride along
 under version control.
 

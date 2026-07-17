@@ -1164,16 +1164,19 @@ def seed_decisions(project_dir: Path, docs_root: str = "docs",
 
     template = _resolve_plugin_root() / LIGHTWEIGHT_TEMPLATE_RELATIVE
     if not template.is_file():
-        # Symmetry with decisions.py's `seed_lightweight`: a copied
-        # `.claude/skills/jig-migrate/migrate.py` has no templates/ tree
-        # beside it, and a bare "not found" would strand exactly the user
-        # decisions.py just redirected here.
+        # Symmetry with decisions.py's `seed_lightweight` (slice 095-01): both
+        # scaffold hosts now copy templates/ beside the copied machinery, so
+        # this means a broken install rather than an expected mode — and a bare
+        # "not found" would strand exactly the user decisions.py redirected
+        # here.
         raise MigrateError(
             f"lightweight-decisions template not found: {template}\n"
-            "jig ships it at templates/docs/decisions/. This usually means "
-            "migrate.py is running from copied machinery (scaffold mode), "
-            "which has no templates/ tree. Point CLAUDE_PLUGIN_ROOT at a jig "
-            "plugin/checkout root and re-run.")
+            "jig ships it at templates/docs/decisions/. A scaffolded project "
+            "carries its own copy beside its copied machinery; a plugin "
+            "install reads it from the plugin root. Reaching this means "
+            "neither is in place: refresh the copied machinery from a jig "
+            "install (`migrate.py copy-machinery <project-dir>`), or point "
+            "CLAUDE_PLUGIN_ROOT at a jig plugin/checkout root and re-run.")
 
     if target.is_file():
         if LIGHTWEIGHT_ENTRIES_HEADING in _safe_read_text(target):

@@ -312,6 +312,47 @@ Run: `python3 skills/memory-sync/test_decisions.py` (30 OK) ·
 Recorded in [docs/memory/learnings.md](../memory/learnings.md) — "Bug 012: an
 init-time-only seed is a permanent gap for every existing project".
 
+## Amendments
+
+Per [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md):
+this record is closed (`status: DONE`), so its prose above is preserved as written
+and corrections are appended here, dated.
+
+### 2026-07-16 — `## Remaining risk` is closed
+
+**Closed by [slice 095-01](../specs/095-scaffold-template-copy/slice-01-claude-scaffold-templates.md)
+/ [ADR-0038](../decisions/adr-0038-claude-scaffold-template-copy.md).** The design
+call this record deferred to the maintainer — should `copy-machinery` ship
+`templates/`, or should record helpers embed their templates? — came back as
+**option (a)**: `copy_machinery` now copies `templates/` into `.claude/templates/`,
+mirroring `_copy_codex_templates`. The copied helpers' `parents[2]/templates/`
+fallback therefore resolves, with no helper changes.
+
+What that changes in the record above:
+
+- **`## Remaining risk` no longer describes reality.** The captured probe
+  (`env -u CLAUDE_PLUGIN_ROOT … decisions.py add-lightweight` →
+  `error: lightweight-decisions template not found`) now exits 0 and seeds the
+  record home. Read that section as the state at the time of this fix.
+- **`## Fix class`'s "Honest scope" qualifier is spent.** `fix_class:
+  structural_fix` was qualified as structural for **plugin-mode** installs
+  because the scaffold-mode variant stayed open. With 095-01 landed it holds for
+  all four install modes; the frontmatter field is unchanged and now unqualified.
+- **The "inherited, not invented" bullet is discharged.** `adr.py`'s identical
+  gap closed with the same copy — it needed no mitigation of its own, which was
+  the argument for fixing the family rather than this helper.
+- **The mitigation survives, re-premised.** The remedy-naming failure this bug
+  shipped is now the **broken-install** guard (a copy predating 095-01, a partial
+  tree, a `CLAUDE_PLUGIN_ROOT` aimed at a non-jig root). `UnreachableTemplateTests`
+  was re-premised rather than deleted, and the message gained
+  `migrate copy-machinery` as the remedy that repairs the install instead of
+  working around it.
+
+Still open, deliberately: whether a `migrate copy-machinery` re-run is the
+sanctioned backfill for projects scaffolded *before* 095-01, and whether `migrate
+report` should flag the gap. Spec 095 declared it out of scope; asked on
+[#109](https://github.com/ramboz/jig/issues/109).
+
 ## Main recheck
 
 - 2026-07-16 - `origin/main@91427b4` -> reproduces: Detached worktree at origin/main@91427b4. Mode 1 (no LD file): 'add-lightweight --title probe --decision probe' -> exit 1, 'error: no docs/decisions/lightweight-decisions.md — scaffold the lightweight-decisions home first'. Mode 2 (hand-rolled LD table): same command -> exit 1, 'error: docs/decisions/lightweight-decisions.md is missing its `## Entries` heading — cannot place the entry', file left untouched. migrate.py on main offers only {report,rename-decisions,split-slices,copy-machinery,adopt-layout} — no seed op. All three confirmed.

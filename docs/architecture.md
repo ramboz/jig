@@ -167,7 +167,8 @@ Plugin `bin/` PATH injection is Bash-tool only, not hook commands. All hook `com
 
 As of [spec 016-scaffold-mode](specs/016-scaffold-mode/spec.md) (slices
 016-01 + 016-02 + 016-03 all DONE; 016-04 deferred), `scaffold-init` copies the
-runtime machinery (`skills/`, `agents/`, `hooks/scripts/`) into the
+runtime machinery (`skills/`, `agents/`, `hooks/scripts/`, and — since
+[slice 095-01](specs/095-scaffold-template-copy/spec.md) — `templates/`) into the
 user's `.claude/` directory under `jig-` prefixed names
 (`.claude/skills/jig-<name>/`, `.claude/agents/jig-<name>.md`,
 `.claude/hooks/scripts/jig-*.sh`), and generate/merge
@@ -287,12 +288,19 @@ registration, and hook protocol translation.
 host-neutral `HostRenderer` interface plus concrete renderers for Claude
 (`ClaudeScaffoldRenderer`) and Codex (`CodexScaffoldRenderer`). Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
-`.claude/agents/`, `.claude/hooks/scripts/`, and `.claude/settings.json`.
-Codex scaffold mode writes `AGENTS.md`, `.codex/skills/`,
-`.codex/agents/*.toml`, `.codex/hooks/scripts/`, `.codex/templates/`, and
-`.codex/hooks.json` without producing Claude-only files. The templates copy
-is runtime support for scaffolded helpers whose source fallback resolves
-template paths relative to the materialized jig runtime. Codex also installs
+`.claude/agents/`, `.claude/hooks/scripts/`, `.claude/templates/`, and
+`.claude/settings.json`. Codex scaffold mode writes `AGENTS.md`,
+`.codex/skills/`, `.codex/agents/*.toml`, `.codex/hooks/scripts/`,
+`.codex/templates/`, and `.codex/hooks.json` without producing Claude-only
+files. **Both** scaffold hosts copy `templates/`: it is runtime support for
+scaffolded helpers whose source fallback resolves template paths relative to
+the materialized jig runtime (`parents[2]/templates/` — `decisions.py`,
+`adr.py`, and `workflow.py`'s slice-template render all read it there). Codex
+has copied templates since its adapter shipped, because its rewrite table
+redirects `${CLAUDE_PLUGIN_ROOT}/templates/` into `.codex/templates/`; the
+Claude side gained the copy in [slice 095-01](specs/095-scaffold-template-copy/spec.md)
+([ADR-0038](decisions/adr-0038-claude-scaffold-template-copy.md)), which is
+what makes record-seeding work in a scaffolded project with no plugin root. Codex also installs
 non-discoverable unprefixed helper aliases under `.codex/skills/<name>/`
 without `SKILL.md`; these preserve existing peer-helper imports such as
 `skills/scaffold-init/scaffold.py` without registering duplicate skills.

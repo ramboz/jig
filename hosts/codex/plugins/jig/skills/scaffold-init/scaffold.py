@@ -782,8 +782,11 @@ def _rewrite_skill_md_paths(body: str) -> str:
     """Replace every `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` with
     `${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/`.
 
-    Operates on the SKILL.md body only — the frontmatter must be carved off
-    by the caller before calling here (AC #5).
+    For a SKILL.md the caller must carve the frontmatter off first (AC #5) —
+    the substitution must not touch it. Callers passing text that has no
+    frontmatter to protect (rendered docs at `scaffold()`; `.md.template`
+    bodies at `_copy_claude_templates`) pass the whole text, which is why this
+    is a precondition on SKILL.md callers rather than on the function.
 
     String substitution, not AST: SKILL.md is markdown + bash, no parsing
     needed. The Known-constraint #1 fallback (substitute absolute paths if
@@ -794,6 +797,51 @@ def _rewrite_skill_md_paths(body: str) -> str:
         r"${CLAUDE_PROJECT_DIR}/.claude/skills/jig-\1/",
         body,
     )
+
+
+def _copy_claude_templates(plugin: Path, target: Path) -> None:
+    """Copy `plugin/templates/` → `target/.claude/templates/` (slice 095-01).
+
+    The Claude mirror of `_copy_codex_templates`. Record helpers resolve their
+    template as `CLAUDE_PLUGIN_ROOT`, else `Path(__file__).parents[2] /
+    "templates"` (`decisions.py`, `adr.py` — same `_plugin_root`). For a helper
+    copied to `.claude/skills/jig-<name>/<helper>.py` that fallback lands on
+    `<project>/.claude`, so without this copy scaffold mode — the one install
+    mode with no plugin root to fall back on — cannot seed the
+    lightweight-decisions home or open an ADR. Copying the tree makes the
+    existing fallback resolve; no helper changes (ADR-0038; the option the
+    maintainer picked over embedding templates in each helper).
+
+    `.md.template` bodies get the same `${CLAUDE_PLUGIN_ROOT}/skills/<name>/`
+    rewrite SKILL.md bodies and rendered docs already get in scaffold mode — a
+    record seeded from a copied template must not teach a command naming a
+    variable that is unset in the project carrying it. Everything else is
+    byte-copied. Both splits mirror `_copy_codex_templates`.
+
+    Idempotent (overwrite in place), so a `migrate copy-machinery` refresh
+    leaves the tree byte-identical."""
+    templates_src = plugin / "templates"
+    templates_dst = target / ".claude" / "templates"
+    if not templates_src.is_dir():
+        return
+    for entry in sorted(templates_src.rglob("*")):
+        if entry.is_dir():
+            continue
+        rel = entry.relative_to(templates_src)
+        dst = templates_dst / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if entry.name.endswith(".md.template"):
+            # Explicit utf-8 both ways: `atomic_write_text` writes utf-8, and
+            # the templates carry non-ASCII (em-dashes). Reading at the
+            # locale's default encoding would mojibake — or raise — under
+            # LANG=C, and the corruption would then propagate into every record
+            # seeded from the copy. (`_copy_codex_templates` reads at default
+            # encoding; `decisions.py` is the one that gets this right.)
+            atomic_write_text(
+                dst, _rewrite_skill_md_paths(entry.read_text(encoding="utf-8")),
+            )
+        else:
+            dst.write_bytes(entry.read_bytes())
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
@@ -1916,9 +1964,12 @@ def copy_machinery(plugin: Path, target: Path, *,
          check (inbox 2026-05-15): ensures we refuse BEFORE any filesystem
          mutation when settings.json is unmanaged. Closes the partial-
          state-on-refuse gap noted in spec 016-03 deviation §7.
-      2. `_copy_skills_and_agents(plugin, target, installed_tiers)` —
+      2. `_copy_claude_templates(plugin, target)` — slice 095-01; the
+         Claude mirror of `_copy_codex_templates`, so the copied record
+         helpers' `parents[2]/templates/` fallback resolves.
+      3. `_copy_skills_and_agents(plugin, target, installed_tiers)` —
          slice 016-01; tier-gated since slice 038-02.
-      3. `_copy_hooks_and_register(plugin, target, force=force)` — slice
+      4. `_copy_hooks_and_register(plugin, target, force=force)` — slice
          016-02; the safety check inside this call is now redundant but
          kept so the function still works correctly when called directly.
 
@@ -1959,6 +2010,13 @@ def copy_machinery(plugin: Path, target: Path, *,
     if host != "claude":
         raise ValueError(f"unsupported scaffold host: {host}")
     _check_hooks_safety(target, force=force)
+    # Slice 095-01: templates ride the machinery copy (Codex parity), so a
+    # scaffold-mode project can seed a record home / open an ADR with no
+    # CLAUDE_PLUGIN_ROOT. Ungated infra — never tier-scoped: the record
+    # helpers span tiers (memory-sync is Tier 0, adr-workflow Tier 1) and a
+    # partial template tree would just be the same gap with a smaller blast
+    # radius. Runs AFTER the safety check so a refusal still writes nothing.
+    _copy_claude_templates(plugin, target)
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
     _write_gitignore_secret_block(target)

@@ -62,8 +62,10 @@ _ENTRIES_PLACEHOLDER_RE = re.compile(r"^_No entries yet\..*?_$\n?",
 # the plugin-root paths inside `*.md.template` (build_codex_plugin.py
 # `_copy_templates`), so the text read here is already host-correct. A data
 # read, not an import — the module docstring's no-cross-tree-import rule holds.
-# NOT reachable in Claude scaffold mode, which copies skills/ but not
-# templates/ — see `seed_lightweight` and bug 012's Remaining risk.
+# Reachable in all four install modes since slice 095-01 (ADR-0038): both
+# scaffold hosts copy `templates/` beside the copied machinery, so `parents[2]`
+# finds it there too. Do not "clean up" `.claude/templates/` — this read is what
+# it is for.
 _TEMPLATE_RELATIVE = (
     Path("templates") / "docs" / "decisions"
     / "lightweight-decisions.md.template"
@@ -161,20 +163,26 @@ def seed_lightweight(project_dir: Path) -> bool:
         return False
     template = _template_path()
     if not template.is_file():
-        # Reachable in Claude scaffold mode: `copy-machinery` copies skills/
-        # and hooks/ but not templates/ (only Codex copies templates — see
-        # scaffold.py `_copy_codex_templates`), so a copied helper's
-        # parents[2] lands on `<project>/.claude`, which has no templates/.
-        # Not fixed here (see bug 012's Remaining risk); but it must name a
-        # remedy that works, or it is the original bug wearing a new costume.
+        # No install mode reaches here by design any more: plugin installs
+        # resolve the template under the plugin root, and both scaffold hosts
+        # copy templates/ beside the copied machinery (slice 095-01 for
+        # Claude, `_copy_codex_templates` for Codex — see ADR-0038). So this
+        # now means a BROKEN install: a copy that predates 095-01, a partial
+        # tree, or CLAUDE_PLUGIN_ROOT pointed at a non-jig root. It still must
+        # name a remedy that works, or it is the original bug (012) wearing a
+        # new costume.
         raise FileNotFoundError(
             "lightweight-decisions template not found: %s\n\n"
-            "jig ships it at templates/docs/decisions/. This usually means "
-            "the helper is running from copied machinery (scaffold mode), "
-            "which has no templates/ tree. Either:\n"
-            "  1. point CLAUDE_PLUGIN_ROOT at a jig plugin/checkout root and "
+            "jig ships it at templates/docs/decisions/. A scaffolded project "
+            "carries its own copy beside its copied machinery; a plugin "
+            "install reads it from the plugin root. Reaching this means "
+            "neither is in place. Either:\n"
+            "  1. refresh this project's copied machinery from a jig install "
+            "(`migrate.py copy-machinery <project-dir>`), which brings "
+            "templates/ with it; or\n"
+            "  2. point CLAUDE_PLUGIN_ROOT at a jig plugin/checkout root and "
             "re-run this command; or\n"
-            "  2. seed the file from a jig install with `/jig:migrate`'s "
+            "  3. seed just this file from a jig install with `/jig:migrate`'s "
             "seed-decisions op (`migrate.py seed-decisions <project-dir>`)."
             % template)
     path.parent.mkdir(parents=True, exist_ok=True)
