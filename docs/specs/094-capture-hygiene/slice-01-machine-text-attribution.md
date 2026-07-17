@@ -202,3 +202,34 @@ rather than taken on trust. Implementation notes:
 | `docs/memory/**` | `no-op` | Nothing load-bearing beyond the existing decision-capture context; no new term. |
 | `docs/decisions/README.md` / ADR index | `no-op` | No ADR introduced. The rule is a defect fix under spec 083's existing decisions, not a new hard-to-reverse choice. |
 | Additional live prose / generated templates touched by this slice | `updated` | `hosts/claude/**` + `hosts/codex/plugins/jig/**` mirrors rebuilt in lockstep (deviation §9). |
+
+## Amendments
+
+### 2026-07-17 — Nested wrapper leaked harness text (PR review of #116)
+
+A fourth instance of the AC #1 defect survived the three implementation reviews
+and was caught in the pre-merge PR review. `_MACHINE_BLOCK` matched to the
+*first* `</tag>` (non-greedy `.*?`), so a wrapper containing its own tag name —
+a `<system-reminder>` quoting a file that itself contains the literal
+`<system-reminder>` — paired the outer opener with the *inner* closer. The outer
+block's tail was left standing, `_MACHINE_TAG` stripped the now-orphan closer,
+and pure harness prose was stamped `who: "user"`. Reproduced end-to-end through
+`jig-decision-inflight.sh`: the leaked text was Claude Code's own reminder
+boilerplate ("You should not respond to this context…"), which carries a Tier-2
+marker, so it wrote a stub. This is **self-triggering while dogfooding jig** —
+this slice's own test file contains the literal tag, so editing it and having the
+host quote it back is enough. That is #108's exact defect, so it is a fix to the
+slice's Goal ("nothing machine-generated is ever recorded with `who: \"user\"`"),
+not an enhancement.
+
+**Fix:** `_MACHINE_BLOCK` is replaced by `_machine_block_spans`, a depth-counted
+scan over `_MACHINE_ANY_TAG` that balances each tag name across nesting; an opener
+that never balances is left to `_MACHINE_TAG`, so the deliberate unpaired-tag
+policy (§3, AC #2) is unchanged. Two regression tests added
+(`test_nested_same_tag_is_one_block`, `test_nested_block_beside_prose_keeps_only_the_prose`),
+witnessed red on the old regex. Host mirrors rebuilt; drift clean.
+
+**Supersedes deviation §7.** The quadratic-backtracking limit accepted there is
+gone with the backtracking regex — the linear span scan runs the 95KB
+opener-spam payload in ~0.002s (was ~1.1s). §7's "not optimised" disposition no
+longer applies.

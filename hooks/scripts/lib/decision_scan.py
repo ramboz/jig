@@ -69,10 +69,8 @@ _MACHINE_TAGS = (
 )
 # `(?![-\w])` rather than `\b`: `-` is a non-word character, so `\b` would let
 # `<command-name-extra>` match a wrapper we never named.
-_MACHINE_BLOCK = re.compile(
-    r"<(%s)(?![-\w])[^>]*>.*?</\1\s*>" % "|".join(_MACHINE_TAGS),
-    re.IGNORECASE | re.DOTALL,
-)
+_MACHINE_ANY_TAG = re.compile(
+    r"<(/?)(%s)(?![-\w])[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
 # Tags with no matching partner — an orphan closer, or an opener whose content
 # was never wrapped. Only the tag goes; anything around it is left standing,
 # because we cannot tell an unpaired opener from the owner naming one in prose
@@ -80,6 +78,35 @@ _MACHINE_BLOCK = re.compile(
 # is the failure #108 is about.
 _MACHINE_TAG = re.compile(
     r"</?(%s)(?![-\w])[^>]*>" % "|".join(_MACHINE_TAGS), re.IGNORECASE)
+
+
+def _machine_block_spans(text):
+    """Half-open spans of the well-formed wrapper blocks in `text`.
+
+    Depth-counted per tag name rather than matched to the *first* closer: a
+    wrapper can contain its own tag name — the host quotes an edited file back
+    inside a `<system-reminder>`, and files in this repo contain the literal tag
+    — and pairing the opener with the first closer would leave the outer block's
+    tail standing as if the owner had typed it.
+
+    An opener that never balances is left for `_MACHINE_TAG`, which keeps the
+    unpaired-tag policy above intact.
+    """
+    spans = []
+    depth = {}
+    start = {}
+    for m in _MACHINE_ANY_TAG.finditer(text):
+        name = m.group(2).lower()
+        if not m.group(1):
+            if not depth.get(name):
+                start[name] = m.start()
+            depth[name] = depth.get(name, 0) + 1
+        elif depth.get(name):
+            depth[name] -= 1
+            if not depth[name]:
+                spans.append((start[name], m.end()))
+    return spans
+
 
 _DEDUP_CONTAINMENT = 0.6
 # Candidates with fewer meaningful tokens than this are never deduped away — a
@@ -174,8 +201,16 @@ def strip_machine_text(text):
     """
     if not text:
         return ""
-    out = _MACHINE_BLOCK.sub(" ", text)
-    out = _MACHINE_TAG.sub(" ", out)
+    kept = []
+    cursor = 0
+    for begin, end in sorted(_machine_block_spans(text)):
+        # Spans of different tag names can interleave; a span starting inside
+        # one already dropped is part of it.
+        if begin >= cursor:
+            kept.append(text[cursor:begin])
+        cursor = max(cursor, end)
+    kept.append(text[cursor:])
+    out = _MACHINE_TAG.sub(" ", " ".join(kept))
     return " ".join(out.split())
 
 

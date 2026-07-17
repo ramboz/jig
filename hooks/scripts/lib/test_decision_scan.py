@@ -283,6 +283,25 @@ class TestMachineText(unittest.TestCase):
         text = "<command-name-extra>use a banner instead</command-name-extra>"
         self.assertEqual(strip_machine_text(text), text)
 
+    # AC #1, nesting — a wrapper that contains its own tag name is still one
+    # block. Reachable while dogfooding: the host quotes an edited file back
+    # inside a `<system-reminder>`, and this repo's own fixtures contain the
+    # literal tag, so the outer reminder's trailing boilerplate ("You should
+    # not respond to this context") arrives carrying a Tier-2 marker.
+    def test_nested_same_tag_is_one_block(self):
+        self.assertEqual(strip_machine_text(
+            "<system-reminder>The file test_decision_scan.py was modified. "
+            "Contents: \"<system-reminder>Tool budget is low.</system-reminder>\"\n"
+            "IMPORTANT: You should not respond to this context."
+            "</system-reminder>"), "")
+
+    def test_nested_block_beside_prose_keeps_only_the_prose(self):
+        self.assertEqual(strip_machine_text(
+            "Use pytest instead of unittest.\n"
+            "<system-reminder>note<system-reminder>x</system-reminder>"
+            "You should not respond to this context.</system-reminder>"),
+            "Use pytest instead of unittest.")
+
     # AC #3 — a harness block beside typed prose leaves exactly the prose,
     # whichever side it lands on.
     def test_mixed_prose_keeps_its_human_half(self):
