@@ -219,8 +219,12 @@ class TestMachineText(unittest.TestCase):
     typed means nobody to attribute it to.
     """
 
-    # AC #1 — every harness wrapper #108 names, each carrying a Tier-2 marker so
-    # the test fails for the right reason (marker present, nothing left to stub).
+    # AC #1 — every harness wrapper #108 names is stripped whole. This assertion
+    # is marker-independent by construction (it checks nothing survives the
+    # strip); most blobs also carry a Tier-2 marker so the end-to-end stakes are
+    # visible, but the two slash-command wrappers deliberately do not, and the
+    # marker's real teeth — a wrapped marker never reaching a stub — are pinned
+    # end-to-end in test_jig_decision_inflight.py.
     def test_harness_wrappers_leave_nothing(self):
         for blob in (
             "<task-notification>Agent finished; it used a banner instead of a "

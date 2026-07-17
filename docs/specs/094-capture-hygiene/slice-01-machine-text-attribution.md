@@ -233,3 +233,12 @@ witnessed red on the old regex. Host mirrors rebuilt; drift clean.
 gone with the backtracking regex — the linear span scan runs the 95KB
 opener-spam payload in ~0.002s (was ~1.1s). §7's "not optimised" disposition no
 longer applies.
+
+**Two review nits, cleaned in the same pass.** (a) The comment on
+`test_harness_wrappers_leave_nothing` claimed all seven wrapper fixtures carry a
+Tier-2 marker; two (`<command-name>`, `<command-message>`) do not, and the
+assertion is marker-independent anyway — comment corrected. (b) A paired
+`<tag>…</tag>` the owner merely *names* in prose is dropped like a real block
+(quote-fidelity loss on that rare input). This is left as designed: a heuristic
+to distinguish it would be the evidence-free guard §3 already deleted. Documented
+in `strip_machine_text`'s docstring rather than "fixed".

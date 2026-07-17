@@ -198,6 +198,14 @@ def strip_machine_text(text):
     Removing paired blocks before unpaired tags is what makes both halves work:
     a well-formed block is dropped whole, contents included, while a bare tag the
     owner mentioned in passing loses only the tag.
+
+    The asymmetry is deliberate and unavoidable: a *paired* `<tag>…</tag>` the
+    owner merely names in prose ("wrap it in <system-reminder> … </system-reminder>")
+    is byte-for-byte indistinguishable from a real injection, so it is dropped
+    like one — costing a few words of quote fidelity in that rare case. A
+    heuristic to tell them apart would be the same evidence-free guard slice
+    094-01 already deleted (`_MACHINE_UNCLOSED`), trading a real recall risk for
+    a speculative one. A lone tag stays cheap to keep; a balanced pair does not.
     """
     if not text:
         return ""
