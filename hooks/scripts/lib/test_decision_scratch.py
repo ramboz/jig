@@ -234,8 +234,26 @@ class SuppressionLogTests(unittest.TestCase):
         self.assertEqual(entry["candidate"]["quote"],
                          "Use Redis instead of Memcached for the cache")
         self.assertEqual(entry["candidate"]["tier"], 1)
+        # The dropped candidate's transcript turn is logged as the owner's
+        # locator for the possibly-reversing statement.
+        self.assertEqual(entry["candidate"]["turn"], 2)
         self.assertIn("Redis", entry["matched"]["quote"])
         self.assertGreaterEqual(entry["containment"], 0.6)
+
+    def test_candidate_without_a_turn_omits_the_key(self):
+        # A candidate carrying the no-turn sentinel (-1) logs no `turn` key,
+        # rather than a misleading negative locator.
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "Use Redis instead of Memcached for the cache",
+             "who": "user", "source": "user-override"}])
+        scan_cands = [Candidate(tier=3, who="agent",
+                                quote="Use Redis instead of Memcached for the cache",
+                                turn=-1, confidence="low")]
+
+        ds.dedup_scan_against_stubs(
+            scan_cands, stub_cands, project_dir=self.project)
+
+        self.assertNotIn("turn", self._log_lines()[0]["candidate"])
 
     def test_a_kept_candidate_logs_nothing(self):
         stub_cands = ds.stubs_to_candidates([

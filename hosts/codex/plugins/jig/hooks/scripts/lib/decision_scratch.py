@@ -202,7 +202,10 @@ def suppression_log_path(project_dir) -> Path:
     """Path to the append-only suppression log under `.jig/`.
 
     One project-wide inspectable file (not per-session): a drop is rare and the
-    owner reads it as an audit trail across sessions."""
+    owner reads it as an audit trail across sessions. Append-only and unbounded
+    by design — it is never read back into context (so it has no context cost),
+    each line is a clipped one-liner, and it is git-ignored; the owner prunes it
+    if it ever grows inconvenient."""
     return Path(project_dir) / _SUPPRESSION_LOG
 
 
@@ -219,14 +222,20 @@ def log_suppression(project_dir, call_site, candidate, matched, score) -> bool:
     if not project_dir:
         return False
     try:
+        cand_entry = {
+            "quote": candidate.quote,
+            "tier": candidate.tier,
+            "who": candidate.who,
+        }
+        # The dropped candidate's transcript turn is the owner's locator for the
+        # possibly-reversing statement — the whole reason this log exists. Guard
+        # it the same way `matched`'s turn is (a stub with no turn carries -1).
+        if isinstance(candidate.turn, int) and candidate.turn >= 0:
+            cand_entry["turn"] = candidate.turn
         entry = {
             "timestamp": _now_iso(),
             "call_site": call_site,
-            "candidate": {
-                "quote": candidate.quote,
-                "tier": candidate.tier,
-                "who": candidate.who,
-            },
+            "candidate": cand_entry,
             "matched": matched,
             "containment": round(score, 3),
         }

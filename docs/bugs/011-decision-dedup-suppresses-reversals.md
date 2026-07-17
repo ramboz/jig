@@ -148,11 +148,14 @@ genuine reversal that lands under the threshold.
 Suppression is removed outright. Containment survives as a *signal*, not a verdict: a candidate
 whose tokens are largely contained by a recorded decision is **flagged** as a possible duplicate
 and still surfaced, and the nudge asks the owner to triage it. Nothing is dropped **against the
-recorded corpus**, so the defect class this record describes cannot recur on those paths.
+recorded corpus**, so the defect class this record describes cannot recur on those paths — and
+option 4 below is subsumed there, because no silent suppression remains to log.[^opt4]
 
-Option 4 below is **not** fully subsumed, contrary to this record's first framing:
-`dedup_scan_against_stubs` still drops silently against in-flight stubs (Residual 1), so one
-silent suppression path outlives the fix. That path is now logged — see [`## Amendments`](#amendments).
+[^opt4]: This last clause is an **overclaim**, preserved here as the record stood at close
+    (per [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md) — records keep
+    their original prose; the correction is annotated, not rewritten). `dedup_scan_against_stubs`
+    still drops silently against in-flight stubs (Residual 1), so one silent suppression path
+    outlives the fix and *was* worth logging. See [`## Amendments`](#amendments).
 
 This resolves the trade-off that made the remedy a decision. Re-surfacing was the cost of
 option 1; it is now uniform (every candidate re-surfaces every Stop, as scan hits already did —
@@ -328,8 +331,9 @@ Additions after this record closed `DONE`, per [ADR-0010](../decisions/adr-0010-
 - **2026-07-17 — option 4 (suppression logging) implemented for the surviving drop path.**
   This record's `## Fix class` claimed "no silent suppression remains to log," but Residual 1
   (`dedup_scan_against_stubs` still drops a Tier-3 agent reversal of an in-flight stub) is exactly
-  such a path. That overclaim is corrected inline above. Option 4 is now delivered *for that path
-  only*: every drop in `dedup_scan_against_stubs` appends one JSON line to
+  such a path. Per ADR-0010 that original prose is left intact and flagged with a footnote; the
+  correction lives here rather than rewriting the closed record. Option 4 is now delivered *for that
+  path only*: every drop in `dedup_scan_against_stubs` appends one JSON line to
   `.jig/decision-suppressions.log` (dropped candidate, covering stub, containment score, call
   site). **Additive observability only — the drop itself is unchanged**, and the residual stays a
   residual: the fix class (whether that path should drop at all) remains the maintainer's call and
