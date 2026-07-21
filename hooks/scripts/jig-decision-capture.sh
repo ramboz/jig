@@ -8,8 +8,8 @@
 # AskUserQuestion answers (Tier 1) and explicit user corrections (Tier 2)
 # reliably, and agent settled-choice phrasing (Tier 3) best-effort. It does NOT
 # try to catch trigger-phrase-free load-bearing decisions — those are owned by
-# 083-06's reconciliation / memory-sync judgment prompt. Candidates are deduped
-# against already-recorded decisions so repeat runs stay quiet.
+# 083-06's reconciliation / memory-sync judgment prompt. Candidates overlapping
+# an already-recorded decision are flagged for triage, never dropped (bug 011).
 #
 # SCRIPT_DIR locates lib/decision_scan.py + lib/read_attribution.py whether jig
 # runs as a plugin (${CLAUDE_PLUGIN_ROOT}/hooks/scripts/) or a scaffolded install
@@ -25,9 +25,9 @@ if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
 try:
-    from lib.decision_scan import scan, dedup, render_summary
+    from lib.decision_scan import scan, flag_duplicates, render_summary
     from lib.decision_scratch import (
-        read_stubs, write_stubs, prune_recorded_stubs,
+        read_stubs, write_stubs, flag_recorded_stubs,
         stubs_to_candidates, dedup_scan_against_stubs)
 
     data = json.load(sys.stdin)
@@ -36,9 +36,9 @@ try:
     messages = data.get('messages', [])
 
     # Already-recorded decisions corpus, split into per-entry blocks so a large
-    # file does not over-suppress (a candidate is dropped only when its tokens
-    # are >=60% contained in a SINGLE recorded entry). Used to prune in-flight
-    # stubs AND to dedup scan hits.
+    # file does not over-flag (a candidate is flagged only when its tokens are
+    # >=60% contained in a SINGLE recorded entry). Flags in-flight stubs AND
+    # scan hits; nothing is dropped against this corpus.
     recorded = []
     for rel in ('docs/decisions/lightweight-decisions.md',
                 'docs/decisions/README.md',
@@ -60,18 +60,20 @@ try:
             if line.startswith('- ') or line.startswith('### '):
                 recorded.append(line)
 
-    # 083-07: in-flight stubs. Prune the ones now recorded and persist the rest,
-    # so an un-recorded stub re-surfaces on the next Stop — same durability as a
+    # 083-07: in-flight stubs. Flag the ones that look already recorded and persist
+    # them all, so every stub re-surfaces on the next Stop — same durability as a
     # scan candidate (a stub is never silently dropped after a single surfacing).
-    stubs = prune_recorded_stubs(read_stubs(project_dir, session_id), recorded)
+    stubs = flag_recorded_stubs(read_stubs(project_dir, session_id), recorded)
     write_stubs(project_dir, session_id, stubs)
     stub_candidates = stubs_to_candidates(stubs)
 
     # Scan the transcript; drop scan hits already captured in-flight so a decision
     # settled both ways surfaces ONCE (no double-surface). Stubs are already
-    # pruned against recorded; dedup the scan hits against recorded too.
-    scan_candidates = dedup_scan_against_stubs(scan(messages), stub_candidates)
-    candidates = stub_candidates + dedup(scan_candidates, recorded)
+    # flagged against recorded; flag the scan hits against recorded too. Nothing
+    # is suppressed for being already recorded — the owner triages (bug 011).
+    scan_candidates = dedup_scan_against_stubs(
+        scan(messages), stub_candidates, project_dir=project_dir)
+    candidates = stub_candidates + flag_duplicates(scan_candidates, recorded)
     candidates.sort(key=lambda c: (c.turn, c.tier))
 
     if not candidates:

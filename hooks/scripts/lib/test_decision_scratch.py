@@ -7,6 +7,7 @@ Run from the repo root:
     python3 hooks/scripts/lib/test_decision_scratch.py
 """
 
+import json
 import sys
 import tempfile
 import unittest
@@ -82,8 +83,13 @@ class ScratchIOTests(unittest.TestCase):
         self.assertFalse(ds.scratch_path(self.project, "s").exists())
 
 
-class PruneRecordedTests(unittest.TestCase):
-    def test_recorded_stub_dropped_unrecorded_kept(self):
+class FlagRecordedTests(unittest.TestCase):
+    # Bug 011 / issue #109: this path mirrored the scan's containment rule (then
+    # `decision_scan.dedup`, now `flag_duplicates`) and so carried the identical
+    # defect — a stub that *reverses* a recorded decision was silently pruned.
+    # Stubs are now flagged, never dropped, matching the scan path.
+
+    def test_recorded_stub_flagged_unrecorded_untouched(self):
         stubs = [
             {"quote": "Use Postgres instead of MySQL for the store",
              "who": "user", "source": "user-override"},
@@ -92,14 +98,32 @@ class PruneRecordedTests(unittest.TestCase):
         ]
         recorded = ["### 2026-06-26 — Store\n**Decision:** Use Postgres instead "
                     "of MySQL for the store."]
-        kept = ds.prune_recorded_stubs(stubs, recorded)
-        self.assertEqual(len(kept), 1)
-        self.assertIn("hexagonal", kept[0]["quote"])
+        kept = ds.flag_recorded_stubs(stubs, recorded)
+        self.assertEqual(len(kept), 2, "a stub is never dropped against recorded")
+        by_quote = {s["quote"]: s for s in kept}
+        self.assertTrue(
+            by_quote["Use Postgres instead of MySQL for the store"]
+            ["possible_duplicate"])
+        self.assertFalse(
+            by_quote["Adopt a hexagonal architecture at the edges"]
+            .get("possible_duplicate", False))
 
-    def test_no_recorded_keeps_all(self):
+    def test_stub_reversing_a_recorded_decision_survives(self):
+        stubs = [{"quote": "actually use MySQL instead of Postgres for the store",
+                  "who": "user", "source": "user-override"}]
+        recorded = ["### 2026-06-26 — Store\n**Decision:** Use Postgres instead "
+                    "of MySQL for the store."]
+        kept = ds.flag_recorded_stubs(stubs, recorded)
+        self.assertEqual(len(kept), 1,
+                         "a reversal captured in-flight must reach the owner")
+        self.assertTrue(kept[0]["possible_duplicate"])
+
+    def test_no_recorded_flags_nothing(self):
         stubs = [{"quote": "some decision here", "who": "user",
                   "source": "user-override"}]
-        self.assertEqual(ds.prune_recorded_stubs(stubs, []), stubs)
+        kept = ds.flag_recorded_stubs(stubs, [])
+        self.assertEqual(len(kept), 1)
+        self.assertFalse(kept[0].get("possible_duplicate", False))
 
 
 class StubCandidateTests(unittest.TestCase):
@@ -114,6 +138,19 @@ class StubCandidateTests(unittest.TestCase):
 
     def test_skips_quoteless_stub(self):
         self.assertEqual(ds.stubs_to_candidates([{"who": "user"}]), [])
+
+    def test_possible_duplicate_flag_carries_onto_the_candidate(self):
+        # The stub path's half of bug 011: flag_recorded_stubs marks the dict,
+        # but the flag only reaches the owner if the Candidate carries it. An
+        # unflagged stub must default to False, not to a missing attribute.
+        flagged, plain = ds.stubs_to_candidates([
+            {"quote": "use postgres for the store", "who": "user",
+             "source": "user-override", "possible_duplicate": True},
+            {"quote": "adopt hexagonal edges", "who": "user",
+             "source": "user-override"},
+        ])
+        self.assertTrue(flagged.possible_duplicate)
+        self.assertFalse(plain.possible_duplicate)
 
 
 class DedupScanVsStubsTests(unittest.TestCase):
@@ -139,6 +176,125 @@ class DedupScanVsStubsTests(unittest.TestCase):
     def test_no_stubs_keeps_all_scan(self):
         scan_cands = [self._scan("anything at all here")]
         self.assertEqual(ds.dedup_scan_against_stubs(scan_cands, []), scan_cands)
+
+    def test_short_scan_candidate_below_floor_is_kept(self):
+        # The terse-quote floor applies here too: a 1-2 token quote clears any
+        # containment threshold against a stub sharing those tokens. Pinned when
+        # the rule moved to decision_scan.is_contained (bug 011).
+        scan_cands = [self._scan("Use it.")]
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "we use it everywhere across the codebase",
+             "who": "user", "source": "user-override"}])
+        self.assertEqual(ds.dedup_scan_against_stubs(scan_cands, stub_cands),
+                         scan_cands)
+
+    def test_none_scan_candidates_is_fail_open(self):
+        # The module contracts fail-open throughout; None must not raise.
+        self.assertEqual(ds.dedup_scan_against_stubs(None, []), [])
+
+
+class SuppressionLogTests(unittest.TestCase):
+    """`dedup_scan_against_stubs` is the one path #117 left that still *drops*
+    silently (bug 011). Every drop must leave one inspectable line under `.jig/`
+    so 'nothing was found' and 'found and dropped' stop being the same on disk.
+    Additive only: the drop itself is unchanged."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _scan(self, quote, tier=1):
+        return Candidate(tier=tier, who="user", quote=quote, turn=2, confidence="high")
+
+    def _log_lines(self):
+        path = ds.suppression_log_path(self.project)
+        if not path.exists():
+            return []
+        return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+
+    def test_a_drop_writes_one_inspectable_line(self):
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "Use Redis instead of Memcached for the cache",
+             "who": "user", "source": "user-override", "turn": 1}])
+        scan_cands = [self._scan("Use Redis instead of Memcached for the cache")]
+
+        kept = ds.dedup_scan_against_stubs(
+            scan_cands, stub_cands, project_dir=self.project)
+
+        # Behaviour unchanged: still dropped.
+        self.assertEqual(kept, [])
+        # ...but no longer silent.
+        lines = self._log_lines()
+        self.assertEqual(len(lines), 1)
+        entry = lines[0]
+        self.assertEqual(entry["call_site"], "dedup_scan_against_stubs")
+        self.assertEqual(entry["candidate"]["quote"],
+                         "Use Redis instead of Memcached for the cache")
+        self.assertEqual(entry["candidate"]["tier"], 1)
+        # The dropped candidate's transcript turn is logged as the owner's
+        # locator for the possibly-reversing statement.
+        self.assertEqual(entry["candidate"]["turn"], 2)
+        self.assertIn("Redis", entry["matched"]["quote"])
+        self.assertGreaterEqual(entry["containment"], 0.6)
+
+    def test_candidate_without_a_turn_omits_the_key(self):
+        # A candidate carrying the no-turn sentinel (-1) logs no `turn` key,
+        # rather than a misleading negative locator.
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "Use Redis instead of Memcached for the cache",
+             "who": "user", "source": "user-override"}])
+        scan_cands = [Candidate(tier=3, who="agent",
+                                quote="Use Redis instead of Memcached for the cache",
+                                turn=-1, confidence="low")]
+
+        ds.dedup_scan_against_stubs(
+            scan_cands, stub_cands, project_dir=self.project)
+
+        self.assertNotIn("turn", self._log_lines()[0]["candidate"])
+
+    def test_a_kept_candidate_logs_nothing(self):
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "Use Redis for caching", "who": "user",
+             "source": "user-override"}])
+        scan_cands = [self._scan("Adopt a hexagonal architecture boundary")]
+
+        kept = ds.dedup_scan_against_stubs(
+            scan_cands, stub_cands, project_dir=self.project)
+
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(self._log_lines(), [])
+
+    def test_logging_is_opt_in_no_project_dir_writes_nothing(self):
+        # Pure-function callers (unit tests, non-hook use) pass no project_dir
+        # and must neither log nor change behaviour.
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "Use Redis instead of Memcached for the cache",
+             "who": "user", "source": "user-override"}])
+        scan_cands = [self._scan("Use Redis instead of Memcached for the cache")]
+
+        kept = ds.dedup_scan_against_stubs(scan_cands, stub_cands)
+
+        self.assertEqual(kept, [])
+        self.assertFalse(ds.suppression_log_path(self.project).exists())
+
+    def test_logging_failure_never_breaks_the_drop(self):
+        # Fail-open like every decision hook: a broken log sink must not change
+        # what is suppressed. Point the project at a file so the `.jig/` dir
+        # cannot be created.
+        blocker = Path(self.project) / "not-a-dir"
+        blocker.write_text("x")
+        stub_cands = ds.stubs_to_candidates([
+            {"quote": "Use Redis instead of Memcached for the cache",
+             "who": "user", "source": "user-override"}])
+        scan_cands = [self._scan("Use Redis instead of Memcached for the cache")]
+
+        kept = ds.dedup_scan_against_stubs(
+            scan_cands, stub_cands, project_dir=str(blocker))
+
+        self.assertEqual(kept, [])
 
 
 class AnswerExtractionTests(unittest.TestCase):
