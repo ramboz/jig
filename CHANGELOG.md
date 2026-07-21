@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.8.0](https://github.com/ramboz/jig/compare/v2.7.1...v2.8.0) (2026-07-21)
+
+
+### Features
+
+* **decision-capture:** log the surviving silent suppression (bug 011 option 4) ([#120](https://github.com/ramboz/jig/issues/120)) ([7952238](https://github.com/ramboz/jig/commit/7952238f980dd9989033c08c264eecf6ab68bd4d))
+* **migrate:** flag ADR status the DONE gate can't read ([#106](https://github.com/ramboz/jig/issues/106)) ([e9f50dc](https://github.com/ramboz/jig/commit/e9f50dc5e6670422b71bac689b6038e06011f1d3))
+* **orient:** add /jig:orient project-orientation skill (Tier 1) ([#90](https://github.com/ramboz/jig/issues/90)) ([0b76648](https://github.com/ramboz/jig/commit/0b76648cc86d36e07f7167b60d1046753ae0ac34))
+* **workflow:** close adoption and discovery gaps ([#104](https://github.com/ramboz/jig/issues/104)) ([414fe82](https://github.com/ramboz/jig/commit/414fe82acb8ddaf14d35814f530ccd97cc8560db))
+
+
+### Bug Fixes
+
+* **decision-capture:** capture hygiene — misattribution, dismissed dialogs, decision routing ([#108](https://github.com/ramboz/jig/issues/108)) ([da342b0](https://github.com/ramboz/jig/commit/da342b0b5d45b5776a45ab7928716baaceb6de8b))
+* **decision-scan:** flag duplicate decisions instead of suppressing them ([#117](https://github.com/ramboz/jig/issues/117)) ([cb6ce8d](https://github.com/ramboz/jig/commit/cb6ce8da95ddd004da3aa19ba9aa5ead3646268f))
+* **decisions:** drop the "No entries yet" placeholder when the first entry lands ([#115](https://github.com/ramboz/jig/issues/115)) ([5b08b91](https://github.com/ramboz/jig/commit/5b08b91b4b00150e2c4330309d526d9164797415))
+* **decisions:** seed lightweight-decisions from template; fail loud on foreign format ([#113](https://github.com/ramboz/jig/issues/113)) ([af53265](https://github.com/ramboz/jig/commit/af53265783bf7aec0566cacda5574f98f76d66d2))
+* **scaffold:** copy templates/ in Claude scaffold mode so record helpers resolve ([#109](https://github.com/ramboz/jig/issues/109)) ([#119](https://github.com/ramboz/jig/issues/119)) ([a3d35a4](https://github.com/ramboz/jig/commit/a3d35a4a50023c640c3f4dfda12e83f9d9332bc9))
+
+
+### Documentation
+
+* **bugs:** record bug 011 — decision dedup suppresses recorded-decision reversals ([#112](https://github.com/ramboz/jig/issues/112)) ([fea869d](https://github.com/ramboz/jig/commit/fea869d7252d95bd9cb40ee3bd778968fd89624c))
+* **readme:** cleanup ([91427b4](https://github.com/ramboz/jig/commit/91427b41bac54a1c9b2b267d7d99fbbbd675e0a5))
+* **specs:** reserve 094-capture-hygiene ([#114](https://github.com/ramboz/jig/issues/114)) ([e5930b4](https://github.com/ramboz/jig/commit/e5930b4406bc1dbefd6b42f6f2c8cd2a8bafed5c))
+* **specs:** reserve 095-scaffold-template-copy ([#118](https://github.com/ramboz/jig/issues/118)) ([fbd846d](https://github.com/ramboz/jig/commit/fbd846d331349bf09d430014cfc852c23330d466))
+
 ## [2.7.1](https://github.com/ramboz/jig/compare/v2.7.0...v2.7.1) (2026-07-15)
 
 
