@@ -104,6 +104,13 @@ class Inventory:
         # Slice 021-01 — used by report's operations section to suppress the
         # `copy-machinery` suggestion when the machinery is already in place.
         self.jig_skill_dirs: list[Path] = []
+        # Slice 095-01 — whether `.claude/templates/` is present beside the
+        # copied machinery. False in every project scaffolded before 095-01
+        # (copy-machinery only started carrying templates then), which strands
+        # the record helpers' `parents[2]/templates/` fallback. Only actionable
+        # when `jig_skill_dirs` is non-empty — report routes such a project to
+        # `copy-machinery` to backfill (ADR-0038 retrofit).
+        self.jig_templates_present: bool = False
         # Bug 012 — the lightweight-decisions home, when present. Absent in
         # every project that adopted jig before the feature landed, because
         # scaffold-init only seeds it at init; report's Operations section
@@ -279,6 +286,12 @@ def scan(project_dir: Path, docs_root: str = "docs") -> Inventory:
         # decide whether to suggest `copy-machinery`.
         elif entry.is_dir() and entry.name.startswith("jig-"):
             inv.jig_skill_dirs.append(entry)
+    # Slice 095-01 — templates present iff `.claude/templates/` holds at least
+    # one file (an empty or absent tree is the pre-095 shape).
+    templates_dir = project_dir / ".claude" / "templates"
+    inv.jig_templates_present = templates_dir.is_dir() and any(
+        p.is_file() for p in templates_dir.rglob("*")
+    )
     claude_agents_dir = project_dir / ".claude" / "agents"
     for entry in _safe_iterdir(claude_agents_dir):
         if _is_content_md(entry):
@@ -658,9 +671,34 @@ def render_operations(inv: Inventory, verdict: str) -> str:
             and not inv.jig_skill_dirs):
         items.append(
             "**`migrate.py copy-machinery <project-dir>`** — copy "
-            "jig's hooks / agents / skill helpers into the target's "
-            "`.claude/` (scaffold-mode parity). Mirrors what "
+            "jig's hooks / agents / skill helpers / templates into the "
+            "target's `.claude/` (scaffold-mode parity). Mirrors what "
             "`scaffold-init` does by default for greenfield projects."
+        )
+
+    # Slice 095-01 — templates backfill (ADR-0038 retrofit). A project that
+    # already has jig machinery but no `.claude/templates/` was scaffolded
+    # before 095-01, when copy-machinery started carrying templates. Its
+    # record helpers (`decisions.py`, `adr.py`, `workflow.py`, `memory.py`)
+    # resolve `parents[2]/templates/`, which lands on `<project>/.claude` —
+    # so without the tree they cannot seed a record home or open an ADR.
+    # Distinct from the full-copy branch above (mutually exclusive on
+    # `jig_skill_dirs`): here the machinery is present and only templates are
+    # missing.
+    if (verdict in {"adoptable", "partial"}
+            and inv.jig_skill_dirs
+            and not inv.jig_templates_present):
+        items.append(
+            "**`migrate.py copy-machinery <project-dir>`** — this project has "
+            "jig machinery but no `.claude/templates/`, so it was scaffolded "
+            "before that tree shipped (ADR-0038). The record helpers "
+            "(`decisions.py`, `adr.py`, `workflow.py`, `memory.py`) resolve "
+            "their template beside the machinery, so in this state recording a "
+            "decision or opening an ADR fails. Re-run `copy-machinery` **from a "
+            "jig install** — a scaffolded project cannot repair itself from its "
+            "own copied files, since `templates/` is exactly what it is missing "
+            "to copy from — to backfill the tree. Idempotent; never overwrites "
+            "your project's own files."
         )
 
     # Bug 012 — seed-decisions. Gated on a jig-shaped verdict because a
@@ -1164,16 +1202,19 @@ def seed_decisions(project_dir: Path, docs_root: str = "docs",
 
     template = _resolve_plugin_root() / LIGHTWEIGHT_TEMPLATE_RELATIVE
     if not template.is_file():
-        # Symmetry with decisions.py's `seed_lightweight`: a copied
-        # `.claude/skills/jig-migrate/migrate.py` has no templates/ tree
-        # beside it, and a bare "not found" would strand exactly the user
-        # decisions.py just redirected here.
+        # Symmetry with decisions.py's `seed_lightweight` (slice 095-01): both
+        # scaffold hosts now copy templates/ beside the copied machinery, so
+        # this means a broken install rather than an expected mode — and a bare
+        # "not found" would strand exactly the user decisions.py redirected
+        # here.
         raise MigrateError(
             f"lightweight-decisions template not found: {template}\n"
-            "jig ships it at templates/docs/decisions/. This usually means "
-            "migrate.py is running from copied machinery (scaffold mode), "
-            "which has no templates/ tree. Point CLAUDE_PLUGIN_ROOT at a jig "
-            "plugin/checkout root and re-run.")
+            "jig ships it at templates/docs/decisions/. A scaffolded project "
+            "carries its own copy beside its copied machinery; a plugin "
+            "install reads it from the plugin root. Reaching this means "
+            "neither is in place: refresh the copied machinery from a jig "
+            "install (`migrate.py copy-machinery <project-dir>`), or point "
+            "CLAUDE_PLUGIN_ROOT at a jig plugin/checkout root and re-run.")
 
     if target.is_file():
         if LIGHTWEIGHT_ENTRIES_HEADING in _safe_read_text(target):
@@ -2036,8 +2077,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cm = sub.add_parser(
         "copy-machinery",
-        help="copy jig's skills, agents, hooks, and hook configuration "
-             "into the target's host-local runtime (scaffold-mode parity)",
+        help="copy jig's skills, agents, hooks, templates, and hook "
+             "configuration into the target's host-local runtime "
+             "(scaffold-mode parity)",
     )
     cm.add_argument("project_dir",
                     help="path to the project to receive jig's machinery")

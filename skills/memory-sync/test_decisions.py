@@ -297,20 +297,30 @@ class ForeignFormatTests(unittest.TestCase):
 
 
 class UnreachableTemplateTests(unittest.TestCase):
-    """Bug 012, review follow-up — Claude scaffold mode copies `skills/` but
-    NOT `templates/` (only Codex has `_copy_codex_templates`), so a copied
-    helper resolves `parents[2]` to `<project>/.claude`, where no template
-    exists. That mode is NOT fixed by this bug (see the record's Remaining
-    risk), but it must fail with a remedy that actually works rather than a
-    bare 'not found' — otherwise it is the original bug in a new costume.
+    """Bug 012, review follow-up — re-premised by slice 095-01.
+
+    Originally this pinned the *expected* Claude scaffold-mode failure: that
+    mode copied `skills/` but not `templates/` (only Codex had
+    `_copy_codex_templates`), so a copied helper resolved `parents[2]` to
+    `<project>/.claude`, where no template existed. Bug 012 could not fix that
+    mode and settled for failing with remedies that work.
+
+    Slice 095-01 closed it — `copy_machinery` now copies `templates/` too
+    (ADR-0038), and `ClaudeScaffoldTemplatesTests` in
+    `skills/scaffold-init/test_scaffold_mode.py` pins the copied helper
+    seeding for real. So no install mode is *expected* to land here any more,
+    and these tests now guard the **broken-install** path: a copy predating
+    095-01, a partial tree, or `CLAUDE_PLUGIN_ROOT` aimed at a non-jig root.
+    The invariant is unchanged and still the point — a bare 'not found' would
+    be the original bug in a new costume.
     """
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.project = Path(self._tmp.name)
         self._saved = os.environ.get("CLAUDE_PLUGIN_ROOT")
-        # Point the plugin root at a dir with no templates/ tree — exactly
-        # what a copied `.claude/skills/jig-memory-sync/` helper sees.
+        # Point the plugin root at a dir with no templates/ tree — an install
+        # whose template home is missing, however it got that way.
         os.environ["CLAUDE_PLUGIN_ROOT"] = str(self.project)
 
     def tearDown(self):
@@ -327,6 +337,10 @@ class UnreachableTemplateTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError) as ctx:
             decisions.seed_lightweight(self.project)
         msg = str(ctx.exception)
+        self.assertIn("copy-machinery", msg,
+                      "must name the remedy that repairs the install rather "
+                      "than working around it — slice 095-01 made "
+                      "copy-machinery bring templates/ with it")
         self.assertIn("CLAUDE_PLUGIN_ROOT", msg,
                       "must name the env-var remedy — it demonstrably works "
                       "from copied machinery")

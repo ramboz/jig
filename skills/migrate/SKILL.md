@@ -317,7 +317,8 @@ python3 .../migrate.py report /path/to/existing-project
 `copy-machinery` brings a migrated project to scaffold-mode parity —
 the same host-local runtime shape `/jig:scaffold-init` produces by
 default for greenfield projects. After running it, the project owns its
-own copy of jig's skills, agents, hook scripts, and hook registration.
+own copy of jig's skills, agents, hook scripts, templates, and hook
+registration.
 The dev can edit those files in their own repo, and they ride along
 under version control.
 
@@ -361,7 +362,18 @@ What it does:
    Claude, `.codex/agents/jig-*.toml` for Codex).
 3. Copies hook scripts into the host runtime, pinning each script's mode
    to `0o755`.
-4. Generates or merges host hook registration. `--host claude` uses
+4. Copies jig's `templates/` tree into the host runtime
+   (`.claude/templates/` or `.codex/templates/`), rewriting helper paths in
+   `*.md.template` bodies to that runtime. This is what lets the copied
+   helpers seed from a template with no plugin root — `decisions.py`
+   (lightweight-decisions), `adr.py new`, `migrate.py seed-decisions`,
+   `workflow.py`'s slice-template render, and `memory.py`'s people.md
+   bootstrap all resolve `parents[2]/templates/`. Claude gained this in
+   [slice 095-01](../../docs/specs/095-scaffold-template-copy/spec.md);
+   Codex has always had it. **Re-run `copy-machinery` from a jig install to
+   refresh a project scaffolded before 095-01** — it is the repair path
+   `decisions.py` names when a template is unreachable.
+5. Generates or merges host hook registration. `--host claude` uses
    `.claude/settings.json`, with per-entry `metadata.managed_by_jig:
    true` markers. `--host codex` uses `.codex/hooks.json`, with a
    schema-clean top-level `hooks` object.

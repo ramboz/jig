@@ -65,10 +65,14 @@ def _bootstrap_people_md(target: Path) -> tuple:
 
     Locates the template the same way scaffold-init does — under
     `plugin_root()/templates/` — and renders its `{{PROJECT_NAME}}`
-    placeholder before an atomic write. If the template cannot be resolved
-    (e.g. a scaffold-mode target whose `templates/` dir was not copied in),
+    placeholder before an atomic write. If the template cannot be resolved,
     degrades gracefully: returns (False, <manual-create guidance>) and the
-    caller exits 0."""
+    caller exits 0.
+
+    Since slice 095-01 (ADR-0038) both scaffold hosts copy `templates/` beside
+    the copied machinery, so a scaffold-mode target resolves this too — this is
+    one of the template-reading family ADR-0038 enumerates. The degrade path now
+    means a broken install, not an expected mode."""
     people = team_signal.people_md_path(target)
     if people.exists():
         return (False, f"people.md already exists at {people} — leaving it untouched.")
@@ -78,9 +82,10 @@ def _bootstrap_people_md(target: Path) -> tuple:
         return (
             False,
             "could not locate the people.md template at "
-            f"{template} — create docs/memory/people.md manually "
-            "(this is expected for a scaffold-mode target without a "
-            "bundled templates/ dir).",
+            f"{template} — create docs/memory/people.md manually, or "
+            "refresh this project's copied machinery from a jig install "
+            "(`migrate.py copy-machinery <project-dir>`), which brings "
+            "templates/ with it.",
         )
     # Inline `{{PROJECT_NAME}}`-only substitution is byte-identical to
     # scaffold-init's `copy_template` for the CURRENT single-placeholder

@@ -2942,18 +2942,30 @@ def _render_stub_slice(num_str: str, slice_num: str = "01",
     and `{{NAME}}` → `name`. Returns the rendered text.
 
     Falls back to an inline minimal template when the file template
-    isn't reachable (e.g. running the helper outside the jig tree)."""
+    isn't reachable (e.g. running the helper outside the jig tree).
+
+    Since slice 095-01 both scaffold hosts copy `templates/` beside the copied
+    machinery, so `parents[2]` reaches the real template in a scaffolded
+    project too — this helper is one of the template-reading family ADR-0038
+    enumerates, and it silently stopped needing the fallback there."""
     template_path = (Path(__file__).resolve().parents[2]
                      / "templates" / "docs" / "specs" / "slice-template.md")
     fragment = f"{num_str}-{slice_num}"
     try:
-        body = template_path.read_text()
-    except OSError:
+        # Explicit utf-8: slice-template.md carries em-dashes, ✅ and →. Slice
+        # 095-01 makes this path reach a real file in scaffold mode for the
+        # first time, so a default-encoding read would newly raise
+        # UnicodeDecodeError under LANG=C — a ValueError, which would escape
+        # the OSError fallback below and crash where the old behaviour cleanly
+        # degraded.
+        body = template_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         # Inline fallback — keeps the helper functional even when the
         # template file isn't on disk (e.g. minimal scaffold smoke tests, or a
-        # scaffolded project where the template is not distributed). Carries the
-        # spec 065-04 self-defining-vocabulary reminder so the author meets it
-        # here too, in parity with the on-disk slice-template.md.
+        # project scaffolded before slice 095-01, which is when copied
+        # machinery started carrying `templates/`). Carries the spec 065-04
+        # self-defining-vocabulary reminder so the author meets it here too, in
+        # parity with the on-disk slice-template.md.
         body = (
             "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n"
             "\n<!-- jig self-defining vocabulary (soft, forward-only): expand "

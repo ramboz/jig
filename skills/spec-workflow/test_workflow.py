@@ -7557,9 +7557,17 @@ class AgentReturnEnvelopeDocTests(unittest.TestCase):
 class SelfDefiningReminderInRenderersTests(unittest.TestCase):
     """Spec 065-04 AC2(b): the self-defining-vocabulary reminder is emitted by
     the DISTRIBUTED workflow.py renderers (`_render_stub_spec` and the inline
-    fallback inside `_render_stub_slice`), so an author in a scaffolded project
-    — where `templates/docs/specs/slice-template.md` is NOT copied and the
-    inline fallback is used — still meets the reminder where they write."""
+    fallback inside `_render_stub_slice`), so an author still meets the reminder
+    where they write, whichever renderer runs.
+
+    The original rationale — "a scaffolded project, where
+    `templates/docs/specs/slice-template.md` is NOT copied and the inline
+    fallback is used" — expired with slice 095-01, which copies `templates/`
+    beside the copied machinery, so scaffold mode now renders the real
+    template. The class still earns its place: the fallback remains live for
+    projects scaffolded before 095-01 and for any unreachable-template case,
+    and `_render_stub_spec` has no on-disk template at all. Only the premise
+    changed, not the invariant."""
 
     @classmethod
     def setUpClass(cls):

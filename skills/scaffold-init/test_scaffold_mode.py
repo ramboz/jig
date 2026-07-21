@@ -14,6 +14,7 @@ or in isolation:
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,10 +24,61 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:  # Python < 3.11 (e.g. default macOS 3.9)
-    tomllib = None  # codex-packaging paths require 3.11+; gated below
+    tomllib = None  # no tomli fallback (jig is zero-dependency); see _load_agent_toml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
+
+
+def _load_agent_toml(text: str) -> dict:
+    """Parse a jig-rendered Codex agent TOML into a dict.
+
+    Uses `tomllib` when available (Python 3.11+). Below that — jig's documented
+    floor is 3.9, the default macOS `python3` — there is no `tomli` fallback
+    because jig ships zero dependencies, so this parses the exact shape
+    `CodexScaffoldRenderer.render_codex_agent_toml` emits: a `#`-comment managed
+    marker, scalar keys rendered as JSON strings (`json.dumps`), and a trailing
+    `developer_instructions` as a `'''…'''` multiline literal (or a JSON string
+    when the body itself contains `'''`). Writer and reader are both jig's and
+    kept in step — this is not a general TOML parser. It exists so these tests
+    RUN and PASS on 3.9 rather than being skipped there (the whole file used to
+    skip below 3.11 for these two assertions, silently dropping ~90 tests that
+    have nothing to do with TOML)."""
+    if tomllib is not None:
+        return tomllib.loads(text)
+    data: dict = {}
+    lines = text.splitlines(keepends=True)
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        key, sep, rest = lines[i].partition(" = ")
+        if not sep:
+            i += 1
+            continue
+        key = key.strip()
+        value = rest.lstrip()
+        if value.startswith("'''"):
+            # Multiline literal: everything from the opening `'''` to the next
+            # `'''` is opaque (may contain `=`, `#`, blank lines).
+            after = value[3:]
+            if "'''" in after:
+                data[key] = after[: after.index("'''")]
+            else:
+                buf = after
+                i += 1
+                while i < len(lines) and "'''" not in lines[i]:
+                    buf += lines[i]
+                    i += 1
+                if i < len(lines):
+                    buf += lines[i][: lines[i].index("'''")]
+                data[key] = buf
+        else:
+            data[key] = json.loads(rest.strip())
+        i += 1
+    return data
 
 
 def run_scaffold_with_args(target: Path, *args: str) -> subprocess.CompletedProcess:
@@ -460,6 +512,314 @@ class WithMachineryTests(unittest.TestCase):
             f"stderr={r.stderr}\nstdout={r.stdout}",
         )
         self.assertNotIn("ModuleNotFoundError", r.stderr)
+
+
+# --------------------------------------------------------------------------
+# Spec 095-01 — Claude scaffold mode copies `templates/` into `.claude/`,
+# mirroring the Codex side's `_copy_codex_templates`, so the copied helpers'
+# existing `parents[2]/templates/` fallback resolves with no change to any
+# helper's template resolution. Before this slice, `copy_machinery` copied
+# `skills/` and `hooks/` only, so no helper could reach a template in the one
+# install mode that has no plugin root to fall back on.
+# --------------------------------------------------------------------------
+
+
+class ClaudeScaffoldTemplatesTests(unittest.TestCase):
+    """Spec 095-01 — the record-helper family can seed records in Claude
+    scaffold mode.
+
+    `--has-tests` forces tier-1 into `installed_tiers` so `adr-workflow` is
+    copied too (AC2). Both helpers run as subprocesses out of the project's
+    OWN copied machinery with `CLAUDE_PLUGIN_ROOT` unset — the exact runtime
+    a scaffolded project has, and the one where `parents[2]` lands on
+    `<project>/.claude`.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-095-templates-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        r = run_scaffold_with_args(self.target, "--with-machinery", "--has-tests")
+        self.assertEqual(
+            r.returncode, 0,
+            f"scaffold --with-machinery failed: stderr={r.stderr}\n"
+            f"stdout={r.stdout}",
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ----- fixtures ---------------------------------------------------------
+    def _scaffold_mode_env(self) -> dict:
+        """The env a scaffolded project's helper actually runs in: no
+        CLAUDE_PLUGIN_ROOT. Git identity is supplied because `adr.py new`
+        commits its reservation stub (AC2); it is inert for AC1."""
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
+        env.update({
+            "GIT_AUTHOR_NAME": "jig test",
+            "GIT_AUTHOR_EMAIL": "test@example.invalid",
+            "GIT_COMMITTER_NAME": "jig test",
+            "GIT_COMMITTER_EMAIL": "test@example.invalid",
+        })
+        return env
+
+    def _copied_helper(self, skill: str, helper: str) -> Path:
+        path = self.target / ".claude" / "skills" / skill / helper
+        self.assertTrue(path.is_file(), f"copied helper missing: {path}")
+        return path
+
+    def _templates_snapshot(self) -> dict:
+        root = self.target / ".claude" / "templates"
+        return {
+            str(p.relative_to(root)): p.read_bytes()
+            for p in sorted(root.rglob("*")) if p.is_file()
+        }
+
+    # ----- AC1: decisions.py seeds its record home --------------------------
+    def test_ac1_scaffold_mode_seeds_lightweight_decisions_without_plugin_root(self):
+        """AC1 — with the record home absent (bug 012 mode 1: the shape of a
+        project scaffolded before the lightweight-decisions template shipped),
+        the copied helper seeds it from the copied template and appends."""
+        record = self.target / "docs" / "decisions" / "lightweight-decisions.md"
+        record.unlink()  # scaffold-init seeds it; the pre-feature shape has none
+
+        helper = self._copied_helper("jig-memory-sync", "decisions.py")
+        r = subprocess.run(
+            [sys.executable, str(helper), "add-lightweight",
+             "--title", "Probe entry",
+             "--decision", "recorded from copied machinery",
+             "--context", "scaffold mode has no CLAUDE_PLUGIN_ROOT",
+             "--scope", "test fixture",
+             "--project-dir", str(self.target)],
+            capture_output=True, text=True, env=self._scaffold_mode_env(),
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"copied decisions.py could not seed its record home:\n"
+            f"stderr={r.stderr}\nstdout={r.stdout}",
+        )
+        self.assertTrue(record.is_file(), f"record home not seeded: {record}")
+        self.assertIn("Probe entry", record.read_text(),
+                      "seeded file must carry the appended entry")
+
+    # ----- AC2: adr.py seeds a new ADR --------------------------------------
+    def test_ac2_scaffold_mode_opens_an_adr_without_plugin_root(self):
+        """AC2 — the family's second member. `adr.py` had the identical gap
+        and no mitigation; unlike the record home, its template is never
+        rendered into the project at install time, so this fails on a
+        *fresh* scaffold today."""
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        env = self._scaffold_mode_env()
+        # `checkout -b` is load-bearing, not cosmetic: off `main`, `adr.py new
+        # --no-push` routes to `_reserve_local_on_current_branch`, which skips
+        # the clean-tree gate. On `main` that gate refuses outright — a freshly
+        # scaffolded tree is entirely untracked. `commit.gpgsign=false` isolates
+        # the fixture from a maintainer's global signing config, which would
+        # otherwise fail this test with "copied adr.py could not scaffold an
+        # ADR" and blame the feature for the environment.
+        for args in (["init", "-q"],
+                     ["config", "commit.gpgsign", "false"],
+                     ["checkout", "-q", "-b", "probe-branch"]):
+            g = subprocess.run(["git", *args], cwd=str(self.target),
+                               capture_output=True, text=True, env=env)
+            self.assertEqual(g.returncode, 0, f"git {args}: {g.stderr}")
+
+        helper = self._copied_helper("jig-adr-workflow", "adr.py")
+        r = subprocess.run(
+            [sys.executable, str(helper), "new", "probe-decision",
+             "--no-push", "--project-dir", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"copied adr.py could not scaffold an ADR:\n"
+            f"stderr={r.stderr}\nstdout={r.stdout}",
+        )
+        written = sorted(
+            (self.target / "docs" / "decisions").glob("adr-*-probe-decision.md")
+        )
+        self.assertEqual(len(written), 1,
+                         f"expected one new ADR, found {written}")
+        self.assertIn("Proposed", written[0].read_text(),
+                      "ADR must be rendered from the copied template")
+
+    # ----- AC3: the copy mirrors Codex --------------------------------------
+    def test_ac3_every_plugin_template_is_copied(self):
+        """AC3 — every file under the plugin's `templates/` lands under
+        `.claude/templates/` at the same relative path."""
+        src_root = REPO_ROOT / "templates"
+        expected = {
+            str(p.relative_to(src_root))
+            for p in src_root.rglob("*") if p.is_file()
+        }
+        self.assertTrue(expected, "fixture check: plugin has no templates/")
+        self.assertEqual(
+            set(self._templates_snapshot()), expected,
+            "copied .claude/templates/ must mirror the plugin's templates/ "
+            "tree file-for-file (parity with _copy_codex_templates)",
+        )
+
+    # ----- AC4: copied templates name the copied machinery ------------------
+    def test_ac4_copied_md_templates_name_the_copied_helpers(self):
+        """AC4 — a record seeded from a copied template must not name
+        `${CLAUDE_PLUGIN_ROOT}`, which is unset in the project that seeded
+        it. Same transform SKILL.md bodies and rendered docs already get."""
+        template = (self.target / ".claude" / "templates" / "docs"
+                    / "decisions" / "lightweight-decisions.md.template")
+        body = template.read_text()
+        self.assertNotIn(
+            "${CLAUDE_PLUGIN_ROOT}/skills/", body,
+            "copied template still names the plugin root — the command it "
+            "teaches would not run in the project that carries it",
+        )
+        self.assertIn(
+            "${CLAUDE_PROJECT_DIR}/.claude/skills/jig-memory-sync/", body,
+            "copied template must name the copied helper",
+        )
+
+    def test_ac4_rewritten_templates_without_a_literal_are_byte_identical(self):
+        """AC4 edge case — the rewrite is a substitution, not a re-render.
+        These go through `_rewrite_skill_md_paths` (they end `.md.template`)
+        but carry no plugin-root literal, so the round trip
+        read_text→sub→atomic_write_text must return the source bytes.
+
+        An earlier version of this test asserted the edge case against
+        `adr-0000-template.md` / `scaffold.json.template` — neither of which
+        ends in `.md.template`, so both took the byte-copy branch and the
+        rewrite path was never exercised at all. Caught in review.
+        """
+        for rel in ("docs/conventions.md.template",
+                    "docs/memory/glossary.md.template"):
+            src = (REPO_ROOT / "templates" / rel).read_bytes()
+            self.assertTrue(rel.endswith(".md.template"),
+                            f"fixture check: {rel} must take the rewrite branch")
+            self.assertNotIn(b"${CLAUDE_PLUGIN_ROOT}/skills/", src,
+                             f"fixture check: {rel} has a plugin-root literal")
+            copied = (self.target / ".claude" / "templates" / rel).read_bytes()
+            self.assertEqual(
+                copied, src,
+                f"{rel} has nothing to rewrite — it must survive byte-for-byte")
+
+    def test_ac4_non_md_templates_are_byte_copied(self):
+        """AC4 edge case — files that are not `.md.template` skip the rewrite
+        entirely and are byte-copied. Iterated rather than hand-listed: a
+        hardcoded pair silently stops covering whatever gets added to
+        `templates/` next (it had already missed `docs/specs/slice-template.md`,
+        which `workflow.py` reads at runtime)."""
+        src_root = REPO_ROOT / "templates"
+        checked = 0
+        for src in sorted(src_root.rglob("*")):
+            if not src.is_file() or src.name.endswith(".md.template"):
+                continue
+            rel = src.relative_to(src_root)
+            copied = (self.target / ".claude" / "templates" / rel)
+            self.assertEqual(copied.read_bytes(), src.read_bytes(),
+                             f"{rel} must be copied verbatim")
+            checked += 1
+        self.assertTrue(checked, "fixture check: no byte-copied templates found")
+
+    # ----- The other two consumers (deviation log §2) ------------------------
+    # The spec framed this as a two-helper family; it is five, and two of the
+    # others silently change behaviour here. AC3 pins that their template files
+    # are copied; these pin that the helpers actually USE them — which is the
+    # claim, and the evidence that copying the whole tree beat an allowlist of
+    # the two templates the ACs happened to name.
+
+    def test_workflow_renders_the_real_slice_template_not_the_fallback(self):
+        """`workflow.py` `_render_stub_slice` reads
+        `parents[2]/templates/docs/specs/slice-template.md`, falling back to a
+        degraded inline template when unreachable. In scaffold mode it now
+        finds the real one. Distinguished by a marker only the on-disk
+        template carries — asserting `is_file()` on the copy would prove
+        nothing AC3 doesn't."""
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        env = self._scaffold_mode_env()
+        for args in (["init", "-q"],
+                     ["config", "commit.gpgsign", "false"],
+                     ["checkout", "-q", "-b", "probe-branch"]):
+            subprocess.run(["git", *args], cwd=str(self.target),
+                           capture_output=True, text=True, env=env, check=True)
+
+        helper = self._copied_helper("jig-spec-workflow", "workflow.py")
+        r = subprocess.run(
+            [sys.executable, str(helper), "new", "probe-spec", "--no-push",
+             "--project-dir", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0,
+                         f"copied workflow.py new failed:\nstderr={r.stderr}")
+        slices = sorted(
+            (self.target / "docs" / "specs").glob("*-probe-spec/slice-01-*.md")
+        )
+        self.assertEqual(len(slices), 1, f"expected one slice, got {slices}")
+        body = slices[0].read_text()
+        marker = "kind: spike"
+        self.assertIn(
+            marker, body,
+            "rendered from the degraded inline fallback, not the copied "
+            "template — the fallback carries no spike-slice section",
+        )
+
+    def test_memory_bootstraps_people_md_from_the_copied_template(self):
+        """`memory.py`'s people.md bootstrap reads
+        `plugin_root()/templates/docs/memory/people.md.template`. Before this
+        slice its degrade path fired in scaffold mode — its own message said
+        the failure was "expected for a scaffold-mode target"."""
+        people = self.target / "docs" / "memory" / "people.md"
+        if people.exists():
+            people.unlink()
+        helper = self._copied_helper("jig-memory-sync", "memory.py")
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; from pathlib import Path;"
+             f"sys.path.insert(0, {str(helper.parent)!r});"
+             f"sys.path.insert(0, {str(helper.parent.parent)!r});"
+             "import memory;"
+             f"w, m = memory._bootstrap_people_md(Path({str(self.target)!r}));"
+             "print(w); print(m)"],
+            capture_output=True, text=True, env=self._scaffold_mode_env(),
+        )
+        self.assertEqual(r.returncode, 0,
+                         f"copied memory.py failed:\nstderr={r.stderr}")
+        self.assertTrue(r.stdout.startswith("True"),
+                        f"bootstrap did not write people.md: {r.stdout}")
+        self.assertTrue(people.is_file(), "people.md was not created")
+    # ----- AC5: idempotent re-run -------------------------------------------
+    def test_ac5_rerun_leaves_templates_byte_identical(self):
+        """AC5 — `migrate copy-machinery` re-runs over an existing project to
+        refresh machinery; the template copy must be idempotent."""
+        before = self._templates_snapshot()
+        r = run_scaffold_with_args(
+            self.target, "--with-machinery", "--has-tests", "--force")
+        self.assertEqual(r.returncode, 0, f"re-run failed: {r.stderr}")
+        self.assertEqual(self._templates_snapshot(), before,
+                         "re-run must leave .claude/templates/ unchanged")
+
+
+class PluginOnlyTemplatesTests(unittest.TestCase):
+    """Spec 095-01 AC6 — the template copy rides the machinery copy. In
+    `--plugin-only` mode the plugin root IS the template home, so a copied
+    tree would be dead weight."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-095-plugin-only-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_ac6_plugin_only_writes_no_templates(self):
+        r = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse(
+            (self.target / ".claude" / "templates").exists(),
+            "--plugin-only must not create .claude/templates/",
+        )
 
 
 # --------------------------------------------------------------------------
@@ -937,6 +1297,15 @@ class MergeExistingSettingsTests(unittest.TestCase):
                 "The safety check must run BEFORE the hook-script copy "
                 "loop so a refused scaffold leaves no trace.",
             )
+        # Slice 095-01 — same invariant for the template tree. Without this,
+        # swapping `_check_hooks_safety` and `_copy_claude_templates` in
+        # `copy_machinery` would strand a 25-file `.claude/templates/` tree on
+        # a refused run while the suite stayed green.
+        self.assertFalse(
+            (self.target / ".claude" / "templates").exists(),
+            "refused scaffold left a partial .claude/templates/ tree — the "
+            "safety check must run BEFORE the template copy.",
+        )
 
     def test_force_overrides_unmanaged_hooks_refusal(self):
         """AC #4 — --force is the documented escape hatch. With it, the
@@ -1369,7 +1738,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         for role, sandbox in expected_sandbox.items():
             agent = self.target / ".codex" / "agents" / f"jig-{role}.toml"
             self.assertTrue(agent.is_file(), f"missing Codex agent: {agent}")
-            data = tomllib.loads(agent.read_text())
+            data = _load_agent_toml(agent.read_text())
             self.assertEqual(data["name"], f"jig-{role}")
             self.assertEqual(data["sandbox_mode"], sandbox)
             self.assertIn("Codex adapter note", data["developer_instructions"])
@@ -1399,7 +1768,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
 
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertIn("installed 3 Codex agent(s)", r.stdout)
-        data = tomllib.loads((agents_dir / "jig-reviewer.toml").read_text())
+        data = _load_agent_toml((agents_dir / "jig-reviewer.toml").read_text())
         self.assertEqual(data["name"], "jig-reviewer")
         self.assertEqual(data["sandbox_mode"], "read-only")
 
@@ -2319,14 +2688,3 @@ class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-def load_tests(loader, tests, pattern):  # unittest discover hook
-    # Codex packaging validation needs tomllib (Python 3.11+). jig is
-    # zero-dependency, so there is no tomli fallback — skip the whole module
-    # below the 3.9 floor rather than error on a missing stdlib import.
-    import sys as _sys
-    import unittest as _unittest
-    if _sys.version_info < (3, 11):
-        return _unittest.TestSuite()
-    return tests
