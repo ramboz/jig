@@ -71,7 +71,8 @@ try:
     # settled both ways surfaces ONCE (no double-surface). Stubs are already
     # flagged against recorded; flag the scan hits against recorded too. Nothing
     # is suppressed for being already recorded — the owner triages (bug 011).
-    scan_candidates = dedup_scan_against_stubs(scan(messages), stub_candidates)
+    scan_candidates = dedup_scan_against_stubs(
+        scan(messages), stub_candidates, project_dir=project_dir)
     candidates = stub_candidates + flag_duplicates(scan_candidates, recorded)
     candidates.sort(key=lambda c: (c.turn, c.tier))
 

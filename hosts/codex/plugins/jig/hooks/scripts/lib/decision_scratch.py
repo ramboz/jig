@@ -37,8 +37,10 @@ try:  # pragma: no cover - exercised by both import paths
     from decision_scan import (
         Candidate,
         clip,
+        containment,
         is_contained,
         is_user_override,
+        normalize_tokens,
         strip_machine_text,
         token_sets,
     )
@@ -46,13 +48,16 @@ except ImportError:  # pragma: no cover
     from lib.decision_scan import (
         Candidate,
         clip,
+        containment,
         is_contained,
         is_user_override,
+        normalize_tokens,
         strip_machine_text,
         token_sets,
     )
 
 _SCRATCH_DIR = Path(".jig") / "decision-scratch"
+_SUPPRESSION_LOG = Path(".jig") / "decision-suppressions.log"
 _SOURCE_TIER = {"askuserquestion": 1, "user-override": 2}
 
 
@@ -193,7 +198,58 @@ def stubs_to_candidates(stubs) -> list:
     return candidates
 
 
-def dedup_scan_against_stubs(scan_candidates, stub_candidates) -> list:
+def suppression_log_path(project_dir) -> Path:
+    """Path to the append-only suppression log under `.jig/`.
+
+    One project-wide inspectable file (not per-session): a drop is rare and the
+    owner reads it as an audit trail across sessions. Append-only and unbounded
+    by design — it is never read back into context (so it has no context cost),
+    each line is a clipped one-liner, and it is git-ignored; the owner prunes it
+    if it ever grows inconvenient."""
+    return Path(project_dir) / _SUPPRESSION_LOG
+
+
+def log_suppression(project_dir, call_site, candidate, matched, score) -> bool:
+    """Append one JSON line recording a suppressed (dropped) candidate.
+
+    The additive half of bug 011: the drop itself is unchanged, but it stops
+    being silent — `nothing found` and `found and dropped` now differ on disk.
+    Records the dropped candidate, the record/stub that covered it, and the raw
+    containment score that decided the drop, tagged with the call site so a
+    future second drop path is distinguishable. Fail-open (returns False on any
+    error): observability must never change what is or isn't suppressed.
+    """
+    if not project_dir:
+        return False
+    try:
+        cand_entry = {
+            "quote": candidate.quote,
+            "tier": candidate.tier,
+            "who": candidate.who,
+        }
+        # The dropped candidate's transcript turn is the owner's locator for the
+        # possibly-reversing statement — the whole reason this log exists. Guard
+        # it the same way `matched`'s turn is (a stub with no turn carries -1).
+        if isinstance(candidate.turn, int) and candidate.turn >= 0:
+            cand_entry["turn"] = candidate.turn
+        entry = {
+            "timestamp": _now_iso(),
+            "call_site": call_site,
+            "candidate": cand_entry,
+            "matched": matched,
+            "containment": round(score, 3),
+        }
+        path = suppression_log_path(project_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, sort_keys=True) + "\n")
+        return True
+    except Exception:
+        return False
+
+
+def dedup_scan_against_stubs(scan_candidates, stub_candidates,
+                             project_dir=None) -> list:
     """Drop scan candidates already captured in-flight (no double-surface).
 
     Deliberately still a *drop*, unlike the recorded-corpus paths: this collapses
@@ -204,10 +260,45 @@ def dedup_scan_against_stubs(scan_candidates, stub_candidates) -> list:
     Residual (bug 011, accepted): a Tier-3 *agent* restatement that in fact
     reverses a stub is dropped here, since agent prose never produces a stub of
     its own to survive as. Low value — Tier 3 is low-confidence by construction.
+
+    `project_dir` opts the drop into the `.jig/` suppression log (bug 011 option
+    4): every drop is recorded there so it is no longer indistinguishable from an
+    empty scan. Omitting it (pure-function callers) logs nothing and changes
+    nothing.
     """
-    stubs = token_sets(c.quote for c in (stub_candidates or []))
-    return [c for c in (scan_candidates or [])
-            if not is_contained(c.quote, stubs)]
+    stubs = list(stub_candidates or [])
+    stub_sets = token_sets(c.quote for c in stubs)
+    kept = []
+    for cand in (scan_candidates or []):
+        if is_contained(cand.quote, stub_sets):
+            if project_dir is not None:
+                _log_stub_suppression(project_dir, cand, stubs)
+            continue
+        kept.append(cand)
+    return kept
+
+
+def _log_stub_suppression(project_dir, cand, stubs) -> None:
+    """Record one drop from `dedup_scan_against_stubs`, naming the covering stub.
+
+    Fail-open wrapper: finding the best-matching stub for the log must never
+    raise into the drop loop."""
+    try:
+        best = None
+        best_score = 0.0
+        for stub in stubs:
+            score = containment(cand.quote, [normalize_tokens(stub.quote)])
+            if score >= best_score:
+                best, best_score = stub, score
+        matched = None
+        if best is not None:
+            matched = {"quote": best.quote, "who": best.who, "tier": best.tier}
+            if isinstance(best.turn, int) and best.turn >= 0:
+                matched["turn"] = best.turn
+        log_suppression(project_dir, "dedup_scan_against_stubs",
+                        cand, matched, best_score)
+    except Exception:
+        pass
 
 
 def _collect_strings(obj, out, budget=40):
