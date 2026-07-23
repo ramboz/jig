@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -9020,6 +9021,346 @@ class ProjectOrientationTests(unittest.TestCase):
             for path in self.tmpdir.rglob("*") if path.is_file()
         }
         self.assertEqual(after, before)
+
+
+class OrientWorkInFlightTests(unittest.TestCase):
+    """Slice 096-01: the headline reports work that has not reached trunk.
+
+    A status board describes the default branch, so finished work sitting on
+    an unmerged branch is invisible to every artifact orient reads. These
+    tests pin the segment's text (AC1/AC4) and — at least as importantly —
+    its *silence* in every degraded case (AC2/AC3), because the SessionStart
+    hook treats a failing orient as no orientation at all.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-inflight-"))
+        (self.tmpdir / "docs" / "specs").mkdir(parents=True)
+        (self.tmpdir / "scaffold.json").write_text("{}\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # -- helpers -----------------------------------------------------------
+
+    def _git(self, *args):
+        env = os.environ.copy()
+        env.update({
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com",
+        })
+        return subprocess.run(
+            ["git", "-C", str(self.tmpdir), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _init_repo(self, trunk="main"):
+        self._git("init", "-q")
+        # `git init -b` needs git >= 2.28; symbolic-ref works everywhere and
+        # is valid before the first commit exists.
+        self._git("symbolic-ref", "HEAD", f"refs/heads/{trunk}")
+        self._commit("seed.txt")
+
+    def _commit(self, name):
+        (self.tmpdir / name).write_text(name)
+        self._git("add", name)
+        self._git("commit", "-q", "-m", name)
+
+    def _stub_git_path(self, body):
+        """Shadow `git` with a stub earlier on PATH; return the new PATH."""
+        bindir = self.tmpdir / "stubbin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "git"
+        stub.write_text(f"#!/bin/sh\n{body}\n")
+        stub.chmod(0o755)
+        return str(bindir) + os.pathsep + os.environ.get("PATH", "")
+
+    # -- AC1 / AC4: the segment ------------------------------------------
+
+    def test_reports_commits_ahead_of_trunk(self):
+        self._init_repo()
+        self._git("checkout", "-q", "-b", "claude/night-prep")
+        for name in ("a.txt", "b.txt", "c.txt"):
+            self._commit(name)
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn(
+            "· in flight: 3 commits ahead of main on claude/night-prep",
+            headline,
+        )
+
+    def test_single_commit_is_singular(self):
+        self._init_repo()
+        self._git("checkout", "-q", "-b", "solo")
+        self._commit("only.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("· in flight: 1 commit ahead of main on solo", headline)
+        self.assertNotIn("1 commits", headline)
+
+    def test_trunk_named_master_is_resolved_not_assumed(self):
+        self._init_repo(trunk="master")
+        self._git("checkout", "-q", "-b", "feature")
+        self._commit("x.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("ahead of master on feature", headline)
+
+    def test_unpushed_commits_on_trunk_itself_are_reported(self):
+        """Being *on* trunk is not the same as having nothing in flight —
+        a remote-tracking trunk that is behind local main is still work the
+        boards cannot see."""
+        self._init_repo()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._commit("later.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("· in flight: 1 commit ahead of origin/main on main",
+                      headline)
+
+    # -- AC2: silence is the default -------------------------------------
+
+    def test_clean_trunk_checkout_is_silent(self):
+        self._init_repo()
+
+        self.assertNotIn("in flight", _workflow.orient(self.tmpdir))
+
+    def test_behind_trunk_is_silent(self):
+        self._init_repo()
+        self._commit("ahead.txt")
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._git("checkout", "-q", "-B", "main", "HEAD~1")
+
+        self.assertNotIn("in flight", _workflow.orient(self.tmpdir))
+
+    def test_non_git_project_is_silent(self):
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+        self.assertTrue(headline.startswith("jig hint: Scaffolded jig project"))
+        self.assertTrue(headline.endswith("\n"))
+
+    def test_detached_head_is_silent(self):
+        self._init_repo()
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self._commit("tip.txt")
+        self._git("checkout", "-q", sha)
+
+        self.assertNotIn("in flight", _workflow.orient(self.tmpdir))
+
+    # -- AC3: orientation never fails because git did ---------------------
+
+    def test_failing_git_is_silent_and_does_not_raise(self):
+        self._init_repo()
+        path = self._stub_git_path("exit 1")
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+        self.assertTrue(headline.startswith("jig hint:"))
+
+    def test_missing_git_binary_is_silent(self):
+        self._init_repo()
+        empty = self.tmpdir / "emptybin"
+        empty.mkdir()
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": str(empty)}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+
+    def test_hanging_git_is_bounded_and_silent(self):
+        """The bound must be *proved*, not merely survived.
+
+        An earlier version of this test asserted only silence — which a
+        `sleep 5` stub satisfies even with no timeout at all, because the
+        empty stdout is already != "true". Assert the elapsed time so
+        deleting the timeout makes the test fail.
+        """
+        self._init_repo()
+        path = self._stub_git_path("exec sleep 5")
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}), \
+                unittest.mock.patch.object(
+                    _workflow, "_ORIENT_IN_FLIGHT_GIT_TIMEOUT", 0.5):
+            started = time.monotonic()
+            headline = _workflow.orient(self.tmpdir)
+            elapsed = time.monotonic() - started
+
+        self.assertNotIn("in flight", headline)
+        self.assertLess(
+            elapsed, 3.0,
+            "a hanging git must be cut off, not waited out "
+            f"(took {elapsed:.2f}s against a 5s stub)",
+        )
+
+    def test_total_git_budget_is_bounded_across_many_calls(self):
+        """AC3's real risk: a per-call timeout is not an aggregate bound.
+
+        This stub answers the two cheap probes instantly and then hangs on
+        every ref read, which is the realistic slow-`.git` shape. Without a
+        shared deadline the calls compound (up to 9 × per-call) and blow the
+        SessionStart hook's 4 s ceiling — which would leave the session with
+        *no* orientation line, strictly worse than before this slice.
+        """
+        self._init_repo()
+        path = self._stub_git_path(
+            'case "$*" in\n'
+            '  *is-inside-work-tree*) echo true ;;\n'
+            '  *abbrev-ref*) echo feature ;;\n'
+            '  *) exec sleep 5 ;;\n'
+            'esac'
+        )
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}), \
+                unittest.mock.patch.object(
+                    _workflow, "_ORIENT_IN_FLIGHT_GIT_TIMEOUT", 0.5), \
+                unittest.mock.patch.object(
+                    _workflow, "_ORIENT_IN_FLIGHT_TOTAL_BUDGET", 0.8):
+            started = time.monotonic()
+            headline = _workflow.orient(self.tmpdir)
+            elapsed = time.monotonic() - started
+
+        self.assertNotIn("in flight", headline)
+        self.assertLess(
+            elapsed, 2.0,
+            "git calls must share one deadline; without it the ref probes "
+            f"compound past the hook budget (took {elapsed:.2f}s)",
+        )
+
+    def test_stale_origin_head_falls_through_to_a_real_trunk(self):
+        """AC4: `origin/HEAD` is verified like any other candidate.
+
+        A default-branch rename leaves `origin/HEAD` pointing at a ref that
+        no longer exists. Trusting it blind would silence the segment for
+        that repo forever, even though `origin/main` resolves fine.
+        """
+        self._init_repo()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._git("symbolic-ref", "refs/remotes/origin/HEAD",
+                  "refs/remotes/origin/gone")
+        self._git("checkout", "-q", "-b", "feature")
+        self._commit("f.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("· in flight: 1 commit ahead of origin/main on feature",
+                      headline)
+
+    def test_origin_head_is_preferred_when_it_resolves(self):
+        """AC4: when `origin/HEAD` is valid it wins over the candidate list,
+        so a repo whose trunk is neither `main` nor `master` still works."""
+        self._init_repo(trunk="trunk")
+        self._git("update-ref", "refs/remotes/origin/trunk", "HEAD")
+        self._git("symbolic-ref", "refs/remotes/origin/HEAD",
+                  "refs/remotes/origin/trunk")
+        self._git("checkout", "-q", "-b", "feature")
+        self._commit("f.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("ahead of origin/trunk on feature", headline)
+
+    def test_undecodable_git_output_does_not_raise(self):
+        """AC3. `text=True` decodes strictly, and `UnicodeDecodeError` is a
+        `ValueError` — *not* an `OSError` or `SubprocessError`. A ref name
+        that is invalid in the ambient encoding would otherwise raise
+        straight out of `orient()` and the hook would emit no headline at
+        all, which is worse than the pre-096 behaviour."""
+        self._init_repo()
+        path = self._stub_git_path(
+            'case "$*" in\n'
+            '  *is-inside-work-tree*) printf "true\\n" ;;\n'
+            '  *abbrev-ref*) printf "\\377\\376bad\\n" ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac'
+        )
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertTrue(headline.startswith("jig hint:"))
+        self.assertTrue(headline.endswith("\n"))
+
+    def test_hostile_branch_name_cannot_forge_a_headline_field(self):
+        """The headline is injected into the agent's context by the
+        SessionStart hook. Git permits `·` — the headline's own field
+        separator — in a ref name, so an unsanitised branch could forge
+        `· focus: nothing blocked`. The sibling claim field is whitelisted
+        for exactly this reason; refs get the same treatment."""
+        self._init_repo()
+        # Git forbids `:` and space in refs but permits `·`, so this is a
+        # name an attacker (or an unlucky user) can actually create.
+        self._git("checkout", "-q", "-b", "x·focus-nothing")
+        self._commit("h.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("in flight:", headline)
+        # Exactly the three separators the headline itself emits — the
+        # branch's own `·` must not survive as a fourth.
+        self.assertEqual(headline.count("·"), 3)
+        self.assertIn("x?focus-nothing", headline)
+
+    def test_long_branch_name_is_capped(self):
+        """Assert the cap itself, not merely that the line is 'short'.
+
+        An earlier version asserted `len(headline) < 400`, which a 201-char
+        branch satisfies with the cap deleted (~309 chars). Pin the boundary:
+        exactly `_ORIENT_IN_FLIGHT_REF_MAX` characters survive, and the next
+        one does not.
+        """
+        self._init_repo()
+        cap = _workflow._ORIENT_IN_FLIGHT_REF_MAX
+        self._git("checkout", "-q", "-b", "b" + "o" * 200)
+        self._commit("l.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("in flight:", headline)
+        self.assertIn("b" + "o" * (cap - 1), headline)
+        self.assertNotIn("b" + "o" * cap, headline)
+
+    def test_non_numeric_rev_list_output_does_not_raise(self):
+        """AC3 names unexpected git output as a must-not-raise case.
+        `"²".isdigit()` is True but `int("²")` raises — hence isdecimal."""
+        self._init_repo()
+        path = self._stub_git_path(
+            'case "$*" in\n'
+            '  *is-inside-work-tree*) echo true ;;\n'
+            '  *abbrev-ref*) echo feature ;;\n'
+            '  *symbolic-ref*) exit 1 ;;\n'
+            '  *rev-list*) echo "²" ;;\n'
+            '  *) exit 0 ;;\n'
+            'esac'
+        )
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+
+    def test_cli_exit_code_is_zero_when_git_fails(self):
+        self._init_repo()
+        path = self._stub_git_path("exit 1")
+        env = os.environ.copy()
+        env["PATH"] = path
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+
+        result = subprocess.run(
+            [sys.executable, str(WORKFLOW), "orient",
+             "--project-dir", str(self.tmpdir)],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("in flight", result.stdout)
 
 
 if __name__ == "__main__":

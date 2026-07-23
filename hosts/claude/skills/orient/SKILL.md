@@ -2,9 +2,10 @@
 name: orient
 description: >-
   Orient a spec-driven jig/servo/shaper repository with a read-only, project-wide
-  briefing: start from the `workflow.py orient` headline, then survey Proposed
-  ADRs, DEFERRED triggers, refinement items, release plans, the inbox, and the bug
-  board; render one readable headline, titled sections, one recommendation, and an
+  briefing: start from the `workflow.py orient` headline, then survey open pull
+  requests and unmerged work, Proposed ADRs, DEFERRED triggers, refinement items,
+  release plans, the inbox, and the bug board; render one readable headline,
+  titled sections, one recommendation, and an
   owning-skill handoff. Use when the user invokes `/jig:orient` or explicitly asks
   for a whole-project session pickup, a return-after-time-away briefing, the overall
   project status or big picture, or what to pick up next across the repository. Do
@@ -46,6 +47,8 @@ Run the read-only command spec 088 added and use its line as your factual base:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" orient --project-dir .
 # → jig hint: <scaffold state> · active specs: <rollup> · focus: <slice needing attention>
+#   …and, only when the checkout is ahead of its default branch:
+#   · in flight: <n> commit(s) ahead of <base> on <branch>
 ```
 
 That single `jig hint:` line — scaffold classification, active-spec rollup, and the
@@ -94,6 +97,14 @@ Orient report "no spec-driven project" on a perfectly valid track-local repo.
 
 Projects vary, so look for these, use what exists, don't assume they all exist:
 
+- **Open pull requests — check these FIRST, and never skip them.** Run `gh pr list`
+  and **read the body** of each open PR (`gh pr view <n>`): unattended workers —
+  overnight, cron, servo loops — put their questions-for-the-owner in the PR
+  description and nowhere else. For each, note what it asks for, whether it is stale
+  against newer local commits, and whether its branch is already an ancestor of local
+  work. If `gh` is unavailable, unauthenticated, or the repo has no remote, **say so in
+  one line** rather than silently omitting the section — "could not check" and "nothing
+  waiting" are different answers.
 - **Spec status** — `<docs_root>/specs/<MNN-slug>/` slice files and the spec status board
   `<docs_root>/specs/README.md`. Read each slice's STATUS marker: `DRAFT`,
   `READY_FOR_REVIEW`, `READY_FOR_IMPLEMENTATION`, `IN_PROGRESS`, `REVIEWED`, `RECONCILED`,
@@ -118,6 +129,10 @@ Projects vary, so look for these, use what exists, don't assume they all exist:
   deferred, and whether a milestone is at risk.
 - **Recent work** — the last few commits and any IN_PROGRESS slice, to say honestly
   what just landed (and flag when the board may be stale vs. a very recent commit).
+  `workflow.py orient` already reports **unmerged local work** in its `in flight:`
+  segment when the checkout is ahead of its default branch; when you see it, name the
+  branch. A status board only ever describes the default branch, so finished work
+  parked on a branch is invisible to every artifact above.
 
 If tests or a green-count are cheaply visible (a recent run, an oracle summary), cite the
 number in the headline as a proof point — but **don't run long suites** just to decorate
@@ -152,41 +167,62 @@ quietly slipping." Cite a proof point if one is cheap (e.g. "252 tests green").
 The single (occasionally two) most natural next thing. A titled bullet with: what it is,
 why it follows now, and any dependency/blocker. This is your lead recommendation candidate.
 
-### 3. The one decision blocking the most (when one exists)
+### 3. Waiting on you — open PRs and unmerged work (when any exist)
+
+Anything already finished and parked in front of the user. One titled bullet each: the
+PR number and title, what it is asking them for, and whether it is still current. This
+sits high in the layout on purpose — a PR awaiting review is work that is *done* and
+blocked only on a human, which almost always outranks work not yet started.
+
+Flag these three explicitly when true, because each one misleads differently:
+
+- **Stale** — newer local commits already answer or supersede it ("PR #1 asks 5
+  questions; 4 were decided today on `<branch>`, and the PR does not show it").
+- **Unmerged branch, no PR** — finished work that no status board reflects, because a
+  board only ever describes the default branch.
+- **Superseded** — the PR's branch is an ancestor of newer local work, so it can be
+  fast-forwarded rather than redone.
+
+> *__PR #1 — night: ground the spec-002 timer drafts__ — asks you 5 questions; 4 were
+> answered today but the PR still shows them open. Clean fast-forward.*
+
+### 4. The one decision blocking the most (when one exists)
 
 If a `Proposed` ADR or a parked owner-decision unblocks more than anything else, surface it
 here, prominently, **before** the long lists. Say what it is, that it's awaiting *their*
 call, and **what deciding it unblocks**. Only include this section when such a decision
-genuinely exists.
+genuinely exists. **Cross-check it against the open PRs first** — a question the user has
+already been asked in a PR body is not a fresh decision to re-derive and re-frame, it is
+an outstanding one to point at.
 
-### 4. Larger deferred bets / packs (when they exist)
+### 5. Larger deferred bets / packs (when they exist)
 
 The bigger parked items that need a **trigger or a decision** before they're actionable.
 One titled bullet each: title — one-line what — the trigger or what's blocking it. Group
 tightly; this is a menu, not an essay.
 
-### 5. The DRAFT queue / ready to build (when specs are DRAFT)
+### 6. The DRAFT queue / ready to build (when specs are DRAFT)
 
 Specs or slices sitting in DRAFT/READY awaiting a go-ahead. One bullet each with the spec
 id and a one-line scope. Note if any is beta/release-blocking, and flag any board row that
 looks stale against a very recent commit.
 
-### 6. Polish follow-ups (when they exist)
+### 7. Polish follow-ups (when they exist)
 
 The small, satisfying parked items — extractions, autocompletes, test-depth, a deferred
 AC. Terse bullets; these are the "if you have an hour" pile.
 
-### 7. Standalone fixes — no spec ceremony (when they exist)
+### 8. Standalone fixes — no spec ceremony (when they exist)
 
 Real bugs or contained correctness issues worth doing without a spec. One bullet each:
 the symptom, and the contained root-cause/fix if known.
 
-### 8. My recommendation (always)
+### 9. My recommendation (always)
 
 **One** clear pick, with a two-to-three-sentence why. Name the single dependency or first
 decision it needs. Don't re-list the menu — commit to a direction.
 
-### 9. The offer (always)
+### 10. The offer (always)
 
 End with a concrete either/or that hands off to the real work:
 > *Want me to draft the 002-07 spec slice, or would you rather tackle backup restore — the
@@ -232,6 +268,13 @@ Name the handoff in the offer; let the user green-light it.
   from the `workflow.py orient` line). If you're unsure whether a trigger is met or a board
   is stale, say so ("b08a627 just landed 036-05, so this row may be stale") rather than
   asserting.
+- **"What's next" means what is *blocked on a human*, not what the repo contains.** The
+  filesystem gives you state; the PR queue and unmerged branches give you what is waiting
+  on a decision. A survey that reads only local files will confidently report a project as
+  unblocked while an open PR sits asking the user five direct questions. Check the
+  collaboration layer **every run — including on a re-ask later in the same session**,
+  when it is tempting to answer from what you already have in context rather than looking
+  again.
 - **Honest headline.** Surface slippage and shipped-more-than-expected with equal candor.
   Don't cheerlead; don't doom.
 - **One recommendation, not a shrug.** The user came for direction. Pick one, say why, and
