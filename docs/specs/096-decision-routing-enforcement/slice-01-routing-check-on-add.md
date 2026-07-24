@@ -54,11 +54,27 @@ ship stale. This slice lands last of the four.
    updated decision now clears `ADR_TRIGGER`, use `decisions.py promote --title
    …` rather than `update`, so the record moves to an ADR and leaves a
    forward-linking stub. The command it names must be the real one 096-03 ships.
-3. **It quotes `ADR_TRIGGER` verbatim.** The trigger sentence in the new guidance
-   is byte-identical to the constant, and `test_decisions.py::SingleSourceDriftTests`
-   is extended to assert this fifth site — so the guidance cannot drift from the
-   rule it applies. This is the single change that makes the prose load-bearing
-   rather than decorative.
+3. **It is bound to the canonical `ADR_TRIGGER`, and the binding is tested.**
+   The guidance judges against the trigger sentence single-sourced from
+   ADR-0031, and a test fails if that linkage is broken.
+
+   **Amended during implementation** (see deviation log). As written this AC
+   asked for a *second* verbatim copy of the sentence in `SKILL.md`, asserted as
+   a "fifth site" by `SingleSourceDriftTests`. That is unimplementable as
+   stated: `_assert_contains_trigger` is a whole-file `assertIn`, and this file
+   is *already* one of the four asserted sites — so a second copy would be
+   pinned by a test that passes on the **old** copy regardless of what the new
+   guidance said. Worse, two copies in one file is weaker single-sourcing, not
+   stronger.
+
+   Implemented instead: the guidance **references** the one verbatim quote
+   already in this file ("the canonical ADR trigger quoted above"), and
+   `UpdateTimeRoutingGuidanceTests` pins what actually carries risk — that the
+   revision-time section exists, that it points at the trigger *and* that the
+   trigger is still in this file (so the reference resolves), that it routes to
+   `promote` and `update`, that it names the lint as advisory, and that it keeps
+   the meaning-not-vocabulary caveat. Verified to fail on drift by mutating the
+   prose.
 4. **Record-time gets a lighter reminder.** The `add-lightweight` guidance block
    notes that if a decision already clears the trigger *when first recorded*, it
    belongs in an ADR (`adr.py new`) from the start — the pre-existing routing

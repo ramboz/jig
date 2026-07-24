@@ -998,6 +998,98 @@ def promote_lightweight(project_dir: Path, title: str,
     return adr_path
 
 
+# --- Advisory lint (096-04 / ADR-0039) -------------------------------------
+# The ONE surface where the lexical evaluator is allowed to run. It reports;
+# it never edits, never seeds, and never blocks a write. ADR-0039 rejected
+# keyword-matching as a write-gate precisely because it is brittle — on an
+# advisory sweep a false positive costs a glance, which is a price worth
+# paying for catching records written before the routing guidance existed.
+
+LintFinding = namedtuple("LintFinding", "date title matches")
+LintReport = namedtuple("LintReport", "path scanned findings")
+
+
+def lint_lightweight(project_dir: Path):
+    """Report the recorded entries whose own text reads as ADR-worthy.
+
+    Returns a `LintReport(path, scanned, findings)`, or **None** when the
+    project has no lightweight-decisions file at all — an absent file has no
+    misfiling in it, and unlike `add_lightweight` this must NOT seed one:
+    seeding is a write, and the whole point of this surface is that it never
+    writes.
+
+    Raises ValueError (`_foreign_format_error`) for a file with no
+    `## Entries` heading, matching the rest of the helper — a file jig cannot
+    parse must fail loudly rather than be reported as clean.
+
+    Only `_real_entries` are scanned, so the illustrative worked example, the
+    `## Template` fence, and 096-03's promotion stubs are all out of scope:
+    documentation is not a decision, and a promoted entry has already been
+    dealt with. Re-reporting a stub would make the output permanently
+    non-empty and train the reader to ignore it.
+    """
+    path = lightweight_path(project_dir)
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
+    entries = _real_entries(text)
+    findings = []
+    for entry in entries:
+        matches = evaluate_routing_signals(
+            entry.title, entry.decision, entry.context, entry.scope)
+        if flags_adr_routing(matches):
+            findings.append(LintFinding(entry.date, entry.title, matches))
+    return LintReport(path, len(entries), findings)
+
+
+def _format_finding(finding) -> str:
+    """One finding, with the matched evidence and the command that fixes it.
+
+    Names the phrases, not just the groups: an advisory report the reader
+    cannot audit is one they have to either trust blindly or ignore, and this
+    signal is explicitly fallible (ADR-0039).
+    """
+    hits = "; ".join("%s: %r" % (m.group, m.phrase) for m in finding.matches)
+    return (
+        "  %s — %s\n"
+        "      matched %s (%s)\n"
+        "      promote with: decisions.py promote --title \"%s\""
+        % (finding.date, finding.title,
+           " and ".join(sorted({m.group for m in finding.matches})),
+           hits, finding.title)
+    )
+
+
+def _cmd_lint(args) -> int:
+    project_dir = Path(args.project_dir).resolve()
+    try:
+        report = lint_lightweight(project_dir)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    rel = _display_path(project_dir)
+    if report is None:
+        print("nothing to lint: %s does not exist" % rel)
+        return 0
+    if not report.findings:
+        # Naming the file and the count on a clean run: a bare "OK" is
+        # indistinguishable from a scan that silently matched nothing
+        # because it was pointed at the wrong file.
+        print("clean: %d entr%s scanned in %s, none read as ADR-worthy"
+              % (report.scanned, "y" if report.scanned == 1 else "ies", rel))
+        return 0
+    print("%d of %d entr%s in %s read as ADR-worthy:"
+          % (len(report.findings), report.scanned,
+             "y" if report.scanned == 1 else "ies", rel))
+    for finding in report.findings:
+        print(_format_finding(finding))
+    print("\nThis is an advisory signal, not a verdict — it matches wording, "
+          "not meaning. Judge each against the ADR trigger before promoting.")
+    return 0 if args.exit_zero else 1
+
+
 def _cmd_add_lightweight(args) -> int:
     project_dir = Path(args.project_dir).resolve()
     try:
@@ -1063,7 +1155,7 @@ def _cmd_promote(args) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=("jig lightweight-decisions helper "
-                     "(add-lightweight, update, promote)"))
+                     "(add-lightweight, update, promote, lint)"))
     sub = p.add_subparsers(dest="command", required=True)
 
     al = sub.add_parser(
@@ -1130,6 +1222,17 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--project-dir", default=".",
                     help="project root (default: cwd)")
     pp.set_defaults(func=_cmd_promote)
+
+    ln = sub.add_parser(
+        "lint",
+        help="report recorded entries whose text reads as ADR-worthy "
+             "(advisory, read-only)")
+    ln.add_argument("--exit-zero", action="store_true",
+                    help="report findings but still exit 0 — for a "
+                         "report-only run that must not fail a script")
+    ln.add_argument("--project-dir", default=".",
+                    help="project root (default: cwd)")
+    ln.set_defaults(func=_cmd_lint)
 
     return p
 

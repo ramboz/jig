@@ -1,7 +1,8 @@
 ---
-status: READY_FOR_IMPLEMENTATION
+status: IN_PROGRESS
 dependencies: [096-03]
 last_verified: 2026-07-24
+claimed_by: claude/ramboz-jig-121-f64f52
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on

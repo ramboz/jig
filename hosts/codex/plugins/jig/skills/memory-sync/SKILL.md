@@ -132,6 +132,43 @@ time, then persist now.
    Confirm with the user before writing — it's their decision to record, not
    yours to infer. If the decision clears the ADR trigger above, route it to an
    ADR (`adr.py new`) instead of here.
+
+   **Revising an already-recorded entry — re-ask the routing question first**
+   (spec 096-01 / [ADR-0039](../../docs/decisions/adr-0039-decision-routing-gate.md)).
+   A decision's weight can change *after* it was filed: [#121](https://github.com/ramboz/jig/issues/121)
+   reports one recorded as bounded, later re-priced by review into a
+   module-boundary change with rejected alternatives, edited in place, and never
+   re-routed. Routing is asked once at first write and never again — so **you**
+   ask it again here. Before revising, judge the entry **as it will read after
+   the change** against the canonical ADR trigger quoted above:
+
+   - **Clears the trigger** → promote it; do not revise it in place:
+     ```bash
+     python3 "${PLUGIN_ROOT}/skills/memory-sync/decisions.py" promote \
+       --title "<existing title>" [--slug "<adr-slug>"] [--no-push | --pr]
+     ```
+     This creates the ADR via `adr.py new`, seeds it from the entry's own
+     fields, and leaves a forward-linking stub so old references still land on
+     a record.
+   - **Still settled, local, and bounded** (one screen / component / string /
+     asset, no *real* rejected alternatives) → revise it in place. Omitted
+     fields keep their recorded values:
+     ```bash
+     python3 "${PLUGIN_ROOT}/skills/memory-sync/decisions.py" update \
+       --title "<existing title>" [--decision "<what>"] [--context "<why>"] \
+       [--scope "<where>"] [--commit "<SHA/PR>"]
+     ```
+
+   Judge meaning, not vocabulary. A UI-copy or translation decision saying "X
+   instead of Y" is naming a *wording* preference, not a rejected architectural
+   alternative — it belongs here. The trigger is about a **load-bearing** choice
+   a future agent could undo by accident. As with recording, confirm a promotion
+   with the user before running it.
+
+   To sweep records written before this guidance existed, `decisions.py lint`
+   reports entries whose text reads as ADR-worthy. It is **advisory** — it
+   matches wording, not meaning, so treat a finding as a prompt to judge, never
+   as a verdict.
 4. **Report a summary** at the end:
    ```bash
    python3 "${PLUGIN_ROOT}/skills/memory-sync/memory.py" summary <target>

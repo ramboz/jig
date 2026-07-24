@@ -470,6 +470,51 @@ class SingleSourceDriftTests(unittest.TestCase):
         self._assert_contains_trigger(ADR_0031)
 
 
+class UpdateTimeRoutingGuidanceTests(unittest.TestCase):
+    """096-01 — the routing enforcement chosen in ADR-0039 is PROSE: the
+    memory-sync prompt tells the assistant to re-judge a lightweight decision
+    against the ADR trigger when revising it, and to promote rather than
+    revise when it clears.
+
+    Deliberately does NOT assert a second verbatim `ADR_TRIGGER` copy in this
+    file. `SingleSourceDriftTests` already pins one copy here with a
+    whole-file `assertIn`, so a second copy would be (a) redundant
+    single-sourcing within one file and (b) untestable — the drift assertion
+    would pass on the OLD copy no matter what the guidance said. The guidance
+    references that one copy instead; what is worth pinning is the linkage
+    itself, which is what these tests do."""
+
+    def setUp(self):
+        self.text = MEMORY_SYNC_SKILL.read_text(encoding="utf-8")
+
+    def test_guidance_fires_at_the_revision_moment(self):
+        self.assertIn("Revising an already-recorded entry", self.text)
+
+    def test_guidance_points_at_the_canonical_trigger(self):
+        # The reference is only valid while the verbatim quote it points at
+        # is in this same file — SingleSourceDriftTests guarantees that.
+        self.assertIn("canonical ADR trigger quoted above", self.text)
+        self.assertIn(decisions.ADR_TRIGGER, self.text)
+
+    def test_guidance_routes_a_cleared_decision_to_promote(self):
+        self.assertIn("decisions.py\" promote", self.text)
+        self.assertIn("--title \"<existing title>\"", self.text)
+
+    def test_guidance_keeps_in_place_revision_for_bounded_decisions(self):
+        self.assertIn("decisions.py\" update", self.text)
+
+    def test_guidance_names_the_advisory_lint_as_advisory(self):
+        self.assertIn("decisions.py lint", self.text)
+        self.assertIn("advisory", self.text)
+
+    def test_guidance_warns_against_the_vocabulary_over_fire(self):
+        """ADR-0039 rejected keyword-matching because UI-copy decisions say
+        "X instead of Y" and belong in the lightweight home. The prose must
+        carry that distinction, or it recreates the over-fire in the model's
+        judgement instead of in a regex."""
+        self.assertIn("Judge meaning, not vocabulary", self.text)
+
+
 class EntriesPlaceholderTests(unittest.TestCase):
     """The template seeds `## Entries` with a "_No entries yet._" placeholder,
     and `add_lightweight` appends at end-of-file without clearing it — so the
@@ -1671,6 +1716,236 @@ class PromoteAtomicityTests(unittest.TestCase):
             "--project-dir", str(self.project)])
         self.assertNotEqual(rc, 0)
         self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+
+# ---- 096-04: `lint` subcommand -----------------------------------------
+#
+# Read-only advisory sweep over what is already on disk (ADR-0039). No
+# subprocess, no seeding, no write path — every fixture below is built
+# through `render_entry` itself (not hand-typed), matching the style the
+# 096-03 promote fixtures already use.
+
+# A single entry that trips the two-signal rule (LOAD_BEARING + ALTERNATIVES
+# together, reusing the pinned marker halves from RoutingEvaluatorTests) —
+# the AC1 "misfiled entry" fixture.
+_LINT_FLAGGED_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.render_entry(
+    "Vendored library swap",
+    _LOAD_BEARING_HALF + " " + _ALTERNATIVES_HALF,
+    "Context text.", "Scope text.", date="2026-07-01")
+
+# Same two-signal combination, but split across the Decision field's own two
+# lines — pins that the scan reads a field WHOLE, not just its first line
+# (096-04's stated multi-line edge case).
+_LINT_MULTILINE_FIELD_SEED = (
+    "# Lightweight Decisions\n\n## Entries\n\n"
+    + decisions.render_entry(
+        "Multi-line signal",
+        "First line is unremarkable.\n" + _LOAD_BEARING_HALF,
+        _ALTERNATIVES_HALF, "Scope.", date="2026-07-02"))
+
+# Clean — no marker fires anywhere in any field.
+_LINT_CLEAN_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.render_entry(
+    "Ordinary decision", "Use blue for the icon.", "Team preference.",
+    "Icon only.", date="2026-07-03")
+
+# `## Entries` present, zero REAL entries — just the template's own
+# placeholder prose (mirrors the shipped template's empty state).
+_LINT_EMPTY_ENTRIES_SEED = """# Lightweight Decisions
+
+## Entries
+
+_No entries yet._
+"""
+
+# An already-promoted stub (096-03 shape) whose HEADING TITLE itself would
+# trip the BOUNDARY marker if it were scanned as an ordinary entry —
+# demonstrates the stub is excluded structurally (its body never matches
+# `_FIELD_RE`, so `_real_entries` never surfaces it), not by title-based
+# special-casing.
+_LINT_PROMOTED_STUB_SEED = """# Lightweight Decisions
+
+## Entries
+
+### 2026-07-01 — Module boundary change
+
+**Promoted:** moved to [ADR-0012: Module Boundary Change](adr-0012-module-boundary-change.md).
+"""
+
+
+class LintTests(unittest.TestCase):
+    """096-04 `lint` — advisory, read-only sweep (ADR-0039). The lexical
+    evaluator (`evaluate_routing_signals` / `flags_adr_routing`) is defined
+    elsewhere; this is the one place it is actually APPLIED."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _seed(self, text):
+        self.target.write_text(text, encoding="utf-8")
+
+    def _text(self):
+        return self.target.read_text(encoding="utf-8")
+
+    def _stdout(self, argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = decisions.main(argv)
+        return rc, buf.getvalue()
+
+    # AC1 — a misfiled entry is reported: date, title, and the matched
+    # groups, via the Python API.
+    def test_ac1_flagged_entry_reported_by_the_python_api(self):
+        self._seed(_LINT_FLAGGED_SEED)
+        report = decisions.lint_lightweight(self.project)
+        self.assertEqual(len(report.findings), 1)
+        finding = report.findings[0]
+        self.assertEqual(finding.date, "2026-07-01")
+        self.assertEqual(finding.title, "Vendored library swap")
+        groups = {m.group for m in finding.matches}
+        self.assertEqual(groups, {"LOAD_BEARING", "ALTERNATIVES"})
+
+    # AC1 — the CLI names date, title, the matched groups/phrases, and the
+    # promote remedy.
+    def test_ac1_cli_names_date_title_matches_and_remedy(self):
+        self._seed(_LINT_FLAGGED_SEED)
+        rc, out = self._stdout(
+            ["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 1)
+        self.assertIn("2026-07-01", out)
+        self.assertIn("Vendored library swap", out)
+        self.assertIn("LOAD_BEARING", out)
+        self.assertIn("ALTERNATIVES", out)
+        self.assertIn(
+            'decisions.py promote --title "Vendored library swap"', out)
+
+    # AC2 — the defining constraint: nothing is ever written, including a
+    # run that DOES produce findings (the case an accidental write would
+    # hide).
+    def test_ac2_run_with_findings_leaves_file_byte_identical(self):
+        self._seed(_LINT_FLAGGED_SEED)
+        before = self._text()
+        self._stdout(["lint", "--project-dir", str(self.project)])
+        self.assertEqual(self._text(), before)
+
+    def test_ac2_clean_run_leaves_file_byte_identical(self):
+        self._seed(_LINT_CLEAN_SEED)
+        before = self._text()
+        self._stdout(["lint", "--project-dir", str(self.project)])
+        self.assertEqual(self._text(), before)
+
+    # AC3 — jig's REAL shipped file, not a fixture: the illustrative worked
+    # example and the `## Template` fence heading produce zero findings.
+    def test_ac3_real_shipped_file_has_zero_findings(self):
+        report = decisions.lint_lightweight(REPO_ROOT)
+        self.assertIsNotNone(report)
+        self.assertEqual(report.findings, [])
+
+    # AC4 — exit code carries the verdict.
+    def test_ac4_clean_exits_zero(self):
+        self._seed(_LINT_CLEAN_SEED)
+        rc = decisions.main(["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0)
+
+    def test_ac4_findings_exit_nonzero(self):
+        self._seed(_LINT_FLAGGED_SEED)
+        rc = decisions.main(["lint", "--project-dir", str(self.project)])
+        self.assertNotEqual(rc, 0)
+
+    def test_ac4_exit_zero_flag_reports_without_failing(self):
+        self._seed(_LINT_FLAGGED_SEED)
+        rc, out = self._stdout(
+            ["lint", "--exit-zero", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0)
+        self.assertIn("Vendored library swap", out)
+
+    # AC5 — a clean file says so: names the file and the entry count.
+    def test_ac5_clean_line_names_file_and_scanned_count(self):
+        self._seed(_LINT_CLEAN_SEED)
+        rc, out = self._stdout(
+            ["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0)
+        self.assertIn("docs/decisions/lightweight-decisions.md", out)
+        self.assertIn("1", out)
+
+    # AC6 — a missing file reports "nothing to lint", exits 0, and does NOT
+    # seed one (contrast add-lightweight, which does seed).
+    def test_ac6_missing_file_reports_nothing_to_lint(self):
+        rc, out = self._stdout(
+            ["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0)
+        self.assertIn("nothing to lint", out)
+
+    def test_ac6_missing_file_is_not_seeded(self):
+        self._stdout(["lint", "--project-dir", str(self.project)])
+        self.assertFalse(
+            self.target.exists(), "lint must not seed a file (AC6)")
+
+    def test_ac6_python_api_returns_none_for_missing_file(self):
+        self.assertIsNone(decisions.lint_lightweight(self.project))
+
+    # AC6 — a foreign-format file raises the existing `_foreign_format_error`,
+    # unchanged.
+    def test_ac6_foreign_format_raises_existing_error(self):
+        self._seed(_FOREIGN_TABLE)
+        with self.assertRaises(ValueError) as ctx:
+            decisions.lint_lightweight(self.project)
+        self.assertIn("## Entries", str(ctx.exception))
+
+    def test_ac6_cli_foreign_format_exits_nonzero(self):
+        self._seed(_FOREIGN_TABLE)
+        rc, err = _run_cli(["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 1)
+        self.assertIn("## Entries", err)
+
+    # AC7 — `--project-dir` and `layout.docs_root` are honoured.
+    def test_ac7_docs_root_dot_is_honoured(self):
+        (self.project / "scaffold.json").write_text(
+            '{"layout": {"docs_root": "."}}', encoding="utf-8")
+        target = decisions.lightweight_path(self.project)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_LINT_CLEAN_SEED, encoding="utf-8")
+        rc, out = self._stdout(
+            ["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0)
+        self.assertIn("decisions/lightweight-decisions.md", out)
+        self.assertNotIn("docs/decisions/lightweight-decisions.md", out)
+
+    # Edge case — a 096-03 promotion stub produces no finding, even when its
+    # heading title alone would trip a marker: it is excluded structurally
+    # (never a REAL entry), not by re-checking its content.
+    def test_edge_promoted_stub_produces_no_finding(self):
+        self._seed(_LINT_PROMOTED_STUB_SEED)
+        report = decisions.lint_lightweight(self.project)
+        self.assertEqual(report.scanned, 0)
+        self.assertEqual(report.findings, [])
+
+    # Edge case — a multi-line field is scanned whole, not first-line-only.
+    def test_edge_multiline_field_is_scanned_whole(self):
+        self._seed(_LINT_MULTILINE_FIELD_SEED)
+        report = decisions.lint_lightweight(self.project)
+        self.assertEqual(len(report.findings), 1)
+        self.assertEqual(report.findings[0].title, "Multi-line signal")
+
+    # Edge case — zero real entries (jig's own file, today) exits 0 with the
+    # clean line.
+    def test_edge_zero_real_entries_exits_clean(self):
+        self._seed(_LINT_EMPTY_ENTRIES_SEED)
+        rc, out = self._stdout(
+            ["lint", "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0)
+        report = decisions.lint_lightweight(self.project)
+        self.assertEqual(report.scanned, 0)
+        self.assertEqual(report.findings, [])
+
+    def test_edge_jigs_own_file_has_zero_real_entries_today(self):
+        report = decisions.lint_lightweight(REPO_ROOT)
+        self.assertEqual(report.scanned, 0)
 
 
 if __name__ == "__main__":
