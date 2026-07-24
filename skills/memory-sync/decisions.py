@@ -40,6 +40,7 @@ import re
 import sys
 from collections import namedtuple
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout  # noqa: E402
@@ -368,6 +369,141 @@ def render_entry(title: str, decision: str, context: str, scope: str,
     return "\n".join(lines) + "\n"
 
 
+# --- Entry parsing for `update` (096-02) ------------------------------------
+# `_existing_keys` above deliberately scans EVERY `### ` heading in the file,
+# including two pieces of documentation-in-entry-clothing this file ships:
+# the `## Template` fence's `### [Date] — [Short title]` placeholder, and (in
+# jig's own docs/decisions/lightweight-decisions.md) the illustrative worked
+# example. That breadth is exactly right for idempotency — "is this key
+# already taken?" only needs to know a heading exists, not whether it is a
+# real record. `update` needs the opposite question — "which of these may I
+# rewrite?" — so it needs a narrower notion, built once here and reused by
+# 096-03 (`promote`) and 096-04 (`lint`), both of which need the same "which
+# headings are real records" answer.
+
+Entry = namedtuple("Entry", "date title decision context scope commit start end")
+
+# A `### ` heading, split on the FIRST ` — ` (matching `render_entry`'s own
+# `"### %s — %s" % (date, title)` join, so parsing agrees with rendering on
+# where the date ends and the title begins). Non-greedy on date: an ISO date
+# never itself contains ` — `, so this never has to disambiguate a title that
+# happens to contain a second em dash.
+_ENTRY_HEADING_RE = re.compile(r"^### (?P<date>.*?) — (?P<title>[^\n]+)$",
+                               re.MULTILINE)
+
+# The blockquote jig's own file uses immediately above its worked example to
+# say "this one is documentation, not a record" (see
+# docs/decisions/lightweight-decisions.md's `## Entries` section). A
+# STRUCTURAL marker, not a hardcoded title — so it also protects a project
+# that adopts the same convention for its own illustrative note, and it does
+# not need updating if the worked example's title or wording ever changes.
+_ILLUSTRATIVE_MARKER_RE = re.compile(r"^> _Illustrative only\b", re.MULTILINE)
+
+# The four fields in the fixed order `render_entry` always emits them, each
+# non-greedy up to the next field's literal marker (or end of block for the
+# last one present) — so a field value that itself contains blank lines or
+# `### `-looking text (096-02's stated edge case) cannot be mistaken for a
+# later field or a new heading; only the literal `\n\n**Context:**` /
+# `\n\n**Scope:**` / `\n\n**Commit:**` markers end a field. `re.DOTALL` makes
+# `.` span newlines, since a field value is not guaranteed single-line.
+# Anchored `\A`...`\Z` (not `^`/`$`) so `.match()` requires the WHOLE block to
+# conform — a malformed block (hand-edited, or from a foreign format) simply
+# fails to match rather than parsing garbage, and `_real_entries` treats a
+# non-match as "not addressable" rather than crashing.
+_FIELD_RE = re.compile(
+    r"\A\n*\*\*Decision:\*\* (?P<decision>.*?)\n\n"
+    r"\*\*Context:\*\* (?P<context>.*?)\n\n"
+    r"\*\*Scope:\*\* (?P<scope>.*?)"
+    r"(?:\n\n\*\*Commit:\*\* (?P<commit>.*?))?"
+    r"\n*\Z",
+    re.DOTALL)
+
+
+def _real_entries(file_text: str) -> list:
+    """Every REAL entry under `## Entries`, as parsed `Entry` records.
+
+    `start`/`end` are byte offsets into `file_text` spanning the entry's own
+    block — heading through its last field — EXCLUDING the blank-line
+    separator that follows it. That is the span `update_lightweight`
+    replaces in place; the separator is left untouched so a following entry
+    (096-02's stated edge case) is never disturbed.
+
+    Two restrictions make this narrower than `_existing_keys`:
+      - only `### ` headings AFTER the `## Entries` heading are considered,
+        which excludes the `## Template` fence for free — `## Template`
+        precedes `## Entries` in every shipped copy of this file, so the
+        fence's placeholder heading is textually out of scope before any
+        illustrative-marker check even runs; and
+      - a heading immediately preceded (allowing intervening blank lines) by
+        the `_ILLUSTRATIVE_MARKER_RE` blockquote is skipped — jig's own
+        worked example is marked this way, and any project using the same
+        convention for its own illustrative note gets the same protection.
+
+    A `### ` heading whose body does not match `_FIELD_RE` (hand-edited into
+    something the helper never wrote) is also skipped rather than raising —
+    "not addressable" is the correct outcome for update, not a crash.
+    """
+    idx = file_text.find(_ENTRIES_HEADING)
+    if idx == -1:
+        return []
+    body_start = idx + len(_ENTRIES_HEADING)
+    section = file_text[body_start:]
+    headings = list(_ENTRY_HEADING_RE.finditer(section))
+    entries = []
+    prev_block_end = 0
+    for i, m in enumerate(headings):
+        heading_start = m.start()
+        block_end = (headings[i + 1].start() if i + 1 < len(headings)
+                    else len(section))
+        gap = section[prev_block_end:heading_start]
+        prev_block_end = block_end
+        if _ILLUSTRATIVE_MARKER_RE.search(gap):
+            continue
+        field_text = section[m.end():block_end]
+        fm = _FIELD_RE.match(field_text)
+        if not fm:
+            continue
+        entries.append(Entry(
+            date=m.group("date"), title=m.group("title"),
+            decision=fm.group("decision"), context=fm.group("context"),
+            scope=fm.group("scope"), commit=fm.group("commit") or "",
+            start=body_start + heading_start, end=body_start + block_end))
+    return entries
+
+
+def _find_entry(file_text: str, title: str, date: Optional[str] = None) -> Entry:
+    """Locate the single REAL entry (see `_real_entries`) matching `title`,
+    normalized the same way the idempotency key already is (`_normalize`),
+    so `update` and `add-lightweight` agree on what counts as "the same
+    entry" (096-02 AC5). `date` narrows to one when a title recurs.
+
+    Raises `ValueError` for every refusal shape `update` needs:
+      - no match — covers a genuinely missing title AND a title that only
+        exists as the illustrative example or the `## Template` fence, since
+        `_real_entries` already excludes both; there is no second "that's
+        documentation" code path (AC7 rides on AC4's refusal for free).
+      - an ambiguous match — more than one entry shares the normalized
+        title and no (or a non-narrowing) `--date` was given; lists the
+        competing dates rather than guessing (AC6).
+    """
+    entries = _real_entries(file_text)
+    norm_title = _normalize(title)
+    candidates = [e for e in entries if _normalize(e.title) == norm_title]
+    if date:
+        norm_date = _normalize(date)
+        candidates = [e for e in candidates if _normalize(e.date) == norm_date]
+    if not candidates:
+        raise ValueError(
+            "no entry titled %r found under `## Entries`%s. Nothing was "
+            "written." % (title, " for date %s" % date if date else ""))
+    if len(candidates) > 1:
+        dates = ", ".join(sorted(e.date for e in candidates))
+        raise ValueError(
+            "title %r matches more than one entry (dates: %s) — pass "
+            "--date to disambiguate. Nothing was written." % (title, dates))
+    return candidates[0]
+
+
 def _today() -> str:
     return datetime.date.today().isoformat()
 
@@ -418,6 +554,82 @@ def add_lightweight(project_dir: Path, title: str, decision: str, context: str,
     return True
 
 
+def update_lightweight(project_dir: Path, title: str,
+                       decision: Optional[str] = None,
+                       context: Optional[str] = None,
+                       scope: Optional[str] = None,
+                       commit: Optional[str] = None,
+                       date: Optional[str] = None) -> bool:
+    """Revise fields on an already-recorded lightweight-decision entry, in
+    place, through the helper (096-02) — the code path #121's routing
+    failure never had (revision was a hand-edit) and spec 083's OQ2
+    anticipated (adding a `**Commit:**` SHA retroactively) but left no way
+    to do.
+
+    `decision`/`context`/`scope`/`commit` default to `None`, meaning "leave
+    as recorded" — deliberately NOT `""` (`add_lightweight`'s default),
+    which would be indistinguishable from "clear this field" (AC2). Passing
+    an explicit empty string DOES set the field to empty; only omitting the
+    keyword argument (or, on the CLI, the flag) preserves it.
+
+    Returns True when the file was rewritten, False when every supplied
+    field already matched what was recorded — a no-op, mirroring
+    `add_lightweight`'s idempotency contract rather than rewriting a file
+    that would come out byte-identical anyway.
+
+    Raises ValueError when: `title` is blank; the file does not exist yet
+    (nothing to update); the file exists but is not in jig's format
+    (`_foreign_format_error`); or `_find_entry` refuses — missing, ambiguous,
+    or a title that only resolves to the illustrative example / template
+    fence (see its docstring).
+
+    Deliberately carries no routing judgement and no `--confirm-lightweight`
+    (096-02 AC8 / ADR-0039): every refusal above is about MATCHING an entry,
+    never about the decision's content. Whether a revision now warrants
+    promotion to an ADR is the assistant's judgement, prompted by
+    memory-sync's `SKILL.md` (096-01) — not this helper's to gate.
+    """
+    if not (title or "").strip():
+        raise ValueError("title is required")
+    path = lightweight_path(project_dir)
+    if not path.is_file():
+        raise ValueError(
+            "%s does not exist yet — there is nothing to update. Record it "
+            "first with `add-lightweight`." % _display_path(project_dir))
+    text = path.read_text(encoding="utf-8")
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
+
+    entry = _find_entry(text, title, date)
+    merged_decision = decision.strip() if decision is not None else entry.decision
+    merged_context = context.strip() if context is not None else entry.context
+    merged_scope = scope.strip() if scope is not None else entry.scope
+    merged_commit = commit.strip() if commit is not None else entry.commit
+
+    if (merged_decision == entry.decision and merged_context == entry.context
+            and merged_scope == entry.scope and merged_commit == entry.commit):
+        return False
+
+    rendered = render_entry(entry.title, merged_decision, merged_context,
+                            merged_scope, merged_commit, entry.date)
+    # `entry.end` reaches true EOF for the file's last entry (`_real_entries`
+    # scopes the Entries section to end-of-file, matching add_lightweight's
+    # own always-append-at-EOF behaviour) — nothing follows to preserve. An
+    # entry with a sibling after it has `entry.end` landing exactly at the
+    # next entry's `### `, so the one blank line `add_lightweight` always
+    # leaves between entries has to be re-supplied here, or the rewritten
+    # block would run straight into the next heading — the "followed by
+    # another entry" edge case this slice calls out explicitly.
+    if entry.end >= len(text):
+        new_text = text[:entry.start] + rendered
+    else:
+        new_text = text[:entry.start] + rendered + "\n" + text[entry.end:]
+    # Plain write — same rationale as `add_lightweight`'s (self-contained
+    # helper, owner-gated single-writer doc, not a hot concurrent path).
+    path.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def _cmd_add_lightweight(args) -> int:
     project_dir = Path(args.project_dir).resolve()
     try:
@@ -446,9 +658,28 @@ def _cmd_add_lightweight(args) -> int:
     return 0
 
 
+def _cmd_update(args) -> int:
+    project_dir = Path(args.project_dir).resolve()
+    try:
+        changed = update_lightweight(
+            project_dir, args.title, decision=args.decision,
+            context=args.context, scope=args.scope, commit=args.commit,
+            date=args.date)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    rel = _display_path(project_dir)
+    if changed:
+        print("updated lightweight decision in %s: %s" % (rel, args.title))
+    else:
+        print("no-op: '%s' already matches the supplied fields in %s"
+              % (args.title, rel))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="jig lightweight-decisions helper (add-lightweight)")
+        description="jig lightweight-decisions helper (add-lightweight, update)")
     sub = p.add_subparsers(dest="command", required=True)
 
     al = sub.add_parser(
@@ -465,6 +696,31 @@ def _build_parser() -> argparse.ArgumentParser:
     al.add_argument("--project-dir", default=".",
                     help="project root (default: cwd)")
     al.set_defaults(func=_cmd_add_lightweight)
+
+    up = sub.add_parser(
+        "update",
+        help="revise fields on an existing lightweight decision entry")
+    up.add_argument("--title", required=True,
+                    help="title of the existing entry to revise")
+    # Defaults are None here, NOT "" like add-lightweight's — None is the
+    # sentinel meaning "omitted, leave as recorded" (096-02 AC2). An
+    # explicit empty string ("--decision ''") is a real value and clears
+    # the field; see `update_lightweight`'s docstring.
+    up.add_argument("--decision", default=None, help="revised decision text")
+    up.add_argument("--context", default=None, help="revised context text")
+    up.add_argument("--scope", default=None, help="revised scope text")
+    up.add_argument("--commit", default=None, help="revised commit SHA or PR")
+    up.add_argument("--date", default=None,
+                    help="disambiguate when --title matches more than one "
+                         "date; does not change the entry's own date")
+    up.add_argument("--project-dir", default=".",
+                    help="project root (default: cwd)")
+    up.set_defaults(func=_cmd_update)
+    # No --confirm-lightweight here, deliberately (096-02 AC8 / ADR-0039):
+    # `update` refuses only on matching grounds (missing / ambiguous /
+    # documentation-only title), never on the decision's content — there is
+    # no routing gate to confirm past. Do not add one; see the ADR.
+
     return p
 
 
