@@ -1,7 +1,7 @@
 ---
 status: READY_FOR_IMPLEMENTATION
-dependencies: [096-01]
-last_verified: 2026-07-22
+dependencies: [096-03]
+last_verified: 2026-07-24
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -16,18 +16,26 @@ last_verified: 2026-07-22
 ## Slice 096-04 — lint-subcommand
 
 **Goal:** `decisions.py lint` sweeps an existing `lightweight-decisions.md` and
-reports the entries whose own text disqualifies them from living there. 096-01
-and 096-02 guard the write paths; this is the one pass over what is **already on
-disk**, written before either gate existed.
+**reports** — never edits — the entries whose own text reads as ADR-worthy. This
+is the one pass over what is **already on disk**, and the single place a lexical
+evaluator is allowed to live: an advisory, report-only surface where a brittle
+signal is low-stakes ([ADR-0039](../../decisions/adr-0039-decision-routing-gate.md)).
+The write-time judgement is the assistant's (096-01); the lint is the backstop
+for records the guidance never saw.
 
 **DoR:**
-- ✅ 096-01 is DONE and exports the evaluator as an importable pure function
-  (096-01 AC8). This slice adds no new rule — it runs the same one over a file
-  instead of over CLI arguments.
+- ✅ [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) confines the
+  lexical evaluator to this advisory surface — it must not gate or edit anything.
+- ✅ This slice owns the evaluator: a pure `evaluate_routing_signals` / marker
+  table derived from `ADR_TRIGGER`'s two criteria (`BOUNDARY` alone, or
+  `ALTERNATIVES ∧ LOAD_BEARING`). One evaluator, so the lint cannot drift from
+  the rule it approximates.
 - ✅ The must-not-flag corpus is jig's own file: one illustrative worked example
   (`lightweight-decisions.md:51-55`) and one `### [Date] — [Short title]` heading
   inside the `## Template` fence (`:33`). A lint that flags either is broken on
-  the only corpus jig ships.
+  the only corpus jig ships. (The evaluator prototype refused an ordinary "user
+  interface" copy decision until narrowed — the brittleness ADR-0039 cites, and
+  the reason this stays advisory-only.)
 
 **Acceptance Criteria:**
 

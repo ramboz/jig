@@ -1,7 +1,7 @@
 ---
 status: READY_FOR_IMPLEMENTATION
-dependencies: [096-01, 096-02]
-last_verified: 2026-07-22
+dependencies: [096-02]
+last_verified: 2026-07-24
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -22,8 +22,9 @@ correction stops being a manual job, which is what makes 096-01's and 096-02's
 flags actionable rather than merely informative.
 
 **DoR:**
-- ✅ 096-01 and 096-02 are DONE — the gate that surfaces the problem exists, and
-  096-02's refusal message already names this subcommand as the remedy.
+- ✅ 096-02 is DONE — its entry parser and title-matching (the "real entry"
+  notion, `_normalize`-keyed lookup, ambiguity handling) are what `promote`
+  reuses to find and remove the entry it moves.
 - ✅ `adr.py new <slug>` scaffolds an ADR and allocates its number, with
   `--no-push` / `--pr` / `--project-dir` (probed via `--help`). This slice calls
   that path rather than writing a second ADR writer.
@@ -57,12 +58,12 @@ flags actionable rather than merely informative.
    **byte-identical** and the error is reported. A promotion that stubs the entry
    and then fails to create its target destroys the record.
 7. **A missing or ambiguous `--title` refuses**, with the same matching rules and
-   messages as 096-02 (AC6–AC8) — one title-matching contract across the helper.
+   messages as 096-02 (AC4–AC6) — one title-matching contract across the helper.
 8. **An already-promoted entry refuses.** Re-running `promote` on a stub exits
    non-zero naming the ADR it already points to, rather than creating a second
    ADR for one decision.
 9. **The illustrative example and the `## Template` fence are not promotable** —
-   same exclusion as 096-02 AC9.
+   same exclusion as 096-02 AC7.
 
 **Edge cases covered explicitly:**
 
@@ -84,8 +85,6 @@ corrected with one command, end-to-end — ADR created, entry stubbed, both link
       Edge cases listed above are covered explicitly.
 - [ ] AC6 (atomicity) is proven by an induced `adr.py` failure, not by
       inspection.
-- [ ] 096-02's refusal message is updated to name `promote` concretely (096-02
-      AC4 deferred the final wording here).
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.

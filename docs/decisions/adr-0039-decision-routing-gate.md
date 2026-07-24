@@ -1,179 +1,187 @@
 ---
 status: Proposed
 dependencies: [adr-0011, adr-0031]
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 frame_review: true
 ---
 
-# ADR-0039: Enforce ADR-vs-lightweight routing with a two-signal deliberateness gate
+# ADR-0039: Route ADR-vs-lightweight by skill-prompted judgment at revision, not a lexical write-gate
 
 ## Status
 
-Proposed (2026-07-22)
+Proposed (2026-07-24) — records the maintainer's direction on
+[#121](https://github.com/ramboz/jig/issues/121), given in
+[his comment](https://github.com/ramboz/jig/issues/121#issuecomment) of
+2026-07-24.
 
 ## Context
 
 [ADR-0031](adr-0031-load-bearing-decision-adr-trigger.md) fixed the *wording* of
 the Architectural Decision Record (ADR) trigger and single-sourced it as
 `decisions.py:ADR_TRIGGER`. Four consumer sites quote it verbatim and
-`test_decisions.py::SingleSourceDriftTests` fails CI if any of them drifts.
+`test_decisions.py::SingleSourceDriftTests` fails CI if any drifts.
 
-**Nothing evaluates a decision against it.** `decisions.py` exposes one
-subcommand, `add-lightweight`, which reads four text fields and appends;
-`ADR_TRIGGER` is a string it ships to a template, never applied to an argument.
-The routing judgement happens once, in the agent's head, at the moment it picks
-which command to type — and the command name presupposes the answer.
-[#121](https://github.com/ramboz/jig/issues/121) reports the consequence: a
-decision recorded as lightweight, later re-priced by an adversarial review into a
-module-boundary change with rejected alternatives, revised **by hand**, and never
-re-routed. The revised entry lists its rejected alternatives while the rubric's
-lightweight criterion reads *"with no real rejected alternatives"* — the record
-disqualified itself in the same file whose header states the rule.
+**Nothing applies it.** `decisions.py` exposes one subcommand, `add-lightweight`,
+which reads four text fields and appends; `ADR_TRIGGER` is a string it renders,
+never evaluated. [#121](https://github.com/ramboz/jig/issues/121) reports the
+consequence: a decision recorded as lightweight, later re-priced by an
+adversarial review into a module-boundary change with rejected alternatives,
+revised **by hand**, and never re-routed. The revised entry lists its rejected
+alternatives while the rubric's lightweight criterion reads *"with no real
+rejected alternatives"* — the record disqualified itself in the same file whose
+header states the rule.
 
-This ADR decides the **shape of the check**, not the rule. Two forces pull
-against each other:
+Two facts frame the decision:
 
-- A check that under-fires is the status quo with extra code.
-- A check that over-fires trains operators to bypass it, which is worse than no
-  check — a gate people reflexively wave through has negative value, because it
-  also launders the cases it *should* have caught.
+1. **The failure is at revision, not first write.** #121's own closing claim —
+   that a first-write check would have caught it — does not survive a read of the
+   code: step 3 was a hand-edit that never called the helper, and a same-title
+   re-record hits the idempotency no-op (`decisions.py:272-273`) before any check
+   could fire. The moment that matters is the **update**.
+2. **The project distrusts lexical pattern-matching.** The maintainer, on #121:
+   a keyword-marker approach is *"likely brittle… we've seen this pattern failing
+   repeatedly already in the project."* A gate that *blocks a write* on a brittle
+   signal is the worst case — a false positive trains the operator to reach for
+   the escape hatch, and a gate everyone waves through also launders the cases it
+   should have caught.
 
-That tension is sharp here because the rubric sends UI-copy decisions to the
-lightweight home **by name** ("UI string or translation choices"), and those
-decisions routinely contain rejected-alternative language. jig's own illustrative
-entry is *"Onboarding CTA copy: 'Get started' over 'Sign up'"* — a rejected
-alternative in the plainest sense, and correctly filed as lightweight.
+This ADR decides **where the routing judgement lives and what mechanism makes
+it**, not the rule (ADR-0031 owns the rule).
 
 ## Decision Options Considered
 
-### Option A: Flat keyword list — flag on any ADR-ish marker
+### Option A: Lexical write-gate on `add-lightweight`
 
-Scan the text for `rejected`, `instead of`, `alternative`, `module`, `boundary`,
-`native`, `protocol`, … and flag on any hit.
+Scan the decision text for markers and refuse on a hit, with an escape hatch.
+Two shapes were prototyped: a flat keyword list (#121's literal suggestion) and a
+two-signal rule derived from the rubric's own two criteria (`BOUNDARY` alone, or
+`ALTERNATIVES ∧ LOAD_BEARING`).
 
-- **Pros:** Trivial to implement and to explain. This is what #121 proposes
-  ("Scan the `--decision` / `--context` text for markers").
-- **Cons:** Fires on jig's own illustrative entry, and on the entire class the
-  rubric explicitly routes to the lightweight home. Every UI-copy decision would
-  arrive at the gate, and the escape hatch would become the normal path within a
-  week — at which point the gate is training operators to ignore it.
+- **Pros:** Deterministic; runs with no model in the loop; the two-signal variant
+  passed both cases that mattered (jig's illustrative UI-copy entry did not flag;
+  #121's reported case did).
+- **Cons:** It is exactly the brittle lexical pattern the maintainer rejected. The
+  flat list fires on jig's own illustrative UI-copy entry; even the tuned
+  two-signal rule needed a mid-implementation narrowing (bare `interface` →
+  `public interface`) after it refused an ordinary "user interface" copy
+  decision — a live demonstration of the brittleness, found only because the
+  false-positive corpus was jig's own file. And it gates the wrong moment: first
+  write, when #121's failure is at revision.
 
-### Option B: Two-signal rule derived from the rubric's own two criteria
+### Option B: Skill-prompted judgement at revision (chosen)
 
-Read the rubric as it is actually written — **two** criteria, of different
-shapes:
+Do not gate the helper. Put the routing judgement in the memory-sync skill's
+written guidance: **when a lightweight decision is being updated, the assistant
+first evaluates — using the already-single-sourced `ADR_TRIGGER` — whether it now
+warrants promotion to an ADR, and if so routes it via `promote` instead of
+revising in place.** The judgement is made by the model already in the loop,
+reading the actual decision, not by a regex.
 
-| # | Criterion (verbatim) | Condition |
-|---|---|---|
-| (a) | "A load-bearing design choice **with rejected alternatives**…" | conjunction |
-| (b) | "Also: any change to a **module boundary, public contract, or cross-cutting policy**." | unconditional |
+- **Pros:** Uses judgement where a lexical rule is brittle, which is the
+  maintainer's stated preference and matches how the rest of jig's
+  load-bearing-decision routing already works (the reconcile checklists and the
+  session-end prompt are all judgement prompts quoting `ADR_TRIGGER`, not
+  matchers). Targets the revision moment, which is where #121 actually broke. Adds
+  no failure mode to the deterministic helper.
+- **Cons:** Not enforced — an agent that skips the guidance, or calls the CLI
+  directly without loading `SKILL.md`, is not stopped. Mitigated, not closed, by
+  the advisory lint (below) and by `update` existing at all, which gives the
+  guidance a concrete command to attach to.
 
-Carry three marker groups — `BOUNDARY`, `ALTERNATIVES`, `LOAD_BEARING` — and
-flag iff `BOUNDARY`, or (`ALTERNATIVES` **and** `LOAD_BEARING`).
+### Option C: Helper-side model call
 
-- **Pros:** The precision comes from the rule itself rather than from tuning. The
-  rubric's own hedge — *"no **real** rejected alternatives"* — is exactly the
-  distinction criterion (a) encodes, so implementing (a) as a conjunction is
-  transcription, not invention. Passes both cases that matter: the illustrative
-  UI-copy entry does not flag; #121's reported case does.
-- **Cons:** Three lists to maintain instead of one, and the conjunction can be
-  defeated by a load-bearing decision described in plain language that names no
-  marker. It reduces false positives at some cost in recall.
+Have `decisions.py` itself call a model to judge each decision.
 
-### Option C: Ask a model to judge each decision
+- **Pros:** Deterministic entry point, judgement-quality signal.
+- **Cons:** Puts a non-deterministic, host- and network-dependent call on a
+  tier-0 helper that is deliberately self-contained and importable. Option B gets
+  the same judgement from the model that is *already* reading the conversation,
+  without making the helper depend on one.
 
-Send the text to a judgement pass instead of matching markers.
+### Option D: Lexical warning, never blocking
 
-- **Pros:** Catches the plain-language cases Option B misses.
-- **Cons:** Puts a non-deterministic call on a tier-0 helper's write path, in a
-  repo where the helper is deliberately self-contained and importable. It would
-  also make `add-lightweight` fail differently depending on host, network, and
-  model version. jig already has a judgement surface for this — the memory-sync
-  session-end prompt — and it is *upstream* of the helper, where a model is
-  already in the loop.
+Keep the marker scan but only print, never refuse.
 
-### Option D: Warn without refusing
-
-Print the flag, append anyway.
-
-- **Pros:** No false-positive cost at all; nothing is ever blocked.
-- **Cons:** The failure #121 reports is precisely that a routing signal existed
-  in prose and nobody acted on it. A warning on stdout, in a batch of four
-  recorded decisions, reproduces that failure with a new coat of paint.
+- **Pros:** No false-positive cost on the write path.
+- **Cons:** A warning in a batch of recorded decisions reproduces #121's original
+  failure — a routing signal that sat in prose and nobody acted on. If the signal
+  is worth computing, it belongs somewhere an operator will actually read it,
+  which is the advisory lint, not a line of stdout mid-batch.
 
 ## Recommended Decision
 
-**Option B**, shipped in jig's established gate shape
-([ADR-0011](adr-0011-spec-gate-model.md), [spec 078](../specs/078-gate-bypass-telemetry/spec.md)):
-on by default, refuses with the matched groups and phrases named, points at the
-ADR route, and carries two escapes — `--confirm-lightweight` for the operator who
-has read the flag and disagrees, and `JIG_DECISION_ROUTING_GATE=0` for the
-operator who wants the check off, instrumented via `emit_gate_bypass`.
+**Option B**, with one carve-out for the lexical machinery.
 
-The gate is a **deliberateness** signal, not an authority. It cannot know whether
-a decision is load-bearing; it can guarantee the question is asked at the moment
-the record is written, and again whenever it is revised. That is the whole of
-what #121 asks for.
+The routing judgement is made by the assistant, prompted by memory-sync's
+`SKILL.md`, at the moment a lightweight decision is **updated** (and reinforced at
+record time). It reuses `ADR_TRIGGER` as the criterion — the same
+single-sourced sentence the reconcile checklists already quote — so the "when is
+an ADR required?" policy still cannot drift across surfaces. When the judgement
+says "promote", the assistant uses `decisions.py promote` (this spec's 096-03),
+which moves the entry to an ADR and leaves a forward-linking stub.
 
-Option C is not rejected on merit — it is rejected *here*. The judgement surface
-belongs upstream, in the prompt, where a model is already reading the
-conversation; the helper's job is to be the deterministic floor under it.
+**The lexical evaluator survives in exactly one place: the advisory `lint`
+(096-04).** A lint is a low-stakes, offline, report-only sweep over records
+*already on disk* — the one surface where a brittle signal is acceptable, because
+a false positive costs a glance and a false negative is no worse than today. It
+never blocks a write and never edits a file. This is the honest home for
+pattern-matching in a project that has learned not to trust it on gate paths.
+
+Rejected, therefore: the write-gate on `add-lightweight` (Option A) — the
+mechanism #121 first proposed and this spec first built, then removed on the
+maintainer's steer.
 
 ## Consequences
 
 **Becomes easier:**
-- A misrouted decision is caught at the moment of writing, by the tool, rather
-  than by a reviewer who happens to reread the file later.
-- The evaluator is a pure importable function, so the revision path (096-02) and
-  the sweep over existing records (096-04) reuse one rule instead of three
-  copies — the same single-sourcing `SingleSourceDriftTests` protects for the
-  sentence, now extended to its application.
-- `ADR_TRIGGER` stops being decorative. Its four verbatim quotations are now
-  backed by behaviour on at least one surface.
+- The routing question is asked by something that can actually read the decision,
+  at the moment the decision changes weight — which is where #121 failed.
+- The deterministic helper gains no new refusal path, so every documented
+  `add-lightweight` command block keeps working unchanged.
+- Pattern-matching lives only where its brittleness is cheap; the project stops
+  betting a write-gate on a signal it already knows is unreliable.
 
 **Becomes harder:**
-- `add-lightweight` can now fail on input it used to accept. Every documented
-  command block keeps working, but an agent scripting the helper must handle a
-  non-zero exit it did not have to before.
-- The three marker groups are a maintenance surface, and a genuinely load-bearing
-  decision written in plain language still slips through. The gate raises the
-  floor; it does not close the hole.
-- A false positive costs the operator one flag and one re-run with
-  `--confirm-lightweight`. Accepted deliberately — see Kill criteria.
+- Enforcement is softer. Guidance can be skipped; a direct CLI caller that never
+  loads `SKILL.md` gets no prompt. The lint backstops this for records on disk,
+  but there is no hard stop at write time. This is the accepted cost of not
+  shipping a gate the maintainer would not trust.
+- The judgement quality now depends on the prompt wording carrying `ADR_TRIGGER`
+  faithfully — so the guidance site joins the set of surfaces
+  `SingleSourceDriftTests` must cover.
 
 ## Assumptions
 
-None unverified. Probed on this worktree at `fd7115a`:
+None unverified. Probed on this worktree:
 
-- `ADR_TRIGGER` is defined at `decisions.py:41-45` and read by no other line in
-  the file — the constant is rendered, never applied.
-- `add-lightweight` is the only subcommand (`decisions.py:313-332`, one
-  `sub.add_parser` call; confirmed via `--help`).
-- `_common.parsing.env_gate_enabled` (`:88`) and
-  `_common.gate_telemetry.emit_gate_bypass` (`:24`) exist and are the shared
-  backing for `JIG_REVIEW_EVIDENCE_GATE` / `JIG_SCAFFOLD_PRECONDITION`.
-- jig's own `lightweight-decisions.md` holds exactly one `### ` entry outside the
-  `## Template` fence, and it is a self-described illustrative example
-  (`:51-55`). It is the false-positive corpus AC3 of slice 096-01 asserts
-  against.
+- `ADR_TRIGGER` is defined at `decisions.py:41-45` and read by no other line —
+  rendered, never applied.
+- jig's existing load-bearing-decision routing is already judgement-prompted, not
+  matched: `docs/workflow.md:303`, `spec-workflow/SKILL.md:684`,
+  `memory-sync/SKILL.md:94` are prose prompts quoting `ADR_TRIGGER`. Option B
+  extends that pattern rather than introducing a new one.
+- The two-signal lexical rule was built and then removed within this spec's
+  history; its narrowing incident (bare `interface`) is recorded here as evidence
+  for the brittleness the maintainer cited, not as a live mechanism.
 
 ## Kill criteria
 
-- **Bypass rate.** If `gate-stats` shows `JIG_DECISION_ROUTING_GATE=0` or
-  `--confirm-lightweight` on a majority of recorded decisions, the gate is
-  over-firing and Option B's marker groups are wrong. Narrow them or withdraw
-  the gate — do not leave a gate everyone waves through.
-- **Zero catch rate.** If no real misrouting is caught over a meaningful sample
-  while misroutings keep being found by review, the conjunction in criterion (a)
-  is too strict and the recall cost of Option B over Option A was mispriced.
+- **Guidance ignored in practice.** If sessions keep misfiling on update despite
+  the `SKILL.md` prompt, the judgement-only approach is too soft and a
+  *deterministic* backstop (a non-lexical one — e.g. a structural check that the
+  entry gained a rejected-alternatives section) has to be revisited.
+- **Lint noise.** If the advisory lint's marker output is mostly false positives
+  on real corpora, drop the lexical evaluator entirely rather than tune it — the
+  maintainer's brittleness verdict would then extend even to the advisory
+  surface.
 
 ## Open questions
 
-- **Should the memory-sync session-end prompt call the evaluator?** It is the
-  upstream judgement surface, and running the deterministic check alongside the
-  model's judgement would catch a decision the model waved through. Out of scope
-  for spec 096, which changes helper behaviour only; worth asking once the gate
-  has a bypass-rate signal to argue from.
-- **Should `lint` (096-04) become a gate rather than a report?** Deliberately
-  left as a report: jig has no corpus of real lightweight entries yet — its own
-  file has zero — so there is no evidence base for making it blocking.
+- **Should record-time (not just update-time) get the same guidance?** The
+  reported failure is at update, so the guidance is anchored there; record-time
+  already has the session-end memory-sync judgement prompt. Whether `add-lightweight`
+  should carry an inline reminder too is left to implementation.
+- **Should `lint` ever become a gate?** Deliberately not now: jig has no corpus of
+  real lightweight entries (its own file has zero), so there is no evidence base
+  for making it blocking — and doing so would re-introduce the very thing this
+  ADR removed.

@@ -1,7 +1,7 @@
 ---
 status: READY_FOR_IMPLEMENTATION
-dependencies: [096-01]
-last_verified: 2026-07-22
+dependencies: []
+last_verified: 2026-07-24
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -15,14 +15,21 @@ last_verified: 2026-07-22
 
 ## Slice 096-02 — update-subcommand
 
-**Goal:** `decisions.py update` revises an already-recorded entry through the
-helper, re-running 096-01's routing check against the **revised** text. This is
-the slice that closes the case #121 actually reported — a decision that was
-bounded when written and load-bearing after it was re-priced.
+**Goal:** `decisions.py update` revises an already-recorded lightweight-decision
+entry **through the helper**, instead of the hand-edit every surface forbids.
+This is the code path the reported case never had — the moment a decision is
+revised is where [#121](https://github.com/ramboz/jig/issues/121) actually broke,
+and today there is no way to revise except by editing markdown the helper cannot
+see.
+
+`update` does **not** judge routing — that judgement is the assistant's, prompted
+by 096-01's `SKILL.md` guidance, per
+[ADR-0039](../../decisions/adr-0039-decision-routing-gate.md). This slice gives
+that judgement a command to act through: revise here, or (when the decision has
+grown ADR-worthy) `promote` (096-03). A code gate on this path was the rejected
+mechanism.
 
 **DoR:**
-- ✅ 096-01 is DONE and exports the evaluator as an importable pure function
-  (096-01 AC8).
 - ✅ The gap is real and probed: `add_lightweight` is append-or-no-op keyed on
   normalized `(date, title)` (`decisions.py:272-273`); there is no edit, no
   delete, no `--force`. Revising means hand-editing markdown, which
@@ -30,6 +37,8 @@ bounded when written and load-bearing after it was re-priced.
 - ✅ Spec 083's own OQ2 (`083/spec.md:467-471`) anticipated adding a
   `**Commit:**` SHA retroactively and left no way to do it. This slice supplies
   the path it assumed.
+- ✅ `render_entry` (`decisions.py:218`) is the canonical emitter this slice must
+  round-trip against.
 
 **Acceptance Criteria:**
 
@@ -41,36 +50,33 @@ bounded when written and load-bearing after it was re-priced.
    Decision / Context / Scope exactly as they were. This is OQ2's case, and a
    revision helper that silently drops the fields you did not mention is worse
    than the hand-edit it replaces.
-3. **The routing check re-runs against the merged result.** The gate evaluates
-   the entry as it will read *after* the update — existing fields plus new ones —
-   not the new fields alone. A revision that adds rejected alternatives to a
-   decision whose existing text is load-bearing must flag, which is exactly
-   #121's step 3.
-4. **A flagged update writes nothing and names `promote`.** Same refusal shape as
-   096-01 (matched groups, `ADR_TRIGGER` verbatim, non-zero exit, no write) —
-   but the remedy it names is `decisions.py promote` (096-03), because the entry
-   already exists and re-routing it is a promotion, not a fresh `adr.py new`.
-   Until 096-03 lands, the message names the manual route; the wording is
-   revisited in 096-03 rather than shipped stale.
-5. **`--confirm-lightweight` and `JIG_DECISION_ROUTING_GATE=0` behave exactly as
-   in 096-01**, including the same one-event telemetry on the env-var path and
-   none on the flag path. One gate, one contract, two call sites.
-6. **A missing entry is a loud refusal.** `update --title` naming no existing
+3. **The rewrite round-trips `render_entry`.** The revised block is byte-identical
+   to what `render_entry` would emit for the merged fields — one blank line
+   between fields, `**Commit:**` only when present — so `add-lightweight` and
+   `update` produce indistinguishable entries. A round-trip test
+   (`render_entry` → parse → same fields) guards the parser.
+4. **A missing entry is a loud refusal.** `update --title` naming no existing
    entry exits non-zero, writes nothing, and says so — it must never silently
    append a new entry, which would turn a typo'd title into a duplicate record.
-7. **Title matching reuses the existing normalization.** Case- and
+5. **Title matching reuses the existing normalization.** Case- and
    whitespace-insensitive, via the same `_normalize` the idempotency key already
    uses (`decisions.py:193-199`), so `update` and `add-lightweight` agree on what
    "the same entry" means. An optional `--date` disambiguates when one title was
    used on two dates.
-8. **Ambiguous matches refuse rather than guess.** If `--title` (without
+6. **Ambiguous matches refuse rather than guess.** If `--title` (without
    `--date`) matches more than one entry, exit non-zero listing the matching
    dates and asking for `--date`.
-9. **The illustrative example and the `## Template` fence are not addressable.**
-   `update` must refuse to target the worked example at `:51-55` or the
-   `### [Date] — [Short title]` line inside the fence — they are documentation,
-   not records, and `_existing_keys` deliberately keys them
-   (`decisions.py:202-215`).
+7. **The illustrative example and the `## Template` fence are not addressable.**
+   `update` must refuse to target the worked example (`### 2026-01-15 —
+   Onboarding CTA copy…`) or the `### [Date] — [Short title]` line inside the
+   fence — they are documentation, not records. `_existing_keys` deliberately
+   keys both (`decisions.py:202-215`), so a narrower "real entry" notion is
+   needed here; introduce it cleanly (096-03 and 096-04 reuse it).
+8. **No routing gate, no routing flag.** `update` refuses on *matching* grounds
+   only (missing / ambiguous / documentation), never on the decision's content,
+   and carries no `--confirm-lightweight`. Routing is the assistant's judgement
+   (096-01) plus the advisory lint (096-04). This AC is a guard against a
+   reviewer re-adding the rejected gate.
 
 **Edge cases covered explicitly:**
 
@@ -84,18 +90,15 @@ bounded when written and load-bearing after it was re-priced.
 - An unchanged update (every supplied field already equal) is a reported no-op,
   not a rewrite — mirroring `add-lightweight`'s idempotency contract.
 
-**Anti-horizontal-phasing check:** with 096-01 and this slice in, the four-step
-sequence #121 reported is stopped at step 3 end-to-end: the revision goes
-through the helper, the check sees the corrected text, and the operator is told
-the entry no longer belongs where it is.
+**Anti-horizontal-phasing check:** after this slice a recorded decision can be
+revised through the helper end-to-end — the precondition both the judgement
+guidance (096-01) and `promote` (096-03) rely on. It is not "a parser exists and
+a later slice will call it".
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions) on Python 3.9.
 - [ ] Implementer test coverage exercises each AC with at least one fixture.
       Edge cases listed above are covered explicitly.
-- [ ] A test replays #121's four-step sequence end-to-end (record bounded →
-      revise with corrected cost and rejected alternatives → flagged) so the
-      reported case has a named regression test.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.

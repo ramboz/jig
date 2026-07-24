@@ -21,6 +21,16 @@ the memory-sync session-end prompt (`skills/memory-sync/SKILL.md`).
 Self-contained by design: it does NOT import the 083-04 scan lib
 (`hooks/scripts/lib/decision_scan.py`) nor `memory.py`, so the host-packaging
 step can copy the skill tree whole without a cross-tree dependency.
+
+`evaluate_routing_signals` + `flags_adr_routing` are a pure, importable
+lexical evaluator of `ADR_TRIGGER`'s two criteria. Per
+[ADR-0039](../../docs/decisions/adr-0039-decision-routing-gate.md) they back
+**only** the advisory `lint` (096-04) — a report-only sweep of records already
+on disk. They deliberately do NOT gate any write path: the maintainer's call on
+[#121](https://github.com/ramboz/jig/issues/121) is that keyword-matching is too
+brittle to block a write, so the real routing judgement is the assistant's,
+prompted by memory-sync's `SKILL.md` (096-01), at the moment a decision is
+updated.
 """
 
 import argparse
@@ -28,6 +38,7 @@ import datetime
 import os
 import re
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -213,6 +224,131 @@ def _existing_keys(file_text: str) -> set:
         if line.startswith("### "):
             keys.add(_normalize(line[len("### "):]))
     return keys
+
+
+# --- Two-signal ADR-routing evaluator (096-01 / ADR-0039) -------------------
+# `ADR_TRIGGER` above states the rule; until this, nothing evaluated a
+# decision against it. The rubric it is transcribed from
+# (docs/decisions/lightweight-decisions.md's routing table) states TWO
+# independent criteria, not one flat list of ADR-ish words:
+#   (a) "A load-bearing design choice with rejected alternatives..." — a
+#       CONJUNCTION: needs both halves.
+#   (b) "Also: any change to a module boundary, public contract, or
+#       cross-cutting policy." — UNCONDITIONAL.
+# A flat keyword scan collapses that distinction and breaks on jig's own
+# corpus: the illustrative lightweight entry ("Onboarding CTA copy: 'Get
+# started' over 'Sign up'") is a rejected alternative in the plainest sense,
+# and the rubric routes it to the LIGHTWEIGHT home by name ("UI string or
+# translation choices"). The rubric's own hedge — "no REAL rejected
+# alternatives" — is what saves it: criterion (a)'s conjunction IS that test.
+# See ADR-0039 (Option A vs B) for the full argument against the flat list.
+
+RoutingMatch = namedtuple("RoutingMatch", "group phrase")
+
+_GROUP_BOUNDARY = "BOUNDARY"
+_GROUP_ALTERNATIVES = "ALTERNATIVES"
+_GROUP_LOAD_BEARING = "LOAD_BEARING"
+
+# Each marker is (display phrase, compiled regex). Regexes run against
+# `_normalize()`-d text (lowercase, whitespace collapsed to single spaces),
+# so patterns are plain lowercase with literal single spaces between words —
+# no re.IGNORECASE needed. `\b` on both ends stops a marker firing INSIDE a
+# longer word it happens to prefix: `alternative` must not fire on
+# `alternatively`, `interface` must not fire on `interfaces` (096-01 edge
+# cases, both asserted in test_decisions.py). Deliberately NOT a blanket
+# `s?` suffix on every marker — that would defeat the boundary guard for
+# exactly the markers where the plural is the false-positive case.
+_MARKER_TABLE = (
+    (_GROUP_BOUNDARY, (
+        # The rubric's own three phrases (criterion b, verbatim) plus
+        # synonym-expansions a real decision is more likely to use in
+        # practice — "the public interface changed" says the same thing as
+        # "changed the public contract" without quoting the rubric.
+        ("module boundary", re.compile(r"\bmodule boundary\b")),
+        ("public contract", re.compile(r"\bpublic contract\b")),
+        ("cross-cutting policy", re.compile(r"\bcross-cutting policy\b")),
+        ("protocol", re.compile(r"\bprotocol\b")),
+        ("schema", re.compile(r"\bschema\b")),
+        ("public api surface", re.compile(r"\bpublic api surface\b")),
+        # Qualified, never bare `interface`. "user interface" is ordinary
+        # vocabulary in exactly the decisions the rubric routes HERE by name
+        # (UI strings, visual choices), and BOUNDARY flags on its own — a bare
+        # marker refuses "Use 'Preferences' over 'Settings' in the user
+        # interface" and teaches the operator to reach for the escape hatch,
+        # which is the Option-A failure ADR-0039 rejects.
+        ("public interface", re.compile(r"\bpublic interface\b")),
+    )),
+    (_GROUP_ALTERNATIVES, (
+        ("rejected", re.compile(r"\brejected\b")),
+        ("ruled out", re.compile(r"\bruled out\b")),
+        ("discarded", re.compile(r"\bdiscarded\b")),
+        ("instead of", re.compile(r"\binstead of\b")),
+        ("rather than", re.compile(r"\brather than\b")),
+        ("as opposed to", re.compile(r"\bas opposed to\b")),
+        ("in favour/favor of", re.compile(r"\bin favou?r of\b")),
+        ("alternative(s)", re.compile(r"\balternatives?\b")),
+        ("trade-off", re.compile(r"\btrade-off\b")),
+    )),
+    (_GROUP_LOAD_BEARING, (
+        ("load-bearing", re.compile(r"\bload-bearing\b")),
+        ("architectural", re.compile(r"\barchitectural\b")),
+        ("structural", re.compile(r"\bstructural\b")),
+        ("replaces/replacing", re.compile(r"\breplac(?:es|ing)\b")),
+        ("native implementation", re.compile(r"\bnative implementation\b")),
+        ("vendored", re.compile(r"\bvendored\b")),
+        ("dependency", re.compile(r"\bdependency\b")),
+        ("coupling", re.compile(r"\bcoupling\b")),
+        ("invariant", re.compile(r"\binvariant\b")),
+        ("migration", re.compile(r"\bmigration\b")),
+        ("irreversible", re.compile(r"\birreversible\b")),
+        ("hard to reverse", re.compile(r"\bhard to reverse\b")),
+    )),
+)
+
+
+def evaluate_routing_signals(title: str, decision: str, context: str,
+                             scope: str) -> list:
+    """Pure lexical evaluator of `ADR_TRIGGER`'s two criteria (ADR-0039).
+
+    Scans the record's four fields for the marker groups above and returns
+    every hit as a `RoutingMatch(group, phrase)`. Module-level and
+    side-effect-free — no filesystem or environment access.
+
+    **Advisory only.** Per ADR-0039 this backs the report-only `lint`
+    (096-04) and nothing else: keyword-matching is too brittle to gate a
+    write (a prototype refused an ordinary "user interface" copy decision
+    until the marker was narrowed), so it lives on the one surface where a
+    false positive costs a glance rather than a blocked write. Do not wire
+    it into `add-lightweight` or `update` — that gate was built and removed.
+
+    Does not decide whether to flag — see `flags_adr_routing`, which applies
+    the two-signal rule to this function's output. Kept separate so the lint
+    can also just enumerate matches for its report.
+    """
+    corpus = _normalize(
+        " ".join(t or "" for t in (title, decision, context, scope)))
+    matches = []
+    for group, markers in _MARKER_TABLE:
+        for phrase, pattern in markers:
+            if pattern.search(corpus):
+                matches.append(RoutingMatch(group, phrase))
+    return matches
+
+
+def flags_adr_routing(matches) -> bool:
+    """Apply the two-signal rule to `evaluate_routing_signals()`'s output.
+
+    Flag iff BOUNDARY matched on its own (criterion b is unconditional — the
+    rubric says "ANY change to a module boundary...", no second signal
+    required), or ALTERNATIVES and LOAD_BEARING matched together (criterion
+    a's conjunction — neither is evidence alone; together they are the
+    rubric's "load-bearing... with rejected alternatives"). See ADR-0039 for
+    why this is a conjunction rather than a flat OR across every marker.
+    """
+    groups = {m.group for m in matches}
+    return (_GROUP_BOUNDARY in groups
+            or (_GROUP_ALTERNATIVES in groups
+                and _GROUP_LOAD_BEARING in groups))
 
 
 def render_entry(title: str, decision: str, context: str, scope: str,

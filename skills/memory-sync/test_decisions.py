@@ -6,8 +6,11 @@ Run from the repo root:
     python3 skills/memory-sync/test_decisions.py
 """
 
+import contextlib
 import importlib.util
+import io
 import os
+import re
 import tempfile
 import unittest
 from datetime import date
@@ -54,6 +57,69 @@ def _import_decisions():
 
 
 decisions = _import_decisions()
+
+
+# ---- CLI helpers ------------------------------------------------------
+
+def _run_cli(argv):
+    """Run `decisions.main(argv)`, capturing stderr. Returns (rc, stderr).
+    Reused by the update / promote / lint subcommand tests."""
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        rc = decisions.main(argv)
+    return rc, buf.getvalue()
+
+
+# Pulls the false-positive corpus straight from the real file (AC3) rather
+# than a hand-transcribed copy, so an edit to the illustrative entry can't
+# leave this test silently exercising stale text.
+_ILLUSTRATIVE_ENTRY_RE = re.compile(
+    r"^### [^\n]+ — (?P<title>[^\n]+)\n\n"
+    r"\*\*Decision:\*\* (?P<decision>.+?)\n\n"
+    r"\*\*Context:\*\* (?P<context>.+?)\n\n"
+    r"\*\*Scope:\*\* (?P<scope>.+?)\n\n",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _real_illustrative_entry():
+    text = RUBRIC.read_text(encoding="utf-8")
+    m = _ILLUSTRATIVE_ENTRY_RE.search(text)
+    assert m, ("illustrative entry not found in %s — has the corpus moved?"
+              % RUBRIC)
+    return (m.group("title").strip(), m.group("decision").strip(),
+            m.group("context").strip(), m.group("scope").strip())
+
+
+# Fixtures for the two-signal rule (096-01 / ADR-0039). Each is checked by
+# hand against every marker group below so the tests pin exactly one
+# condition apiece rather than a coincidental combination.
+_LOAD_BEARING_HALF = (
+    "We are replacing the vendored library with our own native "
+    "implementation.")
+_ALTERNATIVES_HALF = (
+    "We considered several alternatives and rejected them, choosing this "
+    "instead of continuing to patch the old one.")
+_BOUNDARY_ONLY = (
+    "This changes the module boundary between the auth and billing "
+    "services.")
+_ALTERNATIVES_ONLY = (
+    "We considered several alternatives and rejected them, choosing this "
+    "instead of the others.")
+_LOAD_BEARING_ONLY = (
+    "This is a load-bearing decision about internal dependency coupling.")
+_ALTERNATIVELY_TEXT = "We could alternatively use a different color for the icon."
+_SCHEMATIC_TEXT = "We redrew the schematic in the onboarding illustration."
+# A real lightweight decision of the class the rubric routes to this home by
+# name ("UI string or translation choices") that happens to say "user
+# interface". BOUNDARY flags on its own, so a bare `interface` marker would
+# refuse this — see the marker table's note and ADR-0039's Option A.
+_UI_COPY_WITH_INTERFACE = (
+    "Settings label wording",
+    "Use 'Preferences' over 'Settings' in the user interface",
+    "Matches the platform convention users already know",
+    "settings screen",
+)
 
 
 class AddLightweightTests(unittest.TestCase):
@@ -484,6 +550,119 @@ class EntriesPlaceholderTests(unittest.TestCase):
         defect returns with no test failing anywhere else."""
         self.assertRegex(TEMPLATE.read_text(encoding="utf-8"),
                          decisions._ENTRIES_PLACEHOLDER_RE)
+
+
+class RoutingEvaluatorTests(unittest.TestCase):
+    """The pure lexical evaluator that backs the advisory lint (096-04 /
+    ADR-0039). No project dir, no filesystem, no env — text in, matches out.
+    ADR-0039 confines this to the report-only lint; it must not gate a write,
+    so these tests pin behaviour, not a refusal."""
+
+    # AC8 — importable, pure, structured output.
+    def test_evaluator_is_a_plain_function_returning_named_matches(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", "load-bearing change", "", "")
+        self.assertIsInstance(matches, list)
+        self.assertTrue(matches)
+        m = matches[0]
+        self.assertEqual(m.group, "LOAD_BEARING")
+        self.assertEqual(m.phrase, "load-bearing")
+
+    def test_no_markers_returns_empty_list(self):
+        self.assertEqual(
+            decisions.evaluate_routing_signals("t", "d", "c", "s"), [])
+
+    # Edge case — empty/None context+scope must not crash the scan.
+    def test_empty_context_and_scope_do_not_crash(self):
+        self.assertEqual(
+            decisions.evaluate_routing_signals("t", "d", "", ""), [])
+
+    def test_none_context_and_scope_do_not_crash(self):
+        self.assertEqual(
+            decisions.evaluate_routing_signals("t", "d", None, None), [])
+
+    # AC4 — ALTERNATIVES alone does not flag.
+    def test_alternatives_alone_does_not_flag(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", _ALTERNATIVES_ONLY, "", "")
+        groups = {m.group for m in matches}
+        self.assertEqual(groups, {"ALTERNATIVES"})
+        self.assertFalse(decisions.flags_adr_routing(matches))
+
+    # AC4 — LOAD_BEARING alone does not flag.
+    def test_load_bearing_alone_does_not_flag(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", _LOAD_BEARING_ONLY, "", "")
+        groups = {m.group for m in matches}
+        self.assertEqual(groups, {"LOAD_BEARING"})
+        self.assertFalse(decisions.flags_adr_routing(matches))
+
+    # AC2 (evaluator half) — BOUNDARY alone DOES flag.
+    def test_boundary_alone_flags(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", _BOUNDARY_ONLY, "", "")
+        groups = {m.group for m in matches}
+        self.assertEqual(groups, {"BOUNDARY"})
+        self.assertTrue(decisions.flags_adr_routing(matches))
+
+    # AC1 (evaluator half) — ALTERNATIVES + LOAD_BEARING together DOES flag.
+    def test_alternatives_and_load_bearing_together_flag(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", _LOAD_BEARING_HALF, _ALTERNATIVES_HALF, "")
+        groups = {m.group for m in matches}
+        self.assertEqual(groups, {"LOAD_BEARING", "ALTERNATIVES"})
+        self.assertTrue(decisions.flags_adr_routing(matches))
+
+    # AC3 (evaluator half) — jig's own illustrative UI-copy entry, read from
+    # the real file, must not flag under either criterion.
+    def test_illustrative_entry_does_not_flag(self):
+        title, decision, context, scope = _real_illustrative_entry()
+        matches = decisions.evaluate_routing_signals(
+            title, decision, context, scope)
+        self.assertFalse(
+            decisions.flags_adr_routing(matches),
+            "false positive on jig's own illustrative entry: %r" % (matches,))
+
+    # Edge case — a marker inside a larger word must not match.
+    def test_alternatively_does_not_fire_alternative_marker(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", _ALTERNATIVELY_TEXT, "", "")
+        self.assertEqual(matches, [])
+
+    def test_schematic_does_not_fire_schema_marker(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", _SCHEMATIC_TEXT, "", "")
+        self.assertEqual(matches, [])
+
+    # AC3's second corpus — a UI-copy decision that says "user interface".
+    # BOUNDARY flags alone, so a bare `interface` marker refuses a decision the
+    # rubric names as belonging here. Guards the narrowing to `public
+    # interface`; a later re-widening fails on this rather than on a report
+    # from the field.
+    def test_user_interface_in_ui_copy_does_not_flag(self):
+        matches = decisions.evaluate_routing_signals(*_UI_COPY_WITH_INTERFACE)
+        self.assertFalse(
+            decisions.flags_adr_routing(matches),
+            "false positive on an ordinary UI-copy decision: %r" % (matches,))
+
+    # AC7 — case-insensitive and whitespace-tolerant.
+    def test_matching_is_case_insensitive_and_whitespace_tolerant(self):
+        matches = decisions.evaluate_routing_signals(
+            "t", "This changes the   MODULE\n   BOUNDARY  here.", "", "")
+        groups = {m.group for m in matches}
+        self.assertIn("BOUNDARY", groups)
+
+    # AC7 — all four fields are scanned, not just decision/context.
+    def test_all_four_fields_are_scanned(self):
+        field_names = ("title", "decision", "context", "scope")
+        for idx in range(4):
+            args = ["", "", "", ""]
+            args[idx] = "module boundary change"
+            matches = decisions.evaluate_routing_signals(*args)
+            groups = {m.group for m in matches}
+            self.assertIn(
+                "BOUNDARY", groups,
+                "field %r was not scanned" % (field_names[idx],))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
 ---
 status: READY_FOR_IMPLEMENTATION
-dependencies: []
-last_verified: 2026-07-22
-arch_review: true
+dependencies: [096-02, 096-03]
+last_verified: 2026-07-24
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -14,132 +13,89 @@ arch_review: true
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-01 — routing-check-on-add
+## Slice 096-01 — routing-judgment-guidance
 
-**Goal:** `decisions.py add-lightweight` refuses a decision whose own text says
-it belongs in an Architectural Decision Record (ADR), names what it matched, and
-points at `adr.py new` — with `--confirm-lightweight` as the documented escape
-hatch. `ADR_TRIGGER` stops being a string the helper only renders.
+**Goal:** memory-sync's `SKILL.md` tells the assistant, in prose, that **when it
+updates (or records) a lightweight decision it first evaluates the decision
+against `ADR_TRIGGER` and, if it clears the trigger, promotes it to an
+Architectural Decision Record (ADR) with `decisions.py promote` instead of
+filing it as lightweight.** This is the routing enforcement — judgement by the
+model already reading the decision, not a keyword matcher on the write path
+([ADR-0039](../../decisions/adr-0039-decision-routing-gate.md), Option B).
 
-`arch_review: true` — this adds a gate to a **tier-0** helper that four
-documented surfaces and the scaffold path invoke, and gates are governed by
-[ADR-0011](../../decisions/adr-0011-spec-gate-model.md). The shape of the check
-(two-signal, derived from the rubric rather than invented) is the reviewable
-decision, recorded in
-[ADR-0039](../../decisions/adr-0039-decision-routing-gate.md).
+Why guidance and not a code gate: the maintainer's call on
+[#121](https://github.com/ramboz/jig/issues/121). A lexical write-gate is brittle
+(the project has seen the pattern fail repeatedly) and gates first-write, when
+the reported failure is at revision. See ADR-0039.
+
+Depends on **096-02 and 096-03** because the guidance names their commands
+(`update`, `promote`); prose that points at commands which do not exist yet would
+ship stale. This slice lands last of the four.
 
 **DoR:**
-- ✅ [ADR-0031](../../decisions/adr-0031-load-bearing-decision-adr-trigger.md)
-  defines the trigger sentence; this slice applies it rather than changing it.
-- ✅ [ADR-0011](../../decisions/adr-0011-spec-gate-model.md) + [spec 078](../078-gate-bypass-telemetry/spec.md)
-  set the house gate shape: on by default, documented escape hatch, bypass
-  telemetry. `_common/parsing.py:88` and `_common/gate_telemetry.py:24` are the
-  shared backings.
-- ✅ The rubric's two ADR criteria are already written down and are what the
-  evaluator reads from (`lightweight-decisions.md:13`) — the check is a
-  transcription of an existing rule, not a new policy.
-- ✅ jig's own `lightweight-decisions.md` supplies the must-not-flag corpus: one
-  illustrative UI-copy entry (`:55`) and one `## Template` fence heading.
-
-### The two-signal rule (why it is not a keyword list)
-
-The rubric states **two** independent ADR criteria, and they are not the same
-shape:
-
-| # | Criterion (verbatim from the rubric) | Condition |
-|---|---|---|
-| (a) | "A load-bearing design choice **with rejected alternatives**…" | conjunction — needs *both* |
-| (b) | "Also: any change to a **module boundary, public contract, or cross-cutting policy**." | unconditional |
-
-A flat keyword list collapses that distinction and breaks immediately on jig's
-own corpus: the illustrative entry is *"Onboarding CTA copy: 'Get started' over
-'Sign up'"* — a rejected alternative in the plainest sense, and one the rubric
-sends to the **lightweight** home by name ("UI string or translation choices").
-The rubric's own wording is what saves it: *"no **real** rejected alternatives"*.
-"Real" is doing the work, and criterion (a) supplies its test — the alternatives
-have to attach to a **load-bearing** choice.
-
-So the evaluator carries three marker groups and one rule:
-
-- `BOUNDARY` — module boundary, public contract, protocol, schema, cross-cutting
-  policy, public API surface. **Flags alone** (criterion b).
-- `ALTERNATIVES` — rejected, ruled out, discarded, instead of, rather than, as
-  opposed to, in favour/favor of, alternative(s), trade-off. **Never flags
-  alone.**
-- `LOAD_BEARING` — load-bearing, architectural, structural, replaces/replacing,
-  native implementation, vendored, dependency, coupling, invariant, migration,
-  irreversible/hard to reverse. **Never flags alone.**
-
-**Flag iff `BOUNDARY`, or (`ALTERNATIVES` and `LOAD_BEARING`).**
-
-Checked against both cases that matter: the illustrative UI-copy entry hits at
-most `ALTERNATIVES` → no flag. The reported case hits `LOAD_BEARING`
-("replacing… with our own native implementation") *and* `ALTERNATIVES` (the
-rejected alternatives it added at step 3) → flag.
+- ✅ [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) records the
+  chosen approach and the rejected write-gate.
+- ✅ `ADR_TRIGGER` is single-sourced (`decisions.py:41-45`) and already quoted at
+  four judgement surfaces; this adds a fifth of the same kind.
+- ✅ `memory-sync/SKILL.md` already carries a "Load-bearing decision escape hatch"
+  block (~`:87-94`, spec 083-06) quoting `ADR_TRIGGER` — the natural anchor to
+  extend, not a greenfield section.
+- ✅ 096-02 (`update`) and 096-03 (`promote`) are DONE, so the guidance names
+  real commands.
 
 **Acceptance Criteria:**
 
-1. **A load-bearing decision with rejected alternatives is refused.** `add-lightweight`
-   with `--decision`/`--context` text hitting `ALTERNATIVES` **and**
-   `LOAD_BEARING` exits non-zero, writes **nothing** (no seed, no append), and
-   the message (a) names which groups matched and the matched phrase, (b) quotes
-   `ADR_TRIGGER` verbatim from the constant, and (c) names `adr.py new` as the
-   route and `--confirm-lightweight` as the escape hatch.
-2. **A boundary change is refused on its own.** Text hitting `BOUNDARY` alone —
-   no alternatives language anywhere — is refused identically. Criterion (b) is
-   unconditional, so requiring a second signal would under-enforce it.
-3. **A genuinely lightweight decision is untouched.** jig's own illustrative
-   entry, re-recorded through the CLI verbatim (title, decision, context, scope),
-   exits 0 and appends exactly as it does today. This is the false-positive
-   guard, and it uses the real corpus rather than a fixture invented to pass.
-4. **`ALTERNATIVES` alone does not flag, and `LOAD_BEARING` alone does not
-   flag.** Two explicit tests, one per group, so a later "simplification" to a
-   flat keyword list fails rather than silently re-breaking AC3.
-5. **`--confirm-lightweight` proceeds.** The same input as AC1, plus the flag,
-   exits 0 and appends. The gate is a deliberateness signal, not an authority
-   (ADR-0011) — the operator who has read the flag can still record.
-6. **`JIG_DECISION_ROUTING_GATE=0` disables the check**, honouring
-   `_common.parsing.env_gate_enabled`'s falsey-token set, and emits one
-   `gate_bypassed` event via `_common.gate_telemetry.emit_gate_bypass` naming
-   this gate and that env var. `--confirm-lightweight` emits **no** event — it is
-   the gate working as designed, not an override of it (spec 078 instruments
-   env-var escapes).
-7. **Matching is case-insensitive and whitespace-tolerant**, and scans all four
-   text fields (`--title`, `--decision`, `--context`, `--scope`) — `--scope` is
-   where "module" lands.
-8. **The evaluator is importable and pure.** A module-level function returning
-   the matched groups/phrases for a text, with no filesystem or environment
-   access, so 096-02 and 096-04 reuse it rather than re-deriving the rule.
-9. **No change to `add-lightweight`'s existing arguments or output on the happy
-   path.** Every documented command block (`SKILL.md:122-124`,
-   `lightweight-decisions.md:26`, the template, `decision_scan.py:357-362`,
-   `migrate.py`'s nudge) keeps working unchanged.
+1. **The guidance exists at the update moment.** `memory-sync/SKILL.md` states
+   that before revising a recorded lightweight decision, the assistant
+   re-evaluates it against the ADR trigger, because a decision's weight can change
+   after it was first filed — naming #121's failure mode in one line so the
+   *why* travels with the instruction.
+2. **It routes a cleared decision to `promote`.** The guidance says: if the
+   updated decision now clears `ADR_TRIGGER`, use `decisions.py promote --title
+   …` rather than `update`, so the record moves to an ADR and leaves a
+   forward-linking stub. The command it names must be the real one 096-03 ships.
+3. **It quotes `ADR_TRIGGER` verbatim.** The trigger sentence in the new guidance
+   is byte-identical to the constant, and `test_decisions.py::SingleSourceDriftTests`
+   is extended to assert this fifth site — so the guidance cannot drift from the
+   rule it applies. This is the single change that makes the prose load-bearing
+   rather than decorative.
+4. **Record-time gets a lighter reminder.** The `add-lightweight` guidance block
+   notes that if a decision already clears the trigger *when first recorded*, it
+   belongs in an ADR (`adr.py new`) from the start — the pre-existing routing
+   advice, kept, now sitting beside the sharper update-time rule.
+5. **No code gate, no `--confirm-lightweight`.** `add-lightweight` and `update`
+   refuse nothing on routing grounds and carry no routing flag — the enforcement
+   is the guidance plus the advisory lint, per ADR-0039. (This AC is a guard: a
+   later reviewer must not "add the missing gate".)
+6. **The host mirrors carry the same text.** After `scripts/build_host_packages.py`,
+   `hosts/claude/skills/memory-sync/SKILL.md` and the Codex mirror hold the
+   identical guidance — the drift test already covers the `skills/` source; the
+   host copies are regenerated, not hand-edited.
 
 **Edge cases covered explicitly:**
 
-- A marker inside a larger word must not match (`"alternatively"` must not fire
-  `alternative`; `"interfaces"` in prose about a UI must not fire `interface`) —
-  word-boundary matching, asserted.
-- Empty `--context`/`--scope` (both default to `""`) must not crash the scan.
-- The refusal must fire **before** `seed_lightweight`, so a refused call cannot
-  leave a record home behind as a side effect — the same ordering
-  `CliOrderingTests::test_invalid_input_does_not_seed` already pins for field
-  validation.
+- The guidance must not tell the assistant to hand-edit `lightweight-decisions.md`
+  — it routes through `update` / `promote`, consistent with every other surface
+  that forbids hand-editing the file (`SKILL.md:129-131`).
+- The wording distinguishes the two homes the way the rubric does: *clears the
+  trigger* → ADR; *settled, local, bounded, no real rejected alternatives* →
+  stays lightweight. It must not imply that any rejected-alternative mention
+  forces an ADR (that is the Option-A over-fire ADR-0039 rejects).
 
-**Anti-horizontal-phasing check:** after this slice an operator who tries to
-misfile an ADR-worthy decision is stopped at the moment of writing, with the
-route named. It is not "the evaluator exists and a later slice will call it".
+**Anti-horizontal-phasing check:** with 096-02, 096-03, and this slice in, an
+assistant revising a decision that has grown load-bearing is told — at the moment
+it revises — to promote it, and has the command to do so. The judgement, the
+trigger, and the mechanism are all present end-to-end.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions) on Python 3.9.
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
-      Edge cases listed above are covered explicitly.
+- [ ] `SingleSourceDriftTests` extended to the new guidance site and asserted
+      to fail if the quoted trigger is altered.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Architecture review passed (`arch_review: true`).
 - [ ] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
 - [ ] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] Host packages regenerated (`scripts/build_host_packages.py`) — the helper
-      is mirrored into `hosts/claude/` and `hosts/codex/`.
+- [ ] Host packages regenerated (`scripts/build_host_packages.py`) — SKILL.md is
+      mirrored into `hosts/claude/` and `hosts/codex/`.
 - [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
