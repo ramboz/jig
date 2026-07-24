@@ -372,8 +372,11 @@ from slice 058-06 implementation + review, 2026-06-25.
 
 ## Scaffold doc templates render into two install shapes — `${CLAUDE_PLUGIN_ROOT}` paths break in scaffold mode
 The `templates/docs/*.md.template` + `CLAUDE.md.template` files render for BOTH
-install shapes: `--plugin-only` (machinery stays under the plugin root) and the
-default in-repo scaffold (machinery copied to `.claude/skills/jig-*`). A
+install shapes: plugin mode (machinery stays under the plugin root — the
+**default** as of slice 096-01 / [ADR-0039](../decisions/adr-0039-scaffold-defaults-to-plugin-mode.md);
+also reachable explicitly via `--plugin-only`) and the in-repo scaffold
+(`--in-repo`, machinery copied to `.claude/skills/jig-*`; it was the default only
+between slices 016-03 and 096-01). A
 `${CLAUDE_PLUGIN_ROOT}/skills/<name>/...` command path in a doc template is correct
 for plugin-only but **silently broken in a scaffolded project** — the env var is
 unset there and the helper actually lives at `.claude/skills/jig-<name>/...`. A real

@@ -35,8 +35,12 @@ is offered (not auto-installed) when LLM/agent signals are present.
    python3 "${PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" \
      [--runtime <name>] [--team|--solo] [--has-ci|--no-ci] \
      [--has-tests|--no-tests] [--plans-ai|--no-ai] \
+     [--in-repo] \
      <target-dir>
    ```
+   With no machinery flag the wizard scaffolds **plugin mode** — the lean default
+   (docs + primer only; jig runs from the installed plugin). Pass `--in-repo`
+   only when the sixth question is answered "yes".
 5. Read the wizard's stdout summary and report back to the user. List the files
    that were created and the immediate next steps.
 
@@ -74,18 +78,39 @@ user says "skip", "I don't know", "unsure", or similar, do not pass the flag
 5. **LLM/agent work planned** — "Will this project involve LLM or agent development?"
    → `--plans-ai` for yes, `--no-ai` for no; omit if skipped.
    This affects whether tier-2 is offered.
+6. **Machinery vs. plugin** — "Will this project ever run jig where the plugin may
+   NOT be installed — CI, cloud agents, or teammates without jig? (yes → copy
+   jig's machinery into the repo; no → use the installed plugin)"
+   → `--in-repo` for yes; **omit for no** (plugin mode is the default). Skipping
+   selects plugin mode.
+   This is the one architectural question in the flow (it decides repo topology —
+   what gets committed), so it won't appear in the project's own docs. Default to
+   plugin mode (lean repo, jig updates flow from the plugin); choose `--in-repo`
+   only for the self-contained cases above. See
+   [ADR-0039](../../docs/decisions/adr-0039-scaffold-defaults-to-plugin-mode.md).
 
 Skipping every question is the legitimate "pure inference" mode (slice 001-03
-behavior) — the wizard infers from filesystem signals alone. Do not invent
-answers when the user is unsure.
+behavior) — the wizard infers from filesystem signals alone, and defaults to
+plugin mode. Do not invent answers when the user is unsure.
 
 ## Output
 
-After running, the target directory contains:
+After running, the target directory contains (plugin mode — the default):
 - `AGENTS.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
 - `.codex/hooks/` (empty — project-specific gates can go here)
-- `scaffold.json` (install-state manifest)
+- `.gitignore` (secret-ignore floor)
+- `scaffold.json` (install-state manifest; `scaffold_mode: "plugin-only"`)
+
+In plugin mode jig's skills, agents, and hooks stay under the installed plugin
+and run from `${PLUGIN_ROOT}` — nothing is copied into the repo. The
+wizard's stdout summary states the mode and why.
+
+With `--in-repo`, the target additionally gets a self-contained
+`.codex/skills/`, `.codex/agents/`, `.codex/hooks/scripts/`,
+`.codex/templates/`, and a generated `.codex/settings.json`
+(`scaffold_mode: "in-repo"`). Choose it only for CI, cloud agents, or teammates
+without jig installed.
 
 Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 `docs/memory/people.md` is NOT created (solo-project default — team detection is slice 001-03).

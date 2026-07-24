@@ -2455,7 +2455,7 @@ def adoption_manifest(
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides | None = None,
-             with_machinery: bool = True,
+             with_machinery: bool = False,
              host: str = "claude",
              docs_root: str = "docs") -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
@@ -2463,10 +2463,13 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     Q&A wizard answers from slice 001-05; None fields fall back to filesystem
     inference. Plugin templates live at `plugin/templates/`.
 
-    When `with_machinery=True` (slice 016-01; default-on as of slice 016-03),
-    also copies host-local runtime machinery into the target, rewriting
-    SKILL.md path placeholders. The CLI's `--plugin-only` flag sets this to
-    `False` to preserve the pre-016-03 docs-only behavior."""
+    When `with_machinery=True` (slice 016-01), also copies host-local runtime
+    machinery into the target, rewriting SKILL.md path placeholders — the
+    self-contained in-repo mode. The default is `False` (plugin mode: docs +
+    primer only) as of slice 096-01 / ADR-0039, matching the CLI's `--in-repo`
+    opt-in; it kept `True` between slices 016-03 and 096-01. The parameter
+    default and the CLI default (`_build_parser`) are deliberately kept in
+    step."""
     if host not in {"claude", "codex"}:
         raise ValueError(f"unsupported scaffold host: {host}")
 
@@ -2622,8 +2625,9 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     atomic_write_text(target / "brief.md", brief)
 
     # 5. Slice 016-01 + 016-02: copy skills/, agents/, hook scripts, and
-    # write/merge host hook configuration when --with-machinery is on
-    # (default since 016-03). `force` propagates so that --force also
+    # write/merge host hook configuration when in-repo mode is selected
+    # (`--in-repo`; the opt-in as of slice 096-01 / ADR-0039 — it was
+    # default-on between slices 016-03 and 096-01). `force` propagates so --force also
     # overrides the unmanaged-hooks safety check (same escape hatch as
     # AlreadyScaffoldedError). Slice 021-01 lifted the two-call sequence
     # behind a public `copy_machinery()` façade so `migrate.py
@@ -2706,26 +2710,35 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--force", action="store_true",
                    help="overwrite an already-scaffolded directory")
-    # Slice 016-03 flipped the default ON. The two flags are mutually
-    # exclusive: --with-machinery is now redundant (default) but kept for
-    # documentation symmetry and back-compat with explicit slice 016-01/02
-    # invocations; --plugin-only is the new opt-out for users who want the
-    # old docs-only behavior.
+    # Slice 096-01 (ADR-0039) flipped the default back to plugin mode,
+    # reversing slice 016-03's in-repo default. The axis is one mutually
+    # exclusive group over `with_machinery`:
+    #   * default (no flag) → plugin mode: the repo stays lean and jig runs
+    #     from the installed plugin.
+    #   * --in-repo (aliases --with-machinery / --copy-machinery) → in-repo
+    #     mode: copy jig's machinery into the target so the project is
+    #     self-contained. The deliberate opt-in for CI, cloud agents, or
+    #     teammates without jig installed.
+    #   * --plugin-only → plugin mode explicitly (redundant with the default,
+    #     kept for clarity and back-compat).
     machinery = p.add_mutually_exclusive_group()
     machinery.add_argument(
-        "--with-machinery", dest="with_machinery",
-        action="store_true", default=True,
-        help="copy skills/, agents/, and hooks/ into the target's host-local "
-             "runtime so the dev owns and can edit the runtime artifacts "
-             "(default-on as of slice 016-03; flag is now redundant but kept "
-             "for symmetry)",
+        "--in-repo", "--with-machinery", "--copy-machinery",
+        dest="with_machinery",
+        action="store_true", default=False,
+        help="copy jig's machinery (skills/, agents/, hooks/, templates/, and a "
+             "generated settings.json) into the target's host-local runtime so "
+             "the project is self-contained and needs no installed plugin — the "
+             "deliberate opt-in for CI, cloud agents, or teammates without jig. "
+             "(--with-machinery / --copy-machinery are aliases.)",
     )
     machinery.add_argument(
         "--plugin-only", dest="with_machinery",
         action="store_false",
-        help="opt out of scaffold-mode: only scaffold docs/ and the host "
-             "primer into the target; leave skills/ and agents/ under the "
-             "installed plugin runtime (pre-016-03 default behavior)",
+        help="explicitly select the default plugin mode: scaffold only docs/ "
+             "and the host primer; leave skills/ and agents/ under the installed "
+             "plugin runtime. Redundant with the default (kept for clarity and "
+             "back-compat).",
     )
     p.add_argument("--runtime", default=None,
                    help="runtime/language answer from the Q&A wizard "
@@ -2830,6 +2843,22 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(f"scaffolded {target.name} → {target}")
+
+    # Slice 096-01 (ADR-0039): name the scaffold mode and why, so the axis is
+    # visible in the summary rather than a silent default. Emitted for both
+    # hosts (before the Codex early return below).
+    if ns.with_machinery:
+        print(
+            "mode: in-repo — jig's machinery was copied into the project, so it "
+            "is self-contained and needs no installed plugin (chosen via "
+            "--in-repo)."
+        )
+    else:
+        print(
+            "mode: plugin — the repo stays lean and jig runs from the installed "
+            "plugin (the default). Re-run with --in-repo to copy the machinery "
+            "in for CI, cloud agents, or teammates without jig installed."
+        )
 
     if ns.host == "codex":
         return 0

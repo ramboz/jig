@@ -1362,12 +1362,14 @@ class MergeExistingSettingsTests(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 
-class DefaultOnMachineryTests(unittest.TestCase):
-    """Slice 016-03 AC #1 — `--with-machinery` is now default-on. Running
-    scaffold without flags produces a fully-scaffolded `.claude/` tree."""
+class DefaultPluginModeTests(unittest.TestCase):
+    """Slice 096-01 AC #1 (ADR-0039) — the default is now **plugin mode**,
+    reversing slice 016-03's in-repo default. Running scaffold without a
+    machinery flag copies NO machinery: no skills/, agents/, hooks/scripts/,
+    or settings.json under `.claude/`, and `scaffold_mode == 'plugin-only'`."""
 
     def setUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-default-on-")
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-096-01-default-plugin-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
 
@@ -1375,29 +1377,108 @@ class DefaultOnMachineryTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_default_includes_machinery(self):
-        """AC #1 — no flag → machinery copied. scaffold_mode is 'in-repo'."""
+    def test_default_is_plugin_mode(self):
+        """AC #1 — no flag → plugin mode. No copied machinery; scaffold_mode
+        is 'plugin-only'."""
         r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse(
+            (self.target / ".claude" / "skills").exists(),
+            "default scaffold must NOT copy skills/ (plugin mode)",
+        )
+        self.assertFalse(
+            (self.target / ".claude" / "agents").exists(),
+            "default scaffold must NOT copy agents/ (plugin mode)",
+        )
+        self.assertFalse(
+            (self.target / ".claude" / "hooks" / "scripts").exists(),
+            "default scaffold must NOT copy hooks/scripts/ (plugin mode)",
+        )
+        self.assertFalse(
+            (self.target / ".claude" / "settings.json").exists(),
+            "default scaffold must NOT write settings.json (plugin mode)",
+        )
+        manifest = json.loads((self.target / "scaffold.json").read_text())
+        self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
+
+    def test_default_summary_names_plugin_mode(self):
+        """AC #3 — the wizard summary names the chosen (plugin) mode and why."""
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("mode: plugin", r.stdout)
+        self.assertIn("--in-repo", r.stdout)
+
+    def test_in_repo_flag_opts_into_machinery(self):
+        """AC #2 — --in-repo copies the machinery and sets scaffold_mode
+        'in-repo', and the summary names in-repo mode."""
+        r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertTrue(
             (self.target / ".claude" / "skills" / "jig-scaffold-init"
              / "SKILL.md").is_file(),
-            "default scaffold should include skills/",
-        )
-        self.assertTrue(
-            (self.target / ".claude" / "agents" / "jig-reviewer.md").is_file(),
-            "default scaffold should include agents/",
-        )
-        self.assertTrue(
-            (self.target / ".claude" / "hooks" / "scripts").is_dir(),
-            "default scaffold should include hooks/scripts/",
+            "--in-repo should copy skills/",
         )
         self.assertTrue(
             (self.target / ".claude" / "settings.json").is_file(),
-            "default scaffold should write settings.json",
+            "--in-repo should write settings.json",
         )
         manifest = json.loads((self.target / "scaffold.json").read_text())
         self.assertEqual(manifest.get("scaffold_mode"), "in-repo")
+        self.assertIn("mode: in-repo", r.stdout)
+
+    def test_codex_default_is_plugin_mode(self):
+        """AC #1 for the OTHER host — the slice DoD names both hosts. The
+        `with_machinery` branch is host-independent, but the codex suite
+        injects --in-repo for its machinery assertions, so without this the
+        codex *default* path would be exercised nowhere."""
+        sub = Path(self.tmpdir) / "codex-default"
+        sub.mkdir()
+        r = run_scaffold_with_args(sub, "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        for rel in (".codex/skills", ".codex/agents",
+                    ".codex/hooks/scripts", ".codex/hooks.json",
+                    ".codex/templates"):
+            self.assertFalse(
+                (sub / rel).exists(),
+                f"codex default scaffold must NOT create {rel} (plugin mode)",
+            )
+        manifest = json.loads((sub / "scaffold.json").read_text())
+        self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
+        self.assertEqual(manifest.get("host_renderer"), "codex")
+
+    def test_codex_summary_names_the_mode(self):
+        """AC #3 for the OTHER host — the summary must be emitted before
+        main()'s codex early-return, in both modes."""
+        plugin_dir = Path(self.tmpdir) / "codex-sum-plugin"
+        plugin_dir.mkdir()
+        r = run_scaffold_with_args(plugin_dir, "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("mode: plugin", r.stdout)
+
+        in_repo_dir = Path(self.tmpdir) / "codex-sum-inrepo"
+        in_repo_dir.mkdir()
+        r2 = run_scaffold_with_args(in_repo_dir, "--host", "codex", "--in-repo")
+        self.assertEqual(r2.returncode, 0, f"stderr: {r2.stderr}")
+        self.assertIn("mode: in-repo", r2.stdout)
+
+    def test_in_repo_aliases_are_equivalent(self):
+        """AC #2 — --with-machinery and --copy-machinery are aliases of
+        --in-repo: each produces an in-repo scaffold."""
+        for alias in ("--with-machinery", "--copy-machinery"):
+            with self.subTest(alias=alias):
+                sub = Path(self.tmpdir) / f"alias-{alias.strip('-')}"
+                sub.mkdir()
+                r = run_scaffold_with_args(sub, alias)
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                manifest = json.loads((sub / "scaffold.json").read_text())
+                self.assertEqual(
+                    manifest.get("scaffold_mode"), "in-repo",
+                    f"{alias} should be an --in-repo alias",
+                )
+                self.assertTrue(
+                    (sub / ".claude" / "skills").is_dir(),
+                    f"{alias} should copy machinery",
+                )
 
 
 class PluginOnlyOptOutTests(unittest.TestCase):
@@ -1438,14 +1519,20 @@ class PluginOnlyOptOutTests(unittest.TestCase):
 
     def test_plugin_only_and_with_machinery_are_exclusive(self):
         """Passing both --plugin-only and --with-machinery is a usage
-        error (argparse mutually-exclusive group, exit 2)."""
-        r = run_scaffold_with_args(
-            self.target, "--plugin-only", "--with-machinery",
-        )
-        self.assertNotEqual(
-            r.returncode, 0,
-            "passing both flags must be rejected by argparse",
-        )
+        error (argparse mutually-exclusive group, exit 2). Slice 096-01 AC #2
+        names exit 2 specifically, so assert the code rather than merely
+        non-zero — a bare `!= 0` also passes on an unrelated crash."""
+        for in_repo_flag in ("--with-machinery", "--in-repo", "--copy-machinery"):
+            with self.subTest(flag=in_repo_flag):
+                r = run_scaffold_with_args(
+                    self.target, "--plugin-only", in_repo_flag,
+                )
+                self.assertEqual(
+                    r.returncode, 2,
+                    f"--plugin-only with {in_repo_flag} must be an argparse "
+                    f"usage error (exit 2); got {r.returncode}, "
+                    f"stderr={r.stderr!r}",
+                )
 
 
 class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
@@ -1460,9 +1547,9 @@ class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-dogfood-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
-        # Default-on scaffold (no flags); 016-03 made this fully wire up
-        # the .claude/ tree.
-        r = run_scaffold_with_args(self.target)
+        # The dogfood shape is the in-repo tree; since slice 096-01 (ADR-0039)
+        # flipped the default to plugin mode, opt in explicitly with --in-repo.
+        r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(
             r.returncode, 0,
             f"scaffold failed: stderr={r.stderr}\nstdout={r.stdout}",
@@ -1534,6 +1621,14 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _run_codex_scaffold(self, *extra_args: str) -> subprocess.CompletedProcess:
+        # These tests exercise the copied `.codex/` machinery tree. Since slice
+        # 096-01 (ADR-0039) flipped the default to plugin mode, inject --in-repo
+        # unless the caller already selected a mode explicitly (e.g. the
+        # plugin-only leak test passes --plugin-only).
+        mode_flags = {"--in-repo", "--with-machinery",
+                      "--copy-machinery", "--plugin-only"}
+        if not any(a in mode_flags for a in extra_args):
+            extra_args = ("--in-repo", *extra_args)
         return run_scaffold_with_args(self.target, "--host", "codex", *extra_args)
 
     def test_codex_scaffold_tree_has_no_claude_only_files(self):
@@ -1569,7 +1664,8 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
             / "scaffold-init" / "scaffold.py"
         )
         r = subprocess.run(
-            ["python3", str(script), "--host", "codex", str(self.target)],
+            ["python3", str(script), "--host", "codex", "--in-repo",
+             str(self.target)],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -2175,8 +2271,11 @@ class ScaffoldCompletionMarkerTests(unittest.TestCase):
         }, indent=2) + "\n")
 
         # First run: scaffold refuses due to unmanaged hooks. We expect
-        # non-zero exit (rc=3 per the CLI's UnmanagedHooksError branch).
-        r1 = run_scaffold_with_args(self.target)
+        # non-zero exit (rc=3 per the CLI's UnmanagedHooksError branch). The
+        # unmanaged-hooks check runs during the machinery copy, so this uses
+        # in-repo mode (096-01 / ADR-0039 flipped the default to plugin mode,
+        # which never copies machinery and so never reaches the check).
+        r1 = run_scaffold_with_args(self.target, "--in-repo")
         self.assertNotEqual(
             r1.returncode, 0,
             "scaffold must refuse when settings.json has unmanaged hooks; "
@@ -2202,7 +2301,7 @@ class ScaffoldCompletionMarkerTests(unittest.TestCase):
         # Re-run without --force. Must succeed: scaffold.json was never
         # written, so the "already scaffolded" check lets the re-run
         # proceed.
-        r2 = run_scaffold_with_args(self.target)
+        r2 = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(
             r2.returncode, 0,
             f"re-run without --force must succeed after refusal: stderr={r2.stderr}",
@@ -2500,8 +2599,9 @@ class ScaffoldDocStocktakeCommandTests(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-stocktake-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
-        # Default (in-repo) scaffold — machinery copied to .claude/skills.
-        r = run_scaffold_with_args(self.target)
+        # in-repo scaffold — machinery copied to .claude/skills (096-01 flipped
+        # the default to plugin mode, so opt in explicitly).
+        r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
 
     def tearDown(self):
@@ -2565,7 +2665,10 @@ class ScaffoldDocLinksResolveTests(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-links-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
-        r = run_scaffold_with_args(self.target)
+        # in-repo scaffold: this test validates that the in-repo doc rewrite
+        # produces relative links that resolve to the copied tree (096-01
+        # flipped the default to plugin mode).
+        r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
 
     def tearDown(self):
@@ -2655,8 +2758,10 @@ class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
 
     def test_in_repo_scaffold_has_no_plugin_root_command_path(self):
         """AC4 — no generated core doc uses ${CLAUDE_PLUGIN_ROOT}/skills/
-        as a command path in a default (in-repo) scaffold."""
-        target = self._scaffold()
+        as a command path in an in-repo scaffold (096-01 flipped the default
+        to plugin mode, which correctly PRESERVES those paths — see the
+        companion test — so opt in explicitly here)."""
+        target = self._scaffold("--in-repo")
         offenders = []
         for rel in _CORE_DOCS:
             doc = target / rel

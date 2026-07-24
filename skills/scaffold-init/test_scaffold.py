@@ -1997,7 +1997,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
     # AC #1 — verification runs at scaffold end with a summary + verdict.
     def test_in_repo_scaffold_emits_completion_summary(self):
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertIn("Scaffold verification", result.stdout)
         self.assertIn("in-repo", result.stdout)
@@ -2017,7 +2017,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
     # AC #4 — removing a required artifact makes the verdict loud + non-zero.
     def test_missing_seed_file_makes_verification_fail_loudly(self):
-        first = run_scaffold(self.target)
+        first = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
         # Drop a seed file, then re-run verification via the headless surface
         # of the wizard helper (scaffold itself refuses re-scaffold). We assert
@@ -2043,7 +2043,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
         import verify_install  # noqa: E402
 
-        first = run_scaffold(self.target)
+        first = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
         # Remove a scaffolded agent file.
         agent = self.target / ".claude/agents/jig-reviewer.md"
@@ -2262,7 +2262,9 @@ class SecurityFloorTests(unittest.TestCase):
 
     # ---- AC #2: secret-scan hook copied + registered ----
     def test_secret_scan_hook_copied_to_project(self):
-        result = run_scaffold(self.target)
+        # The secret-scan hook is copied into the project only in in-repo mode;
+        # in plugin mode it runs from the installed plugin (096-01 / ADR-0039).
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
         self.assertTrue(hook.is_file(),
@@ -2271,7 +2273,9 @@ class SecurityFloorTests(unittest.TestCase):
         self.assertTrue(os.access(hook, os.X_OK), "hook must be executable")
 
     def test_secret_scan_hook_registered_in_settings(self):
-        result = run_scaffold(self.target)
+        # settings.json (with the hook registration) is written only in in-repo
+        # mode; plugin mode registers the hook via the installed plugin.
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         settings = json.loads(
             (self.target / ".claude/settings.json").read_text()
@@ -2302,7 +2306,7 @@ class SecurityFloorTests(unittest.TestCase):
     def test_secret_scan_hook_works_after_scaffold(self):
         """End-to-end: the copied hook blocks a real secret in the scaffolded
         project tree (AC #2 'observable end-to-end')."""
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
         # Assemble the secret at runtime so this source file never holds one.
@@ -2428,16 +2432,20 @@ class PermissionsDenyTests(unittest.TestCase):
         settings.write_text(json.dumps(payload, indent=2) + "\n")
 
     def _rescaffold_force(self) -> subprocess.CompletedProcess:
+        # permissions.deny lives in the generated settings.json, which is only
+        # written in in-repo mode (096-01 / ADR-0039 flipped the default to
+        # plugin mode), so this suite opts in explicitly.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         return subprocess.run(
-            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            [sys.executable, str(SCAFFOLD), "--in-repo", "--force",
+             str(self.target)],
             capture_output=True, text=True, env=env,
         )
 
     # ---- AC #1: conservative deny defaults are scaffolded ----
     def test_fresh_scaffold_has_destructive_deny_globs(self):
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         deny = self._read_settings().get("permissions", {}).get("deny", [])
         for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
@@ -2450,7 +2458,7 @@ class PermissionsDenyTests(unittest.TestCase):
         """The scaffolded deny array is exactly jig's source-of-truth set
         (no manual count drift)."""
         mod = _load_scaffold_module()
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         deny = self._read_settings().get("permissions", {}).get("deny", [])
         self.assertEqual(
@@ -2508,7 +2516,7 @@ class PermissionsDenyTests(unittest.TestCase):
 
     # ---- AC #2: idempotent re-run ----
     def test_deny_globs_idempotent_across_reruns(self):
-        first = run_scaffold(self.target)
+        first = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
         second = self._rescaffold_force()
         self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
