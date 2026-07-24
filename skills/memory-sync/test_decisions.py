@@ -11,6 +11,9 @@ import importlib.util
 import io
 import os
 import re
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date
@@ -1103,6 +1106,571 @@ class UpdateCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _run_cli(["update", "--decision", "x",
                      "--project-dir", str(self.project)])
+
+
+# ---- 096-03: `promote` subcommand --------------------------------------
+
+ADR_PY = REPO_ROOT / "skills" / "adr-workflow" / "adr.py"
+
+# A single, addressable, plain entry with real Context/Scope text — the
+# default fixture for tests that exercise a normal promotion.
+_PROMOTABLE_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.render_entry(
+    "Button copy", "Use 'Get started'.",
+    "User testing showed it tested lower-friction.", "Onboarding CTA.",
+    date="2026-06-26")
+
+# Context AND Scope both blank — both are optional at write time
+# (`_require_entry_fields` only requires title + decision). Built through
+# `render_entry` itself (not hand-typed) so the exact whitespace shape
+# `_FIELD_RE` expects for an empty field is never guessed at.
+_MINIMAL_ENTRY_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.render_entry(
+    "Minimal entry", "Do the thing.", "", "", date="2026-07-01")
+
+# A pre-promoted stub, matching 096-03's own rendering — the AC8 fixture.
+_ALREADY_PROMOTED_SEED = """# Lightweight Decisions
+
+## Entries
+
+### 2026-05-01 — Old decision
+
+**Promoted:** moved to [ADR-0007: Old Decision](adr-0007-old-decision.md).
+"""
+
+
+class PromoteSlugDerivationTests(unittest.TestCase):
+    """`_default_slug_from_title` — the pure kebab-casing + validation that
+    backs AC1's default slug and the three edge cases (empty / leading
+    digit / consecutive hyphens)."""
+
+    def test_ordinary_title_kebab_cases_cleanly(self):
+        self.assertEqual(
+            decisions._default_slug_from_title("Button copy"),
+            "button-copy")
+
+    def test_title_with_existing_single_hyphen_is_fine(self):
+        self.assertEqual(
+            decisions._default_slug_from_title("Settings-label wording"),
+            "settings-label-wording")
+
+    # Edge case — empty (all-punctuation title).
+    def test_all_punctuation_title_refuses(self):
+        with self.assertRaises(ValueError) as ctx:
+            decisions._default_slug_from_title("???")
+        self.assertIn("--slug", str(ctx.exception))
+
+    # Edge case — leading digit.
+    def test_leading_digit_refuses(self):
+        with self.assertRaises(ValueError) as ctx:
+            decisions._default_slug_from_title("2026 upgrade")
+        msg = str(ctx.exception)
+        self.assertIn("digit", msg)
+        self.assertIn("--slug", msg)
+
+    # Edge case — consecutive hyphens (adjacent punctuation collides).
+    def test_consecutive_hyphens_refuse(self):
+        with self.assertRaises(ValueError) as ctx:
+            decisions._default_slug_from_title("A -- B")
+        msg = str(ctx.exception)
+        self.assertIn("consecutive hyphens", msg)
+        self.assertIn("--slug", msg)
+
+    def test_does_not_silently_mangle(self):
+        """The refusal must not have written a collapsed/stripped slug
+        anywhere the caller could mistake for success — a raise, not a
+        best-effort guess."""
+        with self.assertRaises(ValueError):
+            decisions._default_slug_from_title("2026 -- upgrade")
+
+
+class PromoteAdrLocatorTests(unittest.TestCase):
+    """`_adr_py_path` — sibling-skill resolution (096-03 design decision
+    #2). Run against the REAL repo checkout, where decisions.py's sibling
+    adr-workflow skill genuinely exists."""
+
+    def test_finds_the_real_sibling_adr_py(self):
+        found = decisions._adr_py_path()
+        self.assertIsNotNone(found)
+        self.assertEqual(found.resolve(), ADR_PY.resolve())
+
+    def test_never_raises_when_absent(self):
+        """Simulates a tier-0-only install with no adr-workflow sibling by
+        monkeypatching the locator's own `__file__`-derived directory via a
+        stand-in module attribute is impractical (the function reads
+        `Path(__file__)` directly) — so this pins the documented CONTRACT
+        (never raises, returns None) via the CLAUDE_PLUGIN_ROOT-fallback
+        branch pointed at a directory with no `skills/adr-workflow/`, which
+        cannot mask the always-present real sibling. Real absence is
+        exercised behaviorally by PromoteAdrNotFoundTests below (which
+        monkeypatches `decisions._adr_py_path` itself — the only seam that
+        does not depend on decisions.py's own file location)."""
+        saved = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                os.environ["CLAUDE_PLUGIN_ROOT"] = td
+                # The real sibling (own.parent/adr-workflow/adr.py) still
+                # resolves regardless of CLAUDE_PLUGIN_ROOT — this just
+                # pins that the function does not raise when the
+                # plugin-root fallback candidate is unreachable.
+                found = decisions._adr_py_path()
+        finally:
+            if saved is None:
+                os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_ROOT"] = saved
+        self.assertIsNotNone(found)
+
+
+class RunAdrNewArgvTests(unittest.TestCase):
+    """`_adr_new_argv` — pure argv construction, so AC5's flag-threading is
+    pinned without a real subprocess for every combination."""
+
+    def _argv(self, **kw):
+        defaults = dict(adr_py=Path("/adr.py"), slug="slug", title="Title",
+                        project_dir=Path("/proj"), no_push=False,
+                        pr_mode=False)
+        defaults.update(kw)
+        return decisions._adr_new_argv(**defaults)
+
+    def test_no_push_flag_appended(self):
+        argv = self._argv(no_push=True)
+        self.assertIn("--no-push", argv)
+        self.assertNotIn("--pr", argv)
+
+    def test_pr_flag_appended(self):
+        argv = self._argv(pr_mode=True)
+        self.assertIn("--pr", argv)
+        self.assertNotIn("--no-push", argv)
+
+    def test_neither_flag_by_default(self):
+        argv = self._argv()
+        self.assertNotIn("--no-push", argv)
+        self.assertNotIn("--pr", argv)
+
+    def test_project_dir_and_title_and_slug_present(self):
+        argv = self._argv()
+        self.assertIn("slug", argv)
+        self.assertIn("--title", argv)
+        self.assertIn("Title", argv)
+        self.assertIn("--project-dir", argv)
+        self.assertIn("/proj", argv)
+
+    def test_invoked_with_sys_executable(self):
+        argv = self._argv()
+        self.assertEqual(argv[0], sys.executable)
+
+
+class PromoteStubDetectionTests(unittest.TestCase):
+    """`_find_promoted_stub` — the AC8 lookup, pure text-in/text-out."""
+
+    def test_detects_a_promoted_stub_and_returns_its_filename(self):
+        found = decisions._find_promoted_stub(
+            _ALREADY_PROMOTED_SEED, "Old decision")
+        self.assertEqual(found, "adr-0007-old-decision.md")
+
+    def test_ordinary_real_entry_is_not_a_stub(self):
+        self.assertIsNone(
+            decisions._find_promoted_stub(_PROMOTABLE_SEED, "Button copy"))
+
+    def test_no_match_returns_none(self):
+        self.assertIsNone(
+            decisions._find_promoted_stub(_ALREADY_PROMOTED_SEED,
+                                          "No such title"))
+
+
+class PromoteNotAddressableTests(unittest.TestCase):
+    """AC9 — the illustrative example and the `## Template` fence are not
+    promotable, same exclusion as `update`'s AC7. Mirrors
+    UpdateNotAddressableTests. No subprocess is ever invoked here — the
+    refusal happens before `promote_lightweight` reaches `adr.py`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_generic_illustrative_marker_is_not_promotable(self):
+        self.target.write_text(_SEED, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "Example entry")
+        self.assertEqual(self.target.read_text(encoding="utf-8"), _SEED)
+
+    def test_real_illustrative_worked_example_is_not_promotable(self):
+        rubric_text = RUBRIC.read_text(encoding="utf-8")
+        self.target.write_text(rubric_text, encoding="utf-8")
+        title, _, _, _ = _real_illustrative_entry()
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, title)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), rubric_text)
+
+    def test_template_fence_placeholder_is_not_promotable(self):
+        template_text = TEMPLATE.read_text(encoding="utf-8")
+        self.target.write_text(template_text, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "[Short title]")
+        self.assertEqual(self.target.read_text(encoding="utf-8"),
+                         template_text)
+
+
+class PromoteMissingOrAmbiguousTests(unittest.TestCase):
+    """AC7 — same matching rules and messages as `update`'s AC4-AC6."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_missing_entry_refuses_and_writes_nothing(self):
+        self.target.write_text(_PLAIN_SEED, encoding="utf-8")
+        before = self.target.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "No such title")
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+    def test_missing_file_refuses(self):
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "Anything")
+
+    def test_ambiguous_title_without_date_refuses_and_lists_dates(self):
+        self.target.write_text(_RECURRING_TITLE_SEED, encoding="utf-8")
+        before = self.target.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(self.project, "Recurring title")
+        msg = str(ctx.exception)
+        self.assertIn("2026-06-01", msg)
+        self.assertIn("2026-06-15", msg)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+    def test_foreign_format_refuses(self):
+        self.target.write_text(_FOREIGN_TABLE, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "t")
+
+
+class PromoteAlreadyPromotedTests(unittest.TestCase):
+    """AC8 — re-running promote on an already-promoted entry refuses,
+    naming the ADR it already points to, and never invokes `adr.py`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(_ALREADY_PROMOTED_SEED, encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_refuses_naming_the_existing_adr(self):
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(self.project, "Old decision")
+        self.assertIn("adr-0007-old-decision.md", str(ctx.exception))
+
+    def test_writes_nothing(self):
+        before = self.target.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "Old decision")
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+    def test_never_invokes_adr_py(self):
+        from unittest.mock import patch
+        with patch.object(decisions, "_run_adr_new") as run_mock:
+            with self.assertRaises(ValueError):
+                decisions.promote_lightweight(self.project, "Old decision")
+            run_mock.assert_not_called()
+
+
+class PromoteAdrNotFoundTests(unittest.TestCase):
+    """096-03 design decision #2 — when no adr-workflow sibling resolves,
+    `promote` refuses cleanly (exit non-zero, write nothing) rather than
+    raising an unhandled exception. Exercised via monkeypatching
+    `decisions._adr_py_path` itself, the only seam that does not depend on
+    decisions.py's own real file location (which always has a real
+    sibling in this checkout)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(_PROMOTABLE_SEED, encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_refuses_cleanly_and_names_the_missing_skill(self):
+        from unittest.mock import patch
+        before = self.target.read_text(encoding="utf-8")
+        with patch.object(decisions, "_adr_py_path", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                decisions.promote_lightweight(self.project, "Button copy")
+        msg = str(ctx.exception)
+        self.assertIn("adr-workflow", msg)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+
+# ---- 096-03: real-subprocess end-to-end tests --------------------------
+#
+# `promote` invokes `adr.py new` as a REAL subprocess (096-03 design
+# decision #1) — these tests run it for real, against a real git repo,
+# mirroring adr-workflow/test_adr.py's `ReserveAdrCLITests`. `promote`'s
+# own subprocess call carries no `env=` override (see `_run_adr_new`), so
+# the child inherits THIS test process's environment — identity vars are
+# set on `os.environ` itself (not just passed to the one-off `git init`
+# calls) so the git commit nested two subprocess-hops down still succeeds
+# on a CI runner with no global git identity.
+
+_GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.invalid",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.invalid",
+}
+
+
+def _git_init_off_main(repo_dir: Path) -> None:
+    """A fresh git repo on a non-`main` branch (`work`), so `adr.py new`'s
+    OFF-main routing (`_reserve_local_on_current_branch` for --no-push, or
+    `_reserve_via_detached_worktree` otherwise) is what these tests
+    exercise. The on-`main` path requires a CLEAN working tree (`adr.py`'s
+    `_refuse_if_dirty`), which seeding lightweight-decisions.md AFTER init
+    would violate — off-main + --no-push scopes its own commit to just the
+    new ADR file (`git commit -- <adr-path>`), so the rest of the tree being
+    "dirty" (our seeded lightweight file, scaffold.json) is a non-issue.
+    Scaffold-classified as `scaffolded` (adr.py's `reserve_adr`
+    precondition) via `scaffold.json` — not git-tracked; the classifier
+    reads it straight off disk."""
+    env = {**os.environ, **_GIT_IDENTITY}
+    subprocess.run(["git", "init", "-q", "-b", "work", str(repo_dir)],
+                   env=env, check=True, capture_output=True)
+    (repo_dir / "scaffold.json").write_text("{}\n", encoding="utf-8")
+
+
+class _PromoteE2ETestCase(unittest.TestCase):
+    """Shared fixture for the real-subprocess promote tests below."""
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        _git_init_off_main(self.project)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self._saved_env = {k: os.environ.get(k) for k in _GIT_IDENTITY}
+        os.environ.update(_GIT_IDENTITY)
+
+    def tearDown(self):
+        for k, v in self._saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._tmp.cleanup()
+
+    def _seed(self, text):
+        self.target.write_text(text, encoding="utf-8")
+
+    def _text(self):
+        return self.target.read_text(encoding="utf-8")
+
+
+class PromoteEndToEndTests(_PromoteE2ETestCase):
+    """AC1-AC5 — the real `adr.py new` round trip."""
+
+    # AC1 — creates the ADR through adr.py, default slug.
+    def test_ac1_creates_adr_via_adr_new_default_slug(self):
+        self._seed(_PROMOTABLE_SEED)
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", no_push=True)
+        self.assertTrue(adr_path.is_file())
+        self.assertEqual(adr_path.name, "adr-0001-button-copy.md")
+
+    # AC1 — --slug overrides the default.
+    def test_ac1_slug_override(self):
+        self._seed(_PROMOTABLE_SEED)
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", slug="custom-slug", no_push=True)
+        self.assertEqual(adr_path.name, "adr-0001-custom-slug.md")
+
+    # AC2 — Decision/Context/Scope land in the ADR.
+    def test_ac2_seeds_decision_context_scope(self):
+        self._seed(_PROMOTABLE_SEED)
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", no_push=True)
+        text = adr_path.read_text(encoding="utf-8")
+        self.assertIn("Use 'Get started'.", text)
+        self.assertIn("User testing showed it tested lower-friction.", text)
+        self.assertIn("Onboarding CTA.", text)
+
+    # AC2 — the seeded sections keep the template's one-blank-line spacing.
+    # A `\s*$` heading match swallows the newline, so the re-added spacing
+    # renders `## Context` followed by TWO blank lines; caught by probing a
+    # real promotion, invisible to a substring assertion.
+    def test_ac2_seeded_sections_have_no_double_blank_line(self):
+        self._seed(_PROMOTABLE_SEED)
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", no_push=True)
+        text = adr_path.read_text(encoding="utf-8")
+        for heading in ("Context", "Recommended Decision"):
+            self.assertNotIn(
+                "## %s\n\n\n" % heading, text,
+                "'## %s' rendered with a doubled blank line" % heading)
+            self.assertIn("## %s\n\n" % heading, text)
+
+    # Edge case — empty Context/Scope keep the template's own placeholder.
+    def test_edge_empty_context_and_scope_keep_template_placeholder(self):
+        self._seed(_MINIMAL_ENTRY_SEED)
+        adr_path = decisions.promote_lightweight(
+            self.project, "Minimal entry", no_push=True)
+        text = adr_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "_TODO: describe the situation, forces, and constraints "
+            "driving this decision._", text)
+        self.assertIn(
+            "_TODO: which screen / component / string / asset._", text)
+        self.assertIn("Do the thing.", text)
+
+    # AC3 — the entry becomes a forward-linking stub; heading preserved.
+    def test_ac3_entry_replaced_by_stub_heading_preserved(self):
+        self._seed(_PROMOTABLE_SEED)
+        decisions.promote_lightweight(self.project, "Button copy",
+                                      no_push=True)
+        text = self._text()
+        self.assertIn("### 2026-06-26 — Button copy", text)
+        self.assertNotIn("**Decision:** Use 'Get started'.", text)
+        self.assertIn("**Promoted:**", text)
+        self.assertIn("adr-0001-button-copy.md", text)
+
+    def test_ac3_entry_never_deleted_heading_count_unchanged(self):
+        self._seed(_PROMOTABLE_SEED)
+        before_headings = self._text().count("### ")
+        decisions.promote_lightweight(self.project, "Button copy",
+                                      no_push=True)
+        after_headings = self._text().count("### ")
+        self.assertEqual(before_headings, after_headings)
+
+    # AC4 — the ADR back-links to the entry, naming the original date.
+    def test_ac4_adr_back_links_to_entry_with_original_date(self):
+        self._seed(_PROMOTABLE_SEED)
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", no_push=True)
+        text = adr_path.read_text(encoding="utf-8")
+        self.assertIn("2026-06-26", text)
+        self.assertIn("lightweight-decisions.md", text)
+
+    # AC5 — --no-push reaches adr.py new and suppresses the push.
+    def test_ac5_no_push_creates_adr_without_touching_origin(self):
+        self._seed(_PROMOTABLE_SEED)
+        # No 'origin' remote was ever configured on this repo. If adr.py had
+        # attempted a push it would fail loudly (no push destination), so a
+        # successful return here proves --no-push suppressed it.
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", no_push=True)
+        self.assertTrue(adr_path.is_file())
+
+    def test_default_push_mode_fails_without_an_origin_remote(self):
+        """Negative control for the AC5 test above: proves the fixture (no
+        origin remote) actually WOULD surface a push attempt, so the
+        --no-push test's success is meaningful rather than coincidental."""
+        self._seed(_PROMOTABLE_SEED)
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "Button copy")
+        # And the lightweight file is untouched by the failed attempt.
+        self.assertIn("Button copy", self._text())
+        self.assertIn("**Decision:** Use 'Get started'.", self._text())
+
+
+class PromoteCliTests(_PromoteE2ETestCase):
+    """CLI-level (`decisions.main(["promote", ...])`) smoke coverage."""
+
+    def test_cli_promotes_and_reports_success(self):
+        self._seed(_PROMOTABLE_SEED)
+        rc, err = _run_cli([
+            "promote", "--title", "Button copy", "--no-push",
+            "--project-dir", str(self.project)])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("**Promoted:**", self._text())
+
+    def test_cli_missing_entry_exits_nonzero(self):
+        self._seed(_PLAIN_SEED)
+        rc, err = _run_cli([
+            "promote", "--title", "No such title", "--no-push",
+            "--project-dir", str(self.project)])
+        self.assertEqual(rc, 1)
+        self.assertIn("no such title", err.lower())
+
+    def test_cli_missing_title_is_a_required_argparse_error(self):
+        with self.assertRaises(SystemExit):
+            _run_cli(["promote", "--no-push",
+                     "--project-dir", str(self.project)])
+
+    def test_cli_no_push_and_pr_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            _run_cli(["promote", "--title", "Button copy", "--no-push",
+                     "--pr", "--project-dir", str(self.project)])
+
+
+class PromoteAtomicityTests(unittest.TestCase):
+    """AC6 — atomicity, proven by an INDUCED real `adr.py new` failure, not
+    mock inspection. `CLAUDE_PLUGIN_ROOT` is pointed at a bare directory
+    that carries no `templates/` tree — mirroring
+    `UnreachableTemplateTests` above — so the nested `adr.py new` subprocess
+    (which inherits this process's environment; `promote` passes no `env=`
+    override) genuinely fails to find its template and exits non-zero. No
+    git repo is needed: `--no-push` off the `main` branch (a bare tempdir
+    has no branch at all) reaches the template check before any git call."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        (self.project / "scaffold.json").write_text("{}\n", encoding="utf-8")
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(_PROMOTABLE_SEED, encoding="utf-8")
+
+        self._broken_root_tmp = tempfile.TemporaryDirectory()
+        self._saved_plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        os.environ["CLAUDE_PLUGIN_ROOT"] = self._broken_root_tmp.name
+
+    def tearDown(self):
+        if self._saved_plugin_root is None:
+            os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        else:
+            os.environ["CLAUDE_PLUGIN_ROOT"] = self._saved_plugin_root
+        self._broken_root_tmp.cleanup()
+        self._tmp.cleanup()
+
+    def test_induced_adr_new_failure_leaves_lightweight_file_byte_identical(self):
+        before = self.target.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(
+                self.project, "Button copy", no_push=True)
+        self.assertIn("adr.py new failed", str(ctx.exception))
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+    def test_induced_adr_new_failure_is_a_real_template_not_found(self):
+        """Confirms the induced failure is the specific one this test
+        targets (template unreachable), not some unrelated refusal."""
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(
+                self.project, "Button copy", no_push=True)
+        self.assertIn("template not found", str(ctx.exception).lower())
+
+    def test_cli_exits_nonzero_and_writes_nothing(self):
+        before = self.target.read_text(encoding="utf-8")
+        rc, err = _run_cli([
+            "promote", "--title", "Button copy", "--no-push",
+            "--project-dir", str(self.project)])
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
 
 
 if __name__ == "__main__":

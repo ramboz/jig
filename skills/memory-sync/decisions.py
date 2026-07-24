@@ -22,6 +22,14 @@ Self-contained by design: it does NOT import the 083-04 scan lib
 (`hooks/scripts/lib/decision_scan.py`) nor `memory.py`, so the host-packaging
 step can copy the skill tree whole without a cross-tree dependency.
 
+`promote` (096-03) is the one deliberate exception, and only at the process
+boundary: it shells `adr.py new` as a SUBPROCESS (`subprocess.run`), never
+an `import adr`. A subprocess is not an import — it does not create a
+Python-level cross-tree dependency, so the host-packaging step can still
+copy this skill's tree whole; it just also needs `adr-workflow`'s tree
+present beside it at runtime, which `_adr_py_path` locates and, failing
+that, refuses cleanly rather than importing around the gap.
+
 `evaluate_routing_signals` + `flags_adr_routing` are a pure, importable
 lexical evaluator of `ADR_TRIGGER`'s two criteria. Per
 [ADR-0039](../../docs/decisions/adr-0039-decision-routing-gate.md) they back
@@ -37,6 +45,7 @@ import argparse
 import datetime
 import os
 import re
+import subprocess
 import sys
 from collections import namedtuple
 from pathlib import Path
@@ -630,6 +639,365 @@ def update_lightweight(project_dir: Path, title: str,
     return True
 
 
+
+# --- `promote` (096-03 / ADR-0039) -------------------------------------
+# Moves a lightweight entry to an ADR via `adr.py new` (subprocess — see the
+# module docstring's carve-out), seeds the created ADR from the entry's own
+# fields, and rewrites the entry into a forward-linking stub. The ordering
+# in `promote_lightweight` below is deliberately staged so failure is
+# atomic (AC6): everything that can fail happens BEFORE
+# `lightweight-decisions.md` is touched.
+
+
+def _adr_py_path() -> Optional[Path]:
+    """Locate the sibling adr-workflow skill's `adr.py`.
+
+    `decisions.py` lives in a skill directory named either `memory-sync`
+    (plugin install) or `jig-memory-sync` (Claude scaffold install, which
+    prefixes every copied skill dir with `jig-`). `adr-workflow` is its
+    sibling under the same `skills/` tree, named `adr-workflow` or
+    `jig-adr-workflow` respectively — the prefix is derived from
+    decisions.py's OWN directory name, so both install modes resolve
+    without reading any config. A `CLAUDE_PLUGIN_ROOT`-rooted candidate is
+    also tried, for a (currently theoretical) copy that carries
+    decisions.py without its usual sibling.
+
+    Returns None — never raises — when neither resolves: a tier-0-only
+    install genuinely has no ADR helper, and `promote_lightweight` turns
+    that into a clean refusal rather than a traceback.
+    """
+    own = Path(__file__).resolve().parent
+    prefix = "jig-" if own.name.startswith("jig-") else ""
+    candidates = [own.parent / (prefix + "adr-workflow") / "adr.py"]
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if plugin_root:
+        candidates.append(
+            Path(plugin_root) / "skills" / "adr-workflow" / "adr.py")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+# Stricter than adr.py's OWN `_validate_slug` (`^[a-z0-9][a-z0-9-]*$`, which
+# deliberately accepts a leading digit) — this only gates the DEFAULT slug
+# `promote` derives from an entry's title; an explicit `--slug` bypasses it
+# entirely and is handed to `adr.py new` verbatim, which applies its own
+# (looser) rule. A derived slug this malformed means the title didn't
+# kebab-case cleanly, and guessing a "fixed" form on the caller's behalf
+# would be exactly the silent mangling this slice's edge cases rule out —
+# refuse and name the violated rule instead.
+_DERIVED_SLUG_OK_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+
+def _default_slug_from_title(title: str) -> str:
+    """Kebab-case `title` into a slug: lowercase, then each character that
+    is not `[a-z0-9]` becomes one literal `-` — char-for-char, NOT
+    collapsing runs. Collapsing multiple punctuation/whitespace characters
+    into a single `-` would itself be a silent repair, and it would make
+    the double-hyphen edge case unreachable (a title like "A -- B" would
+    quietly become "a-b" instead of being refused).
+
+    Validates the result against `_DERIVED_SLUG_OK_RE` and raises
+    ValueError naming the violated rule (empty / leading digit or hyphen /
+    consecutive hyphens / trailing hyphen) rather than repairing it.
+    """
+    raw = re.sub(r"[^a-z0-9]", "-", title.strip().lower())
+    if _DERIVED_SLUG_OK_RE.match(raw):
+        return raw
+    if not raw or not raw[0].isalpha():
+        reason = "is empty" if not raw else "starts with a digit or hyphen"
+    elif "--" in raw:
+        reason = "would contain consecutive hyphens"
+    elif raw.endswith("-"):
+        reason = "would end with a hyphen"
+    else:
+        reason = "is not a valid ADR slug"  # defensive; should be unreachable
+    raise ValueError(
+        "title %r kebab-cases to %r, which %s. Pass --slug explicitly to "
+        "name the ADR's slug yourself." % (title, raw, reason))
+
+
+def _adr_new_argv(adr_py: Path, slug: str, title: str, project_dir: Path,
+                  no_push: bool, pr_mode: bool) -> list:
+    """Build the `adr.py new` argv (AC1 + AC5's --no-push/--pr threading).
+    Pure/no I/O, so the flag-threading can be pinned without a real
+    subprocess for every combination — see `_run_adr_new` for the actual
+    invocation."""
+    argv = [sys.executable, str(adr_py), "new", slug, "--title", title,
+           "--project-dir", str(project_dir)]
+    if no_push:
+        argv.append("--no-push")
+    if pr_mode:
+        argv.append("--pr")
+    return argv
+
+
+def _run_adr_new(adr_py: Path, slug: str, title: str, project_dir: Path,
+                 no_push: bool, pr_mode: bool):
+    """Run `adr.py new` as a SUBPROCESS (never an import — see this file's
+    module docstring). No `env=` override is passed: the child inherits
+    this process's environment as-is, so a caller's `CLAUDE_PLUGIN_ROOT` or
+    git identity variables reach the ADR helper unchanged. Returns the
+    `subprocess.CompletedProcess`; `promote_lightweight` decides how to
+    react to a non-zero exit."""
+    argv = _adr_new_argv(adr_py, slug, title, project_dir, no_push, pr_mode)
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def _h2_pattern(heading: str) -> str:
+    """Match a `## <heading>` line, stopping AT the newline.
+
+    `[ \\t]*$` rather than `\\s*$` on purpose: `\\s` matches newlines, so a
+    greedy `\\s*` swallows the blank line after the heading and every caller
+    that then re-adds its own spacing emits one blank line too many (the
+    seeded ADR rendered `## Context` followed by two blank lines). Keeping the
+    match inside the line makes the heading's end unambiguous.
+    """
+    return r"(?m)^##[ \t]+" + re.escape(heading) + r"[ \t]*$"
+
+
+def _get_md_section(text: str, heading: str) -> str:
+    """Body of the `## <heading>` section in `text` (stripped), or '' if the
+    heading is absent. A small, LOCAL section-locator — decisions.py cannot
+    import adr.py's own `_status_section_body` (self-contained by DoR), so
+    this is a minimal, purpose-built duplicate rather than a shared import."""
+    m = re.search(_h2_pattern(heading), text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    next_h2 = re.search(r"(?m)^##\s", rest)
+    body = rest[:next_h2.start()] if next_h2 else rest
+    return body.strip()
+
+
+def _replace_md_section(text: str, heading: str, new_body: str) -> str:
+    """Replace the body of the `## <heading>` section with `new_body`,
+    preserving everything else (including the heading line and the
+    surrounding blank-line spacing style the ADR template uses). Raises
+    ValueError if `heading` is absent — should not happen against a freshly
+    `adr.py new`-created file; a raise here is more honest than silently
+    no-op-ing against a template that has drifted."""
+    m = re.search(_h2_pattern(heading), text)
+    if not m:
+        raise ValueError("ADR has no '## %s' section" % heading)
+    rest = text[m.end():]
+    next_h2 = re.search(r"(?m)^##\s", rest)
+    section_end = m.end() + (next_h2.start() if next_h2 else len(rest))
+    return (text[:m.end()] + "\n\n" + new_body.strip() + "\n\n"
+           + text[section_end:])
+
+
+_ADR_TITLE_RE = re.compile(r"(?m)^#\s+ADR-\d{4}:\s+(.+?)\s*$")
+
+
+def _adr_title(adr_path: Path) -> str:
+    """The `<Title>` from a `# ADR-NNNN: <Title>` heading. Falls back to the
+    file's stem if the heading is somehow absent (defensive; adr.py always
+    writes it)."""
+    m = _ADR_TITLE_RE.search(adr_path.read_text(encoding="utf-8"))
+    return m.group(1).strip() if m else adr_path.stem
+
+
+# There is no dedicated `## Scope` heading in the ADR template
+# (templates/docs/decisions/adr-0000-template.md) — the entry's Scope field
+# is folded into `## Context` (see `_seed_adr_from_entry`). This is the
+# fallback text when Scope was left blank at write time (it is optional —
+# `_require_entry_fields` only requires title + decision), reusing the same
+# "which screen / component / string / asset" wording
+# `_foreign_format_error` already quotes, so the vocabulary for what Scope
+# MEANS stays single-sourced even though this is a different string.
+_ADR_SCOPE_PLACEHOLDER = "_TODO: which screen / component / string / asset._"
+
+
+def _seed_adr_from_entry(adr_path: Path, entry: Entry) -> None:
+    """AC2 + AC4: fill the freshly-created ADR's `## Context` and
+    `## Recommended Decision` sections from the entry's own fields, and
+    append a back-link naming the entry's original date.
+
+    `## Recommended Decision` becomes exactly `entry.decision` — that field
+    is mandatory at write time, so it is never empty here. `## Context` is
+    composed from `entry.context` (or, when empty, the template's OWN
+    placeholder prose — captured from THIS file before it is touched, so
+    the fallback can never drift from whatever `adr.py new`'s template
+    actually shipped), a **Scope:** line (placeholder-backed the same way
+    when empty), and the back-link.
+    """
+    text = adr_path.read_text(encoding="utf-8")
+    context_placeholder = _get_md_section(text, "Context")
+    context_prose = entry.context if entry.context else context_placeholder
+    scope_text = entry.scope if entry.scope else _ADR_SCOPE_PLACEHOLDER
+    context_body = (
+        "%s\n\n**Scope:** %s\n\n"
+        "_Promoted from the lightweight-decision entry dated %s — see "
+        "lightweight-decisions.md._"
+        % (context_prose, scope_text, entry.date)
+    )
+    text = _replace_md_section(text, "Context", context_body)
+    text = _replace_md_section(text, "Recommended Decision", entry.decision)
+    adr_path.write_text(text, encoding="utf-8")
+
+
+# The promoted-stub shape `_render_promoted_stub` writes and
+# `_find_promoted_stub` reads back — deliberately NOT `render_entry`'s
+# Decision/Context/Scope shape (`_FIELD_RE`). A distinct, parseable marker
+# (`**Promoted:**`) is what lets `_find_promoted_stub` tell "already
+# promoted" apart from "genuinely missing" (AC8); a body that matched
+# `_FIELD_RE` would look like an ordinary revisable entry instead, and a
+# re-run of `promote` would only ever see `_find_entry`'s generic "no entry
+# titled ... found".
+_PROMOTED_STUB_RE = re.compile(
+    r"\A\n*\*\*Promoted:\*\* moved to \[ADR-\d{4}: [^\]]*\]"
+    r"\((?P<filename>adr-\d{4}-[a-z0-9][a-z0-9-]*\.md)\)\.\n*\Z")
+
+_ADR_FILENAME_RE = re.compile(r"^adr-(?P<number>\d{4})-")
+
+
+def _find_promoted_stub(file_text: str, title: str,
+                        date: Optional[str] = None) -> Optional[str]:
+    """AC8: is `title` (optionally narrowed by `date`) already a promoted
+    stub? Scans the same `### ` headings AFTER `## Entries` that
+    `_real_entries` scans, but tests bodies against `_PROMOTED_STUB_RE`
+    instead of `_FIELD_RE`.
+
+    Returns the `adr-NNNN-slug.md` filename the entry points to, or None.
+    """
+    idx = file_text.find(_ENTRIES_HEADING)
+    if idx == -1:
+        return None
+    body_start = idx + len(_ENTRIES_HEADING)
+    section = file_text[body_start:]
+    headings = list(_ENTRY_HEADING_RE.finditer(section))
+    norm_title = _normalize(title)
+    norm_date = _normalize(date) if date else None
+    for i, m in enumerate(headings):
+        if _normalize(m.group("title")) != norm_title:
+            continue
+        if norm_date and _normalize(m.group("date")) != norm_date:
+            continue
+        block_end = (headings[i + 1].start() if i + 1 < len(headings)
+                    else len(section))
+        field_text = section[m.end():block_end]
+        sm = _PROMOTED_STUB_RE.match(field_text)
+        if sm:
+            return sm.group("filename")
+    return None
+
+
+def _render_promoted_stub(entry: Entry, adr_path: Path) -> str:
+    """AC3: the forward-linking stub that replaces a promoted entry's body.
+    The heading (`### <date> — <title>`) is left exactly as it was — only
+    the body below it changes — so an old link to this entry still lands on
+    something, not a gap (never delete a promoted entry)."""
+    m = _ADR_FILENAME_RE.match(adr_path.name)
+    number = m.group("number") if m else "????"
+    title = _adr_title(adr_path)
+    return (
+        "### %s — %s\n\n"
+        "**Promoted:** moved to [ADR-%s: %s](%s).\n"
+        % (entry.date, entry.title, number, title, adr_path.name)
+    )
+
+
+def _replace_entry_with_stub(text: str, entry: Entry, adr_path: Path) -> str:
+    """Rewrite `entry`'s span (`entry.start:entry.end`, per `_real_entries`'
+    contract) into its promoted stub, in place — mirrors
+    `update_lightweight`'s own last-entry-vs-followed-by-another-entry
+    handling, since a promoted entry can be anywhere in the file."""
+    stub = _render_promoted_stub(entry, adr_path)
+    if entry.end >= len(text):
+        return text[:entry.start] + stub
+    return text[:entry.start] + stub + "\n" + text[entry.end:]
+
+
+def promote_lightweight(project_dir: Path, title: str,
+                        date: Optional[str] = None,
+                        slug: Optional[str] = None,
+                        no_push: bool = False, pr_mode: bool = False) -> Path:
+    """Move a lightweight-decision entry to an ADR via `adr.py new` (096-03
+    / ADR-0039), seed the ADR from the entry's own fields, and replace the
+    entry with a forward-linking stub. Returns the created ADR's path.
+
+    Ordering is deliberately staged so failure is atomic (AC6): everything
+    that can fail — finding the entry, deriving/validating the slug,
+    locating and running `adr.py new` — happens BEFORE
+    `lightweight-decisions.md` is touched. Only once `adr.py new` has
+    actually succeeded does this function seed the ADR and rewrite the
+    entry; a failure at any earlier step leaves the file byte-identical.
+
+    Raises ValueError for every refusal shape: `title` blank; the file
+    missing or foreign-format; `title` already points to a promoted stub
+    (AC8); `_find_entry`'s missing/ambiguous/illustrative/fence refusals
+    (AC7, AC9 — reused verbatim, same messages `update` gives); a derived
+    slug that doesn't kebab-case cleanly (edge cases); no adr-workflow
+    skill found beside this file; or `adr.py new` itself failing.
+    """
+    if not (title or "").strip():
+        raise ValueError("title is required")
+    path = lightweight_path(project_dir)
+    if not path.is_file():
+        raise ValueError(
+            "%s does not exist yet — there is nothing to promote. Record "
+            "it first with `add-lightweight`." % _display_path(project_dir))
+    text = path.read_text(encoding="utf-8")
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
+
+    # AC8 — a specific refusal for a re-run on an already-promoted entry,
+    # checked BEFORE `_find_entry` (whose generic "no entry titled ..." is
+    # all a stub's body — which never matches `_FIELD_RE` — would otherwise
+    # produce).
+    already = _find_promoted_stub(text, title, date)
+    if already is not None:
+        raise ValueError(
+            "%r is already promoted to %s; nothing to do. Edit that ADR "
+            "directly for further changes." % (title, already))
+
+    # AC7 / AC9 — reuses 096-02's entry-matching contract unchanged: missing,
+    # ambiguous, illustrative-example, or `## Template`-fence titles all
+    # raise here with the SAME messages `update` gives.
+    entry = _find_entry(text, title, date)
+
+    final_slug = (slug or "").strip()
+    if not final_slug:
+        final_slug = _default_slug_from_title(entry.title)
+
+    adr_py = _adr_py_path()
+    if adr_py is None:
+        raise ValueError(
+            "promote needs the adr-workflow skill's adr.py, which was not "
+            "found beside %s. A tier-0-only install has no ADR helper — "
+            "install the adr-workflow skill (or add it to this project's "
+            "copied machinery), then re-run `promote`."
+            % Path(__file__).name)
+
+    result = _run_adr_new(adr_py, final_slug, entry.title, project_dir,
+                          no_push, pr_mode)
+    if result.returncode != 0:
+        raise ValueError(
+            "adr.py new failed (exit %d); %s was left untouched:\n%s"
+            % (result.returncode, _display_path(project_dir),
+               (result.stderr or result.stdout).strip()))
+    stdout_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    if not stdout_lines:
+        raise ValueError(
+            "adr.py new exited 0 but printed nothing; could not determine "
+            "the created ADR's path. %s was left untouched."
+            % _display_path(project_dir))
+    adr_path = Path(stdout_lines[-1].strip())
+    if not adr_path.is_file():
+        raise ValueError(
+            "adr.py new reported a path that does not exist: %s. %s was "
+            "left untouched." % (adr_path, _display_path(project_dir)))
+
+    # From here on, adr.py has already succeeded — seed + stub are the only
+    # remaining steps, both against files that now exist.
+    _seed_adr_from_entry(adr_path, entry)
+    new_text = _replace_entry_with_stub(text, entry, adr_path)
+    path.write_text(new_text, encoding="utf-8")
+    return adr_path
+
+
 def _cmd_add_lightweight(args) -> int:
     project_dir = Path(args.project_dir).resolve()
     try:
@@ -677,9 +1045,25 @@ def _cmd_update(args) -> int:
     return 0
 
 
+def _cmd_promote(args) -> int:
+    project_dir = Path(args.project_dir).resolve()
+    try:
+        adr_path = promote_lightweight(
+            project_dir, args.title, date=args.date, slug=args.slug,
+            no_push=args.no_push, pr_mode=args.pr)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    rel = _display_path(project_dir)
+    print("promoted lightweight decision in %s to %s: %s"
+          % (rel, adr_path, args.title))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="jig lightweight-decisions helper (add-lightweight, update)")
+        description=("jig lightweight-decisions helper "
+                     "(add-lightweight, update, promote)"))
     sub = p.add_subparsers(dest="command", required=True)
 
     al = sub.add_parser(
@@ -720,6 +1104,32 @@ def _build_parser() -> argparse.ArgumentParser:
     # `update` refuses only on matching grounds (missing / ambiguous /
     # documentation-only title), never on the decision's content — there is
     # no routing gate to confirm past. Do not add one; see the ADR.
+
+    pp = sub.add_parser(
+        "promote",
+        help="move a lightweight decision entry to an ADR via `adr.py new`")
+    pp.add_argument("--title", required=True,
+                    help="title of the existing entry to promote")
+    pp.add_argument("--date", default=None,
+                    help="disambiguate when --title matches more than one "
+                         "date")
+    pp.add_argument("--slug", default=None,
+                    help="ADR slug override (default: kebab-cased entry "
+                         "title)")
+    # Mirrors adr.py new's own mutually-exclusive push group (AC5) — both
+    # flags are threaded straight through to the `adr.py new` subprocess.
+    promote_push_group = pp.add_mutually_exclusive_group()
+    promote_push_group.add_argument(
+        "--no-push", action="store_true",
+        help="skip the direct push to origin/main (local-only allocation) "
+             "— passed through to `adr.py new`")
+    promote_push_group.add_argument(
+        "--pr", action="store_true",
+        help="skip the direct-push attempt; go straight to branch + PR — "
+             "passed through to `adr.py new`")
+    pp.add_argument("--project-dir", default=".",
+                    help="project root (default: cwd)")
+    pp.set_defaults(func=_cmd_promote)
 
     return p
 
