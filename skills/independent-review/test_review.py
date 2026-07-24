@@ -2474,6 +2474,79 @@ class TestQualitySnapshotPromptPlacementTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class VacuousTestPromptTests(unittest.TestCase):
+    """Spec 097-02 / issue #124 instance 2, question 4 — the reviewer prompts
+    ask the vacuous-test question directly: would each test still pass if the
+    feature under test were deleted?
+
+    In slice 096-01 four tests were found to pass with the feature removed, and
+    the reconciliation reviewer caught the last one essentially by asking this
+    question. Making it an explicit prompt line front-loads the catch onto the
+    always-on compliance and craft passes instead of a late round.
+    """
+
+    # The stable anchor of the vacuous-test question. Asserting a phrase, not a
+    # runtime gate — a reviewer subagent reads and applies it (see the
+    # no-lexical-marker-gates note: this is a prompt line, not a keyword gate).
+    # Matched against whitespace-normalized prompt text so line-wrapping in the
+    # source prompt block can't make the assertion vacuous.
+    ANCHOR = "would it still pass if the feature under test were deleted"
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        return " ".join(text.split())
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_097_02", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _make_repo_with_spec(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-097-02-"))
+        self._tmpdirs.append(root)
+        _make_repo_with_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def test_implementation_prompt_asks_vacuous_test_question(self):
+        """AC #2 — the compliance (implementation) prompt poses the question."""
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_implementation_prompt(spec, "099-01 alpha", ["x.py"])
+        self.assertIn(
+            self.ANCHOR, self._normalize(prompt),
+            "implementation prompt must ask whether each test would still pass "
+            "if the feature under test were deleted (spec 097-02 AC #2)",
+        )
+
+    def test_pr_review_prompt_asks_vacuous_test_question(self):
+        """AC #2 — the craft (pr-review) prompt poses the question too."""
+        module = self._import_review_module()
+        spec = self._make_repo_with_spec()
+        prompt = module.build_pr_review_prompt(spec, "099-01 alpha", ["x.py"])
+        self.assertIn(
+            self.ANCHOR, self._normalize(prompt),
+            "pr-review prompt must ask whether each test would still pass if "
+            "the feature under test were deleted (spec 097-02 AC #2)",
+        )
+
+
 class TddLoopSkillMentionsQualityTests(unittest.TestCase):
     """AC #5: `skills/tdd-loop/SKILL.md` mentions quality.py as a sibling
     helper and points at independent-review for the snapshot wiring."""

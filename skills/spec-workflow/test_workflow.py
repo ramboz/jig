@@ -1778,6 +1778,23 @@ class SliceTemplateTests(unittest.TestCase):
         self.assertIn("`no-op`", text)
         self.assertIn("`deferred`", text)
 
+    def test_slice_template_dod_asks_for_mutation_evidence(self):
+        """Spec 097-02 / issue #124 instance 2, question 3 — the DoD block
+        requires mutation evidence: each new test shown to fail when its
+        feature is removed. Guards against shipping the guardrail's own
+        prose untested (dogfooding the test-faithfulness discipline)."""
+        template = REPO_ROOT / "templates" / "docs" / "specs" / "slice-template.md"
+        text = template.read_text()
+        # Scope to the standard-slice DoD block so the assertion is anchored,
+        # not a whole-file token match (the failure mode this spec fights).
+        m = re.search(r"\*\*DoD:\*\*\n(.*?)(?=\n### |\n## |\Z)", text,
+                      flags=re.DOTALL)
+        self.assertIsNotNone(m, "slice template must carry a **DoD:** block")
+        dod = m.group(1).lower()
+        self.assertIn("shown to fail when its feature is removed", dod,
+                      "the DoD must require mutation evidence — each new test "
+                      "shown to fail when its feature is removed (spec 097-02)")
+
     def test_slice_template_is_file_per_slice_shape(self):
         """Slice 018-03: template's frontmatter must come BEFORE the
         `## Slice` heading (file-per-slice layout). Embedded layout
