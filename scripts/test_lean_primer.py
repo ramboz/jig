@@ -68,7 +68,7 @@ RELOCATED_TERMS = [
     "Context-cost discipline",
     "Thin-orchestrator",
     "Token-usage tracking",
-    "Slice-claim on IN_PROGRESS",
+    "Slice-claim on working states",  # renamed by ADR-0039 (was "…on IN_PROGRESS")
     "Solo→team re-detection",
     "Vocabulary barrier / lexicon",
     "Status board",

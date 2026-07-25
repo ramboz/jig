@@ -107,15 +107,71 @@ nudge that blocks nothing; the deterministic gate lives in the transition
 helper. State names match `VALID_STATUSES` in
 [skills/spec-workflow/workflow.py](../skills/spec-workflow/workflow.py).
 
-**Slice ownership (claim-on-IN_PROGRESS, spec 049-01).** Transitioning a
-frontmatter slice to `IN_PROGRESS` stamps a `claimed_by:` identifier
-(current branch name, or `JIG_CLAIM_ID`) so two parallel worktrees don't
-both pick up the same slice — the move refuses a foreign claim that is
-still `IN_PROGRESS`, naming the holder. The claim is **local by default**;
-`workflow.py transition … IN_PROGRESS --push` (or `--pr`) reserves it on
-`origin/main` so other worktrees see it. It clears on the move to
-`REVIEWED` and on any back-transition; `--release --reason "<why>"`
-force-clears a stale claim and logs it to the slice's `## Release log`.
+**Slice ownership (claim-on-working-state, spec 049-01 as amended by
+[ADR-0039](decisions/adr-0039-slice-claim-covers-active-lifecycle.md)).**
+The lifecycle splits two ways for ownership purposes:
+
+- **Working states** — `READY_FOR_REVIEW`, `IN_PROGRESS`, `REVIEWED`,
+  `RECONCILED`. A session is doing something here, so transitioning into one
+  **stamps** `claimed_by:` (current branch name, or `JIG_CLAIM_ID`). This is
+  what covers spec-level work — spec review, frame-critique, and above all
+  `REVIEWED → RECONCILED` reconciliation, which was previously unmarked.
+- **Release points** — the two *pickup-queue* states `DRAFT` and
+  `READY_FOR_IMPLEMENTATION`, plus the three terminal states `DONE` /
+  `DEFERRED` / `ABANDONED`. Entering one **clears** the claim. `--release
+  --reason "<why>"` force-clears anywhere and logs to `## Release log`.
+
+The queue-state exclusion is deliberate and preserves spec 049's original
+Non-goal: `DRAFT` and `READY_FOR_IMPLEMENTATION` are exactly the states the
+pickup flow tells a reader to choose from, so a residual owner there would mark
+a *free* slice as occupied — inverting the defect this is meant to fix.
+
+The claim is **local by default**; `--push` (or `--pr`) reserves it on
+`origin/main` so other worktrees see it, at any working state rather than only
+at start-of-build. Only an `IN_PROGRESS` reservation also publishes `status:` to
+the trunk copy — that write is what the start-collision guard reads; every other
+working state publishes the claim alone, because trunk lifecycle state belongs
+to the landing flow, not to a feature branch's in-flight transitions.
+
+Four levels of notice, deliberately different:
+- **Hard refusal** — only when a foreign claim holds a slice that is *already*
+  `IN_PROGRESS` and you are transitioning it to `IN_PROGRESS`, locally or on
+  `origin/main`. Two sessions building one slice is the unrecoverable case.
+- **Warning, non-blocking** — any other foreign claim on your own copy, and a
+  foreign `origin/main` claim at a **working** status. Two sessions working one
+  spec can be legitimate, so this names the holder and proceeds. A foreign trunk
+  claim sitting at a *queue* status is deliberately silent: the slice is free
+  there, so a leftover name is residue, not presence. The *replace* notice is deduplicated by
+  identifier against the on-disk one, so a single transition does not report the
+  same holder twice for the same reason.
+- **Reservation declined** — `--push`/`--pr` at a working state *other than*
+  `IN_PROGRESS` is **best-effort**. If the `origin/main` copy sits at
+  `status: IN_PROGRESS` under someone else's claim, or under none, the
+  reservation warns and pushes **nothing**, then exits 0. That state is
+  *enforced* (it is what the start-of-build guard hard-blocks on), so stamping a
+  claim over it would either move a live lock and get the previous owner refused
+  in your name, or — on an unclaimed copy — manufacture the enforced pair from
+  the other direction and refuse everyone. There is no self-service fix for a
+  trunk-side claim — `--release` clears only your own copy — so coordinate with
+  the holder or wait for their work to land. Your **own** trunk claim is
+  unaffected: that reports a benign no-op.
+- **Silence** — the routine paths: your own claim, and any slice whose claim was
+  released into the pickup queue.
+
+**What a claim does NOT tell you.** A claim names *the session that last moved
+this slice into a working state*, which is a presence hint rather than a live
+lock: the stamp fires on entry, so a session that picks up a slice someone else
+transitioned will not appear until its own next transition.
+
+**Both directions are soft.** An empty `claimed_by:` on a working-state slice is
+*no claim recorded*, **not** evidence the slice is free: claims are local unless
+pushed, so a parallel worktree's unpushed claim is invisible, and a plain
+`Edit`-tool write never takes a claim at all. A *non-empty* one is **not** proof
+anyone is still there either: a claim transfers to whoever transitions next, and
+one can survive a merge naming a branch that no longer exists. Treat a blank
+owner as "unknown" rather than "available" — reading it as "available" is exactly
+the failure [bug 013](bugs/013-slice-claim-covers-only-in-progress.md) was filed
+for — and treat a stale-looking owner as worth a question, not a blocker.
 
 **Worktree baseline and post-land sync.** Reservations from `workflow.py new`
 and `--push` slice claims land on `origin/main`; that remote ref remains the
