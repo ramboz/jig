@@ -43,7 +43,7 @@
 - [ADR-0036: Immutable Release Identity](adr-0036-immutable-release-identity.md) — Jig publishes semantic versions and release tags, but its root Claude marketplace currently fetches `hosts/claude` from the repository default branch without a `ref` or `sha`. (2026-07-14, Accepted)
 - [ADR-0037: Bug-fix repository closure evidence](adr-0037-bug-fix-repository-closure-evidence.md) — The bug lifecycle proves diagnose-before-fix, fresh-main reproduction, and a red-to-green regression test. (2026-07-15, Proposed)
 - [ADR-0038: Claude scaffold mode copies templates/](adr-0038-claude-scaffold-template-copy.md) — jig's record helpers seed their files from the shipped `templates/` tree: `decisions.py` creates `docs/decisions/lightweight-decisions.md` (bug 012), and `adr.py new` renders `adr-0000-template.md`. (2026-07-16, Accepted)
-- [ADR-0039: Route ADR-vs-lightweight by skill-prompted judgment at revision, not a lexical write-gate](adr-0039-decision-routing-gate.md) — [ADR-0031](adr-0031-load-bearing-decision-adr-trigger.md) fixed the *wording* of the Architectural Decision Record (ADR) trigger and single-sourced it as `decisions.py:ADR_TRIGGER`. (Proposed)
+- [ADR-0039: Route ADR-vs-lightweight by skill-prompted judgment at revision, not a lexical write-gate](adr-0039-decision-routing-gate.md) — [ADR-0031](adr-0031-load-bearing-decision-adr-trigger.md) fixed the *wording* of the Architectural Decision Record (ADR) trigger and single-sourced it as `decisions.py:ADR_TRIGGER`. (2026-07-24, Accepted)
 
 ## Lightweight decisions
 

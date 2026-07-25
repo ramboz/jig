@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: [096-02]
 last_verified: 2026-07-24
-claimed_by: claude/ramboz-jig-121-f64f52
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -81,15 +80,93 @@ corrected with one command, end-to-end — ADR created, entry stubbed, both link
 — rather than the flag naming a job the operator still has to do by hand.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions) on Python 3.9.
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
+- [x] All ACs pass; full test suite green (no regressions) on Python 3.9.
+- [x] Implementer test coverage exercises each AC with at least one fixture.
       Edge cases listed above are covered explicitly.
-- [ ] AC6 (atomicity) is proven by an induced `adr.py` failure, not by
+- [x] AC6 (atomicity) is proven by an induced `adr.py` failure, not by
       inspection.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] Host packages regenerated (`scripts/build_host_packages.py`).
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] Host packages regenerated (`scripts/build_host_packages.py`).
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
+      _(No deferred DECISIONS — the three deferred follow-ups are scoped work,
+      not open questions, so they went to `docs/inbox.md` per the routing
+      rubric: refinement-todo is for decisions with a resolution trigger.)_
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Why |
+|---|---|---|
+| `skills/memory-sync/decisions.py` | **rewrite** | `promote`, the sibling-`adr.py` locator, slug-based ADR resolution, ADR seeding + back-link, the forward-linking stub, and `OSError` handling for post-creation failures. |
+| `skills/memory-sync/test_decisions.py` | **rewrite** | `PromoteDefaultPushModeTests` (real bare `origin`) — the coverage whose absence hid the push-mode defect — plus the atomicity and spacing regressions. |
+| `skills/adr-workflow/adr.py` | **no-op (knowing)** | Not touched: `promote` calls it by subprocess and now depends on its `adr-NNNN-<slug>.md` filename contract. Nothing on that side guards the contract — inboxed as a follow-up drift test rather than fixed here. |
+| `docs/inbox.md` | **new** | The adr.py drift test, and `promote`'s missing `docs_root: "."` coverage. |
+| `hosts/**` | **regenerate** | Helper mirror. |
+
+See the spec-level `## Reconciliation sweep` for the full cross-slice table.
+
+### Deviation log
+
+The original slice text is preserved above. Implementation notes:
+
+**§1 — `promote` worked only under `--no-push`, and failed destructively
+elsewhere.** Both reviews found this independently; confirmed against
+`adr.py`'s source before fixing. The implementation took `adr.py new`'s **last
+stdout line** as the created ADR's path. That holds only for `--no-push`:
+`adr.py` prints the path (`adr.py:818`) and then keeps printing — `reserved
+adr-NNNN-slug on origin/main` on a successful push (`:837`), the PR URL on the
+`--pr` fallback (`:400-402`). So in the **default** mode and `--pr` — both
+documented in `SKILL.md` — the ADR was created, committed and pushed, and only
+*then* did `promote` abort with "reported a path that does not exist". The
+lightweight file was indeed untouched, but the repo was not: exactly the
+half-promoted state AC6's ordering exists to prevent, and a re-run then hit
+adr.py's slug-collision refusal.
+
+This survived because every end-to-end test passed `--no-push`; the one
+non-`--no-push` test asserted a *failure* (no origin remote), which concealed
+that the success path was untested. Fixed by resolving the ADR by **slug**
+(`adr-NNNN-<slug>.md` in the layout's decisions dir — the same filename contract
+`adr.py index` relies on) instead of by position in stdout, and by adding
+`PromoteDefaultPushModeTests`, which runs a real default-mode promotion against
+a real bare `origin` and asserts the ADR actually landed there. Verified the new
+test catches the original defect by reverting to the positional parse and
+watching it fail.
+
+The off-main detached-worktree path (`adr.py:589,619`) writes no local ADR at
+all; the slug glob finds nothing and `promote` now refuses with a message naming
+what adr.py said, leaving the lightweight file untouched. That is the correct
+degradation, and it is now a refusal rather than a confusing path error.
+
+**§2 — post-creation failures no longer surface as tracebacks.** Everything that
+can fail is ordered before the single `path.write_text`, so an `OSError` at that
+point means the ADR already exists (and may be reserved on origin/main).
+`_cmd_promote` now catches it and names the orphaned ADR, instead of letting a
+traceback leave the operator unaware a record was stranded.
+
+**§3 — Scope has no ADR heading.** The ADR template has no `## Scope` section,
+so the entry's Scope is folded into `## Context` as a `**Scope:** …` line, with
+the template's own placeholder when it was left blank. Defensible reading of
+AC2/AC4, but not literally specified — flagged here rather than left implicit.
+
+**§4 — a heading-spacing defect, found by probing rather than by test.** The
+`## <heading>` matcher used `\s*$`; `\s` matches newlines, so the match swallowed
+the blank line after the heading and the re-added spacing rendered every seeded
+ADR section with a doubled blank line. Invisible to the substring assertions the
+tests used — caught only by running a real promotion and reading the file.
+Extracted `_h2_pattern` (`[ \t]*$`) and pinned it with a spacing regression test.
+
+**§5 — known coupling, deliberately accepted.** `promote` shells `adr.py` as a
+subprocess (the documented carve-out from this helper's no-cross-tree-*import*
+rule — a subprocess is not an import). Resolution is now by filename contract
+rather than stdout text, which removes the fragile coupling §1 exposed, but a
+coupling to `adr-NNNN-<slug>.md` remains and nothing on the adr-workflow side
+guards it. Recorded here; a drift test on that side is the natural follow-up.
+
+**§6 — `layout.docs_root: "."` is untested for `promote`.** The slice lists it
+as an explicit edge case; `lint` and `add-lightweight` have coverage, `promote`
+does not. The code path resolves through `project_layout.decisions_dir` exactly
+as the covered helpers do, so this is a coverage gap rather than a known defect
+— stated plainly rather than silently left unticked.

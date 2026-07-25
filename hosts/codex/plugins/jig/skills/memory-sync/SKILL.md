@@ -3,16 +3,17 @@ name: memory-sync
 description: >
   Persist new context, terms, learnings, and settled lightweight decisions. Use when
   the user says remember this, save this for later, add to glossary, note this down,
-  or at the end of a session to consolidate what was learned — that goes to the
-  memory layer (AGENTS.md hot cache, docs/memory/, docs/inbox.md). Also use to
-  record a decision, remember this decision, or write this decision down when the
-  call is a lightweight one shipped outside a spec slice: UI strings, visual and CSS
-  choices, sizes, copy, or translation fixes. Those go to
-  docs/decisions/lightweight-decisions.md via decisions.py. Also auto-fires at
-  session end to surface capture-worthy items. Do not use for updating specs or code
-  comments — those have their own workflows. For a load-bearing or architectural
-  decision, one with rejected alternatives worth recording, or any decision the user
-  wants written up as an ADR, use `/jig:adr-workflow` instead.
+  or at session end to consolidate what was learned — that goes to the memory layer
+  (AGENTS.md hot cache, docs/memory/, docs/inbox.md). Also use to record a decision
+  or remember this decision when the call is a lightweight one shipped outside a
+  spec slice: UI strings, visual and CSS choices, copy, or translation fixes. Those
+  go to docs/decisions/lightweight-decisions.md via decisions.py. Also use when
+  revising, updating, or re-pricing an already-recorded decision: judge whether it
+  now warrants an ADR and promote it if so, rather than editing it in place. Also
+  auto-fires at session end. Do not use for updating specs or code comments. For a
+  NEW load-bearing decision, one with rejected alternatives, or any the user wants
+  written up as an ADR, use `/jig:adr-workflow`; an already-recorded entry that
+  outgrew this home is promoted from here.
 user-invocable: true
 ---
 

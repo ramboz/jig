@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: []
 last_verified: 2026-07-24
-claimed_by: claude/ramboz-jig-121-f64f52
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -97,13 +96,81 @@ guidance (096-01) and `promote` (096-03) rely on. It is not "a parser exists and
 a later slice will call it".
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions) on Python 3.9.
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
+- [x] All ACs pass; full test suite green (no regressions) on Python 3.9.
+- [x] Implementer test coverage exercises each AC with at least one fixture.
       Edge cases listed above are covered explicitly.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] Host packages regenerated (`scripts/build_host_packages.py`).
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] Host packages regenerated (`scripts/build_host_packages.py`).
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
+      _(No deferred DECISIONS — the three deferred follow-ups are scoped work,
+      not open questions, so they went to `docs/inbox.md` per the routing
+      rubric: refinement-todo is for decisions with a resolution trigger.)_
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Why |
+|---|---|---|
+| `skills/memory-sync/decisions.py` | **rewrite** | `update` + the entry parser (`_real_entries`/`_find_entry`), the `## Entries` section bound, and the line-initial-heading guard in `render_entry`. |
+| `skills/memory-sync/test_decisions.py` | **rewrite** | `EntriesSectionBoundTests` (the data-loss regression), the round-trip guard, and the corrected inline-vs-line-initial heading pair. |
+| `docs/decisions/lightweight-decisions.md` | **no-op** | Format unchanged — `update` re-renders through the existing `render_entry`, byte-identical to what `add-lightweight` emits. |
+| `hosts/**` | **regenerate** | Helper mirror. |
+
+See the spec-level `## Reconciliation sweep` for the full cross-slice table.
+
+### Deviation log
+
+The original slice text is preserved above. Implementation notes:
+
+**§1 — `_real_entries` had no lower bound, and it destroyed data.** Found by the
+craft review, reproduced before fixing. The `## Entries` section ran to
+end-of-file, so the last entry's `**Scope:**` absorbed any following `## `
+section — and because `update` rewrites exactly the span the parser reports, the
+absorbed section was then **deleted**:
+
+```
+## Entries
+### 2026-07-01 — First
+**Decision:** d / **Context:** c / **Scope:** s
+
+## Archive
+Old decisions worth keeping.
+```
+
+`update --scope "new"` silently removed `## Archive` and everything under it.
+Not reachable on jig's own file or the shipped template (`## Entries` is last in
+both), but reachable for any adopter who keeps a section below their entries —
+a shape `_foreign_format_error`'s own remedy ("add an `## Entries` heading to
+the existing file") actively invites. Fixed by bounding the section at the next
+`^## ` (`_NEXT_H2_RE`) and anchoring its start on a real heading line
+(`_ENTRIES_HEADING_RE`) rather than a substring `find`, which a prose mention of
+`## Entries` could otherwise shift. `EntriesSectionBoundTests` covers parse,
+`update`, `promote`, `lint`, and the prose-mention case.
+
+**§2 — a line-initial `### ` in a field value orphaned the entry.** The slice's
+stated edge case ("a `--decision` value containing markdown that looks like a
+heading") was covered by a test passing *inline* `### `, which the
+`(?m)^### ` heading pattern can never match — so the test asserted a guarantee
+it did not exercise, and the real case failed: a value carrying a line-initial
+`### ` split its own entry, neither half parsed, and the entry vanished from
+`update`, `promote` and `lint` with no error. Fixed by refusing such values at
+`render_entry`, the single emitter both write paths funnel through. The old test
+is kept (renamed to say it covers the *inline* case, which is legal and
+preserved) and a real line-initial test added beside it.
+
+**§3 — AC ordering renumbered.** The reframe (ADR-0039) removed the routing gate
+from this slice, so the original AC3/AC4/AC5 (gate re-run, flagged-update
+refusal, escape hatches) are gone and the remainder renumbered. AC8 is now a
+*guard* AC — `update` must carry no routing gate — rather than a feature.
+
+**§4 — refusal messages are shared, not distinct.** The slice anticipated a
+separate "that's documentation" refusal for the illustrative example and the
+`## Template` fence (AC7). The implementation folds them into the generic "no
+entry titled …" refusal, since `_real_entries` simply does not surface them. A
+user who targets the worked example is told the entry does not exist rather than
+that it is documentation. Accepted: the outcome (not addressable) is correct and
+the message is honest, and a second refusal path would need the parser to
+retain what it deliberately filters out.

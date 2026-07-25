@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: memory-sync
 use_cases: []
 ---
@@ -90,15 +90,31 @@ helper; and had it instead re-run `add-lightweight` with the same title and date
 (`decisions.py:272-273`) before any check could fire. A first-write check catches
 *future* misfilings; it cannot see a revision that never reaches it.
 
-So the reported case closes only when **096-01 and 096-02 are both in**: the
-evaluator, plus a revision path for it to run on. This spec keeps them as
-separate slices — 096-01 is independently valuable and 096-02 reuses its
-evaluator — but states the dependency plainly rather than shipping 096-01 and
-declaring #121 fixed.
+So closing the reported case needs **both** a compliant revision path and a
+trigger that fires on it: 096-02's `update` and 096-03's `promote` supply the
+path, and 096-01's guidance supplies the judgement that routes onto it. Neither
+half is sufficient alone — stated plainly rather than shipping one and declaring
+#121 fixed.
+
+_(Corrected after the reframe: this paragraph previously described 096-01 as
+shipping "the evaluator" that 096-02 would reuse. That was the rejected
+write-gate design; per [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md)
+096-01 ships prose guidance and the lexical evaluator survives only inside
+096-04's advisory lint.)_
 
 ## Assumptions
 
-None unverified. Each claim above was probed on this worktree at `fd7115a`:
+**One load-bearing assumption is UNVERIFIED**, and it is the one the chosen
+mechanism rests on: *the routing guidance is in the acting agent's context at the
+moment a recorded lightweight entry is revised.* Named, with its counter-evidence
+(four `ADR_TRIGGER` judgement prompts predate #121 and did not fire; ADR-0031
+explicitly declines to claim a prompt lifts attention), in
+[ADR-0039 § Assumptions](../../decisions/adr-0039-decision-routing-gate.md).
+That is why the guidance landed on memory-sync's always-loaded **skill
+description** and both reconcile checklists, not the skill body alone. It is not
+claimed to be enforcement.
+
+The remaining claims are code facts, each probed on this worktree at `fd7115a`:
 
 - `add-lightweight` is the helper's only subcommand — `decisions.py:313-332`
   (`_build_parser`), one `sub.add_parser` call; confirmed by `--help`.
@@ -204,3 +220,43 @@ on it) together close the reported case; 096-03 makes the correction one command
   recommends, the operator decides.
 - **Retro-promoting existing entries.** 096-04 reports; acting on its report is an
   operator decision, one `promote` call at a time.
+
+## Reconciliation sweep
+
+| Artifact | Disposition | Why |
+|---|---|---|
+| [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) | **rewrite → accept** | Authored for the lexical write-gate, rewritten to record the maintainer's pick (judgement at revision; markers advisory-only). Accepted at close. |
+| `skills/memory-sync/SKILL.md` — **frontmatter `description:`** | **rewrite** | The load-bearing one. The always-loaded surface now covers *revising / updating / correcting / re-pricing* an already-recorded decision and names promotion as the remedy. The first implementation put the guidance in the skill **body** only; the frame-critique pass showed the body may never load on the trajectory #121 describes (a revision during a review session, not a memory-sync run), and the maintainer's ask was literally "a better skill description". |
+| `skills/memory-sync/SKILL.md` — body | **rewrite** | The full revision-time routing guidance the description points into (096-01). |
+| `docs/workflow.md` | **rewrite** | Reconcile checklist gains the revision clause, beside the `ADR_TRIGGER` quote it already carried — so a spec session carries the trigger too, not just a memory-sync run. |
+| `skills/spec-workflow/SKILL.md` | **rewrite** | The skill-side copy of that same checklist; fixing only `workflow.md` would leave the two out of step. |
+| `evals/cases/memory-sync.json` | **rewrite** | Two routing cases guarding the new description trigger ("update that decision we recorded…", "revise the lightweight decision entry…"). Full eval stays green: 64/64 positive, 44/44 negative; the adr-workflow × memory-sync collision moves 0.21 → 0.24, far under the 0.50 warn threshold. |
+| `skills/memory-sync/decisions.py` | **rewrite** | Three new subcommands; the write-gate built in the first pass was removed on the reframe. |
+| `skills/memory-sync/test_decisions.py` | **rewrite** | 51 → 158 tests. Gate-CLI tests deleted with the gate; structural guards added for the ADR-0039 boundary and the self-containment rule (previously prose-only). |
+| `docs/decisions/lightweight-decisions.md` | **no-op** | The rubric is unchanged — this spec enforces the existing rule, it does not restate it. jig's own file still holds zero real entries. |
+| `templates/docs/decisions/lightweight-decisions.md.template` | **no-op (knowing)** | The scaffold seed's helper block still shows only `add-lightweight`. Adding `update`/`promote`/`lint` there widens what every newly scaffolded project is told about, which is a scaffold-output change; deliberately out of this spec's scope and inboxed instead. |
+| `hosts/claude/**`, `hosts/codex/**` | **regenerate** | Mirrors of `SKILL.md` + `decisions.py`; rebuilt via `scripts/build_host_packages.py`, never hand-edited. |
+| `docs/conventions.md` | **no-op** | Untouched by design — needs explicit human approval, and nothing here is a convention change. |
+| `docs/memory/glossary.md` | **new** | **advisory lint** — the distinction between an advisory signal and a gate is the whole point of ADR-0039 and is not obvious from the command name. Carries the don't-re-wire-it warning and the false-negative weakness. |
+| `docs/inbox.md` | **new** (3 entries) | Follow-ups surfaced by review, out of scope here — see below. |
+| `docs/specs/README.md` | **regenerate + annotate** | Board regenerated (280 slices / 95 specs); the four 096 rows carry the load-bearing invariants in the Notes column — most importantly **PARKED: don't re-propose the lexical write-gate**, which otherwise lived only inside a slice deviation log that nothing loads by default. Notes verified to survive a re-run. |
+| `CLAUDE.md` | **no-op** | Spec closes in one pass; per spec 025-01 no Active-specs entry is grown, and the primer is at its line budget (spec 076-01). The invariants live in the status-board Notes column and the glossary, which is the on-demand home the primer indexes into. |
+
+**Inboxed follow-ups** (found by review, deliberately not fixed here):
+
+1. **`adr.py`'s print contract is unguarded.** `promote` now resolves the created
+   ADR by filename (`adr-NNNN-<slug>.md`) rather than by parsing stdout, which
+   removes the fragile coupling — but nothing on the adr-workflow side pins that
+   filename shape. A drift test belongs there.
+2. **`promote` under `layout.docs_root: "."`** has no test, unlike `lint` and
+   `add-lightweight`. The path resolves through `project_layout.decisions_dir`
+   exactly as the covered helpers do, so this is a coverage gap, not a known
+   defect.
+3. **The scaffold template's helper block** documents only `add-lightweight`.
+   Whether newly scaffolded projects should be told about the other three
+   subcommands is a scaffold-output question, not a helper question.
+
+**Not swept, deliberately:** the unguarded fifth `ADR_TRIGGER` site in
+`templates/…lightweight-decisions.md.template` (already listed under Out of
+scope, and filed separately as its own task), and the Tier-2/3 conversation-scan
+markers parked by [#108](https://github.com/ramboz/jig/issues/108).

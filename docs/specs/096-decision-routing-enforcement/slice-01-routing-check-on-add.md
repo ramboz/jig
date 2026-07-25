@@ -1,5 +1,5 @@
 ---
-status: READY_FOR_IMPLEMENTATION
+status: DONE
 dependencies: [096-02, 096-03]
 last_verified: 2026-07-24
 ---
@@ -60,12 +60,19 @@ ship stale. This slice lands last of the four.
 
    **Amended during implementation** (see deviation log). As written this AC
    asked for a *second* verbatim copy of the sentence in `SKILL.md`, asserted as
-   a "fifth site" by `SingleSourceDriftTests`. That is unimplementable as
-   stated: `_assert_contains_trigger` is a whole-file `assertIn`, and this file
-   is *already* one of the four asserted sites — so a second copy would be
-   pinned by a test that passes on the **old** copy regardless of what the new
-   guidance said. Worse, two copies in one file is weaker single-sourcing, not
-   stronger.
+   a "fifth site" by `SingleSourceDriftTests`. Rejected on design grounds: two
+   copies of a single-sourced sentence **in one file** is weaker
+   single-sourcing, not stronger — it creates an intra-file drift pair where
+   there was none.
+
+   A secondary argument made in an earlier draft of this amendment — that the
+   assertion was *unimplementable* because `_assert_contains_trigger` is a
+   whole-file `assertIn` and would pass on the old copy — was **overstated, and
+   the compliance review was right to call it**. It is a real trap for the
+   obvious implementation, but `assertEqual(text.count(ADR_TRIGGER), 2)` or an
+   assertion scoped to the new section would both have worked. The AC was
+   changed because a second copy is the wrong design, not because it could not
+   be tested.
 
    Implemented instead: the guidance **references** the one verbatim quote
    already in this file ("the canonical ADR trigger quoted above"), and
@@ -104,14 +111,82 @@ it revises — to promote it, and has the command to do so. The judgement, the
 trigger, and the mechanism are all present end-to-end.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions) on Python 3.9.
-- [ ] `SingleSourceDriftTests` extended to the new guidance site and asserted
-      to fail if the quoted trigger is altered.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] Host packages regenerated (`scripts/build_host_packages.py`) — SKILL.md is
+- [x] All ACs pass; full test suite green (no regressions) on Python 3.9.
+- [x] The guidance→trigger binding is pinned and asserted to fail on drift.
+      _(Amended with AC3: `UpdateTimeRoutingGuidanceTests`, not a fifth
+      `SingleSourceDriftTests` site — see AC3 for why a second in-file copy was
+      rejected. Verified by mutating the prose and watching it fail.)_
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+      _(Compliance + craft, both independent; findings addressed below.)_
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] Host packages regenerated (`scripts/build_host_packages.py`) — SKILL.md is
       mirrored into `hosts/claude/` and `hosts/codex/`.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
+      _(No deferred DECISIONS — the three deferred follow-ups are scoped work,
+      not open questions, so they went to `docs/inbox.md` per the routing
+      rubric: refinement-todo is for decisions with a resolution trigger.)_
+
+### Reconciliation sweep
+
+This slice's mechanism *is* a documentation change, so its sweep is the widest.
+
+| Artifact | Disposition | Why |
+|---|---|---|
+| `skills/memory-sync/SKILL.md` — frontmatter `description:` | **rewrite** | The load-bearing surface: it is loaded every session, whereas the body may never load on the trajectory #121 describes. Now covers revising / updating / re-pricing a recorded decision and names promotion as the remedy. **Trimmed to fit the Codex host's hard 1024-character description limit** — the first expansion hit 1303 and failed 13 install-contract tests. |
+| `skills/memory-sync/SKILL.md` — body | **rewrite** | The full revision-time routing guidance the description points into. |
+| `docs/workflow.md` | **rewrite** | Reconcile checklist gains the revision clause beside the `ADR_TRIGGER` quote it already carried, so spec sessions carry it too. |
+| `skills/spec-workflow/SKILL.md` | **rewrite** | The skill-side copy of that checklist; fixing only `workflow.md` would leave the pair out of step. |
+| `evals/cases/memory-sync.json` | **rewrite** | Two routing cases guard the new description trigger. Eval stays 64/64 positive, 44/44 negative. |
+| `docs/memory/glossary.md` | **new** | **advisory lint** — carries the don't-re-wire-it warning. |
+| [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) | **rewrite → accept** | Rewritten to the maintainer's pick; Assumptions section now names the behavioural assumption this slice rests on as load-bearing and **unverified**, with its counter-evidence. |
+| `hosts/**` | **regenerate** | Mirrors of both SKILL.md files; never hand-edited. |
+
+See the spec-level `## Reconciliation sweep` for the full cross-slice table.
+
+### Deviation log
+
+The original slice text is preserved above (AC3 carries its amendment inline).
+Implementation notes:
+
+**§1 — this slice is not what it was written as.** As authored, 096-01 was a
+*lexical write-gate* on `add-lightweight`: a two-signal evaluator wired to
+refuse, with `--confirm-lightweight` and `JIG_DECISION_ROUTING_GATE=0` as
+escapes, in jig's house gate shape. It was built, and it worked. The maintainer
+then rejected the mechanism on [#121](https://github.com/ramboz/jig/issues/121):
+keyword-matching is *"likely brittle… we've seen this pattern failing repeatedly
+already in the project"*, and he asked instead for a better skill description so
+the model judges. [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md)
+was rewritten to record that pick, the gate was removed, and this slice was
+re-scoped to the prose guidance. See the reframe commit for the removal.
+
+The brittleness was not hypothetical: the gate, in its tuned two-signal form,
+refused *"Use 'Preferences' over 'Settings' in the user interface"* — an ordinary
+UI-copy decision the rubric routes to the lightweight home **by name** — because
+a bare `interface` marker sat in a group that flags with no second signal. That
+was caught by probing before the reframe, and the same failure mode recurred in
+the surviving advisory lint (see 096-04 §1). Two independent recurrences of the
+same class is the argument for the maintainer's call, recorded here so a future
+session does not re-propose the gate.
+
+**§2 — this slice now lands LAST, not first.** It names `update` and `promote`,
+so it depends on 096-02 and 096-03 rather than being their prerequisite. The
+frontmatter dependency and the spec's build order were both inverted.
+
+**§3 — AC3 was amended, and the first draft of that amendment overstated its
+case.** The AC asked for a second verbatim `ADR_TRIGGER` copy in `SKILL.md`
+asserted as a fifth `SingleSourceDriftTests` site. Rejected: two copies of a
+single-sourced sentence in one file is weaker single-sourcing, and the obvious
+implementation is untestable because `_assert_contains_trigger` is a whole-file
+`assertIn` that would pass on the old copy. My first amendment said this made
+the AC "unimplementable" — the compliance review correctly pointed out that
+`assertEqual(text.count(ADR_TRIGGER), 2)` would have worked, so the honest
+reason is *wrong design*, not *impossible*. AC3 now says so.
+
+**§4 — enforcement is genuinely softer, and that is the accepted trade.** Prose
+guidance can be skipped; an agent that shells `decisions.py` without loading
+`SKILL.md` gets no prompt at all. ADR-0039 states this under Consequences and
+sets a kill criterion for it. The advisory lint (096-04) is the backstop for
+records the guidance never saw — not a replacement for it.

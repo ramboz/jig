@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: [096-03]
 last_verified: 2026-07-24
-claimed_by: claude/ramboz-jig-121-f64f52
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -78,15 +77,80 @@ with the fix command for each — the backlog #121 describes as invisible become
 enumerable.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions) on Python 3.9.
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
+- [x] All ACs pass; full test suite green (no regressions) on Python 3.9.
+- [x] Implementer test coverage exercises each AC with at least one fixture.
       Edge cases listed above are covered explicitly.
-- [ ] AC3 asserted against the repo's real `docs/decisions/lightweight-decisions.md`,
+- [x] AC3 asserted against the repo's real `docs/decisions/lightweight-decisions.md`,
       so a future edit to the illustrative example that breaks the lint fails CI.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] Host packages regenerated (`scripts/build_host_packages.py`).
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] Host packages regenerated (`scripts/build_host_packages.py`).
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
+      _(No deferred DECISIONS — the three deferred follow-ups are scoped work,
+      not open questions, so they went to `docs/inbox.md` per the routing
+      rubric: refinement-todo is for decisions with a resolution trigger.)_
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Why |
+|---|---|---|
+| `skills/memory-sync/decisions.py` | **rewrite** | `lint` (read-only), and the marker table narrowed after the craft review found five real false positives. |
+| `skills/memory-sync/test_decisions.py` | **rewrite** | Lint ACs against jig's real shipped file, negative fixtures for the narrowed markers, and AST-based guards pinning the evaluator's single call site. |
+| `docs/memory/glossary.md` | **new** | **advisory lint** — records that the honest risk is false NEGATIVES (ADR-0031), so "mitigated by the lint" is not over-read. |
+| `docs/inbox.md` | **new** | The scaffold template's helper block still documents only `add-lightweight`. |
+| `hosts/**` | **regenerate** | Helper mirror. |
+
+See the spec-level `## Reconciliation sweep` for the full cross-slice table.
+
+### Deviation log
+
+The original slice text is preserved above. Implementation notes:
+
+**§1 — the marker table was narrowed after the craft review found real false
+positives.** ADR-0039 accepts that this signal is fallible and states a kill
+criterion for it; the review supplied the concrete cases, each verified before
+changing anything:
+
+| Decision (all belong in the lightweight home) | Fired on |
+|---|---|
+| "Link the support address with the `mailto:` protocol instead of a contact form" | `BOUNDARY: protocol` |
+| "Name the colour tokens after the Figma colour schema" | `BOUNDARY: schema` |
+| "Use the outline bell icon rather than the filled one … lands with the icon-set migration" | `LOAD_BEARING: migration` |
+| "Say 'Nothing here yet' instead of 'No data' … no new dependency" | `LOAD_BEARING: dependency` |
+| "Replace the custom share icon with the platform glyph" | `LOAD_BEARING: replaces` |
+
+The third is a brand/icon swap — the *first* example in `lightweight-decisions.md`'s
+own opening line. Changes made:
+
+- `BOUNDARY` now holds **only qualified phrases** — bare `protocol` and `schema`
+  removed, `wire protocol` and `database schema` kept. This group flags with no
+  second signal, so one over-broad member condemns a whole class on its own; the
+  invariant is now stated at the table.
+- `LOAD_BEARING` lost bare `dependency` and `migration`, and `replac(es|ing)` is
+  qualified to a following implementation/library/module/path/layer noun. In
+  practice `ALTERNATIVES` is near-universal prose ("X instead of Y" is how anyone
+  describes any choice), so a `LOAD_BEARING` member is close to flagging alone.
+
+Re-verified after narrowing: all seven false positives clear, and the three
+must-flag cases (the #121 case, a bare boundary change, a database-schema change)
+still flag. Negative fixtures added alongside `_UI_COPY_WITH_INTERFACE`.
+
+**§2 — the lint inherits 096-02's section bound.** An unbounded `## Entries`
+section fed trailing prose to the evaluator, so a project with a section below
+its entries could raise findings against text that is not a decision at all.
+Fixed in 096-02 (see its deviation log §1); asserted here by
+`EntriesSectionBoundTests::test_lint_does_not_scan_the_following_section`.
+
+**§3 — two assertions were weaker than their ACs.** AC1 requires the report to
+name the matched *phrases*, but the test asserted only the group names, which
+appear in the summary line regardless — dropping the phrase list would not have
+failed anything. AC5's "entry count" was asserted with `assertIn("1", out)`, a
+single character that matches almost any output. Both tightened.
+
+**§4 — advisory framing is in the output, not just the docs.** The report ends
+with a line stating that it matches wording rather than meaning and that each
+finding needs judging. ADR-0039 makes the advisory status load-bearing; a
+reader who only ever sees stdout would otherwise not learn it.

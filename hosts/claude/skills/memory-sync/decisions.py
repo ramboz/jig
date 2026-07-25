@@ -269,24 +269,25 @@ _GROUP_LOAD_BEARING = "LOAD_BEARING"
 # `s?` suffix on every marker — that would defeat the boundary guard for
 # exactly the markers where the plural is the false-positive case.
 _MARKER_TABLE = (
+    # EVERY member here must be a QUALIFIED phrase, never a bare common noun.
+    # This group flags with no second signal, so one over-broad member
+    # condemns a whole class of decisions on its own. Bare `protocol` and
+    # `schema` were removed for exactly that reason: "link the support address
+    # with the `mailto:` protocol" and "name the colour tokens after the Figma
+    # colour schema" are UI/design decisions the rubric routes HERE by name,
+    # and both flagged. Same reasoning keeps `interface` qualified as `public
+    # interface` — "user interface" is ordinary vocabulary in this home.
+    # Adding a bare word to this group is the Option-A failure ADR-0039
+    # rejects; if a new marker cannot be qualified, put it in LOAD_BEARING
+    # where it needs corroboration.
     (_GROUP_BOUNDARY, (
-        # The rubric's own three phrases (criterion b, verbatim) plus
-        # synonym-expansions a real decision is more likely to use in
-        # practice — "the public interface changed" says the same thing as
-        # "changed the public contract" without quoting the rubric.
         ("module boundary", re.compile(r"\bmodule boundary\b")),
         ("public contract", re.compile(r"\bpublic contract\b")),
         ("cross-cutting policy", re.compile(r"\bcross-cutting policy\b")),
-        ("protocol", re.compile(r"\bprotocol\b")),
-        ("schema", re.compile(r"\bschema\b")),
         ("public api surface", re.compile(r"\bpublic api surface\b")),
-        # Qualified, never bare `interface`. "user interface" is ordinary
-        # vocabulary in exactly the decisions the rubric routes HERE by name
-        # (UI strings, visual choices), and BOUNDARY flags on its own — a bare
-        # marker refuses "Use 'Preferences' over 'Settings' in the user
-        # interface" and teaches the operator to reach for the escape hatch,
-        # which is the Option-A failure ADR-0039 rejects.
         ("public interface", re.compile(r"\bpublic interface\b")),
+        ("wire protocol", re.compile(r"\bwire protocol\b")),
+        ("database schema", re.compile(r"\bdatabase schema\b")),
     )),
     (_GROUP_ALTERNATIVES, (
         ("rejected", re.compile(r"\brejected\b")),
@@ -299,19 +300,28 @@ _MARKER_TABLE = (
         ("alternative(s)", re.compile(r"\balternatives?\b")),
         ("trade-off", re.compile(r"\btrade-off\b")),
     )),
+    # Needs ALTERNATIVES to fire, but ALTERNATIVES is near-universal prose
+    # ("X instead of Y" is how anyone describes any choice), so in practice a
+    # member here is close to flagging alone. Bare `dependency` and
+    # `migration` were removed on that basis: "lands with the icon-set
+    # migration" and "no new dependency" turned an icon swap and an
+    # empty-state string — the rubric's own opening examples — into findings.
     (_GROUP_LOAD_BEARING, (
         ("load-bearing", re.compile(r"\bload-bearing\b")),
         ("architectural", re.compile(r"\barchitectural\b")),
         ("structural", re.compile(r"\bstructural\b")),
-        ("replaces/replacing", re.compile(r"\breplac(?:es|ing)\b")),
         ("native implementation", re.compile(r"\bnative implementation\b")),
         ("vendored", re.compile(r"\bvendored\b")),
-        ("dependency", re.compile(r"\bdependency\b")),
-        ("coupling", re.compile(r"\bcoupling\b")),
+        ("tight(ly) coupled/coupling",
+         re.compile(r"\bcoupling\b|\btightly coupled\b")),
         ("invariant", re.compile(r"\binvariant\b")),
-        ("migration", re.compile(r"\bmigration\b")),
         ("irreversible", re.compile(r"\birreversible\b")),
         ("hard to reverse", re.compile(r"\bhard to reverse\b")),
+        # Qualified: bare `replaces` covers "replace the icon", which is a
+        # brand/icon swap and belongs in this home.
+        ("replaces the … implementation/library/path",
+         re.compile(r"\breplac(?:es|ing)\b[^.]{0,60}?"
+                    r"\b(?:implementation|library|module|path|layer)\b")),
     )),
 )
 
@@ -361,9 +371,39 @@ def flags_adr_routing(matches) -> bool:
                 and _GROUP_LOAD_BEARING in groups))
 
 
+# A field value may mention `### ` inline, but must not START a line with it:
+# entry blocks are delimited by line-initial `### ` headings, so such a value
+# splits its own entry in two. Neither half then parses as a well-formed
+# block, so the entry silently disappears from `update`, `promote` and `lint`
+# — a recorded decision orphaned in place, with no error. Refusing at the
+# write is the only cheap fix; once written, nothing can tell the injected
+# heading from a real one.
+_LINE_INITIAL_HEADING_RE = re.compile(r"(?m)^###\s")
+
+
+def _reject_line_initial_headings(**fields) -> None:
+    for name, value in sorted(fields.items()):
+        if value and _LINE_INITIAL_HEADING_RE.search(value):
+            raise ValueError(
+                "--%s starts a line with '### ', which is how entry headings "
+                "are delimited — the entry would be split in two and become "
+                "invisible to update/promote/lint. Nothing was written. "
+                "Reword it (inline '### ' is fine; it is only a problem at "
+                "the start of a line)." % name)
+
+
 def render_entry(title: str, decision: str, context: str, scope: str,
                  commit: str = "", date: str = "") -> str:
-    """Render one entry in the file's `### [Date] — [Title]` template shape."""
+    """Render one entry in the file's `### [Date] — [Title]` template shape.
+
+    Refuses a field value that would start a line with `### ` — see
+    `_reject_line_initial_headings`. This is the single emitter every write
+    path funnels through (`add_lightweight`, `update_lightweight`), so the
+    guard sits here rather than being repeated at each caller.
+    """
+    _reject_line_initial_headings(
+        title=title, decision=decision, context=context, scope=scope,
+        commit=commit)
     lines = [
         "### %s — %s" % (date, title),
         "",
@@ -399,6 +439,15 @@ Entry = namedtuple("Entry", "date title decision context scope commit start end"
 # happens to contain a second em dash.
 _ENTRY_HEADING_RE = re.compile(r"^### (?P<date>.*?) — (?P<title>[^\n]+)$",
                                re.MULTILINE)
+
+# `## Entries` as a HEADING LINE, and the H2 that closes the section. Both
+# anchored, and both load-bearing for `_real_entries`: the first stops a
+# passing mention of `## Entries` in prose from moving the section start, the
+# second stops the last entry from swallowing whatever follows it. See
+# `_real_entries` for why swallowing is destructive rather than merely untidy.
+_ENTRIES_HEADING_RE = re.compile(
+    r"(?m)^" + re.escape(_ENTRIES_HEADING) + r"[ \t]*$")
+_NEXT_H2_RE = re.compile(r"(?m)^## ")
 
 # The blockquote jig's own file uses immediately above its worked example to
 # say "this one is documentation, not a record" (see
@@ -452,11 +501,23 @@ def _real_entries(file_text: str) -> list:
     something the helper never wrote) is also skipped rather than raising —
     "not addressable" is the correct outcome for update, not a crash.
     """
-    idx = file_text.find(_ENTRIES_HEADING)
-    if idx == -1:
+    # Anchored to a real `## Entries` HEADING LINE, not a substring: prose or
+    # a code fence mentioning `## Entries` above the true heading would
+    # otherwise set `body_start` too early and pull the `## Template` fence
+    # into scope as a parseable entry.
+    hm = _ENTRIES_HEADING_RE.search(file_text)
+    if hm is None:
         return []
-    body_start = idx + len(_ENTRIES_HEADING)
-    section = file_text[body_start:]
+    body_start = hm.end()
+    # The section STOPS at the next H2. Without this bound the last entry's
+    # `**Scope:**` swallows every following section — and since `update` and
+    # `promote` rewrite exactly the span parsed here, the swallowed section is
+    # then deleted from the file. `_foreign_format_error`'s own remedy tells
+    # people to add `## Entries` to an existing document, so a following H2
+    # (`## Archive`, `## Superseded`) is a shape jig actively invites.
+    nm = _NEXT_H2_RE.search(file_text, body_start)
+    section_end = nm.start() if nm else len(file_text)
+    section = file_text[body_start:section_end]
     headings = list(_ENTRY_HEADING_RE.finditer(section))
     entries = []
     prev_block_end = 0
@@ -978,17 +1039,28 @@ def promote_lightweight(project_dir: Path, title: str,
             "adr.py new failed (exit %d); %s was left untouched:\n%s"
             % (result.returncode, _display_path(project_dir),
                (result.stderr or result.stdout).strip()))
-    stdout_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-    if not stdout_lines:
+    # Resolve the ADR by its slug, NOT by position in adr.py's stdout.
+    # adr.py prints the path and then keeps printing: `reserved … on
+    # origin/main` on a successful push, the PR URL on the `--pr` fallback.
+    # Taking the last line therefore worked only under `--no-push` and broke
+    # every other mode *after* the ADR had been created and pushed — the
+    # half-promoted state this function's ordering exists to prevent. The
+    # slug is ours (we computed it), and adr.py's filename shape
+    # `adr-NNNN-<slug>.md` is the same contract `adr.py index` relies on.
+    matches = sorted(
+        project_layout.decisions_dir(project_dir)
+        .glob("adr-[0-9][0-9][0-9][0-9]-%s.md" % final_slug))
+    if not matches:
         raise ValueError(
-            "adr.py new exited 0 but printed nothing; could not determine "
-            "the created ADR's path. %s was left untouched."
-            % _display_path(project_dir))
-    adr_path = Path(stdout_lines[-1].strip())
-    if not adr_path.is_file():
-        raise ValueError(
-            "adr.py new reported a path that does not exist: %s. %s was "
-            "left untouched." % (adr_path, _display_path(project_dir)))
+            "adr.py new exited 0 but no adr-NNNN-%s.md landed in %s, so "
+            "there is nothing to promote into. %s was left untouched.\n"
+            "adr.py said:\n%s"
+            % (final_slug, project_layout.decisions_dir(project_dir),
+               _display_path(project_dir),
+               (result.stdout or "").strip()))
+    # Highest number wins: if an earlier run left a same-slug ADR behind, the
+    # one this call just reserved is the later allocation.
+    adr_path = matches[-1]
 
     # From here on, adr.py has already succeeded — seed + stub are the only
     # remaining steps, both against files that now exist.
@@ -1145,6 +1217,16 @@ def _cmd_promote(args) -> int:
             no_push=args.no_push, pr_mode=args.pr)
     except ValueError as exc:
         print("error: %s" % exc, file=sys.stderr)
+        return 1
+    except OSError as exc:
+        # Everything that can fail is ordered before the ADR is created, so an
+        # OSError here means the write ITSELF failed — the ADR exists and may
+        # already be reserved on origin/main. A traceback would leave the
+        # operator with no idea a record was orphaned; name it instead.
+        print("error: promote failed while writing after the ADR was already "
+              "created: %s\nCheck docs/decisions/ for an orphaned ADR before "
+              "re-running — a re-run allocates a new number." % exc,
+              file=sys.stderr)
         return 1
     rel = _display_path(project_dir)
     print("promoted lightweight decision in %s to %s: %s"

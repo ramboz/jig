@@ -6,6 +6,7 @@ Run from the repo root:
     python3 skills/memory-sync/test_decisions.py
 """
 
+import ast
 import contextlib
 import importlib.util
 import io
@@ -807,6 +808,90 @@ _RECURRING_TITLE_SEED = """# Lightweight Decisions
 """
 
 
+class EntriesSectionBoundTests(unittest.TestCase):
+    """The `## Entries` section must START at a real heading line and STOP at
+    the next H2.
+
+    Without the stop bound the last entry's `**Scope:**` absorbs everything
+    that follows — and since `update`/`promote` rewrite exactly the span the
+    parser reports, the absorbed section is then DELETED. Reachable for any
+    adopter who keeps another section below their entries, which
+    `_foreign_format_error`'s own remedy ("add an `## Entries` heading to the
+    existing file") actively invites."""
+
+    _WITH_TRAILING_SECTION = (
+        "# Lightweight Decisions\n\n"
+        "## Entries\n\n"
+        "### 2026-07-01 — First\n\n"
+        "**Decision:** d\n\n"
+        "**Context:** c\n\n"
+        "**Scope:** s\n\n"
+        "## Archive\n\n"
+        "Old decisions worth keeping.\n"
+    )
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name)
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(self._WITH_TRAILING_SECTION, encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_last_entry_does_not_absorb_the_following_section(self):
+        entry = decisions._real_entries(self._WITH_TRAILING_SECTION)[0]
+        self.assertEqual(entry.scope, "s")
+
+    def test_update_does_not_delete_the_following_section(self):
+        decisions.update_lightweight(self.project, "First", scope="new scope")
+        text = self.target.read_text(encoding="utf-8")
+        self.assertIn("## Archive", text)
+        self.assertIn("Old decisions worth keeping.", text)
+        self.assertIn("**Scope:** new scope", text)
+
+    def test_promote_does_not_delete_the_following_section(self):
+        """`_replace_entry_with_stub` rewrites the same span, so the bound
+        protects promote too — asserted separately because the two callers
+        splice differently (stub vs re-render)."""
+        entry = decisions._real_entries(self._WITH_TRAILING_SECTION)[0]
+        adr = self.target.parent / "adr-0001-x.md"
+        adr.write_text("# ADR-0001: X\n", encoding="utf-8")
+        stubbed = decisions._replace_entry_with_stub(
+            self._WITH_TRAILING_SECTION, entry, adr)
+        self.assertIn("## Archive", stubbed)
+        self.assertIn("Old decisions worth keeping.", stubbed)
+
+    def test_lint_does_not_scan_the_following_section(self):
+        """An unbounded section also feeds unrelated prose to the evaluator,
+        so a trailing section could raise findings against text that is not a
+        decision at all."""
+        report = decisions.lint_lightweight(self.project)
+        self.assertEqual(report.scanned, 1)
+
+    def test_entries_heading_must_be_a_heading_line_not_a_mention(self):
+        """A prose mention of `## Entries` above the real heading must not
+        move the section start — that would pull the `## Template` fence into
+        scope as a parseable entry."""
+        text = (
+            "# Lightweight Decisions\n\n"
+            "Record one per line under `## Entries` below.\n\n"
+            "## Template\n\n"
+            "### [Date] — [Short title]\n\n"
+            "**Decision:** _what_\n\n"
+            "**Context:** _why_\n\n"
+            "**Scope:** _where_\n\n"
+            "## Entries\n\n"
+            "### 2026-07-01 — Real\n\n"
+            "**Decision:** d\n\n"
+            "**Context:** c\n\n"
+            "**Scope:** s\n"
+        )
+        self.assertEqual([e.title for e in decisions._real_entries(text)],
+                         ["Real"])
+
+
 class ParseRoundTripTests(unittest.TestCase):
     """AC3's stated guard: a round trip through `render_entry` then the
     parser must return exactly the fields that went in, or `update`'s
@@ -1007,8 +1092,8 @@ class UpdateLightweightTests(unittest.TestCase):
                          ["First entry", "Target entry", "Third entry"])
 
     # Edge case — markdown that looks like a heading inside --decision must
-    # not corrupt the file's structure.
-    def test_decision_with_heading_like_text_does_not_corrupt_structure(self):
+    # not corrupt the file's structure. INLINE `### ` is legal and preserved.
+    def test_decision_with_inline_heading_like_text_is_preserved(self):
         self._seed(_MULTI_SEED)
         decisions.update_lightweight(
             self.project, "Target entry",
@@ -1019,6 +1104,32 @@ class UpdateLightweightTests(unittest.TestCase):
                          ["First entry", "Target entry", "Third entry"])
         self.assertEqual(entries[1].decision,
                          "See ### Not A Heading for details")
+
+    # The case the inline test above CANNOT reach: a LINE-INITIAL `### ` is
+    # what actually delimits an entry, so a value carrying one used to split
+    # its own entry and orphan it — invisible to update/promote/lint, no
+    # error. Refused at the write instead.
+    def test_line_initial_heading_in_decision_is_refused(self):
+        self._seed(_MULTI_SEED)
+        before = self._text()
+        with self.assertRaises(ValueError) as ctx:
+            decisions.update_lightweight(
+                self.project, "Target entry",
+                decision="line1\n### 2020-01-01 — Ghost\nmore")
+        self.assertIn("### ", str(ctx.exception))
+        self.assertEqual(self._text(), before, "refused write must not touch "
+                                               "the file")
+        self.assertEqual(
+            [e.title for e in decisions._real_entries(self._text())],
+            ["First entry", "Target entry", "Third entry"])
+
+    def test_line_initial_heading_is_refused_on_add_too(self):
+        """The guard lives in `render_entry`, the shared emitter — so the
+        append path is covered by the same check, not a second copy."""
+        with self.assertRaises(ValueError):
+            decisions.add_lightweight(
+                self.project, "Injected", "ok",
+                "ctx\n### 2020-01-01 — Ghost", "s", date="2026-08-01")
 
     # Edge case — every supplied field already matches: reported no-op, not
     # a rewrite.
@@ -1115,6 +1226,45 @@ class UpdateRoutingGuardTests(unittest.TestCase):
         src = DECISIONS_PY.read_text(encoding="utf-8")
         self.assertNotIn("gate_telemetry", src)
         self.assertNotIn("_common.parsing", src)
+
+    def test_evaluator_is_reachable_only_from_lint(self):
+        """ADR-0039's actual boundary: the lexical evaluator must not be
+        wired into any write path. Asserted over the AST, not the source
+        text — prose in docstrings names these functions, so a substring
+        check reports matches that are not call sites."""
+        tree = ast.parse(DECISIONS_PY.read_text(encoding="utf-8"))
+        callers = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Name)
+                        and sub.func.id == "evaluate_routing_signals"):
+                    callers.append(node.name)
+        self.assertEqual(
+            sorted(set(callers)), ["lint_lightweight"],
+            "the evaluator must be called only by the advisory lint; "
+            "callers were %r" % (sorted(set(callers)),))
+
+    def test_self_containment_imports(self):
+        """The module docstring's standing rule: no cross-tree import of the
+        scan lib, memory.py, or adr.py (the subprocess call to adr.py is the
+        documented carve-out, and is not an import). Previously unguarded —
+        the rule was prose only. AST-based, so the docstring that *describes*
+        the rule does not trip it."""
+        tree = ast.parse(DECISIONS_PY.read_text(encoding="utf-8"))
+        forbidden = {"decision_scan", "memory", "adr"}
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        self.assertEqual(
+            imported & forbidden, set(),
+            "decisions.py must stay self-contained; forbidden import(s): %r"
+            % (sorted(imported & forbidden),))
 
 
 class UpdateCliTests(unittest.TestCase):
@@ -1633,6 +1783,71 @@ class PromoteEndToEndTests(_PromoteE2ETestCase):
         self.assertIn("**Decision:** Use 'Get started'.", self._text())
 
 
+class PromoteDefaultPushModeTests(unittest.TestCase):
+    """The DEFAULT push mode, end-to-end against a real `origin`.
+
+    Regression guard for a defect that hid behind `--no-push`-only coverage:
+    `promote` used to take `adr.py new`'s LAST stdout line as the created
+    ADR's path. adr.py prints the path and then keeps printing — `reserved …
+    on origin/main` after a successful push, the PR URL on the `--pr`
+    fallback — so every mode except `--no-push` aborted with "reported a path
+    that does not exist" AFTER the ADR had been created, committed and
+    pushed: precisely the half-promoted state `promote_lightweight`'s
+    ordering exists to prevent. Resolution is by slug now, not by position."""
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.origin = root / "origin.git"
+        self.project = root / "work"
+        env = {**os.environ, **_GIT_IDENTITY}
+        self._saved_env = {k: os.environ.get(k) for k in _GIT_IDENTITY}
+        os.environ.update(_GIT_IDENTITY)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main",
+                        str(self.origin)], env=env, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "clone", "-q", str(self.origin),
+                        str(self.project)], env=env, check=True,
+                       capture_output=True)
+        (self.project / "scaffold.json").write_text("{}\n", encoding="utf-8")
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(_PROMOTABLE_SEED, encoding="utf-8")
+        # adr.py's on-main path refuses a dirty tree, so commit the seed.
+        for argv in (["git", "add", "-A"],
+                     ["git", "commit", "-q", "-m", "seed"],
+                     ["git", "push", "-q", "origin", "main"]):
+            subprocess.run(argv, cwd=self.project, env=env, check=True,
+                           capture_output=True)
+
+    def tearDown(self):
+        for k, v in self._saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._tmp.cleanup()
+
+    def test_default_push_mode_promotes_successfully(self):
+        adr_path = decisions.promote_lightweight(self.project, "Button copy")
+        self.assertTrue(adr_path.is_file())
+        self.assertEqual(adr_path.name, "adr-0001-button-copy.md")
+        text = self.target.read_text(encoding="utf-8")
+        self.assertIn("**Promoted:**", text)
+        self.assertIn("adr-0001-button-copy.md", text)
+
+    def test_default_push_mode_actually_pushed(self):
+        """Negative control: proves the fixture really is exercising the
+        push path, so the test above is not passing on a silent fallback."""
+        decisions.promote_lightweight(self.project, "Button copy")
+        out = subprocess.run(
+            ["git", "ls-tree", "--name-only", "-r", "main"],
+            cwd=self.origin, capture_output=True, text=True, check=True).stdout
+        self.assertIn("adr-0001-button-copy.md", out)
+
+
 class PromoteCliTests(_PromoteE2ETestCase):
     """CLI-level (`decisions.main(["promote", ...])`) smoke coverage."""
 
@@ -1821,6 +2036,12 @@ class LintTests(unittest.TestCase):
         self.assertIn("Vendored library swap", out)
         self.assertIn("LOAD_BEARING", out)
         self.assertIn("ALTERNATIVES", out)
+        # The matched PHRASES, not just the group names — the groups appear in
+        # the summary line regardless, so asserting only those would still
+        # pass if the evidence list were dropped, and an advisory finding the
+        # reader cannot audit is one they can only trust blindly or ignore.
+        self.assertIn("'vendored'", out)
+        self.assertIn("'rejected'", out)
         self.assertIn(
             'decisions.py promote --title "Vendored library swap"', out)
 
@@ -1871,7 +2092,10 @@ class LintTests(unittest.TestCase):
             ["lint", "--project-dir", str(self.project)])
         self.assertEqual(rc, 0)
         self.assertIn("docs/decisions/lightweight-decisions.md", out)
-        self.assertIn("1", out)
+        # The count in context, not a bare "1" — a single character matches
+        # almost any output, including a date or a path fragment.
+        self.assertIn("1 entry scanned", out)
+        self.assertIn("clean", out)
 
     # AC6 — a missing file reports "nothing to lint", exits 0, and does NOT
     # seed one (contrast add-lightweight, which does seed).

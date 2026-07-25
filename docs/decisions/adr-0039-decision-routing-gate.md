@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: [adr-0011, adr-0031]
 last_verified: 2026-07-24
 frame_review: true
@@ -9,10 +9,10 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-07-24) — records the maintainer's direction on
-[#121](https://github.com/ramboz/jig/issues/121), given in
-[his comment](https://github.com/ramboz/jig/issues/121#issuecomment) of
-2026-07-24.
+Accepted (2026-07-24)
+
+Records the maintainer's direction, given on
+[#121](https://github.com/ramboz/jig/issues/121) on 2026-07-24.
 
 ## Context
 
@@ -44,6 +44,13 @@ Two facts frame the decision:
    signal is the worst case — a false positive trains the operator to reach for
    the escape hatch, and a gate everyone waves through also launders the cases it
    should have caught.
+
+   **Scoped deliberately: this argument is about gates built on *brittle
+   signals*, not about [ADR-0011](adr-0011-spec-gate-model.md)'s
+   deliberateness-gate model as such.** Left unscoped it would generalise
+   against every escape-hatched gate jig has, `jig-spec-gate.sh` included, which
+   is not the claim and not this ADR's call to make. ADR-0011's model stands; what
+   this ADR says is that a *lexical* signal is not sound enough to sit under one.
 
 This ADR decides **where the routing judgement lives and what mechanism makes
 it**, not the rule (ADR-0031 owns the rule).
@@ -78,15 +85,20 @@ revising in place.** The judgement is made by the model already in the loop,
 reading the actual decision, not by a regex.
 
 - **Pros:** Uses judgement where a lexical rule is brittle, which is the
-  maintainer's stated preference and matches how the rest of jig's
-  load-bearing-decision routing already works (the reconcile checklists and the
-  session-end prompt are all judgement prompts quoting `ADR_TRIGGER`, not
-  matchers). Targets the revision moment, which is where #121 actually broke. Adds
-  no failure mode to the deterministic helper.
+  maintainer's stated preference. Targets the revision moment, which is where
+  #121 actually broke. Adds no failure mode to the deterministic helper.
 - **Cons:** Not enforced — an agent that skips the guidance, or calls the CLI
-  directly without loading `SKILL.md`, is not stopped. Mitigated, not closed, by
-  the advisory lint (below) and by `update` existing at all, which gives the
-  guidance a concrete command to attach to.
+  directly, is not stopped. Mitigated, not closed, by the advisory lint (below)
+  and by `update`/`promote` existing at all, which give the guidance concrete
+  commands to attach to.
+- **The precedent argument cuts both ways, and is recorded as a risk rather than
+  a Pro.** "The rest of jig's load-bearing-decision routing already works this
+  way" is true — the reconcile checklists and the session-end prompt are all
+  judgement prompts quoting `ADR_TRIGGER`, not matchers. But those four surfaces
+  predate #121 and did not fire. A fifth prompt of the same kind is not
+  self-evidently different; what makes this one different has to be *where* it
+  sits, which is why the guidance went into the always-loaded skill description
+  and the reconcile checklists rather than a skill body alone. See Assumptions.
 
 ### Option C: Helper-side model call
 
@@ -152,7 +164,39 @@ maintainer's steer.
 
 ## Assumptions
 
-None unverified. Probed on this worktree:
+**Load-bearing and UNVERIFIED — the whole option rests on it:** *the routing
+guidance is in the acting agent's context at the moment a recorded lightweight
+entry is revised.* Named here because the frame-critique pass was right that an
+earlier draft claimed "None unverified" while resting on exactly this.
+
+The counter-evidence is real and must be recorded with it:
+
+- jig already ships **four** judgement prompts quoting `ADR_TRIGGER`
+  (`docs/workflow.md:303`, `spec-workflow/SKILL.md:684`,
+  `memory-sync/SKILL.md`, the rubric), live since ADR-0031 —
+  **and [#121](https://github.com/ramboz/jig/issues/121) happened anyway.** So
+  "this extends an existing pattern" is not only a Pro; it also cites the
+  mechanism whose miss produced the ticket.
+- [ADR-0031](adr-0031-load-bearing-decision-adr-trigger.md) explicitly declines
+  to claim that a judgement prompt lifts attention, and routes the deterministic
+  floor elsewhere. This ADR leans on the claim ADR-0031 refused to make.
+
+What that changes here, rather than being noted and ignored:
+
+- The guidance moved into memory-sync's **skill description** — the surface the
+  host loads every session — not only the skill body, which may never load on
+  the trajectory #121 describes (a revision during an adversarial-review
+  session, not during a memory-sync run). The maintainer's ask was literally "a
+  better skill description"; the first implementation put it in the body only.
+- The two reconcile checklists that already quote `ADR_TRIGGER` gain the
+  revision clause, so a spec session carries it too.
+- **Option B would not have caught #121 on its own either.** The revision there
+  was a hand-edit that never reached any helper. `update`/`promote` supply a
+  compliant path (necessary); the prompt supplies the trigger (not sufficient
+  alone). Stating this keeps Option A's disqualification honest rather than
+  asymmetric.
+
+Code facts, each probed on this worktree:
 
 - `ADR_TRIGGER` is defined at `decisions.py:41-45` and read by no other line —
   rendered, never applied.
@@ -166,14 +210,32 @@ None unverified. Probed on this worktree:
 
 ## Kill criteria
 
-- **Guidance ignored in practice.** If sessions keep misfiling on update despite
-  the `SKILL.md` prompt, the judgement-only approach is too soft and a
-  *deterministic* backstop (a non-lexical one — e.g. a structural check that the
-  entry gained a rejected-alternatives section) has to be revisited.
-- **Lint noise.** If the advisory lint's marker output is mostly false positives
-  on real corpora, drop the lexical evaluator entirely rather than tune it — the
-  maintainer's brittleness verdict would then extend even to the advisory
-  surface.
+Rewritten to be *observable*. The frame-critique pass was right that the first
+draft's criteria could not trip: neither had a corpus or a signal behind it, and
+a soft mechanism whose only safety valve cannot fire is not backstopped.
+
+- **The guidance does not reach the moment.** Observable at reconciliation: for
+  each spec that revised a recorded decision, did the session route through
+  `update`/`promote`, or hand-edit? Two hand-edits after this ships means the
+  prompt is not landing where revisions happen, and a *deterministic,
+  non-lexical* backstop (e.g. a structural check that an entry gained
+  rejected-alternatives content since its last recorded state) has to be
+  revisited.
+- **The lint misses what it exists to catch.** The honest risk is **false
+  negatives**, not noise: ADR-0031 already found that a lexical scan "is biased
+  to catch *lightweight* decisions and miss *load-bearing* ones — the more
+  load-bearing a decision, the less likely it carries a stock trigger phrase",
+  and slice 096-04 narrowed the markers further, trading recall for precision in
+  exactly that direction. Observable: when a misfiled entry is found by a human
+  or a review, re-run `lint` against it. If the lint would not have flagged it,
+  that is one strike; on the second, the evaluator is decorative and should be
+  dropped rather than tuned. This also means **"mitigated by the advisory lint"
+  is materially weaker than it sounds** — recorded here rather than left to be
+  rediscovered.
+- **Lint noise.** If findings on a real downstream corpus are mostly false
+  positives, drop the evaluator rather than tune it — the brittleness verdict
+  would then extend even to the advisory surface. Watch this second; the
+  narrowing in 096-04 already optimised against it.
 
 ## Open questions
 
