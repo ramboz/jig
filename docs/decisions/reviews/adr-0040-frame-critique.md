@@ -1,5 +1,5 @@
 ---
-adr: 0039
+adr: 0040
 pass: frame-critique
 verdict: needs-changes
 reviewer: jig:reviewer subagent (2 rounds)
