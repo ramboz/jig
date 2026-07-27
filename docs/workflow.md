@@ -301,8 +301,8 @@ After implementation, before marking DONE:
   Canonical wording — single-sourced from ADR-0031, drift-tested verbatim across
   all four surfaces:
   A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
-- **Re-ask that question when a recorded decision is REVISED** (spec 096 /
-  [ADR-0039](decisions/adr-0039-decision-routing-gate.md)). Routing is asked once
+- **Re-ask that question when a recorded decision is REVISED** (spec 100 /
+  [ADR-0042](decisions/adr-0042-decision-routing-gate.md)). Routing is asked once
   at first write and never again, so a decision re-priced by review can stay
   misfiled indefinitely. If a revised entry now clears the trigger above, promote
   it — `decisions.py promote --title "<title>"` — rather than editing it in

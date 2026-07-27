@@ -5,7 +5,7 @@ last_verified: 2026-07-24
 frame_review: true
 ---
 
-# ADR-0039: Route ADR-vs-lightweight by skill-prompted judgment at revision, not a lexical write-gate
+# ADR-0042: Route ADR-vs-lightweight by skill-prompted judgment at revision, not a lexical write-gate
 
 ## Status
 
@@ -129,11 +129,11 @@ The routing judgement is made by the assistant, prompted by memory-sync's
 record time). It reuses `ADR_TRIGGER` as the criterion — the same
 single-sourced sentence the reconcile checklists already quote — so the "when is
 an ADR required?" policy still cannot drift across surfaces. When the judgement
-says "promote", the assistant uses `decisions.py promote` (this spec's 096-03),
+says "promote", the assistant uses `decisions.py promote` (this spec's 100-03),
 which moves the entry to an ADR and leaves a forward-linking stub.
 
 **The lexical evaluator survives in exactly one place: the advisory `lint`
-(096-04).** A lint is a low-stakes, offline, report-only sweep over records
+(100-04).** A lint is a low-stakes, offline, report-only sweep over records
 *already on disk* — the one surface where a brittle signal is acceptable, because
 a false positive costs a glance and a false negative is no worse than today. It
 never blocks a write and never edits a file. This is the honest home for
@@ -225,7 +225,7 @@ a soft mechanism whose only safety valve cannot fire is not backstopped.
   negatives**, not noise: ADR-0031 already found that a lexical scan "is biased
   to catch *lightweight* decisions and miss *load-bearing* ones — the more
   load-bearing a decision, the less likely it carries a stock trigger phrase",
-  and slice 096-04 narrowed the markers further, trading recall for precision in
+  and slice 100-04 narrowed the markers further, trading recall for precision in
   exactly that direction. Observable: when a misfiled entry is found by a human
   or a review, re-run `lint` against it. If the lint would not have flagged it,
   that is one strike; on the second, the evaluator is decorative and should be
@@ -235,7 +235,7 @@ a soft mechanism whose only safety valve cannot fire is not backstopped.
 - **Lint noise.** If findings on a real downstream corpus are mostly false
   positives, drop the evaluator rather than tune it — the brittleness verdict
   would then extend even to the advisory surface. Watch this second; the
-  narrowing in 096-04 already optimised against it.
+  narrowing in 100-04 already optimised against it.
 
 ## Open questions
 

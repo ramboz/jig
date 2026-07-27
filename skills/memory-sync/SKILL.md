@@ -135,7 +135,7 @@ time, then persist now.
    ADR (`adr.py new`) instead of here.
 
    **Revising an already-recorded entry — re-ask the routing question first**
-   (spec 096-01 / [ADR-0039](../../docs/decisions/adr-0039-decision-routing-gate.md)).
+   (spec 100-01 / [ADR-0042](../../docs/decisions/adr-0042-decision-routing-gate.md)).
    A decision's weight can change *after* it was filed: [#121](https://github.com/ramboz/jig/issues/121)
    reports one recorded as bounded, later re-priced by review into a
    module-boundary change with rejected alternatives, edited in place, and never

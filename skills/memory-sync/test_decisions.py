@@ -95,7 +95,7 @@ def _real_illustrative_entry():
             m.group("context").strip(), m.group("scope").strip())
 
 
-# Fixtures for the two-signal rule (096-01 / ADR-0039). Each is checked by
+# Fixtures for the two-signal rule (100-01 / ADR-0042). Each is checked by
 # hand against every marker group below so the tests pin exactly one
 # condition apiece rather than a coincidental combination.
 _LOAD_BEARING_HALF = (
@@ -117,7 +117,7 @@ _SCHEMATIC_TEXT = "We redrew the schematic in the onboarding illustration."
 # A real lightweight decision of the class the rubric routes to this home by
 # name ("UI string or translation choices") that happens to say "user
 # interface". BOUNDARY flags on its own, so a bare `interface` marker would
-# refuse this — see the marker table's note and ADR-0039's Option A.
+# refuse this — see the marker table's note and ADR-0042's Option A.
 _UI_COPY_WITH_INTERFACE = (
     "Settings label wording",
     "Use 'Preferences' over 'Settings' in the user interface",
@@ -472,7 +472,7 @@ class SingleSourceDriftTests(unittest.TestCase):
 
 
 class UpdateTimeRoutingGuidanceTests(unittest.TestCase):
-    """096-01 — the routing enforcement chosen in ADR-0039 is PROSE: the
+    """100-01 — the routing enforcement chosen in ADR-0042 is PROSE: the
     memory-sync prompt tells the assistant to re-judge a lightweight decision
     against the ADR trigger when revising it, and to promote rather than
     revise when it clears.
@@ -509,7 +509,7 @@ class UpdateTimeRoutingGuidanceTests(unittest.TestCase):
         self.assertIn("advisory", self.text)
 
     def test_guidance_warns_against_the_vocabulary_over_fire(self):
-        """ADR-0039 rejected keyword-matching because UI-copy decisions say
+        """ADR-0042 rejected keyword-matching because UI-copy decisions say
         "X instead of Y" and belong in the lightweight home. The prose must
         carry that distinction, or it recreates the over-fire in the model's
         judgement instead of in a regex."""
@@ -602,9 +602,9 @@ class EntriesPlaceholderTests(unittest.TestCase):
 
 
 class RoutingEvaluatorTests(unittest.TestCase):
-    """The pure lexical evaluator that backs the advisory lint (096-04 /
-    ADR-0039). No project dir, no filesystem, no env — text in, matches out.
-    ADR-0039 confines this to the report-only lint; it must not gate a write,
+    """The pure lexical evaluator that backs the advisory lint (100-04 /
+    ADR-0042). No project dir, no filesystem, no env — text in, matches out.
+    ADR-0042 confines this to the report-only lint; it must not gate a write,
     so these tests pin behaviour, not a refusal."""
 
     # AC8 — importable, pure, structured output.
@@ -714,10 +714,10 @@ class RoutingEvaluatorTests(unittest.TestCase):
                 "field %r was not scanned" % (field_names[idx],))
 
 
-# ---- 096-02: `update` subcommand --------------------------------------
+# ---- 100-02: `update` subcommand --------------------------------------
 
 # A plain, addressable, single-entry fixture — no illustrative marker, so
-# every entry in it is REAL per the 096-02 "real entry" notion. The default
+# every entry in it is REAL per the 100-02 "real entry" notion. The default
 # fixture for tests that exercise a normal revision.
 _PLAIN_SEED = """# Lightweight Decisions
 
@@ -937,7 +937,7 @@ class ParseRoundTripTests(unittest.TestCase):
 
 
 class UpdateLightweightTests(unittest.TestCase):
-    """096-02 `update_lightweight` — the Python API `_cmd_update` calls."""
+    """100-02 `update_lightweight` — the Python API `_cmd_update` calls."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1188,7 +1188,7 @@ class UpdateNotAddressableTests(unittest.TestCase):
 
 class UpdateRoutingGuardTests(unittest.TestCase):
     """AC8 — a guard against re-introducing the rejected write-gate
-    (ADR-0039). `update` carries no `--confirm-lightweight` and refuses only
+    (ADR-0042). `update` carries no `--confirm-lightweight` and refuses only
     on matching grounds, never on the decision's content."""
 
     def setUp(self):
@@ -1228,7 +1228,7 @@ class UpdateRoutingGuardTests(unittest.TestCase):
         self.assertNotIn("_common.parsing", src)
 
     def test_evaluator_is_reachable_only_from_lint(self):
-        """ADR-0039's actual boundary: the lexical evaluator must not be
+        """ADR-0042's actual boundary: the lexical evaluator must not be
         wired into any write path. Asserted over the AST, not the source
         text — prose in docstrings names these functions, so a substring
         check reports matches that are not call sites."""
@@ -1303,7 +1303,7 @@ class UpdateCliTests(unittest.TestCase):
                      "--project-dir", str(self.project)])
 
 
-# ---- 096-03: `promote` subcommand --------------------------------------
+# ---- 100-03: `promote` subcommand --------------------------------------
 
 ADR_PY = REPO_ROOT / "skills" / "adr-workflow" / "adr.py"
 
@@ -1321,7 +1321,7 @@ _PROMOTABLE_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.rende
 _MINIMAL_ENTRY_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.render_entry(
     "Minimal entry", "Do the thing.", "", "", date="2026-07-01")
 
-# A pre-promoted stub, matching 096-03's own rendering — the AC8 fixture.
+# A pre-promoted stub, matching 100-03's own rendering — the AC8 fixture.
 _ALREADY_PROMOTED_SEED = """# Lightweight Decisions
 
 ## Entries
@@ -1378,7 +1378,7 @@ class PromoteSlugDerivationTests(unittest.TestCase):
 
 
 class PromoteAdrLocatorTests(unittest.TestCase):
-    """`_adr_py_path` — sibling-skill resolution (096-03 design decision
+    """`_adr_py_path` — sibling-skill resolution (100-03 design decision
     #2). Run against the REAL repo checkout, where decisions.py's sibling
     adr-workflow skill genuinely exists."""
 
@@ -1583,7 +1583,7 @@ class PromoteAlreadyPromotedTests(unittest.TestCase):
 
 
 class PromoteAdrNotFoundTests(unittest.TestCase):
-    """096-03 design decision #2 — when no adr-workflow sibling resolves,
+    """100-03 design decision #2 — when no adr-workflow sibling resolves,
     `promote` refuses cleanly (exit non-zero, write nothing) rather than
     raising an unhandled exception. Exercised via monkeypatching
     `decisions._adr_py_path` itself, the only seam that does not depend on
@@ -1611,9 +1611,9 @@ class PromoteAdrNotFoundTests(unittest.TestCase):
         self.assertEqual(self.target.read_text(encoding="utf-8"), before)
 
 
-# ---- 096-03: real-subprocess end-to-end tests --------------------------
+# ---- 100-03: real-subprocess end-to-end tests --------------------------
 #
-# `promote` invokes `adr.py new` as a REAL subprocess (096-03 design
+# `promote` invokes `adr.py new` as a REAL subprocess (100-03 design
 # decision #1) — these tests run it for real, against a real git repo,
 # mirroring adr-workflow/test_adr.py's `ReserveAdrCLITests`. `promote`'s
 # own subprocess call carries no `env=` override (see `_run_adr_new`), so
@@ -1933,12 +1933,12 @@ class PromoteAtomicityTests(unittest.TestCase):
         self.assertEqual(self.target.read_text(encoding="utf-8"), before)
 
 
-# ---- 096-04: `lint` subcommand -----------------------------------------
+# ---- 100-04: `lint` subcommand -----------------------------------------
 #
-# Read-only advisory sweep over what is already on disk (ADR-0039). No
+# Read-only advisory sweep over what is already on disk (ADR-0042). No
 # subprocess, no seeding, no write path — every fixture below is built
 # through `render_entry` itself (not hand-typed), matching the style the
-# 096-03 promote fixtures already use.
+# 100-03 promote fixtures already use.
 
 # A single entry that trips the two-signal rule (LOAD_BEARING + ALTERNATIVES
 # together, reusing the pinned marker halves from RoutingEvaluatorTests) —
@@ -1950,7 +1950,7 @@ _LINT_FLAGGED_SEED = "# Lightweight Decisions\n\n## Entries\n\n" + decisions.ren
 
 # Same two-signal combination, but split across the Decision field's own two
 # lines — pins that the scan reads a field WHOLE, not just its first line
-# (096-04's stated multi-line edge case).
+# (100-04's stated multi-line edge case).
 _LINT_MULTILINE_FIELD_SEED = (
     "# Lightweight Decisions\n\n## Entries\n\n"
     + decisions.render_entry(
@@ -1972,7 +1972,7 @@ _LINT_EMPTY_ENTRIES_SEED = """# Lightweight Decisions
 _No entries yet._
 """
 
-# An already-promoted stub (096-03 shape) whose HEADING TITLE itself would
+# An already-promoted stub (100-03 shape) whose HEADING TITLE itself would
 # trip the BOUNDARY marker if it were scanned as an ordinary entry —
 # demonstrates the stub is excluded structurally (its body never matches
 # `_FIELD_RE`, so `_real_entries` never surfaces it), not by title-based
@@ -1988,7 +1988,7 @@ _LINT_PROMOTED_STUB_SEED = """# Lightweight Decisions
 
 
 class LintTests(unittest.TestCase):
-    """096-04 `lint` — advisory, read-only sweep (ADR-0039). The lexical
+    """100-04 `lint` — advisory, read-only sweep (ADR-0042). The lexical
     evaluator (`evaluate_routing_signals` / `flags_adr_routing`) is defined
     elsewhere; this is the one place it is actually APPLIED."""
 
@@ -2140,7 +2140,7 @@ class LintTests(unittest.TestCase):
         self.assertIn("decisions/lightweight-decisions.md", out)
         self.assertNotIn("docs/decisions/lightweight-decisions.md", out)
 
-    # Edge case — a 096-03 promotion stub produces no finding, even when its
+    # Edge case — a 100-03 promotion stub produces no finding, even when its
     # heading title alone would trip a marker: it is excluded structurally
     # (never a REAL entry), not by re-checking its content.
     def test_edge_promoted_stub_produces_no_finding(self):

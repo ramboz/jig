@@ -13,7 +13,7 @@ last_verified: 2026-07-24
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-02 — update-subcommand
+## Slice 100-02 — update-subcommand
 
 **Goal:** `decisions.py update` revises an already-recorded lightweight-decision
 entry **through the helper**, instead of the hand-edit every surface forbids.
@@ -23,10 +23,10 @@ and today there is no way to revise except by editing markdown the helper cannot
 see.
 
 `update` does **not** judge routing — that judgement is the assistant's, prompted
-by 096-01's `SKILL.md` guidance, per
-[ADR-0039](../../decisions/adr-0039-decision-routing-gate.md). This slice gives
+by 100-01's `SKILL.md` guidance, per
+[ADR-0042](../../decisions/adr-0042-decision-routing-gate.md). This slice gives
 that judgement a command to act through: revise here, or (when the decision has
-grown ADR-worthy) `promote` (096-03). A code gate on this path was the rejected
+grown ADR-worthy) `promote` (100-03). A code gate on this path was the rejected
 mechanism.
 
 **DoR:**
@@ -71,11 +71,11 @@ mechanism.
    Onboarding CTA copy…`) or the `### [Date] — [Short title]` line inside the
    fence — they are documentation, not records. `_existing_keys` deliberately
    keys both (`decisions.py:202-215`), so a narrower "real entry" notion is
-   needed here; introduce it cleanly (096-03 and 096-04 reuse it).
+   needed here; introduce it cleanly (100-03 and 100-04 reuse it).
 8. **No routing gate, no routing flag.** `update` refuses on *matching* grounds
    only (missing / ambiguous / documentation), never on the decision's content,
    and carries no `--confirm-lightweight`. Routing is the assistant's judgement
-   (096-01) plus the advisory lint (096-04). This AC is a guard against a
+   (100-01) plus the advisory lint (100-04). This AC is a guard against a
    reviewer re-adding the rejected gate.
 
 **Edge cases covered explicitly:**
@@ -92,7 +92,7 @@ mechanism.
 
 **Anti-horizontal-phasing check:** after this slice a recorded decision can be
 revised through the helper end-to-end — the precondition both the judgement
-guidance (096-01) and `promote` (096-03) rely on. It is not "a parser exists and
+guidance (100-01) and `promote` (100-03) rely on. It is not "a parser exists and
 a later slice will call it".
 
 **DoD:**
@@ -161,7 +161,7 @@ it did not exercise, and the real case failed: a value carrying a line-initial
 is kept (renamed to say it covers the *inline* case, which is legal and
 preserved) and a real line-initial test added beside it.
 
-**§3 — AC ordering renumbered.** The reframe (ADR-0039) removed the routing gate
+**§3 — AC ordering renumbered.** The reframe (ADR-0042) removed the routing gate
 from this slice, so the original AC3/AC4/AC5 (gate re-run, flagged-update
 refusal, escape hatches) are gone and the remainder renumbered. AC8 is now a
 *guard* AC — `update` must carry no routing gate — rather than a feature.

@@ -4,10 +4,10 @@ pass: frame-critique
 verdict: pass
 reviewer: jig:reviewer (independent, read-only)
 reviewed_at: 2026-07-24T23:43:48Z
-prompt_source: review.py frame-critique docs/decisions/adr-0039-decision-routing-gate.md
+prompt_source: review.py frame-critique docs/decisions/adr-0042-decision-routing-gate.md
 ---
 
-Adversarial frame-critique of ADR-0039, run before accept (ADR-0020 OQ2).
+Adversarial frame-critique of ADR-0042, run before accept (ADR-0020 OQ2).
 
 **Initial verdict: needs-changes.** The reviewer found the ADR's load-bearing
 assumption was never stated: *that memory-sync's guidance is in the acting
@@ -17,7 +17,7 @@ agent's context at the moment a recorded decision is revised.* The draft claimed
 The attack that landed: jig already shipped four judgement prompts quoting
 `ADR_TRIGGER` before #121, and #121 happened anyway — so citing that pattern as
 precedent cites the mechanism whose miss produced the ticket. ADR-0031
-explicitly declines to claim a judgement prompt lifts attention; ADR-0039 rested
+explicitly declines to claim a judgement prompt lifts attention; ADR-0042 rested
 on the claim ADR-0031 refused to make. Compounding it, the guidance had landed
 in the skill *body* while the always-loaded *description* never mentioned
 revising a record and routed load-bearing decisions to `adr-workflow`, which
@@ -42,7 +42,7 @@ skill description".
    disqualification is not asymmetric.
 6. Kill criteria rewritten to be observable, and the honest risk named as false
    NEGATIVES (ADR-0031: lexical scans miss load-bearing cases precisely because
-   they carry no stock phrase; 096-04 narrowed further in that direction). This
+   they carry no stock phrase; 100-04 narrowed further in that direction). This
    downgrades "mitigated by the advisory lint" explicitly.
 7. The brittle-signal argument is scoped so it does not generalise against
    ADR-0011's deliberateness-gate model as a whole.

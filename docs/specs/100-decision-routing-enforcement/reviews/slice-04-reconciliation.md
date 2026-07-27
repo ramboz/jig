@@ -1,13 +1,13 @@
 ---
-slice: 096-03 — promote-subcommand
+slice: 100-04 — lint-subcommand
 pass: reconciliation
 verdict: pass
 reviewer: jig:reviewer (independent, read-only)
 reviewed_at: 2026-07-24T23:59:01Z
-prompt_source: review.py reconciliation (spec 096, all slices)
+prompt_source: review.py reconciliation (spec 100, all slices)
 ---
 
-Independent reconciliation review of spec 096 — does the written record match
+Independent reconciliation review of spec 100 — does the written record match
 reality? Run read-only against the artifacts, not the conversation.
 
 **Verdict: needs-changes on the first pass. Every finding executed or corrected.**
@@ -45,7 +45,7 @@ Corrected:
    verdicts and the deviation logs; the only deferral (`promote` under
    `docs_root: "."`) is now stated in the box, in the deviation log, and in the
    inbox rather than in one place.
-7. **`spec.md` still claimed "Assumptions: None unverified"** while ADR-0039 now
+7. **`spec.md` still claimed "Assumptions: None unverified"** while ADR-0042 now
    names a load-bearing unverified one. CORRECTED — the spec names it and points
    at the ADR.
 
@@ -55,5 +55,5 @@ pushed it to 1303 characters against a **hard 1024 limit for the Codex host** �
 eval-tested trigger phrase preserved; routing eval stays 64/64 positive, 44/44
 negative.
 
-Final state: 3618 tests OK, pyright clean, hosts in sync, ADR-0039 Accepted with
+Final state: 3618 tests OK, pyright clean, hosts in sync, ADR-0042 Accepted with
 its frame-critique recorded.

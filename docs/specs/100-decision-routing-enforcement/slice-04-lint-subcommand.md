@@ -1,6 +1,6 @@
 ---
 status: DONE
-dependencies: [096-03]
+dependencies: [100-03]
 last_verified: 2026-07-24
 ---
 
@@ -13,18 +13,18 @@ last_verified: 2026-07-24
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-04 — lint-subcommand
+## Slice 100-04 — lint-subcommand
 
 **Goal:** `decisions.py lint` sweeps an existing `lightweight-decisions.md` and
 **reports** — never edits — the entries whose own text reads as ADR-worthy. This
 is the one pass over what is **already on disk**, and the single place a lexical
 evaluator is allowed to live: an advisory, report-only surface where a brittle
-signal is low-stakes ([ADR-0039](../../decisions/adr-0039-decision-routing-gate.md)).
-The write-time judgement is the assistant's (096-01); the lint is the backstop
+signal is low-stakes ([ADR-0042](../../decisions/adr-0042-decision-routing-gate.md)).
+The write-time judgement is the assistant's (100-01); the lint is the backstop
 for records the guidance never saw.
 
 **DoR:**
-- ✅ [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) confines the
+- ✅ [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md) confines the
   lexical evaluator to this advisory surface — it must not gate or edit anything.
 - ✅ This slice owns the evaluator: a pure `evaluate_routing_signals` / marker
   table derived from `ADR_TRIGGER`'s two criteria (`BOUNDARY` alone, or
@@ -34,7 +34,7 @@ for records the guidance never saw.
   (`lightweight-decisions.md:51-55`) and one `### [Date] — [Short title]` heading
   inside the `## Template` fence (`:33`). A lint that flags either is broken on
   the only corpus jig ships. (The evaluator prototype refused an ordinary "user
-  interface" copy decision until narrowed — the brittleness ADR-0039 cites, and
+  interface" copy decision until narrowed — the brittleness ADR-0042 cites, and
   the reason this stays advisory-only.)
 
 **Acceptance Criteria:**
@@ -64,7 +64,7 @@ for records the guidance never saw.
 
 **Edge cases covered explicitly:**
 
-- An entry that is already a promotion stub (096-03) produces no finding — it has
+- An entry that is already a promotion stub (100-03) produces no finding — it has
   been dealt with, and re-reporting it would make the lint's output permanently
   non-empty.
 - An entry whose fields are split across multiple lines is scanned whole, not
@@ -110,7 +110,7 @@ See the spec-level `## Reconciliation sweep` for the full cross-slice table.
 The original slice text is preserved above. Implementation notes:
 
 **§1 — the marker table was narrowed after the craft review found real false
-positives.** ADR-0039 accepts that this signal is fallible and states a kill
+positives.** ADR-0042 accepts that this signal is fallible and states a kill
 criterion for it; the review supplied the concrete cases, each verified before
 changing anything:
 
@@ -138,10 +138,10 @@ Re-verified after narrowing: all seven false positives clear, and the three
 must-flag cases (the #121 case, a bare boundary change, a database-schema change)
 still flag. Negative fixtures added alongside `_UI_COPY_WITH_INTERFACE`.
 
-**§2 — the lint inherits 096-02's section bound.** An unbounded `## Entries`
+**§2 — the lint inherits 100-02's section bound.** An unbounded `## Entries`
 section fed trailing prose to the evaluator, so a project with a section below
 its entries could raise findings against text that is not a decision at all.
-Fixed in 096-02 (see its deviation log §1); asserted here by
+Fixed in 100-02 (see its deviation log §1); asserted here by
 `EntriesSectionBoundTests::test_lint_does_not_scan_the_following_section`.
 
 **§3 — two assertions were weaker than their ACs.** AC1 requires the report to
@@ -152,5 +152,5 @@ single character that matches almost any output. Both tightened.
 
 **§4 — advisory framing is in the output, not just the docs.** The report ends
 with a line stating that it matches wording rather than meaning and that each
-finding needs judging. ADR-0039 makes the advisory status load-bearing; a
+finding needs judging. ADR-0042 makes the advisory status load-bearing; a
 reader who only ever sees stdout would otherwise not learn it.

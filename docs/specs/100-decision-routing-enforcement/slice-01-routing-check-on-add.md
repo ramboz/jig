@@ -1,6 +1,6 @@
 ---
 status: DONE
-dependencies: [096-02, 096-03]
+dependencies: [100-02, 100-03]
 last_verified: 2026-07-24
 ---
 
@@ -13,7 +13,7 @@ last_verified: 2026-07-24
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-01 — routing-judgment-guidance
+## Slice 100-01 — routing-judgment-guidance
 
 **Goal:** memory-sync's `SKILL.md` tells the assistant, in prose, that **when it
 updates (or records) a lightweight decision it first evaluates the decision
@@ -21,26 +21,26 @@ against `ADR_TRIGGER` and, if it clears the trigger, promotes it to an
 Architectural Decision Record (ADR) with `decisions.py promote` instead of
 filing it as lightweight.** This is the routing enforcement — judgement by the
 model already reading the decision, not a keyword matcher on the write path
-([ADR-0039](../../decisions/adr-0039-decision-routing-gate.md), Option B).
+([ADR-0042](../../decisions/adr-0042-decision-routing-gate.md), Option B).
 
 Why guidance and not a code gate: the maintainer's call on
 [#121](https://github.com/ramboz/jig/issues/121). A lexical write-gate is brittle
 (the project has seen the pattern fail repeatedly) and gates first-write, when
-the reported failure is at revision. See ADR-0039.
+the reported failure is at revision. See ADR-0042.
 
-Depends on **096-02 and 096-03** because the guidance names their commands
+Depends on **100-02 and 100-03** because the guidance names their commands
 (`update`, `promote`); prose that points at commands which do not exist yet would
 ship stale. This slice lands last of the four.
 
 **DoR:**
-- ✅ [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) records the
+- ✅ [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md) records the
   chosen approach and the rejected write-gate.
 - ✅ `ADR_TRIGGER` is single-sourced (`decisions.py:41-45`) and already quoted at
   four judgement surfaces; this adds a fifth of the same kind.
 - ✅ `memory-sync/SKILL.md` already carries a "Load-bearing decision escape hatch"
   block (~`:87-94`, spec 083-06) quoting `ADR_TRIGGER` — the natural anchor to
   extend, not a greenfield section.
-- ✅ 096-02 (`update`) and 096-03 (`promote`) are DONE, so the guidance names
+- ✅ 100-02 (`update`) and 100-03 (`promote`) are DONE, so the guidance names
   real commands.
 
 **Acceptance Criteria:**
@@ -53,7 +53,7 @@ ship stale. This slice lands last of the four.
 2. **It routes a cleared decision to `promote`.** The guidance says: if the
    updated decision now clears `ADR_TRIGGER`, use `decisions.py promote --title
    …` rather than `update`, so the record moves to an ADR and leaves a
-   forward-linking stub. The command it names must be the real one 096-03 ships.
+   forward-linking stub. The command it names must be the real one 100-03 ships.
 3. **It is bound to the canonical `ADR_TRIGGER`, and the binding is tested.**
    The guidance judges against the trigger sentence single-sourced from
    ADR-0031, and a test fails if that linkage is broken.
@@ -88,7 +88,7 @@ ship stale. This slice lands last of the four.
    advice, kept, now sitting beside the sharper update-time rule.
 5. **No code gate, no `--confirm-lightweight`.** `add-lightweight` and `update`
    refuse nothing on routing grounds and carry no routing flag — the enforcement
-   is the guidance plus the advisory lint, per ADR-0039. (This AC is a guard: a
+   is the guidance plus the advisory lint, per ADR-0042. (This AC is a guard: a
    later reviewer must not "add the missing gate".)
 6. **The host mirrors carry the same text.** After `scripts/build_host_packages.py`,
    `hosts/claude/skills/memory-sync/SKILL.md` and the Codex mirror hold the
@@ -103,9 +103,9 @@ ship stale. This slice lands last of the four.
 - The wording distinguishes the two homes the way the rubric does: *clears the
   trigger* → ADR; *settled, local, bounded, no real rejected alternatives* →
   stays lightweight. It must not imply that any rejected-alternative mention
-  forces an ADR (that is the Option-A over-fire ADR-0039 rejects).
+  forces an ADR (that is the Option-A over-fire ADR-0042 rejects).
 
-**Anti-horizontal-phasing check:** with 096-02, 096-03, and this slice in, an
+**Anti-horizontal-phasing check:** with 100-02, 100-03, and this slice in, an
 assistant revising a decision that has grown load-bearing is told — at the moment
 it revises — to promote it, and has the command to do so. The judgement, the
 trigger, and the mechanism are all present end-to-end.
@@ -141,7 +141,7 @@ This slice's mechanism *is* a documentation change, so its sweep is the widest.
 | `skills/spec-workflow/SKILL.md` | **rewrite** | The skill-side copy of that checklist; fixing only `workflow.md` would leave the pair out of step. |
 | `evals/cases/memory-sync.json` | **rewrite** | Two routing cases guard the new description trigger. Eval stays 64/64 positive, 44/44 negative. |
 | `docs/memory/glossary.md` | **new** | **advisory lint** — carries the don't-re-wire-it warning. |
-| [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) | **rewrite → accept** | Rewritten to the maintainer's pick; Assumptions section now names the behavioural assumption this slice rests on as load-bearing and **unverified**, with its counter-evidence. |
+| [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md) | **rewrite → accept** | Rewritten to the maintainer's pick; Assumptions section now names the behavioural assumption this slice rests on as load-bearing and **unverified**, with its counter-evidence. |
 | `hosts/**` | **regenerate** | Mirrors of both SKILL.md files; never hand-edited. |
 
 See the spec-level `## Reconciliation sweep` for the full cross-slice table.
@@ -151,14 +151,14 @@ See the spec-level `## Reconciliation sweep` for the full cross-slice table.
 The original slice text is preserved above (AC3 carries its amendment inline).
 Implementation notes:
 
-**§1 — this slice is not what it was written as.** As authored, 096-01 was a
+**§1 — this slice is not what it was written as.** As authored, 100-01 was a
 *lexical write-gate* on `add-lightweight`: a two-signal evaluator wired to
 refuse, with `--confirm-lightweight` and `JIG_DECISION_ROUTING_GATE=0` as
 escapes, in jig's house gate shape. It was built, and it worked. The maintainer
 then rejected the mechanism on [#121](https://github.com/ramboz/jig/issues/121):
 keyword-matching is *"likely brittle… we've seen this pattern failing repeatedly
 already in the project"*, and he asked instead for a better skill description so
-the model judges. [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md)
+the model judges. [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md)
 was rewritten to record that pick, the gate was removed, and this slice was
 re-scoped to the prose guidance. See the reframe commit for the removal.
 
@@ -167,12 +167,12 @@ refused *"Use 'Preferences' over 'Settings' in the user interface"* — an ordin
 UI-copy decision the rubric routes to the lightweight home **by name** — because
 a bare `interface` marker sat in a group that flags with no second signal. That
 was caught by probing before the reframe, and the same failure mode recurred in
-the surviving advisory lint (see 096-04 §1). Two independent recurrences of the
+the surviving advisory lint (see 100-04 §1). Two independent recurrences of the
 same class is the argument for the maintainer's call, recorded here so a future
 session does not re-propose the gate.
 
 **§2 — this slice now lands LAST, not first.** It names `update` and `promote`,
-so it depends on 096-02 and 096-03 rather than being their prerequisite. The
+so it depends on 100-02 and 100-03 rather than being their prerequisite. The
 frontmatter dependency and the spec's build order were both inverted.
 
 **§3 — AC3 was amended, and the first draft of that amendment overstated its
@@ -187,6 +187,6 @@ reason is *wrong design*, not *impossible*. AC3 now says so.
 
 **§4 — enforcement is genuinely softer, and that is the accepted trade.** Prose
 guidance can be skipped; an agent that shells `decisions.py` without loading
-`SKILL.md` gets no prompt at all. ADR-0039 states this under Consequences and
-sets a kill criterion for it. The advisory lint (096-04) is the backstop for
+`SKILL.md` gets no prompt at all. ADR-0042 states this under Consequences and
+sets a kill criterion for it. The advisory lint (100-04) is the backstop for
 records the guidance never saw — not a replacement for it.

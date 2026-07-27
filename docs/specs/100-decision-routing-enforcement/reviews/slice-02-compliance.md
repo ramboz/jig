@@ -1,13 +1,13 @@
 ---
-slice: 096-04 — lint-subcommand
+slice: 100-02 — update-subcommand
 pass: compliance
 verdict: pass
 reviewer: jig:reviewer (independent, read-only)
 reviewed_at: 2026-07-24T23:44:58Z
-prompt_source: review.py implementation (spec 096, all slices)
+prompt_source: review.py implementation (spec 100, all slices)
 ---
 
-Independent compliance review of spec 096 (all four slices), run read-only
+Independent compliance review of spec 100 (all four slices), run read-only
 against the ACs without access to the implementation conversation.
 
 **Verdict: needs-changes on the first pass; every finding addressed below.**
@@ -16,7 +16,7 @@ Confirmed satisfied: the illustrative worked example and the `## Template` fence
 are genuinely excluded from `update`/`promote`/`lint` (structural marker, not a
 hardcoded title, asserted against the REAL shipped file); `promote`'s ordering
 puts every failure point before its single write, proven by an induced `adr.py`
-failure; `lint` has no write or seed path; ADR-0039's boundary holds —
+failure; `lint` has no write or seed path; ADR-0042's boundary holds —
 `evaluate_routing_signals` has exactly one call site, inside `lint_lightweight`,
 and no `--confirm-lightweight` exists on any parser.
 
@@ -40,11 +40,11 @@ Findings, and what was done:
 5. **`promote` under `layout.docs_root: "."` has no test.** ACCEPTED as a
    coverage gap and inboxed; the path resolves through `project_layout` exactly
    as the covered helpers do.
-6. **Slice 096-01's AC3 amendment was overstated** ("unimplementable" — in fact
+6. **Slice 100-01's AC3 amendment was overstated** ("unimplementable" — in fact
    `assertEqual(count, 2)` would have worked). CORRECTED in the slice: the AC was
    changed because a second in-file copy is the wrong design, not because it
    could not be tested. The stale DoD line was amended to match.
 7. **Refusal messages fold AC7/AC9 into the generic "no entry titled …".**
-   ACCEPTED and recorded in 096-02's deviation log §4.
-8. **ADR-0039 was still Proposed.** RESOLVED: frame-critique run and recorded,
+   ACCEPTED and recorded in 100-02's deviation log §4.
+8. **ADR-0042 was still Proposed.** RESOLVED: frame-critique run and recorded,
    the findings acted on, ADR accepted.

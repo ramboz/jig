@@ -1,13 +1,13 @@
 ---
-slice: 096-04 — lint-subcommand
+slice: 100-01 — routing-judgment-guidance
 pass: craft
 verdict: pass
 reviewer: jig:reviewer (independent, read-only)
 reviewed_at: 2026-07-24T23:45:21Z
-prompt_source: review.py pr-review (spec 096, all slices)
+prompt_source: review.py pr-review (spec 100, all slices)
 ---
 
-Independent craft review of spec 096, run read-only over the four commits
+Independent craft review of spec 100, run read-only over the four commits
 without access to the implementation conversation.
 
 **Verdict: FAIL on the first pass — two load-bearing defects. Both reproduced
@@ -57,7 +57,7 @@ before fixing, both fixed, both now regression-tested.**
 7. **A docstring contradicted the code** on whether entry spans include the
    blank-line separator. Corrected.
 
-Noted as good and deliberately not churned: the ADR-0039 boundary is genuinely
+Noted as good and deliberately not churned: the ADR-0042 boundary is genuinely
 respected and structurally guarded; the e2e tests use real git and real
 subprocesses rather than mocks; fixtures are built through `render_entry` and the
 false-positive corpus is read from the real shipped file; the code is Python

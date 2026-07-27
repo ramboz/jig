@@ -22,7 +22,7 @@ Self-contained by design: it does NOT import the 083-04 scan lib
 (`hooks/scripts/lib/decision_scan.py`) nor `memory.py`, so the host-packaging
 step can copy the skill tree whole without a cross-tree dependency.
 
-`promote` (096-03) is the one deliberate exception, and only at the process
+`promote` (100-03) is the one deliberate exception, and only at the process
 boundary: it shells `adr.py new` as a SUBPROCESS (`subprocess.run`), never
 an `import adr`. A subprocess is not an import — it does not create a
 Python-level cross-tree dependency, so the host-packaging step can still
@@ -32,12 +32,12 @@ that, refuses cleanly rather than importing around the gap.
 
 `evaluate_routing_signals` + `flags_adr_routing` are a pure, importable
 lexical evaluator of `ADR_TRIGGER`'s two criteria. Per
-[ADR-0039](../../docs/decisions/adr-0039-decision-routing-gate.md) they back
-**only** the advisory `lint` (096-04) — a report-only sweep of records already
+[ADR-0042](../../docs/decisions/adr-0042-decision-routing-gate.md) they back
+**only** the advisory `lint` (100-04) — a report-only sweep of records already
 on disk. They deliberately do NOT gate any write path: the maintainer's call on
 [#121](https://github.com/ramboz/jig/issues/121) is that keyword-matching is too
 brittle to block a write, so the real routing judgement is the assistant's,
-prompted by memory-sync's `SKILL.md` (096-01), at the moment a decision is
+prompted by memory-sync's `SKILL.md` (100-01), at the moment a decision is
 updated.
 """
 
@@ -236,7 +236,7 @@ def _existing_keys(file_text: str) -> set:
     return keys
 
 
-# --- Two-signal ADR-routing evaluator (096-01 / ADR-0039) -------------------
+# --- Two-signal ADR-routing evaluator (100-01 / ADR-0042) -------------------
 # `ADR_TRIGGER` above states the rule; until this, nothing evaluated a
 # decision against it. The rubric it is transcribed from
 # (docs/decisions/lightweight-decisions.md's routing table) states TWO
@@ -251,7 +251,7 @@ def _existing_keys(file_text: str) -> set:
 # and the rubric routes it to the LIGHTWEIGHT home by name ("UI string or
 # translation choices"). The rubric's own hedge — "no REAL rejected
 # alternatives" — is what saves it: criterion (a)'s conjunction IS that test.
-# See ADR-0039 (Option A vs B) for the full argument against the flat list.
+# See ADR-0042 (Option A vs B) for the full argument against the flat list.
 
 RoutingMatch = namedtuple("RoutingMatch", "group phrase")
 
@@ -264,7 +264,7 @@ _GROUP_LOAD_BEARING = "LOAD_BEARING"
 # so patterns are plain lowercase with literal single spaces between words —
 # no re.IGNORECASE needed. `\b` on both ends stops a marker firing INSIDE a
 # longer word it happens to prefix: `alternative` must not fire on
-# `alternatively`, `interface` must not fire on `interfaces` (096-01 edge
+# `alternatively`, `interface` must not fire on `interfaces` (100-01 edge
 # cases, both asserted in test_decisions.py). Deliberately NOT a blanket
 # `s?` suffix on every marker — that would defeat the boundary guard for
 # exactly the markers where the plural is the false-positive case.
@@ -277,7 +277,7 @@ _MARKER_TABLE = (
     # colour schema" are UI/design decisions the rubric routes HERE by name,
     # and both flagged. Same reasoning keeps `interface` qualified as `public
     # interface` — "user interface" is ordinary vocabulary in this home.
-    # Adding a bare word to this group is the Option-A failure ADR-0039
+    # Adding a bare word to this group is the Option-A failure ADR-0042
     # rejects; if a new marker cannot be qualified, put it in LOAD_BEARING
     # where it needs corroboration.
     (_GROUP_BOUNDARY, (
@@ -328,14 +328,14 @@ _MARKER_TABLE = (
 
 def evaluate_routing_signals(title: str, decision: str, context: str,
                              scope: str) -> list:
-    """Pure lexical evaluator of `ADR_TRIGGER`'s two criteria (ADR-0039).
+    """Pure lexical evaluator of `ADR_TRIGGER`'s two criteria (ADR-0042).
 
     Scans the record's four fields for the marker groups above and returns
     every hit as a `RoutingMatch(group, phrase)`. Module-level and
     side-effect-free — no filesystem or environment access.
 
-    **Advisory only.** Per ADR-0039 this backs the report-only `lint`
-    (096-04) and nothing else: keyword-matching is too brittle to gate a
+    **Advisory only.** Per ADR-0042 this backs the report-only `lint`
+    (100-04) and nothing else: keyword-matching is too brittle to gate a
     write (a prototype refused an ordinary "user interface" copy decision
     until the marker was narrowed), so it lives on the one surface where a
     false positive costs a glance rather than a blocked write. Do not wire
@@ -362,7 +362,7 @@ def flags_adr_routing(matches) -> bool:
     rubric says "ANY change to a module boundary...", no second signal
     required), or ALTERNATIVES and LOAD_BEARING matched together (criterion
     a's conjunction — neither is evidence alone; together they are the
-    rubric's "load-bearing... with rejected alternatives"). See ADR-0039 for
+    rubric's "load-bearing... with rejected alternatives"). See ADR-0042 for
     why this is a conjunction rather than a flat OR across every marker.
     """
     groups = {m.group for m in matches}
@@ -418,7 +418,7 @@ def render_entry(title: str, decision: str, context: str, scope: str,
     return "\n".join(lines) + "\n"
 
 
-# --- Entry parsing for `update` (096-02) ------------------------------------
+# --- Entry parsing for `update` (100-02) ------------------------------------
 # `_existing_keys` above deliberately scans EVERY `### ` heading in the file,
 # including two pieces of documentation-in-entry-clothing this file ships:
 # the `## Template` fence's `### [Date] — [Short title]` placeholder, and (in
@@ -427,7 +427,7 @@ def render_entry(title: str, decision: str, context: str, scope: str,
 # already taken?" only needs to know a heading exists, not whether it is a
 # real record. `update` needs the opposite question — "which of these may I
 # rewrite?" — so it needs a narrower notion, built once here and reused by
-# 096-03 (`promote`) and 096-04 (`lint`), both of which need the same "which
+# 100-03 (`promote`) and 100-04 (`lint`), both of which need the same "which
 # headings are real records" answer.
 
 Entry = namedtuple("Entry", "date title decision context scope commit start end")
@@ -460,7 +460,7 @@ _ILLUSTRATIVE_MARKER_RE = re.compile(r"^> _Illustrative only\b", re.MULTILINE)
 # The four fields in the fixed order `render_entry` always emits them, each
 # non-greedy up to the next field's literal marker (or end of block for the
 # last one present) — so a field value that itself contains blank lines or
-# `### `-looking text (096-02's stated edge case) cannot be mistaken for a
+# `### `-looking text (100-02's stated edge case) cannot be mistaken for a
 # later field or a new heading; only the literal `\n\n**Context:**` /
 # `\n\n**Scope:**` / `\n\n**Commit:**` markers end a field. `re.DOTALL` makes
 # `.` span newlines, since a field value is not guaranteed single-line.
@@ -484,7 +484,7 @@ def _real_entries(file_text: str) -> list:
     block — heading through its last field — EXCLUDING the blank-line
     separator that follows it. That is the span `update_lightweight`
     replaces in place; the separator is left untouched so a following entry
-    (096-02's stated edge case) is never disturbed.
+    (100-02's stated edge case) is never disturbed.
 
     Two restrictions make this narrower than `_existing_keys`:
       - only `### ` headings AFTER the `## Entries` heading are considered,
@@ -545,7 +545,7 @@ def _find_entry(file_text: str, title: str, date: Optional[str] = None) -> Entry
     """Locate the single REAL entry (see `_real_entries`) matching `title`,
     normalized the same way the idempotency key already is (`_normalize`),
     so `update` and `add-lightweight` agree on what counts as "the same
-    entry" (096-02 AC5). `date` narrows to one when a title recurs.
+    entry" (100-02 AC5). `date` narrows to one when a title recurs.
 
     Raises `ValueError` for every refusal shape `update` needs:
       - no match — covers a genuinely missing title AND a title that only
@@ -631,7 +631,7 @@ def update_lightweight(project_dir: Path, title: str,
                        commit: Optional[str] = None,
                        date: Optional[str] = None) -> bool:
     """Revise fields on an already-recorded lightweight-decision entry, in
-    place, through the helper (096-02) — the code path #121's routing
+    place, through the helper (100-02) — the code path #121's routing
     failure never had (revision was a hand-edit) and spec 083's OQ2
     anticipated (adding a `**Commit:**` SHA retroactively) but left no way
     to do.
@@ -654,10 +654,10 @@ def update_lightweight(project_dir: Path, title: str,
     fence (see its docstring).
 
     Deliberately carries no routing judgement and no `--confirm-lightweight`
-    (096-02 AC8 / ADR-0039): every refusal above is about MATCHING an entry,
+    (100-02 AC8 / ADR-0042): every refusal above is about MATCHING an entry,
     never about the decision's content. Whether a revision now warrants
     promotion to an ADR is the assistant's judgement, prompted by
-    memory-sync's `SKILL.md` (096-01) — not this helper's to gate.
+    memory-sync's `SKILL.md` (100-01) — not this helper's to gate.
     """
     if not (title or "").strip():
         raise ValueError("title is required")
@@ -701,7 +701,7 @@ def update_lightweight(project_dir: Path, title: str,
 
 
 
-# --- `promote` (096-03 / ADR-0039) -------------------------------------
+# --- `promote` (100-03 / ADR-0042) -------------------------------------
 # Moves a lightweight entry to an ADR via `adr.py new` (subprocess — see the
 # module docstring's carve-out), seeds the created ADR from the entry's own
 # fields, and rewrites the entry into a forward-linking stub. The ordering
@@ -975,8 +975,8 @@ def promote_lightweight(project_dir: Path, title: str,
                         date: Optional[str] = None,
                         slug: Optional[str] = None,
                         no_push: bool = False, pr_mode: bool = False) -> Path:
-    """Move a lightweight-decision entry to an ADR via `adr.py new` (096-03
-    / ADR-0039), seed the ADR from the entry's own fields, and replace the
+    """Move a lightweight-decision entry to an ADR via `adr.py new` (100-03
+    / ADR-0042), seed the ADR from the entry's own fields, and replace the
     entry with a forward-linking stub. Returns the created ADR's path.
 
     Ordering is deliberately staged so failure is atomic (AC6): everything
@@ -1014,7 +1014,7 @@ def promote_lightweight(project_dir: Path, title: str,
             "%r is already promoted to %s; nothing to do. Edit that ADR "
             "directly for further changes." % (title, already))
 
-    # AC7 / AC9 — reuses 096-02's entry-matching contract unchanged: missing,
+    # AC7 / AC9 — reuses 100-02's entry-matching contract unchanged: missing,
     # ambiguous, illustrative-example, or `## Template`-fence titles all
     # raise here with the SAME messages `update` gives.
     entry = _find_entry(text, title, date)
@@ -1070,9 +1070,9 @@ def promote_lightweight(project_dir: Path, title: str,
     return adr_path
 
 
-# --- Advisory lint (096-04 / ADR-0039) -------------------------------------
+# --- Advisory lint (100-04 / ADR-0042) -------------------------------------
 # The ONE surface where the lexical evaluator is allowed to run. It reports;
-# it never edits, never seeds, and never blocks a write. ADR-0039 rejected
+# it never edits, never seeds, and never blocks a write. ADR-0042 rejected
 # keyword-matching as a write-gate precisely because it is brittle — on an
 # advisory sweep a false positive costs a glance, which is a price worth
 # paying for catching records written before the routing guidance existed.
@@ -1095,7 +1095,7 @@ def lint_lightweight(project_dir: Path):
     parse must fail loudly rather than be reported as clean.
 
     Only `_real_entries` are scanned, so the illustrative worked example, the
-    `## Template` fence, and 096-03's promotion stubs are all out of scope:
+    `## Template` fence, and 100-03's promotion stubs are all out of scope:
     documentation is not a decision, and a promoted entry has already been
     dealt with. Re-reporting a stub would make the output permanently
     non-empty and train the reader to ignore it.
@@ -1121,7 +1121,7 @@ def _format_finding(finding) -> str:
 
     Names the phrases, not just the groups: an advisory report the reader
     cannot audit is one they have to either trust blindly or ignore, and this
-    signal is explicitly fallible (ADR-0039).
+    signal is explicitly fallible (ADR-0042).
     """
     hits = "; ".join("%s: %r" % (m.group, m.phrase) for m in finding.matches)
     return (
@@ -1261,7 +1261,7 @@ def _build_parser() -> argparse.ArgumentParser:
     up.add_argument("--title", required=True,
                     help="title of the existing entry to revise")
     # Defaults are None here, NOT "" like add-lightweight's — None is the
-    # sentinel meaning "omitted, leave as recorded" (096-02 AC2). An
+    # sentinel meaning "omitted, leave as recorded" (100-02 AC2). An
     # explicit empty string ("--decision ''") is a real value and clears
     # the field; see `update_lightweight`'s docstring.
     up.add_argument("--decision", default=None, help="revised decision text")
@@ -1274,7 +1274,7 @@ def _build_parser() -> argparse.ArgumentParser:
     up.add_argument("--project-dir", default=".",
                     help="project root (default: cwd)")
     up.set_defaults(func=_cmd_update)
-    # No --confirm-lightweight here, deliberately (096-02 AC8 / ADR-0039):
+    # No --confirm-lightweight here, deliberately (100-02 AC8 / ADR-0042):
     # `update` refuses only on matching grounds (missing / ambiguous /
     # documentation-only title), never on the decision's content — there is
     # no routing gate to confirm past. Do not add one; see the ADR.

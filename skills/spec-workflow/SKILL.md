@@ -682,7 +682,7 @@ status flip is allowed. Each item is a gate.
       Canonical wording — single-sourced from ADR-0031, drift-tested verbatim
       across all four surfaces:
       A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
-- [ ] **Revised a recorded decision?** (spec 096 / [ADR-0039](../../docs/decisions/adr-0039-decision-routing-gate.md))
+- [ ] **Revised a recorded decision?** (spec 100 / [ADR-0042](../../docs/decisions/adr-0042-decision-routing-gate.md))
       Routing is asked once at first write and never again, so a decision
       re-priced during this slice can stay misfiled. If a revised entry now
       clears the trigger above, promote it (`decisions.py promote --title

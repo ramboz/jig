@@ -1,6 +1,6 @@
 ---
 status: DONE
-dependencies: [096-02]
+dependencies: [100-02]
 last_verified: 2026-07-24
 ---
 
@@ -13,16 +13,16 @@ last_verified: 2026-07-24
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-03 — promote-subcommand
+## Slice 100-03 — promote-subcommand
 
 **Goal:** `decisions.py promote --title "<existing>"` moves a misfiled entry to
 an Architectural Decision Record (ADR) via `adr.py new`, seeds that ADR from the
 entry's own fields, and replaces the entry with a stub that links forward. The
-correction stops being a manual job, which is what makes 096-01's and 096-02's
+correction stops being a manual job, which is what makes 100-01's and 100-02's
 flags actionable rather than merely informative.
 
 **DoR:**
-- ✅ 096-02 is DONE — its entry parser and title-matching (the "real entry"
+- ✅ 100-02 is DONE — its entry parser and title-matching (the "real entry"
   notion, `_normalize`-keyed lookup, ambiguity handling) are what `promote`
   reuses to find and remove the entry it moves.
 - ✅ `adr.py new <slug>` scaffolds an ADR and allocates its number, with
@@ -58,12 +58,12 @@ flags actionable rather than merely informative.
    **byte-identical** and the error is reported. A promotion that stubs the entry
    and then fails to create its target destroys the record.
 7. **A missing or ambiguous `--title` refuses**, with the same matching rules and
-   messages as 096-02 (AC4–AC6) — one title-matching contract across the helper.
+   messages as 100-02 (AC4–AC6) — one title-matching contract across the helper.
 8. **An already-promoted entry refuses.** Re-running `promote` on a stub exits
    non-zero naming the ADR it already points to, rather than creating a second
    ADR for one decision.
 9. **The illustrative example and the `## Template` fence are not promotable** —
-   same exclusion as 096-02 AC7.
+   same exclusion as 100-02 AC7.
 
 **Edge cases covered explicitly:**
 

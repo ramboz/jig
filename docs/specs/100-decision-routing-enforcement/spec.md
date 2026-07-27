@@ -6,7 +6,7 @@ use_cases: []
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on first use and link the term to docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "Self-defining vocabulary". -->
 
-# Spec 096: Decision-routing enforcement
+# Spec 100: Decision-routing enforcement
 
 > Reserved on 2026-07-22 via `workflow.py new`.
 
@@ -91,16 +91,16 @@ helper; and had it instead re-run `add-lightweight` with the same title and date
 *future* misfilings; it cannot see a revision that never reaches it.
 
 So closing the reported case needs **both** a compliant revision path and a
-trigger that fires on it: 096-02's `update` and 096-03's `promote` supply the
-path, and 096-01's guidance supplies the judgement that routes onto it. Neither
+trigger that fires on it: 100-02's `update` and 100-03's `promote` supply the
+path, and 100-01's guidance supplies the judgement that routes onto it. Neither
 half is sufficient alone — stated plainly rather than shipping one and declaring
 #121 fixed.
 
-_(Corrected after the reframe: this paragraph previously described 096-01 as
-shipping "the evaluator" that 096-02 would reuse. That was the rejected
-write-gate design; per [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md)
-096-01 ships prose guidance and the lexical evaluator survives only inside
-096-04's advisory lint.)_
+_(Corrected after the reframe: this paragraph previously described 100-01 as
+shipping "the evaluator" that 100-02 would reuse. That was the rejected
+write-gate design; per [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md)
+100-01 ships prose guidance and the lexical evaluator survives only inside
+100-04's advisory lint.)_
 
 ## Assumptions
 
@@ -109,7 +109,7 @@ mechanism rests on: *the routing guidance is in the acting agent's context at th
 moment a recorded lightweight entry is revised.* Named, with its counter-evidence
 (four `ADR_TRIGGER` judgement prompts predate #121 and did not fire; ADR-0031
 explicitly declines to claim a prompt lifts attention), in
-[ADR-0039 § Assumptions](../../decisions/adr-0039-decision-routing-gate.md).
+[ADR-0042 § Assumptions](../../decisions/adr-0042-decision-routing-gate.md).
 That is why the guidance landed on memory-sync's always-loaded **skill
 description** and both reconcile checklists, not the skill body alone. It is not
 claimed to be enforcement.
@@ -130,18 +130,18 @@ The remaining claims are code facts, each probed on this worktree at `fd7115a`:
 - jig's load-bearing-decision routing is already judgement-prompted prose, not a
   matcher — `docs/workflow.md:303`, `spec-workflow/SKILL.md:684`,
   `memory-sync/SKILL.md:94` each quote `ADR_TRIGGER` in a prompt. The chosen
-  approach (ADR-0039) extends that existing pattern rather than adding a new
+  approach (ADR-0042) extends that existing pattern rather than adding a new
   gate mechanism.
 - jig's own `lightweight-decisions.md` holds **zero real entries** — the single
   `### ` entry at `:55` is a self-described illustrative worked example (`:51-53`),
   and a second `### ` heading lives inside the `## Template` fence. Both are
-  load-bearing for 096-04: a lint that flags either one is broken on the only
+  load-bearing for 100-04: a lint that flags either one is broken on the only
   corpus jig ships.
 
 ## Decomposition
 
 SPIDR analysis. **The mechanism is the maintainer's call, recorded in
-[ADR-0039](../../decisions/adr-0039-decision-routing-gate.md): route by
+[ADR-0042](../../decisions/adr-0042-decision-routing-gate.md): route by
 skill-prompted judgement at revision, not a lexical write-gate.** A keyword
 matcher on the write path is brittle (the project has seen the pattern fail
 repeatedly) and gates the wrong moment — first write, when the reported failure
@@ -152,7 +152,7 @@ low-stakes advisory lint.
 - **Spike:** none left. The one-time unknown — *can a lexical rule route
   reliably?* — was answered **no** by building it: even a rubric-derived
   two-signal rule refused an ordinary "user interface" copy decision until
-  narrowed, which is the brittleness ADR-0039 cites. The judgement approach
+  narrowed, which is the brittleness ADR-0042 cites. The judgement approach
   removes the unknown by not depending on a matcher.
 - **Paths:** four moments in a record's life, and they are the slice boundaries —
   *first write* (`add-lightweight`, already exists), *revision* (no path today),
@@ -168,28 +168,28 @@ low-stakes advisory lint.
   behind — `promote` writes its ADR through `adr.py new` rather than inventing a
   second ADR writer.
 - **Rules:** the routing criterion stays single-sourced as `ADR_TRIGGER`
-  (ADR-0031). The judgement guidance (096-01) quotes it, joining the surfaces
-  `SingleSourceDriftTests` covers; the advisory lint (096-04) reuses a lexical
+  (ADR-0031). The judgement guidance (100-01) quotes it, joining the surfaces
+  `SingleSourceDriftTests` covers; the advisory lint (100-04) reuses a lexical
   evaluator derived from it. There is exactly one evaluator, so the lint cannot
   drift from the rule it approximates.
 
-→ **Four slices.** 096-02 (the revision path) plus 096-01 (the judgement that runs
-on it) together close the reported case; 096-03 makes the correction one command;
-096-04 surfaces what is already misfiled. Build order is dependency-first —
+→ **Four slices.** 100-02 (the revision path) plus 100-01 (the judgement that runs
+on it) together close the reported case; 100-03 makes the correction one command;
+100-04 surfaces what is already misfiled. Build order is dependency-first —
 `update` and `promote` are the code the guidance names, so they land before the
 `SKILL.md` prose that references them.
 
 ## Slices
 
-- [096-01 — routing-judgment-guidance](slice-01-routing-check-on-add.md) —
+- [100-01 — routing-judgment-guidance](slice-01-routing-check-on-add.md) —
   `SKILL.md` guidance so the assistant evaluates a lightweight decision against
   `ADR_TRIGGER` when updating (or recording) it, and routes to `promote` when it
-  clears the trigger. Replaces the rejected write-gate (ADR-0039).
-- [096-02 — update-subcommand](slice-02-update-subcommand.md) — give revision a
+  clears the trigger. Replaces the rejected write-gate (ADR-0042).
+- [100-02 — update-subcommand](slice-02-update-subcommand.md) — give revision a
   code path at all, so the judgement guidance has a command to attach to.
-- [096-03 — promote-subcommand](slice-03-promote-subcommand.md) — move an entry
+- [100-03 — promote-subcommand](slice-03-promote-subcommand.md) — move an entry
   to an ADR via `adr.py new` and leave a forward-linking stub behind.
-- [096-04 — lint-subcommand](slice-04-lint-subcommand.md) — read-only, advisory
+- [100-04 — lint-subcommand](slice-04-lint-subcommand.md) — read-only, advisory
   sweep flagging already-recorded entries whose text reads as ADR-worthy; the one
   home for the lexical evaluator.
 
@@ -212,32 +212,32 @@ on it) together close the reported case; 096-03 makes the correction one command
 - **Bug 011 / the dedup fix class.** Deliberately deferred; see
   [bug 011](../../bugs/011-decision-dedup-suppresses-reversals.md).
 - **A lexical write-gate on `add-lightweight`.** Built first, then removed on the
-  maintainer's steer (ADR-0039, Option A). Keyword-matching on a write path is
+  maintainer's steer (ADR-0042, Option A). Keyword-matching on a write path is
   brittle and the project distrusts it; the judgement moves to `SKILL.md` prose
   and the markers survive only in the advisory lint.
 - **Auto-promoting on a hit.** Nothing rewrites an owner's record unasked.
-  Promotion stays an explicit 096-03 call; the lint reports, the guidance
+  Promotion stays an explicit 100-03 call; the lint reports, the guidance
   recommends, the operator decides.
-- **Retro-promoting existing entries.** 096-04 reports; acting on its report is an
+- **Retro-promoting existing entries.** 100-04 reports; acting on its report is an
   operator decision, one `promote` call at a time.
 
 ## Reconciliation sweep
 
 | Artifact | Disposition | Why |
 |---|---|---|
-| [ADR-0039](../../decisions/adr-0039-decision-routing-gate.md) | **rewrite → accept** | Authored for the lexical write-gate, rewritten to record the maintainer's pick (judgement at revision; markers advisory-only). Accepted at close. |
+| [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md) | **rewrite → accept** | Authored for the lexical write-gate, rewritten to record the maintainer's pick (judgement at revision; markers advisory-only). Accepted at close. |
 | `skills/memory-sync/SKILL.md` — **frontmatter `description:`** | **rewrite** | The load-bearing one. The always-loaded surface now covers *revising / updating / correcting / re-pricing* an already-recorded decision and names promotion as the remedy. The first implementation put the guidance in the skill **body** only; the frame-critique pass showed the body may never load on the trajectory #121 describes (a revision during a review session, not a memory-sync run), and the maintainer's ask was literally "a better skill description". |
-| `skills/memory-sync/SKILL.md` — body | **rewrite** | The full revision-time routing guidance the description points into (096-01). |
+| `skills/memory-sync/SKILL.md` — body | **rewrite** | The full revision-time routing guidance the description points into (100-01). |
 | `docs/workflow.md` | **rewrite** | Reconcile checklist gains the revision clause, beside the `ADR_TRIGGER` quote it already carried — so a spec session carries the trigger too, not just a memory-sync run. |
 | `skills/spec-workflow/SKILL.md` | **rewrite** | The skill-side copy of that same checklist; fixing only `workflow.md` would leave the two out of step. |
 | `evals/cases/memory-sync.json` | **rewrite** | Two routing cases guarding the new description trigger ("update that decision we recorded…", "revise the lightweight decision entry…"). Full eval stays green: 64/64 positive, 44/44 negative; the adr-workflow × memory-sync collision moves 0.21 → 0.24, far under the 0.50 warn threshold. |
 | `skills/memory-sync/decisions.py` | **rewrite** | Three new subcommands; the write-gate built in the first pass was removed on the reframe. |
-| `skills/memory-sync/test_decisions.py` | **rewrite** | 51 → 158 tests. Gate-CLI tests deleted with the gate; structural guards added for the ADR-0039 boundary and the self-containment rule (previously prose-only). |
+| `skills/memory-sync/test_decisions.py` | **rewrite** | 51 → 158 tests. Gate-CLI tests deleted with the gate; structural guards added for the ADR-0042 boundary and the self-containment rule (previously prose-only). |
 | `docs/decisions/lightweight-decisions.md` | **no-op** | The rubric is unchanged — this spec enforces the existing rule, it does not restate it. jig's own file still holds zero real entries. |
 | `templates/docs/decisions/lightweight-decisions.md.template` | **no-op (knowing)** | The scaffold seed's helper block still shows only `add-lightweight`. Adding `update`/`promote`/`lint` there widens what every newly scaffolded project is told about, which is a scaffold-output change; deliberately out of this spec's scope and inboxed instead. |
 | `hosts/claude/**`, `hosts/codex/**` | **regenerate** | Mirrors of `SKILL.md` + `decisions.py`; rebuilt via `scripts/build_host_packages.py`, never hand-edited. |
 | `docs/conventions.md` | **no-op** | Untouched by design — needs explicit human approval, and nothing here is a convention change. |
-| `docs/memory/glossary.md` | **new** | **advisory lint** — the distinction between an advisory signal and a gate is the whole point of ADR-0039 and is not obvious from the command name. Carries the don't-re-wire-it warning and the false-negative weakness. |
+| `docs/memory/glossary.md` | **new** | **advisory lint** — the distinction between an advisory signal and a gate is the whole point of ADR-0042 and is not obvious from the command name. Carries the don't-re-wire-it warning and the false-negative weakness. |
 | `docs/inbox.md` | **new** (3 entries) | Follow-ups surfaced by review, out of scope here — see below. |
 | `docs/specs/README.md` | **regenerate + annotate** | Board regenerated (280 slices / 95 specs); the four 096 rows carry the load-bearing invariants in the Notes column — most importantly **PARKED: don't re-propose the lexical write-gate**, which otherwise lived only inside a slice deviation log that nothing loads by default. Notes verified to survive a re-run. |
 | `CLAUDE.md` | **no-op** | Spec closes in one pass; per spec 025-01 no Active-specs entry is grown, and the primer is at its line budget (spec 076-01). The invariants live in the status-board Notes column and the glossary, which is the on-demand home the primer indexes into. |
