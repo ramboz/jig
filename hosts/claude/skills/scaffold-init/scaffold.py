@@ -2466,8 +2466,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     When `with_machinery=True` (slice 016-01), also copies host-local runtime
     machinery into the target, rewriting SKILL.md path placeholders — the
     self-contained in-repo mode. The default is `False` (plugin mode: docs +
-    primer only) as of slice 096-01 / ADR-0039, matching the CLI's `--in-repo`
-    opt-in; it kept `True` between slices 016-03 and 096-01. The parameter
+    primer only) as of slice 099-01 / ADR-0041, matching the CLI's `--in-repo`
+    opt-in; it kept `True` between slices 016-03 and 099-01. The parameter
     default and the CLI default (`_build_parser`) are deliberately kept in
     step."""
     if host not in {"claude", "codex"}:
@@ -2626,8 +2626,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     # 5. Slice 016-01 + 016-02: copy skills/, agents/, hook scripts, and
     # write/merge host hook configuration when in-repo mode is selected
-    # (`--in-repo`; the opt-in as of slice 096-01 / ADR-0039 — it was
-    # default-on between slices 016-03 and 096-01). `force` propagates so --force also
+    # (`--in-repo`; the opt-in as of slice 099-01 / ADR-0041 — it was
+    # default-on between slices 016-03 and 099-01). `force` propagates so --force also
     # overrides the unmanaged-hooks safety check (same escape hatch as
     # AlreadyScaffoldedError). Slice 021-01 lifted the two-call sequence
     # behind a public `copy_machinery()` façade so `migrate.py
@@ -2710,7 +2710,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--force", action="store_true",
                    help="overwrite an already-scaffolded directory")
-    # Slice 096-01 (ADR-0039) flipped the default back to plugin mode,
+    # Slice 099-01 (ADR-0041) flipped the default back to plugin mode,
     # reversing slice 016-03's in-repo default. The axis is one mutually
     # exclusive group over `with_machinery`:
     #   * default (no flag) → plugin mode: the repo stays lean and jig runs
@@ -2844,7 +2844,7 @@ def main(argv: list[str]) -> int:
 
     print(f"scaffolded {target.name} → {target}")
 
-    # Slice 096-01 (ADR-0039): name the scaffold mode and why, so the axis is
+    # Slice 099-01 (ADR-0041): name the scaffold mode and why, so the axis is
     # visible in the summary rather than a silent default. Emitted for both
     # hosts (before the Codex early return below).
     if ns.with_machinery:

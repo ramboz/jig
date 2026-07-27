@@ -5,14 +5,14 @@ last_verified: 2026-07-24
 frame_review: true
 ---
 
-# ADR-0039: scaffold-init defaults to plugin mode
+# ADR-0041: scaffold-init defaults to plugin mode
 
 ## Status
 
 Proposed (2026-07-24)
 
 This record reverses a default set by [spec 016-03](../specs/016-scaffold-mode/spec.md)
-and is implemented by [spec 096](../specs/096-scaffold-default-plugin-mode/spec.md).
+and is implemented by [spec 099](../specs/099-scaffold-default-plugin-mode/spec.md).
 It starts `Proposed`; because it reverses a framing decision it carries
 `frame_review: true`, so `adr.py accept` will not flip it to `Accepted` without a
 passing frame-critique verdict (ADR-0020). Provenance: reported by Marie-Rose on

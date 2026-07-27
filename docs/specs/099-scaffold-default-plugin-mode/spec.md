@@ -6,7 +6,7 @@ use_cases: []
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on first use and link the term to docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "Self-defining vocabulary". -->
 
-# Spec 096: scaffold-init defaults to plugin mode
+# Spec 099: scaffold-init defaults to plugin mode
 
 > Reported on [issue #127](https://github.com/ramboz/jig/issues/127).
 
@@ -36,9 +36,9 @@ cloud agents on a bare checkout, teams without universal jig install, archival
 repos. The ask is not to remove in-repo; it is to make it the deliberate opt-in it
 deserves to be, and make plugin mode the lean default.
 
-## Decision (ADR-0039)
+## Decision (ADR-0041)
 
-Recorded in [ADR-0039](../../decisions/adr-0039-scaffold-defaults-to-plugin-mode.md)
+Recorded in [ADR-0041](../../decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)
 (Proposed): **default to plugin mode; in-repo behind an explicit `--in-repo`**,
 for **both hosts**. Concretely:
 
@@ -49,7 +49,7 @@ for **both hosts**. Concretely:
 3. Surface the axis as a sixth Q&A question in the skill.
 4. Have the wizard's stdout summary name the chosen mode and why.
 
-Rejected alternatives (see ADR-0039): keeping the in-repo default and only adding
+Rejected alternatives (see ADR-0041): keeping the in-repo default and only adding
 the question + summary (leaves the heavy mode as the silent default for anyone who
 skips the question); and a per-host default (the axis is host-independent — the
 same objections apply to a Codex project whose plugin is installed).
@@ -69,7 +69,7 @@ of `scaffold()`:
   (a plugin cannot write project `settings.json permissions`). This is the
   pre-existing behavior of the already-shipped `--plugin-only` path, not a
   regression introduced here. Whether plugin mode should also seed it is **out of
-  scope** (ADR-0039 Open questions).
+  scope** (ADR-0041 Open questions).
 
 ## Decomposition
 
@@ -94,15 +94,15 @@ behavior; splitting them would ship intermediate states with no standalone value
 
 ## Slices
 
-- [096-01 — default-plugin-mode](slice-01-default-plugin-mode.md)
+- [099-01 — default-plugin-mode](slice-01-default-plugin-mode.md)
 
 ## Out of scope
 
 - **Seeding `permissions.deny` on the plugin-only path.** A real follow-up
-  (ADR-0039 Open questions), but it changes what plugin mode *does*; this spec only
+  (ADR-0041 Open questions), but it changes what plugin mode *does*; this spec only
   changes which mode is the default.
 - **A detected (rather than static) default** that picks in-repo when no plugin is
-  present. Needs a plugin-presence probe that does not exist today (ADR-0039 Open
+  present. Needs a plugin-presence probe that does not exist today (ADR-0041 Open
   questions).
 - **Retrofitting already-scaffolded projects.** Projects already scaffolded in
   in-repo mode are untouched; this changes only what a *new* no-flag scaffold

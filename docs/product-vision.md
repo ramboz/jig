@@ -70,7 +70,7 @@ closed the second half by adding content-guidance at init time so a
 new project leaves the wizard with a real vision + architecture seed,
 not three "Deferred — no signal" stanzas.
 
-**Amendment (2026-07, [ADR-0039](decisions/adr-0039-scaffold-defaults-to-plugin-mode.md)).**
+**Amendment (2026-07, [ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)).**
 Both modes remain first-class, but the *default* is now plugin mode:
 in-repo is the explicit `--in-repo` opt-in. What the 2026-05 audit
 demanded was that owning the machinery be **possible and supported** —
@@ -207,7 +207,7 @@ reconciliation.
    work make it possible to put the machinery (`skills/`, `agents/`,
    `hooks/`) in the dev's host-native project directory (`.claude/` or
    `.codex/`) where it can be read, modified, and extended. As of
-   [ADR-0039](decisions/adr-0039-scaffold-defaults-to-plugin-mode.md)
+   [ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)
    that is the `--in-repo` **opt-in**, not the default: vendoring ~130
    files into every project pinned them to the scaffold-time version and
    buried the project's own history under jig internals. What positioning

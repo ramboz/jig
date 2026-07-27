@@ -607,7 +607,7 @@ class RealScaffoldContractTests(unittest.TestCase):
         scaffold_py = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
         # The scaffold-contract helpers (skill closure, settings coherence)
         # validate the in-repo materialized tree; scaffold in-repo explicitly
-        # since slice 096-01 / ADR-0039 flipped the default to plugin mode.
+        # since slice 099-01 / ADR-0041 flipped the default to plugin mode.
         result = subprocess.run(
             [sys.executable, str(scaffold_py), "--in-repo", str(cls.target)],
             capture_output=True,

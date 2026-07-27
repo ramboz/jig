@@ -13,7 +13,7 @@ last_verified: 2026-07-24
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-01 — default-plugin-mode
+## Slice 099-01 — default-plugin-mode
 
 **Goal:** A no-flag `scaffold.py <dir>` produces a lean plugin-mode project
 (no copied machinery); copying jig's machinery in-repo is the deliberate
@@ -21,7 +21,7 @@ last_verified: 2026-07-24
 question + a summary line that names the mode and why). Applies to both hosts.
 
 **DoR:**
-- ✅ [ADR-0039](../../decisions/adr-0039-scaffold-defaults-to-plugin-mode.md)
+- ✅ [ADR-0041](../../decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)
   records the decision (Proposed) and the rejected alternatives.
 - ✅ The off-switch (`--plugin-only`, `dest=with_machinery`, `store_false`) and
   both code paths (`copy_machinery` vs the plugin-only branch) already exist in
@@ -131,7 +131,7 @@ three in-repo aliases.
 `--plugin-only` path, both now on the *default* path, so they are recorded rather
 than silently inherited):
    - **`permissions.deny` is absent from the default scaffold.** Accepted by
-     ADR-0039 (§Open questions) — a plugin cannot write project `settings.json`
+     ADR-0041 (§Open questions) — a plugin cannot write project `settings.json`
      permissions. Flagged for a follow-up decision.
    - **Codex plugin mode renders docs with `.codex/skills/…` paths.** The Codex
      doc rewrite is unconditional (`scaffold.py`, `host == "codex"` branch), so a
@@ -180,7 +180,7 @@ as the known intermittent host-drift-guard flake.
 **10. Not changed: ADR-0007's "by default" phrasing.** `adr-0007`'s Context
 describes 016-03's flip in unbounded present tense. Left alone deliberately —
 ADRs are immutable records of a decision at a point in time (ADR-0010), and
-correcting their Context prose is how a record stops being a record. ADR-0039 is
+correcting their Context prose is how a record stops being a record. ADR-0041 is
 the forward pointer for anyone reading 0007 today.
 
 ### Reconciliation sweep
@@ -192,11 +192,11 @@ the forward pointer for anyone reading 0007 today.
 | `docs/product-vision.md` | `updated` | **Two edits.** Dated amendment under the 2026-05 positioning-recovery history, *and* standing **principle #7** rewritten — it asserted scaffolded mode as the default (caught in review round 1; the file had been half-updated). |
 | `docs/philosophy.md` | `updated` | "Own the scaffolding; don't rent the plugin" principle re-premised on the opt-in (caught in review round 1; absent from the original sweep table). |
 | `docs/architecture.md` | `no-op` | Checked: no module-boundary or public-contract drift. No new module, no changed helper seam — the change is one argparse default plus a print. |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `updated` | `CLAUDE.md` Active-specs entry names spec 096 + ADR-0039. Scaffold seed templates (`001-adopt-jig` spec + slice) corrected — they claimed `.claude/` machinery every new project now may not have. |
-| `skills/migrate/SKILL.md` | `updated` | "(default since slice 016-03)" was a stale default claim in a skill contract; now names `--in-repo` as the opt-in and bounds 016-03→096-01 as the interval it *was* the default. Mirrored in both packaged copies. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `updated` | `CLAUDE.md` Active-specs entry names spec 099 + ADR-0041. Scaffold seed templates (`001-adopt-jig` spec + slice) corrected — they claimed `.claude/` machinery every new project now may not have. |
+| `skills/migrate/SKILL.md` | `updated` | "(default since slice 016-03)" was a stale default claim in a skill contract; now names `--in-repo` as the opt-in and bounds 016-03→099-01 as the interval it *was* the default. Mirrored in both packaged copies. |
 | `docs/inbox.md` | `no-op` | Checked: no parked item resolved or contradicted by this slice. |
-| `docs/refinement-todo.md` | `no-op` | No decision was deferred *by* this slice. The two open questions live in ADR-0039 (§Open questions), which is their proper home — a Proposed ADR's open questions are not refinement-todo items. |
+| `docs/refinement-todo.md` | `no-op` | No decision was deferred *by* this slice. The two open questions live in ADR-0041 (§Open questions), which is their proper home — a Proposed ADR's open questions are not refinement-todo items. |
 | `docs/memory/glossary.md` | `updated` | "Scaffolded install / scaffold mode" entry re-premised: opt-in, the four reasons plugin mode is the default, and when to choose in-repo. |
-| `docs/memory/learnings.md` | `updated` | "Scaffold doc templates render into two install shapes" gotcha said "the default in-repo scaffold"; now names plugin mode as the default and bounds in-repo to the 016-03→096-01 interval. Missed in the first sweep — see deviation §8. |
-| `docs/decisions/README.md` / ADR index | `updated` | ADR-0039 added to the index (Proposed, dated). |
+| `docs/memory/learnings.md` | `updated` | "Scaffold doc templates render into two install shapes" gotcha said "the default in-repo scaffold"; now names plugin mode as the default and bounds in-repo to the 016-03→099-01 interval. Missed in the first sweep — see deviation §8. |
+| `docs/decisions/README.md` / ADR index | `updated` | ADR-0041 added to the index (Proposed, dated). |
 | `hosts/claude/**`, `hosts/codex/**` | `updated` | Rebuilt via `scripts/build_host_packages.py`; drift guard clean. Verified both packaged `scaffold.py` + `SKILL.md` carry the change. |

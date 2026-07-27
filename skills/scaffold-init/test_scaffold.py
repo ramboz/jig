@@ -2263,7 +2263,7 @@ class SecurityFloorTests(unittest.TestCase):
     # ---- AC #2: secret-scan hook copied + registered ----
     def test_secret_scan_hook_copied_to_project(self):
         # The secret-scan hook is copied into the project only in in-repo mode;
-        # in plugin mode it runs from the installed plugin (096-01 / ADR-0039).
+        # in plugin mode it runs from the installed plugin (099-01 / ADR-0041).
         result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
@@ -2433,7 +2433,7 @@ class PermissionsDenyTests(unittest.TestCase):
 
     def _rescaffold_force(self) -> subprocess.CompletedProcess:
         # permissions.deny lives in the generated settings.json, which is only
-        # written in in-repo mode (096-01 / ADR-0039 flipped the default to
+        # written in in-repo mode (099-01 / ADR-0041 flipped the default to
         # plugin mode), so this suite opts in explicitly.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)

@@ -1363,13 +1363,13 @@ class MergeExistingSettingsTests(unittest.TestCase):
 
 
 class DefaultPluginModeTests(unittest.TestCase):
-    """Slice 096-01 AC #1 (ADR-0039) — the default is now **plugin mode**,
+    """Slice 099-01 AC #1 (ADR-0041) — the default is now **plugin mode**,
     reversing slice 016-03's in-repo default. Running scaffold without a
     machinery flag copies NO machinery: no skills/, agents/, hooks/scripts/,
     or settings.json under `.claude/`, and `scaffold_mode == 'plugin-only'`."""
 
     def setUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="jig-096-01-default-plugin-")
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-099-01-default-plugin-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
 
@@ -1519,7 +1519,7 @@ class PluginOnlyOptOutTests(unittest.TestCase):
 
     def test_plugin_only_and_with_machinery_are_exclusive(self):
         """Passing both --plugin-only and --with-machinery is a usage
-        error (argparse mutually-exclusive group, exit 2). Slice 096-01 AC #2
+        error (argparse mutually-exclusive group, exit 2). Slice 099-01 AC #2
         names exit 2 specifically, so assert the code rather than merely
         non-zero — a bare `!= 0` also passes on an unrelated crash."""
         for in_repo_flag in ("--with-machinery", "--in-repo", "--copy-machinery"):
@@ -1547,7 +1547,7 @@ class DogfoodVerifyInstallScaffoldTests(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-dogfood-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
-        # The dogfood shape is the in-repo tree; since slice 096-01 (ADR-0039)
+        # The dogfood shape is the in-repo tree; since slice 099-01 (ADR-0041)
         # flipped the default to plugin mode, opt in explicitly with --in-repo.
         r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(
@@ -1622,7 +1622,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
 
     def _run_codex_scaffold(self, *extra_args: str) -> subprocess.CompletedProcess:
         # These tests exercise the copied `.codex/` machinery tree. Since slice
-        # 096-01 (ADR-0039) flipped the default to plugin mode, inject --in-repo
+        # 099-01 (ADR-0041) flipped the default to plugin mode, inject --in-repo
         # unless the caller already selected a mode explicitly (e.g. the
         # plugin-only leak test passes --plugin-only).
         mode_flags = {"--in-repo", "--with-machinery",
@@ -2273,7 +2273,7 @@ class ScaffoldCompletionMarkerTests(unittest.TestCase):
         # First run: scaffold refuses due to unmanaged hooks. We expect
         # non-zero exit (rc=3 per the CLI's UnmanagedHooksError branch). The
         # unmanaged-hooks check runs during the machinery copy, so this uses
-        # in-repo mode (096-01 / ADR-0039 flipped the default to plugin mode,
+        # in-repo mode (099-01 / ADR-0041 flipped the default to plugin mode,
         # which never copies machinery and so never reaches the check).
         r1 = run_scaffold_with_args(self.target, "--in-repo")
         self.assertNotEqual(
@@ -2599,7 +2599,7 @@ class ScaffoldDocStocktakeCommandTests(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-046-01-stocktake-")
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
-        # in-repo scaffold — machinery copied to .claude/skills (096-01 flipped
+        # in-repo scaffold — machinery copied to .claude/skills (099-01 flipped
         # the default to plugin mode, so opt in explicitly).
         r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
@@ -2666,7 +2666,7 @@ class ScaffoldDocLinksResolveTests(unittest.TestCase):
         self.target = Path(self.tmpdir) / "demo-project"
         self.target.mkdir()
         # in-repo scaffold: this test validates that the in-repo doc rewrite
-        # produces relative links that resolve to the copied tree (096-01
+        # produces relative links that resolve to the copied tree (099-01
         # flipped the default to plugin mode).
         r = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
@@ -2758,7 +2758,7 @@ class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
 
     def test_in_repo_scaffold_has_no_plugin_root_command_path(self):
         """AC4 — no generated core doc uses ${CLAUDE_PLUGIN_ROOT}/skills/
-        as a command path in an in-repo scaffold (096-01 flipped the default
+        as a command path in an in-repo scaffold (099-01 flipped the default
         to plugin mode, which correctly PRESERVES those paths — see the
         companion test — so opt in explicitly here)."""
         target = self._scaffold("--in-repo")

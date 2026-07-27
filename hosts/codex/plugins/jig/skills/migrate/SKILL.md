@@ -370,9 +370,9 @@ With `--force`, Codex replaces an unmanaged `.codex/hooks.json` with jig's gener
 ### Relationship to scaffold-mode
 
 `migrate.py copy-machinery` is the migration-path equivalent of
-`scaffold-init --in-repo` (the opt-in as of slice 096-01 / ADR-0039;
+`scaffold-init --in-repo` (the opt-in as of slice 099-01 / ADR-0041;
 `--with-machinery` is an accepted alias, and it was the *default* only between
-slices 016-03 and 096-01). Both
+slices 016-03 and 099-01). Both
 end up calling the same host-aware `copy_machinery(plugin, target, *,
 force, host)` façade in `scaffold.py`, so the resulting host runtime
 shape is equivalent regardless of which adoption path produced it.

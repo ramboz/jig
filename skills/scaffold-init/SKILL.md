@@ -87,7 +87,7 @@ user says "skip", "I don't know", "unsure", or similar, do not pass the flag
    what gets committed), so it won't appear in the project's own docs. Default to
    plugin mode (lean repo, jig updates flow from the plugin); choose `--in-repo`
    only for the self-contained cases above. See
-   [ADR-0039](../../docs/decisions/adr-0039-scaffold-defaults-to-plugin-mode.md).
+   [ADR-0041](../../docs/decisions/adr-0041-scaffold-defaults-to-plugin-mode.md).
 
 Skipping every question is the legitimate "pure inference" mode (slice 001-03
 behavior) — the wizard infers from filesystem signals alone, and defaults to

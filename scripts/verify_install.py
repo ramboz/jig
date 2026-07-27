@@ -191,8 +191,8 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 #
 # The plugin-mode checks above validate that jig's plugin install footprint
 # is on disk (`.claude-plugin/...` etc.). When jig is installed via
-# `scaffold-init --in-repo` (the opt-in as of slice 096-01 / ADR-0039;
-# default-on between slices 016-03 and 096-01), the artifacts live under
+# `scaffold-init --in-repo` (the opt-in as of slice 099-01 / ADR-0041;
+# default-on between slices 016-03 and 099-01), the artifacts live under
 # `<project>/.claude/` instead, with a `jig-` prefix to namespace them away
 # from user-added project skills. The four scaffold-mode checks mirror the
 # four plugin-mode checks (skills / agents / hook scripts / settings.json
@@ -523,8 +523,8 @@ def run_all_scaffold_checks(project_root: Path) -> list[CheckResult]:
 
 def _looks_unscaffolded(project_root: Path) -> bool:
     """`.claude/` directory entirely absent → the project was never
-    scaffolded with `--in-repo` (the machinery opt-in as of slice 096-01 /
-    ADR-0039; default-on between slices 016-03 and 096-01).
+    scaffolded with `--in-repo` (the machinery opt-in as of slice 099-01 /
+    ADR-0041; default-on between slices 016-03 and 099-01).
     Mirrors `_looks_uninstalled` semantics for plugin mode."""
     return not (project_root / ".claude").exists()
 
