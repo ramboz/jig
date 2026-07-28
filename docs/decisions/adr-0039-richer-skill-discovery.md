@@ -1,5 +1,5 @@
 ---
-status: Accepted
+status: Superseded
 dependencies: []
 last_verified: 2026-07-27
 frame_review: true
@@ -10,6 +10,7 @@ frame_review: true
 ## Status
 
 Accepted (2026-07-27)
+Superseded by [ADR-0040](./adr-0040-richer-skill-discovery-explicit-candidate-channel.md) (2026-07-28)
 
 ## Context
 
