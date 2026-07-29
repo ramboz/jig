@@ -570,11 +570,16 @@ def detect_richer_skill(skill_name: str) -> "str | None":
     (`~/.claude/skills/<skill_name>/SKILL.md`), or None when only jig's
     bundled baseline is available.
 
-    User-scope only, by design: a *project*-scope `.claude/skills/<name>/`
-    may be jig's OWN baseline, copied in by `scaffold-init` — indistinguishable
-    by path from a genuinely richer project skill — so detecting it would
-    false-positive on every scaffolded repo. User installs are unambiguous.
-    Project-scope detection is deferred (see docs/refinement-todo.md).
+    User-scope only, by design HERE — this is the retained *legacy* lookup, the
+    last fallback after 096-01 config resolution. It stays user-scope so it never
+    false-positives on a scaffolded project. (The old rationale that a
+    project-scope copy is "indistinguishable by path" from a richer skill was
+    FALSE and is corrected per ADR-0040 D2 / ADR-0010: `scaffold-init` writes its
+    baselines `jig-`-prefixed, so they ARE distinguishable by path —
+    `skill_discovery.is_jig_baseline_path` is the discriminator, and
+    `skill_discovery.resolve_skill_path` does exclusion-aware multi-scope
+    resolution. The full explicit-candidate chain that removes THIS function
+    lands in spec 096-03.)
 
     Conservative on every error (returns None): never block the craft/arch
     pass because a `Path`/`home()`/`stat` call raised. `Path.home()` honors

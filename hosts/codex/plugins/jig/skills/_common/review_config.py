@@ -28,15 +28,18 @@ What this module owns (slice 096-01):
     (ADR-0040 D1, fixing an over-strict ADR-0039-era AC; preserves `review.py`'s
     documented "never block the craft/arch pass" posture).
 
-**Scope seam (096-01 vs 096-02).** A bare name resolves against USER scope only
-here (`~/.claude/skills/<name>/SKILL.md`) — the scope the reported bug came from,
-which spec 053 confirmed the reviewer can read. The general multi-scope
-precedence resolver + the reviewer-read-at-admin/plugin-scope probe are 096-02's
-job. An explicit path (absolute, or containing a path separator) is used as-is.
+**Bare-name resolution (096-02).** A bare name resolves via
+`skill_discovery.resolve_skill_path_any_host` — across project → user → admin
+scope on BOTH hosts (Claude then Codex), with the jig-baseline discovery filter
+OFF (explicit config overrides discovery exclusion, AC7). This closes the
+user-scope-only Codex bare-name seam that 096-01 shipped. An explicit path
+(absolute, or containing a path separator) is used as-is — see `_resolve_value`.
 
-`_common` is a LEAF: stdlib only (mirrors `project_layout.py`). JSON via the
-`json` stdlib — no `tomllib` (the supported floor is Python 3.9). `$HOME`-honoring
-(`Path.home()`), so it is hermetically testable.
+This module is a near-leaf: stdlib plus the sibling `_common.skill_discovery`
+(the only intra-`_common` import — a one-directional config → discovery
+dependency, no cycle). JSON via the `json` stdlib — no `tomllib` (the supported
+floor is Python 3.9). `$HOME`-honoring (`Path.home()`), so it is hermetically
+testable.
 """
 
 from __future__ import annotations
@@ -44,6 +47,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
+from _common import skill_discovery
 
 _SCAFFOLD_SENTINEL = "scaffold.json"
 
@@ -100,27 +105,35 @@ def _raw_review_block(project_dir: Path) -> "dict | None":
     return review
 
 
-def _resolve_value(value: str) -> "str | None":
+def _resolve_value(value: str, project_dir: Path) -> "str | None":
     """Resolve a well-formed `<category>_skill` string to an existing SKILL.md
     path, or `None` when it does not resolve on this machine.
 
     An explicit path (absolute, or containing a path separator) is used as-is —
     pointing either at a `SKILL.md` file directly or at a skill directory (a
-    trailing `/SKILL.md` is appended for a directory). A bare name resolves
-    against USER scope only (`~/.claude/skills/<name>/SKILL.md`) — 096-02
-    generalizes to multi-scope. Conservative on every OS error (returns `None`)."""
+    trailing `/SKILL.md` is appended for a directory). A *relative* explicit path
+    is anchored to `project_dir` (NOT the process CWD) — `scaffold.json` is a
+    committed, team-shared, project-relative manifest, so a relative path in it
+    means "relative to the project." A bare name resolves via
+    `skill_discovery.resolve_skill_path_any_host` — across project → user →
+    admin scope on BOTH hosts (spec 096-02, closing the 096-01 Codex bare-name
+    seam). Exclusion is OFF: explicit config overrides the jig-baseline
+    discovery filter (AC7). Conservative on every OS error (returns `None`)."""
     try:
         if os.path.isabs(value) or (os.sep in value) or (
             os.altsep and os.altsep in value
         ):
             p = Path(value)
+            if not p.is_absolute():
+                # Relative explicit path → anchor to the project, not CWD.
+                p = Path(project_dir) / p
             if p.is_file():
                 return str(p)
             candidate = p / "SKILL.md"
             return str(candidate) if candidate.is_file() else None
-        # Bare name -> user scope (096-02 generalizes to project/admin scope).
-        candidate = Path.home() / ".claude" / "skills" / value / "SKILL.md"
-        return str(candidate) if candidate.is_file() else None
+        return skill_discovery.resolve_skill_path_any_host(
+            value, project_dir=project_dir, exclude_jig_baselines=False,
+        )
     except (OSError, ValueError, RuntimeError):
         return None
 
@@ -174,4 +187,4 @@ def configured_skill(project_dir: Path, category: str) -> "str | None":
     raw = configured_value(project_dir, category)
     if raw is None:
         return None
-    return _resolve_value(raw)
+    return _resolve_value(raw, Path(project_dir))

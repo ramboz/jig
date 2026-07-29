@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [096-01]
-last_verified:
+last_verified: 2026-07-28
 frame_review: true
 kind: feature
 arch_review: true
@@ -105,20 +105,132 @@ consumed by three passes across two host packages, and touches the
   excluded by AC3 with no migration.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
-      Edge cases listed above are covered explicitly.
-- [ ] Hermetic tests — all scope roots are injectable; no test reads the
+- [x] All ACs pass; full test suite green (no regressions). 3632 tests OK; ruff
+      clean; host-package drift in sync.
+- [x] Implementer test coverage exercises each AC with at least one fixture.
+      Edge cases listed above are covered explicitly (56 `_common` tests).
+- [x] Hermetic tests — all scope roots are injectable; no test reads the
       developer's real `~/.claude` or `~/.agents`.
-- [ ] Host packages regenerated + `--check` drift gate green **iff** the AC4
-      marker is adopted; a no-op otherwise (recorded).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed. Arch pass passed (`arch_review: true`).
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated — the project-scope detection entry is
+- [x] Host packages regenerated + `--check` drift gate green (no marker adopted;
+      review.py + skill_discovery + review_config changes propagated).
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed. Arch pass passed (`arch_review: true`).
+      (A blocker — `is_jig_baseline_path` matching `jig` anywhere — was caught by
+      compliance+craft+arch, fixed, and re-passed.)
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated — the project-scope detection entry is
       resolved by AC5; ADR-0040 OQ4 recorded as resolved by AC4.
+
+### Deviation log (after reconciliation)
+
+Original ACs preserved. Implementation notes + decisions:
+
+- **OQ4 resolved: NO marker adopted.** The plugin is named `jig` on both hosts
+  (`hosts/codex/plugins/jig/`, Claude `plugin.json` `"name": "jig"`), so jig's
+  admin/plugin-scope baselines are identifiable by a `jig` path segment — a pure
+  path test, same class as the project-scope `jig-` prefix. `is_jig_baseline_path`
+  handles both. So **no `jig_baseline: true` frontmatter marker ships**, there is
+  **no host-package regeneration for a marker**, and ADR-0039 OQ4 (no migration)
+  is *mooted* — with no marker there is nothing to migrate. This is the cheaper
+  resolution the frame-critique pointed at.
+- **AC6 VERIFIED by live probe (not deferred).** A real `jig:reviewer` subagent
+  Read a SKILL.md at project scope AND at an absolute admin/plugin path outside
+  the project — both succeeded, returning the fixture `description`. So the
+  multi-scope resolver's paths are reviewer-readable; no scope is withheld. The
+  spec `## Assumptions` entry is updated VERIFIED (extends spec 053's user-scope
+  confirmation to project + admin/plugin). **Note:** this is an *attestation*
+  (a recorded live-probe result), not a hermetic test result reproducible from
+  the tree — AC6 explicitly calls for a live probe precisely because a Python
+  test cannot exercise a subagent's sandbox reach.
+- **New module `_common/skill_discovery.py`** (the arch-relevant boundary): the
+  home for scope roots (per host), `resolve_skill_path` (exclusion-aware,
+  multi-scope), `resolve_skill_path_any_host` (config bare-name convenience),
+  `is_jig_baseline_path`, and a tolerant `parse_skill_frontmatter`
+  (plain/folded/literal scalars). Distinct from `review_config` (scaffold.json
+  config); 096-03's enumeration/candidate channel composes it.
+- **Config bare-name resolution upgraded to multi-scope/host** (closes the
+  096-01 Codex bare-name seam the 096-01 frame-critique flagged): `review_config`
+  now delegates bare-name resolution to `skill_discovery.resolve_skill_path_any_host`
+  (project → user → admin, Claude then Codex), with exclusion OFF (AC7 — config
+  overrides the discovery filter). Explicit paths still used as-is. The 096-01
+  user-scope tests still pass (user scope is still searched).
+- **AC8 docstring correction:** `detect_richer_skill`'s "indistinguishable by
+  path" claim is corrected inline (ADR-0010 live-prose policy) — the premise is
+  false; the `jig-` prefix discriminator + `skill_discovery` are the correction.
+  (The code-health builder's stale docstring was already corrected in 096-01;
+  `build_frame_critique_prompt`'s "no established richer frame-critique reviewer"
+  is correct never-defer prose, untouched.)
+- **`detect_richer_skill` retained, not removed** (AC): it stays as the legacy
+  last-fallback until 096-03 removes it via the full explicit-candidate chain.
+- **Review-driven blocker fix (compliance + craft + arch all flagged it):**
+  `is_jig_baseline_path`'s admin/plugin test originally matched a `jig` segment
+  *anywhere* in the ancestor path — a **fail-closed false positive** that would
+  wrongly exclude a genuine richer skill at project scope inside any `jig`-named
+  path (jig's own repo while dogfooding, or a checkout under `.../misc/jig/...`,
+  or this very worktree). Fixed to **anchor the `jig` match to a `plugins/`
+  ancestor** (`.../plugins/**/jig/**/skills/...`). Added tests:
+  false-positive prevention (genuine skill under a `jig`-named project root
+  resolves in discovery mode), `jig`-before-`plugins` not matched, the symlinked
+  skill-dir edge case, and `_default_claude_admin_roots`' plugin glob. Also
+  corrected `review_config`'s "stdlib only" module docstring (it now imports the
+  sibling `skill_discovery`), documented the Claude-then-Codex cross-host
+  precedence tiebreak, and refreshed the `docs/architecture.md` `_common` list.
+  A second re-review round fixed a stale `review_config` module-docstring
+  paragraph (still described bare-name resolution as user-scope-only,
+  contradicting the now-multi-scope code), dropped `review_config` from
+  `skill_discovery`'s "stdlib-only mirror" set, and anchored a *relative*
+  explicit config path to `project_dir` (not CWD — scaffold.json is a committed
+  project-relative manifest).
+
+**Known gaps carried to 096-03** (the slice that actually wires discovery
+exclusion — here exclusion runs only in unit tests; config uses
+`exclude_jig_baselines=False`):
+
+- **Codex admin-scope exclusion is unproven.** `is_jig_baseline_path` catches a
+  Claude admin baseline via its `plugins/**/jig/**` path, but a jig baseline
+  installed directly under Codex's `/etc/codex/skills/<skill>/` has neither a
+  `jig-` prefix nor a `plugins/jig` ancestor, so it would slip the path test.
+  AC5's "every scope, both hosts" is proven for project scope (both hosts) +
+  Claude admin scope; Codex admin-scope exclusion is a 096-03 obligation.
+- **OQ4 path test fails OPEN and couples to a host-internal layout.** The admin
+  arm keys on the host's plugin-cache dir shape (`plugins/.../jig/...`), which
+  jig does not own. If a host changes its plugin-dir scheme, a jig baseline
+  could be offered back as "richer" — the fail direction is *open* (a marker
+  would fail closed). Accepted here because config precedence (096-01) is the
+  guaranteed floor and no exclusion-on consumer ships in this slice; 096-03
+  inherits this as a known risk.
+- **`parse_skill_frontmatter` minor fidelity:** drops embedded blank lines in
+  literal (`|`) scalars and requires a trailing newline after the closing
+  `---`. Fine for name/description extraction; flag if 096-03 needs faithful
+  multi-paragraph descriptions.
+
+### Reconciliation sweep
+
+- **Deviation log** — updated (above).
+- **`docs/refinement-todo.md`** — the "project-scope richer-skill detection"
+  entry marked RESOLVED, linking this slice; OQ4 mitigation (marker idea)
+  recorded superseded. `updated`.
+- **`docs/specs/.../spec.md` `## Assumptions`** — reviewer-read item flipped
+  ASSUMED → VERIFIED. `updated`.
+- **`detect_richer_skill` docstring** (`review.py`) — corrected inline (AC8).
+  `updated`.
+- **Host packages** (`hosts/claude`, `hosts/codex`) — regenerated (review.py +
+  new `skill_discovery.py` + `review_config.py` propagated;
+  `test_skill_discovery.py` correctly excluded); drift `--check` green. `updated`.
+- **`docs/architecture.md`** — `updated` (mechanical: the `_common` list refreshed
+  to add `project_layout.py`, `review_config.py`, `skill_discovery.py`). No
+  module-boundary or public-contract change beyond what ADR-0040 D2 already
+  governs — `skill_discovery` is a new leaf `_common` module mirroring the
+  documented shared-helper convention — so no new ADR (ADR-0040 governs; this
+  implements D2).
+- **`docs/conventions.md`** — no-op.
+- **`docs/inbox.md`** — swept; nothing resolved.
+- **Lightweight decisions** — none.
+- **Memory** — the "path-prefix beats frontmatter marker for baseline exclusion"
+  + "reviewer can read admin-scope absolute paths" lessons; folded into
+  `/jig:memory-sync` at session close.
 
 ### Close-out (post-DONE)
 

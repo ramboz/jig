@@ -116,6 +116,53 @@ class ReviewConfigTest(unittest.TestCase):
         self.assertIsNone(rc.configured_skill(self.proj, "pr_review"))
 
     # -- edge cases -------------------------------------------------------
+    # -- 096-02: config bare-name resolution is now multi-scope/host --------
+    def test_bare_name_resolves_at_project_scope(self):
+        # 096-02 upgrade: a bare config name resolves at PROJECT scope too, not
+        # just user scope (096-01 was user-scope only).
+        d = self.proj / ".claude" / "skills" / "team-pr"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: team-pr\n---\n")
+        self._write_scaffold({"review": {"pr_review_skill": "team-pr"}})
+        self.assertEqual(
+            rc.configured_skill(self.proj, "pr_review"), str(d / "SKILL.md")
+        )
+
+    def test_bare_name_resolves_on_codex_scope(self):
+        # Closes the 096-01 Codex bare-name seam: a bare name installed under
+        # Codex's user scope resolves.
+        d = self.home / ".agents" / "skills" / "cdx-pr"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: cdx-pr\n---\n")
+        self._write_scaffold({"review": {"arch_review_skill": "cdx-pr"}})
+        self.assertEqual(
+            rc.configured_skill(self.proj, "arch_review"), str(d / "SKILL.md")
+        )
+
+    def test_relative_explicit_path_anchored_to_project(self):
+        # A relative explicit path in the committed scaffold.json anchors to the
+        # project dir, not the process CWD.
+        d = self.proj / "tools" / "my-review"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: my-review\n---\n")
+        self._write_scaffold(
+            {"review": {"pr_review_skill": "tools/my-review"}}
+        )
+        self.assertEqual(
+            rc.configured_skill(self.proj, "pr_review"), str(d / "SKILL.md")
+        )
+
+    def test_config_bare_name_does_not_exclude_jig_baseline(self):
+        # AC7: config resolution does NOT apply the discovery exclusion — a user
+        # who names a jig-prefixed project skill in config gets it.
+        d = self.proj / ".claude" / "skills" / "jig-pr-review"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: pr-review\n---\n")
+        self._write_scaffold({"review": {"pr_review_skill": "jig-pr-review"}})
+        self.assertEqual(
+            rc.configured_skill(self.proj, "pr_review"), str(d / "SKILL.md")
+        )
+
     def test_docs_root_dot_project_is_sentinel_anchored(self):
         # A docs_root="." project still keeps scaffold.json at the project root,
         # so config discovery is unaffected.

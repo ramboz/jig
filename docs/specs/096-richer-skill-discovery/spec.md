@@ -119,9 +119,12 @@ gates, and all process/orchestration skills.
   ships**, is jig-side: does an orchestrator reliably run the
   `candidates → pick → --richer-skill` sequence against jig's own prose? This is
   the most likely failure mode of the whole design (ADR-0040 Assumptions).
-- **ASSUMED (cheap to verify in 096-02):** the read-only reviewer can `Read` a
-  SKILL.md at project and admin scope. Spec 053's live probe confirmed only
-  `~/.claude` (user scope). 096-02 carries an explicit AC to probe it.
+- **VERIFIED (2026-07-28, 096-02 AC6 live probe):** the read-only reviewer
+  (`jig:reviewer`, Read/Glob/Grep) CAN `Read` a SKILL.md at project scope AND at
+  an absolute admin/plugin path outside the project — both reads succeeded and
+  returned the fixture's `description`. So the multi-scope resolver's paths are
+  usable by the reviewer; no scope needs to be withheld. (Spec 053 had confirmed
+  only `~/.claude` user scope; this extends it to project + admin/plugin.)
 
 ## Decomposition
 
