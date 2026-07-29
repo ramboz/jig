@@ -185,6 +185,111 @@ def resolve_skill_path(name: str, *, host: str, project_dir: Path,
     return None
 
 
+# -- candidate enumeration + tiering (spec 096-03, ADR-0040 D3) ------------
+
+# Category triggers: phrases whose presence in a skill's description indicates
+# it plausibly performs that review category. Recall-oriented — deliberately
+# broad; precision comes from the incidental-demotion pass below, and the final
+# PICK is the orchestrator's (a miss only demotes to `speculative`, still
+# visible + pickable — ADR-0040 D3).
+_CATEGORY_TRIGGERS = {
+    "pr_review": (
+        "pr review", "pull request review", "code review", "diff review",
+        "merge request review", "review this pr", "review the pr",
+        "review changes", "review the diff", "reviewing pull requests",
+    ),
+    "arch_review": (
+        "architecture review", "arch review", "design review", "rfc review",
+        "technical design", "system design", "design doc", "adr review",
+        "review this design", "architecture proposal",
+    ),
+    "code_health": (
+        "code health", "code quality", "static analysis", "linting",
+        "complexity", "duplication", "tech debt", "technical debt",
+        "maintainability", "code smell",
+    ),
+}
+
+# Incidental markers: a description that carries a category trigger but is
+# primarily a BRIEFING / DIGEST / NOTIFICATION tool (it *mentions* reviews
+# rather than *performing* them) is demoted to `speculative`. These are
+# domain-general signals, not corpus-specific names (the 096-02 spike's
+# `morning-github` false positive said it "stages draft PR reviews" — a
+# briefing that stages drafts, not a reviewer). Kept off the pick path so a
+# wrong demotion is never fatal.
+_INCIDENTAL_MARKERS = (
+    "briefing", "digest", "stage draft", "staging draft", "roundup",
+    "stand-up", "standup", "summariz", "notification", "daily note",
+    "morning ", "news radar", "inbox",
+)
+
+
+def _classify_for_category(description: str, category: str) -> bool:
+    """True iff `description` is HIGH-CONFIDENCE for `category`: it carries a
+    category trigger AND is not primarily an incidental briefing/digest mention.
+    Precision governs *tiering*, never the pick (ADR-0040 D3)."""
+    desc = (description or "").lower()
+    triggers = _CATEGORY_TRIGGERS.get(category, ())
+    if not any(t in desc for t in triggers):
+        return False
+    if any(m in desc for m in _INCIDENTAL_MARKERS):
+        return False
+    return True
+
+
+def enumerate_candidates(category: str, *, project_dir: Path,
+                         home: "Path | None" = None,
+                         admin_roots: "list[Path] | None" = None,
+                         hosts: "tuple | None" = None) -> "list[dict]":
+    """Enumerate all non-baseline skills across scopes on the given hosts and
+    return them TIERED for `category` (spec 096-03 AC1). Each entry is
+    `{"name", "description", "path", "tier"}` where `tier` is `high-confidence`
+    or `speculative`. Recall-oriented — it MAY over-offer into speculative; it
+    MUST NOT be the thing that picks.
+
+    Deterministic + order-stable: candidates are de-duplicated by name
+    (most-specific scope wins) and sorted (high-confidence first, then by name).
+    Baselines (`is_jig_baseline_path`) are excluded. Conservative on every
+    filesystem error (a bad scope is skipped, never raised)."""
+    if category not in _CATEGORY_TRIGGERS:
+        raise ValueError(f"unknown category {category!r}; expected one of "
+                         f"{', '.join(_CATEGORY_TRIGGERS)}")
+    hosts = hosts or (CLAUDE, CODEX)
+    seen: dict = {}  # name -> entry (first, most-specific, wins)
+    for host in hosts:
+        for root in scope_roots(host, project_dir, home, admin_roots):
+            try:
+                if not Path(root).is_dir():
+                    continue
+                entries = sorted(Path(root).iterdir(), key=lambda p: p.name)
+            except OSError:
+                continue
+            for skill_dir in entries:
+                try:
+                    md = skill_dir / "SKILL.md"
+                    if not md.is_file() or is_jig_baseline_path(md):
+                        continue
+                    fm = parse_skill_frontmatter(md.read_text(encoding="utf-8"))
+                except (OSError, ValueError, UnicodeDecodeError):
+                    continue
+                if not fm:
+                    continue
+                name = fm.get("name") or skill_dir.name
+                if name in seen:
+                    continue  # most-specific scope already claimed this name
+                desc = fm.get("description", "")
+                tier = ("high-confidence"
+                        if _classify_for_category(desc, category)
+                        else "speculative")
+                seen[name] = {"name": name, "description": desc,
+                              "path": str(md), "tier": tier}
+    ordered = sorted(
+        seen.values(),
+        key=lambda e: (0 if e["tier"] == "high-confidence" else 1, e["name"]),
+    )
+    return ordered
+
+
 # -- tolerant name/description frontmatter reader (AC2) --------------------
 
 _FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)

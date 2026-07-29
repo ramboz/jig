@@ -263,6 +263,89 @@ class ParseSkillFrontmatterTest(unittest.TestCase):
         self.assertEqual(got.get("name"), "ok")
 
 
+class EnumerateCandidatesTest(unittest.TestCase):
+    """Spec 096-03 AC1: tiered candidate enumeration (recall, not precision)."""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.home = self.root / "home"
+        self.proj = self.root / "proj"
+        self.user = self.home / ".claude" / "skills"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _mk(self, name, desc, *, root=None):
+        root = root or self.user
+        d = root / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {desc}\n---\n")
+
+    def _enum(self, category):
+        return sd.enumerate_candidates(
+            category, project_dir=self.proj, home=self.home, admin_roots=[])
+
+    def test_originating_bug_richer_under_nonmatching_name_enumerated(self):
+        # DoD regression: a richer skill installed at user scope under a
+        # non-matching name is enumerated + appears in a printed tier.
+        self._mk("review-pr-deep",
+                 "Deep, blocking-focused PR review with security checks")
+        cands = {c["name"]: c["tier"] for c in self._enum("pr_review")}
+        self.assertIn("review-pr-deep", cands)
+        self.assertEqual(cands["review-pr-deep"], "high-confidence")
+
+    def test_spike_false_positive_lands_in_speculative(self):
+        # DoD regression: a briefing that mentions "stage draft PR reviews"
+        # lands in SPECULATIVE, not high-confidence, and is never auto-selected.
+        self._mk("morning-github",
+                 "GitHub briefing sub-agent — gather notifications, stage "
+                 "draft PR reviews via the pending review API")
+        cands = {c["name"]: c["tier"] for c in self._enum("pr_review")}
+        self.assertEqual(cands.get("morning-github"), "speculative")
+
+    def test_baselines_excluded(self):
+        # a jig baseline at project scope is never a candidate
+        self._mk("jig-pr-review", "Team baseline PR review",
+                 root=self.proj / ".claude" / "skills")
+        names = {c["name"] for c in self._enum("pr_review")}
+        self.assertNotIn("pr-review", names)
+        self.assertNotIn("jig-pr-review", names)
+
+    def test_over_offers_into_speculative_recall(self):
+        # recall-oriented: an unrelated skill is still enumerated (speculative)
+        self._mk("weather", "Tells you the weather")
+        cands = {c["name"]: c["tier"] for c in self._enum("pr_review")}
+        self.assertEqual(cands.get("weather"), "speculative")
+
+    def test_deterministic_order_high_confidence_first(self):
+        self._mk("zzz-arch", "architecture review of RFCs and design docs")
+        self._mk("aaa-other", "unrelated tool")
+        order = [c["name"] for c in self._enum("arch_review")]
+        # high-confidence (zzz-arch) sorts before speculative (aaa-other)
+        self.assertEqual(order[0], "zzz-arch")
+
+    def test_dedup_most_specific_scope_wins(self):
+        self._mk("dup", "PR review at user scope")
+        self._mk("dup", "PR review at project scope",
+                 root=self.proj / ".claude" / "skills")
+        cands = [c for c in self._enum("pr_review") if c["name"] == "dup"]
+        self.assertEqual(len(cands), 1)
+        self.assertIn("project scope", cands[0]["description"])
+
+    def test_unknown_category_raises(self):
+        with self.assertRaises(ValueError):
+            sd.enumerate_candidates("security_review", project_dir=self.proj,
+                                    home=self.home, admin_roots=[])
+
+    def test_high_confidence_carries_description_speculative_via_format(self):
+        self._mk("team-arch", "architecture review of designs")
+        hi = [c for c in self._enum("arch_review")
+              if c["tier"] == "high-confidence"][0]
+        self.assertTrue(hi["description"])
+
+
 class ScaffoldExclusionInvariantTest(unittest.TestCase):
     """AC3's load-bearing invariant, tested against the REAL scaffold writer:
     every project-scope skill dir a jig scaffold writes that carries a

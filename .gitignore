@@ -32,3 +32,9 @@ __pycache__/
 # Release artifacts (built locally by scripts/build_release_zip.py).
 dist/
 *.zip
+
+# Candidate-channel sidecars (spec 096-03): transient per-review state written
+# by `review.py candidates`, consumed by `record-review`. Keyed to (slice,pass)
+# under docs/specs/*/reviews/.candidates/. Never committed — an un-consumed one
+# would carry a machine-specific applied_path into the portable evidence tree.
+docs/specs/*/reviews/.candidates/

@@ -30,12 +30,14 @@ output (summary / strengths / concerns / open questions).
 
 Skill dispatch for both craft passes is FILE-READ based, not router-based:
 the craft/arch pass runs in a read-only `reviewer` subagent with no `Skill`
-tool, so it cannot use Claude's skill router. `detect_richer_skill()` checks
-for a user-installed skill on disk (`~/.claude/skills/<name>/SKILL.md`); when
-present the prompt hands the reviewer that concrete path to read-and-apply,
-else it inlines jig's baseline buckets. (A live probe showed the original
-prose-router dispatch was inert on the no-`Skill`-tool subagent path; this
-promotes spec 031 Open-question-#1 option (b) from deferred fallback.)
+tool, so it cannot use Claude's skill router. Resolution is the 096-03 chain
+(`_resolve_richer_for_pass`): config (`review.<category>_skill`, 096-01) WINS →
+the validated `--richer-skill` pick over the printed candidate tiers (096-03) →
+baseline. When a richer skill resolves the prompt hands the reviewer that
+concrete path to read-and-apply, else it inlines jig's baseline buckets. (A live
+probe showed the original prose-router dispatch was inert on the no-`Skill`-tool
+subagent path; this promotes spec 031 Open-question-#1 option (b) from deferred
+fallback.)
 
 Usage:
     python3 review.py implementation <spec.md> <slice-fragment> <deliverable-path>...
@@ -61,9 +63,11 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import candidate_sidecar as _candidate_sidecar
 from _common import project_layout
 from _common import review_config as _review_config
 from _common import review_evidence as _evidence
+from _common import skill_discovery as _skill_discovery
 from _common.atomic_io import atomic_write_text
 from _common.parsing import SliceLookupError
 from _common.parsing import load_slice as _load_slice_common
@@ -557,67 +561,75 @@ For each acceptance criterion in slice {slice_label}, verify:
 # Open-question-#1 option (b) ("filesystem-detect installed skills") from
 # "fallback if (a) misroutes" now that (a) is shown to misroute here.
 #
-# Spec 096-01 (ADR-0040 D1) adds a config-first layer ON TOP of this on-disk
-# detection: `_resolve_richer_skill` prefers an explicit `review.<category>_skill`
-# in the project's scaffold.json (the only path ADR-0040 can *guarantee*), then
-# falls back to `detect_richer_skill`'s legacy user-scope exact-name lookup. The
-# three extensible builders (pr / arch / code-health) route through it; the full
-# explicit-candidate chain that removes `detect_richer_skill` arrives in 096-03.
+# Spec 096-03 (ADR-0040 D3) replaces the legacy user-scope exact-name lookup
+# (`detect_richer_skill`, removed) with the full explicit-candidate chain:
+#   1. config wins  — an explicit `review.<category>_skill` in scaffold.json
+#      (096-01, the only path ADR-0040 can *guarantee*);
+#   2. the orchestrator's `--richer-skill` PICK, validated against the printed
+#      candidate tiers in the sidecar (096-03) — a pick must be a candidate that
+#      was actually shown, and must resolve (096-02) to a non-baseline SKILL.md;
+#   3. baseline otherwise.
+# `_resolve_richer_for_pass` is the single resolver the three builders route
+# through. An off-list / unresolvable / `none` pick falls back to baseline WITHOUT
+# erroring the pass (a bad pick must not block review, ADR-0040 D3 / AC4).
 
 
-def detect_richer_skill(skill_name: str) -> "str | None":
-    """Return the path to a USER-scope installed `<skill_name>` SKILL.md
-    (`~/.claude/skills/<skill_name>/SKILL.md`), or None when only jig's
-    bundled baseline is available.
+def _validate_pick_against_sidecar(spec_path: Path, slice_label: str,
+                                   pass_name: str, pick: str,
+                                   project_root: "Path | None") -> "str | None":
+    """Resolve + validate the orchestrator's `--richer-skill <name>` PICK
+    (spec 096-03 AC4). Returns the SKILL.md path iff the pick is a candidate that
+    was actually SHOWN (present in the sidecar's printed tiers) AND its recorded
+    path still exists and is non-baseline. Otherwise `None` (→ baseline): an
+    off-list name (not in either printed tier), a vanished path, or a
+    baseline-marked path all fall back without erroring the pass.
 
-    User-scope only, by design HERE — this is the retained *legacy* lookup, the
-    last fallback after 096-01 config resolution. It stays user-scope so it never
-    false-positives on a scaffolded project. (The old rationale that a
-    project-scope copy is "indistinguishable by path" from a richer skill was
-    FALSE and is corrected per ADR-0040 D2 / ADR-0010: `scaffold-init` writes its
-    baselines `jig-`-prefixed, so they ARE distinguishable by path —
-    `skill_discovery.is_jig_baseline_path` is the discriminator, and
-    `skill_discovery.resolve_skill_path` does exclusion-aware multi-scope
-    resolution. The full explicit-candidate chain that removes THIS function
-    lands in spec 096-03.)
-
-    Conservative on every error (returns None): never block the craft/arch
-    pass because a `Path`/`home()`/`stat` call raised. `Path.home()` honors
-    `$HOME`, which keeps this hermetically testable.
-    """
+    The resolved path is taken from the SHOWN candidate's stored `path` — NOT
+    re-resolved by name — so a skill whose frontmatter `name` diverges from its
+    directory name (the name is what enumeration recorded + the orchestrator
+    picked) does not silently miss and fall to baseline. Conservative on every
+    error. (`project_root` is unused now that the path comes from the sidecar;
+    kept for signature stability with the resolver.)"""
+    del project_root  # path comes from the sidecar, not a name re-resolution
     try:
-        candidate = Path.home() / ".claude" / "skills" / skill_name / "SKILL.md"
-        if candidate.is_file():
-            return str(candidate)
-    except (OSError, ValueError, RuntimeError):
-        pass
-    return None
+        sidecar = _candidate_sidecar.read_sidecar(
+            spec_path, slice_label, pass_name)
+        candidates = (sidecar or {}).get("candidates", [])
+        match = next((c for c in candidates if c.get("name") == pick), None)
+        if match is None:
+            return None  # off-list — the declared substrate must not be fiction
+        path = match.get("path")
+        if not path:
+            return None
+        p = Path(path)
+        if not p.is_file() or _skill_discovery.is_jig_baseline_path(p):
+            return None
+        return str(p)
+    except (OSError, ValueError):
+        return None
 
 
-def _resolve_richer_skill(spec_path: Path, category: str,
-                          skill_name: str) -> "str | None":
-    """Config-first richer-skill resolution for a builder (spec 096-01 / ADR-0040
-    D1). Precedence: an explicit `review.<category>_skill` in the project's
-    scaffold.json WINS (`review_config.configured_skill`); absent config, fall
-    back to the legacy user-scope exact-name lookup (`detect_richer_skill`).
-
-    `category` is one of `review_config.CATEGORIES`; `skill_name` is the folder
-    name the legacy lookup uses (`pr-review` / `arch-review` / `code-health`).
+def _resolve_richer_for_pass(spec_path: Path, slice_label: str, category: str,
+                             pass_name: str, richer_skill: "str | None",
+                             non_interactive: bool) -> "str | None":
+    """The single richer-skill resolver for a pass builder (spec 096-03 /
+    ADR-0040 D3). Precedence: config (096-01) WINS → the validated `--richer-skill`
+    pick (096-03) → baseline (`None`).
 
     A STRUCTURAL config mistake (`ReviewConfigError`) propagates — a mistyped
-    config the user deliberately wrote must surface, not silently fall back to
-    the baseline and reproduce the original bug (ADR-0040 D1 / AC2). A config
-    value that is well-formed but does not resolve on this machine returns `None`
-    from `configured_skill`, and we fall through to the legacy lookup.
-
-    096-03 removes `detect_richer_skill` and this fallback in favor of the full
-    explicit-candidate chain; here the legacy lookup is retained (AC4)."""
+    config the user deliberately wrote must surface, not silently reproduce the
+    original bug (AC2). Everything else (no config, `none`, off-list, unresolvable)
+    degrades to baseline without erroring the pass."""
     project_root = _find_project_root(spec_path)
     if project_root is not None:
         configured = _review_config.configured_skill(project_root, category)
         if configured is not None:
             return configured
-    return detect_richer_skill(skill_name)
+    if richer_skill and richer_skill.strip().lower() not in ("", "none"):
+        return _validate_pick_against_sidecar(
+            spec_path, slice_label, pass_name, richer_skill.strip(),
+            project_root)
+    return None
 
 
 def _config_substrate_lines(spec_path: Path, pass_name: str) -> str:
@@ -645,7 +657,7 @@ def _config_substrate_lines(spec_path: Path, pass_name: str) -> str:
     Conservative: a malformed config (`ReviewConfigError`) or an unresolvable
     project root yields `""` — deriving the substrate must never be the thing
     that fails a recording (the malformed config already surfaced at
-    prompt-build time via `_resolve_richer_skill`)."""
+    prompt-build time via `_resolve_richer_for_pass`)."""
     category = _review_config.PASS_TO_CATEGORY.get(pass_name)
     if category is None:
         return ""
@@ -697,7 +709,9 @@ Be terse but specific. Cite file:line when flagging issues."""
 
 
 def build_pr_review_prompt(spec_path: Path, slice_label: str,
-                           deliverables: list) -> str:
+                           deliverables: list, *,
+                           richer_skill: "str | None" = None,
+                           non_interactive: bool = False) -> str:
     """Construct the standard pr-review (craft pass) prompt.
 
     Slice 031-01: the orchestrator runs this pass AFTER the compliance
@@ -710,14 +724,14 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
 
     Dispatch is file-read based, not router-based. The craft pass runs in
     a read-only `reviewer` subagent with no `Skill` tool, so it cannot use
-    Claude's skill router. Resolution is config-first (spec 096-01 / ADR-0040
-    D1): `_resolve_richer_skill(spec_path, "pr_review", "pr-review")` prefers an
-    explicit `review.pr_review_skill` in the project's scaffold.json, then falls
-    back to the legacy user-scope `detect_richer_skill("pr-review")` lookup. When
-    a richer skill resolves, the prompt hands the reviewer that concrete path to
-    read-and-apply (it supersedes the inlined baseline buckets). When none
-    resolves, the prompt inlines jig's baseline buckets. Either way, findings are
-    normalized into the shared verdict envelope below.
+    Claude's skill router. Resolution is the 096-03 chain via
+    `_resolve_richer_for_pass`: config (`review.pr_review_skill`, 096-01) WINS →
+    the validated `--richer-skill` pick (096-03, must be a shown candidate that
+    resolves non-baseline) → baseline. When a richer skill resolves, the prompt
+    hands the reviewer that concrete path to read-and-apply (it supersedes the
+    inlined baseline buckets). When none resolves, the prompt inlines jig's
+    baseline buckets. Either way, findings are normalized into the shared verdict
+    envelope below.
 
     NOTE: unlike `build_implementation_prompt` and
     `build_reconciliation_prompt`, this builder does NOT append
@@ -728,7 +742,9 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
     framing the `jig:pr-review` skill description establishes.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
-    richer = _resolve_richer_skill(spec_path, "pr_review", "pr-review")
+    richer = _resolve_richer_for_pass(
+        spec_path, slice_label, "pr_review", "craft",
+        richer_skill, non_interactive)
     if richer:
         routing_para = (
             f"A richer `pr-review` skill is installed at `{richer}`.\n"
@@ -838,7 +854,9 @@ Evaluate whether the fix resolves the recorded bug honestly and narrowly.
 
 
 def build_arch_review_prompt(spec_path: Path, slice_label: str,
-                             deliverables: list) -> str:
+                             deliverables: list, *,
+                             richer_skill: "str | None" = None,
+                             non_interactive: bool = False) -> str:
     """Construct the standard arch-review (architecture pass) prompt.
 
     Slice 031-02: the orchestrator runs this pass AFTER the compliance
@@ -853,13 +871,11 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     passes so the workflow can consume one verdict shape across all
     three passes.
 
-    Same config-first file-read dispatch as `build_pr_review_prompt`: the
-    read-only `reviewer` subagent has no `Skill` tool, so
-    `_resolve_richer_skill(spec_path, "arch_review", "arch-review")` prefers an
-    explicit `review.arch_review_skill` in scaffold.json, then falls back to the
-    legacy user-scope `detect_richer_skill("arch-review")` lookup, and hands the
-    reviewer the resolved concrete path to read-and-apply when one is found;
-    otherwise the prompt inlines jig's baseline arch buckets.
+    Same 096-03 resolution chain as `build_pr_review_prompt` via
+    `_resolve_richer_for_pass`: config (`review.arch_review_skill`) WINS → the
+    validated `--richer-skill` pick → baseline; hands the reviewer the resolved
+    concrete path to read-and-apply when one is found, else inlines jig's
+    baseline arch buckets.
 
     NOTE: like `build_pr_review_prompt`, this builder does NOT append
     `_principles_check_block()`. Constitution-adherence is checked in
@@ -867,7 +883,9 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     architectural concerns only.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
-    richer = _resolve_richer_skill(spec_path, "arch_review", "arch-review")
+    richer = _resolve_richer_for_pass(
+        spec_path, slice_label, "arch_review", "arch",
+        richer_skill, non_interactive)
     if richer:
         routing_para = (
             f"A richer `arch-review` skill is installed at `{richer}`.\n"
@@ -943,7 +961,9 @@ boundaries, public contracts, and design coherence?
 
 
 def build_code_health_review_prompt(spec_path: Path, slice_label: str,
-                                    deliverables: list, summary: str) -> str:
+                                    deliverables: list, summary: str, *,
+                                    richer_skill: "str | None" = None,
+                                    non_interactive: bool = False) -> str:
     """Construct the standard code-health-review prompt (slice 060-05).
 
     The on-demand code-health pass runs AFTER the compliance + craft (+
@@ -971,19 +991,19 @@ def build_code_health_review_prompt(spec_path: Path, slice_label: str,
     builder does NOT append `_principles_check_block()`. The code-health
     pass is scoped to the health-summary judgment only.
 
-    Config-first richer-skill dispatch (spec 096-01 / ADR-0040 D1): an explicit
-    `review.code_health_skill` in the project's scaffold.json is honored via
-    `_resolve_richer_skill`, the same way `pr-review` / `arch-review` honor their
-    keys. (Before 096-01 this builder had no richer dispatch — there was no
-    config channel to honor; the ADR-0040 D1 decision makes `code_health` one of
-    the three extensible categories.) The ZERO-CONFIG enumeration path for
-    code-health arrives in 096-03; here only explicit config resolves.
+    Richer-skill dispatch via the 096-03 chain (`_resolve_richer_for_pass`):
+    config (`review.code_health_skill`, 096-01 / ADR-0040 D1) WINS → the validated
+    `--richer-skill` pick (096-03) → baseline. (Before 096-01 this builder had no
+    richer dispatch — the ADR-0040 D1 decision makes `code_health` one of the
+    three extensible categories.)
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     summary_block = summary.rstrip() if summary and summary.strip() else \
         "_(no health.py summary was provided — judge on the deliverables " \
         "alone, and note the missing summary in your reasoning.)_"
-    richer = _resolve_richer_skill(spec_path, "code_health", "code-health")
+    richer = _resolve_richer_for_pass(
+        spec_path, slice_label, "code_health", "code-health",
+        richer_skill, non_interactive)
     if richer:
         richer_para = (
             f"\n**A richer `code-health` reviewer is configured at `{richer}`.**"
@@ -1649,6 +1669,157 @@ def check_reviews(args) -> int:
     return 0
 
 
+# -------- candidate channel (spec 096-03) --------
+
+# pass name -> category for the candidate-channel passes. Single source of
+# truth: `review_config.PASS_TO_CATEGORY` (no local duplicate to drift).
+_PASS_CATEGORY = _review_config.PASS_TO_CATEGORY
+
+
+def _add_richer_skill_args(subparser) -> None:
+    """Add the required `--richer-skill` + optional `--non-interactive` args to
+    a pass subparser (spec 096-03 AC3). Requiredness is load-bearing: a silent
+    default would decay the pick into inert prose (ADR-0040 §3 rule 2)."""
+    subparser.add_argument(
+        "--richer-skill", dest="richer_skill", required=True,
+        help="the orchestrator's selected richer skill NAME (from the printed "
+             "`candidates` tiers), or the literal `none`. Required.")
+    subparser.add_argument(
+        "--non-interactive", dest="non_interactive", action="store_true",
+        help="declare no orchestrator (CI / reproducible run) — suppresses the "
+             "missing-sidecar fail-fast; config remains the reproducible path.")
+
+
+def _format_candidates(category: str, candidates: list) -> str:
+    """Render the tiered candidate list (096-03 AC1): high-confidence with
+    name + description; speculative as names only (bounds context cost)."""
+    high = [c for c in candidates if c.get("tier") == "high-confidence"]
+    spec_tier = [c for c in candidates if c.get("tier") != "high-confidence"]
+    lines = [f"CANDIDATES for category '{category}':", "", "[high-confidence]"]
+    if high:
+        for c in high:
+            lines.append(f"- {c['name']} :: {c.get('description', '')}")
+    else:
+        lines.append("(none)")
+    lines.append("")
+    lines.append("[speculative]")
+    if spec_tier:
+        lines.extend(f"- {c['name']}" for c in spec_tier)
+    else:
+        lines.append("(none)")
+    lines.append("")
+    lines.append(
+        "Pick the single best HIGH-CONFIDENCE candidate for this category and "
+        "pass it as `--richer-skill <name>` (you MAY pick a speculative one if "
+        "it is clearly the best; pass `--richer-skill none` for the baseline). "
+        "The pick is a heuristic — an explicit `review.<category>_skill` in "
+        "scaffold.json overrides it.")
+    return "\n".join(lines) + "\n"
+
+
+def run_candidates(ns) -> int:
+    """`candidates` subcommand (096-03 AC1/AC2): enumerate non-baseline skills
+    for the category, print them tiered, AND write the shown set to the sidecar
+    (the sole writer of the candidate set)."""
+    spec = Path(ns.spec)
+    if not spec.is_file():
+        sys.stderr.write(f"spec not found: {spec}\n")
+        return 2
+    # Coherence: `category` and `--pass` must agree, else the sidecar would be
+    # keyed under one pass while holding another category's candidates (the
+    # pass would then validate its pick against the wrong shown set).
+    if _PASS_CATEGORY.get(ns.pass_name) != ns.category:
+        sys.stderr.write(
+            f"category '{ns.category}' does not match --pass '{ns.pass_name}' "
+            f"(expected category '{_PASS_CATEGORY.get(ns.pass_name)}')\n")
+        return 2
+    try:
+        slice_label = find_slice_label(spec, ns.slice)
+    except (ReviewError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+    project_root = _find_project_root(spec) or spec.parent
+    candidates = _skill_discovery.enumerate_candidates(
+        ns.category, project_dir=project_root)
+    _candidate_sidecar.write_shown(
+        spec, slice_label, ns.pass_name, ns.category, candidates)
+    sys.stdout.write(_format_candidates(ns.category, candidates))
+    return 0
+
+
+def _run_pass_with_selection(ns, command: str) -> int:
+    """Handle a candidate-channel pass (pr-review / arch-review / code-health):
+    the fail-fast (AC6), the prompt build, and recording the pick into the
+    sidecar (096-03). Precedence + validation live in `_resolve_richer_for_pass`;
+    this seam owns the CLI-level side effects."""
+    spec = Path(ns.spec)
+    try:
+        slice_label = find_slice_label(spec, ns.slice)
+    except (ReviewError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+    pass_name = {"pr-review": "craft", "arch-review": "arch",
+                 "code-health": "code-health"}[command]
+    category = _PASS_CATEGORY[pass_name]
+    project_root = _find_project_root(spec)
+
+    # Config wins and needs no sidecar. Otherwise the orchestrated path REQUIRES
+    # a sidecar (candidates ran) unless the caller declared --non-interactive
+    # (the documented CI / no-orchestrator escape) — AC6 fail-fast.
+    try:
+        configured = (_review_config.configured_skill(project_root, category)
+                      if project_root is not None else None)
+    except _review_config.ReviewConfigError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+    has_sidecar = _candidate_sidecar.has_shown(spec, slice_label, pass_name)
+    if (configured is None and not ns.non_interactive and not has_sidecar):
+        sys.stderr.write(
+            f"no candidate sidecar for ({slice_label}, {pass_name}) and no "
+            f"`review.{category}_skill` config — run `review.py candidates "
+            f"{category} <spec> <slice> --pass {pass_name}` first, or pass "
+            f"--non-interactive for a CI/no-orchestrator run.\n")
+        return 2
+
+    # Build the prompt (the builder resolves config → validated-pick → baseline).
+    try:
+        if command == "pr-review":
+            prompt = build_pr_review_prompt(
+                spec, slice_label, ns.deliverables,
+                richer_skill=ns.richer_skill,
+                non_interactive=ns.non_interactive)
+        elif command == "arch-review":
+            prompt = build_arch_review_prompt(
+                spec, slice_label, ns.deliverables,
+                richer_skill=ns.richer_skill,
+                non_interactive=ns.non_interactive)
+        else:  # code-health
+            summary = _read_summary(ns)
+            prompt = build_code_health_review_prompt(
+                spec, slice_label, ns.deliverables, summary,
+                richer_skill=ns.richer_skill,
+                non_interactive=ns.non_interactive)
+    except _review_config.ReviewConfigError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    # Record the orchestrator's pick into the sidecar (if one exists) so 096-05
+    # can derive `substrate:` from the shown-and-declined set. Config wins, so a
+    # config-selected run records `config` as the pick sentinel.
+    if has_sidecar:
+        applied = _resolve_richer_for_pass(
+            spec, slice_label, category, pass_name,
+            ns.richer_skill, ns.non_interactive)
+        pick = "config" if configured is not None else ns.richer_skill.strip()
+        try:
+            _candidate_sidecar.record_pick(
+                spec, slice_label, pass_name, pick, applied)
+        except _candidate_sidecar.SidecarError:
+            pass  # raced away — non-fatal for prompt emission
+    sys.stdout.write(prompt)
+    return 0
+
+
 # -------- CLI plumbing --------
 
 
@@ -1677,6 +1848,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("spec", help="path to spec.md")
     pp.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pp.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+    _add_richer_skill_args(pp)
 
     pb = sub.add_parser(
         "bug-review",
@@ -1693,6 +1865,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pa.add_argument("spec", help="path to spec.md")
     pa.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pa.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
+    _add_richer_skill_args(pa)
 
     # Slice 064-03: frame-critique pass — on-demand (gated by
     # `frame_review: true`), adversarial, runs PRE-implementation at
@@ -1730,6 +1903,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "--summary-file", dest="summary_file", default=None,
         help="path to the health.py summary text (default: read stdin)",
     )
+    _add_richer_skill_args(pch)
+
+    # Slice 096-03: candidate enumeration — prints the tiered candidate set for
+    # a category and writes it to the sidecar (the sole writer of the set).
+    pcand = sub.add_parser(
+        "candidates",
+        help="enumerate + print tiered richer-skill candidates for a category "
+             "and write them to the sidecar (096-03)",
+    )
+    pcand.add_argument(
+        "category", choices=("pr_review", "arch_review", "code_health"),
+        help="the extensible review category to enumerate candidates for")
+    pcand.add_argument("spec", help="path to spec.md")
+    pcand.add_argument(
+        "slice", help="slice name or fragment (case-insensitive substring)")
+    pcand.add_argument(
+        "--pass", dest="pass_name", required=True,
+        choices=("craft", "arch", "code-health"),
+        help="the review pass the candidates are for (keys the sidecar)")
 
     # Slice 071-01: design-review pass — on-demand (gated by
     # `design_review: true`), ATTEST-ONLY. Mirrors `arch-review`'s
@@ -1882,6 +2074,33 @@ def main(argv: list) -> int:
             sys.stderr.write(f"review.py failed: {exc}\n")
             return 1
 
+    # Slice 096-03: the candidate channel — enumeration + tiered print + sidecar.
+    if ns.command == "candidates":
+        try:
+            return run_candidates(ns)
+        except ReviewError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"review.py failed: {exc}\n")
+            return 1
+
+    # Slice 096-03: the three extensible passes route through the selection
+    # seam (fail-fast + pick recording) rather than the generic builder block.
+    if ns.command in ("pr-review", "arch-review", "code-health"):
+        spec = Path(ns.spec)
+        if not spec.is_file():
+            sys.stderr.write(f"spec not found: {spec}\n")
+            return 2
+        try:
+            return _run_pass_with_selection(ns, ns.command)
+        except ReviewError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"review.py failed: {exc}\n")
+            return 1
+
     if ns.command == "bug-review":
         bug = Path(ns.bug)
         if not bug.is_file():
@@ -1932,22 +2151,16 @@ def main(argv: list) -> int:
                 "path\n")
             return 2
 
+    # pr-review / arch-review / code-health are intercepted above (the 096-03
+    # selection seam); this block handles the remaining passes.
     try:
         slice_label = find_slice_label(spec, ns.slice)
         if ns.command == "implementation":
             prompt = build_implementation_prompt(spec, slice_label, ns.deliverables)
-        elif ns.command == "pr-review":
-            prompt = build_pr_review_prompt(spec, slice_label, ns.deliverables)
-        elif ns.command == "arch-review":
-            prompt = build_arch_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "design-review":
             prompt = build_design_review_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "frame-critique":
             prompt = build_frame_critique_prompt(spec, slice_label, ns.deliverables)
-        elif ns.command == "code-health":
-            summary = _read_summary(ns)
-            prompt = build_code_health_review_prompt(
-                spec, slice_label, ns.deliverables, summary)
         else:
             prompt = build_reconciliation_prompt(spec, slice_label)
         sys.stdout.write(prompt)
