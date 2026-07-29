@@ -487,11 +487,19 @@ not be what was actually shown).
   an enumerable skill surface at `$HOME/.agents/skills`, repo `.agents/skills`,
   and `/etc/codex/skills`, with `SKILL.md` frontmatter identical in shape to
   Claude's. Grounds D3's host-portability claim.
-- **ASSUMED, NOT VERIFIED:** that an orchestrator reliably executes the
-  `candidates` → pick → `--richer-skill` sequence when instructed in SKILL.md
-  prose. This is the residual prose-compliance risk D3 does **not** eliminate —
-  it moves the risk from *which set is selected from* to *whether the step is
-  run at all*. **This is the most likely failure mode of the whole design.**
+- **PARTIALLY VERIFIED (2026-07-28, spec 096-04 probe — status update, not a
+  decision change):** that an orchestrator reliably executes the `candidates` →
+  pick → `--richer-skill` sequence when instructed in SKILL.md prose. This is the
+  residual prose-compliance risk D3 does **not** eliminate — it moves the risk
+  from *which set is selected from* to *whether the step is run at all*, **the
+  most likely failure mode of the whole design.** Spec 096-04's behavioral probe
+  (`scripts/orchestrator_selection_probe.py`) settled it as a *reachability floor
+  test*: **Claude PASS** (the agent ran the stub `candidates` and emitted the
+  correct pick on a non-empty tiered list AND `none` on an empty-tier control),
+  **Codex INCONCLUSIVE** (host unauthenticated in the probe environment; re-run
+  after `codex login`). Reachability is confirmed on Claude; *durability under
+  mid-slice cost pressure* still rests on the `substrate:` aggregate (Kill
+  criterion 1), exactly as this ADR framed it.
 
   Stated precisely, because revision 1 overclaimed here: requiredness of
   `--richer-skill` does **not** mitigate it. Requiredness constrains the *pass*

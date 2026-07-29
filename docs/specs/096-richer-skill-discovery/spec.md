@@ -115,10 +115,16 @@ gates, and all process/orchestration skills.
 - **RETIRED (ADR-0040 D3):** ADR-0039's OQ6 (that the Codex orchestrator receives
   skill `name`/`description` in ambient context) is no longer load-bearing — the
   explicit printed list is shown on both hosts because the calibration
-  requirement demands it anyway. The residual, **probed by 096-04 before 096-03
-  ships**, is jig-side: does an orchestrator reliably run the
-  `candidates → pick → --richer-skill` sequence against jig's own prose? This is
-  the most likely failure mode of the whole design (ADR-0040 Assumptions).
+  requirement demands it anyway.
+- **VERIFIED for Claude / INCONCLUSIVE for Codex (2026-07-28, 096-04 behavioral
+  probe):** the jig-side prose-compliance premise — does an orchestrator reliably
+  run the `candidates → pick → --richer-skill` sequence against jig's own prose?
+  — is the most likely failure mode of the whole design (ADR-0040 Assumptions).
+  `scripts/orchestrator_selection_probe.py` settled it: **Claude PASS** (ran the
+  stub `candidates` and emitted the right pick on the positive fixture AND `none`
+  on the empty control), **Codex INCONCLUSIVE** (host unauthenticated here; agent
+  loop never ran — re-run after `codex login`). This **unblocks 096-03** (which
+  ships Claude-only); Codex stays on the config-only floor.
 - **VERIFIED (2026-07-28, 096-02 AC6 live probe):** the read-only reviewer
   (`jig:reviewer`, Read/Glob/Grep) CAN `Read` a SKILL.md at project scope AND at
   an absolute admin/plugin path outside the project — both reads succeeded and
