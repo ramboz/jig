@@ -298,7 +298,7 @@
 | [096-richer-skill-discovery](096-richer-skill-discovery/spec.md) | 096-01 — config-precedence | **DONE** |  |
 | [096-richer-skill-discovery](096-richer-skill-discovery/spec.md) | 096-02 — baseline-exclusion-and-resolve | **DONE** |  |
 | [096-richer-skill-discovery](096-richer-skill-discovery/spec.md) | 096-03 — enumerate-and-select | DRAFT |  |
-| [096-richer-skill-discovery](096-richer-skill-discovery/spec.md) | 🔬 096-04 — orchestrator-selection-compliance | DRAFT |  |
+| [096-richer-skill-discovery](096-richer-skill-discovery/spec.md) | 🔬 096-04 — orchestrator-selection-compliance | **DONE** |  |
 | [096-richer-skill-discovery](096-richer-skill-discovery/spec.md) | 096-05 — anomaly-record-and-consumers | DRAFT |  |
 
 ## Deferred slices
