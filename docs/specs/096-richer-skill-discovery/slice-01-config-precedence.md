@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [adr-0040]
-last_verified:
+last_verified: 2026-07-28
 frame_review: true
 kind: feature
 ---
@@ -105,18 +105,91 @@ a named follow-up (ADR-0040 OQ1) — no key ships for either here.
   `project_layout` is, not docs-root-relative.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
+- [x] All ACs pass; full test suite green (no regressions). 3593 tests OK; ruff
+      clean; host-package drift in sync.
+- [x] Implementer test coverage exercises each AC with at least one fixture.
       Edge cases listed above are covered explicitly.
-- [ ] Hermetic tests — config resolution honors `$HOME` / `--project-dir`, never
+- [x] Hermetic tests — config resolution honors `$HOME` / `--project-dir`, never
       reads the developer's real `~/.claude`.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during
-      implementation.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed. (compliance + craft both `pass`.)
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred during
+      implementation. (No new deferrals — the seams below are already tracked by
+      096-02 / 096-05 / ADR-0040 OQ1.)
+
+### Deviation log (after reconciliation)
+
+Original ACs above are preserved. Implementation deviations + review-driven
+changes:
+
+- **`applied_skill` records the portable configured identifier, not the resolved
+  absolute path.** Both review passes flagged that stamping a machine-specific
+  `$HOME` path into a committed evidence artifact (ADR-0014 audit trail) is
+  non-portable. Reconciliation added `review_config.configured_value` (the raw
+  bare-name/path as written in scaffold.json) and switched `_config_substrate_lines`
+  to record that; the resolved absolute path is used only in-memory for the
+  read-and-apply prompt. Regression tests assert `applied_skill` carries no
+  `$HOME` / no `/SKILL.md` for a bare-name config. (An *explicit* path a user
+  writes in scaffold.json is recorded verbatim — that is the user's own
+  committed value, not one jig injected; the portability guarantee is about not
+  synthesizing a machine-specific path from a portable bare name.)
+- **AC6 narrowed from literal "when a config key is present" to "when the
+  configured skill also resolves on this machine."** A config key that is present
+  but names an uninstalled skill produces NO `substrate` stamp here — the honest
+  "record what was applied" reading. The config-declared-but-not-installed audit
+  case is 096-05's to record (it needs the sidecar/anomaly machinery). Both
+  reviewers accepted this as consistent with the "minimum viable half" framing.
+- **`_config_substrate_lines` swallows `ReviewConfigError` (records nothing)
+  whereas `_resolve_richer_skill` propagates it.** Deliberate: a structural
+  config mistake already surfaces loudly at prompt-build time (when the pass is
+  constructed); deriving the substrate at record time must never be the thing
+  that fails a recording.
+- **Stale builder docstrings corrected.** The `build_pr_review_prompt` /
+  `build_arch_review_prompt` docstrings + the module-header comment described
+  dispatch as `detect_richer_skill`-only; updated to the config-first
+  `_resolve_richer_skill` precedence (the code-health docstring was already
+  updated in the initial implementation). A craft-pass nit.
+- **`code_health` gained a richer-dispatch path (net-new).** Before this slice
+  `build_code_health_review_prompt` had no richer dispatch at all; ADR-0040 D1
+  makes `code_health` an extensible category, so config-first dispatch + a
+  read-and-apply routing paragraph were added and its "NOT wired here" docstring
+  corrected.
+
+**Documented scope seams (tracked, not fixed here):**
+
+- **Codex bare-name resolution.** A bare `review.<category>_skill` name resolves
+  only against `~/.claude/skills` in this slice (a mild AC5 tension); Codex
+  bare-name + full multi-scope resolution arrive with **096-02**. Explicit paths
+  are host-portable today.
+- **Interactive / bug-fix config honoring.** A configured key is honored only in
+  the orchestrated review pass, not on `/jig:<skill>` interactive invocation nor
+  in `bug-fix`'s craft pass (AC7 prose notes state this) — **ADR-0040 OQ1**.
+
+### Reconciliation sweep
+
+- **Deviation log** — updated (above).
+- **`review.py` builder docstrings + module header** — updated (config-first
+  precedence now documented on all three builders).
+- **Host packages** (`hosts/claude`, `hosts/codex`) — updated; drift `--check`
+  green (review.py + review_config.py + four SKILL.md notes propagated;
+  `test_review_config.py` correctly excluded as a test file).
+- **`docs/architecture.md`** — no-op. No module boundary or public contract
+  changed at the architecture level: `review_config` is a new leaf `_common`
+  helper mirroring the existing `project_layout` pattern; no ADR trigger beyond
+  ADR-0040 which already governs.
+- **`docs/conventions.md`** — no-op. No new authoring rule.
+- **`docs/refinement-todo.md`** — no-op. No new deferral; existing seams are
+  owned by 096-02 / 096-05 / ADR-0040 OQ1.
+- **`docs/inbox.md`** — swept; nothing resolved by this slice.
+- **Spec 053 `## Amendments`** — deferred to Close-out (post-DONE), per the
+  slice's own close-out list.
+- **Lightweight decisions** — none (no UI strings / visual / brand calls).
+- **Memory** — one candidate: the `_common` config-helper pattern + the
+  portable-identifier-in-committed-evidence lesson; folded into `/jig:memory-sync`
+  at session close, not a per-slice memory write.
 
 ### Close-out (post-DONE)
 
@@ -124,5 +197,7 @@ a named follow-up (ADR-0040 OQ1) — no key ships for either here.
 - [ ] Spec 053 gets a dated `## Amendments` entry recording that its exact-name /
       user-scope-only resolution is superseded (ADR-0010 — records get
       amendments, live prose is corrected inline).
-- [ ] Prose note added to `bug-fix`, `pr-review`, `arch-review`, `code-health`
-      SKILL.mds re: orchestrated-pass-only config honoring (AC7).
+- [x] Prose note added to `bug-fix`, `pr-review`, `arch-review`, `code-health`
+      SKILL.mds re: orchestrated-pass-only config honoring (AC7). (Done in
+      implementation, not post-DONE — verified present in all four + propagated
+      to host packages.)

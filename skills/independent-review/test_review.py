@@ -7,6 +7,7 @@ Run from the repo root:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -3087,6 +3088,213 @@ class RecordReviewAdrModeTests(unittest.TestCase):
         r = self._record("--pass", "frame-critique", "--verdict", "pass",
                          "--reviewer", "x", "--prompt-source", "x")
         self.assertEqual(r.returncode, 2, f"stdout: {r.stdout}")
+
+
+# ---------------------------------------------------------------------------
+# Slice 096-01 (ADR-0040 D1/D3): config-first richer-skill resolution in the
+# three extensible builders + the derived `substrate: config` record.
+# ---------------------------------------------------------------------------
+
+
+class RicherSkillConfigTests(unittest.TestCase):
+    """Config (`review.<category>_skill` in scaffold.json) WINS over the legacy
+    exact-name lookup for the three extensible builders, and `record-review`
+    derives `substrate: config` from config presence. Hermetic — injects $HOME
+    and a tmp project with scaffold.json; never reads the real ~/.claude."""
+
+    def setUp(self):
+        # Import review in-process (builders are pure functions).
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
+        sys.path.insert(0, str(REPO_ROOT / "skills" / "independent-review"))
+        import review  # noqa: E402
+        self.review = review
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-cfg-"))
+        self.home = self.tmp / "home"
+        (self.home / ".claude" / "skills").mkdir(parents=True)
+        self._old_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(self.home)
+        # A configured richer skill installed at user scope.
+        self.richer = self.home / ".claude" / "skills" / "review-pr-deep"
+        self.richer.mkdir(parents=True)
+        (self.richer / "SKILL.md").write_text(
+            "---\nname: review-pr-deep\n---\n# richer\n"
+        )
+        # A project with scaffold.json at its root and a spec under docs/specs.
+        self.proj = self.tmp / "proj"
+        self.specdir = self.proj / "docs" / "specs" / "099-x"
+        self.spec = _make_spec_with_slice(self.specdir, "01", "cfg")
+
+    def tearDown(self):
+        import shutil
+        if self._old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self._old_home
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _scaffold(self, review_block: dict) -> None:
+        (self.proj / "scaffold.json").write_text(
+            json.dumps({"review": review_block})
+        )
+
+    # -- AC4: config wins over the legacy exact-name lookup ---------------
+    def test_pr_builder_config_wins(self):
+        # Install a legacy `pr-review` at user scope AND configure a different
+        # richer skill; the configured one must win.
+        legacy = self.home / ".claude" / "skills" / "pr-review"
+        legacy.mkdir(parents=True)
+        (legacy / "SKILL.md").write_text("---\nname: pr-review\n---\n")
+        self._scaffold({"pr_review_skill": "review-pr-deep"})
+        prompt = self.review.build_pr_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"]
+        )
+        self.assertIn("review-pr-deep/SKILL.md", prompt)
+        self.assertNotIn(str(legacy / "SKILL.md"), prompt)
+
+    def test_arch_builder_config_wins(self):
+        self._scaffold({"arch_review_skill": "review-pr-deep"})
+        prompt = self.review.build_arch_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"]
+        )
+        self.assertIn("review-pr-deep/SKILL.md", prompt)
+
+    # -- AC3: code-health builder now honors config (net-new dispatch) ----
+    def test_code_health_builder_emits_richer_para_when_configured(self):
+        self._scaffold({"code_health_skill": "review-pr-deep"})
+        prompt = self.review.build_code_health_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"], "clean"
+        )
+        self.assertIn("review-pr-deep/SKILL.md", prompt)
+        self.assertIn("richer `code-health` reviewer is configured", prompt)
+
+    def test_code_health_builder_no_richer_para_when_unconfigured(self):
+        # No scaffold.json at all → baseline, no richer paragraph.
+        prompt = self.review.build_code_health_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"], "clean"
+        )
+        self.assertNotIn("reviewer is configured", prompt)
+
+    # -- AC2: a mistyped config surfaces (does not silently fall back) -----
+    def test_structural_malformed_config_propagates_from_builder(self):
+        self._scaffold({"pr_review_skill": 123})
+        with self.assertRaises(self.review._review_config.ReviewConfigError):
+            self.review.build_pr_review_prompt(
+                self.spec, "099-01 — cfg", ["a.py"]
+            )
+
+    # -- AC2: runtime absence falls back to baseline, no raise ------------
+    def test_uninstalled_config_falls_back_to_baseline(self):
+        self._scaffold({"pr_review_skill": "not-installed-here"})
+        prompt = self.review.build_pr_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"]
+        )
+        # No richer path named; baseline routing paragraph present.
+        self.assertNotIn("not-installed-here", prompt)
+        self.assertIn("bundled `pr-review` SKILL.md baseline", prompt)
+
+    # -- _config_substrate_lines derivation ------------------------------
+    def test_substrate_lines_for_configured_craft(self):
+        self._scaffold({"pr_review_skill": "review-pr-deep"})
+        lines = self.review._config_substrate_lines(self.spec, "craft")
+        self.assertIn("substrate: config", lines)
+        # Records the PORTABLE configured identifier, not the machine-specific
+        # resolved absolute path (committed evidence must not bake in $HOME).
+        self.assertIn("applied_skill: review-pr-deep", lines)
+        self.assertNotIn("/SKILL.md", lines)
+        self.assertNotIn(str(self.home), lines)
+
+    def test_substrate_lines_empty_for_compliance_pass(self):
+        self._scaffold({"pr_review_skill": "review-pr-deep"})
+        # compliance is not one of the three extensible categories → no stamp.
+        self.assertEqual(
+            self.review._config_substrate_lines(self.spec, "compliance"), ""
+        )
+
+    def test_substrate_lines_empty_when_unconfigured(self):
+        # No scaffold.json → no config → no substrate stamp.
+        self.assertEqual(
+            self.review._config_substrate_lines(self.spec, "craft"), ""
+        )
+
+
+class RecordReviewSubstrateTests(unittest.TestCase):
+    """`record-review` writes `substrate: config` + `applied_skill` into the
+    evidence frontmatter for a configured extensible pass, and the resulting
+    artifact still clears the ADR-0014 evidence gate (extra keys tolerated)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-recsub-"))
+        self.home = self.tmp / "home"
+        (self.home / ".claude" / "skills" / "review-pr-deep").mkdir(parents=True)
+        (self.home / ".claude" / "skills" / "review-pr-deep"
+         / "SKILL.md").write_text("---\nname: review-pr-deep\n---\n")
+        self.proj = self.tmp / "proj"
+        self.spec = _make_spec_with_slice(
+            self.proj / "docs" / "specs" / "099-x", "01", "cfg"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, pass_name, review_block=None,
+                summary="## VERDICT\npass\n\n## REASONING\nok.\n"):
+        if review_block is not None:
+            (self.proj / "scaffold.json").write_text(
+                json.dumps({"review": review_block})
+            )
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+               "HOME": str(self.home)}
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review",
+             str(self.spec), "0XX-01",
+             "--pass", pass_name, "--verdict", "pass",
+             "--reviewer", "jig:reviewer",
+             "--prompt-source", "review.py x"],
+            input=summary, capture_output=True, text=True, env=env,
+        )
+
+    def _evidence(self, pass_name):
+        return self.spec.parent / "reviews" / f"slice-01-{pass_name}.md"
+
+    def test_configured_craft_stamps_substrate_config(self):
+        r = self._record("craft", {"pr_review_skill": "review-pr-deep"})
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("craft").read_text())
+        self.assertEqual(fields.get("substrate"), "config")
+        # Portable configured identifier, not an absolute $HOME path.
+        self.assertEqual(fields.get("applied_skill"), "review-pr-deep")
+        self.assertNotIn(str(self.home), fields.get("applied_skill", ""))
+
+    def test_unconfigured_craft_stamps_no_substrate(self):
+        r = self._record("craft", review_block={})
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("craft").read_text())
+        self.assertNotIn("substrate", fields)
+        self.assertNotIn("applied_skill", fields)
+
+    def test_compliance_pass_stamps_no_substrate(self):
+        r = self._record("compliance", {"pr_review_skill": "review-pr-deep"})
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("compliance").read_text())
+        self.assertNotIn("substrate", fields)
+
+    def test_substrate_artifact_still_parses_with_verdict_intact(self):
+        # ADR-0014 gate predicate reads `verdict:` only. A substrate-bearing
+        # artifact must parse cleanly with the gate's input untouched — extra
+        # frontmatter keys are tolerated, the gate is not amended.
+        self._record("craft", {"pr_review_skill": "review-pr-deep"})
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("craft").read_text())
+        self.assertEqual(fields.get("verdict"), "pass")
+        self.assertEqual(fields.get("substrate"), "config")
+        # canonical fields still present + well-formed alongside the new keys
+        for key in ("slice", "pass", "verdict", "reviewer",
+                    "reviewed_at", "prompt_source"):
+            self.assertIn(key, fields)
 
 
 if __name__ == "__main__":

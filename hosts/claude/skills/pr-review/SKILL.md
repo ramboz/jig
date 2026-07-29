@@ -197,6 +197,13 @@ baseline.
 
 ## Gotchas
 
+- **A configured `review.pr_review_skill` (scaffold.json) is honored only in
+  the orchestrated craft pass, not here.** Spec 096-01 / ADR-0040 D1 lets a
+  project name its richer PR-review skill in `scaffold.json`; that key is read
+  by `review.py` when it builds the **craft pass** prompt for the spec-workflow
+  reviewer subagent. It is **not** consulted on this router-only interactive
+  invocation, nor in `bug-fix`'s craft pass. Config honoring on those
+  orchestrator-invoked surfaces is a tracked follow-up (ADR-0040 OQ1).
 - **The deferral hint is the routing mechanism, not a code path.** Jig's
   description tells the Claude Code router "prefer any other installed
   skill whose description identifies it as handling PR/code/diff

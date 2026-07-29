@@ -62,6 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout
+from _common import review_config as _review_config
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import SliceLookupError
@@ -555,6 +556,13 @@ For each acceptance criterion in slice {slice_label}, verify:
 # the reviewer its concrete path to read-and-apply. This promotes spec 031
 # Open-question-#1 option (b) ("filesystem-detect installed skills") from
 # "fallback if (a) misroutes" now that (a) is shown to misroute here.
+#
+# Spec 096-01 (ADR-0040 D1) adds a config-first layer ON TOP of this on-disk
+# detection: `_resolve_richer_skill` prefers an explicit `review.<category>_skill`
+# in the project's scaffold.json (the only path ADR-0040 can *guarantee*), then
+# falls back to `detect_richer_skill`'s legacy user-scope exact-name lookup. The
+# three extensible builders (pr / arch / code-health) route through it; the full
+# explicit-candidate chain that removes `detect_richer_skill` arrives in 096-03.
 
 
 def detect_richer_skill(skill_name: str) -> "str | None":
@@ -579,6 +587,75 @@ def detect_richer_skill(skill_name: str) -> "str | None":
     except (OSError, ValueError, RuntimeError):
         pass
     return None
+
+
+def _resolve_richer_skill(spec_path: Path, category: str,
+                          skill_name: str) -> "str | None":
+    """Config-first richer-skill resolution for a builder (spec 096-01 / ADR-0040
+    D1). Precedence: an explicit `review.<category>_skill` in the project's
+    scaffold.json WINS (`review_config.configured_skill`); absent config, fall
+    back to the legacy user-scope exact-name lookup (`detect_richer_skill`).
+
+    `category` is one of `review_config.CATEGORIES`; `skill_name` is the folder
+    name the legacy lookup uses (`pr-review` / `arch-review` / `code-health`).
+
+    A STRUCTURAL config mistake (`ReviewConfigError`) propagates — a mistyped
+    config the user deliberately wrote must surface, not silently fall back to
+    the baseline and reproduce the original bug (ADR-0040 D1 / AC2). A config
+    value that is well-formed but does not resolve on this machine returns `None`
+    from `configured_skill`, and we fall through to the legacy lookup.
+
+    096-03 removes `detect_richer_skill` and this fallback in favor of the full
+    explicit-candidate chain; here the legacy lookup is retained (AC4)."""
+    project_root = _find_project_root(spec_path)
+    if project_root is not None:
+        configured = _review_config.configured_skill(project_root, category)
+        if configured is not None:
+            return configured
+    return detect_richer_skill(skill_name)
+
+
+def _config_substrate_lines(spec_path: Path, pass_name: str) -> str:
+    """Derive the `substrate: config` frontmatter lines for a recorded verdict
+    (spec 096-01 / ADR-0040 D3), or `""` when no config substrate applies.
+
+    Returns `"substrate: config\\napplied_skill: <path>\\n"` iff `pass_name`
+    maps to one of the three extensible categories AND the project (resolved
+    from `spec_path`) configures a resolvable richer skill for it. Otherwise
+    `""` — so the field stays absent for compliance / reconciliation /
+    frame-critique / unconfigured passes and every pre-096 artifact.
+
+    The recorded `applied_skill` is the PORTABLE configured identifier (the bare
+    name or path as written in scaffold.json — `configured_value`), NOT the
+    machine-specific resolved absolute path: these lines land in a committed,
+    team-shared evidence artifact (ADR-0014), so a local `$HOME` path must never
+    be baked in. The stamp is derived from observable config state — it records
+    what the project CONFIGURED to be applied, not a confirmation the reviewer
+    read it (the derive-from-observable-state posture, ADR-0040 D3).
+
+    Stamped only when the configured skill also RESOLVES on this machine; a
+    config key that is present but unresolvable produces no stamp here (that
+    audit case — config declared, not installed — is 096-05's to record).
+
+    Conservative: a malformed config (`ReviewConfigError`) or an unresolvable
+    project root yields `""` — deriving the substrate must never be the thing
+    that fails a recording (the malformed config already surfaced at
+    prompt-build time via `_resolve_richer_skill`)."""
+    category = _review_config.PASS_TO_CATEGORY.get(pass_name)
+    if category is None:
+        return ""
+    project_root = _find_project_root(spec_path)
+    if project_root is None:
+        return ""
+    try:
+        if _review_config.configured_skill(project_root, category) is None:
+            return ""
+        identifier = _review_config.configured_value(project_root, category)
+    except _review_config.ReviewConfigError:
+        return ""
+    if identifier is None:
+        return ""
+    return f"substrate: config\napplied_skill: {identifier}\n"
 
 
 # -------- pr-review prompt (slice 031-01) --------
@@ -628,11 +705,14 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
 
     Dispatch is file-read based, not router-based. The craft pass runs in
     a read-only `reviewer` subagent with no `Skill` tool, so it cannot use
-    Claude's skill router. `detect_richer_skill("pr-review")` checks for a
-    user-installed skill on disk; when present, the prompt hands the reviewer
-    that concrete path to read-and-apply (it supersedes the inlined baseline
-    buckets). When absent, the prompt inlines jig's baseline buckets. Either
-    way, findings are normalized into the shared verdict envelope below.
+    Claude's skill router. Resolution is config-first (spec 096-01 / ADR-0040
+    D1): `_resolve_richer_skill(spec_path, "pr_review", "pr-review")` prefers an
+    explicit `review.pr_review_skill` in the project's scaffold.json, then falls
+    back to the legacy user-scope `detect_richer_skill("pr-review")` lookup. When
+    a richer skill resolves, the prompt hands the reviewer that concrete path to
+    read-and-apply (it supersedes the inlined baseline buckets). When none
+    resolves, the prompt inlines jig's baseline buckets. Either way, findings are
+    normalized into the shared verdict envelope below.
 
     NOTE: unlike `build_implementation_prompt` and
     `build_reconciliation_prompt`, this builder does NOT append
@@ -643,7 +723,7 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
     framing the `jig:pr-review` skill description establishes.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
-    richer = detect_richer_skill("pr-review")
+    richer = _resolve_richer_skill(spec_path, "pr_review", "pr-review")
     if richer:
         routing_para = (
             f"A richer `pr-review` skill is installed at `{richer}`.\n"
@@ -768,11 +848,13 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     passes so the workflow can consume one verdict shape across all
     three passes.
 
-    Same file-read dispatch as `build_pr_review_prompt`: the read-only
-    `reviewer` subagent has no `Skill` tool, so
-    `detect_richer_skill("arch-review")` checks disk for a user-installed
-    skill and hands the reviewer its concrete path to read-and-apply when
-    present; otherwise the prompt inlines jig's baseline arch buckets.
+    Same config-first file-read dispatch as `build_pr_review_prompt`: the
+    read-only `reviewer` subagent has no `Skill` tool, so
+    `_resolve_richer_skill(spec_path, "arch_review", "arch-review")` prefers an
+    explicit `review.arch_review_skill` in scaffold.json, then falls back to the
+    legacy user-scope `detect_richer_skill("arch-review")` lookup, and hands the
+    reviewer the resolved concrete path to read-and-apply when one is found;
+    otherwise the prompt inlines jig's baseline arch buckets.
 
     NOTE: like `build_pr_review_prompt`, this builder does NOT append
     `_principles_check_block()`. Constitution-adherence is checked in
@@ -780,7 +862,7 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     architectural concerns only.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
-    richer = detect_richer_skill("arch-review")
+    richer = _resolve_richer_skill(spec_path, "arch_review", "arch-review")
     if richer:
         routing_para = (
             f"A richer `arch-review` skill is installed at `{richer}`.\n"
@@ -884,15 +966,31 @@ def build_code_health_review_prompt(spec_path: Path, slice_label: str,
     builder does NOT append `_principles_check_block()`. The code-health
     pass is scoped to the health-summary judgment only.
 
-    Richer-skill deferral is intentionally NOT wired here (unlike
-    pr-review / arch-review): there is no established "richer code-health
-    reviewer" skill category to detect, so jig's rubric is inlined. (See
-    the deviation log.)
+    Config-first richer-skill dispatch (spec 096-01 / ADR-0040 D1): an explicit
+    `review.code_health_skill` in the project's scaffold.json is honored via
+    `_resolve_richer_skill`, the same way `pr-review` / `arch-review` honor their
+    keys. (Before 096-01 this builder had no richer dispatch — there was no
+    config channel to honor; the ADR-0040 D1 decision makes `code_health` one of
+    the three extensible categories.) The ZERO-CONFIG enumeration path for
+    code-health arrives in 096-03; here only explicit config resolves.
     """
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     summary_block = summary.rstrip() if summary and summary.strip() else \
         "_(no health.py summary was provided — judge on the deliverables " \
         "alone, and note the missing summary in your reasoning.)_"
+    richer = _resolve_richer_skill(spec_path, "code_health", "code-health")
+    if richer:
+        richer_para = (
+            f"\n**A richer `code-health` reviewer is configured at `{richer}`.**"
+            " Read that SKILL.md in full now — and any reference files it points"
+            " to — then apply ITS rubric as your code-health pass, superseding"
+            " the evaluation guidance below. Your tools are read-only; if you"
+            " cannot read that path, fall back to the guidance below. Whatever"
+            " rubric you apply, normalize your findings into the required output"
+            " envelope at the end of this prompt.\n"
+        )
+    else:
+        richer_para = ""
     return f"""{_PREAMBLE}
 
 ## Your job
@@ -907,7 +1005,7 @@ tool *cannot* make about the change's code health.
 **`health.py` has already been run by the orchestrator / CI — you are
 read-only (no Bash) and must NOT try to run it.** Its tight summary is
 provided below; judge THAT summary (and the deliverables), never raw logs.
-
+{richer_para}
 ## health.py summary (run by the spine; judge this, do not re-run)
 
 ```
@@ -1489,8 +1587,18 @@ def record_review(args) -> int:
         sys.stderr.write(f"{exc}\n")
         return 2
 
-    # Frontmatter in canonical field order (ADR-0014 §2). The `slice` field
-    # records the full label so the artifact is self-describing.
+    # Config-substrate DERIVATION (spec 096-01 / ADR-0040 D3). `record-review`
+    # is the honest-actor chokepoint: it DERIVES the substrate from observable
+    # state (here, config presence), never accepting an orchestrator-typed
+    # value. For 096-01 only the `config` case is derived — when this pass maps
+    # to one of the three extensible categories AND the project configures a
+    # richer skill that resolves, stamp `substrate: config` + the PORTABLE
+    # configured `applied_skill` identifier (the raw scaffold.json value, not the
+    # machine-specific resolved path — committed evidence must stay portable).
+    # The full shown/not-shown/non-interactive/n/a vocabulary (which needs the
+    # 096-03 sidecar) lands in 096-05. No stamp otherwise, so the field stays
+    # absent — backward-compatible with pre-096 artifacts.
+    substrate_lines = _config_substrate_lines(spec, args.pass_name)
     frontmatter = (
         "---\n"
         f"slice: {slice_label}\n"
@@ -1499,6 +1607,7 @@ def record_review(args) -> int:
         f"reviewer: {args.reviewer}\n"
         f"reviewed_at: {_now_iso8601()}\n"
         f"prompt_source: {args.prompt_source}\n"
+        f"{substrate_lines}"
         "---\n"
     )
     content = frontmatter + "\n" + body
