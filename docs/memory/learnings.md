@@ -885,3 +885,82 @@ Two mechanical notes worth keeping:
 - **Assert the outcome, not the exit code.** That test first checked only
   `returncode == 0`, which a copy that wrote nothing at all would also satisfy.
   Pinning *where the blocks landed* is what makes it mean the documented thing.
+## Bug 023: a `host` argument answers *some* host's question — say which one
+
+`migrate.py copy_machinery` takes one `host`, and it was answering two
+different questions with it:
+
+- **where does the machinery go?** — a property of *this invocation*
+  (`--host`, or inferred from where the copied helper sits on disk);
+- **what variable do this project's docs cite?** — a property of *the project*,
+  fixed when its docs were rendered, and already recorded in `scaffold.json`
+  as `host_renderer`.
+
+Feeding the invocation host to the second question makes a Codex-installed
+helper scan Claude-rendered docs for `${PLUGIN_ROOT}`, match nothing, and print
+nothing — output identical to a clean project. The manifest flip still
+succeeds, so the run looks fine.
+
+- **A variable that is in scope and plausible is still a guess.**
+  `resolved_host` was correct for the copy and merely *available* for the
+  advisory. Nothing at the call site distinguished the two meanings, so one
+  name served both and the second answer was right only by coincidence. When a
+  helper takes a `host` (or `mode`, or `profile`) argument, name whose it is —
+  in the signature or the comment.
+- **Varying two inputs together is not coverage.** Bug 018 shipped 28 tests
+  across both hosts, and every one scaffolded and invoked the *same* host. All
+  28 would pass against a hard-coded constant. Only a fixture where project
+  host ≠ invocation host can show which input the code actually reads.
+- **Splitting a conflated read means splitting it in both directions.** The
+  token now follows the project; the offered replacement path deliberately
+  stays on the invocation, because after `--host codex` the skills really are
+  under `.codex/skills/` and no `.claude/skills/` exists. Moving *both* halves
+  to the project host would have traded one false statement for another.
+- **Third instance in one function.** Bug 018 recorded "a caller widened a
+  contract the callee was never told about", then repeated it a few hundred
+  lines later, and its fix moved the *spellings* to their owner while leaving
+  the *host selection* pointing at the invocation. Recording a learning does
+  not enforce it; the enforcement here is `read_host_renderer` returning `None`
+  for a host it does not recognise instead of quietly defaulting to Claude, so
+  an unknown answer cannot masquerade as a known one. See the bug 018 entry
+  above.
+- **A host name written inside a cross-host contrast will invert in the other
+  host's package.** `build_codex_plugin.py` rewrites `Claude` → `Codex`
+  wholesale, so "run a Codex-installed helper against a Claude-scaffolded
+  project" ships to Codex users as "...against a Codex-scaffolded project" —
+  the same-host case the sentence just dismissed. This happened here, in the
+  documentation *of the two-host fix*, and it had already happened once in
+  scaffold-init's SKILL.md (`test_scaffold_mode.py::test_skill_md_output_
+  survives_the_codex_translation`). The rule: in any host-translated file,
+  phrase host contrasts **neutrally** ("a helper installed for one host
+  against a project scaffolded for the other") so there is no literal for the
+  builder to rewrite — and pin it against the RENDERED artifact, because the
+  source always reads fine. That is why a source-only assertion cannot catch
+  it. It recurred a *third* time in the same cycle: the editor comment added
+  to warn future editors off host literals named both hosts itself, and
+  shipped as `NO host literals ("Codex", "Codex", .codex/, .codex/) …
+  rewrites the first to the second`. A rule stated in prose that violates
+  itself is worth less than no rule.
+- **Because the rewrite runs one way, "renders identically" is only half a
+  guard.** The builder maps Claude spellings to Codex ones and never the
+  reverse, so section identity catches every Claude spelling *the builder
+  rewrites* and is **blind** to a Codex one — both packages render it
+  verbatim, and the other host's readers get a sentence about a host they are
+  not using. Pin both directions: identity for the translated side, an
+  explicit absence check for the untranslated one. The guard's **second**
+  version asserted identity alone and claimed it held "iff the section
+  contains nothing host-specific", which was false in exactly that direction.
+  (The first banned two known-bad sentences and was useless; four versions in
+  total — the sequence is in bug 023's `## Proof`.)
+- **And take the forbidden set FROM the translator, not from memory.** The
+  **third** version kept identity and hand-wrote `Codex` / `.codex/` /
+  `CODEX_` for the blind direction — and let `${PLUGIN_ROOT}`, `AGENTS.md`,
+  `--host codex` / `--host claude` (lowercase — the builder is
+  case-sensitive) and unslashed `.codex` straight through. A restated table
+  is the bug-018 defect, and writing it *inside the guard built to stop this
+  bug's version of it* is how little the lesson transfers by memory alone.
+  It is now parsed out of `build_codex_plugin.py` by an AST walk over its
+  `.replace()` calls, taking **both** sides of each pair: the left-hand side
+  is a spelling the build consumes, the right-hand side one it produces —
+  and the second group is exactly what a hand-written list forgets, because
+  those strings never appear in the source you are looking at.

@@ -384,15 +384,33 @@ places, and the command treats them differently:
 
 #### Stale plugin-root citations after conversion
 
+<!-- EDITORS: this section must name no host, no host runtime directory, no
+     host-specific variable, and no vendor name. The package build rewrites
+     one host's names to the other's, so a host named inside a cross-host
+     contrast INVERTS in the other host's package and contradicts itself.
+     Write "one host" / "the other" instead. Most of this is checked
+     mechanically, but not all of it — vendor names, and host-specific
+     filenames the build does not itself rewrite, are on you. -->
+
 `docs/workflow.md` and `docs/decisions/lightweight-decisions.md` are
 rendered with plugin-root helper commands in plugin mode. After conversion
 that variable is unset — that is exactly the population this route
 rescues — so those commands no longer run.
 
 `copy-machinery` prints a warning naming each affected file and its hit
-count, followed by the in-repo form the paths should take. It looks for the
-plugin-root variable **this host actually renders** and offers this host's
-in-repo replacement, so the paths it quotes are the ones in front of you.
+count, followed by the in-repo form the paths should take.
+
+The two halves of that warning come from two different places, on purpose.
+The variable it **searches for** is the one the *project* was rendered
+against — `scaffold.json`'s `host_renderer` — because that is what its docs
+actually contain, whichever host you happen to be running from. The path it
+**offers as the replacement** is this *invocation's*, because that is where
+this run just put the machinery.
+
+Run a helper installed for one host against a project scaffolded for the
+other and each half still names something real: the variable its docs really
+cite, and the directory the skills really landed in. When both are the same
+host — the ordinary case — you will not notice the distinction.
 
 **The command does not touch these files, and you must not silently touch
 them either.** They ship as `Status: Draft (wizard-generated)` with an

@@ -651,7 +651,7 @@ def write_installed_tiers(target: Path, new_tiers: list) -> None:
     atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
 
 
-# --- scaffold_mode accessors (bug 018) ------------------------------------
+# --- scaffold_mode + host_renderer accessors (bugs 018, 023) ---------------
 #
 # `scaffold_mode` is written once at scaffold time (`_build_manifest`) and,
 # until bug 018, never again — so a project converted from plugin-only to
@@ -660,6 +660,12 @@ def write_installed_tiers(target: Path, new_tiers: list) -> None:
 # deliberately shaped like `read_installed_tiers` / `write_installed_tiers`
 # (its nearest sibling: same manifest, same atomic write, same
 # commit-after-the-copy-succeeds discipline).
+#
+# `read_host_renderer` (bug 023) joins them as the third read accessor: same
+# manifest, same degrade-to-None contract. It reads `_HOST_RENDERERS`, which
+# is defined further down beside the renderers themselves — a module global
+# resolved at call time, so the accessor stays here with its siblings rather
+# than migrating to the registry.
 
 def read_scaffold_mode(target: Path) -> "str | None":
     """Return `scaffold_mode` from `target/scaffold.json`, or None when there
@@ -690,6 +696,44 @@ def write_scaffold_mode(target: Path, mode: str) -> None:
     data = json.loads(manifest_path.read_text())
     data["scaffold_mode"] = mode
     atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
+
+
+def read_host_renderer(target: Path) -> "str | None":
+    """Return `host_renderer` from `target/scaffold.json` — the host this
+    project's manifest was written for — or None when the manifest cannot
+    answer.
+
+    For a scaffolded project that is the renderer that produced its docs,
+    which is what bug 023's caller wants. For one adopted via
+    `migrate.py adopt-layout` it is the host the corpus was adopted FOR
+    (`adoption_manifest` takes it from the invocation), and the docs are
+    user-authored, so no renderer produced them — there is nothing better to
+    read there, and the field is still the project's own claim rather than a
+    passing helper's.
+
+    Same contract as the two accessors above: every unusable shape — no
+    manifest, unreadable, field absent or wrong-typed — collapses to None,
+    "this project makes no renderer claim", so callers need exactly one
+    fallback branch.
+
+    An unrecognised host collapses to None too, rather than riding
+    `renderer_for_host`'s fallback to Claude: that fallback answers "give me
+    some renderer", while this answers "what was this project rendered with",
+    where a wrong guess is bug 023. (Whether the fallback should exist is
+    open — `docs/refinement-todo.md`.)
+    """
+    manifest = target / "scaffold.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    host = data.get("host_renderer")
+    # `isinstance` first: a wrong-typed field can be unhashable (a list from a
+    # hand-edited manifest), and `unhashable in dict` raises rather than
+    # returning False.
+    return host if isinstance(host, str) and host in _HOST_RENDERERS else None
 
 
 def _hook_profile(signals: Signals) -> str:
@@ -1555,6 +1599,12 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         }
 
 
+_HOST_RENDERERS = {
+    "claude": ClaudeScaffoldRenderer,
+    "codex": CodexScaffoldRenderer,
+}
+
+
 def renderer_for_host(host: str) -> type:
     """The renderer CLASS for `host` (not an instance).
 
@@ -1564,7 +1614,7 @@ def renderer_for_host(host: str) -> type:
     keeping their own copy. Unknown hosts fall back to Claude, matching how
     `--host` already degrades elsewhere.
     """
-    return CodexScaffoldRenderer if host == "codex" else ClaudeScaffoldRenderer
+    return _HOST_RENDERERS.get(host, ClaudeScaffoldRenderer)
 
 
 def _copy_skill_dir(src: Path, dst: Path) -> None:
