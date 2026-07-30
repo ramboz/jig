@@ -1536,6 +1536,86 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
     def _run_codex_scaffold(self, *extra_args: str) -> subprocess.CompletedProcess:
         return run_scaffold_with_args(self.target, "--host", "codex", *extra_args)
 
+    # ---- Bug 015: brief.md + seed spec must speak the host's vocabulary ----
+
+    def _seed_and_brief_text(self, target: Path) -> str:
+        """brief.md plus every seed-spec file, concatenated."""
+        parts = [(target / "brief.md").read_text()]
+        seed = target / "docs" / "specs" / "001-adopt-jig"
+        # Assert the seed exists before globbing it. Without this, a regressed
+        # seed emission yields an empty glob, and the `AGENTS.md` assertions
+        # below would still pass off brief.md alone — the seed half of this
+        # regression test would go vacuous silently.
+        self.assertTrue(seed.is_dir(), f"seed spec missing at {seed}")
+        seed_files = sorted(seed.glob("*.md"))
+        self.assertTrue(seed_files, f"seed spec dir {seed} is empty")
+        parts += [p.read_text() for p in seed_files]
+        return "\n".join(parts)
+
+    def test_codex_brief_and_seed_name_agents_md_plugin_mode(self):
+        """Bug 015 — a Codex project's first-read documents must not tell the
+        user to open `CLAUDE.md`, a file only Claude projects have.
+
+        `brief.md` and the seed spec were rendered through paths that never
+        received the host transform (`_render_brief` passed no hook;
+        `_emit_seed_spec` built a layout-only one), so they kept the canonical
+        templates' Claude vocabulary while every other rendered doc was
+        translated."""
+        r = self._run_codex_scaffold("--plugin-only")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        text = self._seed_and_brief_text(self.target)
+        self.assertNotIn("CLAUDE.md", text)
+        self.assertIn("AGENTS.md", text)
+
+    def test_codex_brief_and_seed_name_agents_md_in_repo_mode(self):
+        """Bug 015 affected BOTH modes — the fault was the render path, not the
+        mode, so pin the other side too."""
+        r = self._run_codex_scaffold("--with-machinery")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        text = self._seed_and_brief_text(self.target)
+        self.assertNotIn("CLAUDE.md", text)
+        self.assertIn("AGENTS.md", text)
+
+    def test_codex_host_rewrite_does_not_mangle_project_name(self):
+        """Bug 015's fix applies the host transform to the TEMPLATE, before
+        substitution — not to the rendered output.
+
+        The Codex transform contains a blanket `Claude` -> `Codex` replacement
+        and `PROJECT_NAME` is user-derived, so post-substitution rewriting
+        corrupts a project legitimately named after Claude. Pinned because the
+        obvious one-line fix (`post_render=doc_rewrite`) passes the two tests
+        above while silently renaming the user's project."""
+        target = Path(self.tmpdir) / "Claude-Tools"
+        target.mkdir()
+        r = run_scaffold_with_args(target, "--host", "codex", "--plugin-only")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        text = self._seed_and_brief_text(target)
+        self.assertIn("Claude-Tools", text,
+                      "the project's own name must survive the host rewrite")
+        self.assertNotIn("Codex-Tools", text)
+
+    def test_claude_host_brief_and_seed_are_unchanged(self):
+        """The control arm of the same gate (Claude host, despite the class
+        name): these documents must still name `CLAUDE.md`. Guards against a
+        fix that translates unconditionally.
+
+        Both modes, because they exercise different transforms. `--plugin-only`
+        passes `host_rewrite=None`; `--with-machinery` passes
+        `_rewrite_skill_md_paths`, which bug 015 made newly reachable on these
+        two documents. That path is inert against today's templates (neither
+        carries a `${CLAUDE_PLUGIN_ROOT}/skills/` pattern) — pinned so it stays
+        that way if the seed grows one, since the seed's whole job is to
+        describe jig machinery."""
+        for mode_flag in ("--plugin-only", "--with-machinery"):
+            with self.subTest(mode=mode_flag):
+                target = Path(self.tmpdir) / f"claude-project{mode_flag}"
+                target.mkdir()
+                r = run_scaffold_with_args(target, mode_flag)
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                text = self._seed_and_brief_text(target)
+                self.assertIn("CLAUDE.md", text)
+                self.assertNotIn("AGENTS.md", text)
+
     def test_codex_scaffold_tree_has_no_claude_only_files(self):
         r = self._run_codex_scaffold()
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
