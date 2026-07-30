@@ -346,7 +346,11 @@ class AcceptTests(unittest.TestCase):
         # Second accept should refuse
         result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 2)
-        self.assertIn("proposed", result.stderr.lower())
+        # Assert the refusal names the state it found. (The old
+        # case-insensitive `"proposed"` check passed only because the fixture
+        # FILENAME is `adr-0001-proposed-thing.md`, which the message echoes —
+        # the post-ADR-0046 message contains no "Proposed" of its own.)
+        self.assertIn("already Accepted", result.stderr)
 
     def test_accept_writes_atomically(self):
         """Accept leaves no stray .tmp file behind."""
@@ -1227,12 +1231,18 @@ class WriterStampsFrontmatterStatusTests(unittest.TestCase):
                          "Accepted",
                          "new (superseding) ADR retains Accepted")
 
-    # ---- AC #5: synchronized-write lock (regression guard) ----
+    # ---- AC #5: synchronized-write lock, canonical-prose case ----
+    #
+    # ADR-0046 narrows ADR-0026's unconditional sync-lock: prose is now a
+    # BEST-EFFORT mirror, so the lock holds only while the prose Status
+    # line is canonical (`<State> (YYYY-MM-DD)`). Both tests below seed
+    # canonical prose via `cmd_new`, so the pairing is still guaranteed.
+    # The deliberate-divergence case is pinned in
+    # `NonCanonicalProseStatusTests` below.
 
-    def test_supersede_frontmatter_and_prose_cannot_diverge(self):
-        """ADR-0026 sync-lock: after supersede, the OLD ADR has BOTH
-        frontmatter `status: Superseded` AND the prose `Superseded by` line
-        — they cannot diverge."""
+    def test_supersede_syncs_frontmatter_and_canonical_prose(self):
+        """After supersede, the OLD ADR has BOTH frontmatter
+        `status: Superseded` AND the prose `Superseded by` line."""
         old, new = self._two_accepted_adrs()
         old_path, _ = self.adr.cmd_supersede(self.adrs_dir, old, new)
         content = old_path.read_text()
@@ -1243,9 +1253,10 @@ class WriterStampsFrontmatterStatusTests(unittest.TestCase):
             "prose Superseded-by line must accompany frontmatter Superseded",
         )
 
-    def test_accept_frontmatter_and_prose_cannot_diverge(self):
-        """ADR-0026 sync-lock (mirror): after accept, the ADR has BOTH
-        frontmatter `status: Accepted` AND the prose `Accepted (date)`."""
+    def test_accept_syncs_frontmatter_and_canonical_prose(self):
+        """Mirror: after accept, an ADR whose prose Status line is
+        canonical has BOTH frontmatter `status: Accepted` AND the prose
+        `Accepted (date)`."""
         target = self.adr.cmd_new(self.adrs_dir, "sync-accept", "")
         number = self.adr._parse_adr_number(target.name)
         _write_adr_frame_verdict(self.adrs_dir, f"{number:04d}", "pass")
@@ -1304,6 +1315,347 @@ class WriterStampsFrontmatterStatusTests(unittest.TestCase):
             _write_adr_frame_verdict(self.adrs_dir, num, "pass")
             self.adr.cmd_accept(self.adrs_dir, num)
         return old, new
+
+
+# ---------- ADR-0046 / bug 013: non-canonical prose Status line ----------
+
+
+# The exact shape reported in issue #123: a hand-edited Status line that is
+# genuinely `Proposed`, carrying an authored trailing clause.
+TRAILING_CLAUSE = " — awaiting owner acceptance."
+
+
+def _write_adr_with_prose_status(path: Path, number: str, slug: str,
+                                 title: str, prose_status_line: str,
+                                 *, frontmatter_status: str = None) -> None:
+    """Seed an ADR whose prose `## Status` body is `prose_status_line`
+    verbatim. `frontmatter_status=None` seeds a legacy (pre-073) ADR with
+    no `status:` field, exercising the prose-classifier fallback; passing a
+    value seeds the frontmatter-canonical case."""
+    front = ""
+    if frontmatter_status is not None:
+        front = (
+            "---\n"
+            f"status: {frontmatter_status}\n"
+            "dependencies: []\n"
+            "last_verified: 2026-01-02\n"
+            "---\n\n"
+        )
+    path.write_text(
+        f"{front}"
+        f"# ADR-{number}: {title}\n\n"
+        f"## Status\n\n{prose_status_line}\n\n"
+        f"## Context\n\nSample context paragraph for the ADR.\n\n"
+        f"## Decision Options Considered\n\n_TODO_\n\n"
+        f"## Recommended Decision\n\n_TODO_\n\n"
+        f"## Consequences\n\n_TODO_\n\n"
+        f"## Open questions\n\nNone.\n"
+    )
+
+
+class NonCanonicalProseStatusTests(unittest.TestCase):
+    """ADR-0046 (supersedes ADR-0026 ruling 2) / bug 013 / issue #123.
+
+    Frontmatter `status:` is authoritative; the prose `## Status` line is a
+    best-effort human-readable mirror. `accept` gates on the *classified*
+    state and never refuses because of prose formatting; it rewrites the
+    prose line only when that line is canonical, and otherwise leaves the
+    authored text byte-identical and emits a touch-up note.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-prose-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        self.adr = _import_adr_module()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _seed(self, prose_line: str, *, frontmatter_status: str = None,
+              number: str = "0001", slug: str = "trailing-text") -> Path:
+        path = self.adrs_dir / f"adr-{number}-{slug}.md"
+        _write_adr_with_prose_status(path, number, slug, "Trailing Text",
+                                     prose_line,
+                                     frontmatter_status=frontmatter_status)
+        return path
+
+    # ---- the reported repro: accept no longer refuses ----
+
+    def test_accept_succeeds_with_trailing_text_legacy_adr(self):
+        """Issue #123 repro, legacy shape (no frontmatter `status:`): the
+        lenient prose classifier reads `Proposed`, so accept proceeds."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+    def test_accept_succeeds_with_trailing_text_frontmatter_adr(self):
+        """Same line, frontmatter-canonical ADR: frontmatter decides."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+    def test_accept_flips_frontmatter_despite_non_canonical_prose(self):
+        """ADR-0046 ruling 2: the frontmatter flip is unconditional."""
+        path = self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                          frontmatter_status="Proposed")
+        run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(_frontmatter_status(path.read_text()), "Accepted")
+
+    def test_accept_leaves_non_canonical_prose_byte_identical(self):
+        """The authored line survives untouched — not truncated, not
+        rewritten into the self-contradictory
+        `Accepted (today) — awaiting owner acceptance.`"""
+        line = f"Proposed (2026-07-22){TRAILING_CLAUSE}"
+        path = self._seed(line, frontmatter_status="Proposed")
+        run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        content = path.read_text()
+        self.assertIn(line, content, "authored Status line must survive")
+        self.assertNotIn(f"Accepted ({TODAY}){TRAILING_CLAUSE}", content)
+        self.assertNotIn(f"Accepted ({TODAY})\n", content,
+                         "prose must NOT be flipped when non-canonical")
+
+    def test_accept_notes_that_prose_needs_touch_up(self):
+        """A note on stderr names the file and the stale line, so the agent
+        can reconcile the prose (ADR-0046 ruling 2)."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("adr-0001-trailing-text.md", result.stderr)
+        self.assertIn("Status", result.stderr)
+        self.assertIn(f"Accepted ({TODAY})", result.stderr,
+                      "the note must state the value the prose should carry")
+
+    def test_accept_prints_path_to_stdout_with_non_canonical_prose(self):
+        """The note goes to stderr; stdout stays the machine-readable path."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.stdout.strip(),
+                         "docs/decisions/adr-0001-trailing-text.md")
+
+    def test_accept_emits_no_note_when_prose_is_canonical(self):
+        """The canonical path is unchanged and silent."""
+        path = self._seed("Proposed (2026-07-22)",
+                          frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertEqual(result.stderr.strip(), "",
+                         "no touch-up note when the prose was rewritten")
+        self.assertIn(f"Accepted ({TODAY})", path.read_text())
+
+    # ---- gating is on state, never on prose formatting ----
+
+    def test_accept_refuses_when_frontmatter_says_accepted(self):
+        """Divergence guard: frontmatter Accepted + stale `Proposed` prose
+        must NOT re-accept. Frontmatter decides (ruling 3)."""
+        self._seed("Proposed (2026-07-22)", frontmatter_status="Accepted")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("already Accepted", result.stderr)
+
+    def test_accept_refuses_superseded_and_names_the_state(self):
+        """A Superseded ADR is refused with the state named — not with the
+        old catch-all `Status is not 'Proposed (...)'` message."""
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Superseded")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        # Assert the phrase unique to the Superseded branch — `Superseded`
+        # alone is also produced by the generic `state: <X>` catch-all, so it
+        # cannot distinguish the dedicated branch from its own fallback.
+        self.assertIn("accept its superseder instead", result.stderr)
+
+    def test_accept_refusal_names_the_actual_state(self):
+        """An unclassifiable Status body refuses with a message that names
+        what was found — the diagnosis cost that produced issue #123."""
+        self._seed("_TODO: decide this._")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("Unknown", result.stderr)
+
+    def test_blank_frontmatter_status_falls_through_to_prose(self):
+        """A stamped-but-empty `status:` carries no state, so it must not be
+        read as one — the classifier falls through to prose. Pins the
+        docstring claim on `_frontmatter_status`; without it the
+        blank-vs-absent distinction is only asserted in a comment, which is
+        the artifact class that filed this bug."""
+        path = self.adrs_dir / "adr-0001-blank-status.md"
+        path.write_text(
+            "---\nstatus:\ndependencies: []\nlast_verified:\n---\n\n"
+            "# ADR-0001: Blank Status\n\n"
+            f"## Status\n\nProposed (2026-07-22){TRAILING_CLAUSE}\n\n"
+            "## Context\n\nSample context paragraph for the ADR.\n"
+        )
+        # Prose says Proposed, so accept proceeds — a blank `status:` read as
+        # a state would classify Unknown and refuse.
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("status: Accepted", path.read_text())
+
+    # ---- ruling 3: every reader is frontmatter-first ----
+
+    def test_index_renders_frontmatter_status_over_stale_prose(self):
+        """The README index must not advertise a stale prose state."""
+        self._seed("Proposed (2026-07-22)", frontmatter_status="Accepted")
+        result = run_adr("index", str(self.adrs_dir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        index = (self.adrs_dir / "README.md").read_text()
+        entry = next(line for line in index.splitlines()
+                     if "adr-0001-trailing-text.md" in line)
+        # State comes from frontmatter, and NO date is published: the prose
+        # date (2026-07-22) belongs to the stale `Proposed` state, and
+        # `last_verified` (2026-01-02) is a freshness stamp, not an
+        # acceptance date — a plausible wrong date is worse than none.
+        # Scoped to this ADR's bullet; the fixture README names other ADRs.
+        self.assertIn("(Accepted)", entry)
+        self.assertNotIn("Proposed", entry,
+                         "index must read frontmatter, not stale prose")
+        self.assertNotIn("2026-07-22", entry,
+                         "index must not pair a frontmatter state with the "
+                         "stale prose date")
+        self.assertNotIn("2026-01-02", entry,
+                         "index must not pass `last_verified` off as an "
+                         "acceptance date")
+
+    def test_resolve_todo_accepts_frontmatter_accepted_with_stale_prose(self):
+        """`resolve-todo`'s Accepted check is frontmatter-first."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Accepted")
+        todo = Path(self.tmpdir) / "docs" / "refinement-todo.md"
+        write_refinement_todo(todo)
+        result = run_adr("resolve-todo", "0001", "Hook strictness",
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("~~Decision: Hook strictness profiles~~",
+                      todo.read_text())
+
+    def test_supersede_gate_reads_frontmatter_not_prose(self):
+        """Frontmatter `Proposed` beats a stale prose `Accepted` line."""
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Proposed",
+                   number="0001", slug="old-one")
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Accepted",
+                   number="0002", slug="new-one")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("Proposed", result.stderr)
+
+    def test_supersede_refuses_when_prose_anchor_is_missing(self):
+        """ADR-0046 ruling 5: the `Superseded by` link is load-bearing, so
+        supersede refuses (rather than silently dropping it) when the prose
+        carries no canonical `Accepted (date)` anchor."""
+        old = self._seed(f"Accepted (2026-01-02){TRAILING_CLAUSE}",
+                         frontmatter_status="Accepted",
+                         number="0001", slug="old-one")
+        new = self._seed("Accepted (2026-01-02)",
+                         frontmatter_status="Accepted",
+                         number="0002", slug="new-one")
+        before_old, before_new = old.read_text(), new.read_text()
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("adr-0001-old-one.md", result.stderr)
+        # Assert the ANCHOR-specific refusal, not just "Status": the pre-fix
+        # strict reader refused this same input for an entirely different
+        # reason (`_classify_status` → Unknown → "Status is not Accepted"),
+        # so a looser assertion passes with or without ruling 5 in place.
+        self.assertIn("no canonical", result.stderr)
+        self.assertIn("anchor the supersession link", result.stderr)
+        self.assertIn("ruling 5", result.stderr)
+        # Refusal is atomic: neither file was touched.
+        self.assertEqual(old.read_text(), before_old)
+        self.assertEqual(new.read_text(), before_new)
+
+    def test_supersede_refusal_points_at_the_accept_commit_not_metadata(self):
+        """ADR-0046 "Why not Option C" residual: the deferred prose fix needs
+        the acceptance date, and the record no longer holds it — the prose
+        date belongs to the pre-acceptance state.
+
+        The refusal must send the operator to the accept commit and must NOT
+        offer `last_verified` as the answer: that field is a *freshness*
+        stamp (ADR-0024's `reaffirm` refreshes it), so on a reaffirmed ADR it
+        is a plausible-looking wrong date, and this repair writes into an
+        immutable record."""
+        self._seed(f"Accepted (2026-01-02){TRAILING_CLAUSE}",
+                   frontmatter_status="Accepted",
+                   number="0001", slug="old-one")
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Accepted",
+                   number="0002", slug="new-one")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("git log", result.stderr)
+        self.assertIn("adr-0001-old-one.md", result.stderr)
+        self.assertIn("freshness field, not an acceptance date",
+                      result.stderr)
+        # The seeded frontmatter carries `last_verified: 2026-01-02`. It must
+        # not be presented as the line to write.
+        self.assertNotIn("last_verified: 2026-01-02", result.stderr)
+        # The pathspec must carry its directory, not just the basename: git
+        # resolves pathspecs relative to cwd, so `-- adr-0001-old-one.md` from
+        # a repo root matches nothing and exits 0 — output indistinguishable
+        # from "there is no accept commit". This is the defect the printed
+        # command shipped with once; assert the shape, not just the verb.
+        # `.resolve()` because `adr.py` resolves the decisions dir before
+        # building the path (and on macOS the temp dir is symlinked under
+        # /private, so the unresolved form would not match).
+        expected = (self.adrs_dir / "adr-0001-old-one.md").resolve()
+        self.assertIn(f"-- '{expected}'", result.stderr)
+        self.assertIn(os.sep, str(expected))
+        # `-S` matches every commit that changed the string's count, so the
+        # ordering has to be pinned or "the first line" is wrong.
+        self.assertIn("--reverse", result.stderr)
+
+    def test_supersede_refuses_when_the_new_adr_lacks_the_anchor(self):
+        """Ruling 5 guards BOTH ADRs, and the new-ADR branch needs its own
+        test: without it, the old ADR gains `Superseded by …` plus
+        `status: Superseded` while the new ADR never gains
+        `Supersedes ADR-NNNN` — exactly the information loss ruling 5 exists
+        to prevent. Mutating this branch away leaves the rest of the suite
+        green, so the symmetric case is not covered by the old-ADR test."""
+        old = self._seed("Accepted (2026-01-02)",
+                         frontmatter_status="Accepted",
+                         number="0001", slug="old-one")
+        new = self._seed(f"Accepted (2026-01-02){TRAILING_CLAUSE}",
+                         frontmatter_status="Accepted",
+                         number="0002", slug="new-one")
+        before_old, before_new = old.read_text(), new.read_text()
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        # The refusal names the NEW ADR — the one actually missing an anchor.
+        self.assertIn("adr-0002-new-one.md", result.stderr)
+        self.assertIn("anchor the supersession link", result.stderr)
+        # Atomic across both files: the old ADR must not have been written
+        # even though its own anchor was fine.
+        self.assertEqual(old.read_text(), before_old)
+        self.assertEqual(new.read_text(), before_new)
+
+    # ---- the comment/code disagreement that filed the issue ----
+
+    def test_proposed_rewrite_pattern_stays_canonical_only(self):
+        """Issue #123's comment/code disagreement, pinned behaviourally
+        rather than by matching comment text.
+
+        `_STATUS_PROPOSED_RE` drives the prose *rewrite*, so it must keep
+        refusing trailing content: a pattern that matched it would either
+        drop the authored clause or emit the self-contradictory
+        `Accepted (today) — awaiting owner acceptance`. Leniency belongs in
+        the gate (`_adr_status`), not in this pattern."""
+        self.assertFalse(
+            self.adr._STATUS_PROPOSED_RE.search(
+                f"Proposed (2026-07-22){TRAILING_CLAUSE}"),
+            "the rewrite pattern must stay canonical-only",
+        )
+        self.assertTrue(
+            self.adr._STATUS_PROPOSED_RE.search("Proposed (2026-07-22)"),
+            "the rewrite pattern must still match the canonical form",
+        )
+        # The gate, by contrast, is lenient about the same line.
+        self.assertEqual(
+            self.adr._adr_status(
+                "# ADR-0001: x\n", f"\nProposed (2026-07-22){TRAILING_CLAUSE}\n"),
+            "Proposed",
+        )
 
 
 # ---------- Supersede SKILL.md surface (slice 005-02 AC #5) ----------

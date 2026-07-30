@@ -582,3 +582,40 @@ Runner adapters must preserve the distinction between an implicit project target
 ## Bug 011: correct withdrawn prose by sweeping, not by chasing cited lines
 When a fix withdraws a documented rationale, correcting only the lines a reviewer names leaves siblings behind — a stale `spec.md` constraint survived three consecutive review passes that way. Grep the withdrawn *phrasing* across `docs/` instead (here: "repeat runs stay quiet", "dedup-against-recorded", "until recorded", "then pruned"). Two traps make this worse than ordinary doc drift: prose under a heading like "Design constraints (locked in, all phases)" reads as binding and can license re-introducing the bug, and `workflow.py status-board` *preserves* the Notes column across regeneration, so a stale note there never self-corrects.
 
+
+## Bug 013: a field's meaning lives in its readers, not its writers
+Three lessons from one gate, in ascending order of how easy they are to repeat.
+
+**A regex that both gates and transforms exports the transform's strictness
+into the gate**, where it reads as an arbitrary format rule. `cmd_accept`'s
+pattern legitimately needed an exact `Proposed (YYYY-MM-DD)` match to *rewrite*
+the line, and that requirement leaked into the *decision to proceed*. When one
+pattern serves both roles the tolerant read and the exact rewrite want different
+patterns — and a comment claiming otherwise ("or with extra trailing content",
+never true) is the tell that the two roles were never separated.
+
+**Do not infer a field's semantics from its provenance.** Fixing this bug, the
+implementer needed an acceptance date, found that only `cmd_accept` writes
+`last_verified` in code, and concluded it *is* the acceptance date. It is not: it
+is a freshness stamp. [ADR-0024](../decisions/adr-0024-reference-reframe.md)'s
+`reaffirm` disposition refreshes it as a documented judgment step (no code path
+to grep), `workflow.py`'s staleness check reads it as "verified N days ago", and
+eight prose-`Proposed` ADRs already carry a filled value. The grep answered
+"who writes this?" while the question was "what does this mean?" — and a field's
+contract lives in its defining ADR and in what *reads* it. The near-miss cost:
+a plausible wrong date published in the README index and offered to a human to
+write into an immutable record. **A plausible wrong value is worse than an
+absent one**, because nothing about it looks wrong; the diverged index entry now
+publishes no date at all.
+
+**Run the remediation command you print.** The refusal message told the operator
+to recover the date with `git log … -- <basename>`. Git resolves pathspecs
+relative to cwd, so from a repo root it matched nothing and exited 0 — output
+indistinguishable from "there is no such commit". An error message is a
+deliverable; an unexecuted one is an untested code path with a human on the
+other end.
+
+**Process note:** the frame-critique earned its cost here, but only because it
+ran four times. Rounds 1–3 each found something verifiable, and round 2 refuted
+round 1's *fix* rather than the original design — an adversarial pass is worth
+re-running against your own repairs, not just against the initial draft.

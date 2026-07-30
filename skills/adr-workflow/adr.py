@@ -898,10 +898,19 @@ def _find_adr_by_number(adrs_dir: Path, number: str) -> Path:
     return matches[0]
 
 
-# Match a Status line body of `Proposed (YYYY-MM-DD)` (or with extra trailing
-# content). Captures the date so we can preserve formatting if needed.
+# Match a *canonical* Status line body — exactly `Proposed (YYYY-MM-DD)`,
+# nothing after the date. Deliberately strict: this pattern drives the prose
+# REWRITE (`Proposed (…)` → `Accepted (today)`), and a looser pattern would
+# either drop authored trailing text or produce the self-contradictory
+# `Accepted (today) — awaiting owner acceptance` (issue #123).
+#
+# It is NOT the accept gate. Per ADR-0046, `cmd_accept` gates on the
+# classified state (frontmatter-first) and uses this pattern only to decide
+# whether the prose line is safe to rewrite; a non-canonical line is left
+# exactly as authored. Groups are non-capturing: the rewrite substitutes the
+# whole line, so no caller reads the state or the date back out of the match.
 _STATUS_PROPOSED_RE = re.compile(
-    r"(?m)^(Proposed)[ \t]*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\)[ \t]*$"
+    r"(?m)^(?:Proposed)[ \t]*\((?:[0-9]{4}-[0-9]{2}-[0-9]{2})\)[ \t]*$"
 )
 
 
@@ -948,8 +957,74 @@ def _gate_frame_critique(adrs_dir: Path, adr_path: Path, number: str) -> None:
         )
 
 
+def _frontmatter_status(adr_text: str) -> str:
+    """The ADR's canonical `status:` frontmatter value, or `''` when the
+    field is absent **or present but blank**.
+
+    ADR-0046 ruling 1 (carried forward from ADR-0026): where this field
+    carries a value it decides the ADR's lifecycle state, and the value is
+    compared exactly and case-sensitively. Collapsing blank-to-absent is
+    deliberate — a stamped-but-empty `status:` carries no state, so callers
+    fall through to the prose classifier rather than reading `''` as a
+    lifecycle value. Note this is *not* identical to
+    `workflow.py::_lookup_adr_accepted`, which branches on the field's
+    presence; the exact-match discipline is shared, the blank handling is
+    not."""
+    fields, _ = _parse_frontmatter(adr_text)
+    value = fields.get("status", "")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _adr_status(adr_text: str, section_body: str) -> str:
+    """Classify an ADR's lifecycle state **frontmatter-first**
+    (ADR-0046 ruling 3).
+
+    Prose is consulted only as the legacy fallback, for ADRs authored
+    before spec 073 started stamping `status:`. Because prose is a
+    best-effort mirror that may lag the frontmatter (ruling 2), no gate or
+    reader in this module may take the state from prose while a `status:`
+    field exists — that is what keeps divergence cosmetic rather than
+    behaviour-changing. (`_classify_status` is defined in the supersede
+    section below; both are module-level, so the order is immaterial.)"""
+    return _frontmatter_status(adr_text) or _classify_status(section_body)
+
+
+def _first_nonempty_line(section_body: str) -> str:
+    for raw_line in section_body.splitlines():
+        if raw_line.strip():
+            return raw_line.strip()
+    return ""
+
+
+def _note_stale_prose_status(adr_path: Path, section_body: str,
+                             expected: str) -> None:
+    """ADR-0046 ruling 2: the prose Status line was not canonical, so it was
+    left exactly as authored. Name the file, the surviving line, and the
+    value it should carry, so the agent can reconcile the prose."""
+    found = _first_nonempty_line(section_body) or "(empty)"
+    sys.stderr.write(
+        f"note: {adr_path.name} frontmatter is now `status: Accepted`, but "
+        f"its prose `## Status` line is not a canonical "
+        f"`Proposed (YYYY-MM-DD)` line — the only shape the rewrite can "
+        f"safely replace — so it was left untouched:\n"
+        f"    {found}\n"
+        f"Update it to `{expected}`. Deterministic tooling does not rewrite "
+        f"prose it cannot fully parse (ADR-0046: frontmatter is "
+        f"authoritative, prose is a best-effort mirror).\n"
+    )
+
+
 def cmd_accept(adrs_dir: Path, number: str) -> Path:
-    """Flip the Status from Proposed → Accepted (today's date)."""
+    """Flip the Status from Proposed → Accepted (today's date).
+
+    ADR-0046 (supersedes ADR-0026 ruling 2): the flip is gated on the ADR's
+    *classified* state — frontmatter first, lenient prose classifier as the
+    legacy fallback — and never on prose formatting. Frontmatter
+    `status: Accepted` is stamped unconditionally; the prose `## Status`
+    line is rewritten only when it is canonical, and is otherwise left
+    exactly as authored with a touch-up note on stderr. Prose and
+    frontmatter may therefore be briefly out of step (a deliberate,
+    recorded trade — every reader here is frontmatter-first)."""
     adr_path = _find_adr_by_number(adrs_dir, number)
 
     # Slice 064-05: gate the flip on a passing frame-critique verdict BEFORE
@@ -957,41 +1032,55 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
     _gate_frame_critique(adrs_dir, adr_path, number)
 
     text = adr_path.read_text()
+    status_end, section_end, section_body = _status_section_body(
+        text, adr_path.name,
+    )
 
-    # Scope the search to the `## Status` section only.
-    status_match = re.search(r"(?m)^##\s+Status\s*$", text)
-    if not status_match:
-        raise AdrError(f"ADR has no '## Status' section: {adr_path.name}")
-    rest = text[status_match.end():]
-    next_h2 = re.search(r"(?m)^##\s", rest)
-    section_end = status_match.end() + (next_h2.start() if next_h2 else len(rest))
-    section_body = text[status_match.end():section_end]
-
-    if not _STATUS_PROPOSED_RE.search(section_body):
-        # Distinguish already-Accepted / Superseded for a useful error message.
-        if re.search(r"(?m)^Accepted\s*\(", section_body):
+    state = _adr_status(text, section_body)
+    if state != "Proposed":
+        if state == "Accepted":
             raise AdrError(
-                f"ADR {adr_path.name} is already Accepted; refusing to re-accept "
-                "(ADRs are immutable — supersede instead)"
+                f"ADR {adr_path.name} is already Accepted; refusing to "
+                "re-accept (ADRs are immutable — supersede instead)"
+            )
+        if state == "Superseded":
+            raise AdrError(
+                f"ADR {adr_path.name} is Superseded; refusing to accept a "
+                "superseded decision — accept its superseder instead."
             )
         raise AdrError(
-            f"ADR {adr_path.name} Status is not 'Proposed (...)'. "
-            "Refusing to flip; only Proposed → Accepted is supported in this slice."
+            f"ADR {adr_path.name} is not Proposed (state: {state}); refusing "
+            "to flip — only Proposed → Accepted is supported. State is read "
+            "from the frontmatter `status:` field, falling back to the prose "
+            "`## Status` section for legacy ADRs."
         )
 
-    new_body = _STATUS_PROPOSED_RE.sub(
-        lambda _m: f"Accepted ({_today()})", section_body, count=1
-    )
-    new_text = text[:status_match.end()] + new_body + text[section_end:]
+    # Prose is best-effort (ADR-0046 ruling 2): rewrite the Status line ONLY
+    # when it is canonical. A decorated / hand-edited line is left byte-
+    # identical rather than truncated or mangled into `Accepted (today) —
+    # <stale clause>` (issue #123).
+    accepted_line = f"Accepted ({_today()})"
+    prose_is_canonical = _STATUS_PROPOSED_RE.search(section_body) is not None
+    if prose_is_canonical:
+        new_body = _STATUS_PROPOSED_RE.sub(
+            lambda _m: accepted_line, section_body, count=1
+        )
+        new_text = text[:status_end] + new_body + text[section_end:]
+    else:
+        new_text = text
+
     # Slice 014-01: stamp `last_verified: <today>` in the ADR frontmatter
     # at the single point where an ADR becomes decision-of-record. Adds
     # the frontmatter block if absent; updates the field if present.
     new_text = _set_frontmatter_field(new_text, "last_verified", _today())
-    # Slice 073-02 (ADR-0026): stamp the canonical `status: Accepted`
-    # frontmatter field in the SAME atomic write that flips the prose to
-    # `Accepted (date)`, so frontmatter and prose cannot diverge.
+    # Spec 073-02 / ADR-0046 ruling 2: the canonical `status: Accepted`
+    # stamp is unconditional, and still lands in the SAME single atomic
+    # write as any prose mutation — no second write pass.
     new_text = _set_frontmatter_field(new_text, "status", "Accepted")
     atomic_write_text(adr_path, new_text)
+
+    if not prose_is_canonical:
+        _note_stale_prose_status(adr_path, section_body, accepted_line)
     return adr_path
 
 
@@ -1074,8 +1163,11 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
         new_text, new_path.name,
     )
 
-    old_status = _classify_status(old_body)
-    new_status = _classify_status(new_body)
+    # ADR-0046 ruling 3: gate on the frontmatter-canonical state, with the
+    # prose classifier as the legacy fallback — a prose line that lags the
+    # frontmatter must not decide whether a supersession is allowed.
+    old_status = _adr_status(old_text, old_body)
+    new_status = _adr_status(new_text, new_body)
 
     if old_status != "Accepted":
         if old_status == "Proposed":
@@ -1126,30 +1218,32 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     # Accepted (date) line.
     new_old_body = _insert_after_accepted(old_body, superseded_by_line)
     if new_old_body == old_body:
-        # Defensive: should not happen because we already verified
-        # _STATUS_ACCEPTED_RE matches. Raise rather than write a no-op.
-        raise AdrError(
-            f"failed to locate the Accepted line in {old_path.name} "
-            f"Status block; refusing to mutate."
-        )
+        # ADR-0046 ruling 5: unlike `accept`, supersede does not rewrite a
+        # line — it INSERTS the `Superseded by …` link, which is load-bearing
+        # (both `_classify_status` and human navigation read it). With no
+        # canonical `Accepted (YYYY-MM-DD)` anchor there is nowhere to put
+        # it, and dropping it silently would lose information — so refuse,
+        # before either file is written.
+        raise AdrError(_no_anchor_message(old_path, "old"))
     new_old_text = (
         old_text[:old_status_end] + new_old_body + old_text[old_section_end:]
     )
-    # Slice 073-02 (ADR-0026): stamp the OLD ADR's canonical
-    # `status: Superseded` frontmatter field in the SAME atomic write that
-    # appends the prose `Superseded by …` line — sync-locked so prose and
-    # frontmatter cannot diverge. The NEW (superseding) ADR's status is NOT
-    # touched here: it retains `status: Accepted` (new-style ADRs carry it
-    # from `accept`; legacy ones grandfather via the reader's prose
-    # fallback). No backfill (ADR-0026 Open question).
+    # Slice 073-02: stamp the OLD ADR's canonical `status: Superseded`
+    # frontmatter field in the SAME atomic write that appends the prose
+    # `Superseded by …` line. Prose and frontmatter stay sync-locked *here*
+    # — but that is ADR-0046 ruling 5's doing, not ADR-0026's surviving
+    # invariant: supersede refuses without a canonical anchor (above), so by
+    # this line the prose is known-parseable and the pairing is reachable.
+    # `accept` has no such guarantee and may diverge (ruling 2).
+    # The NEW (superseding) ADR's status is NOT touched here: it retains
+    # `status: Accepted` (new-style ADRs carry it from `accept`; legacy ones
+    # grandfather via the reader's prose fallback). No backfill (carried
+    # forward as an ADR-0046 Open question).
     new_old_text = _set_frontmatter_field(new_old_text, "status", "Superseded")
 
     new_new_body = _insert_after_accepted(new_body, supersedes_line)
     if new_new_body == new_body:
-        raise AdrError(
-            f"failed to locate the Accepted line in {new_path.name} "
-            f"Status block; refusing to mutate."
-        )
+        raise AdrError(_no_anchor_message(new_path, "new"))
     new_new_text = (
         new_text[:new_status_end] + new_new_body + new_text[new_section_end:]
     )
@@ -1158,6 +1252,48 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     atomic_write_text(old_path, new_old_text)
     atomic_write_text(new_path, new_new_text)
     return old_path, new_path
+
+
+def _no_anchor_message(adr_path: Path, role: str) -> str:
+    """Refusal text for ADR-0046 ruling 5 — the ADR is Accepted per its
+    canonical state, but its prose `## Status` carries no canonical
+    `Accepted (YYYY-MM-DD)` line to anchor the supersession link to.
+
+    The message names where the acceptance date can be recovered, because
+    the record itself no longer holds it: the prose date belongs to the
+    stale state, and `last_verified` is a *freshness* field (ADR-0024's
+    `reaffirm` refreshes it), not an acceptance date. Pointing at the accept
+    commit is the only honest answer — suggesting `last_verified` would
+    invite a plausible wrong date into an immutable record.
+
+    The pathspec is `adr_path`, not its basename: git resolves pathspecs
+    relative to cwd, so a bare filename matches nothing from a repo root and
+    exits 0 — output indistinguishable from "there is no accept commit".
+    `--reverse` puts the oldest matching commit first, because `-S` matches
+    every commit that changed the string's occurrence count (a later prose
+    mention counts), and the acceptance is the earliest of them.
+
+    Reachable **only** when frontmatter supplied the Accepted state. A
+    prose-only ADR classifies Accepted through `_STATUS_ACCEPTED_RE`, which is
+    the same pattern `_insert_after_accepted` searches — so if it classified
+    Accepted, the anchor exists by construction and this refusal cannot
+    fire."""
+    return (
+        f"refusing to supersede: {role} ADR {adr_path.name} is Accepted, but "
+        f"its prose `## Status` section has no canonical "
+        f"`Accepted (YYYY-MM-DD)` line to anchor the supersession link to. "
+        f"Unlike `accept`, supersede cannot fall back to a frontmatter-only "
+        f"write — the `Superseded by …` / `Supersedes …` lines live in prose "
+        f"and are load-bearing (ADR-0046 ruling 5). Put the Status line in "
+        f"canonical form (move any trailing text to the paragraph below it) "
+        f"and re-run. The acceptance date is not in the record: the prose "
+        f"date belongs to the pre-acceptance state, and `last_verified` is a "
+        f"freshness field, not an acceptance date. Recover it from the "
+        f"accept commit — the first line is the one you want:\n"
+        f"    git log --reverse -S'status: Accepted' --format='%as %h' "
+        f"-- '{adr_path}'\n"
+        f"Neither ADR was modified."
+    )
 
 
 def _insert_after_accepted(section_body: str, new_line: str) -> str:
@@ -1191,6 +1327,35 @@ _SUPERSEDED_BY_RE = re.compile(
 
 
 def _extract_status_and_date(adr_text: str) -> tuple:
+    """Returns (status, date) for the README index and `resolve-todo`'s
+    Accepted check — **frontmatter-first** (ADR-0046 ruling 3).
+
+    Where frontmatter carries a `status:` field it decides the state; the
+    prose parse below supplies only the date. When the two disagree — the
+    divergence ADR-0046 ruling 2 permits — the prose date belongs to the
+    *stale* state, so pairing it with the frontmatter state would advertise
+    a combination that never existed. **No date is published for a diverged
+    ADR** (the renderer omits the date and shows the state alone).
+
+    There is deliberately no substitute date. `last_verified` is the obvious
+    candidate and the wrong one: it is a *freshness* field, not an
+    acceptance date — ADR-0024's `reaffirm` disposition refreshes it and
+    `workflow.py`'s staleness check reads it as "verified N days ago", so on
+    a reaffirmed ADR it is simply a later date that would read as a genuine
+    acceptance date. A plausible wrong date is worse than no date.
+
+    ADRs with no `status:` field resolve entirely from prose, as before.
+    """
+    prose_status, prose_date = _extract_prose_status_and_date(adr_text)
+    fm_status = _frontmatter_status(adr_text)
+    if not fm_status:
+        return (prose_status, prose_date)
+    if fm_status == prose_status:
+        return (fm_status, prose_date)
+    return (fm_status, "")
+
+
+def _extract_prose_status_and_date(adr_text: str) -> tuple:
     """Returns (status, date) extracted from the `## Status` section.
 
     - If the body contains a `Superseded by [ADR-NNNN](...) (date)` line,
