@@ -537,7 +537,7 @@ rather than quietly deleted, because an over-claimed gap and an over-claimed
 guarantee are the same failure.
 
 The real gap is narrower: the **floor** checks — `permissions-deny` and
-`gitignore-secret` — live in `_SCAFFOLD_CHECKS`, which is gated on
+`gitignore-floor` — live in `_SCAFFOLD_CHECKS`, which is gated on
 `with_machinery`, while both artifacts are now written in plugin mode. Probed:
 a default scaffold produces `.claude/settings.json` and two `jig
 secret-ignore` blocks in `.gitignore`, and neither is verified. Note the
@@ -597,7 +597,7 @@ a wrong gap-report is the more insidious of the two because it reads as candour.
 Corrected in place rather than deleted, so the correction is visible.
 
 The real gap is narrower and now stated as such: the two **floor** checks
-(`permissions-deny`, `gitignore-secret`) sit inside the `with_machinery`-gated
+(`permissions-deny`, `gitignore-floor`) sit inside the `with_machinery`-gated
 `_SCAFFOLD_CHECKS` while both artifacts are written in plugin mode — and the
 `.gitignore` half has been written on that path since **052-02**, so this
 predates the OQ1 fold-in and is not a gap this slice opened.
@@ -616,6 +616,43 @@ Last stale framing: `DefaultOffMachineryTests`' docstring still called plugin
 mode "the dormant copy path". It was 016-01's default, dormant under 016-03, and
 is the default again — §19's lesson (the sweep does not reach the test suite's
 own prose) one class further down the same file.
+
+**21. Round 11 — the Q2 fix was a no-op on the only path that ships.**
+
+OQ3 was recorded RESOLVED, the ADR claimed "the two hosts end up symmetric", and
+every Codex test passed. All of it was true *of the source tree*, and false of
+the shipped plugin.
+
+`build_codex_plugin.py` pre-rewrote the packaged `templates/**/*.md.template`
+through the **in-repo** transform at build time. `scaffold()`'s mode gate keys on
+`${CLAUDE_PLUGIN_ROOT}/skills/` — already gone from a pre-rewritten template — so
+the gate matched nothing and the project-local shape survived. **Probed:** a
+plugin-mode scaffold run from `hosts/codex/plugins/jig/` emits
+`docs/workflow.md` citing `${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-*` while
+`.codex/skills/` is absent — precisely the defect §7 recorded and OQ3 claimed
+closed, still live on the one path a real Codex user takes.
+
+The Claude package does not have this problem because it ships templates
+**canonical** and lets `scaffold()` transform them per mode. The Codex build was
+transforming them *twice* — once at build time (mode-blind, and therefore wrong)
+and again in `_copy_codex_templates` at scaffold time (mode-aware, and correct).
+Fix: drop the build-time rewrite. The transform is not lost, it moves to where it
+can tell the modes apart.
+
+**This is the third instance in one slice of the same shape:** source is
+transformed before shipping, so a test on the source is not a test of the
+contract. §13 found it in the printed strings, §17 in `SKILL.md` bodies, and now
+§21 in `templates/`. Each time the source read correctly. Each time the fixture
+had to move to the shipped artifact to have teeth — `test_codex_docs_correct_
+when_scaffolded_from_the_shipped_package` scaffolds from
+`hosts/codex/plugins/jig/` in both modes and asserts the cited tree matches the
+tree actually created. Verified red against the packaging that shipped.
+
+**The generalisable rule, now earned rather than asserted:** wherever a build
+step rewrites an artifact, the *build output* is the contract. A test that reads
+the repo copy is testing an intermediate. Everything jig ships to Codex goes
+through such a step, so this will keep recurring until Codex fixtures default to
+the package.
 
 ### Reconciliation sweep
 

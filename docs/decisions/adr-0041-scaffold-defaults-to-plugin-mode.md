@@ -403,3 +403,14 @@ not an invention for this slice: jig already depends on Codex expanding it for
 every command in the packaged `hooks/hooks.json`, and `build_codex_plugin.py`
 renders the plugin's own SKILL.md bodies against it. The two hosts end up
 symmetric — in-repo names the copied tree, plugin mode names the plugin root.
+
+**Second-order fix, found by compliance round 5 and worth recording because the
+first fix looked complete:** the mode gate alone was a no-op on the path that
+matters. `build_codex_plugin.py` pre-rewrote the *packaged* templates to the
+in-repo shape at build time, and `scaffold()`'s gate keys on
+`${CLAUDE_PLUGIN_ROOT}/skills/` — already gone from a pre-rewritten template.
+So a scaffold run from an **installed Codex plugin** still emitted docs citing a
+`.codex/skills/` tree it never created, while every source-tree test passed. The
+Codex package now ships templates canonical, exactly as the Claude package does,
+and the transform happens where it can be mode-aware. Pinned by a fixture that
+scaffolds from the shipped package rather than the source tree.

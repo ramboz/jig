@@ -2035,6 +2035,48 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
         self.assertFalse((self.target / ".codex" / "skills").exists())
 
+    def test_codex_docs_correct_when_scaffolded_from_the_shipped_package(self):
+        """OQ3's mode gate must hold on the path real users take.
+
+        Every other Codex test runs `scaffold.py` from the SOURCE tree, where
+        `templates/` is canonical. The shipped Codex package used to
+        pre-rewrite its templates to the in-repo shape at build time, which
+        `scaffold()` could not undo — its gate keys on
+        `${CLAUDE_PLUGIN_ROOT}/skills/`, already gone from a pre-rewritten
+        template. So the gate was a no-op exactly where it mattered, and a
+        plugin-mode scaffold from a real Codex install emitted docs citing a
+        `.codex/skills/` tree it never created.
+
+        Source-tree tests passed throughout. Second instance in this slice of
+        "source is transformed before shipping, so a test on the source is not
+        a test of the contract" — the first was the SKILL.md body."""
+        pkg = REPO_ROOT / "hosts" / "codex" / "plugins" / "jig"
+        for mode_flag, expect, forbid in (
+            ("--plugin-only", "${PLUGIN_ROOT}/skills/",
+             "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/"),
+            ("--in-repo", "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/",
+             "${PLUGIN_ROOT}/skills/"),
+        ):
+            with self.subTest(mode=mode_flag):
+                target = Path(self.tmpdir) / f"pkg{mode_flag}"
+                target.mkdir()
+                r = subprocess.run(
+                    [sys.executable,
+                     str(pkg / "skills" / "scaffold-init" / "scaffold.py"),
+                     "--host", "codex", "--solo", mode_flag, str(target)],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                workflow = (target / "docs" / "workflow.md").read_text()
+                self.assertIn(expect, workflow)
+                self.assertNotIn(forbid, workflow)
+                # The cited tree must match what was actually created.
+                self.assertEqual(
+                    (target / ".codex" / "skills").is_dir(),
+                    mode_flag == "--in-repo",
+                    "docs must cite a tree the scaffold actually creates",
+                )
+
     def test_codex_in_repo_docs_still_use_project_local_paths(self):
         """The in-repo counterpart of the test above — slice 099-01 gated the
         Codex rewrite on mode, so pin the OTHER side of that gate. Here the

@@ -609,8 +609,11 @@ def run_completion_summary(
 
     Mode-awareness (the correctness nuance): the machinery checks (`skills` /
     `skill-closure` / `agents` / `hooks` / `settings` / `manifest` + the
-    security-floor trio) validate `.claude/` artifacts that exist ONLY in
-    `--with-machinery` (in-repo) mode. In `--plugin-only` mode that machinery
+    security-floor trio) validate `.claude/` artifacts. Most exist only in
+    `--with-machinery` (in-repo) mode — but `gitignore-floor` (since 052-02)
+    and `permissions-deny` (since 099-01) are now written in plugin mode too,
+    so gating those two here under-checks the default path. Deferred, with a
+    resolution trigger, in `docs/refinement-todo.md`. In `--plugin-only` mode that machinery
     is expected to come from the installed plugin rather than the target, so running those checks
     would false-fail a perfectly good plugin-only scaffold. They are therefore
     included only when `with_machinery=True`. The seed presence check (AC #3)

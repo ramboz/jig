@@ -202,15 +202,21 @@ def _copy_templates(source_root: Path, output_dir: Path) -> None:
             continue
         dst = templates_dst / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if entry.name.endswith(".md.template"):
-            dst.write_text(
-                scaffold_mod.CodexScaffoldRenderer.rewrite_skill_md_paths(
-                    entry.read_text()
-                ),
-                encoding="utf-8",
-            )
-        else:
-            dst.write_bytes(entry.read_bytes())
+        # Slice 099-01 (ADR-0041 OQ3): ship templates CANONICAL, exactly as the
+        # Claude package does. Pre-rewriting them here baked in the *in-repo*
+        # shape (`.codex/skills/jig-<name>/`), which `scaffold()` cannot undo —
+        # its mode gate keys on `${CLAUDE_PLUGIN_ROOT}/skills/`, already gone
+        # from a pre-rewritten template. That made the mode gate a no-op for
+        # the one path that matters (a scaffold run FROM an installed Codex
+        # plugin), so plugin-mode docs cited a `.codex/skills/` tree the
+        # scaffold never creates — the exact defect OQ3 exists to fix.
+        #
+        # The transform is not lost, it moves to where it can be mode-aware:
+        # `scaffold()` applies it per mode to rendered docs, and
+        # `_copy_codex_templates` applies it when copying templates into
+        # `.codex/templates/` for in-repo. It was being run twice; the
+        # build-time copy was the one that could not tell the modes apart.
+        dst.write_bytes(entry.read_bytes())
 
 
 def _render_codex_agent_templates(source_root: Path, output_dir: Path) -> None:
