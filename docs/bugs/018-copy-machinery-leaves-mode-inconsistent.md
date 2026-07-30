@@ -2,7 +2,6 @@
 status: FIXING
 tier: standard
 severity: medium
-claimed_by: claude/bug-copy-machinery-mode
 regression_test: skills/migrate/test_migrate.py::PluginModeConversionTests
 main_repro_checked_at: 2026-07-30
 main_repro_ref: a03f6c8
@@ -256,3 +255,7 @@ to read the rendered artifact.
 ## Main recheck
 
 - 2026-07-30 - `00c3333` -> reproduces: scaffold --plugin-only then copy-machinery: scaffold_mode stays plugin-only; docs/workflow.md keeps 3 CLAUDE_PLUGIN_ROOT citations
+
+## Release log
+
+- 2026-07-30 - released claim from claude/bug-copy-machinery-mode: branch claude/bug-copy-machinery-mode was deleted after PR #145 merged; no session holds this bug. Part 1 (manifest flip) is on main; the retroactive bug-review and craft passes returned needs-changes on part 2 (docs advisory never fires on the Codex host), so the bug stays FIXING and is free for pickup.
