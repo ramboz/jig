@@ -836,3 +836,34 @@ which is the only kind that works on a rule about restraint.
 | `docs/memory/learnings.md` | `updated` | "Scaffold doc templates render into two install shapes" gotcha said "the default in-repo scaffold"; now names plugin mode as the default and bounds in-repo to the 016-03→099-01 interval. Missed in the first sweep — see deviation §8. |
 | `docs/decisions/README.md` / ADR index | `updated` | ADR-0041 added to the index. Index row and ordering re-resolved after the merge with `main` (ADR-0039/spec 096 landed there meanwhile); both conflicts were additive, so both sides were kept and numeric order restored **by hand** — regenerating via `adr.py index` overwrites the hand-written ADR-0041 summary with the record's first sentence. |
 | `hosts/claude/**`, `hosts/codex/**` | `updated` | Rebuilt via `scripts/build_host_packages.py`; drift guard clean. Verified both packaged `scaffold.py` + `SKILL.md` carry the change. |
+
+## Amendments
+
+### 2026-07-30 — bug 018 fixed; §16's "known and left open" no longer holds in full
+
+§16 recorded, correctly at the time, that `migrate.py copy-machinery` neither
+flipped `scaffold.json`'s `scaffold_mode` nor re-rendered the emitted docs, and
+filed that as **bug 018**. That bug is now fixed
+([#145](https://github.com/ramboz/jig/pull/145)), so the entry reads as a
+standing limitation when it is now history:
+
+- **The manifest half is closed.** `copy-machinery` flips `plugin-only` ->
+  `in-repo` after a successful copy and reports it. A project with no
+  `scaffold.json` is still left alone — it makes no mode claim to contradict.
+- **The docs half is closed by decision, not by code, and stays that way.**
+  Re-rendering `docs/workflow.md` would overwrite a file the user is invited to
+  edit. The maintainer's ruling on [#145](https://github.com/ramboz/jig/pull/145)
+  was to warn rather than rewrite, and to have the session ask the user what
+  they want. `copy-machinery` now names each stale file with its hit count and
+  the in-repo form, and writes nothing; `migrate/SKILL.md` carries the asking.
+  So the docs still cite the plugin root after conversion — by design now,
+  rather than by omission.
+
+What §16 says about *this* slice is unchanged: 099-01 widened `copy-machinery`'s
+advertised contract without widening the command, and that was the right thing
+to record here rather than fix here.
+
+Unaffected by the fix, and still open: `copy-machinery` is reached by a user who
+by definition has no plugin installed, while `migrate.py` lives inside the
+plugin. Whether the mode line should recommend this route at all belongs to this
+slice's summary line, not to bug 018.

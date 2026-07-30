@@ -5,7 +5,7 @@ severity: medium
 claimed_by: claude/bug-copy-machinery-mode
 regression_test: skills/migrate/test_migrate.py::PluginModeConversionTests
 main_repro_checked_at: 2026-07-30
-main_repro_ref: 00c3333
+main_repro_ref: a03f6c8
 main_repro_result: reproduces
 red_confirmed_at: 2026-07-30
 green_confirmed_at: 2026-07-30
@@ -16,10 +16,11 @@ escalated_to:
 
 # Bug 018: copy-machinery-leaves-mode-inconsistent
 
-> **Numbering note:** 015–017 are taken by unmerged PRs
-> [#143](https://github.com/ramboz/jig/pull/143) and
-> [#144](https://github.com/ramboz/jig/pull/144). `bug.py new` re-allocated 015
-> on a main-rooted worktree, so this record was renumbered by hand.
+> **Numbering note:** when this was filed, 015–017 were held by then-unmerged
+> PRs [#143](https://github.com/ramboz/jig/pull/143) and
+> [#144](https://github.com/ramboz/jig/pull/144), and `bug.py new` re-allocated
+> 015 on a main-rooted worktree — so this record was renumbered by hand. Both
+> PRs have since merged and 018 is confirmed free on `main`.
 
 ## Symptom
 
@@ -39,8 +40,12 @@ without a plugin, so the command is now advertised on the default path.
 
 ## Repro
 
-Filed against `main@bde9dfc`; re-verified unchanged on `main@00c3333`
-(2026-07-30) before the fix was written:
+Filed against `main@bde9dfc`; re-verified unchanged on `main@00c3333` before
+the fix was written, and again on `main@a03f6c8` (2026-07-30) after specs 099-01
+(#136) and bug 017's record (#144) landed — checked in a throwaway detached
+worktree at that ref, so the fix on this branch could not mask it. 099-01 made
+plugin mode the *default*, which widens the affected population rather than
+changing the behaviour:
 
 ```bash
 mkdir -p /tmp/cmprobe
@@ -182,6 +187,13 @@ command.
   simply did not contain the section, and nothing failed. Section moved after
   the refusal block; `test_codex_render_keeps_the_ask_before_editing_step` now
   guards the *rendered* artifact so the same silent drop cannot recur.
+- **A fixture that would have passed for the wrong reason.**
+  `test_already_in_repo_project_is_not_reflipped` built its in-repo project
+  with a bare `scaffold.py <dir>`, which was in-repo when the test was written
+  and became *plugin mode* the moment 099-01 (#136) merged. It then failed
+  loudly — but only because it asserts a negative; a differently-shaped test
+  would have gone on passing while proving nothing. Now pins `--in-repo`
+  explicitly, with a comment saying why.
 
 ## Regression test
 
@@ -202,7 +214,9 @@ form) documenting the ask-before-editing step.
 
 ## Proof
 
-Red witnessed before the fix — 5 of 14 failing on unmodified `main@00c3333`:
+Red witnessed before the fix — 5 of 14 failing on unmodified `main@00c3333`
+(the then-current main; the repro was re-confirmed on `main@a03f6c8` after the
+rebase, see Repro):
 
 ```
 FAIL: test_successful_copy_flips_scaffold_mode_to_in_repo

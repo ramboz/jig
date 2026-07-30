@@ -2831,7 +2831,10 @@ class PluginModeConversionTests(unittest.TestCase):
     def test_already_in_repo_project_is_not_reflipped(self):
         other = self.tmpdir / "inrepo"
         other.mkdir()
-        r = run_scaffold("--no-tests", str(other))
+        # `--in-repo` explicitly: since spec 099-01 / ADR-0041 plugin mode is
+        # the DEFAULT, so a bare scaffold would build the wrong fixture here
+        # and this test would pass by accident.
+        r = run_scaffold("--no-tests", "--in-repo", str(other))
         self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
         r = run_migrate("copy-machinery", str(other))
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
