@@ -1606,8 +1606,14 @@ class DefaultPluginModeTests(unittest.TestCase):
         understates a security-relevant artifact is exactly the kind of drift a
         pin catches and a reader does not."""
         skill = (REPO_ROOT / "skills" / "scaffold-init" / "SKILL.md").read_text()
-        # The sixth Q&A question exists and names the opt-in flag.
-        self.assertIn("--in-repo", skill)
+        # The sixth Q&A question must EXIST, not merely be alluded to. Asserting
+        # `--in-repo` alone was vacuous: the invocation example already contains
+        # it, so deleting the whole question left the test green.
+        self.assertRegex(skill, r"(?m)^6\. \*\*Machinery vs\. plugin\*\*")
+        self.assertIn("NOT be installed", skill,
+                      "the question must state what it is actually asking")
+        self.assertIn("plugin mode is the default", skill,
+                      "and which way skipping it resolves")
         # Output must not understate the default path: a permissions floor IS
         # seeded, and the reason it is not "machinery" must be stated.
         self.assertIn("permissions", skill.lower())

@@ -654,6 +654,28 @@ the repo copy is testing an intermediate. Everything jig ships to Codex goes
 through such a step, so this will keep recurring until Codex fixtures default to
 the package.
 
+**22. The AC #4 fixture was itself vacuous — the fixture added to close a
+vacuous-coverage finding.**
+
+§16 added `test_skill_md_documents_the_machinery_axis` because AC #4 was the one
+AC with no fixture, and prose-only ACs cannot fail. The test asserted
+`--in-repo` appears in `SKILL.md` — which the invocation example already
+guarantees, several sections above the question it was meant to pin. Deleting
+the entire sixth Q&A question left the test green. It pinned the Output half of
+AC #4 properly and the question half not at all.
+
+Now asserts the question's own heading (`^6\. \*\*Machinery vs. plugin\*\*`),
+that it states what it asks, and which way skipping resolves. Verified by
+deleting the question: red, then green on restore — the check §16 itself
+prescribed ("would this still pass if the feature were deleted?") and did not
+run on its own work.
+
+Worth stating because it is the sharper version of §16's lesson: **a fixture
+added to close a coverage gap needs the vacuity check more than ordinary tests
+do**, because it is written to satisfy a finding rather than to express a
+belief about behaviour, and "it passes" is precisely the outcome that makes it
+look finished.
+
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |
