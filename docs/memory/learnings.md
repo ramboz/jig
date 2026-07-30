@@ -802,3 +802,37 @@ before the first fix merged as `dd0d350`. Both were run retroactively in
 [#150](https://github.com/ramboz/jig/pull/150) and both returned
 `needs-changes`, which is how the Codex gap surfaced — after shipping. The
 `→ REVIEWED` evidence gate is what would have caught it before.
+
+## Bug 019: a resolver that returns half its answer makes every caller guess the rest
+
+`_common.parsing.load_slice` resolves both *what* a slice is called and *which
+file it lives in*. `review.py`'s wrapper returned the label and dropped the
+path. With the location gone, seven prompt builders had nothing left to name
+but `spec_path` — so all seven sent the read-only reviewer to `spec.md`, which
+under file-per-slice contains none of the acceptance criteria, deviation log, or
+reconciliation sweep it was being asked to verify. **When a lookup computes two
+facts and a wrapper discards one, the discarded fact gets re-invented downstream
+as a guess.** Return the whole answer, or the abstraction is a lie by omission.
+
+Two generalizable points:
+
+- **A defect that a human driver silently corrects is a defect only unattended
+  runs pay for.** Interactively you notice the path is wrong and retype it; the
+  session succeeds and nothing gets filed. The same prompt handed to an
+  unattended reviewer — explicitly told not to look beyond the files it is
+  pointed at — returns a confident verdict about the wrong file. **Anywhere a
+  human-in-the-loop routinely patches output by hand, put a test**: the loop is
+  hiding the bug, not fixing it. Bug 017 above reached the same rule from the
+  opposite direction — a defect visible only when nobody is driving. Two
+  independent bugs, one signature: **"never reproduces by hand" is a clue about
+  the observer, not a verdict on the bug.**
+- **When two layouts coexist, render the difference in exactly one place.** The
+  fix is one `_slice_source()` that decides how the reading target is phrased;
+  the builders interpolate it. Seven independently-worded `## What to read`
+  entries were seven chances to get the layout wrong, and the eighth builder
+  would have made it eight.
+
+The dual-layout support itself was never broken — `MixedLayoutResolutionTests`
+proved the *label* resolved correctly in both layouts, and that green test read
+as coverage of the feature. **Asserting that the right thing was found is not
+asserting that the right thing was reported.**
