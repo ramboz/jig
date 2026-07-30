@@ -19,6 +19,24 @@
 **Why:** Silent gaps get forgotten. Explicit `Deferred` markers turn unknowns into trackable items.
 **How to apply:** Use a `> **Deferred — <reason>.**` blockquote in the section. Add a corresponding entry to `docs/refinement-todo.md` with a resolution trigger.
 
+## Decisions
+
+**Rule:** Accepted decision records are append-only — never erased. Once a record
+in `docs/decisions/` is `Accepted`, correct it by striking the stale wording
+(`~~old~~`) with a date and reason, or by superseding it with a new record
+(`Supersedes: ADR-NNNN`) — never by deleting or overwriting the original. A
+`Proposed` / draft record is still a working draft: edit its body inline.
+**Why:** `docs/decisions/` is the audit trail of *why* the project is shaped the
+way it is. When superseded reasoning is silently swapped for its replacement, a
+later reader cannot tell carefully established reasoning from a quiet edit, and
+the record stops being trustworthy — especially when an option was rejected *on*
+the reasoning that got erased. A draft record carries no such trail yet, so
+locking it down only invites churn.
+**How to apply:** While a record is `Proposed` / draft, edit freely. Once it is
+`Accepted`, treat its body as immutable: strike-and-date, or open a superseding
+record. Git history is the deep audit trail; the struck-through prose is the
+one a reader sees without digging.
+
 ## Specs
 
 **Rule:** Every non-trivial change starts with a spec, SPIDR-split into vertical slices.

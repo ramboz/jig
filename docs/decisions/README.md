@@ -43,6 +43,9 @@
 - [ADR-0036: Immutable Release Identity](adr-0036-immutable-release-identity.md) — Jig publishes semantic versions and release tags, but its root Claude marketplace currently fetches `hosts/claude` from the repository default branch without a `ref` or `sha`. (2026-07-14, Accepted)
 - [ADR-0037: Bug-fix repository closure evidence](adr-0037-bug-fix-repository-closure-evidence.md) — The bug lifecycle proves diagnose-before-fix, fresh-main reproduction, and a red-to-green regression test. (2026-07-15, Proposed)
 - [ADR-0038: Claude scaffold mode copies templates/](adr-0038-claude-scaffold-template-copy.md) — jig's record helpers seed their files from the shipped `templates/` tree: `decisions.py` creates `docs/decisions/lightweight-decisions.md` (bug 012), and `adr.py new` renders `adr-0000-template.md`. (2026-07-16, Accepted)
+- [ADR-0039: Host-portable richer-skill discovery for extensible review passes](adr-0039-richer-skill-discovery.md) — jig ships **shallow baselines** for several review/judgment skills and is meant to **defer to a richer skill the user has installed** when one is present. (2026-07-27, Accepted)
+- [ADR-0040: Explicit candidate channel for richer-skill discovery](adr-0040-richer-skill-discovery-explicit-candidate-channel.md) — _TODO: describe the situation, forces, and constraints driving this decision._ (2026-07-27, Proposed)
+- [ADR-0044: Lifecycle entry gate](adr-0044-lifecycle-entry-gate.md) — Every teeth-not-trust gate jig has was built because "the agent will remember" was not good enough. (2026-07-30, Accepted)
 
 ## Lightweight decisions
 
