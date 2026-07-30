@@ -161,7 +161,7 @@ issue 81 showed the "trust the local file" default let a parallel worktree
 duplicate an entire landed slice, colliding only at merge. Bypass the new
 fetch with `JIG_START_COLLISION_GATE=0`.
 
-### 2026-07-24 — the claim spans the WORKING states, not `IN_PROGRESS` only (ADR-0039)
+### 2026-07-24 — the claim spans the WORKING states, not `IN_PROGRESS` only (ADR-0043)
 
 This spec's AC1 stamped `claimed_by:` only on `→ IN_PROGRESS`; its **AC4**
 cleared it on `IN_PROGRESS → REVIEWED` and on the back-edges to
@@ -169,7 +169,7 @@ cleared it on `IN_PROGRESS → REVIEWED` and on the back-edges to
 *"No claim on `READY_FOR_IMPLEMENTATION` slices. Claiming requires committing to
 start the work. Browsing the board doesn't reserve anything."*
 
-[ADR-0039](../../decisions/adr-0039-slice-claim-covers-active-lifecycle.md)
+[ADR-0043](../../decisions/adr-0043-slice-claim-covers-active-lifecycle.md)
 **widens AC1's stamp, partially reverses AC4's clearing, and preserves that
 Non-goal.**
 [Bug 013](../../bugs/013-slice-claim-covers-only-in-progress.md) (from
@@ -193,7 +193,7 @@ signal, precisely because AC4 cleared the claim on the way into it.
 
 **What did NOT change, and why it matters.** Two of AC4's three clearing edges
 (`READY_FOR_IMPLEMENTATION`, `DRAFT`) survive untouched, and the Non-goal above
-stands. A first cut of ADR-0039 widened the stamp to all six non-terminal states
+stands. A first cut of ADR-0043 widened the stamp to all six non-terminal states
 and was **wrong**: `spec-workflow/SKILL.md` tells a reader to pick the next slice
 from `READY_FOR_IMPLEMENTATION` (or `DRAFT`), so stamping those leaves the spec
 author's branch name on a slice that is now free — the board labels every ready
@@ -229,4 +229,4 @@ Still out of scope (unchanged): a local claim remains invisible to a worktree on
 an unpushed branch — the separately parked push-by-default item in
 [refinement-todo](../../refinement-todo.md), from issue 81. The reported incident
 was two worktrees on separate branches, so **coverage alone does not close it**;
-see ADR-0039 Context.
+see ADR-0043 Context.

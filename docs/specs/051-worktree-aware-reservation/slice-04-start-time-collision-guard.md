@@ -247,13 +247,13 @@ clarifications append here.
 > Post-DONE corrections per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
 > The original record above is preserved; dated entries below record reality.
 
-### 2026-07-24 — dev-log note 3's premise no longer holds (ADR-0039)
+### 2026-07-24 — dev-log note 3's premise no longer holds (ADR-0043)
 
 Note 3 justified letting a `REVIEWED`/`RECONCILED` origin copy fall through on
 the grounds that *"those states clear `claimed_by` … so there is no foreign owner
 to collide with"*. Both halves of that premise are now false:
 
-- [ADR-0039](../../decisions/adr-0039-slice-claim-covers-active-lifecycle.md)
+- [ADR-0043](../../decisions/adr-0043-slice-claim-covers-active-lifecycle.md)
   (from [bug 013](../../bugs/013-slice-claim-covers-only-in-progress.md)) makes
   `REVIEWED` and `RECONCILED` **claim-bearing** working states — clearing on
   `→ REVIEWED` is precisely the edge it reverses, because it left reconciliation

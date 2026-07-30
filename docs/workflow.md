@@ -108,7 +108,7 @@ helper. State names match `VALID_STATUSES` in
 [skills/spec-workflow/workflow.py](../skills/spec-workflow/workflow.py).
 
 **Slice ownership (claim-on-working-state, spec 049-01 as amended by
-[ADR-0039](decisions/adr-0039-slice-claim-covers-active-lifecycle.md)).**
+[ADR-0043](decisions/adr-0043-slice-claim-covers-active-lifecycle.md)).**
 The lifecycle splits two ways for ownership purposes:
 
 - **Working states** — `READY_FOR_REVIEW`, `IN_PROGRESS`, `REVIEWED`,

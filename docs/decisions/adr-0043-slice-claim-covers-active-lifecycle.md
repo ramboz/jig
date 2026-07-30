@@ -5,7 +5,7 @@ last_verified: 2026-07-24
 frame_review: true
 ---
 
-# ADR-0039: Slice Claim Covers Active Lifecycle
+# ADR-0043: Slice Claim Covers Active Lifecycle
 
 ## Status
 

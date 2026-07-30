@@ -122,7 +122,7 @@ claim was never stamped at all.
   `_CLAIM_CLEARING_STATUSES` was not a coding error and nothing here was
   "simply" wrong. But widening the field is nonetheless the **fix that
   shipped** — chosen by the maintainer as a deliberate reversal of that
-  decision, recorded in [ADR-0039](../decisions/adr-0039-slice-claim-covers-active-lifecycle.md)
+  decision, recorded in [ADR-0043](../decisions/adr-0043-slice-claim-covers-active-lifecycle.md)
   with a spec 049 `## Amendments` entry. The distinction is load-bearing: a
   falsified diagnosis fixed silently is drift; a decision reversed on the
   record is a decision. Its acknowledged cost — conflating "I am implementing
@@ -179,9 +179,9 @@ reported as *"unclaimed"* with unearned confidence.
 option 1 — widen the marker so the data can carry spec-level presence — and the
 honest-prose fix rides along with it (see `## Fix`, reader-side items 6–8).
 Widening reverses a recorded decision rather than correcting a slip, so it is
-recorded as [ADR-0039](../decisions/adr-0039-slice-claim-covers-active-lifecycle.md)
+recorded as [ADR-0043](../decisions/adr-0043-slice-claim-covers-active-lifecycle.md)
 + a spec 049 amendment. Options 2 (a separate expiring lease field) and 4 (a
-touched-on-another-branch advisory) remain unbuilt and are logged as ADR-0039
+touched-on-another-branch advisory) remain unbuilt and are logged as ADR-0043
 open questions; option 4 in particular catches a case no claim field can see —
 plain `Edit`-tool writes that never reach `transition`.
 
@@ -190,10 +190,10 @@ plain `Edit`-tool writes that never reach `transition`.
 `structural_fix`. The remedy changes what the data itself can express, at the
 source, rather than papering over the reader. `claimed_by:` stops meaning "who
 is implementing" and starts meaning **"which session is working this slice
-right now"**, across the whole active lifecycle.
+right now"**, across the whole working lifecycle.
 
 This deliberately reverses spec 049's `IN_PROGRESS`-only Non-goal, so it is
-recorded as a decision ([ADR-0039](../decisions/adr-0039-slice-claim-covers-active-lifecycle.md))
+recorded as a decision ([ADR-0043](../decisions/adr-0043-slice-claim-covers-active-lifecycle.md))
 with a spec 049 `## Amendments` entry, not slipped in as a bare code change
 (ADR-0010).
 
@@ -252,7 +252,7 @@ lighter option 3 (fix the inference in prose only).
    reservation publishes `status:` to the trunk copy **only** for an
    `IN_PROGRESS` target — that one write is load-bearing because
    `_refuse_start_collision` reads exactly `status: IN_PROGRESS` + a foreign
-   claim off `origin/main`. For every other active state the reservation
+   claim off `origin/main`. For every other working state the reservation
    publishes the **claim alone** and leaves trunk `status:` untouched: trunk
    lifecycle state is owned by the landing flow, not by a feature branch's
    in-flight transitions. The idempotent-re-claim short-circuit is re-keyed on
@@ -275,7 +275,7 @@ lighter option 3 (fix the inference in prose only).
    carry it — the separate, already-parked
    [refinement-todo](../refinement-todo.md) item (push-by-default claims, from
    issue 81). **The reported incident is exactly this shape**, so coverage alone
-   does not close it; see [ADR-0039](../decisions/adr-0039-slice-claim-covers-active-lifecycle.md)
+   does not close it; see [ADR-0043](../decisions/adr-0043-slice-claim-covers-active-lifecycle.md)
    Context, which says so outright. This fix makes the data *capable* of carrying
    presence, makes `--push` usable at every working state, and gives a pushed
    claim a consumer; it does not make local claims telepathic.
@@ -310,11 +310,11 @@ lighter option 3 (fix the inference in prose only).
    `test_push_skips_an_unclaimed_in_progress_trunk_copy`,
    `test_push_at_working_state_is_silent_about_our_own_in_progress_trunk_claim`,
    and `test_push_to_in_progress_claims_an_unclaimed_in_progress_trunk_copy`.
-   Logged as ADR-0039 open question 4.
+   Logged as ADR-0043 open question 4.
 4. **`READY_FOR_REVIEW` is classified as a working state on judgment, not
    measurement.** Its name is queue-shaped; it is treated as working because it
    is the reported incident's state and because in jig practice the author
-   transitions into it and runs the review in the same session. ADR-0039 kill
+   transitions into it and runs the review in the same session. ADR-0043 kill
    criterion 1 watches for the counter-evidence.
 5. **`orient`'s focus line was NOT changed.** Of the four reader surfaces named
    in Evidence 4, three were fixed (board render, `collect_slices` docstring,
@@ -332,7 +332,7 @@ lighter option 3 (fix the inference in prose only).
 7. **The warning has few opportunities to fire until claims are pushed by
    default.** Claim identity is the branch name, so same-branch sessions never
    look foreign to each other, and cross-branch sessions cannot read the field
-   without `--push`. ADR-0039 open question 6 states this rather than counting
+   without `--push`. ADR-0043 open question 6 states this rather than counting
    the warning as delivered value.
 
 ## Already tried
@@ -357,7 +357,7 @@ it*, which are separate decisions.**
    `status: IN_PROGRESS` to `origin/main`. Two harms, not one: it regresses the
    shared trunk's view of the slice, and it *fabricates* the foreign-
    `IN_PROGRESS` state that `_refuse_start_collision` hard-blocks on — i.e. it
-   would have manufactured precisely the false-refusal class ADR-0039 claims to
+   would have manufactured precisely the false-refusal class ADR-0043 claims to
    avoid. It had **zero test coverage**, which is why it survived to review;
    all three passes flagged it independently. Fixed as described in `## Fix`
    item 5, with `test_push_at_non_in_progress_state_does_not_rewrite_trunk_status`
@@ -403,7 +403,7 @@ it*, which are separate decisions.**
    could only ever be reached for an `IN_PROGRESS` target. Widening the call site
    made it reachable for `REVIEWED --push` against a trunk copy the implementer
    is still building — so a reviewer worktree recording a verdict would have been
-   refused outright, verbatim the false-block class ADR-0039 claims to avoid. It
+   refused outright, verbatim the false-block class ADR-0043 claims to avoid. It
    was also asserted *not* to happen in five separate prose surfaces. Fixed by
    gating the refusal on the target being `IN_PROGRESS` (both ends, matching the
    local path) and letting the new warning carry every other case;
@@ -431,7 +431,7 @@ it*, which are separate decisions.**
    Worse than the bookkeeping error: the behaviour really was unguarded, on
    **both** paths. Dropping `target_is_in_progress` from the trunk refusal, or
    `new_status == IN_PROGRESS_STATUS` from the local one, left the entire suite
-   green — so the false-refusal case ADR-0039 names as the thing it avoids had no
+   green — so the false-refusal case ADR-0043 names as the thing it avoids had no
    regression guard at all. Now pinned by five tests, and each conjunct was
    **mutation-checked** (removed, suite re-run under `python3 -B`, confirmed red,
    restored) rather than assumed to discriminate.
@@ -515,7 +515,7 @@ What it pins, and why each matters:
   `test_push_at_working_state_does_not_refuse_on_foreign_in_progress_trunk` /
   `test_push_to_in_progress_still_refuses_on_foreign_in_progress_trunk` — **the
   false-refusal guards**, on the local and trunk paths respectively, plus the
-  anti-regression on the relaxation. These pin the case ADR-0039 names as the
+  anti-regression on the relaxation. These pin the case ADR-0043 names as the
   false block it avoids (a reviewer worktree recording a verdict on a slice the
   implementer still holds) and, on the trunk path, that an *enforced* claim is
   skipped rather than transferred. They exist because `## Already tried` entry 6
@@ -540,7 +540,7 @@ What it pins, and why each matters:
 because they pinned the reversed edge: `SliceClaimTests.test_claim_carried_into_reviewed`
 (renamed from `…_cleared_on_reviewed`) and
 `StatusBoardClaimRenderTests.test_active_states_surface_claim_terminal_states_do_not`.
-Each carries an in-place `AMENDED by ADR-0039` note. Note the count *fell* from
+Each carries an in-place `AMENDED by ADR-0043` note. Note the count *fell* from
 four to two once the design was narrowed: `test_claim_cleared_on_back_to_ready`
 and `…_on_back_to_draft` were inverted by the over-wide first cut and have been
 restored to their original spec 049 assertions, which is the clearest signal that
@@ -634,7 +634,7 @@ not before. It does **not** prove the incident is impossible: session B had to
 opt in with `--push`, and session A had to integrate `origin/main`. Without both,
 A's local copy still shows blank — the visibility axis, parked as push-by-default
 in [refinement-todo](../refinement-todo.md) and named in
-[ADR-0039](../decisions/adr-0039-slice-claim-covers-active-lifecycle.md) OQ1,
+[ADR-0043](../decisions/adr-0043-slice-claim-covers-active-lifecycle.md) OQ1,
 which also records that publication alone is insufficient because the surveying
 surfaces read the local copy. Residual risks 1 and 7 state the same limit.
 

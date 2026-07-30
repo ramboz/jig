@@ -5399,7 +5399,7 @@ class SliceClaimTests(unittest.TestCase):
     and refuses a foreign on-disk claim; `push`/`pr_mode` additionally
     reserve the claim on origin/main (mocked here — no real push). The
     claim is cleared on the back-transitions to the pickup-queue states,
-    and `--release` force-clears with an audit reason. (ADR-0039 reversed
+    and `--release` force-clears with an audit reason. (ADR-0043 reversed
     the REVIEWED clearing edge — see `test_claim_carried_into_reviewed`
     and `Bug013WidenedClaimTests`.) Off-network (default) behaviors
     call `transition()` directly; the reserve paths use the
@@ -5521,9 +5521,9 @@ class SliceClaimTests(unittest.TestCase):
             _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
         self.assertEqual(self._fm().get("claimed_by"), "wt-me")
 
-    # ---- AC4: claim clearing, as narrowed by ADR-0039 -----------------
+    # ---- AC4: claim clearing, as narrowed by ADR-0043 -----------------
     #
-    # PARTIALLY AMENDED by ADR-0039 / bug 013. AC4 originally cleared the claim
+    # PARTIALLY AMENDED by ADR-0043 / bug 013. AC4 originally cleared the claim
     # on all three of REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT. Only the
     # REVIEWED edge is reversed: clearing there is what left reconciliation —
     # the heaviest write phase — with no owner. The other two edges SURVIVE
@@ -6133,7 +6133,7 @@ class Bug013WidenedClaimTests(unittest.TestCase):
     pickup surface then read "no claim" as "free", which is exactly how the
     reported incident routed a second session onto a live slice.
 
-    See [ADR-0039](../../docs/decisions/adr-0039-slice-claim-covers-active-lifecycle.md),
+    See [ADR-0043](../../docs/decisions/adr-0043-slice-claim-covers-active-lifecycle.md),
     which AMENDS spec 049's `IN_PROGRESS`-only scoping (amends, not supersedes —
     ADR-0010 makes that distinction load-bearing in this repo)."""
 
@@ -6208,7 +6208,7 @@ class Bug013WidenedClaimTests(unittest.TestCase):
                                  f"{target} is a release point")
 
     def test_claim_states_partition_the_lifecycle(self):
-        """The stamp/clear split IS the semantic core of ADR-0039, so pin it:
+        """The stamp/clear split IS the semantic core of ADR-0043, so pin it:
         every lifecycle status must be in exactly one set. Without this, a
         tenth status added later would silently carry neither stamp nor
         clear (craft pass)."""
@@ -6343,7 +6343,7 @@ class Bug013WidenedClaimTests(unittest.TestCase):
     # ---- reservation on origin/main at a non-IN_PROGRESS state ------------
     #
     # The craft + bug-review passes both caught this as a blocker: widening the
-    # CALL SITE to every active state without touching `_reserve_claim_on_main`
+    # CALL SITE to every working state without touching `_reserve_claim_on_main`
     # made `transition … RECONCILED --push` publish `status: IN_PROGRESS` to
     # origin/main — corrupting the trunk copy AND fabricating exactly the
     # foreign-IN_PROGRESS state that `_refuse_start_collision` hard-blocks on.
@@ -6463,7 +6463,7 @@ class Bug013WidenedClaimTests(unittest.TestCase):
 
     def test_reservation_warns_before_replacing_a_foreign_trunk_claim(self):
         """A foreign claim on the TRUNK copy outside IN_PROGRESS is newly
-        reachable (pre-ADR-0039 a trunk claim could only coexist with
+        reachable (pre-ADR-0043 a trunk claim could only coexist with
         `status: IN_PROGRESS`). Overwriting it silently would break this
         decision's headline promise, and the on-disk warning cannot cover it —
         that one reads the CALLER's copy, which in the cross-branch case does
@@ -6537,7 +6537,7 @@ class Bug013WidenedClaimTests(unittest.TestCase):
     # the whole suite green.
 
     def test_local_foreign_in_progress_claim_does_not_block_a_working_target(self):
-        """The case ADR-0039 names as the false block it avoids: a reviewer
+        """The case ADR-0043 names as the false block it avoids: a reviewer
         worktree recording a verdict on a slice the implementer still holds.
         Warns, never refuses. Guards the `new_status == IN_PROGRESS_STATUS`
         conjunct on the local refusal."""
@@ -6802,13 +6802,13 @@ class StatusBoardClaimRenderTests(unittest.TestCase):
         table = _workflow.render_status_table(rows)
         self.assertEqual(self._status_cell(table, "200-01 — a"), "IN_PROGRESS")
 
-    # AC2 — AMENDED by ADR-0039 / bug 013: active states now DO surface the
+    # AC2 — AMENDED by ADR-0043 / bug 013: active states now DO surface the
     # claim (an IN_PROGRESS-only suffix is what made spec-level presence
     # unrenderable). Terminal states still ignore `claimed_by` — they never
     # carry one — and unclaimed active rows still render plain, so the
     # "byte-identical when unclaimed" half of AC2 stands.
     def test_active_states_surface_claim_terminal_states_do_not(self):
-        # ADR-0039 narrowed the claim-bearing set to the WORKING states; the
+        # ADR-0043 narrowed the claim-bearing set to the WORKING states; the
         # two pickup-queue states (DRAFT / READY_FOR_IMPLEMENTATION) render
         # plain, exactly as they did pre-049-02.
         active = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED")

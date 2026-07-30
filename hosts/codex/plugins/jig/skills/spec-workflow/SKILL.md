@@ -312,7 +312,7 @@ SKILL.md hand-off is the documented gate.
      "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" IN_PROGRESS
    ```
    **Claim-on-working-state (spec 049-01, amended by
-   [ADR-0039](../../docs/decisions/adr-0039-slice-claim-covers-active-lifecycle.md)).**
+   [ADR-0043](../../docs/decisions/adr-0043-slice-claim-covers-active-lifecycle.md)).**
    On a frontmatter (file-per-slice) slice, a transition into a **working
    state** — `READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` / `RECONCILED` —
    stamps `claimed_by:` (the current branch name, or `JIG_CLAIM_ID`), so

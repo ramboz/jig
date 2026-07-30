@@ -43,7 +43,7 @@
 - [ADR-0036: Immutable Release Identity](adr-0036-immutable-release-identity.md) — Jig publishes semantic versions and release tags, but its root Claude marketplace currently fetches `hosts/claude` from the repository default branch without a `ref` or `sha`. (2026-07-14, Accepted)
 - [ADR-0037: Bug-fix repository closure evidence](adr-0037-bug-fix-repository-closure-evidence.md) — The bug lifecycle proves diagnose-before-fix, fresh-main reproduction, and a red-to-green regression test. (2026-07-15, Proposed)
 - [ADR-0038: Claude scaffold mode copies templates/](adr-0038-claude-scaffold-template-copy.md) — jig's record helpers seed their files from the shipped `templates/` tree: `decisions.py` creates `docs/decisions/lightweight-decisions.md` (bug 012), and `adr.py new` renders `adr-0000-template.md`. (2026-07-16, Accepted)
-- [ADR-0039: Slice Claim Covers Active Lifecycle](adr-0039-slice-claim-covers-active-lifecycle.md) — `claimed_by:` is jig's only machine-readable "a session is working here" signal. (2026-07-24, Proposed)
+- [ADR-0043: Slice Claim Covers Active Lifecycle](adr-0043-slice-claim-covers-active-lifecycle.md) — `claimed_by:` is jig's only machine-readable "a session is working here" signal. (2026-07-24, Proposed)
 
 ## Lightweight decisions
 
