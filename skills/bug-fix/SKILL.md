@@ -260,6 +260,23 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" status-board
 Run `/jig:memory-sync` to consolidate any new learnings. Land the change with
 `/jig:slice-land` if a formal landing checklist helps.
 
+**Before landing, audit the board.** `docs/bugs/README.md` is derived — every
+column is computed from the records — so it is regenerated, never hand-edited,
+and a merge conflict on it is resolved by re-running `status-board` rather than
+by picking a side:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" check-board
+```
+
+Read-only; exits non-zero on either problem it can find. **Stale board** — the
+records changed and `status-board` wasn't re-run. **Duplicate id** — two records
+claim one number, which is what parallel branches produce when the number was
+never reserved on the trunk. The renderer emits both rows without complaint and
+a staleness check can't see it (both rows *are* faithfully derived), so this is
+the only thing that catches it. Wire it into CI if the project lands work from
+more than one branch at a time.
+
 ### Escalation (`→ ESCALATED`)
 
 When diagnosis reveals the "bug" is a missing or under-specified

@@ -959,25 +959,79 @@ def _render_board(rows: list[dict[str, str]],
     return board
 
 
-def regenerate_status_board(project_dir: Path) -> Path:
-    bugs_dir = _bugs_dir(project_dir)
-    bugs_dir.mkdir(parents=True, exist_ok=True)
-    board = bugs_dir / "README.md"
-    default_preamble = (
-        "# Bug Status Board\n\n"
-        "> Related: [Spec Status Board](../specs/README.md). Check both "
-        "boards before folding reported defects into spec acceptance "
-        "criteria.\n\n"
-    )
-    existing = board.read_text() if board.exists() else default_preamble
+_DEFAULT_BOARD_PREAMBLE = (
+    "# Bug Status Board\n\n"
+    "> Related: [Spec Status Board](../specs/README.md). Check both "
+    "boards before folding reported defects into spec acceptance "
+    "criteria.\n\n"
+)
+
+
+def _compose_board(project_dir: Path, existing: str) -> str:
+    """Render the board text from the records on disk, carrying the curated
+    Notes column over from `existing`. Pure — shared by `regenerate_status_board`
+    (which writes it) and `check_board` (which compares against it), so the
+    check can never drift from what regeneration would produce."""
     notes = _parse_existing_notes(existing)
     table_start = existing.find("| ID |")
     preamble = existing[:table_start].rstrip() if table_start != -1 else existing.rstrip()
     if not preamble:
-        preamble = default_preamble.rstrip()
-    content = preamble + "\n\n" + _render_board(_bug_rows(project_dir), notes)
-    atomic_write_text(board, content)
+        preamble = _DEFAULT_BOARD_PREAMBLE.rstrip()
+    return preamble + "\n\n" + _render_board(_bug_rows(project_dir), notes)
+
+
+def regenerate_status_board(project_dir: Path) -> Path:
+    bugs_dir = _bugs_dir(project_dir)
+    bugs_dir.mkdir(parents=True, exist_ok=True)
+    board = bugs_dir / "README.md"
+    existing = board.read_text() if board.exists() else _DEFAULT_BOARD_PREAMBLE
+    atomic_write_text(board, _compose_board(project_dir, existing))
     return board
+
+
+def _duplicate_ids(project_dir: Path) -> dict:
+    """Map bug id -> sorted filenames, for ids claimed by more than one record.
+
+    `_render_board` renders two records sharing an id as two rows without
+    complaint, and a drift check can't see the problem either — both rows are
+    faithfully derived. Today the only thing that surfaces this is the merge
+    conflict on the board itself, which is precisely what we want to stop
+    resolving by hand (issue #149). So it needs its own detector."""
+    bugs_dir = _bugs_dir(project_dir)
+    if not bugs_dir.is_dir():
+        return {}
+    by_id: dict = {}
+    for path in sorted(bugs_dir.glob("*.md")):
+        if path.name == "README.md" or not _is_bug_record(path):
+            continue
+        bug_id, _slug = _bug_id_and_slug(path)
+        by_id.setdefault(bug_id, []).append(path.name)
+    return {k: v for k, v in sorted(by_id.items()) if len(v) > 1}
+
+
+def check_board(project_dir: Path) -> list:
+    """Read-only board audit. Returns a list of human-readable problems —
+    empty means clean. Never writes: CI runs this against a checkout, and a
+    check that repairs what it measures can't be trusted to report it."""
+    problems = []
+    for bug_id, names in _duplicate_ids(project_dir).items():
+        problems.append(
+            f"duplicate bug id {bug_id}: {', '.join(names)} — renumber one "
+            "before landing; parallel branches both allocated it"
+        )
+    board = _bugs_dir(project_dir) / "README.md"
+    if not board.is_file():
+        problems.append(
+            f"missing board: {board} — run `bug.py status-board` to create it"
+        )
+        return problems
+    existing = board.read_text()
+    if existing != _compose_board(project_dir, existing):
+        problems.append(
+            f"stale board: {board} does not match the bug records — run "
+            "`bug.py status-board` and commit the result"
+        )
+    return problems
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1056,6 +1110,12 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[project_parent],
         help="regenerate docs/bugs/README.md",
     )
+    sub.add_parser(
+        "check-board",
+        parents=[project_parent],
+        help="read-only: verify docs/bugs/README.md matches the records and "
+             "that no bug id is claimed twice",
+    )
     return parser
 
 
@@ -1093,6 +1153,13 @@ def main(argv: list[str] | None = None) -> int:
         elif ns.command == "status-board":
             path = regenerate_status_board(project_dir)
             print(path.relative_to(project_dir))
+        elif ns.command == "check-board":
+            problems = check_board(project_dir)
+            for problem in problems:
+                print(f"bug board: {problem}", file=sys.stderr)
+            if problems:
+                return 1
+            print("bug board: clean")
         else:  # pragma: no cover - argparse enforces this.
             parser.error(f"unknown command: {ns.command}")
     except BugError as exc:
