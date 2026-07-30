@@ -429,7 +429,7 @@ under `if new_status == IN_PROGRESS_STATUS`), so the marker alone would go on
 asserting a finished slice forever. Reading the named record's *current* status
 is the correction.
 
-**Hard dependency on [#138](https://github.com/ramboz/jig/pull/138)** (bug 013).
+**Hard dependency on [#138](https://github.com/ramboz/jig/pull/138)** (bug 014).
 It reverses the clearing edge above: claims become working-lifecycle claims,
 stamped across `READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` / `RECONCILED`
 and cleared only at release points (`_CLAIM_WORKING_STATUSES` /

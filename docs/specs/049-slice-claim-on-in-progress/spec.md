@@ -172,7 +172,7 @@ start the work. Browsing the board doesn't reserve anything."*
 [ADR-0045](../../decisions/adr-0045-slice-claim-covers-active-lifecycle.md)
 **widens AC1's stamp, partially reverses AC4's clearing, and preserves that
 Non-goal.**
-[Bug 013](../../bugs/013-slice-claim-covers-only-in-progress.md) (from
+[Bug 014](../../bugs/014-slice-claim-covers-only-in-progress.md) (from
 [issue 130](https://github.com/ramboz/jig/issues/130)) showed the cost of the
 `REVIEWED` clearing edge: jig routes agent sessions to work by reading slice
 state, so a slice under spec review, frame-critique, or — worst —
@@ -198,7 +198,7 @@ and was **wrong**: `spec-workflow/SKILL.md` tells a reader to pick the next slic
 from `READY_FOR_IMPLEMENTATION` (or `DRAFT`), so stamping those leaves the spec
 author's branch name on a slice that is now free — the board labels every ready
 slice with a departed owner, and the implementer's first `→ IN_PROGRESS` warns on
-the routine path. That inverts bug 013 rather than fixing it. Caught by the
+the routine path. That inverts bug 014 rather than fixing it. Caught by the
 frame-critique pass and reproduced before narrowing.
 
 **Refusal semantics unchanged.** AC3 still hard-refuses only when *both* ends

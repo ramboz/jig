@@ -170,7 +170,7 @@ pushed, so a parallel worktree's unpushed claim is invisible, and a plain
 anyone is still there either: a claim transfers to whoever transitions next, and
 one can survive a merge naming a branch that no longer exists. Treat a blank
 owner as "unknown" rather than "available" — reading it as "available" is exactly
-the failure [bug 013](bugs/013-slice-claim-covers-only-in-progress.md) was filed
+the failure [bug 014](bugs/014-slice-claim-covers-only-in-progress.md) was filed
 for — and treat a stale-looking owner as worth a question, not a blocker.
 
 **Worktree baseline and post-land sync.** Reservations from `workflow.py new`

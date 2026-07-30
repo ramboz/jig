@@ -3,7 +3,7 @@ status: DONE
 tier: gnarly
 severity: medium
 claimed_by: claude/issue-130-jig-bugfix-57198e
-regression_test: skills/spec-workflow/test_workflow.py::Bug013WidenedClaimTests
+regression_test: skills/spec-workflow/test_workflow.py::Bug014WidenedClaimTests
 main_repro_checked_at: 2026-07-24
 main_repro_ref: origin/main@fd7115a
 main_repro_result: reproduces
@@ -14,7 +14,7 @@ security_surface: false
 escalated_to:
 ---
 
-# Bug 013: slice-claim-covers-only-in-progress
+# Bug 014: slice-claim-covers-only-in-progress
 
 Reported as [issue #130](https://github.com/ramboz/jig/issues/130) (jig 2.8.0).
 
@@ -374,7 +374,7 @@ it*, which are separate decisions.**
    `READY_FOR_IMPLEMENTATION (author-branch)` for an available slice, and the
    implementer's first `→ IN_PROGRESS` printed "another session may be working
    it right now" — deterministically, on the most routine path in jig. That is
-   bug 013 with the sign flipped: "blank reads as free" became "residue reads as
+   bug 014 with the sign flipped: "blank reads as free" became "residue reads as
    occupied", on the same surface, and a warning that fires on every pickup
    trains readers to ignore warnings. Caught by the frame-critique pass, which
    also observed that spec 049's Non-goal made two claims and the first
@@ -466,7 +466,7 @@ adjusting the one you meant to change.
 
 ## Regression test
 
-`skills/spec-workflow/test_workflow.py::Bug013WidenedClaimTests` — 28 test
+`skills/spec-workflow/test_workflow.py::Bug014WidenedClaimTests` — 28 test
 methods (several parameterized over the state sets via `subTest`).
 Witnessed **red** before the fix — `red_confirmed_at` stamped by the `bug.py`
 `→ FIXING` gate shelling to `tdd.py`. `green_confirmed_at` is stamped by the
@@ -640,7 +640,7 @@ surfaces read the local copy. Residual risks 1 and 7 state the same limit.
 
 ## Learning
 
-Recorded in [docs/memory/learnings.md](../memory/learnings.md) as *"Bug 013: a
+Recorded in [docs/memory/learnings.md](../memory/learnings.md) as *"Bug 014: a
 partial signal teaches a total inference"*: a mechanism that answers a narrow
 question reliably gets read as answering the broad one, and the working cases are
 what make the misreading stick. Coverage limits must be documented where the

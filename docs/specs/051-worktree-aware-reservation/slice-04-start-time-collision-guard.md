@@ -254,7 +254,7 @@ the grounds that *"those states clear `claimed_by` … so there is no foreign ow
 to collide with"*. Both halves of that premise are now false:
 
 - [ADR-0045](../../decisions/adr-0045-slice-claim-covers-active-lifecycle.md)
-  (from [bug 013](../../bugs/013-slice-claim-covers-only-in-progress.md)) makes
+  (from [bug 014](../../bugs/014-slice-claim-covers-only-in-progress.md)) makes
   `REVIEWED` and `RECONCILED` **claim-bearing** working states — clearing on
   `→ REVIEWED` is precisely the edge it reverses, because it left reconciliation
   unmarked.

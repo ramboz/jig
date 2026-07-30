@@ -5418,7 +5418,7 @@ class SliceClaimTests(unittest.TestCase):
     claim is cleared on the back-transitions to the pickup-queue states,
     and `--release` force-clears with an audit reason. (ADR-0045 reversed
     the REVIEWED clearing edge — see `test_claim_carried_into_reviewed`
-    and `Bug013WidenedClaimTests`.) Off-network (default) behaviors
+    and `Bug014WidenedClaimTests`.) Off-network (default) behaviors
     call `transition()` directly; the reserve paths use the
     `_SubprocessRecorder` git mock (same pattern as ReserveSpecTests)."""
 
@@ -5540,14 +5540,14 @@ class SliceClaimTests(unittest.TestCase):
 
     # ---- AC4: claim clearing, as narrowed by ADR-0045 -----------------
     #
-    # PARTIALLY AMENDED by ADR-0045 / bug 013. AC4 originally cleared the claim
+    # PARTIALLY AMENDED by ADR-0045 / bug 014. AC4 originally cleared the claim
     # on all three of REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT. Only the
     # REVIEWED edge is reversed: clearing there is what left reconciliation —
     # the heaviest write phase — with no owner. The other two edges SURVIVE
     # UNCHANGED, because `DRAFT` and `READY_FOR_IMPLEMENTATION` are the pickup-
     # queue states jig tells readers to choose from; a residual claim there
     # would read as "occupied" on a slice that is free. See
-    # `Bug013WidenedClaimTests` for the full contract.
+    # `Bug014WidenedClaimTests` for the full contract.
 
     def test_claim_carried_into_reviewed(self):
         self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
@@ -6139,8 +6139,8 @@ class StartCollisionGuardE2E(unittest.TestCase):
         self.assertEqual(self._fm().get("claimed_by"), "wt-me")
 
 
-class Bug013WidenedClaimTests(unittest.TestCase):
-    """Bug 013 / issue #130: `claimed_by:` must mark presence across the whole
+class Bug014WidenedClaimTests(unittest.TestCase):
+    """Bug 014 / issue #130: `claimed_by:` must mark presence across the whole
     ACTIVE lifecycle, not only `IN_PROGRESS`.
 
     Before this fix the claim was stamped only on `→ IN_PROGRESS` and actively
@@ -6240,7 +6240,7 @@ class Bug013WidenedClaimTests(unittest.TestCase):
         """Regression on the frame-critique finding, at the exact surface that
         broke: the spec author's `→ READY_FOR_IMPLEMENTATION` must NOT leave
         their branch name on a slice that is now free to pick up. Stamping the
-        pickup queue inverts bug 013 — "blank reads as free" becomes "residue
+        pickup queue inverts bug 014 — "blank reads as free" becomes "residue
         reads as occupied"."""
         import io
         from unittest.mock import patch
@@ -6819,7 +6819,7 @@ class StatusBoardClaimRenderTests(unittest.TestCase):
         table = _workflow.render_status_table(rows)
         self.assertEqual(self._status_cell(table, "200-01 — a"), "IN_PROGRESS")
 
-    # AC2 — AMENDED by ADR-0045 / bug 013: active states now DO surface the
+    # AC2 — AMENDED by ADR-0045 / bug 014: active states now DO surface the
     # claim (an IN_PROGRESS-only suffix is what made spec-level presence
     # unrenderable). Terminal states still ignore `claimed_by` — they never
     # carry one — and unclaimed active rows still render plain, so the

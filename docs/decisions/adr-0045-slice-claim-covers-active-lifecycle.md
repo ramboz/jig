@@ -57,7 +57,7 @@ Reported as [issue #130](https://github.com/ramboz/jig/issues/130) with a real
 incident (bouge, 2026-07-24): one session surveyed slice frontmatter, found a
 `READY_FOR_REVIEW` slice with no `claimed_by:`, and twice recommended it as
 *"unblocked, unclaimed"* while a second session was actively working it.
-Diagnosed as [bug 013](../bugs/013-slice-claim-covers-only-in-progress.md).
+Diagnosed as [bug 014](../bugs/014-slice-claim-covers-only-in-progress.md).
 
 **Two axes, and this decision moves only one of them.** Stated plainly, because
 the frame-critique pass was right to attack it: the reported incident was two
@@ -69,7 +69,7 @@ decision does not, by itself, prevent the incident that motivated it.** It fixes
 incident also turns on *visibility* — whether an existing claim can be read from
 another worktree. Visibility is separately parked as the push-by-default item in
 [refinement-todo](../refinement-todo.md) (from issue 81), and widening coverage
-raises its value without settling it. The mechanical repro in bug 013 is
+raises its value without settling it. The mechanical repro in bug 014 is
 single-tree: it proves the coverage gap is real, not that coverage was the
 binding constraint in the incident. Both axes must move before the reported
 failure class is closed; this is the one the maintainer chose to move first.
@@ -362,7 +362,7 @@ reader surfaces honest.
   three-state clear list, and the both-ends-`IN_PROGRESS` refusal are as
   described — read directly at `skills/spec-workflow/workflow.py:1267`,
   `:3725`, `:1271`, and reproduced end-to-end against a detached worktree at
-  `origin/main@fd7115a` (bug 013 `## Repro`).
+  `origin/main@fd7115a` (bug 014 `## Repro`).
 - **Verified by probe:** spec 049's Non-goals do state the `IN_PROGRESS`-only
   scoping as intent, so this ADR reverses a decision rather than fixing a slip.
 - **Assumed, not verified:** that warning-not-blocking is the right default

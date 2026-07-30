@@ -346,7 +346,7 @@ SKILL.md hand-off is the documented gate.
    at all. A claim that IS present names the session that last *moved* the
    slice into a working state — a presence hint, not a live lock. When it
    matters, ask rather than assume — see
-   [bug 013](../../docs/bugs/013-slice-claim-covers-only-in-progress.md).
+   [bug 014](../../docs/bugs/014-slice-claim-covers-only-in-progress.md).
 4. Fill in / refresh `plan.md` and `tasks.md` for the slice.
 5. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
    with `[jig:phase=implementation] [jig:spec=NNN] [jig:slice=NNN-NN]` so

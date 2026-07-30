@@ -1947,7 +1947,7 @@ def render_status_table(rows: list, notes_map: dict | None = None) -> str:
         # while the board could only show an owner on IN_PROGRESS rows, it was
         # structurally unable to say "someone is reconciling this", which is
         # exactly the read that sent a second session onto a live slice
-        # (bug 013). Release-point rows (pickup-queue + terminal) never
+        # (bug 014). Release-point rows (pickup-queue + terminal) never
         # carry a claim; legacy / unclaimed
         # rows fall back to the plain status (empty suffix).
         if status in _CLAIM_WORKING_STATUSES:
@@ -3801,7 +3801,7 @@ def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
 
 CLAIM_FIELD = "claimed_by"
 
-# ADR-0045 / bug 013 (issue #130): a claim marks "a session is working this
+# ADR-0045 / bug 014 (issue #130): a claim marks "a session is working this
 # slice right now" across the WORKING states — not just "who is
 # implementing". Spec 049 scoped the stamp to IN_PROGRESS and cleared it on
 # REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT, which left every spec-level
@@ -4083,7 +4083,7 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
     # decision's headline promise (a loud warning for every foreign claim the
     # block does not cover). The on-disk warning in `transition` cannot cover
     # this case: it reads the CALLER's copy, which in the cross-branch scenario
-    # that motivated bug 013 does not carry the other session's claim at all.
+    # that motivated bug 014 does not carry the other session's claim at all.
     # Caught by the craft + bug-review passes.
     if existing and existing != identifier and existing != already_warned:
         sys.stderr.write(
