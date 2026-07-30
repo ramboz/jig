@@ -47,6 +47,7 @@
 - [ADR-0040: Explicit candidate channel for richer-skill discovery](adr-0040-richer-skill-discovery-explicit-candidate-channel.md) — _TODO: describe the situation, forces, and constraints driving this decision._ (2026-07-27, Proposed)
 - [ADR-0042: Route ADR-vs-lightweight by skill-prompted judgment at revision, not a lexical write-gate](adr-0042-decision-routing-gate.md) — [ADR-0031](adr-0031-load-bearing-decision-adr-trigger.md) fixed the *wording* of the Architectural Decision Record (ADR) trigger and single-sourced it as `decisions.py:ADR_TRIGGER`. (2026-07-24, Accepted)
 - [ADR-0044: Lifecycle entry gate](adr-0044-lifecycle-entry-gate.md) — Every teeth-not-trust gate jig has was built because "the agent will remember" was not good enough. (2026-07-30, Accepted)
+- [ADR-0045: Slice Claim Covers Active Lifecycle](adr-0045-slice-claim-covers-active-lifecycle.md) — `claimed_by:` is jig's only machine-readable "a session is working here" signal. (2026-07-24, Accepted)
 - [ADR-0046: Frontmatter status is authoritative; prose Status is best-effort](adr-0046-adr-status-frontmatter-authority.md) — [ADR-0026](./adr-0026-adr-status-frontmatter.md) made frontmatter `status:` the canonical home for ADR lifecycle state a… (2026-07-29, Accepted)
 
 ## Lightweight decisions

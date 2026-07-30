@@ -311,18 +311,42 @@ SKILL.md hand-off is the documented gate.
    python3 "${PLUGIN_ROOT}/skills/spec-workflow/workflow.py" transition \
      "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" IN_PROGRESS
    ```
-   **Claim-on-IN_PROGRESS (spec 049-01).** On a frontmatter (file-per-slice)
-   slice this stamps `claimed_by:` (the current branch name, or
-   `JIG_CLAIM_ID`) so parallel worktrees don't both pick up the same slice.
-   It refuses if the slice is already claimed by a *different* identifier and
-   still `IN_PROGRESS` — naming the holder and pointing at `--release`. The
-   claim is **local by default**; add `--push` (direct) or `--pr` (via PR) to
-   reserve it on `origin/main` so other worktrees see it (race / protected-
-   branch handling mirrors `workflow.py new`). The claim is cleared on the
-   forward move to `REVIEWED` and on any back-transition to
-   `READY_FOR_IMPLEMENTATION` / `DRAFT`. To force-release a stale claim:
-   `transition <spec> <slice> READY_FOR_IMPLEMENTATION --release --reason
-   "<why>"` (clears `claimed_by:`, logs to the slice's `## Release log`).
+   **Claim-on-working-state (spec 049-01, amended by
+   [ADR-0045](../../docs/decisions/adr-0045-slice-claim-covers-active-lifecycle.md)).**
+   On a frontmatter (file-per-slice) slice, a transition into a **working
+   state** — `READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` / `RECONCILED` —
+   stamps `claimed_by:` (the current branch name, or `JIG_CLAIM_ID`), so
+   spec-level work is marked too, not just implementation. Entering a **release
+   point** clears it: the two pickup-queue states `DRAFT` /
+   `READY_FOR_IMPLEMENTATION` (step 2 above tells you to choose work from
+   exactly those, so a leftover owner there would mark a free slice as
+   occupied), plus the terminal `DONE` / `DEFERRED` / `ABANDONED`.
+
+   It **refuses** only when the slice is already `IN_PROGRESS` under a
+   *different* identifier and you are moving it to `IN_PROGRESS` (naming the
+   holder, pointing at `--release`); any other foreign claim — on your copy or
+   on `origin/main` — is a loud **non-blocking warning**, because two sessions
+   working one spec can be legitimate. The claim is **local by default**; add
+   `--push` (direct) or `--pr` (via PR) to reserve it on `origin/main` so other
+   worktrees see it, at any working state, though only an `IN_PROGRESS`
+   reservation also publishes `status:` there (race / protected-branch handling
+   mirrors `workflow.py new`). At a working state that reservation is
+   **best-effort** (for a target other than `IN_PROGRESS`): if the trunk copy is
+   already `status: IN_PROGRESS` under someone else's claim or none, it warns and
+   pushes nothing, because that state is what the start-of-build guard
+   hard-blocks on — stamping a claim over it would move a live lock, or
+   manufacture the enforced pair on an unclaimed copy. Your own trunk claim just
+   reports a benign no-op. To force-release a stale claim: `transition
+   <spec> <slice> <state> --release --reason "<why>"` (clears `claimed_by:`,
+   logs to `## Release log`).
+
+   **Do not read a blank `claimed_by:` as "free".** It means *no claim is
+   recorded*: claims are local unless pushed, so another worktree's unpushed
+   claim is invisible, and a plain `Edit`-tool write to a slice takes no claim
+   at all. A claim that IS present names the session that last *moved* the
+   slice into a working state — a presence hint, not a live lock. When it
+   matters, ask rather than assume — see
+   [bug 014](../../docs/bugs/014-slice-claim-covers-only-in-progress.md).
 4. Fill in / refresh `plan.md` and `tasks.md` for the slice.
 5. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
    with `[jig:phase=implementation] [jig:spec=NNN] [jig:slice=NNN-NN]` so
