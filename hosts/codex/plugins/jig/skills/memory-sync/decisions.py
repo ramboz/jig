@@ -23,14 +23,35 @@ template those rubrics are seeded from quotes it too
 Self-contained by design: it does NOT import the 083-04 scan lib
 (`hooks/scripts/lib/decision_scan.py`) nor `memory.py`, so the host-packaging
 step can copy the skill tree whole without a cross-tree dependency.
+
+`promote` (100-03) is the one deliberate exception, and only at the process
+boundary: it shells `adr.py new` as a SUBPROCESS (`subprocess.run`), never
+an `import adr`. A subprocess is not an import — it does not create a
+Python-level cross-tree dependency, so the host-packaging step can still
+copy this skill's tree whole; it just also needs `adr-workflow`'s tree
+present beside it at runtime, which `_adr_py_path` locates and, failing
+that, refuses cleanly rather than importing around the gap.
+
+`evaluate_routing_signals` + `flags_adr_routing` are a pure, importable
+lexical evaluator of `ADR_TRIGGER`'s two criteria. Per
+[ADR-0042](../../docs/decisions/adr-0042-decision-routing-gate.md) they back
+**only** the advisory `lint` (100-04) — a report-only sweep of records already
+on disk. They deliberately do NOT gate any write path: the maintainer's call on
+[#121](https://github.com/ramboz/jig/issues/121) is that keyword-matching is too
+brittle to block a write, so the real routing judgement is the assistant's,
+prompted by memory-sync's `SKILL.md` (100-01), at the moment a decision is
+updated.
 """
 
 import argparse
 import datetime
 import os
 import re
+import subprocess
 import sys
+from collections import namedtuple
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout  # noqa: E402
@@ -218,9 +239,174 @@ def _existing_keys(file_text: str) -> set:
     return keys
 
 
+# --- Two-signal ADR-routing evaluator (100-01 / ADR-0042) -------------------
+# `ADR_TRIGGER` above states the rule; until this, nothing evaluated a
+# decision against it. The rubric it is transcribed from
+# (docs/decisions/lightweight-decisions.md's routing table) states TWO
+# independent criteria, not one flat list of ADR-ish words:
+#   (a) "A load-bearing design choice with rejected alternatives..." — a
+#       CONJUNCTION: needs both halves.
+#   (b) "Also: any change to a module boundary, public contract, or
+#       cross-cutting policy." — UNCONDITIONAL.
+# A flat keyword scan collapses that distinction and breaks on jig's own
+# corpus: the illustrative lightweight entry ("Onboarding CTA copy: 'Get
+# started' over 'Sign up'") is a rejected alternative in the plainest sense,
+# and the rubric routes it to the LIGHTWEIGHT home by name ("UI string or
+# translation choices"). The rubric's own hedge — "no REAL rejected
+# alternatives" — is what saves it: criterion (a)'s conjunction IS that test.
+# See ADR-0042 (Option A vs B) for the full argument against the flat list.
+
+RoutingMatch = namedtuple("RoutingMatch", "group phrase")
+
+_GROUP_BOUNDARY = "BOUNDARY"
+_GROUP_ALTERNATIVES = "ALTERNATIVES"
+_GROUP_LOAD_BEARING = "LOAD_BEARING"
+
+# Each marker is (display phrase, compiled regex). Regexes run against
+# `_normalize()`-d text (lowercase, whitespace collapsed to single spaces),
+# so patterns are plain lowercase with literal single spaces between words —
+# no re.IGNORECASE needed. `\b` on both ends stops a marker firing INSIDE a
+# longer word it happens to prefix: `alternative` must not fire on
+# `alternatively`, `interface` must not fire on `interfaces` (100-01 edge
+# cases, both asserted in test_decisions.py). Deliberately NOT a blanket
+# `s?` suffix on every marker — that would defeat the boundary guard for
+# exactly the markers where the plural is the false-positive case.
+_MARKER_TABLE = (
+    # EVERY member here must be a QUALIFIED phrase, never a bare common noun.
+    # This group flags with no second signal, so one over-broad member
+    # condemns a whole class of decisions on its own. Bare `protocol` and
+    # `schema` were removed for exactly that reason: "link the support address
+    # with the `mailto:` protocol" and "name the colour tokens after the Figma
+    # colour schema" are UI/design decisions the rubric routes HERE by name,
+    # and both flagged. Same reasoning keeps `interface` qualified as `public
+    # interface` — "user interface" is ordinary vocabulary in this home.
+    # Adding a bare word to this group is the Option-A failure ADR-0042
+    # rejects; if a new marker cannot be qualified, put it in LOAD_BEARING
+    # where it needs corroboration.
+    (_GROUP_BOUNDARY, (
+        ("module boundary", re.compile(r"\bmodule boundary\b")),
+        ("public contract", re.compile(r"\bpublic contract\b")),
+        ("cross-cutting policy", re.compile(r"\bcross-cutting policy\b")),
+        ("public api surface", re.compile(r"\bpublic api surface\b")),
+        ("public interface", re.compile(r"\bpublic interface\b")),
+        ("wire protocol", re.compile(r"\bwire protocol\b")),
+        ("database schema", re.compile(r"\bdatabase schema\b")),
+    )),
+    (_GROUP_ALTERNATIVES, (
+        ("rejected", re.compile(r"\brejected\b")),
+        ("ruled out", re.compile(r"\bruled out\b")),
+        ("discarded", re.compile(r"\bdiscarded\b")),
+        ("instead of", re.compile(r"\binstead of\b")),
+        ("rather than", re.compile(r"\brather than\b")),
+        ("as opposed to", re.compile(r"\bas opposed to\b")),
+        ("in favour/favor of", re.compile(r"\bin favou?r of\b")),
+        ("alternative(s)", re.compile(r"\balternatives?\b")),
+        ("trade-off", re.compile(r"\btrade-off\b")),
+    )),
+    # Needs ALTERNATIVES to fire, but ALTERNATIVES is near-universal prose
+    # ("X instead of Y" is how anyone describes any choice), so in practice a
+    # member here is close to flagging alone. Bare `dependency` and
+    # `migration` were removed on that basis: "lands with the icon-set
+    # migration" and "no new dependency" turned an icon swap and an
+    # empty-state string — the rubric's own opening examples — into findings.
+    (_GROUP_LOAD_BEARING, (
+        ("load-bearing", re.compile(r"\bload-bearing\b")),
+        ("architectural", re.compile(r"\barchitectural\b")),
+        ("structural", re.compile(r"\bstructural\b")),
+        ("native implementation", re.compile(r"\bnative implementation\b")),
+        ("vendored", re.compile(r"\bvendored\b")),
+        ("tight(ly) coupled/coupling",
+         re.compile(r"\bcoupling\b|\btightly coupled\b")),
+        ("invariant", re.compile(r"\binvariant\b")),
+        ("irreversible", re.compile(r"\birreversible\b")),
+        ("hard to reverse", re.compile(r"\bhard to reverse\b")),
+        # Qualified: bare `replaces` covers "replace the icon", which is a
+        # brand/icon swap and belongs in this home.
+        ("replaces the … implementation/library/path",
+         re.compile(r"\breplac(?:es|ing)\b[^.]{0,60}?"
+                    r"\b(?:implementation|library|module|path|layer)\b")),
+    )),
+)
+
+
+def evaluate_routing_signals(title: str, decision: str, context: str,
+                             scope: str) -> list:
+    """Pure lexical evaluator of `ADR_TRIGGER`'s two criteria (ADR-0042).
+
+    Scans the record's four fields for the marker groups above and returns
+    every hit as a `RoutingMatch(group, phrase)`. Module-level and
+    side-effect-free — no filesystem or environment access.
+
+    **Advisory only.** Per ADR-0042 this backs the report-only `lint`
+    (100-04) and nothing else: keyword-matching is too brittle to gate a
+    write (a prototype refused an ordinary "user interface" copy decision
+    until the marker was narrowed), so it lives on the one surface where a
+    false positive costs a glance rather than a blocked write. Do not wire
+    it into `add-lightweight` or `update` — that gate was built and removed.
+
+    Does not decide whether to flag — see `flags_adr_routing`, which applies
+    the two-signal rule to this function's output. Kept separate so the lint
+    can also just enumerate matches for its report.
+    """
+    corpus = _normalize(
+        " ".join(t or "" for t in (title, decision, context, scope)))
+    matches = []
+    for group, markers in _MARKER_TABLE:
+        for phrase, pattern in markers:
+            if pattern.search(corpus):
+                matches.append(RoutingMatch(group, phrase))
+    return matches
+
+
+def flags_adr_routing(matches) -> bool:
+    """Apply the two-signal rule to `evaluate_routing_signals()`'s output.
+
+    Flag iff BOUNDARY matched on its own (criterion b is unconditional — the
+    rubric says "ANY change to a module boundary...", no second signal
+    required), or ALTERNATIVES and LOAD_BEARING matched together (criterion
+    a's conjunction — neither is evidence alone; together they are the
+    rubric's "load-bearing... with rejected alternatives"). See ADR-0042 for
+    why this is a conjunction rather than a flat OR across every marker.
+    """
+    groups = {m.group for m in matches}
+    return (_GROUP_BOUNDARY in groups
+            or (_GROUP_ALTERNATIVES in groups
+                and _GROUP_LOAD_BEARING in groups))
+
+
+# A field value may mention `### ` inline, but must not START a line with it:
+# entry blocks are delimited by line-initial `### ` headings, so such a value
+# splits its own entry in two. Neither half then parses as a well-formed
+# block, so the entry silently disappears from `update`, `promote` and `lint`
+# — a recorded decision orphaned in place, with no error. Refusing at the
+# write is the only cheap fix; once written, nothing can tell the injected
+# heading from a real one.
+_LINE_INITIAL_HEADING_RE = re.compile(r"(?m)^###\s")
+
+
+def _reject_line_initial_headings(**fields) -> None:
+    for name, value in sorted(fields.items()):
+        if value and _LINE_INITIAL_HEADING_RE.search(value):
+            raise ValueError(
+                "--%s starts a line with '### ', which is how entry headings "
+                "are delimited — the entry would be split in two and become "
+                "invisible to update/promote/lint. Nothing was written. "
+                "Reword it (inline '### ' is fine; it is only a problem at "
+                "the start of a line)." % name)
+
+
 def render_entry(title: str, decision: str, context: str, scope: str,
                  commit: str = "", date: str = "") -> str:
-    """Render one entry in the file's `### [Date] — [Title]` template shape."""
+    """Render one entry in the file's `### [Date] — [Title]` template shape.
+
+    Refuses a field value that would start a line with `### ` — see
+    `_reject_line_initial_headings`. This is the single emitter every write
+    path funnels through (`add_lightweight`, `update_lightweight`), so the
+    guard sits here rather than being repeated at each caller.
+    """
+    _reject_line_initial_headings(
+        title=title, decision=decision, context=context, scope=scope,
+        commit=commit)
     lines = [
         "### %s — %s" % (date, title),
         "",
@@ -233,6 +419,162 @@ def render_entry(title: str, decision: str, context: str, scope: str,
     if commit:
         lines += ["", "**Commit:** %s" % commit]
     return "\n".join(lines) + "\n"
+
+
+# --- Entry parsing for `update` (100-02) ------------------------------------
+# `_existing_keys` above deliberately scans EVERY `### ` heading in the file,
+# including two pieces of documentation-in-entry-clothing this file ships:
+# the `## Template` fence's `### [Date] — [Short title]` placeholder, and (in
+# jig's own docs/decisions/lightweight-decisions.md) the illustrative worked
+# example. That breadth is exactly right for idempotency — "is this key
+# already taken?" only needs to know a heading exists, not whether it is a
+# real record. `update` needs the opposite question — "which of these may I
+# rewrite?" — so it needs a narrower notion, built once here and reused by
+# 100-03 (`promote`) and 100-04 (`lint`), both of which need the same "which
+# headings are real records" answer.
+
+Entry = namedtuple("Entry", "date title decision context scope commit start end")
+
+# A `### ` heading, split on the FIRST ` — ` (matching `render_entry`'s own
+# `"### %s — %s" % (date, title)` join, so parsing agrees with rendering on
+# where the date ends and the title begins). Non-greedy on date: an ISO date
+# never itself contains ` — `, so this never has to disambiguate a title that
+# happens to contain a second em dash.
+_ENTRY_HEADING_RE = re.compile(r"^### (?P<date>.*?) — (?P<title>[^\n]+)$",
+                               re.MULTILINE)
+
+# `## Entries` as a HEADING LINE, and the H2 that closes the section. Both
+# anchored, and both load-bearing for `_real_entries`: the first stops a
+# passing mention of `## Entries` in prose from moving the section start, the
+# second stops the last entry from swallowing whatever follows it. See
+# `_real_entries` for why swallowing is destructive rather than merely untidy.
+_ENTRIES_HEADING_RE = re.compile(
+    r"(?m)^" + re.escape(_ENTRIES_HEADING) + r"[ \t]*$")
+_NEXT_H2_RE = re.compile(r"(?m)^## ")
+
+# The blockquote jig's own file uses immediately above its worked example to
+# say "this one is documentation, not a record" (see
+# docs/decisions/lightweight-decisions.md's `## Entries` section). A
+# STRUCTURAL marker, not a hardcoded title — so it also protects a project
+# that adopts the same convention for its own illustrative note, and it does
+# not need updating if the worked example's title or wording ever changes.
+_ILLUSTRATIVE_MARKER_RE = re.compile(r"^> _Illustrative only\b", re.MULTILINE)
+
+# The four fields in the fixed order `render_entry` always emits them, each
+# non-greedy up to the next field's literal marker (or end of block for the
+# last one present) — so a field value that itself contains blank lines or
+# `### `-looking text (100-02's stated edge case) cannot be mistaken for a
+# later field or a new heading; only the literal `\n\n**Context:**` /
+# `\n\n**Scope:**` / `\n\n**Commit:**` markers end a field. `re.DOTALL` makes
+# `.` span newlines, since a field value is not guaranteed single-line.
+# Anchored `\A`...`\Z` (not `^`/`$`) so `.match()` requires the WHOLE block to
+# conform — a malformed block (hand-edited, or from a foreign format) simply
+# fails to match rather than parsing garbage, and `_real_entries` treats a
+# non-match as "not addressable" rather than crashing.
+_FIELD_RE = re.compile(
+    r"\A\n*\*\*Decision:\*\* (?P<decision>.*?)\n\n"
+    r"\*\*Context:\*\* (?P<context>.*?)\n\n"
+    r"\*\*Scope:\*\* (?P<scope>.*?)"
+    r"(?:\n\n\*\*Commit:\*\* (?P<commit>.*?))?"
+    r"\n*\Z",
+    re.DOTALL)
+
+
+def _real_entries(file_text: str) -> list:
+    """Every REAL entry under `## Entries`, as parsed `Entry` records.
+
+    `start`/`end` are byte offsets into `file_text` spanning the entry's own
+    block — heading through its last field — EXCLUDING the blank-line
+    separator that follows it. That is the span `update_lightweight`
+    replaces in place; the separator is left untouched so a following entry
+    (100-02's stated edge case) is never disturbed.
+
+    Two restrictions make this narrower than `_existing_keys`:
+      - only `### ` headings AFTER the `## Entries` heading are considered,
+        which excludes the `## Template` fence for free — `## Template`
+        precedes `## Entries` in every shipped copy of this file, so the
+        fence's placeholder heading is textually out of scope before any
+        illustrative-marker check even runs; and
+      - a heading immediately preceded (allowing intervening blank lines) by
+        the `_ILLUSTRATIVE_MARKER_RE` blockquote is skipped — jig's own
+        worked example is marked this way, and any project using the same
+        convention for its own illustrative note gets the same protection.
+
+    A `### ` heading whose body does not match `_FIELD_RE` (hand-edited into
+    something the helper never wrote) is also skipped rather than raising —
+    "not addressable" is the correct outcome for update, not a crash.
+    """
+    # Anchored to a real `## Entries` HEADING LINE, not a substring: prose or
+    # a code fence mentioning `## Entries` above the true heading would
+    # otherwise set `body_start` too early and pull the `## Template` fence
+    # into scope as a parseable entry.
+    hm = _ENTRIES_HEADING_RE.search(file_text)
+    if hm is None:
+        return []
+    body_start = hm.end()
+    # The section STOPS at the next H2. Without this bound the last entry's
+    # `**Scope:**` swallows every following section — and since `update` and
+    # `promote` rewrite exactly the span parsed here, the swallowed section is
+    # then deleted from the file. `_foreign_format_error`'s own remedy tells
+    # people to add `## Entries` to an existing document, so a following H2
+    # (`## Archive`, `## Superseded`) is a shape jig actively invites.
+    nm = _NEXT_H2_RE.search(file_text, body_start)
+    section_end = nm.start() if nm else len(file_text)
+    section = file_text[body_start:section_end]
+    headings = list(_ENTRY_HEADING_RE.finditer(section))
+    entries = []
+    prev_block_end = 0
+    for i, m in enumerate(headings):
+        heading_start = m.start()
+        block_end = (headings[i + 1].start() if i + 1 < len(headings)
+                    else len(section))
+        gap = section[prev_block_end:heading_start]
+        prev_block_end = block_end
+        if _ILLUSTRATIVE_MARKER_RE.search(gap):
+            continue
+        field_text = section[m.end():block_end]
+        fm = _FIELD_RE.match(field_text)
+        if not fm:
+            continue
+        entries.append(Entry(
+            date=m.group("date"), title=m.group("title"),
+            decision=fm.group("decision"), context=fm.group("context"),
+            scope=fm.group("scope"), commit=fm.group("commit") or "",
+            start=body_start + heading_start, end=body_start + block_end))
+    return entries
+
+
+def _find_entry(file_text: str, title: str, date: Optional[str] = None) -> Entry:
+    """Locate the single REAL entry (see `_real_entries`) matching `title`,
+    normalized the same way the idempotency key already is (`_normalize`),
+    so `update` and `add-lightweight` agree on what counts as "the same
+    entry" (100-02 AC5). `date` narrows to one when a title recurs.
+
+    Raises `ValueError` for every refusal shape `update` needs:
+      - no match — covers a genuinely missing title AND a title that only
+        exists as the illustrative example or the `## Template` fence, since
+        `_real_entries` already excludes both; there is no second "that's
+        documentation" code path (AC7 rides on AC4's refusal for free).
+      - an ambiguous match — more than one entry shares the normalized
+        title and no (or a non-narrowing) `--date` was given; lists the
+        competing dates rather than guessing (AC6).
+    """
+    entries = _real_entries(file_text)
+    norm_title = _normalize(title)
+    candidates = [e for e in entries if _normalize(e.title) == norm_title]
+    if date:
+        norm_date = _normalize(date)
+        candidates = [e for e in candidates if _normalize(e.date) == norm_date]
+    if not candidates:
+        raise ValueError(
+            "no entry titled %r found under `## Entries`%s. Nothing was "
+            "written." % (title, " for date %s" % date if date else ""))
+    if len(candidates) > 1:
+        dates = ", ".join(sorted(e.date for e in candidates))
+        raise ValueError(
+            "title %r matches more than one entry (dates: %s) — pass "
+            "--date to disambiguate. Nothing was written." % (title, dates))
+    return candidates[0]
 
 
 def _today() -> str:
@@ -285,6 +627,649 @@ def add_lightweight(project_dir: Path, title: str, decision: str, context: str,
     return True
 
 
+def update_lightweight(project_dir: Path, title: str,
+                       decision: Optional[str] = None,
+                       context: Optional[str] = None,
+                       scope: Optional[str] = None,
+                       commit: Optional[str] = None,
+                       date: Optional[str] = None) -> bool:
+    """Revise fields on an already-recorded lightweight-decision entry, in
+    place, through the helper (100-02) — the code path #121's routing
+    failure never had (revision was a hand-edit) and spec 083's OQ2
+    anticipated (adding a `**Commit:**` SHA retroactively) but left no way
+    to do.
+
+    `decision`/`context`/`scope`/`commit` default to `None`, meaning "leave
+    as recorded" — deliberately NOT `""` (`add_lightweight`'s default),
+    which would be indistinguishable from "clear this field" (AC2). Passing
+    an explicit empty string DOES set the field to empty; only omitting the
+    keyword argument (or, on the CLI, the flag) preserves it.
+
+    Returns True when the file was rewritten, False when every supplied
+    field already matched what was recorded — a no-op, mirroring
+    `add_lightweight`'s idempotency contract rather than rewriting a file
+    that would come out byte-identical anyway.
+
+    Raises ValueError when: `title` is blank; the file does not exist yet
+    (nothing to update); the file exists but is not in jig's format
+    (`_foreign_format_error`); or `_find_entry` refuses — missing, ambiguous,
+    or a title that only resolves to the illustrative example / template
+    fence (see its docstring).
+
+    Deliberately carries no routing judgement and no `--confirm-lightweight`
+    (100-02 AC8 / ADR-0042): every refusal above is about MATCHING an entry,
+    never about the decision's content. Whether a revision now warrants
+    promotion to an ADR is the assistant's judgement, prompted by
+    memory-sync's `SKILL.md` (100-01) — not this helper's to gate.
+    """
+    if not (title or "").strip():
+        raise ValueError("title is required")
+    path = lightweight_path(project_dir)
+    if not path.is_file():
+        raise ValueError(
+            "%s does not exist yet — there is nothing to update. Record it "
+            "first with `add-lightweight`." % _display_path(project_dir))
+    text = path.read_text(encoding="utf-8")
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
+
+    entry = _find_entry(text, title, date)
+    merged_decision = decision.strip() if decision is not None else entry.decision
+    merged_context = context.strip() if context is not None else entry.context
+    merged_scope = scope.strip() if scope is not None else entry.scope
+    merged_commit = commit.strip() if commit is not None else entry.commit
+
+    if (merged_decision == entry.decision and merged_context == entry.context
+            and merged_scope == entry.scope and merged_commit == entry.commit):
+        return False
+
+    rendered = render_entry(entry.title, merged_decision, merged_context,
+                            merged_scope, merged_commit, entry.date)
+    # `entry.end` reaches true EOF for the file's last entry (`_real_entries`
+    # scopes the Entries section to end-of-file, matching add_lightweight's
+    # own always-append-at-EOF behaviour) — nothing follows to preserve. An
+    # entry with a sibling after it has `entry.end` landing exactly at the
+    # next entry's `### `, so the one blank line `add_lightweight` always
+    # leaves between entries has to be re-supplied here, or the rewritten
+    # block would run straight into the next heading — the "followed by
+    # another entry" edge case this slice calls out explicitly.
+    if entry.end >= len(text):
+        new_text = text[:entry.start] + rendered
+    else:
+        new_text = text[:entry.start] + rendered + "\n" + text[entry.end:]
+    # Plain write — same rationale as `add_lightweight`'s (self-contained
+    # helper, owner-gated single-writer doc, not a hot concurrent path).
+    path.write_text(new_text, encoding="utf-8")
+    return True
+
+
+
+# --- `promote` (100-03 / ADR-0042) -------------------------------------
+# Moves a lightweight entry to an ADR via `adr.py new` (subprocess — see the
+# module docstring's carve-out), seeds the created ADR from the entry's own
+# fields, and rewrites the entry into a forward-linking stub. The ordering
+# in `promote_lightweight` below is deliberately staged so failure is
+# atomic (AC6): everything that can fail happens BEFORE
+# `lightweight-decisions.md` is touched.
+
+
+def _current_branch(project_dir: Path) -> Optional[str]:
+    """The project's current branch name, or None when detached / not a repo.
+
+    Deliberately a local `subprocess.run` rather than a reuse of `adr.py`'s
+    own `_current_branch`: this file stays self-contained by DoR (no
+    cross-tree import), and `promote`'s one carve-out is a SUBPROCESS at the
+    process boundary, not an import.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "--short", "HEAD"],
+            cwd=str(project_dir), capture_output=True, text=True)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _refuse_push_mode_off_main(project_dir: Path, no_push: bool) -> None:
+    """Refuse a push-mode `promote` from anywhere but `main`, BEFORE any ADR
+    is created.
+
+    `adr.py new` reserves push-mode ADR numbers differently depending on the
+    caller's branch. On `main` it writes, commits and pushes in the caller's
+    own tree, so the file is on disk for `_seed_adr_from_entry` to fill in.
+    Off `main` — jig's normal worktree-per-task mode — it builds the
+    reservation commit in an EPHEMERAL DETACHED worktree at origin/main and
+    pushes `HEAD:main`, so the ADR lands on the shared trunk and NEVER in the
+    caller's working copy (`adr.py`'s own `_print_draft_hint` says as much).
+    `promote` then has nothing local to seed or link to.
+
+    Left unguarded that is worse than a plain failure: the ADR is already
+    reserved and pushed to origin/main, and a re-run cannot recover because
+    the slug is now taken there (`adr.py` refuses with a slug collision). The
+    entry stays unpromoted with an orphaned stub ADR on shared main and no
+    self-service way forward.
+
+    So refuse up-front and name the working alternative. Checked BEFORE
+    `_run_adr_new`, which keeps `promote_lightweight`'s atomicity contract
+    honest: nothing is created, nothing is pushed, nothing needs cleaning up.
+    `--no-push` is unaffected — off `main` it routes to
+    `_reserve_local_on_current_branch`, which DOES write into the caller's
+    tree, and is the mode every documented `promote` example should prefer
+    from a feature branch.
+    """
+    if no_push:
+        return
+    branch = _current_branch(project_dir)
+    if branch == "main":
+        return
+    # `git symbolic-ref` also fails outside a repository, not just on a
+    # detached HEAD. Both are correctly NOT `main` and get the same advice, so
+    # they share a message rather than growing a second probe for a
+    # distinction that changes nothing about the remedy.
+    where = ("a detached HEAD (or a directory outside a git repository)"
+             if branch is None else "branch %r" % branch)
+    raise ValueError(
+        "promote from %s needs --no-push. In push mode `adr.py new` reserves "
+        "the ADR on origin/main from an ephemeral worktree, so the file never "
+        "lands in this working copy and there would be nothing to seed or "
+        "link — leaving a reserved ADR on the shared trunk that a re-run "
+        "cannot reuse (its slug is taken). Nothing was written.\n\n"
+        "Either:\n"
+        "  1. re-run with --no-push for a local ADR (the usual choice on a "
+        "feature branch — land it with the rest of your work); or\n"
+        "  2. promote from `main`, where the reservation lands in the tree."
+        % where)
+
+
+def _adr_py_path() -> Optional[Path]:
+    """Locate the sibling adr-workflow skill's `adr.py`.
+
+    `decisions.py` lives in a skill directory named either `memory-sync`
+    (plugin install) or `jig-memory-sync` (Claude scaffold install, which
+    prefixes every copied skill dir with `jig-`). `adr-workflow` is its
+    sibling under the same `skills/` tree, named `adr-workflow` or
+    `jig-adr-workflow` respectively — the prefix is derived from
+    decisions.py's OWN directory name, so both install modes resolve
+    without reading any config. A `CLAUDE_PLUGIN_ROOT`-rooted candidate is
+    also tried, for a (currently theoretical) copy that carries
+    decisions.py without its usual sibling.
+
+    Returns None — never raises — when neither resolves: a tier-0-only
+    install genuinely has no ADR helper, and `promote_lightweight` turns
+    that into a clean refusal rather than a traceback.
+    """
+    own = Path(__file__).resolve().parent
+    prefix = "jig-" if own.name.startswith("jig-") else ""
+    candidates = [own.parent / (prefix + "adr-workflow") / "adr.py"]
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if plugin_root:
+        candidates.append(
+            Path(plugin_root) / "skills" / "adr-workflow" / "adr.py")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+# Stricter than adr.py's OWN `_validate_slug` (`^[a-z0-9][a-z0-9-]*$`, which
+# deliberately accepts a leading digit) — this only gates the DEFAULT slug
+# `promote` derives from an entry's title; an explicit `--slug` bypasses it
+# entirely and is handed to `adr.py new` verbatim, which applies its own
+# (looser) rule. A derived slug this malformed means the title didn't
+# kebab-case cleanly, and guessing a "fixed" form on the caller's behalf
+# would be exactly the silent mangling this slice's edge cases rule out —
+# refuse and name the violated rule instead.
+_DERIVED_SLUG_OK_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+
+def _default_slug_from_title(title: str) -> str:
+    """Kebab-case `title` into a slug: lowercase, then each character that
+    is not `[a-z0-9]` becomes one literal `-` — char-for-char, NOT
+    collapsing runs. Collapsing multiple punctuation/whitespace characters
+    into a single `-` would itself be a silent repair, and it would make
+    the double-hyphen edge case unreachable (a title like "A -- B" would
+    quietly become "a-b" instead of being refused).
+
+    Validates the result against `_DERIVED_SLUG_OK_RE` and raises
+    ValueError naming the violated rule (empty / leading digit or hyphen /
+    consecutive hyphens / trailing hyphen) rather than repairing it.
+    """
+    raw = re.sub(r"[^a-z0-9]", "-", title.strip().lower())
+    if _DERIVED_SLUG_OK_RE.match(raw):
+        return raw
+    if not raw or not raw[0].isalpha():
+        reason = "is empty" if not raw else "starts with a digit or hyphen"
+    elif "--" in raw:
+        reason = "would contain consecutive hyphens"
+    elif raw.endswith("-"):
+        reason = "would end with a hyphen"
+    else:
+        reason = "is not a valid ADR slug"  # defensive; should be unreachable
+    raise ValueError(
+        "title %r kebab-cases to %r, which %s. Pass --slug explicitly to "
+        "name the ADR's slug yourself." % (title, raw, reason))
+
+
+def _adr_new_argv(adr_py: Path, slug: str, title: str, project_dir: Path,
+                  no_push: bool, pr_mode: bool) -> list:
+    """Build the `adr.py new` argv (AC1 + AC5's --no-push/--pr threading).
+    Pure/no I/O, so the flag-threading can be pinned without a real
+    subprocess for every combination — see `_run_adr_new` for the actual
+    invocation."""
+    argv = [sys.executable, str(adr_py), "new", slug, "--title", title,
+           "--project-dir", str(project_dir)]
+    if no_push:
+        argv.append("--no-push")
+    if pr_mode:
+        argv.append("--pr")
+    return argv
+
+
+def _run_adr_new(adr_py: Path, slug: str, title: str, project_dir: Path,
+                 no_push: bool, pr_mode: bool):
+    """Run `adr.py new` as a SUBPROCESS (never an import — see this file's
+    module docstring). No `env=` override is passed: the child inherits
+    this process's environment as-is, so a caller's `CLAUDE_PLUGIN_ROOT` or
+    git identity variables reach the ADR helper unchanged. Returns the
+    `subprocess.CompletedProcess`; `promote_lightweight` decides how to
+    react to a non-zero exit."""
+    argv = _adr_new_argv(adr_py, slug, title, project_dir, no_push, pr_mode)
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def _h2_pattern(heading: str) -> str:
+    """Match a `## <heading>` line, stopping AT the newline.
+
+    `[ \\t]*$` rather than `\\s*$` on purpose: `\\s` matches newlines, so a
+    greedy `\\s*` swallows the blank line after the heading and every caller
+    that then re-adds its own spacing emits one blank line too many (the
+    seeded ADR rendered `## Context` followed by two blank lines). Keeping the
+    match inside the line makes the heading's end unambiguous.
+    """
+    return r"(?m)^##[ \t]+" + re.escape(heading) + r"[ \t]*$"
+
+
+def _get_md_section(text: str, heading: str) -> str:
+    """Body of the `## <heading>` section in `text` (stripped), or '' if the
+    heading is absent. A small, LOCAL section-locator — decisions.py cannot
+    import adr.py's own `_status_section_body` (self-contained by DoR), so
+    this is a minimal, purpose-built duplicate rather than a shared import."""
+    m = re.search(_h2_pattern(heading), text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    next_h2 = re.search(r"(?m)^##\s", rest)
+    body = rest[:next_h2.start()] if next_h2 else rest
+    return body.strip()
+
+
+def _replace_md_section(text: str, heading: str, new_body: str) -> str:
+    """Replace the body of the `## <heading>` section with `new_body`,
+    preserving everything else (including the heading line and the
+    surrounding blank-line spacing style the ADR template uses). Raises
+    ValueError if `heading` is absent — should not happen against a freshly
+    `adr.py new`-created file; a raise here is more honest than silently
+    no-op-ing against a template that has drifted."""
+    m = re.search(_h2_pattern(heading), text)
+    if not m:
+        raise ValueError("ADR has no '## %s' section" % heading)
+    rest = text[m.end():]
+    next_h2 = re.search(r"(?m)^##\s", rest)
+    section_end = m.end() + (next_h2.start() if next_h2 else len(rest))
+    return (text[:m.end()] + "\n\n" + new_body.strip() + "\n\n"
+           + text[section_end:])
+
+
+_ADR_TITLE_RE = re.compile(r"(?m)^#\s+ADR-\d{4}:\s+(.+?)\s*$")
+
+
+def _adr_title(adr_path: Path) -> str:
+    """The `<Title>` from a `# ADR-NNNN: <Title>` heading. Falls back to the
+    file's stem if the heading is somehow absent (defensive; adr.py always
+    writes it)."""
+    m = _ADR_TITLE_RE.search(adr_path.read_text(encoding="utf-8"))
+    return m.group(1).strip() if m else adr_path.stem
+
+
+# There is no dedicated `## Scope` heading in the ADR template
+# (templates/docs/decisions/adr-0000-template.md) — the entry's Scope field
+# is folded into `## Context` (see `_seed_adr_from_entry`). This is the
+# fallback text when Scope was left blank at write time (it is optional —
+# `_require_entry_fields` only requires title + decision), reusing the same
+# "which screen / component / string / asset" wording
+# `_foreign_format_error` already quotes, so the vocabulary for what Scope
+# MEANS stays single-sourced even though this is a different string.
+_ADR_SCOPE_PLACEHOLDER = "_TODO: which screen / component / string / asset._"
+
+
+def _seed_adr_from_entry(adr_path: Path, entry: Entry) -> None:
+    """AC2 + AC4: fill the freshly-created ADR's `## Context` and
+    `## Recommended Decision` sections from the entry's own fields, and
+    append a back-link naming the entry's original date.
+
+    `## Recommended Decision` becomes exactly `entry.decision` — that field
+    is mandatory at write time, so it is never empty here. `## Context` is
+    composed from `entry.context` (or, when empty, the template's OWN
+    placeholder prose — captured from THIS file before it is touched, so
+    the fallback can never drift from whatever `adr.py new`'s template
+    actually shipped), a **Scope:** line (placeholder-backed the same way
+    when empty), and the back-link.
+    """
+    text = adr_path.read_text(encoding="utf-8")
+    context_placeholder = _get_md_section(text, "Context")
+    context_prose = entry.context if entry.context else context_placeholder
+    scope_text = entry.scope if entry.scope else _ADR_SCOPE_PLACEHOLDER
+    context_body = (
+        "%s\n\n**Scope:** %s\n\n"
+        "_Promoted from the lightweight-decision entry dated %s — see "
+        "lightweight-decisions.md._"
+        % (context_prose, scope_text, entry.date)
+    )
+    text = _replace_md_section(text, "Context", context_body)
+    text = _replace_md_section(text, "Recommended Decision", entry.decision)
+    adr_path.write_text(text, encoding="utf-8")
+
+
+# The promoted-stub shape `_render_promoted_stub` writes and
+# `_find_promoted_stub` reads back — deliberately NOT `render_entry`'s
+# Decision/Context/Scope shape (`_FIELD_RE`). A distinct, parseable marker
+# (`**Promoted:**`) is what lets `_find_promoted_stub` tell "already
+# promoted" apart from "genuinely missing" (AC8); a body that matched
+# `_FIELD_RE` would look like an ordinary revisable entry instead, and a
+# re-run of `promote` would only ever see `_find_entry`'s generic "no entry
+# titled ... found".
+_PROMOTED_STUB_RE = re.compile(
+    r"\A\n*\*\*Promoted:\*\* moved to \[ADR-\d{4}: [^\]]*\]"
+    r"\((?P<filename>adr-\d{4}-[a-z0-9][a-z0-9-]*\.md)\)\.\n*\Z")
+
+_ADR_FILENAME_RE = re.compile(r"^adr-(?P<number>\d{4})-")
+
+
+def _find_promoted_stub(file_text: str, title: str,
+                        date: Optional[str] = None) -> Optional[str]:
+    """AC8: is `title` (optionally narrowed by `date`) already a promoted
+    stub? Scans the same `### ` headings AFTER `## Entries` that
+    `_real_entries` scans, but tests bodies against `_PROMOTED_STUB_RE`
+    instead of `_FIELD_RE`.
+
+    Returns the `adr-NNNN-slug.md` filename the entry points to, or None.
+
+    Scoped exactly as `_real_entries` scopes itself — anchored on a real
+    `## Entries` HEADING LINE and bounded at the next H2 — and for the same
+    reasons. A plain substring `.find()` lets prose mentioning `## Entries`
+    move the section start; an unbounded tail lets a FOLLOWING section
+    (`## Archive`, `## Superseded` — the shape `_foreign_format_error`'s own
+    remedy 1 invites) supply the match. Either way an archived stub answers
+    for a live entry, and since `promote_lightweight` consults this FIRST, the
+    result is a false "already promoted" that refuses a legitimate promotion.
+    """
+    hm = _ENTRIES_HEADING_RE.search(file_text)
+    if hm is None:
+        return None
+    body_start = hm.end()
+    nm = _NEXT_H2_RE.search(file_text, body_start)
+    section = file_text[body_start:nm.start() if nm else len(file_text)]
+    headings = list(_ENTRY_HEADING_RE.finditer(section))
+    norm_title = _normalize(title)
+    norm_date = _normalize(date) if date else None
+    for i, m in enumerate(headings):
+        if _normalize(m.group("title")) != norm_title:
+            continue
+        if norm_date and _normalize(m.group("date")) != norm_date:
+            continue
+        block_end = (headings[i + 1].start() if i + 1 < len(headings)
+                    else len(section))
+        field_text = section[m.end():block_end]
+        sm = _PROMOTED_STUB_RE.match(field_text)
+        if sm:
+            return sm.group("filename")
+    return None
+
+
+def _render_promoted_stub(entry: Entry, adr_path: Path) -> str:
+    """AC3: the forward-linking stub that replaces a promoted entry's body.
+    The heading (`### <date> — <title>`) is left exactly as it was — only
+    the body below it changes — so an old link to this entry still lands on
+    something, not a gap (never delete a promoted entry)."""
+    m = _ADR_FILENAME_RE.match(adr_path.name)
+    number = m.group("number") if m else "????"
+    title = _adr_title(adr_path)
+    return (
+        "### %s — %s\n\n"
+        "**Promoted:** moved to [ADR-%s: %s](%s).\n"
+        % (entry.date, entry.title, number, title, adr_path.name)
+    )
+
+
+def _replace_entry_with_stub(text: str, entry: Entry, adr_path: Path) -> str:
+    """Rewrite `entry`'s span (`entry.start:entry.end`, per `_real_entries`'
+    contract) into its promoted stub, in place — mirrors
+    `update_lightweight`'s own last-entry-vs-followed-by-another-entry
+    handling, since a promoted entry can be anywhere in the file."""
+    stub = _render_promoted_stub(entry, adr_path)
+    if entry.end >= len(text):
+        return text[:entry.start] + stub
+    return text[:entry.start] + stub + "\n" + text[entry.end:]
+
+
+def promote_lightweight(project_dir: Path, title: str,
+                        date: Optional[str] = None,
+                        slug: Optional[str] = None,
+                        no_push: bool = False, pr_mode: bool = False) -> Path:
+    """Move a lightweight-decision entry to an ADR via `adr.py new` (100-03
+    / ADR-0042), seed the ADR from the entry's own fields, and replace the
+    entry with a forward-linking stub. Returns the created ADR's path.
+
+    Ordering is deliberately staged so failure is atomic (AC6): everything
+    that can fail — finding the entry, deriving/validating the slug,
+    locating and running `adr.py new` — happens BEFORE
+    `lightweight-decisions.md` is touched. Only once `adr.py new` has
+    actually succeeded does this function seed the ADR and rewrite the
+    entry; a failure at any earlier step leaves the file byte-identical.
+
+    Raises ValueError for every refusal shape: `title` blank; the file
+    missing or foreign-format; `title` already points to a promoted stub
+    (AC8); `_find_entry`'s missing/ambiguous/illustrative/fence refusals
+    (AC7, AC9 — reused verbatim, same messages `update` gives); a derived
+    slug that doesn't kebab-case cleanly (edge cases); no adr-workflow
+    skill found beside this file; or `adr.py new` itself failing.
+    """
+    if not (title or "").strip():
+        raise ValueError("title is required")
+    path = lightweight_path(project_dir)
+    if not path.is_file():
+        raise ValueError(
+            "%s does not exist yet — there is nothing to promote. Record "
+            "it first with `add-lightweight`." % _display_path(project_dir))
+    text = path.read_text(encoding="utf-8")
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
+
+    # AC8 — a specific refusal for a re-run on an already-promoted entry,
+    # checked BEFORE `_find_entry` (whose generic "no entry titled ..." is
+    # all a stub's body — which never matches `_FIELD_RE` — would otherwise
+    # produce).
+    already = _find_promoted_stub(text, title, date)
+    if already is not None:
+        raise ValueError(
+            "%r is already promoted to %s; nothing to do. Edit that ADR "
+            "directly for further changes." % (title, already))
+
+    # AC7 / AC9 — reuses 100-02's entry-matching contract unchanged: missing,
+    # ambiguous, illustrative-example, or `## Template`-fence titles all
+    # raise here with the SAME messages `update` gives.
+    entry = _find_entry(text, title, date)
+
+    final_slug = (slug or "").strip()
+    if not final_slug:
+        final_slug = _default_slug_from_title(entry.title)
+
+    adr_py = _adr_py_path()
+    if adr_py is None:
+        raise ValueError(
+            "promote needs the adr-workflow skill's adr.py, which was not "
+            "found beside %s. A tier-0-only install has no ADR helper — "
+            "install the adr-workflow skill (or add it to this project's "
+            "copied machinery), then re-run `promote`."
+            % Path(__file__).name)
+
+    # Last check before anything is created: a push-mode promote off `main`
+    # cannot work and would leave a reserved ADR on the shared trunk (see the
+    # helper). Deliberately AFTER the adr.py resolution above — a missing ADR
+    # helper is an install-integrity problem, and reporting "wrong branch for
+    # this mode" to someone who has no `adr.py` at all would send them after
+    # the wrong fix. Both still precede `_run_adr_new`, so the atomicity
+    # contract in this function's docstring holds either way.
+    _refuse_push_mode_off_main(project_dir, no_push)
+
+    result = _run_adr_new(adr_py, final_slug, entry.title, project_dir,
+                          no_push, pr_mode)
+    if result.returncode != 0:
+        raise ValueError(
+            "adr.py new failed (exit %d); %s was left untouched:\n%s"
+            % (result.returncode, _display_path(project_dir),
+               (result.stderr or result.stdout).strip()))
+    # Resolve the ADR by its slug, NOT by position in adr.py's stdout.
+    # adr.py prints the path and then keeps printing: `reserved … on
+    # origin/main` on a successful push, the PR URL on the `--pr` fallback.
+    # Taking the last line therefore worked only under `--no-push` and broke
+    # every other mode *after* the ADR had been created and pushed — the
+    # half-promoted state this function's ordering exists to prevent. The
+    # slug is ours (we computed it), and adr.py's filename shape
+    # `adr-NNNN-<slug>.md` is the same contract `adr.py index` relies on.
+    matches = sorted(
+        project_layout.decisions_dir(project_dir)
+        .glob("adr-[0-9][0-9][0-9][0-9]-%s.md" % final_slug))
+    if not matches:
+        raise ValueError(
+            "adr.py new exited 0 but no adr-NNNN-%s.md landed in %s, so "
+            "there is nothing to promote into. %s was left untouched.\n"
+            "adr.py said:\n%s"
+            % (final_slug, project_layout.decisions_dir(project_dir),
+               _display_path(project_dir),
+               (result.stdout or "").strip()))
+    # Highest number wins: if an earlier run left a same-slug ADR behind, the
+    # one this call just reserved is the later allocation.
+    adr_path = matches[-1]
+
+    # From here on, adr.py has already succeeded — seed + stub are the only
+    # remaining steps, both against files that now exist. Any failure past
+    # this point leaves a created (and, in push mode, already-pushed) ADR
+    # behind, so it must SAY so: `_cmd_promote`'s bare ValueError message
+    # would otherwise report e.g. "ADR has no '## Context' section" with no
+    # hint that a record was orphaned. `_cmd_promote` catches OSError for the
+    # same reason; a drifted ADR template raises ValueError instead, and both
+    # need the same disclosure.
+    try:
+        _seed_adr_from_entry(adr_path, entry)
+        new_text = _replace_entry_with_stub(text, entry, adr_path)
+        path.write_text(new_text, encoding="utf-8")
+    except ValueError as exc:
+        raise ValueError(
+            "%s was created%s but could not be seeded, so %s was left "
+            "untouched: %s\nCheck %s before re-running — a re-run allocates a "
+            "new number, and this one's slug is already taken."
+            % (adr_path.name,
+               "" if no_push else " and reserved on origin/main",
+               _display_path(project_dir), exc,
+               project_layout.decisions_dir(project_dir))) from exc
+    return adr_path
+
+
+# --- Advisory lint (100-04 / ADR-0042) -------------------------------------
+# The ONE surface where the lexical evaluator is allowed to run. It reports;
+# it never edits, never seeds, and never blocks a write. ADR-0042 rejected
+# keyword-matching as a write-gate precisely because it is brittle — on an
+# advisory sweep a false positive costs a glance, which is a price worth
+# paying for catching records written before the routing guidance existed.
+
+LintFinding = namedtuple("LintFinding", "date title matches")
+LintReport = namedtuple("LintReport", "path scanned findings")
+
+
+def lint_lightweight(project_dir: Path):
+    """Report the recorded entries whose own text reads as ADR-worthy.
+
+    Returns a `LintReport(path, scanned, findings)`, or **None** when the
+    project has no lightweight-decisions file at all — an absent file has no
+    misfiling in it, and unlike `add_lightweight` this must NOT seed one:
+    seeding is a write, and the whole point of this surface is that it never
+    writes.
+
+    Raises ValueError (`_foreign_format_error`) for a file with no
+    `## Entries` heading, matching the rest of the helper — a file jig cannot
+    parse must fail loudly rather than be reported as clean.
+
+    Only `_real_entries` are scanned, so the illustrative worked example, the
+    `## Template` fence, and 100-03's promotion stubs are all out of scope:
+    documentation is not a decision, and a promoted entry has already been
+    dealt with. Re-reporting a stub would make the output permanently
+    non-empty and train the reader to ignore it.
+    """
+    path = lightweight_path(project_dir)
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    if _ENTRIES_HEADING not in text:
+        raise ValueError(_foreign_format_error(project_dir))
+    entries = _real_entries(text)
+    findings = []
+    for entry in entries:
+        matches = evaluate_routing_signals(
+            entry.title, entry.decision, entry.context, entry.scope)
+        if flags_adr_routing(matches):
+            findings.append(LintFinding(entry.date, entry.title, matches))
+    return LintReport(path, len(entries), findings)
+
+
+def _format_finding(finding) -> str:
+    """One finding, with the matched evidence and the command that fixes it.
+
+    Names the phrases, not just the groups: an advisory report the reader
+    cannot audit is one they have to either trust blindly or ignore, and this
+    signal is explicitly fallible (ADR-0042).
+    """
+    hits = "; ".join("%s: %r" % (m.group, m.phrase) for m in finding.matches)
+    return (
+        "  %s — %s\n"
+        "      matched %s (%s)\n"
+        "      promote with: decisions.py promote --title \"%s\""
+        % (finding.date, finding.title,
+           " and ".join(sorted({m.group for m in finding.matches})),
+           hits, finding.title)
+    )
+
+
+def _cmd_lint(args) -> int:
+    project_dir = Path(args.project_dir).resolve()
+    try:
+        report = lint_lightweight(project_dir)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    rel = _display_path(project_dir)
+    if report is None:
+        print("nothing to lint: %s does not exist" % rel)
+        return 0
+    if not report.findings:
+        # Naming the file and the count on a clean run: a bare "OK" is
+        # indistinguishable from a scan that silently matched nothing
+        # because it was pointed at the wrong file.
+        print("clean: %d entr%s scanned in %s, none read as ADR-worthy"
+              % (report.scanned, "y" if report.scanned == 1 else "ies", rel))
+        return 0
+    print("%d of %d entr%s in %s read as ADR-worthy:"
+          % (len(report.findings), report.scanned,
+             "y" if report.scanned == 1 else "ies", rel))
+    for finding in report.findings:
+        print(_format_finding(finding))
+    print("\nThis is an advisory signal, not a verdict — it matches wording, "
+          "not meaning. Judge each against the ADR trigger before promoting.")
+    return 0 if args.exit_zero else 1
+
+
 def _cmd_add_lightweight(args) -> int:
     project_dir = Path(args.project_dir).resolve()
     try:
@@ -313,9 +1298,54 @@ def _cmd_add_lightweight(args) -> int:
     return 0
 
 
+def _cmd_update(args) -> int:
+    project_dir = Path(args.project_dir).resolve()
+    try:
+        changed = update_lightweight(
+            project_dir, args.title, decision=args.decision,
+            context=args.context, scope=args.scope, commit=args.commit,
+            date=args.date)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    rel = _display_path(project_dir)
+    if changed:
+        print("updated lightweight decision in %s: %s" % (rel, args.title))
+    else:
+        print("no-op: '%s' already matches the supplied fields in %s"
+              % (args.title, rel))
+    return 0
+
+
+def _cmd_promote(args) -> int:
+    project_dir = Path(args.project_dir).resolve()
+    try:
+        adr_path = promote_lightweight(
+            project_dir, args.title, date=args.date, slug=args.slug,
+            no_push=args.no_push, pr_mode=args.pr)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    except OSError as exc:
+        # Everything that can fail is ordered before the ADR is created, so an
+        # OSError here means the write ITSELF failed — the ADR exists and may
+        # already be reserved on origin/main. A traceback would leave the
+        # operator with no idea a record was orphaned; name it instead.
+        print("error: promote failed while writing after the ADR was already "
+              "created: %s\nCheck docs/decisions/ for an orphaned ADR before "
+              "re-running — a re-run allocates a new number." % exc,
+              file=sys.stderr)
+        return 1
+    rel = _display_path(project_dir)
+    print("promoted lightweight decision in %s to %s: %s"
+          % (rel, adr_path, args.title))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="jig lightweight-decisions helper (add-lightweight)")
+        description=("jig lightweight-decisions helper "
+                     "(add-lightweight, update, promote, lint)"))
     sub = p.add_subparsers(dest="command", required=True)
 
     al = sub.add_parser(
@@ -332,6 +1362,68 @@ def _build_parser() -> argparse.ArgumentParser:
     al.add_argument("--project-dir", default=".",
                     help="project root (default: cwd)")
     al.set_defaults(func=_cmd_add_lightweight)
+
+    up = sub.add_parser(
+        "update",
+        help="revise fields on an existing lightweight decision entry")
+    up.add_argument("--title", required=True,
+                    help="title of the existing entry to revise")
+    # Defaults are None here, NOT "" like add-lightweight's — None is the
+    # sentinel meaning "omitted, leave as recorded" (100-02 AC2). An
+    # explicit empty string ("--decision ''") is a real value and clears
+    # the field; see `update_lightweight`'s docstring.
+    up.add_argument("--decision", default=None, help="revised decision text")
+    up.add_argument("--context", default=None, help="revised context text")
+    up.add_argument("--scope", default=None, help="revised scope text")
+    up.add_argument("--commit", default=None, help="revised commit SHA or PR")
+    up.add_argument("--date", default=None,
+                    help="disambiguate when --title matches more than one "
+                         "date; does not change the entry's own date")
+    up.add_argument("--project-dir", default=".",
+                    help="project root (default: cwd)")
+    up.set_defaults(func=_cmd_update)
+    # No --confirm-lightweight here, deliberately (100-02 AC8 / ADR-0042):
+    # `update` refuses only on matching grounds (missing / ambiguous /
+    # documentation-only title), never on the decision's content — there is
+    # no routing gate to confirm past. Do not add one; see the ADR.
+
+    pp = sub.add_parser(
+        "promote",
+        help="move a lightweight decision entry to an ADR via `adr.py new`")
+    pp.add_argument("--title", required=True,
+                    help="title of the existing entry to promote")
+    pp.add_argument("--date", default=None,
+                    help="disambiguate when --title matches more than one "
+                         "date")
+    pp.add_argument("--slug", default=None,
+                    help="ADR slug override (default: kebab-cased entry "
+                         "title)")
+    # Mirrors adr.py new's own mutually-exclusive push group (AC5) — both
+    # flags are threaded straight through to the `adr.py new` subprocess.
+    promote_push_group = pp.add_mutually_exclusive_group()
+    promote_push_group.add_argument(
+        "--no-push", action="store_true",
+        help="skip the direct push to origin/main (local-only allocation) "
+             "— passed through to `adr.py new`")
+    promote_push_group.add_argument(
+        "--pr", action="store_true",
+        help="skip the direct-push attempt; go straight to branch + PR — "
+             "passed through to `adr.py new`")
+    pp.add_argument("--project-dir", default=".",
+                    help="project root (default: cwd)")
+    pp.set_defaults(func=_cmd_promote)
+
+    ln = sub.add_parser(
+        "lint",
+        help="report recorded entries whose text reads as ADR-worthy "
+             "(advisory, read-only)")
+    ln.add_argument("--exit-zero", action="store_true",
+                    help="report findings but still exit 0 — for a "
+                         "report-only run that must not fail a script")
+    ln.add_argument("--project-dir", default=".",
+                    help="project root (default: cwd)")
+    ln.set_defaults(func=_cmd_lint)
+
     return p
 
 
