@@ -1,8 +1,7 @@
 ---
-status: FIXING
+status: DONE
 tier: standard
 severity: medium
-claimed_by: claude/bug-copy-machinery-mode
 regression_test: skills/migrate/test_migrate.py::PluginModeConversionTests
 main_repro_checked_at: 2026-07-30
 main_repro_ref: a03f6c8
@@ -12,6 +11,7 @@ green_confirmed_at: 2026-07-30
 fix_class: structural_fix
 security_surface: false
 escalated_to:
+claimed_by: claude/bug-018-close-out
 ---
 
 # Bug 018: copy-machinery-leaves-mode-inconsistent
@@ -156,10 +156,26 @@ migrate-into-jig case is untouched.
 
 **Part 2 — the docs.** `copy-machinery` scans the project's *own* markdown
 (configured docs root + host primer, excluding the host runtime dirs whose
-machinery this command just refreshed) for surviving `${CLAUDE_PLUGIN_ROOT}`
-citations, and prints each file with its hit count plus the host-correct
-in-repo form. **It writes nothing.** The advisory is not a gate: the copy
-succeeded, so the exit code stays 0.
+machinery this command just refreshed) for surviving plugin-root citations,
+and prints each file with its hit count plus the in-repo form. **It writes
+nothing.** The advisory is not a gate: the copy succeeded, so the exit code
+stays 0.
+
+Both the token it looks for and the replacement it offers are **read from the
+host's scaffold renderer**, not restated in `migrate.py`:
+`scaffold.renderer_for_host(host)` returns the renderer class, and
+`_plugin_root_token` / `_in_repo_skill_path` take `PLUGIN_ROOT_PREFIX` and
+`SKILL_PATH_REPLACEMENT` off it. `ClaudeScaffoldRenderer` gained the
+`PLUGIN_ROOT_PREFIX` / `PLUGIN_ROOT_VAR` declarations it was missing (Codex
+already overrode them), so every renderer now answers the question.
+
+That indirection is the fix, not decoration. The first cut hard-coded the
+single literal `${CLAUDE_PLUGIN_ROOT}` — see `## Already tried` — and Codex
+plugin-mode docs are rendered against `${PLUGIN_ROOT}`, so the scan matched
+nothing and **every Codex project got silence** while the shipped Codex
+`SKILL.md` promised it a warning. Sourcing the strings from the renderer means
+a renderer change carries the advisory with it instead of switching it off
+unnoticed.
 
 The *decision* lives in [`skills/migrate/SKILL.md`](../../skills/migrate/SKILL.md),
 not in the helper — a new "Converting a plugin-mode project" section instructs
@@ -194,23 +210,59 @@ command.
   loudly — but only because it asserts a negative; a differently-shaped test
   would have gone on passing while proving nothing. Now pins `--in-repo`
   explicitly, with a comment saying why.
+- **The first fix was Claude-only, and shipped that way.** Part 2 detected the
+  single literal `${CLAUDE_PLUGIN_ROOT}`; Codex renders its plugin-mode docs
+  against `${PLUGIN_ROOT}`, so `_stale_plugin_root_docs` returned `[]` for
+  every Codex project, no advisory was ever printed, and
+  `_IN_REPO_SKILL_PATH["codex"]` was unreachable in practice. No test caught
+  it — every fixture in `PluginModeConversionTests` is a Claude scaffold. It
+  was found by the retroactive `bug-review` and `craft` passes (both
+  `needs-changes`, [#150](https://github.com/ramboz/jig/pull/150)) after the
+  first fix had already merged as `dd0d350`, and confirmed by running
+  `copy-machinery --host codex` against a Codex scaffold. Fixed by sourcing
+  both spellings from the host's renderer rather than restating them — see
+  `## Fix` part 2.
+- **Two assertions that were passing without testing anything.**
+  `test_copied_machinery_is_not_reported_as_stale_user_docs` ran on a
+  default-`docs_root` fixture, where `.claude/` is outside the scan root
+  *structurally* — deleting `_STALE_SCAN_SKIP_DIRS` entirely left it green. It
+  now lives in `CopyMachineryStaleScanScopeTests` on a `docs_root="."`
+  project, the only shape where the skip-set is consulted.
+  `test_summary_reports_the_mode_flip` asserted `"plugin-only"` and
+  `"in-repo"` as separate substrings while its own negative counterparts
+  asserted the whole line; it now asserts the line.
 
 ## Regression test
 
-`skills/migrate/test_migrate.py::PluginModeConversionTests` (15 tests).
+`skills/migrate/test_migrate.py::PluginModeConversionTests` (14 tests) —
+named in the frontmatter as the test for the bug **as reported**. Two further
+classes in the same module carry the rest and are equally load-bearing; the
+gate runs the whole suite regardless of the selector, so nothing here is
+unguarded:
 
-Written against a *scaffolded* project, as the record required: a
+| Class | Pins |
+|---|---|
+| `PluginModeConversionTests` (14) | the manifest flip and the Claude-host advisory |
+| `CodexPluginModeConversionTests` (11) | the advisory firing on Codex, with the host's own token and replacement path, plus the anti-drift guards |
+| `CopyMachineryStaleScanScopeTests` (3) | the scan's scope on a `docs_root="."` project — the skip-set and `_project_docs_root` |
+
+All written against *scaffolded* projects, as the record required: a
 `copy-machinery` run on a project with no `scaffold.json` has no mode to flip,
 so a test on that path would pass without proving anything.
-`test_baseline_manifest_says_plugin_only` pins the premise so the conversion
-test cannot silently start passing for the wrong reason.
+`test_baseline_manifest_says_plugin_only` and
+`test_baseline_codex_docs_cite_the_codex_plugin_root` pin the premises so
+neither conversion test can silently start passing for the wrong reason.
 
-Coverage: the flip itself, the reported flip, field preservation, idempotency,
-the already-in-repo no-op, the no-manifest no-op, the docs being named, the
+Coverage: the flip itself, the reported flip, field preservation (in both
+directions — nothing dropped, nothing invented), idempotency, the
+already-in-repo no-op, the no-manifest no-op, the docs being named, the
 replacement path being stated, **the docs surviving byte-for-byte**, the exit
 code staying 0, silence when there is nothing stale, machinery not being
-mis-reported as user docs, and the skill (in both source and Codex-rendered
-form) documenting the ask-before-editing step.
+mis-reported as user docs, dependency trees not being scanned, the skill (in
+both source and Codex-rendered form) documenting the ask-before-editing step,
+and — new — the whole docs half repeated under `--host codex`, plus two
+guards asserting the token and replacement path still equal the renderer's
+own constants.
 
 ## Proof
 
@@ -233,11 +285,44 @@ caught up with the maintainer's ruling the fix was already on disk, so the gate
 could only have re-witnessed green. The red above is the real evidence, and it
 was witnessed before any production line was written — not reconstructed after.
 
-Green after: `PluginModeConversionTests` 15/15 OK; full suite **3705 tests OK
-(4 skipped)**, pyright clean. The suite's host-package drift guard reports
-stale packages inside `run_tests.py` but passes 4/4 when run on its own
-(`build_host_packages.py --check`) with the packages freshly built and
-committed — that is bug 008, not this change.
+Green after, *as of that first cycle*: `PluginModeConversionTests` 15/15 OK;
+full suite **3705 tests OK (4 skipped)**, pyright clean. (That class holds 14
+tests today — one moved to `CopyMachineryStaleScanScopeTests` in the second
+cycle below. The counts in this paragraph are the historical record of the
+first cycle and are deliberately not restated.)
+
+### Second red → green (the Codex host gap)
+
+The Codex gap in `## Already tried` was found after `dd0d350` had merged, so
+it got its own red→green cycle on top of the shipped fix. Red witnessed on the
+merged code before any production line was changed — 4 failures + 2 errors:
+
+```
+FAIL: test_stale_codex_doc_citations_are_named_in_the_summary
+    AssertionError: 'still cite' not found in
+    'copied machinery into .../proj/.codex\nscaffold_mode: plugin-only -> in-repo\n'
+    : the docs advisory never fired for a Codex project
+FAIL: test_codex_warning_names_the_codex_token
+FAIL: test_codex_summary_states_the_codex_replacement_path
+FAIL: test_codex_warning_does_not_fail_the_run
+ERROR: test_detection_token_tracks_the_renderer          (no _plugin_root_token yet)
+ERROR: test_in_repo_replacement_path_tracks_the_renderer (no _in_repo_skill_path yet)
+```
+
+Green after: the three bug-018 classes 28/28 OK, `test_migrate` 190/190 OK,
+the three scaffold suites 159 + 13 + 112 OK, full suite **3835 tests OK
+(7 skipped)**, exit code 0.
+
+**Correcting an earlier claim in this record:** the note above about the
+host-package drift guard failing inside `run_tests.py` was wrong, and so was
+the reference to bug 008 for it. The `ERROR: committed host packages are
+stale…` text in the suite output is *expected output* from
+`scripts/test_build_host_packages.py::DriftCheckTests`, which deliberately
+induces drift to assert the message shape. Those 13 tests pass, and
+`run_tests.py` exits **0**. The original misreading came from taking an exit
+code through a pipe (`… | tail`), which reports `tail`'s status, not the
+script's. Whether bug 008 describes a real separate flake is untouched by
+this — it simply was not what was happening here.
 
 ## Learning
 
@@ -253,6 +338,41 @@ author places inside such a span vanishes from the Codex package with no error
 and no diff to notice. Source-only assertions do not catch it — the guard has
 to read the rendered artifact.
 
+**The same widened-contract failure recurred inside the fix for it, one layer
+down.** The fix's own part 2 hard-coded `${CLAUDE_PLUGIN_ROOT}` while the Codex
+renderer emits `${PLUGIN_ROOT}` — so the advisory silently did nothing for
+every Codex project, and the shipped Codex `SKILL.md` promised those users a
+warning they would never see. Writing the learning down did not prevent
+repeating it a few hundred lines later. What prevents it is *structural*: read
+the host's spellings from the host's renderer, so there is no second copy to
+drift. A per-host constant sitting in a consumer module is a contract
+restatement, and restatements go stale silently.
+
+**A host-parameterized code path needs a fixture per host, or the untested
+host is a guess.** Every fixture in `PluginModeConversionTests` was a Claude
+scaffold, so a function threading `resolved_host` through to a Claude-only
+literal looked fully covered — 15 green tests, one of the two hosts exercised.
+When a function takes a host (or any mode/variant) parameter, the fixture
+matrix has to cover the values, not just the default.
+
+**Never read an exit code through a pipe.** `cmd | tail` reports `tail`'s
+status. That is how this record came to claim the test suite was failing on a
+known flake when it was passing and printing a test's expected error text — see
+the correction in `## Proof`. Redirect to a file and check `$?`, or use
+`PIPESTATUS`.
+
 ## Main recheck
 
 - 2026-07-30 - `00c3333` -> reproduces: scaffold --plugin-only then copy-machinery: scaffold_mode stays plugin-only; docs/workflow.md keeps 3 CLAUDE_PLUGIN_ROOT citations
+
+> **Log/frontmatter note.** `main_repro_ref` reads `a03f6c8` but this log has
+> no `a03f6c8` line: that recheck was run and written up as prose in `## Repro`
+> rather than through `bug.py main-check`, so only the frontmatter field was
+> updated. The prose account stands; the missing line is a bookkeeping gap, not
+> a missing check. Flagged by the craft pass on
+> [#150](https://github.com/ramboz/jig/pull/150). Left as-is rather than
+> back-dating a synthetic entry.
+
+## Release log
+
+- 2026-07-30 - released claim from claude/bug-copy-machinery-mode: branch claude/bug-copy-machinery-mode was deleted after PR #145 merged; no session holds this bug. Part 1 (manifest flip) is on main; the retroactive bug-review and craft passes returned needs-changes on part 2 (docs advisory never fires on the Codex host), so the bug stays FIXING and is free for pickup.
