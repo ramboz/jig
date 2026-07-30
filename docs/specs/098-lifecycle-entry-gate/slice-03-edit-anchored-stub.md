@@ -1,6 +1,6 @@
 ---
 status: DEFERRED
-dependencies: [adr-0040]
+dependencies: [adr-0044]
 last_verified: 2026-07-27
 ---
 

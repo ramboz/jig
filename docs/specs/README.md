@@ -303,6 +303,7 @@
 | [098-lifecycle-entry-gate](098-lifecycle-entry-gate/spec.md) | 098-01 — entry-gate nudge (Claude host) | DRAFT |  |
 | [098-lifecycle-entry-gate](098-lifecycle-entry-gate/spec.md) | 098-02 — Codex host parity | DRAFT |  |
 | [098-lifecycle-entry-gate](098-lifecycle-entry-gate/spec.md) | 098-03 — edit-anchored capture stub (DEFERRED) | DEFERRED |  |
+| [098-lifecycle-entry-gate](098-lifecycle-entry-gate/spec.md) | 098-04 — bug-lifecycle claim marker | DRAFT |  |
 
 ## Deferred slices
 

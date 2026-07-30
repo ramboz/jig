@@ -1,13 +1,13 @@
 ---
-adr: 0040
+adr: 0044
 pass: frame-critique
 verdict: needs-changes
 reviewer: jig:reviewer subagent (2 rounds)
 reviewed_at: 2026-07-27T17:33:32Z
-prompt_source: review.py frame-critique docs/decisions/adr-0040-lifecycle-entry-gate.md
+prompt_source: review.py frame-critique docs/decisions/adr-0044-lifecycle-entry-gate.md
 ---
 
-Two adversarial rounds against ADR-0040 + spec 098. Both returned
+Two adversarial rounds against ADR-0044 + spec 098. Both returned
 `needs-changes`. Every finding below was independently re-probed against the
 tree before being accepted.
 
@@ -75,5 +75,39 @@ about the code), and 4/5/7/8 are carried into **open question #5** — jig has n
 signal today that means "this session is inside the lifecycle," and inventing
 one is a decision for the maintainer, not for this revision.
 
-**ADR-0040 therefore stays `Proposed`.** It cannot pass its own accept gate, and
+**ADR-0044 therefore stays `Proposed`.** It cannot pass its own accept gate, and
 should not: the frame critique did precisely its job, twice.
+
+## Amendments
+
+<!-- ADR-0010: this is a closed review record. Its findings are preserved as
+     written; what happened to them afterwards is appended here, never edited
+     into the prose above. -->
+
+- **2026-07-30 — the record was renumbered from ADR-0040 to ADR-0044.** 0040 was
+  taken on `main` on 2026-07-27 by an unrelated reservation. Every "ADR-0040"
+  above refers to what is now
+  [ADR-0044](../adr-0044-lifecycle-entry-gate.md); the findings themselves are
+  unchanged.
+- **2026-07-30 — the disposition above is superseded; the ADR is now Accepted.**
+  The maintainer answered question #5 on
+  [#128](https://github.com/ramboz/jig/pull/128): *"Yes, let's do #138 first, and
+  just address the remaining gap here."* Against the findings carried into that
+  question:
+  - **4, 5** (no signal spans the working lifecycle; claim-based rules fire
+    during reconciliation) — closed by depending on
+    [#138](https://github.com/ramboz/jig/pull/138), which makes the claim span
+    `READY_FOR_REVIEW` → `RECONCILED`.
+  - **7** (session scoping unprobed) — **probed 2026-07-30 and present.** The
+    `PostToolUse` payload carries a real `session_id`: `jig-decision-inflight.sh`
+    wrote `.jig/decision-scratch/411b8c7a-4d9e-45d7-be01-5b4fab17d725.log`,
+    keyed on the host's session UUID rather than the `default` fallback.
+    Claude host only; Codex is 098-02's to re-probe.
+  - **8** (anti-dead-gate tests one-directional) — closed in slice 098-01, which
+    now carries anti-false-fire tests for reconciliation and for a bug fix, plus
+    anti-stale-marker and foreign-claim cases.
+  - **6** (the `claimed_by: detached` misreading) — remains corrected in the ADR;
+    the identity question is answered as *branch scoping*, not operator identity,
+    preserving spec 049's non-goal.
+  - The bug arm, which no finding could close and #138 does not touch, becomes
+    slice 098-04.

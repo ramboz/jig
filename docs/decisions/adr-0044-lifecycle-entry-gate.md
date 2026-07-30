@@ -1,15 +1,29 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: [adr-0011, adr-0014, adr-0015, adr-0033]
-last_verified: 2026-07-27
+last_verified: 2026-07-30
 frame_review: true
 ---
 
-# ADR-0040: Lifecycle entry gate
+# ADR-0044: Lifecycle entry gate
 
 ## Status
 
-Proposed (2026-07-24)
+Accepted (2026-07-30)
+
+Proposed 2026-07-24; held at Proposed through two
+falsifying frame-critique rounds (evidence:
+[`reviews/adr-0044-frame-critique.md`](reviews/adr-0044-frame-critique.md))
+until the detection rule had a definition that survived probing. Accepted once
+the maintainer settled question #5 on
+[#128](https://github.com/ramboz/jig/pull/128) (2026-07-30): *"let's do #138
+first, and just address the remaining gap here."*
+
+**Numbered 0044, not 0040.** This ADR was drafted as 0040 and the number was
+taken on `main` on 2026-07-27 by
+[`adr-0040-richer-skill-discovery-explicit-candidate-channel`](adr-0040-richer-skill-discovery-explicit-candidate-channel.md),
+which reserved first. 0041–0043 are claimed by other open PRs. Renumbered here
+rather than on `main`; see [spec 098](../specs/098-lifecycle-entry-gate/spec.md).
 
 ## Context
 
@@ -119,14 +133,18 @@ leaves an auditable trace.
 edited file belongs to the claimed slice's declared surface. That is settled
 (resolved question #1).
 
-**What it reads to decide "inside" is not settled, and this ADR does not fix
-it.** Two adversarial rounds falsified two successive definitions — first
-"presence of any `IN_PROGRESS` slice or open bug on the branch" (silent forever),
-then "a live claim in this working tree" (fires once per slice during
-reconciliation, and blind to bug fixes entirely). The decision to build the gate
-stands on its own; the detection rule is
-[open question #5](#open-question-5-there-is-no-inside-the-lifecycle-signal-yet)
-and blocks implementation.
+**What it reads to decide "inside" is the working-tree claim, once
+[#138](https://github.com/ramboz/jig/pull/138) has landed.** Two adversarial
+rounds falsified two successive definitions — first "presence of any
+`IN_PROGRESS` slice or open bug on the branch" (silent forever), then "a live
+claim in this working tree" (fires once per slice during reconciliation, and
+blind to bug fixes entirely). The maintainer's call on the second failure is to
+fix the signal at its source rather than route around it: **#138 lands first,
+making the claim span the whole working lifecycle, and this spec closes what
+#138 does not cover.** The rule is stated in
+[resolved question #5](#resolved-question-5);
+implementation of slice 098-01 is gated on #138 merging, not on a further
+decision.
 
 The source boundary reuses the project's existing `.gitignore` — via
 `git check-ignore` — plus a fixed, unconfigurable list of lifecycle-artifact
@@ -166,6 +184,13 @@ has not yet settled. This ADR commits only to the entry-gate nudge.
 - Two hosts to keep in step. The build transform mirrors the hook into the Codex
   package automatically, but runtime behaviour there is verified separately
   (spec slice 098-02), which is where the real cost sits.
+- **The gate now has a hard dependency on the claim machinery** (resolved
+  question #5). Its correctness is downstream of `workflow.py`'s and `bug.py`'s
+  claim semantics, so a future change to when a claim is stamped or cleared
+  silently changes when this gate fires. That coupling is deliberate — the
+  alternative was a parallel signal that would drift — but it means the claim
+  states are now load-bearing for something outside the lifecycle helpers, and
+  should be treated as such when they are next touched.
 
 **Accepted coverage limit — edits that never reach the tool boundary.** The hook
 sees `Edit|Write|MultiEdit` only. A file written through Bash — `sed -i`, a
@@ -200,6 +225,19 @@ place to look.
 - **A per-session state file under `$TMPDIR` is enough to make the nudge fire at
   most once per session and re-arm on state change.** Grounded: `jig-context-check.sh`
   already uses exactly this once-per-band-per-session mechanism.
+- **The `PostToolUse` payload carries a real `session_id`.** Grounded by live
+  probe on the Claude host, 2026-07-30 — this was open question #5's third
+  unknown and it is now closed. `jig-decision-inflight.sh` runs on `PostToolUse`
+  and keys its scratch file on `data.get('session_id') or 'default'`
+  (`lib/decision_scratch.append_stub`). During the session that wrote this
+  revision the hook produced
+  `.jig/decision-scratch/411b8c7a-4d9e-45d7-be01-5b4fab17d725.log` — the host's
+  real session UUID, not the `default` fallback. The `AskUserQuestion` matcher
+  that fired is a `PostToolUse` matcher, so the common payload fields are the
+  same ones the `Edit|Write|MultiEdit` matcher receives; `jig-boundary-change-warn.sh`
+  already reads `data.get('session_id')` on exactly that matcher today. Per-session
+  cadence keying is therefore sound on the Claude host. **Not probed on Codex** —
+  slice 098-02 must re-probe rather than inherit this.
 - **`git check-ignore` is a usable, reusable `.gitignore` oracle, and it does not
   cover lifecycle artifacts.** Grounded by probe, 2026-07-27 — see resolved
   question #3 for the three commands and their results.
@@ -222,8 +260,13 @@ place to look.
   **8 weeks** of real use the gate's logged fires (`append_additional_context_event`,
   `out_of_lifecycle_edit`) are **zero** while out-of-lifecycle edits are still
   being caught by the owner, the detection is wrong — suspect the liveness signal
-  (resolved question #1), the `.`-root boundary collapse (question #3), or the
+  (resolved question #5), the `.`-root boundary collapse (question #3), or the
   Bash-write blind spot (Consequences) before concluding the problem is solved.
+  **First check of all: is the claim actually being held?** The rule is only as
+  good as #138's claim coverage — a session that never transitions its slice, or
+  a bug never picked up locally, reads as "outside" and the gate goes loud, while
+  a marker left behind by tooling that skips the status write reads as "inside"
+  and it goes quiet.
   The close-out dogfood check must not be read as evidence of health: "stays
   silent during a normal in-slice session" passes just as cleanly for a dead gate.
 - If a lower-cost signal makes lifecycle entry self-evident without a per-edit
@@ -235,10 +278,11 @@ The four questions this ADR was proposed with were answered by the maintainer on
 [#128](https://github.com/ramboz/jig/pull/128) (2026-07-27), and are settled
 here and in [spec 098](../specs/098-lifecycle-entry-gate/spec.md).
 
-**A fifth question was opened by the frame critique and is not settled** — see
-[open question #5](#open-question-5-there-is-no-inside-the-lifecycle-signal-yet).
-It blocks implementation, not the decision: *that* the gate should exist is
-decided; *how it recognizes "inside the lifecycle"* is not.
+**A fifth question was opened by the frame critique and answered on 2026-07-30**
+— see [resolved question #5](#resolved-question-5).
+It was the accept blocker: *that* the gate should exist was decided from the
+start; *how it recognizes "inside the lifecycle"* was not, and the ADR was held
+at Proposed until it was.
 
 1. **Strictness of "inside the lifecycle" — coarse.** The gate does **not**
    require the edited file to belong to the claimed slice's declared surface.
@@ -266,7 +310,7 @@ decided; *how it recognizes "inside the lifecycle"* is not.
    > this tree, **or** an open bug record is `claimed_by` this checkout
 
    was itself falsified by the second critique round. **It is not the decision;
-   see [open question #5](#open-question-5-there-is-no-inside-the-lifecycle-signal-yet).**
+   see [resolved question #5](#resolved-question-5).**
    `.jig/spec-ref` is genuinely the closest existing signal — `workflow.py`
    stamps it on `transition … IN_PROGRESS` (slice 056-03), it is working-tree-
    local and git-ignored, and hooks already read it via
@@ -322,85 +366,124 @@ decided; *how it recognizes "inside the lifecycle"* is not.
    Claude one), while runtime confirmation needs the Codex host — the same
    constraint that forced 083-08 into its own slice.
 
-### Open question #5 — there is no "inside the lifecycle" signal yet {#open-question-5-there-is-no-inside-the-lifecycle-signal-yet}
+### Resolved question 5
 
-**Raised by the frame critique, 2026-07-27. This is the blocker: the decision to
-build the gate stands, but it cannot be implemented until this is answered.**
+**What "inside the lifecycle" reads.** Raised by the frame critique on
+2026-07-27 as the accept blocker; answered by the maintainer on
+[#128](https://github.com/ramboz/jig/pull/128), 2026-07-30: *"Yes, let's do #138
+first, and just address the remaining gap here."*
 
 The gate needs to distinguish "this session is working inside jig" from "this
-session is editing ad-hoc." Every candidate signal jig has today fails, and the
-failures were verified against the tree, not reasoned about:
+session is editing ad-hoc." Every candidate signal jig had **at the time of the
+critique** failed, and the failures were verified against the tree, not reasoned
+about. They are kept here because they are the evidence for the rule below:
 
-- **Slice claims are destroyed mid-lifecycle.** `_CLAIM_CLEARING_STATUSES =
-  ("REVIEWED", "READY_FOR_IMPLEMENTATION", "DRAFT")` — the claim clears and the
-  slice leaves `IN_PROGRESS` at REVIEWED, while `docs/workflow.md` step 7 puts
+- **Slice claims were destroyed mid-lifecycle.** `_CLAIM_CLEARING_STATUSES =
+  ("REVIEWED", "READY_FOR_IMPLEMENTATION", "DRAFT")` — the claim cleared and the
+  slice left `IN_PROGRESS` at REVIEWED, while `docs/workflow.md` step 7 puts
   **reconciliation after** that transition: updating `architecture.md`,
   `CLAUDE.md`, `roadmap.md`. Those are tracked, not ignored, and not under the
-  artifact subtrees — so they read as source. A claim-based rule fires **once
-  per slice, on every slice**, telling the agent to enter the lifecycle while it
-  performs the mandated last step of a slice. AC5's "re-arm on lifecycle state
-  change" lands the re-arm exactly there. This is not tunable noise; it is the
-  wrong definition of "lifecycle".
-- **The bug arm has no local signal at all.** `bug.py new_bug(push=True)` calls
+  artifact subtrees — so they read as source. A claim-based rule would have
+  fired **once per slice, on every slice**, telling the agent to enter the
+  lifecycle while it performs the mandated last step of a slice. AC5's "re-arm
+  on lifecycle state change" lands the re-arm exactly there. This was not
+  tunable noise; it was the wrong definition of "lifecycle" — **and it is the
+  thing #138 fixes.**
+- **The bug arm had no local signal at all.** `bug.py new_bug(push=True)` calls
   `reserve_bug_on_origin` and returns `None`: the record lands on `origin/main`,
   nothing in the working tree. `bug.py` never writes `.jig/spec-ref`. A bug fix
-  opened the way jig prescribes is invisible to both arms.
+  opened the way jig prescribes was invisible to both arms. **#138 does not
+  touch this; (a) below does.**
 - **There is no operator identity to compare against.** `_claim_identifier` (in
   both `workflow.py` and `bug.py`) returns `JIG_CLAIM_ID`, else the **branch
   name**, else the literal `"detached"` — spec 049's stated non-goal is "no
   human-identity inference". **This corrects an assertion made earlier in this
   ADR's revision:** `claimed_by: detached` on bug 008 is not a stale artifact,
-  it is that function's normal return value. Consequences: a bug reported on
-  `main` and fixed on a task branch can never match; two agents on same-named
-  branches match each other.
-- **Per-session state is keyed on a payload field, not on `$TMPDIR`.**
+  it is that function's normal return value. **Answered by (b) below — as
+  scoping, not as identity.**
+- **Per-session state is keyed on a payload field.**
   `jig-context-check.sh` keys once-per-session state on
   `payload.session_id or 'default'`. Whether `PostToolUse` carries `session_id`
-  is **unprobed**. If it does not, all sessions share the `default` key and one
-  fire silences the gate until `$TMPDIR` is cleared — a silent death the
-  under-fire criterion cannot tell apart from success.
+  was unprobed. **Probed 2026-07-30; it does — (c) below.**
 
-**Most of this is already being fixed elsewhere — [#138](https://github.com/ramboz/jig/pull/138).**
-That PR (bug 013 / its own ADR, Accepted, implemented and reviewed) reverses
-exactly the clearing edge above: claims become *working-lifecycle* claims, stamped
-across `READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` / `RECONCILED` and cleared
-only at release points. If it lands, the reconciliation false-fire — the fatal
-objection — disappears, and a claim becomes a usable "inside the lifecycle"
-signal for the whole span this gate cares about. **Spec 098 should take a hard
-dependency on it rather than invent a parallel mechanism.**
+#### The rule
 
-What #138 does *not* cover, and what remains of question #5:
+A session is **inside the lifecycle** when this working tree holds a live
+*working-lifecycle claim* on a work item — a spec slice or a bug record:
 
-- **The bug arm.** `new_bug(push=True)` still leaves nothing in the working tree,
-  and `bug.py` still never stamps `.jig/spec-ref`. #138 is about slice claims.
-- **Identity is a branch name.** Workable *because* jig's own convention is one
-  worktree per task — "claimed by this branch" is then a coherent liveness test —
-  but it must be written as branch scoping, not as "operator identity", and the
-  report-on-`main`/fix-on-branch case needs a stated answer (re-claim on the task
-  branch, most likely).
-- **`session_id` in the `PostToolUse` payload** is still unprobed.
+> **Slice arm.** `.jig/spec-ref` names a slice, that slice's `claimed_by`
+> matches this checkout's claim identifier, **and** its status is one of #138's
+> `_CLAIM_WORKING_STATUSES` (`READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` /
+> `RECONCILED`).
+>
+> **Bug arm.** The same shape over a bug record, once `bug.py` stamps the same
+> working-tree marker (slice 098-04).
+>
+> Anything else is **outside** — a clean tree, an unrelated open slice on the
+> branch, a claim held by a different checkout, or a slice that has reached a
+> release point.
 
-**The maintainer's call, given that.** Roughly:
+The status cross-check is what makes a stale marker harmless: nothing clears
+`.jig/spec-ref` on the way out of a working state (`workflow.py` writes it only
+under `if new_status == IN_PROGRESS_STATUS`), so the marker alone would go on
+asserting a finished slice forever. Reading the named record's *current* status
+is the correction.
 
-- **(a) Build the signal first.** A genuine session/lifecycle marker — set on
-  entry, cleared on exit, spanning IN_PROGRESS *through* reconciliation, written
-  by both `workflow.py` and `bug.py`. Correct, and it makes this gate a
-  dependent of a new piece of machinery rather than a small hook.
-- **(b) Narrow the gate to the high-confidence case only.** Fire only when there
-  is *no lifecycle activity of any kind* in this tree — no `.jig/spec-ref` at
-  all, no recent transition. Catches the 11 measured incidents (all were
-  "nothing in flight"), misses everything subtler, and is honest about it.
-- **(c) Re-shape the trigger.** If the real signal is "a session that never
-  entered", a Stop/SessionStart-shaped check may beat a per-edit hook — though
-  ADR option D was rejected for firing nowhere near the edit.
-- **(d) Something else.**
+**Hard dependency on [#138](https://github.com/ramboz/jig/pull/138)** (bug 013).
+It reverses the clearing edge above: claims become working-lifecycle claims,
+stamped across `READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` / `RECONCILED`
+and cleared only at release points (`_CLAIM_WORKING_STATUSES` /
+`_CLAIM_RELEASE_STATUSES`). That is exactly the span this gate needs, and it
+removes the reconciliation false-fire — the fatal objection. **Slice 098-01 must
+not be implemented before #138 merges**, and this ADR deliberately does not
+invent a parallel signal in the meantime. (#138's own decision record is
+numbered `adr-0039-slice-claim-covers-active-lifecycle` on that branch, which
+collides with `main`'s merged ADR-0039; it is referenced here by PR and bug id
+until that is settled.)
 
-Recommendation, revised in light of #138: **land #138 first, then take (a) for
-free** — the working-lifecycle claim it introduces *is* the signal this gate
-needs, for slices. Close the bug arm and the identity wording on top of it, probe
-`session_id`, and only then implement 098-01. Falling back to (b) — fire only
-when there is no lifecycle activity of any kind in this tree — stays available if
-#138 stalls. Either way, no slice should be implemented before this is settled.
+#### What #138 does not cover, and how spec 098 closes it
+
+**(a) The bug arm — closed by new slice 098-04.** `new_bug(push=True)` leaves
+nothing in the working tree and `bug.py` never stamps `.jig/spec-ref`. The
+local steps of the bug lifecycle — `bug.py pickup <id>`, and `transition` into
+a working status — stamp the **same** working-tree marker `workflow.py` already
+stamps at `IN_PROGRESS`, so the gate reads one signal for both lifecycles
+instead of maintaining two. Constraint: today's readers of that marker
+(`read_attribution.read_spec_ref`, `_common/gate_telemetry`, `scripts/usage.py`)
+must keep parsing what they parse now — the marker is *extended*, not
+repurposed.
+
+**(b) Identity is a branch name, and is written as branch scoping.** Spec 049's
+non-goal — no human-identity inference — stands, and this ADR does not weaken
+it. The claim test reads **"claimed by this checkout"**, never "claimed by this
+operator". It is coherent only because jig's convention is one worktree per
+task. Two consequences, stated rather than fixed:
+
+- two checkouts on same-named branches read as each other;
+- a bug reported on `main` but fixed on a task branch never matches unless it is
+  re-claimed. **The prescribed answer is to re-claim on the task branch** —
+  `bug.py pickup <id>` from the working tree, already the documented step in
+  `bug-fix/SKILL.md` §1. Slice 098-04 makes that step the thing that stamps the
+  marker, so *following the skill* is what turns the gate off. No new ritual.
+
+**(c) `session_id` in the `PostToolUse` payload — probed 2026-07-30, present.**
+See Assumptions for the probe. Codex is **not** covered by it; slice 098-02
+re-probes rather than inherits.
+
+#### Alternatives rejected at this junction
+
+Recorded because the maintainer chose among them:
+
+- **Narrow the gate to "no lifecycle activity of any kind in this tree."**
+  Catches the 11 measured incidents (all were "nothing in flight") and nothing
+  subtler. Rejected: it hard-codes the draft's blind spot as the design instead
+  of fixing the signal, and #138 makes the better rule available at no
+  additional cost. Retained only as a fallback if #138 stalls.
+- **Re-shape the trigger to Stop / SessionStart.** Rejected for the same reason
+  option D was: it fires nowhere near the edit.
+- **Build the working-lifecycle signal here, as new machinery.** Rejected in
+  favour of depending on #138, which is implemented and reviewed rather than
+  speculative, and which owns that surface.
 
 ### Still open (deliberately)
 

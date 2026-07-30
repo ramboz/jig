@@ -1,7 +1,7 @@
 ---
 status: DRAFT
-dependencies: [adr-0040]
-last_verified: 2026-07-27
+dependencies: [adr-0044, 098-04]
+last_verified: 2026-07-30
 frame_review: true
 ---
 
@@ -19,16 +19,28 @@ else. No block, no owner prompt, no failure mode for the session.
 **Scope:** the Claude host. The Codex-host equivalent is slice 098-02 (settled
 call #4 — same spec, separately verifiable slice).
 
-**BLOCKED — do not implement.** AC2 below has no valid definition yet. Two
-adversarial rounds falsified two successive readings of "inside the lifecycle"
-(see the spec's settled call #1 and
-[ADR-0040 open question #5](../../decisions/adr-0040-lifecycle-entry-gate.md#open-question-5-there-is-no-inside-the-lifecycle-signal-yet)).
-Everything else in this slice is ready; AC2 is load-bearing for all of it.
+**NOT YET STARTABLE — waiting on two work items, not on a decision.** AC2's
+definition is settled (maintainer, 2026-07-30), but the surface it reads does not
+exist yet:
+
+1. **[#138](https://github.com/ramboz/jig/pull/138) must merge.** It is what makes
+   a slice claim span the whole working lifecycle instead of clearing at
+   REVIEWED. Without it this gate fires at every slice's reconciliation — the
+   objection that killed the previous definition.
+2. **Slice 098-04 must be DONE.** It supplies the same signal for the bug
+   lifecycle, which #138 does not touch.
+
+Both are declared in the frontmatter. This is a sequencing gate: nothing here
+needs another answer from the maintainer.
 
 **DoR:**
-- ❌ [ADR-0040](../../decisions/adr-0040-lifecycle-entry-gate.md) is **Proposed**,
-  not Accepted — it fails its own frame-critique gate, correctly.
-- ❌ Open question #5 (what signal means "inside the lifecycle") is unanswered.
+- ✅ [ADR-0044](../../decisions/adr-0044-lifecycle-entry-gate.md) is **Accepted**
+  (2026-07-30), after being held at Proposed through two failed frame-critique
+  rounds.
+- ✅ Question #5 (what signal means "inside the lifecycle") is answered — see
+  [ADR-0044 resolved question #5](../../decisions/adr-0044-lifecycle-entry-gate.md#resolved-question-5).
+- ⏳ #138 merged — **not yet** (open, draft).
+- ⏳ Slice 098-04 DONE — **not yet**.
 - ✅ The **four** questions this spec was opened with are settled by the
   maintainer on [#128](https://github.com/ramboz/jig/pull/128); the criteria
   below are written against those calls, not against the draft's
@@ -42,11 +54,16 @@ Everything else in this slice is ready; AC2 is load-bearing for all of it.
   `lib/read_attribution.append_additional_context_event`.
 - ✅ The anti-nag mechanism exists: `jig-context-check.sh` once-per-band-per-session
   `$TMPDIR` state file.
-- ❌ **Lifecycle-state sources are NOT sufficient.** `claimed_by` (spec 049) and
-  `docs/bugs/*.md` exist and are readable, but neither answers "is *this session*
-  inside the lifecycle" — the claim is cleared at REVIEWED before reconciliation
-  runs, and a `--push` bug reservation leaves nothing in the working tree. This
-  DoR item was ✅ in the draft and is the reason AC2 is blocked.
+- ⏳ **Lifecycle-state sources become sufficient only once both dependencies
+  land.** `claimed_by` (spec 049) and `docs/bugs/*.md` are readable today, but
+  on `main` as it stands neither answers "is *this session* inside the
+  lifecycle" — the claim is cleared at REVIEWED before reconciliation runs
+  (#138 fixes that), and a `--push` bug reservation leaves nothing in the
+  working tree (098-04 fixes that). This DoR item was ✅ in the original draft;
+  the frame critique falsified it, and it stays ⏳ until both are in.
+- ✅ **`session_id` is present in the `PostToolUse` payload** — probed on the
+  Claude host 2026-07-30 (spec Assumptions). AC5's cadence keying is safe here;
+  the Codex equivalent is 098-02's to re-probe.
 - ✅ The `.gitignore` oracle is probed, and its gap is measured: `git check-ignore`
   excludes `.claude/settings.local.json` but **not** `docs/specs/README.md` or
   `.claude/` (probe recorded in the spec's Assumptions) — which is why AC3 is
@@ -57,21 +74,37 @@ Everything else in this slice is ready; AC2 is load-bearing for all of it.
 1. **Trigger.** A new hook `hooks/scripts/jig-entry-gate.sh` fires on
    `PostToolUse` / `Edit|Write|MultiEdit`, co-located in the existing matcher
    (third entry after `jig-post-edit-verify.sh`, `jig-boundary-change-warn.sh`).
-2. 🚧 **In-lifecycle detection — BLOCKED on open question #5.** Settled: the
-   check is *coarse* (it never asks whether the edited file belongs to the
-   claimed slice's surface). Unsettled: what it reads. Two candidate rules are
-   already falsified — record-presence (silent forever) and live-claim-in-this-
-   tree (fires every slice during reconciliation, blind to bug fixes). Whatever
-   the maintainer chooses must satisfy, at minimum:
-   - silent through **reconciliation**, which runs *after* the claim is cleared
-     at REVIEWED (`_CLAIM_CLEARING_STATUSES`) and touches `architecture.md` /
-     `CLAUDE.md` / `roadmap.md`;
-   - silent during a **bug fix** opened the prescribed way, including after
-     `new_bug(push=True)` puts the record on `origin/main` and nothing locally;
+2. **In-lifecycle detection — a live working-lifecycle claim held by this
+   checkout** (settled call #5). The check is *coarse*: it never asks whether the
+   edited file belongs to the claimed work item's surface. The session counts as
+   **inside** when either arm holds:
+   - **Slice arm.** `.jig/spec-ref` names a slice, that slice's `claimed_by`
+     equals this checkout's `_claim_identifier`, **and** its status is one of
+     #138's `_CLAIM_WORKING_STATUSES` (`READY_FOR_REVIEW` / `IN_PROGRESS` /
+     `REVIEWED` / `RECONCILED`).
+   - **Bug arm.** The same three-part test over the bug record named by the
+     marker 098-04 stamps.
+
+   Everything else is **outside**: a clean tree, an unrelated open slice on the
+   branch, a claim held by another checkout, or a work item that has reached a
+   release point.
+
+   The status cross-check is load-bearing, not belt-and-braces: nothing clears
+   `.jig/spec-ref` on the way out of a working state (`workflow.py` writes it
+   only under `if new_status == IN_PROGRESS_STATUS`), so the marker alone would
+   assert a finished slice forever. Reading the named record's *current* status
+   is what makes a stale marker harmless.
+
+   The rule must, by construction, satisfy all four of the properties the two
+   falsified drafts failed — each has a test below:
+   - silent through **reconciliation** (which is inside `_CLAIM_WORKING_STATUSES`
+     under #138, and was outside the old `_CLAIM_CLEARING_STATUSES` behaviour);
+   - silent during a **bug fix** opened the prescribed way, via 098-04's marker;
    - **fires** on a tree with unrelated open work and no live claim (the
-     falsifying case that killed rule 1);
-   - no dependence on an "operator identity" — `_claim_identifier` returns a
-     branch name, and spec 049's stated non-goal is human-identity inference.
+     falsifying case that killed the presence rule);
+   - no dependence on operator identity — the comparison is **branch scoping**
+     (`_claim_identifier` returns a branch name), and spec 049's non-goal of
+     human-identity inference is preserved.
 3. **Source boundary — `.gitignore` plus lifecycle artifacts** (settled call #3).
    The hook nudges only for edits to *project source*. A path is source unless
    either test excludes it:
@@ -104,7 +137,7 @@ Everything else in this slice is ready; AC2 is load-bearing for all of it.
 7. **Opt-out.** `JIG_ENTRY_GATE=0` (widened token set `{0,false,off,no}`, matching
    `jig-boundary-change-warn`) disables the hook.
 8. **Fail-open.** `except Exception: pass` around all logic; any error leaves the
-   session untouched (ADR-0040 / #111 constraint #3).
+   session untouched (ADR-0044 / #111 constraint #3).
 9. **Auditable.** A fire logs via `append_additional_context_event` (hook name
    `jig-entry-gate`, event kind e.g. `out_of_lifecycle_edit`).
 10. **Scaffold-mode parity.** Register the script in
@@ -117,14 +150,23 @@ Everything else in this slice is ready; AC2 is load-bearing for all of it.
   `IN_PROGRESS` and an unclaimed open bug exists on the branch, but this tree
   holds no live claim → the edit **still nudges**. This is the exact tree state
   of jig's own `main`; the pre-critique rule failed it silently.
-- edit while this session is legitimately inside the lifecycle → silent
-  (mechanism per open question #5).
+- edit while this session holds a live claim on an `IN_PROGRESS` slice → silent.
 - **anti-false-fire #1:** edit to `architecture.md` / `CLAUDE.md` during
-  **reconciliation**, i.e. after the slice reached REVIEWED and the claim was
-  cleared → silent. (The live-claim rule failed exactly here.)
+  **reconciliation** — slice at `REVIEWED`, then `RECONCILED` — → silent.
+  Under #138 both are working statuses and the claim is still held; the
+  pre-#138 behaviour cleared it at `REVIEWED` and this is exactly where the
+  live-claim rule fired. Assert against the claim state, not just the output,
+  so the test fails loudly if #138's semantics regress.
 - **anti-false-fire #2:** source edit during a bug fix opened with
-  `new_bug(push=True)`, where the record is on `origin/main` and the working
-  tree has neither a local bug record nor `.jig/spec-ref` → silent.
+  `new_bug(push=True)` and picked up locally (`bug.py pickup <id>`) → silent,
+  via 098-04's marker. The record originates on `origin/main`; the point of the
+  test is that the *local* pickup step is what makes the gate quiet.
+- **anti-stale-marker:** `.jig/spec-ref` names a slice that has since reached a
+  release point (`DONE` / `DEFERRED` / `ABANDONED` / back to the pickup queue)
+  → the edit **nudges**. Nothing clears the marker, so a rule that trusted it
+  without the status cross-check would go silent forever after the first slice.
+- **foreign claim:** marker names a slice claimed by a *different* checkout
+  → **nudges** (branch scoping, AC2).
 - edit to a `.gitignore`-matched path (e.g. `__pycache__/x.pyc`,
   `.jig/spec-ref`) → silent (boundary test (a)).
 - edit to a *tracked* lifecycle artifact — `docs/specs/…`, `docs/bugs/…`,
@@ -144,8 +186,9 @@ Everything else in this slice is ready; AC2 is load-bearing for all of it.
   (fail-open).
 - **missing `session_id` in the payload** → cadence still scopes per session, or
   the gate degrades to a documented safe behaviour; it must not silence itself
-  globally via the shared `'default'` key (`jig-context-check.sh`). Probe the
-  real payload before implementing AC5.
+  globally via the shared `'default'` key (`jig-context-check.sh`). The field
+  *is* present on Claude (probed 2026-07-30); this test guards the degradation
+  path, since a host that stops sending it would silently kill the gate.
 - scaffold parity: `_EXPECTED_HOOK_SCRIPTS` lists the new script.
 
 **DoD:**
@@ -158,7 +201,7 @@ Everything else in this slice is ready; AC2 is load-bearing for all of it.
 
 ### Close-out (post-DONE)
 - [ ] Dogfood, both directions. Silence alone proves nothing — a dead gate is
-      silent too (ADR-0040 under-fire kill criterion):
+      silent too (ADR-0044 under-fire kill criterion):
       - [ ] a normal in-slice jig session on this repo produces no false fire; **and**
       - [ ] a deliberate out-of-lifecycle edit, made on a tree that has an
             unrelated `IN_PROGRESS` slice and an open bug, **does** fire.

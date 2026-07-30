@@ -1,6 +1,6 @@
 ---
 status: DRAFT
-dependencies: [adr-0040, 098-01]
+dependencies: [adr-0044, 098-01]
 last_verified: 2026-07-27
 frame_review: true  # the Codex hook payload shape can only be proven on the
 #                   # actual Codex runtime — the point of this slice.
