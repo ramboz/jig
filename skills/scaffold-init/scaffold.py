@@ -179,7 +179,7 @@ def render(template_text: str, substitutions: dict) -> str:
 
 
 def copy_template(src: Path, dst: Path, substitutions: dict,
-                  post_render=None) -> None:
+                  post_render=None, pre_render=None) -> None:
     """Read a `.template` file, render `{{KEY}}` placeholders, write to dst.
 
     `post_render` (slice 046-01) is an optional `str -> str` transform
@@ -190,9 +190,20 @@ def copy_template(src: Path, dst: Path, substitutions: dict,
     rewrite SKILL.md bodies already get, now applied to rendered docs so
     the commands they document actually run inside the scaffolded target.
     `--plugin-only` passes `None` (no rewrite — the plugin-root path is
-    correct when machinery is NOT copied locally)."""
+    correct when machinery is NOT copied locally).
+
+    `pre_render` (bug 015) is an optional `str -> str` transform applied to the
+    RAW template, *before* substitution — so it rewrites jig's own prose while
+    leaving substituted values alone. Use it for the host translation
+    (`Claude` -> `Codex`, `CLAUDE.md` -> `AGENTS.md`), whose blanket word
+    replacements must not reach user-derived values such as `PROJECT_NAME`.
+    `post_render` stays the right hook for transforms that are safe on values
+    too (the layout link rewrite)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    rendered = render(src.read_text(), substitutions)
+    body = src.read_text()
+    if pre_render is not None:
+        body = pre_render(body)
+    rendered = render(body, substitutions)
     if post_render is not None:
         rendered = post_render(rendered)
     atomic_write_text(dst, rendered)
@@ -2059,7 +2070,7 @@ def _specs_dir_has_content(target: Path, docs_root: str = "docs") -> bool:
 
 
 def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
-                    docs_root: str = "docs") -> None:
+                    docs_root: str = "docs", host_rewrite=None) -> None:
     """Emit the worked-example reference spec (slice 048-05) into a
     greenfield `docs/specs/`:
 
@@ -2071,7 +2082,14 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
     content, the seed is skipped silently and never overwrites the user's
     work. The seed templates carry only the `{{PROJECT_NAME}}` substitution
     and never leak `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths — they
-    read correctly inside the target tree (coordinated with spec 046)."""
+    read correctly inside the target tree (coordinated with spec 046).
+
+    They ARE host-flavoured, though (bug 015). Like every canonical jig
+    template they are authored Claude-side and name `CLAUDE.md`; `host_rewrite`
+    is the caller's host transform, and without it a Codex project's seed spec
+    tells the reader to open a file only Claude projects have. Applied
+    pre-substitution (see `copy_template`) so the blanket `Claude` -> `Codex`
+    replacement cannot reach `PROJECT_NAME`."""
     if _specs_dir_has_content(target, docs_root):
         return
     seed_root = template_root / "docs" / "specs" / "seed"
@@ -2089,7 +2107,8 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
         # emitted by the generic doc copy (step 2); the spec/slice files
         # land in their 001-adopt-jig / 002-first-spec subdirs.
         dst = specs_dst / dst_name
-        copy_template(src, dst, subs, post_render=seed_rewrite)
+        copy_template(src, dst, subs, post_render=seed_rewrite,
+                      pre_render=host_rewrite)
 
 
 # ---------- Slice 052-02: secret-ignore .gitignore floor (ADR-0013) ----------
@@ -2555,6 +2574,14 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     else:
         doc_rewrite = _rewrite_skill_md_paths if with_machinery else None
 
+    # Bug 015: keep the host transform in its own name. `doc_rewrite` is about
+    # to be composed with the layout rewrite and used as a POST-render hook;
+    # brief.md and the seed spec need the host half applied PRE-substitution
+    # instead, so the blanket `Claude` -> `Codex` replacement cannot rewrite a
+    # user's project name (a directory called `Claude-Tools` would otherwise be
+    # emitted as `Codex-Tools`).
+    host_rewrite = doc_rewrite
+
     # Slice 084-03: layout-aware docs root. Emit the docs tree under
     # <target>/<docs_root> (collapsed to <target> for "."), and compose the
     # `docs/<x>` → `<docs_root>/<x>` link rewrite onto the machinery transform
@@ -2597,7 +2624,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # docs/specs/. Greenfield-only (Clarification Q1): skipped silently
     # when any spec already exists, so a migrate path / --force re-scaffold
     # never overwrites the user's work.
-    _emit_seed_spec(template_root, target, subs, docs_root)
+    _emit_seed_spec(template_root, target, subs, docs_root,
+                    host_rewrite=host_rewrite)
 
     # 2c. Slice 050-01: an EXPLICIT `--solo` (overrides.is_team is False)
     # writes the tracked `.jig/no-people-md` opt-out marker so memory-sync's
@@ -2616,7 +2644,13 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
 
     # 4. brief.md — human-readable summary of detection results
+    # Bug 015: host-translate the TEMPLATE before rendering, for the same
+    # reason the seed spec does — `_render_brief`'s own dynamic blocks are
+    # jig-authored fixed strings with no host vocabulary, so the transform has
+    # nothing to do there and no chance to corrupt a substituted value.
     brief_template = (template_root / "brief.md.template").read_text()
+    if host_rewrite is not None:
+        brief_template = host_rewrite(brief_template)
     brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers,
                           subs, docs_root)
     atomic_write_text(target / "brief.md", brief)
