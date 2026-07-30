@@ -585,3 +585,110 @@ Runner adapters must preserve the distinction between an implicit project target
 ## Bug 011: correct withdrawn prose by sweeping, not by chasing cited lines
 When a fix withdraws a documented rationale, correcting only the lines a reviewer names leaves siblings behind — a stale `spec.md` constraint survived three consecutive review passes that way. Grep the withdrawn *phrasing* across `docs/` instead (here: "repeat runs stay quiet", "dedup-against-recorded", "until recorded", "then pruned"). Two traps make this worse than ordinary doc drift: prose under a heading like "Design constraints (locked in, all phases)" reads as binding and can license re-introducing the bug, and `workflow.py status-board` *preserves* the Notes column across regeneration, so a stale note there never self-corrects.
 
+## Bug 013: a field's meaning lives in its readers, not its writers
+Three lessons from one gate, in ascending order of how easy they are to repeat.
+
+**A regex that both gates and transforms exports the transform's strictness
+into the gate**, where it reads as an arbitrary format rule. `cmd_accept`'s
+pattern legitimately needed an exact `Proposed (YYYY-MM-DD)` match to *rewrite*
+the line, and that requirement leaked into the *decision to proceed*. When one
+pattern serves both roles the tolerant read and the exact rewrite want different
+patterns — and a comment claiming otherwise ("or with extra trailing content",
+never true) is the tell that the two roles were never separated.
+
+**Do not infer a field's semantics from its provenance.** Fixing this bug, the
+implementer needed an acceptance date, found that only `cmd_accept` writes
+`last_verified` in code, and concluded it *is* the acceptance date. It is not: it
+is a freshness stamp. [ADR-0024](../decisions/adr-0024-reference-reframe.md)'s
+`reaffirm` disposition refreshes it as a documented judgment step (no code path
+to grep), `workflow.py`'s staleness check reads it as "verified N days ago", and
+eight prose-`Proposed` ADRs already carry a filled value. The grep answered
+"who writes this?" while the question was "what does this mean?" — and a field's
+contract lives in its defining ADR and in what *reads* it. The near-miss cost:
+a plausible wrong date published in the README index and offered to a human to
+write into an immutable record. **A plausible wrong value is worse than an
+absent one**, because nothing about it looks wrong; the diverged index entry now
+publishes no date at all.
+
+**Run the remediation command you print.** The refusal message told the operator
+to recover the date with `git log … -- <basename>`. Git resolves pathspecs
+relative to cwd, so from a repo root it matched nothing and exited 0 — output
+indistinguishable from "there is no such commit". An error message is a
+deliverable; an unexecuted one is an untested code path with a human on the
+other end.
+
+**Process note:** the frame-critique earned its cost here, but only because it
+ran four times. Rounds 1–3 each found something verifiable, and round 2 refuted
+round 1's *fix* rather than the original design — an adversarial pass is worth
+re-running against your own repairs, not just against the initial draft.
+
+## Bug 014: a partial signal teaches a total inference
+A mechanism that answers a *narrow* question reliably will be read as answering
+the *broad* one — and the working cases are what make the misreading stick.
+`claimed_by:` honestly meant "who is implementing this slice"; every reader
+generalized it to "jig tracks who is working on what", because it was correct
+every single time they checked. It looked reliable right up until it silently
+wasn't, which is worse than having no marker at all: nothing prompts you to
+doubt a signal that has never yet been wrong in front of you.
+
+Three things generalize. First: **when one system produces a signal and another
+routes decisions on it, the coverage limit must be written where the reader is,
+not where the writer is.** Spec 049 documented its `IN_PROGRESS`-only scoping
+precisely and correctly — in spec 049. `orient`, the status board, and the
+pickup flow never repeated it, and they are what an agent actually reads.
+Second: **the phase with the heaviest writes deserves the strongest signal, and
+lifecycle machinery tends to give it the weakest** — the claim was deliberately
+*cleared* on entry to `REVIEWED`, i.e. immediately before reconciliation, the
+single biggest write phase jig has. Check the ordering whenever a marker is
+released on a state change. Third: **absence-of-record is not evidence-of-
+absence, and prose must say so out loud.** jig's own `collect_slices` docstring
+called an empty field "unclaimed"; that one word is the whole bug in miniature.
+The fix now states, in the docstring and in both skill surfaces, that blank
+means *no claim recorded* — unpushed claims are invisible and plain `Edit`
+writes take no claim, so blank can never mean free.
+
+**The sharpest lesson is about the fix, not the bug: widening a signal can
+invert the very defect it was meant to close.** The first cut stamped every
+non-terminal state, including the two the pickup flow tells readers to choose
+work from. That left the spec author's branch name on slices that were now free,
+so the board labelled available work as owned and the routine
+author→implementer handoff warned every single time. "Blank reads as free" became
+"residue reads as occupied" — same surface, same class, sign flipped. The rule
+that fixes it generalizes: **classify lifecycle states by whether a session is
+DOING something there or the item is QUEUED for whoever comes next, and only mark
+the first kind.** Marking a queue is what produces false occupancy, and a warning
+that fires on the most routine path trains readers to ignore warnings. A
+corollary for reversals: check whether a recorded non-goal makes *more than one*
+claim before rebutting it — spec 049's said both "browsing doesn't reserve" and
+"no claim on READY_FOR_IMPLEMENTATION", and rebutting only the first missed that
+the real objection is *the actor is not the future worker*.
+
+Process notes. Reversing a recorded non-goal makes pre-existing tests fail
+*correctly* — that is the design conversation surfacing, not breakage — but
+rewriting them is legitimate only with the reversal recorded first (ADR + spec
+`## Amendments`); and the count of inverted tests is a useful proxy for how big
+the reversal really is (ours fell from four to two once the design was narrowed).
+Three separate over-reaches all came from the same root: **widening a marker,
+widening the blocking that shares its condition, and widening the machinery that
+consumes it are three decisions, not one.** The suite caught the first (a session
+could no longer move its own slice out of `IN_PROGRESS`); review caught the
+second (the trunk reservation still hardcoded one status, and later still
+overwrote a foreign trunk claim silently); and the third only surfaced when a
+reviewer asked what *reads* the newly-written field — the answer was nothing, so
+the docs' promise of cross-worktree visibility was untrue until a read path was
+added. When widening a write, always ask what consumes it.
+
+**A batched edit script's per-step log is not evidence the edit landed.** Two
+regression tests were recorded in the bug record as pinning a fix, and neither
+existed: the script that added them raised on a *later* assertion and returned
+before its single `write_text`, discarding every earlier substitution — after
+already printing `ok: <step>` for each one. Per-step logging plus
+all-or-nothing writing makes partial failure look exactly like success. It
+happened twice in one session. **Verify by grepping for the artifact
+(`grep -c '<test name>' <file>`), never by trusting the script's own echo** —
+and for a guard, go further: remove each conjunct, re-run under `python3 -B`,
+confirm red, restore. Both refusal conjuncts here were unpinned; the suite stayed
+green with either deleted, which no amount of "the tests pass" would have
+revealed. This compounds the [[mutation-testing-pycache-false-negative]] trap:
+a test that cannot fail is worse than a missing test, because the record then
+cites it as evidence.

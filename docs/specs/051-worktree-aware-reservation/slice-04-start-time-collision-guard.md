@@ -189,6 +189,7 @@ clarifications append here.
    origin/main (claims are local by default), so there is no foreign owner to
    collide with; only a landed `DONE` is a definite duplication. Recorded here
    rather than widening the block.
+   **[Rationale falsified 2026-07-24 — see `## Amendments`.]**
 
 4. **`relative_to` fallback now warns (craft nit).** The (practically
    unreachable) case where the slice path can't be resolved under the project
@@ -240,3 +241,33 @@ clarifications append here.
 | `docs/specs/README.md` status board | `deferred` | Regenerated at close-out (post-DONE). |
 | `docs/refinement-todo.md` | `updated` | Added a durable deferred-decision entry for the two scoped-out follow-ups (push-by-default claim; `session-plan` claim-check report) with a resolution trigger — more robust than the slice Non-goals alone (DoD line 116). |
 | `docs/memory/` | `deferred` | `/jig:memory-sync` at close-out for the start-collision-guard learning. |
+
+## Amendments
+
+> Post-DONE corrections per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md).
+> The original record above is preserved; dated entries below record reality.
+
+### 2026-07-24 — dev-log note 3's premise no longer holds (ADR-0045)
+
+Note 3 justified letting a `REVIEWED`/`RECONCILED` origin copy fall through on
+the grounds that *"those states clear `claimed_by` … so there is no foreign owner
+to collide with"*. Both halves of that premise are now false:
+
+- [ADR-0045](../../decisions/adr-0045-slice-claim-covers-active-lifecycle.md)
+  (from [bug 014](../../bugs/014-slice-claim-covers-only-in-progress.md)) makes
+  `REVIEWED` and `RECONCILED` **claim-bearing** working states — clearing on
+  `→ REVIEWED` is precisely the edge it reverses, because it left reconciliation
+  unmarked.
+- The constant named here no longer exists: `_CLAIM_CLEARING_STATUSES` was
+  renamed `_CLAIM_RELEASE_STATUSES` and now holds the pickup-queue states
+  (`DRAFT` / `READY_FOR_IMPLEMENTATION`) plus the terminal three.
+
+The behaviour also changed, in the direction this note declined: a foreign claim
+on an `origin/main` copy at a non-`IN_PROGRESS` working state now emits a
+**non-blocking warning** from `_refuse_start_collision`. The *hard block* remains
+scoped exactly as 051-04 shipped it — `DONE` and both-ends-`IN_PROGRESS` — so
+this record's AC2/AC4 scope decision stands; only the "nothing to collide with"
+reasoning is withdrawn.
+
+Swept rather than line-corrected, per the bug-011 learning: the withdrawn
+phrasing was grepped across `docs/` and this was its only surviving site.

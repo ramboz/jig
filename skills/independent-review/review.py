@@ -527,6 +527,9 @@ acceptance criteria.
 For each acceptance criterion in slice {slice_label}, verify:
 - Is it met by the deliverable?
 - Are tests exercising the AC meaningfully (not just superficial assertions)?
+- **Vacuous-test check** — for each test covering this AC, would it still pass
+  if the feature under test were deleted? Flag any that would: a test that
+  cannot fail proves nothing (issue #124 instance 2).
 - Are there bugs (correctness, edge cases)?
 - Any security or robustness concerns relevant to this change?{pre_snapshot_check}
 
@@ -696,6 +699,9 @@ implementation: scope, blockers, nits, and strengths.
 - Does the implementation match the spec's stated scope?
 - Are there correctness, security, or robustness concerns?
 - Are tests exercising the change meaningfully?
+- **Vacuous-test check** — for each test touching this change, would it still
+  pass if the feature under test were deleted? Flag any that would: a test that
+  cannot fail proves nothing (issue #124 instance 2).
 - Are there nits worth flagging (naming, structure, idioms)?
 - What does the change get right that's worth calling out?
 
