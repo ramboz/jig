@@ -109,8 +109,15 @@ def run_scaffold_with_args(target: Path, *args: str,
 
 
 class DefaultOffMachineryTests(unittest.TestCase):
-    """Slice 016-01 AC #8 (g) — the dormant copy path now reached via
-    `--plugin-only` (slice 016-03 flipped the default)."""
+    """Slice 016-01 AC #8 (g) — plugin mode copies no machinery.
+
+    Framing corrected by slice 099-01. This path was 016-01's default, became
+    the "dormant" one under 016-03's in-repo default, and is the default again
+    now — so it is not dormant and `--plugin-only` reaches nothing special.
+    The tests pass the flag explicitly on purpose: that pins the FLAG, while
+    `DefaultPluginModeTests` pins the no-flag default. Same assertions
+    throughout — what plugin mode produces never moved, only what it was
+    relative to."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-016-default-")
@@ -1382,7 +1389,8 @@ class MergeExistingSettingsTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# Slice 016-03 — default flip + --plugin-only opt-out + dogfood regression
+# Slice 016-03 (default flip to in-repo) + slice 099-01 (flipped back to
+# plugin mode). `--plugin-only` is no longer an opt-out — see PluginOnlyFlagTests.
 # --------------------------------------------------------------------------
 
 
@@ -1503,7 +1511,11 @@ class DefaultPluginModeTests(unittest.TestCase):
         r = run_scaffold_with_args(self.target, env=env)
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertIn("source checkout", r.stdout)
-        self.assertIn("--in-repo", r.stdout)
+        # Deliberately NOT asserting "--in-repo" here: that string comes from
+        # the unconditional mode line, so it holds whether or not the note
+        # fires, and it implies the note offers that remedy — it does not, it
+        # points at the mode line. Pinned where it belongs instead, on the
+        # mode-line tests.
         # The note states what was DETECTED (topology + no plugin host), never
         # the condition — a contributor with the plugin installed who ran from
         # a clone is a legitimate false positive and must not be told their
@@ -1708,10 +1720,16 @@ class DefaultPluginModeTests(unittest.TestCase):
                 )
 
 
-class PluginOnlyOptOutTests(unittest.TestCase):
-    """Slice 016-03 AC #1 — `--plugin-only` opts out, preserving the old
-    docs-only behavior (scaffold_mode: plugin-only, no .claude/skills/
-    or .claude/agents/)."""
+class PluginOnlyFlagTests(unittest.TestCase):
+    """`--plugin-only` selects plugin mode explicitly: `scaffold_mode:
+    plugin-only`, no `.claude/skills/`, no `.claude/agents/`.
+
+    Framing updated by slice 099-01. Under 016-03 this flag was an *opt-out*
+    from an in-repo default, which is what the class was originally named for;
+    since 099-01 flipped the default back, it opts out of nothing and is kept
+    for back-compat and for stating the choice out loud. The assertions are
+    unchanged — what the flag produces did not move, only what it is relative
+    to."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-016-03-plugin-only-")

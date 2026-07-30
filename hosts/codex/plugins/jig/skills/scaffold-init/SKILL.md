@@ -106,9 +106,10 @@ After running, the target directory contains (plugin mode — the default):
 - `.gitignore` (secret-ignore floor)
 - `scaffold.json` (install-state manifest; `scaffold_mode: "plugin-only"`)
 
-> This section is host-neutral **on purpose**: it is machine-translated per
-> host, so naming a host inside a conditional inverts its meaning. Check
-> `scaffold.json` for what your project actually received.
+> For what your project actually received: `scaffold.json` records the mode and
+> host, and your host's own settings file (if it has one) carries the deny
+> floor. (This section is deliberately host-neutral — it is machine-translated
+> per host.)
 
 In plugin mode jig's skills, agents, and hooks stay under the installed plugin
 and run from the plugin root — no *machinery* is copied into the repo. The one
@@ -116,6 +117,7 @@ exception is the permissions file above: `permissions.deny` lives in the
 project's own settings and no plugin mechanism can inject it, so the scaffold
 writes it in both modes wherever the host supports it (ADR-0041 OQ1). It
 carries **no** hook registrations.
+
 The wizard's stdout summary states the mode and why.
 
 With `--in-repo`, the target additionally gets a self-contained copy of jig's

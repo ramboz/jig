@@ -440,8 +440,13 @@ neither flips `scaffold.json`'s `scaffold_mode` to `in-repo` nor re-renders the
 already-emitted docs, so a converted project ends with working machinery under
 `.claude/skills/` and a manifest and `docs/workflow.md` still describing plugin
 mode. §15 fixed "advice that does not run"; this is the residual "advice that
-runs but leaves the project inconsistent". It needs its own record, not a
-widening of this slice.
+runs but leaves the project inconsistent". It needed its own record rather than
+a widening of this slice, and now has one: **bug 018**, filed in
+[#145](https://github.com/ramboz/jig/pull/145). Note the record lives on that
+branch, **not this one** — `main` is PR-only, so a bug filed mid-slice cannot
+appear in this tree. Stated explicitly because "filed" is otherwise
+unverifiable from here, which is the same unverifiable-disposition problem
+§8 and §14 name.
 
 **17. Round 8 — the fix for the understated security artifact created an
 overstated one on the other host.**
@@ -490,6 +495,128 @@ Two nits folded in: `--plugin-only`'s `--help` still described the pre-OQ1 path
 byte-identical read/parse/raise block — including the error string — alongside
 `_check_hooks_safety`; both now share `_read_settings_json`.
 
+**18. Round 9 — the status board asserted the retracted claim, in the one file
+built to be read instead of the spec.**
+
+Compliance round 3 found `docs/specs/README.md`'s Notes cell still saying the
+`permissions.deny` gap was "deliberately out of scope — ADR-0041 Open
+questions". OQ1 closed that; `_write_permissions_deny_floor` implements it;
+`spec.md` says "Pulled INTO scope". The board said otherwise.
+
+The Notes column exists precisely so a reader can skip the spec — which is what
+makes a stale claim there cost more than the same claim buried in a slice. And
+the sweep row for that file read `updated`, honestly, because it *was* updated
+by this slice; it just was not updated *enough*. **A disposition of `updated` is
+not a claim that the file is now correct** — that is the §8 lesson at one more
+remove, and the third distinct artifact this slice has had to chase the same
+retracted claim through (`product-vision.md` §4, `learnings.md` §8, `README.md`
+§12, the printed strings §13, the Codex render §17, now the status board).
+
+The corrected cell also carries the host asymmetry, which the board had never
+stated: `permissions.deny` is Claude-only in **both** modes, because Codex has
+no project-scoped permission surface. A reader who only ever sees the board
+would otherwise infer the floor is universal.
+
+Also corrected: §16 still read "It needs its own record", with no pointer, and
+bug 018 lives on [#145](https://github.com/ramboz/jig/pull/145) rather than in
+this tree (`main` is PR-only, so a bug filed mid-slice *cannot* appear here).
+Now stated explicitly — "filed" is otherwise unverifiable from this branch,
+which is the same problem in a new costume.
+
+**Carried forward, not fixed here — and this entry was itself wrong on its
+first writing, which is worth leaving visible.** It claimed
+`verify_install.py`'s `run_completion_summary` "runs **zero** checks in plugin
+mode". Compliance round 4 falsified that by probing: a greenfield plugin-mode
+scaffold reports `1/1 checks passed`, because the `seed` check is appended
+whenever `seed_expected` is true, which is the modal new project. The
+`if not checks` branch fires only for plugin-only **and** non-greenfield.
+
+I wrote a gap-report from reading the gate rather than running the command —
+the exact move this slice's deviation log keeps faulting elsewhere. Corrected
+rather than quietly deleted, because an over-claimed gap and an over-claimed
+guarantee are the same failure.
+
+The real gap is narrower: the **floor** checks — `permissions-deny` and
+`gitignore-secret` — live in `_SCAFFOLD_CHECKS`, which is gated on
+`with_machinery`, while both artifacts are now written in plugin mode. Probed:
+a default scaffold produces `.claude/settings.json` and two `jig
+secret-ignore` blocks in `.gitignore`, and neither is verified. Note the
+`.gitignore` half is **not** new — it has been written on the plugin-only path
+since 052-02, so this predates the OQ1 fold-in and is not a gap this slice
+opened. Left out because widening the completion report's check set is a
+behaviour change no AC asks for.
+
+**19. Round 9 craft — PASS, with the sweep's blind spot named: the test suite's
+own prose.**
+
+Nits applied: an orientation comment that pointed "above" at constants sitting
+below it; an assertion in the source-checkout note test that held whether or not
+the note fired (it pinned a mode-line string, implying the note offers the
+`--in-repo` remedy, which it does not — it points at the mode line); a remedy
+that named a bare `migrate.py` with a placeholder disagreeing with migrate's own
+canonical `<project-dir>`; and a `SKILL.md` note whose first sentence was
+authoring guidance for a future editor, shipped in an artifact the host loads
+every session — its enforcement lives in a test and its rationale in §17, so
+only the runtime-useful half stays.
+
+The finding worth carrying: **the reconciliation sweep never reaches the test
+suite's own prose.** `PluginOnlyOptOutTests` and its section banner still framed
+`--plugin-only` as an *opt-out* from an in-repo default — true under 016-03,
+false the moment 099-01 flipped the default back, at which point the flag opts
+out of nothing. The in-body comments had been updated; the class name, docstring
+and banner had not. Same class as the `migrate/SKILL.md` "default since slice
+016-03" row already in the sweep table, but the sweep table enumerates *docs*,
+and a stale name in a test file is doc-truth too — arguably worse, since the
+name is what the next contributor reads first. Renamed to `PluginOnlyFlagTests`,
+docstring re-framed to say what it is relative to now and what did not change.
+
+**Deferred with rationale**, so a later slice picks it up instead of
+re-discovering it: `rewrite_skill_md_paths` is named for an artifact while its
+sibling `rewrite_doc_paths_plugin_mode` is named for a mode, and at the call
+site both are the doc rewrite. Not renamed here — `rewrite_skill_md_paths` is a
+pre-existing public override of `ClaudeScaffoldRenderer`'s classmethod,
+referenced from `scripts/build_codex_plugin.py` and ADR-0038, so the rename is
+cross-cutting and does not belong in a slice about a default flag.
+
+**20. Round 10 — the gap-report I wrote to be honest about a gap was itself
+over-claimed.**
+
+§18 stated `verify_install.py`'s completion summary "runs **zero** checks in
+plugin mode" and therefore "verifies nothing" on the new default path.
+Compliance round 4 falsified it by *running the command*: a greenfield
+plugin-mode scaffold prints `1/1 checks passed`, because the `seed` check is
+appended whenever `seed_expected` is true — the modal new project. The silent
+branch fires only for plugin-only **and** non-greenfield.
+
+I had read the `with_machinery` gate and reported from it, without running the
+thing. That is the same move this log faults elsewhere — §14's "verify the edit
+landed, don't trust the echo", §11's directional probing — arriving this time in
+a *deviation entry*, the artifact whose entire job is to be the honest account.
+**An over-claimed gap and an over-claimed guarantee are the same failure**, and
+a wrong gap-report is the more insidious of the two because it reads as candour.
+Corrected in place rather than deleted, so the correction is visible.
+
+The real gap is narrower and now stated as such: the two **floor** checks
+(`permissions-deny`, `gitignore-secret`) sit inside the `with_machinery`-gated
+`_SCAFFOLD_CHECKS` while both artifacts are written in plugin mode — and the
+`.gitignore` half has been written on that path since **052-02**, so this
+predates the OQ1 fold-in and is not a gap this slice opened.
+
+Also corrected: the `docs/refinement-todo.md` sweep row still said "no decision
+was deferred", while §18 deferred a completion-report change and §19 deferred
+the renderer rename. Both lived only in a closing slice's deviation log — the
+same undiscoverability that filing bug 018 fixed for §16. Three entries are now
+in `refinement-todo.md`, each with a resolution trigger; the third (the seed
+template's `.claude/` leak) is written to **re-probe first**, since bug 015's
+pre-substitution fix may already cover it and the observation predates that
+merge. A deferral that asserts a symptom it has not re-checked is how this log
+got into trouble in the first place.
+
+Last stale framing: `DefaultOffMachineryTests`' docstring still called plugin
+mode "the dormant copy path". It was 016-01's default, dormant under 016-03, and
+is the default again — §19's lesson (the sweep does not reach the test suite's
+own prose) one class further down the same file.
+
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |
@@ -506,7 +633,7 @@ byte-identical read/parse/raise block — including the error string — alongsi
 | `scripts/test_symmetric_install_docs.py` | `updated` | The two README scaffold recipes now pin `--in-repo` (see the `README.md` row). A third test asserting the same fact was removed as redundant; the rationale moved onto the two assertions that already pinned it. |
 | `skills/migrate/SKILL.md` | `updated` | "(default since slice 016-03)" was a stale default claim in a skill contract; now names `--in-repo` as the opt-in and bounds 016-03→099-01 as the interval it *was* the default. Mirrored in both packaged copies. |
 | `docs/inbox.md` | `no-op` | Checked: no parked item resolved or contradicted by this slice. |
-| `docs/refinement-todo.md` | `no-op` | No decision was deferred *by* this slice into refinement-todo. One WAS deferred out of it, and now has a record rather than a claim: the `migrate.py copy-machinery` gap §16 named is filed as **bug 018** ([#145](https://github.com/ramboz/jig/pull/145)) — round-2 compliance correctly flagged that §16 said "needs its own record" while no record existed, the same disposition-asserted-from-intent defect as §8/§14. The open questions live in ADR-0041 (§Open questions), which is their proper home. Of the three, OQ1 and OQ3 are now RESOLVED and implemented here; only OQ2 (a *detected* default) stays open — it needs a two-sided plugin-presence probe that jig **considered and declined to pay for** (path fragility across scopes), not one that cannot be built; OQ2 retracts the earlier "does not exist" wording. |
+| `docs/refinement-todo.md` | `updated` | Three deferrals from this slice now have entries, because a deferral recorded only in a closing slice's deviation log is undiscoverable — the same problem filing bug 018 fixed for §16: the plugin-mode floor-check gap (§18), the `rewrite_skill_md_paths` naming asymmetry (§19), and the seed template's `.claude/` host leak. Previously marked `no-op` on the rationale that nothing was deferred *into* refinement-todo, which was true of the first sweep and false by §18. One WAS deferred out of it, and now has a record rather than a claim: the `migrate.py copy-machinery` gap §16 named is filed as **bug 018** ([#145](https://github.com/ramboz/jig/pull/145)) — round-2 compliance correctly flagged that §16 said "needs its own record" while no record existed, the same disposition-asserted-from-intent defect as §8/§14. The open questions live in ADR-0041 (§Open questions), which is their proper home. Of the three, OQ1 and OQ3 are now RESOLVED and implemented here; only OQ2 (a *detected* default) stays open — it needs a two-sided plugin-presence probe that jig **considered and declined to pay for** (path fragility across scopes), not one that cannot be built; OQ2 retracts the earlier "does not exist" wording. |
 | `docs/memory/glossary.md` | `updated` | "Scaffolded install / scaffold mode" entry re-premised: opt-in, the four reasons plugin mode is the default, and when to choose in-repo. |
 | `docs/memory/learnings.md` | `updated` | "Scaffold doc templates render into two install shapes" gotcha said "the default in-repo scaffold"; now names plugin mode as the default and bounds in-repo to the 016-03→099-01 interval. Missed in the first sweep — see deviation §8. |
 | `docs/decisions/README.md` / ADR index | `updated` | ADR-0041 added to the index. Index row and ordering re-resolved after the merge with `main` (ADR-0039/spec 096 landed there meanwhile); both conflicts were additive, so both sides were kept and numeric order restored **by hand** — regenerating via `adr.py index` overwrites the hand-written ADR-0041 summary with the record's first sentence. |

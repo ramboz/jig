@@ -996,10 +996,11 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
     )
     PROJECT_HOOK_SCRIPT_PREFIX = "${CODEX_PROJECT_DIR:-$PWD}/.codex/hooks/scripts/"
 
-    # Slice 099-01 (ADR-0041 OQ3) — the plugin-mode counterparts of the three
-    # runtime targets above.
+    # Slice 099-01 (ADR-0041 OQ3) — plugin-mode counterparts of the three
+    # PROJECT-LOCAL runtime targets (`SKILL_PATH_REPLACEMENT` just above;
+    # `PROJECT_TEMPLATES_ROOT` / `PROJECT_ROOT_PREFIX` just below).
     #
-    # The targets above are all PROJECT-LOCAL: they name `.codex/skills/`,
+    # Those targets all name `.codex/skills/`,
     # `.codex/templates/`, `.codex/` — directories that exist only because
     # in-repo mode copied the machinery there. Plugin mode copies nothing, so
     # rendering docs against them cites a tree the scaffold never created.
@@ -3046,7 +3047,8 @@ def main(argv: list[str]) -> int:
             "plugin installed for your host (the default). If none is "
             "installed there, this project has jig's docs but not its "
             "runtime: install the plugin, or add the machinery with "
-            "`migrate.py copy-machinery <dir>` (re-running the scaffold needs "
+            "jig's `migrate.py copy-machinery <project-dir>` (re-running the "
+            "scaffold needs "
             "--in-repo --force, since this directory is now scaffolded). "
             "--in-repo also suits CI, cloud agents, and teammates without jig "
             "installed."
