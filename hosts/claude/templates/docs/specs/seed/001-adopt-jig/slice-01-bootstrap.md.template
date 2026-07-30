@@ -8,8 +8,8 @@ last_verified:
 
 **Goal:** Adopt jig in {{PROJECT_NAME}} by running `scaffold-init`, so the
 project opens with the jig docs tree, an honest CLAUDE.md, a populated
-status board, and the `.claude/` runtime machinery — a complete pattern
-for the spec-driven loop from turn one.
+status board, and a runnable jig workflow — a complete pattern for the
+spec-driven loop from turn one.
 
 **DoR:**
 - ✅ The target directory exists and is not already scaffolded (no
