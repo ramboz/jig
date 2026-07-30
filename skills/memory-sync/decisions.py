@@ -15,8 +15,10 @@ subcommand (that helper owns `docs/memory/`; this file lives in `docs/decisions/
 for the load-bearing-decision ADR trigger sentence. Four consumer sites quote
 it verbatim — this helper's routing rubric in `lightweight-decisions.md`, the two
 reconcile checklists (`docs/workflow.md`, `skills/spec-workflow/SKILL.md`), and
-the memory-sync session-end prompt (`skills/memory-sync/SKILL.md`).
-`test_decisions.py` asserts the string appears in all four, so drift fails CI.
+the memory-sync session-end prompt (`skills/memory-sync/SKILL.md`). The scaffold
+template those rubrics are seeded from quotes it too
+(`templates/docs/decisions/lightweight-decisions.md.template`).
+`test_decisions.py` asserts the string appears in all five, so drift fails CI.
 
 Self-contained by design: it does NOT import the 083-04 scan lib
 (`hooks/scripts/lib/decision_scan.py`) nor `memory.py`, so the host-packaging
@@ -55,8 +57,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout  # noqa: E402
 
 # --- Single canonical ADR-trigger sentence (mirrors ADR-0031) ---------------
-# Edit here AND in ADR-0031; the four consumer sites quote this verbatim and
-# test_decisions.py fails CI on drift. The em-dashes (U+2014) are significant.
+# Edit here AND in ADR-0031; the four consumer sites and the scaffold template
+# quote this verbatim and test_decisions.py fails CI on drift. The em-dashes
+# (U+2014) are significant.
 # NOTE: assembled from adjacent string literals, so a grep for the full
 # sentence won't match *this* file — the test imports the constant, not the text.
 ADR_TRIGGER = (

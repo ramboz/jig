@@ -29,7 +29,9 @@ TEMPLATE = (
 TODAY = date.today().isoformat()
 
 # The four consumer sites that must quote the canonical ADR-trigger sentence
-# verbatim, plus ADR-0031 (the human-readable canonical source).
+# verbatim, plus ADR-0031 (the human-readable canonical source) and TEMPLATE
+# (defined above) — the scaffold seed every new project's rubric is created
+# from, so it quotes the sentence for every downstream project too.
 RUBRIC = REPO_ROOT / "docs" / "decisions" / "lightweight-decisions.md"
 WORKFLOW_MD = REPO_ROOT / "docs" / "workflow.md"
 SPEC_WORKFLOW_SKILL = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
@@ -447,7 +449,8 @@ class CliOrderingTests(unittest.TestCase):
 
 class SingleSourceDriftTests(unittest.TestCase):
     """083-05 AC4 / 083-06 AC3 — the canonical ADR_TRIGGER sentence must appear
-    verbatim in all four consumer sites (and in ADR-0031's prose)."""
+    verbatim in all four consumer sites (and in ADR-0031's prose, and in the
+    scaffold template every downstream project's rubric is seeded from)."""
 
     def _assert_contains_trigger(self, path: Path):
         self.assertTrue(path.exists(), "missing consumer site: %s" % path)
@@ -469,6 +472,18 @@ class SingleSourceDriftTests(unittest.TestCase):
 
     def test_adr0031_canonical_source(self):
         self._assert_contains_trigger(ADR_0031)
+
+    def test_template_site(self):
+        """The scaffold seed — the rubric every new jig project starts from.
+        Reword it alone and each project scaffolded afterwards gets routing
+        advice that disagrees with jig's own.
+
+        `SeedFromTemplateTests.test_seeded_body_is_the_real_template_not_a_stub`
+        also fails on such a reword, but incidentally: it quotes ADR_TRIGGER as
+        a proxy for "not a hand-rolled stub", so its coverage here disappears
+        the day it picks a different proxy. This asserts the site directly.
+        """
+        self._assert_contains_trigger(TEMPLATE)
 
 
 class UpdateTimeRoutingGuidanceTests(unittest.TestCase):

@@ -2805,5 +2805,82 @@ class SelfDefiningConventionBlockTests(unittest.TestCase):
         self.assertEqual(wf.read_text().count(self.BLOCK_BEGIN), 1)
 
 
+class DecisionsConventionTemplateTests(unittest.TestCase):
+    """Spec 097-01 / issue #124 instance 1 — the scaffolded conventions
+    template ships a rule that accepted decision records are append-only
+    (strike-and-date, never erase), while proposed/draft ones stay editable.
+
+    Two downstream sessions independently erased superseded reasoning from a
+    decision record because nothing in the scaffold said not to. jig holds the
+    rule for itself (docs/conventions.md); this guards that it reaches every
+    scaffolded project too. Scoped to *accepted* records so it does not
+    contradict the maintainer's ruling that a Proposed ADR's body is a draft.
+    """
+
+    def _template(self) -> str:
+        return (REPO_ROOT / "templates" / "docs"
+                / "conventions.md.template").read_text(encoding="utf-8")
+
+    def _decisions_section(self, body: str) -> str:
+        # Body of the `## Decisions` section: from its heading to the next H2.
+        m = re.search(r"^## Decisions\b.*?(?=^## |\Z)", body,
+                      flags=re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(
+            m, "conventions template must carry a `## Decisions` section "
+               "stating the append-only rule (spec 097-01 AC #1)")
+        return m.group(0)
+
+    def test_template_states_accepted_decisions_are_append_only(self):
+        """AC #1 — the rule exists and names the immutable-after-acceptance
+        discipline: strike-and-date or supersede, never delete/overwrite."""
+        section = self._decisions_section(self._template()).lower()
+        self.assertIn("append-only", section,
+                      "the Decisions rule must state records are append-only")
+        self.assertIn("accepted", section,
+                      "the rule must scope immutability to *accepted* records")
+        # The honest correction mechanism, not deletion.
+        self.assertTrue(
+            "strike" in section or "supersede" in section,
+            "the rule must name strike-and-date / supersede as the way to "
+            "correct an accepted record (not deletion)")
+
+    def test_template_keeps_proposed_records_editable(self):
+        """AC #2 — the rule explicitly leaves Proposed/draft records editable,
+        so it does not contradict question 2's ruling (a draft ADR is not
+        frozen)."""
+        section = self._decisions_section(self._template()).lower()
+        self.assertIn("proposed", section,
+                      "the rule must carve out Proposed/draft records as still "
+                      "editable, per the maintainer's question-2 ruling")
+        # Assert the editable *sense*, not the bare token "edit": an inverted
+        # carve-out like "a Proposed record must never be edited" contains
+        # "edit" too, and would satisfy a bare-token check while contradicting
+        # AC #2. Dogfooding this spec's own vacuous-test discipline.
+        self.assertTrue(
+            "edit freely" in section or "edit its body inline" in section,
+            "the carve-out must affirmatively permit editing a draft record "
+            "(e.g. 'edit freely' / 'edit its body inline'), not merely mention "
+            "the word 'edit' — otherwise an inverted 'never edit' phrasing "
+            "would pass this test")
+
+    def test_fresh_scaffold_conventions_carry_the_rule(self):
+        """AC #1 end-to-end — a freshly scaffolded project's docs/conventions.md
+        (rendered from the template) carries the append-only rule."""
+        tmpdir = tempfile.mkdtemp(prefix="jig-097-01-")
+        try:
+            target = Path(tmpdir) / "demo-project"
+            target.mkdir()
+            result = run_scaffold(target)
+            self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+            conv = target / "docs" / "conventions.md"
+            self.assertTrue(conv.is_file(), "docs/conventions.md must scaffold")
+            section = self._decisions_section(conv.read_text()).lower()
+            self.assertIn("append-only", section)
+            self.assertIn("accepted", section)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
