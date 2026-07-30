@@ -41,6 +41,9 @@ check below)._
 - [ ] All ACs pass; full test suite green (no regressions).
 - [ ] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
+- [ ] Each new test has been shown to fail when its feature is removed —
+      the test is capable of failing, not vacuously green (mutate the
+      feature, watch the test go red, restore).
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
 - [ ] Implementation review passed.
