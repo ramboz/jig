@@ -81,6 +81,12 @@ Use `compliance` for `review.py implementation`, `craft` for `pr-review`,
 reconciliation review. These tags make later token reports price the workflow
 phase, not just the subagent type.
 
+> **Always pass `spec.md`, in every recipe below.** The helper resolves which
+> file actually holds the named slice — a sibling `slice-NN-<short>.md` under
+> the file-per-slice layout, or the `## Slice` section of `spec.md` under the
+> embedded one — and points the reviewer at that file, with `spec.md` trailing
+> as context. Do not hand-substitute the slice path (bug 019).
+
 ### Implementation review
 
 After the implementer has written the deliverable to disk:
@@ -244,8 +250,9 @@ the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
 
 ### Reconciliation review
 
-After the deviation log subsection has been added under the slice in
-`spec.md`:
+After the deviation log subsection has been added under the slice — in its
+`slice-NN-<short>.md` file, or under the `## Slice` section in `spec.md` in the
+embedded layout:
 
 ```bash
 PROMPT=$(python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
