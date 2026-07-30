@@ -722,15 +722,30 @@ Two corollaries from the same bug, both cheap and both general:
   before substitution. A guard test pins it, proven by a single-variable
   variant: switching only the brief back to post-substitution turns it red.
 
-**`review.py record-review` blocks forever on stdin when `--summary-file` is
-omitted and stdin is a pipe.** It falls back to `sys.stdin.read()` guarded only
-by `if not sys.stdin.isatty()`. In a terminal stdin *is* a tty, so the read is
-skipped and nothing hangs — which is why this never reproduces by hand. Under
-any agent harness or CI runner stdin is a pipe that never reaches EOF, so the
-process waits indefinitely. This is the long-unexplained hang in
-[[jig-flaky-host-drift-guard]]'s note about `run_tests.py` "hanging on a
-`review.py record-review` subprocess": a test fixture invokes `record-review`
-without `--summary-file`. **Workaround: run jig helpers with `< /dev/null`**
-(`python3 scripts/run_tests.py < /dev/null`) — the suite then completes in ~100s
-instead of hanging. Real fix: guard the fallback on a closed/ready stdin, or
-require `--summary-file` in non-interactive use.
+**`isatty()` answers "is this a terminal", never "is there input waiting"**
+(bug 017). `record-review` guarded a `sys.stdin.read()` fallback with
+`if not sys.stdin.isatty()`. That splits three real cases into two: a terminal
+(skip), a closed stdin (`""` immediately), and **an open pipe nobody ever
+closes — which blocks forever**. A human at a prompt is always the first case;
+an agent harness and most CI runners are always the third. So the failure
+appeared only where nobody was watching, and jig's whole suite could hang for
+13+ minutes on a ~100s run while the bug "never reproduced by hand". That
+signature is itself the tell: **a defect that only shows up when a human is not
+driving points at a terminal-shaped assumption.** The fix removed the branch
+rather than bounding it — `--summary-file -` is now the only route to stdin —
+because a timeout or a readiness poll would have kept behaviour forking on what
+stdin happens to be.
+
+Two corollaries worth keeping:
+
+- **Don't use one property as a proxy for another.** `isatty()` was standing in
+  for "input is available", which no syscall on a pipe can answer without
+  either blocking or racing. When the question can't be asked, make the caller
+  state the answer (an explicit flag) instead of guessing.
+- **The obvious regression test proves nothing here.**
+  `subprocess.run(stdin=subprocess.PIPE)` closes the write end immediately, so
+  the child sees EOF and exits — it passes against the *unfixed* code. Only
+  `os.pipe()` with the write end held open by the test reproduces it. One wrong
+  repro of exactly this shape briefly appeared to *disprove* the bug. Compare
+  [[mutation-testing-pycache-false-negative]]: when a test passes sooner than
+  expected, suspect the harness before believing the result.

@@ -241,7 +241,9 @@ is read-only — `bug.py` validates the durable verdict artifacts they produce
 There is **no arch pass** — bugs carry no design.
 
 Record each verdict with `review.py record-review --bug NNN --pass <name>
---verdict pass --reviewer <src>`. The `REVIEWED` gate requires `bug-review` +
+--verdict pass --reviewer <src> --summary-file <path>` (or `--summary-file -`
+to pipe the body in — the body is required, and stdin is never read
+implicitly, bug 017). The `REVIEWED` gate requires `bug-review` +
 `craft` (+ `security` when `security_surface: true`), each `verdict: pass`.
 
 ### 5. Verify (gnarly/security only) and close

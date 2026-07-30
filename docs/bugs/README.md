@@ -21,5 +21,5 @@
 | 014 | slice-claim-covers-only-in-progress | medium | gnarly | DONE | yes | skills/spec-workflow/test_workflow.py::Bug014WidenedClaimTests | claude/issue-130-jig-bugfix-57198e |  |  |
 | 015 | codex-brief-seed-claude-md-leak | medium | standard | DONE | yes | skills/scaffold-init/test_scaffold_mode.py::CodexScaffoldAdapterTests::test_codex_brief_and_seed_name_agents_md_plugin_mode | claude/bug-codex-brief-claude-md |  |  |
 | 016 | codex-host-rewrite-mangles-project-name | low |  | REPORTED | yes |  |  |  |  |
-| 017 | record-review-blocks-on-stdin | high | standard | ROOT_CAUSED | yes |  |  |  |  |
+| 017 | record-review-blocks-on-stdin | high | standard | DONE | yes | skills/independent-review/test_review.py::Bug017RecordReviewStdinTests | claude/bug-017-stdin-fix |  |  |
 | 018 | copy-machinery-leaves-mode-inconsistent | medium | standard | FIXING | yes | skills/migrate/test_migrate.py::PluginModeConversionTests | claude/bug-copy-machinery-mode |  |  |

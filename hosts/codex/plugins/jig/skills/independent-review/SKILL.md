@@ -272,7 +272,11 @@ reconciliation}`,
 `prompt_source`) lives in `skills/_common/review_evidence.py` so the
 slice 045-03 transition gate validates the same shape.
 
-Record a verdict (the freeform body comes from `--summary-file` or stdin):
+Record a verdict. The freeform body is **required** and comes from
+`--summary-file PATH`, or from stdin with `--summary-file -` — a verdict
+with no body is refused. `record-review` never reads stdin unless asked
+(bug 017: the old implicit fallback blocked forever on a pipe nobody
+closed, hanging CI and agent harnesses):
 
 ```bash
 python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
