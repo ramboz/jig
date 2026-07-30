@@ -99,18 +99,24 @@ After running, the target directory contains (plugin mode — the default):
 - `AGENTS.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
 - `.codex/hooks/` (empty — project-specific gates can go here)
+- `.codex/settings.json` — **permissions only**: the ADR-0013 destructive-command
+  deny floor (`git push --force`, `git reset --hard`, `rm -rf`). Codex host only;
+  Codex has no equivalent project-scoped permission surface.
 - `.gitignore` (secret-ignore floor)
 - `scaffold.json` (install-state manifest; `scaffold_mode: "plugin-only"`)
 
 In plugin mode jig's skills, agents, and hooks stay under the installed plugin
-and run from `${PLUGIN_ROOT}` — nothing is copied into the repo. The
-wizard's stdout summary states the mode and why.
+and run from `${PLUGIN_ROOT}` — no *machinery* is copied into the repo.
+The one exception is that `settings.json` line: `permissions.deny` lives in the
+project's own settings and no plugin mechanism can inject it, so the scaffold
+writes it in both modes (ADR-0041 OQ1). It carries **no** `hooks` block.
+The wizard's stdout summary states the mode and why.
 
 With `--in-repo`, the target additionally gets a self-contained
 `.codex/skills/`, `.codex/agents/`, `.codex/hooks/scripts/`,
-`.codex/templates/`, and a generated `.codex/settings.json`
-(`scaffold_mode: "in-repo"`). Choose it only for CI, cloud agents, or teammates
-without jig installed.
+`.codex/templates/`, and a `.codex/settings.json` that *also* registers the
+jig hooks (`scaffold_mode: "in-repo"`). Choose it only for CI, cloud agents, or
+teammates without jig installed.
 
 Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 `docs/memory/people.md` is NOT created (solo-project default — team detection is slice 001-03).

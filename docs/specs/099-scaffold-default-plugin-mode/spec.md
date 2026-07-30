@@ -39,7 +39,8 @@ deserves to be, and make plugin mode the lean default.
 ## Decision (ADR-0041)
 
 Recorded in [ADR-0041](../../decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)
-(Proposed): **default to plugin mode; in-repo behind an explicit `--in-repo`**,
+(Accepted 2026-07-29, after a six-round frame critique): **default to plugin
+mode; in-repo behind an explicit `--in-repo`**,
 for **both hosts**. Concretely:
 
 1. Flip the `with_machinery` default to `False` (plugin mode).
@@ -56,20 +57,26 @@ same objections apply to a Codex project whose plugin is installed).
 
 ## Security-floor note (ADR-0013)
 
-Flipping the default does **not** strip jig's security floor, because the plugin
-provides most of it. Probed against `hooks/hooks.json` and the plugin-only branch
-of `scaffold()`:
+Flipping the default does **not** strip jig's security floor **provided a plugin
+is installed for the target host**, because the plugin provides most of it. That
+precondition is load-bearing, not pedantic: plugin mode relocates the gates, it
+does not make them portable, so a plugin-less plugin-mode scaffold keeps only
+what the scaffold itself writes. See ADR-0041 (floor table + OQ2 residual) for
+which populations reach that state and which of them the scaffold now warns.
+Probed against `hooks/hooks.json` and the plugin-only branch of `scaffold()`:
 
 - `.gitignore` secret patterns — written in **both** modes.
 - secret-scan hook, spec-gate, context-check, and the other gates — **run from
   the installed plugin** in plugin mode (registered globally in the plugin's
   `hooks/hooks.json`), so they need no per-project copy.
 - `## Security (MUST)` primer block — written in both modes.
-- `permissions.deny` guardrails — the **one** part plugin mode does not seed
-  (a plugin cannot write project `settings.json permissions`). This is the
-  pre-existing behavior of the already-shipped `--plugin-only` path, not a
-  regression introduced here. Whether plugin mode should also seed it is **out of
-  scope** (ADR-0041 Open questions).
+- `permissions.deny` guardrails — **now seeded in plugin mode too** (Claude
+  host; Codex has no equivalent project-scoped permission surface). Originally
+  scoped out here: a plugin cannot write project `settings.json permissions`, so
+  the already-shipped `--plugin-only` path never did. The maintainer ruled on
+  [#136](https://github.com/ramboz/jig/pull/136) to fold it in rather than ship a
+  default that silently dropped the guardrail from every new project — see
+  ADR-0041 OQ1 and `_write_permissions_deny_floor`.
 
 ## Decomposition
 
@@ -98,12 +105,17 @@ behavior; splitting them would ship intermediate states with no standalone value
 
 ## Out of scope
 
-- **Seeding `permissions.deny` on the plugin-only path.** A real follow-up
-  (ADR-0041 Open questions), but it changes what plugin mode *does*; this spec only
-  changes which mode is the default.
+- ~~**Seeding `permissions.deny` on the plugin-only path.**~~ **Pulled INTO
+  scope** during implementation on the maintainer's call
+  ([#136](https://github.com/ramboz/jig/pull/136), ADR-0041 OQ1). It does change
+  what plugin mode *does*, which is why it was scoped out at authoring time; the
+  counter-argument that won is that making plugin mode the default without it
+  drops ADR-0013 part 3 from every new project by default.
 - **A detected (rather than static) default** that picks in-repo when no plugin is
-  present. Needs a plugin-presence probe that does not exist today (ADR-0041 Open
-  questions).
+  present. Needs a **two-sided** plugin-presence probe, which jig has considered
+  and declined to pay for (path fragility across scopes) rather than found
+  impossible — see ADR-0041 OQ2, which retracts the earlier "does not exist"
+  framing.
 - **Retrofitting already-scaffolded projects.** Projects already scaffolded in
   in-repo mode are untouched; this changes only what a *new* no-flag scaffold
   produces.

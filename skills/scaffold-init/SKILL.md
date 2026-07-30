@@ -99,18 +99,24 @@ After running, the target directory contains (plugin mode — the default):
 - `CLAUDE.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
 - `.claude/hooks/` (empty — project-specific gates can go here)
+- `.claude/settings.json` — **permissions only**: the ADR-0013 destructive-command
+  deny floor (`git push --force`, `git reset --hard`, `rm -rf`). Claude host only;
+  Codex has no equivalent project-scoped permission surface.
 - `.gitignore` (secret-ignore floor)
 - `scaffold.json` (install-state manifest; `scaffold_mode: "plugin-only"`)
 
 In plugin mode jig's skills, agents, and hooks stay under the installed plugin
-and run from `${CLAUDE_PLUGIN_ROOT}` — nothing is copied into the repo. The
-wizard's stdout summary states the mode and why.
+and run from `${CLAUDE_PLUGIN_ROOT}` — no *machinery* is copied into the repo.
+The one exception is that `settings.json` line: `permissions.deny` lives in the
+project's own settings and no plugin mechanism can inject it, so the scaffold
+writes it in both modes (ADR-0041 OQ1). It carries **no** `hooks` block.
+The wizard's stdout summary states the mode and why.
 
 With `--in-repo`, the target additionally gets a self-contained
 `.claude/skills/`, `.claude/agents/`, `.claude/hooks/scripts/`,
-`.claude/templates/`, and a generated `.claude/settings.json`
-(`scaffold_mode: "in-repo"`). Choose it only for CI, cloud agents, or teammates
-without jig installed.
+`.claude/templates/`, and a `.claude/settings.json` that *also* registers the
+jig hooks (`scaffold_mode: "in-repo"`). Choose it only for CI, cloud agents, or
+teammates without jig installed.
 
 Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 `docs/memory/people.md` is NOT created (solo-project default — team detection is slice 001-03).

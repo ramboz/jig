@@ -12,8 +12,9 @@ project so the very first turn has a faithful pattern to imitate. It
 records the genuine first unit of work in `{{PROJECT_NAME}}`: adopting
 jig by running `scaffold-init` to lay down the docs tree, AGENTS.md, the
 status board, and a wired-up, runnable jig workflow. (Where the machinery
-itself lives depends on the mode chosen at scaffold time — by default it
-runs from the installed jig plugin; `--in-repo` copies it into `.codex/`.
+itself lives depends on the mode chosen at scaffold time — by default it is
+expected to come from an installed jig plugin; `--in-repo` copies it into
+`.codex/` instead.
 `scaffold.json`'s `scaffold_mode` field records which one this project got.)
 
 It is **real, permanent project history**, not a labelled-deletable

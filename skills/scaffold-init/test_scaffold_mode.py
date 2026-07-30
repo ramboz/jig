@@ -81,10 +81,17 @@ def _load_agent_toml(text: str) -> dict:
     return data
 
 
-def run_scaffold_with_args(target: Path, *args: str) -> subprocess.CompletedProcess:
-    """Invoke scaffold.py with extra CLI flags before the target path."""
-    env = os.environ.copy()
-    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+def run_scaffold_with_args(target: Path, *args: str,
+                           env: "dict | None" = None) -> subprocess.CompletedProcess:
+    """Invoke scaffold.py with extra CLI flags before the target path.
+
+    Defaults to a plugin-driven environment (`CLAUDE_PLUGIN_ROOT` set), which
+    is what most tests want and keeps slice 099-01's unconfirmed-plugin note
+    out of their stdout. Pass `env=` explicitly to drive the other side of
+    that branch."""
+    if env is None:
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
     return subprocess.run(
         [sys.executable, str(SCAFFOLD), *args, str(target)],
         capture_output=True, text=True, env=env,
@@ -92,11 +99,12 @@ def run_scaffold_with_args(target: Path, *args: str) -> subprocess.CompletedProc
 
 
 # --------------------------------------------------------------------------
-# Plugin-only opt-out behavior (slice 016-01 AC #8 (g) PRE-016-03; slice
-# 016-03 AC #1 flipped the default ON, so these tests now drive the
-# behavior via --plugin-only explicitly. Same invariants — slice 016-01
-# `--with-machinery` flag is still default-on; the dormant path is now
-# the explicit opt-out.)
+# Plugin-only behavior. History: slice 016-01 AC #8 (g) had plugin mode as the
+# default; 016-03 flipped it to in-repo, so these tests drove it via an explicit
+# `--plugin-only`; slice 099-01 flipped it back, so `--plugin-only` is now
+# redundant with the default and kept for back-compat. The tests still pass it
+# explicitly — that is deliberate, it pins the FLAG's behavior rather than the
+# default's, which `DefaultPluginModeTests` covers separately.
 # --------------------------------------------------------------------------
 
 
@@ -1340,20 +1348,36 @@ class MergeExistingSettingsTests(unittest.TestCase):
             "user's Edit-matcher hook was clobbered under --force",
         )
 
-    def test_default_off_does_not_write_settings_or_hooks(self):
-        """AC #1 — with --plugin-only, no hook scripts, no settings.json.
-        Pure existing-behavior preservation for users who opt out.
-        (Slice 016-03 flipped the default, so this case is now reached
-        via the explicit opt-out flag rather than absent-by-default.)"""
+    def test_default_off_writes_permissions_only_settings_no_hooks(self):
+        """AC #1 — with --plugin-only, no hook scripts.
+
+        Slice 099-01 (ADR-0041 OQ1) narrowed this: plugin mode still copies no
+        hook *scripts*, but it now DOES write `.claude/settings.json` carrying
+        the `permissions.deny` security floor — the one ADR-0013 part that
+        cannot be served from the plugin root. The assertion is inverted, not
+        deleted: settings.json must exist, and must carry permissions WITHOUT
+        a hooks block."""
         r = run_scaffold_with_args(self.target, "--plugin-only")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertFalse(
             (self.target / ".claude" / "hooks" / "scripts").exists(),
             ".claude/hooks/scripts must not exist with --plugin-only",
         )
-        self.assertFalse(
-            (self.target / ".claude" / "settings.json").exists(),
-            ".claude/settings.json must not exist with --plugin-only",
+        settings_path = self.target / ".claude" / "settings.json"
+        self.assertTrue(
+            settings_path.exists(),
+            "--plugin-only must write settings.json for the permissions floor",
+        )
+        settings = json.loads(settings_path.read_text())
+        self.assertIn("permissions", settings)
+        self.assertIn(
+            "Bash(rm -rf*)", settings["permissions"]["deny"],
+            "plugin mode must seed the destructive-command deny defaults",
+        )
+        self.assertNotIn(
+            "hooks", settings,
+            "plugin mode must not materialize a hooks block — the plugin's "
+            "own hooks.json serves those",
         )
 
 
@@ -1365,8 +1389,11 @@ class MergeExistingSettingsTests(unittest.TestCase):
 class DefaultPluginModeTests(unittest.TestCase):
     """Slice 099-01 AC #1 (ADR-0041) — the default is now **plugin mode**,
     reversing slice 016-03's in-repo default. Running scaffold without a
-    machinery flag copies NO machinery: no skills/, agents/, hooks/scripts/,
-    or settings.json under `.claude/`, and `scaffold_mode == 'plugin-only'`."""
+    machinery flag copies NO machinery: no skills/, agents/, or hooks/scripts/
+    under `.claude/`, and `scaffold_mode == 'plugin-only'`.
+
+    `.claude/settings.json` IS written, and is not machinery: it carries the
+    `permissions.deny` floor and no hooks block (ADR-0041 OQ1)."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-099-01-default-plugin-")
@@ -1394,12 +1421,187 @@ class DefaultPluginModeTests(unittest.TestCase):
             (self.target / ".claude" / "hooks" / "scripts").exists(),
             "default scaffold must NOT copy hooks/scripts/ (plugin mode)",
         )
-        self.assertFalse(
+        # Slice 099-01 (ADR-0041 OQ1): settings.json IS written in plugin mode
+        # — permissions-only, no hooks. See
+        # test_default_mode_seeds_permissions_deny_floor below.
+        self.assertTrue(
             (self.target / ".claude" / "settings.json").exists(),
-            "default scaffold must NOT write settings.json (plugin mode)",
+            "default scaffold writes a permissions-only settings.json",
         )
         manifest = json.loads((self.target / "scaffold.json").read_text())
         self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
+
+    def test_default_mode_seeds_permissions_deny_floor(self):
+        """Slice 099-01 / ADR-0041 OQ1 — plugin mode seeds the ADR-0013 part 3
+        destructive-command guardrail.
+
+        `permissions.deny` lives in the *project's* settings.json, so unlike
+        the hooks and the primer block it cannot be served from the plugin
+        root. Making plugin mode the default would otherwise have silently
+        dropped the floor's one project-scoped part from every new project."""
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        settings = json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+        deny = settings["permissions"]["deny"]
+        for rule in ("Bash(git push --force*)", "Bash(git reset --hard*)",
+                     "Bash(rm -rf*)"):
+            self.assertIn(rule, deny, f"missing deny default: {rule}")
+        self.assertNotIn(
+            "hooks", settings,
+            "plugin mode writes permissions ONLY — hooks come from the "
+            "installed plugin, not a per-project copy",
+        )
+
+    def test_default_mode_permissions_write_preserves_user_settings(self):
+        """The plugin-mode write merges; it does not clobber. A user's own
+        settings.json — including hooks jig does not manage — survives, and
+        their deny entries keep their order ahead of jig's."""
+        settings_path = self.target / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({
+            "model": "opus",
+            "hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": []}]},
+            "permissions": {"allow": ["Bash(ls*)"], "deny": ["Bash(curl*)"]},
+        }))
+        # Deliberately NO --force. `_write_permissions_deny_floor` never runs
+        # the unmanaged-hooks refusal (it does not touch `hooks`), and this is
+        # the test that proves it: a pre-existing settings.json carrying a
+        # third-party hook must not make plugin mode refuse. Passing --force
+        # here would mask exactly that, since --force also overrides the
+        # refusal.
+        r = run_scaffold_with_args(self.target)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        settings = json.loads(settings_path.read_text())
+        self.assertEqual(settings.get("model"), "opus",
+                         "unrelated user keys must survive")
+        self.assertEqual(
+            settings["hooks"]["PreToolUse"][0]["matcher"], "Edit",
+            "plugin mode must not touch the user's own hooks",
+        )
+        self.assertEqual(settings["permissions"]["allow"], ["Bash(ls*)"],
+                         "permissions.allow is not jig-managed")
+        self.assertEqual(
+            settings["permissions"]["deny"][0], "Bash(curl*)",
+            "user deny entries stay first, in order",
+        )
+        self.assertIn("Bash(rm -rf*)", settings["permissions"]["deny"])
+
+    def test_plugin_mode_notes_when_run_from_source_checkout(self):
+        """Slice 099-01, frame-critique rounds 1-2 — plugin mode is only lean
+        if a plugin is actually installed; otherwise it is empty, and silently
+        so.
+
+        `git clone … && python3 …/scaffold.py <project>` is a documented README
+        install path with no plugin anywhere. Detected POSITIVELY (the run came
+        out of a jig source checkout), not inferred from a missing env var —
+        absence is one-sided and would also flag a plugin-installed user who
+        simply used a terminal."""
+        env = dict(os.environ)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        r = run_scaffold_with_args(self.target, env=env)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("source checkout", r.stdout)
+        self.assertIn("--in-repo", r.stdout)
+        # The note states what was DETECTED (topology + no plugin host), never
+        # the condition — a contributor with the plugin installed who ran from
+        # a clone is a legitimate false positive and must not be told their
+        # project is broken.
+        self.assertIn("if you do have the jig plugin installed", r.stdout.lower())
+
+    def test_plugin_mode_stays_quiet_when_plugin_driven(self):
+        """The note is advisory and must not cry wolf: a set plugin-root
+        variable means a plugin host is driving the run, which is what makes a
+        checkout-shaped run legitimate (jig's own suite, contributors running
+        from source). Well-grounded on Claude; weaker on Codex, which is why
+        the unconditional mode line — not this note — carries the warning."""
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        r = run_scaffold_with_args(self.target, env=env)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("source checkout", r.stdout)
+
+    def test_in_repo_mode_never_notes_plugin_presence(self):
+        """in-repo is self-contained by construction — a missing plugin is
+        irrelevant there, so the note must not fire regardless of the env."""
+        env = dict(os.environ)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        r = run_scaffold_with_args(self.target, "--in-repo", env=env)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("source checkout", r.stdout)
+
+    def test_note_detects_installed_plugin_shape_as_quiet(self):
+        """The other side of the discriminator, pinned on a REAL directory
+        shape rather than a mock: an installed plugin is `hosts/claude`
+        repackaged — `skills/` + `templates/`, no `hosts/`, no `scripts/`.
+        Running from that shape must stay quiet even with no env var, because
+        such a user is not in the failing population."""
+        installed = Path(self.tmpdir) / "installed-plugin"
+        shutil.copytree(REPO_ROOT / "hosts" / "claude", installed)
+        self.assertFalse((installed / "hosts").exists())
+        env = dict(os.environ)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        r = subprocess.run(
+            [sys.executable,
+             str(installed / "skills" / "scaffold-init" / "scaffold.py"),
+             str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("source checkout", r.stdout)
+
+    def test_note_fires_on_codex_host_too(self):
+        """The failing population is host-independent — README documents a
+        Codex clone-and-run recipe as well. Pinned because the detection must
+        NOT rest on any claim about Codex's environment: `docs/architecture.md`
+        documents `PLUGIN_ROOT` for plugin *hooks*, which does not establish it
+        in a skill subprocess, and `plugin_root()` does not trust it for Codex.
+        The checkout-shape signal needs no such claim."""
+        env = dict(os.environ)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        env.pop("PLUGIN_ROOT", None)
+        r = run_scaffold_with_args(self.target, "--host", "codex", env=env)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("source checkout", r.stdout)
+
+    def test_plugin_mode_line_is_true_for_plugin_less_runs(self):
+        """The mode line prints unconditionally, so its wording must hold for
+        EVERY population — including the plugin-less shapes no detector catches
+        (unzipped release package, copied plugin tree, cross-host run).
+
+        It previously asserted "jig runs from the installed plugin" flatly: a
+        fact about the user's machine the scaffold cannot know, and for those
+        users an affirmative false statement — worse than the silence it
+        replaced. Pinned because conditionalizing it is the residual's cheapest
+        mitigation and needs no detection at all."""
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)   # note suppressed; line still prints
+        r = run_scaffold_with_args(self.target, env=env)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("source checkout", r.stdout)
+        self.assertIn("if none is installed", r.stdout.lower())
+        self.assertIn("--in-repo", r.stdout)
+
+    def test_skill_md_documents_the_machinery_axis(self):
+        """Slice 099-01 AC #4 — the skill contract must surface the axis and
+        describe what the default actually produces.
+
+        Added after review: AC #4 was the one AC with no fixture, and it was
+        also the one that had drifted — the Output section still listed plugin
+        mode's artifacts without `.claude/settings.json`, which the ADR-0041
+        OQ1 fold-in made the default path write. A skill contract that
+        understates a security-relevant artifact is exactly the kind of drift a
+        pin catches and a reader does not."""
+        skill = (REPO_ROOT / "skills" / "scaffold-init" / "SKILL.md").read_text()
+        # The sixth Q&A question exists and names the opt-in flag.
+        self.assertIn("--in-repo", skill)
+        # Output must not understate the default path: settings.json IS written,
+        # and the reason it is not "machinery" must be stated.
+        self.assertIn(".claude/settings.json", skill)
+        self.assertIn("permissions", skill.lower())
+        # And it must not claim the old default.
+        self.assertNotIn("in-repo (the default)", skill)
 
     def test_default_summary_names_plugin_mode(self):
         """AC #3 — the wizard summary names the chosen (plugin) mode and why."""
@@ -1510,9 +1712,15 @@ class PluginOnlyOptOutTests(unittest.TestCase):
             (self.target / ".claude" / "hooks" / "scripts").exists(),
             "--plugin-only must not create .claude/hooks/scripts/",
         )
-        self.assertFalse(
-            (self.target / ".claude" / "settings.json").exists(),
-            "--plugin-only must not write .claude/settings.json",
+        # Slice 099-01 (ADR-0041 OQ1): settings.json IS written — the
+        # permissions floor only, never hooks. What --plugin-only skips is the
+        # copied *machinery*, which is what the assertions above pin.
+        settings = json.loads(
+            (self.target / ".claude" / "settings.json").read_text()
+        )
+        self.assertNotIn(
+            "hooks", settings,
+            "--plugin-only settings.json must carry no hooks block",
         )
         manifest = json.loads((self.target / "scaffold.json").read_text())
         self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
@@ -1757,13 +1965,48 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         self.assertNotIn("CLAUDE_PLUGIN_ROOT", workflow)
         self.assertNotIn("CLAUDE_PROJECT_DIR", workflow)
         self.assertNotIn(".claude/", workflow)
-        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex", workflow)
         self.assertNotIn("CLAUDE_PLUGIN_ROOT", primer)
+
+        # Slice 099-01 (ADR-0041 OQ3). This assertion is INVERTED, not deleted.
+        # It used to require `${CODEX_PROJECT_DIR:-$PWD}/.codex` here — the
+        # project-local runtime root — while the very same test asserted below
+        # that `.codex/skills/` does not exist. Plugin mode copies nothing, so
+        # those docs cited a tree that was never created. Plugin-mode docs now
+        # name the INSTALLED plugin via Codex's own `${PLUGIN_ROOT}`, mirroring
+        # what Claude plugin mode does with `${CLAUDE_PLUGIN_ROOT}`.
+        self.assertIn("${PLUGIN_ROOT}/skills/", workflow)
+        self.assertNotIn(
+            "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/", workflow,
+            "plugin mode must not cite the project-local skills tree it "
+            "never creates",
+        )
+        # The primer cites no runtime path at all — slice 099-01 moved its
+        # Session Pickup line to the host-native `/jig:orient`, which resolves
+        # in either mode and keeps slice 048-03 AC #5 (no plugin-root leakage
+        # on the adoption surface) intact.
+        self.assertNotIn("${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/", primer)
+        self.assertNotIn("${PLUGIN_ROOT}/skills/", primer)
 
         manifest = json.loads((self.target / "scaffold.json").read_text())
         self.assertEqual(manifest.get("host_renderer"), "codex")
         self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
         self.assertFalse((self.target / ".codex" / "skills").exists())
+
+    def test_codex_in_repo_docs_still_use_project_local_paths(self):
+        """The in-repo counterpart of the test above — slice 099-01 gated the
+        Codex rewrite on mode, so pin the OTHER side of that gate. Here the
+        machinery really is copied to `.codex/skills/`, so docs must name it
+        and must NOT point at the plugin root."""
+        r = self._run_codex_scaffold("--in-repo")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
+
+        workflow = (self.target / "docs" / "workflow.md").read_text()
+        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/", workflow)
+        self.assertNotIn("${PLUGIN_ROOT}/skills/", workflow)
+        self.assertTrue(
+            (self.target / ".codex" / "skills").exists(),
+            "--in-repo must create the tree its docs cite",
+        )
 
     def test_codex_project_local_templates_are_codex_native(self):
         r = self._run_codex_scaffold()

@@ -611,7 +611,7 @@ def run_completion_summary(
     `skill-closure` / `agents` / `hooks` / `settings` / `manifest` + the
     security-floor trio) validate `.claude/` artifacts that exist ONLY in
     `--with-machinery` (in-repo) mode. In `--plugin-only` mode that machinery
-    lives in the installed plugin, not the target, so running those checks
+    is expected to come from the installed plugin rather than the target, so running those checks
     would false-fail a perfectly good plugin-only scaffold. They are therefore
     included only when `with_machinery=True`. The seed presence check (AC #3)
     runs in BOTH modes — but only when `seed_expected=True`; a non-greenfield
@@ -661,9 +661,14 @@ def run_completion_summary(
     if not checks:
         # plugin-only + seed skipped (non-greenfield): nothing machinery-
         # specific to verify here. Still emit an explicit, non-silent line.
+        # Slice 099-01: say where the machinery is EXPECTED in this mode, not
+        # where it is — the scaffold cannot see the user's host install. Same
+        # correction as the plugin-mode summary line (ADR-0041 OQ2 residual);
+        # an unconditional "lives in the installed plugin" is false for a
+        # plugin-less run.
         out.write(
-            "  (no scaffold-mode checks apply in this mode; machinery "
-            "lives in the installed plugin)\n"
+            "  (no scaffold-mode checks apply in this mode; machinery is "
+            "expected to come from the jig plugin installed for this host)\n"
         )
         out.write("Scaffold complete and verified — 0/0 checks passed.\n")
         return 0
