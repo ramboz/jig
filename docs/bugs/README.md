@@ -23,3 +23,4 @@
 | 016 | codex-host-rewrite-mangles-project-name | low |  | REPORTED | yes |  |  |  |  |
 | 017 | record-review-blocks-on-stdin | high | standard | DONE | yes | skills/independent-review/test_review.py::Bug017RecordReviewStdinTests | claude/bug-017-stdin-fix |  |  |
 | 018 | copy-machinery-leaves-mode-inconsistent | medium | standard | FIXING | yes | skills/migrate/test_migrate.py::PluginModeConversionTests | claude/bug-copy-machinery-mode |  |  |
+| 022 | copy-machinery-ignores-docs-root | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CopyMachineryTrackLocalDocsRootTests | claude/bug-copy-machinery-docs-root |  |  |

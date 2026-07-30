@@ -2987,6 +2987,141 @@ class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
         self.assertEqual(twice.count(self.BLOCK_BEGIN), 1, "no duplicate block")
 
 
+_UNSET = object()  # "caller passed nothing", distinct from a falsy layout
+
+
+class CopyMachineryTrackLocalDocsRootTests(unittest.TestCase):
+    """Bug 022 — `copy-machinery` must write its two managed `workflow.md`
+    blocks under the project's CONFIGURED `layout.docs_root` (spec 084 /
+    ADR-0033), not a hardcoded `docs/`.
+
+    `migrate.copy_machinery` forwarded `force` / `installed_tiers` / `host` to
+    `scaffold.copy_machinery` but not `docs_root`, so the façade's
+    `docs_root="docs"` default applied. On a track-local project
+    (`docs_root: "."`) that put the blocks in a `docs/workflow.md` the project
+    never asked for, and left the real root `workflow.md` untouched."""
+
+    SELF_DEFINING_BEGIN = "<!-- >>> jig self-defining-vocabulary >>> -->"
+    REFRAME_BEGIN = "<!-- >>> jig reframe-practice >>> -->"
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-022-docs-root-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _seed(self, docs_root: str, *, raw_layout=_UNSET):
+        """Seed a spec-driven project whose docs live under `docs_root`, with a
+        scaffold.json recording that layout.
+
+        Returns `(project_dir, workflow_path)` — both explicitly, so no test
+        has to re-derive one from the other by `.parents[N]` index arithmetic
+        (the depth coupling ADR-0033 removed elsewhere).
+
+        `raw_layout` overrides what is written to scaffold.json's `layout`
+        key, so a test can seed a MALFORMED config while still knowing where
+        the correctly-configured workflow.md would be."""
+        project = self.tmpdir / docs_root.replace("/", "-").replace(".", "root")
+        base = project if docs_root == "." else project / docs_root
+        (base / "specs" / "001-demo").mkdir(parents=True)
+        (base / "specs" / "001-demo" / "spec.md").write_text(
+            "# Spec 001\n\n## Overview\n\nDemo.\n"
+        )
+        (base / "decisions").mkdir(parents=True)
+        (base / "decisions" / "adr-0001-demo.md").write_text("# ADR-0001 demo\n")
+        (base / "architecture.md").write_text("# Architecture\n")
+        workflow = base / "workflow.md"
+        workflow.write_text("# Workflow\n\nOur own house rules.\n")
+        layout = {"docs_root": docs_root} if raw_layout is _UNSET else raw_layout
+        (project / "scaffold.json").write_text(_json.dumps(
+            {"layout": layout, "installed_tiers": ["tier-0"]}
+        ) + "\n")
+        return project, workflow
+
+    def test_convention_block_lands_at_configured_root(self):
+        project, workflow = self._seed(".")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        text = workflow.read_text()
+        self.assertIn(
+            self.SELF_DEFINING_BEGIN, text,
+            f"convention block missing from {workflow} — copy-machinery wrote it "
+            "to a hardcoded docs/ instead of the configured docs_root",
+        )
+        self.assertIn("Our own house rules.", text,
+                      "pre-existing workflow content must survive the append")
+
+    def test_no_spurious_docs_dir_is_created(self):
+        project, _workflow = self._seed(".")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse(
+            (project / "docs").exists(),
+            "copy-machinery created a docs/ dir in a docs_root='.' project — "
+            "collapsing that layer is the entire point of track-local adoption",
+        )
+
+    def test_reframe_block_lands_at_configured_root(self):
+        project, workflow = self._seed(".")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn(
+            self.REFRAME_BEGIN, workflow.read_text(),
+            f"reframe practice block missing from {workflow} — the second "
+            "managed block must follow the same configured root",
+        )
+
+    def test_nested_docs_root_is_honoured(self):
+        """Not `.`-special-cased: any non-default root must be honoured."""
+        project, workflow = self._seed("docs/internal")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn(
+            self.SELF_DEFINING_BEGIN, workflow.read_text(),
+            f"block missing from {workflow}",
+        )
+        # The invariant stated directly: nothing is written to the default
+        # root at all. Unconditional, so it cannot degrade into a trivial
+        # pass if the marker constant ever drifts.
+        self.assertFalse(
+            (project / "docs" / "workflow.md").exists(),
+            "block leaked into docs/workflow.md instead of docs/internal/",
+        )
+
+    def test_default_docs_root_still_lands_in_docs(self):
+        """Regression guard on the ordinary path — the fix must not move the
+        blocks for a project that uses the default root."""
+        project, workflow = self._seed("docs")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn(self.SELF_DEFINING_BEGIN, workflow.read_text())
+
+    def test_malformed_layout_degrades_instead_of_failing_the_copy(self):
+        """The resolver choice this fix rests on, pinned.
+
+        `_project_docs_root` swallows a bad config and returns `"docs"` rather
+        than raising, so a malformed `scaffold.json` cannot fail a machinery
+        copy that would otherwise succeed. That is the whole reason it is used
+        here instead of the raising `_validated_docs_root`. Without this test
+        someone could swap in a raising resolver and every other test in this
+        class would stay green."""
+        project, _workflow = self._seed(".", raw_layout={"docs_root": ["not", "a", "string"]})
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(
+            r.returncode, 0,
+            "a malformed layout.docs_root must not fail the copy — "
+            f"stderr: {r.stderr}",
+        )
+        # Pin the degrade OUTCOME, not just the exit code: the fallback is
+        # the literal "docs", so the blocks land there. Without this a copy
+        # that exited 0 while writing no blocks at all would pass.
+        self.assertTrue(
+            (project / "docs" / "workflow.md").is_file(),
+            "the degrade must fall back to the documented `docs` root, "
+            "not skip the managed blocks entirely",
+        )
+
+
 # -------------------- SeedDecisionsTests --------------------
 
 
