@@ -801,6 +801,16 @@ _PLUGIN_SKILL_PATH_RE = re.compile(
     r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/([A-Za-z0-9_-]+)/"
 )
 
+# Slice 099-01 (ADR-0041 OQ3) — the Codex PROJECT-LOCAL skill path, for
+# normalizing back to the plugin root. Needed because the packaged Codex
+# templates ship in this shape, so plugin-mode rendering starts from it
+# rather than from the canonical `${CLAUDE_PLUGIN_ROOT}` form. The `jig-`
+# prefix is stripped: the copied tree namespaces skill dirs, the plugin
+# root does not.
+_PROJECT_LOCAL_SKILL_RE = re.compile(
+    r"\$\{CODEX_PROJECT_DIR:-\$PWD\}/\.codex/skills/jig-([A-Za-z0-9_-]+)/"
+)
+
 
 _SKILL_DIR_EXCLUDES: frozenset[str] = frozenset({"__pycache__", "fixtures"})
 
@@ -1101,6 +1111,25 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             root_prefix = cls.PROJECT_ROOT_PREFIX
             root_var = cls.PROJECT_ROOT_VAR
             scaffold_skill_dir = cls.PROJECT_SCAFFOLD_SKILL_DIR
+
+        if plugin_mode:
+            # The input may ALREADY be Codex project-local, and usually is: the
+            # packaged templates ship Codex-native (see
+            # `build_codex_plugin.py` for why — runtime readers copy them
+            # verbatim). `SKILL_PATH_RE` only matches `${CLAUDE_PLUGIN_ROOT}/`,
+            # so on a packaged template it matches nothing and the project-local
+            # shape survives — which is how plugin mode ended up emitting docs
+            # citing a `.codex/skills/` tree it never creates.
+            #
+            # Normalize that shape to the plugin root first. Only in plugin
+            # mode: in-repo WANTS the project-local paths, and re-pointing them
+            # at the plugin would break the self-contained install.
+            out = _PROJECT_LOCAL_SKILL_RE.sub(
+                cls.PLUGIN_SKILL_PATH_REPLACEMENT, body)
+            out = out.replace(cls.PROJECT_TEMPLATES_ROOT,
+                              cls.PLUGIN_TEMPLATES_ROOT)
+            out = out.replace(cls.PROJECT_ROOT_PREFIX, cls.PLUGIN_ROOT_PREFIX)
+            body = out
 
         out = cls.SKILL_PATH_RE.sub(skill_repl, body)
         out = out.replace("${CLAUDE_PLUGIN_ROOT}/templates/", templates_root)

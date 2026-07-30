@@ -632,12 +632,19 @@ plugin-mode scaffold run from `hosts/codex/plugins/jig/` emits
 `.codex/skills/` is absent — precisely the defect §7 recorded and OQ3 claimed
 closed, still live on the one path a real Codex user takes.
 
-The Claude package does not have this problem because it ships templates
-**canonical** and lets `scaffold()` transform them per mode. The Codex build was
-transforming them *twice* — once at build time (mode-blind, and therefore wrong)
-and again in `_copy_codex_templates` at scaffold time (mode-aware, and correct).
-Fix: drop the build-time rewrite. The transform is not lost, it moves to where it
-can tell the modes apart.
+**First attempt, reverted:** make the Codex build ship templates canonical, as
+the Claude package does, and let `scaffold()` transform per mode. That fixed the
+symptom and broke something else — see §23. `_copy_templates` feeds **two**
+consumer sets, and only one runs through `scaffold()`.
+
+**What shipped instead:** the packaged templates stay Codex-native, and
+`_rewrite_host_paths(plugin_mode=True)` learns to normalize an *already*
+project-local input back to the plugin root (`_PROJECT_LOCAL_SKILL_RE`, plus the
+templates-root and root-prefix replacements). Plugin mode no longer depends on
+the input being canonical, which was the actual fragility: the gate matched only
+`${CLAUDE_PLUGIN_ROOT}/skills/`, so any input that had already been translated
+slipped past it. Only plugin mode normalizes — in-repo *wants* the project-local
+paths, and re-pointing them would break the self-contained install.
 
 **This is the third instance in one slice of the same shape:** source is
 transformed before shipping, so a test on the source is not a test of the
@@ -675,6 +682,41 @@ added to close a coverage gap needs the vacuity check more than ordinary tests
 do**, because it is written to satisfy a finding rather than to express a
 belief about behaviour, and "it passes" is precisely the outcome that makes it
 look finished.
+
+**23. Round 12 — the packaging fix broke a second consumer, and the test that
+would have caught it does not run on the local interpreter.**
+
+§21's fix (ship canonical Codex templates) was wrong, and wrong in an
+instructive way: **`_copy_templates` feeds two consumer sets, and only one goes
+through `scaffold()`.** `decisions.py` reads the packaged template at runtime
+and copies it verbatim into the project (`seed_lightweight_home`); `adr.py`,
+`memory.py` and `workflow.py` read packaged templates the same way. Those
+readers have no transform of their own — they rely on the package already being
+host-correct. Shipping canonical handed a Codex project a
+`${CLAUDE_PLUGIN_ROOT}` it can never resolve, in
+`docs/decisions/lightweight-decisions.md`.
+
+`decisions.py` even *documents* the dependency — "the Codex build pre-renders
+the plugin-root paths … so the text read here is already host-correct" — a
+comment I invalidated without reading it. **A build step with two consumers
+cannot be re-homed for one of them.**
+
+Reverted. The packaged templates stay Codex-native; instead
+`_rewrite_host_paths(plugin_mode=True)` normalizes an already-project-local
+input back to the plugin root. That is the better fix regardless: the gate's real
+fragility was that it matched only `${CLAUDE_PLUGIN_ROOT}/skills/`, so *any*
+pre-translated input slipped past. It now handles both input shapes, and only in
+plugin mode — in-repo wants the project-local paths.
+
+**The part worth carrying furthest:** `scripts/test_build_codex_committed_package.py`
+asserts exactly this contract (`assertNotIn("CLAUDE_PLUGIN_ROOT", …)` on the
+built package, slice 061-02 AC #2) and **went red under §21 without my seeing
+it** — the module self-skips below Python 3.11, the local floor is 3.9, and CI
+runs 3.12. So `run_tests.py` green on this machine could not substantiate "no
+regressions" for a packaging change, and would not have until CI. Deviation §9's
+"suite green" claim needs that version qualifier. Same family as §17/§21 — test
+the shipped artifact — with one more axis: **on the interpreter that actually
+loads the test.**
 
 ### Reconciliation sweep
 

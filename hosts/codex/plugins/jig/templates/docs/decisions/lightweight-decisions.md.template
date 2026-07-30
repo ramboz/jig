@@ -24,7 +24,7 @@ is an ADR required?" policy can't drift across surfaces.
 Record a lightweight entry with the helper (idempotent append):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" add-lightweight \
+python3 "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-memory-sync/decisions.py" add-lightweight \
   --title "<short title>" --decision "<what>" --context "<why>" --scope "<where>"
 ```
 
