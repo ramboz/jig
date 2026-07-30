@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
+from _common.derived_docs import duplicate_ids as _duplicate_ids_in
 from _common.parsing import (
     clear_frontmatter_field,
     frontmatter_flag_truthy,
@@ -996,17 +997,19 @@ def _duplicate_ids(project_dir: Path) -> dict:
     complaint, and a drift check can't see the problem either — both rows are
     faithfully derived. Today the only thing that surfaces this is the merge
     conflict on the board itself, which is precisely what we want to stop
-    resolving by hand (issue #149). So it needs its own detector."""
+    resolving by hand (issue #149). So it needs its own detector.
+
+    Grouping lives in `_common.derived_docs`; the spec board and the ADR index
+    have the same collision, and only the id-off-a-path step differs. What
+    counts as a bug *record* stays here — `_is_bug_record` is bug-specific."""
     bugs_dir = _bugs_dir(project_dir)
     if not bugs_dir.is_dir():
         return {}
-    by_id: dict = {}
-    for path in sorted(bugs_dir.glob("*.md")):
-        if path.name == "README.md" or not _is_bug_record(path):
-            continue
-        bug_id, _slug = _bug_id_and_slug(path)
-        by_id.setdefault(bug_id, []).append(path.name)
-    return {k: v for k, v in sorted(by_id.items()) if len(v) > 1}
+    return _duplicate_ids_in(
+        (_bug_id_and_slug(path)[0], path.name)
+        for path in sorted(bugs_dir.glob("*.md"))
+        if path.name != "README.md" and _is_bug_record(path)
+    )
 
 
 def check_board(project_dir: Path) -> list:
