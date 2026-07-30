@@ -836,3 +836,52 @@ The dual-layout support itself was never broken — `MixedLayoutResolutionTests`
 proved the *label* resolved correctly in both layouts, and that green test read
 as coverage of the feature. **Asserting that the right thing was found is not
 asserting that the right thing was reported.**
+
+
+## Bug 022: a default is a decision, and reuse inherits a contract
+
+`scaffold.copy_machinery` grew a `docs_root` parameter in spec 084 with a
+default of `"docs"`. Spec 084 updated the greenfield caller and missed the
+other one, `migrate.copy_machinery` — so `migrate copy-machinery` wrote its two
+managed `workflow.md` blocks into a hardcoded `docs/` on every project,
+correct for the majority and wrong for exactly the track-local (`docs_root:
+"."`) shape that spec 084 existed to support.
+
+**An optional parameter with a sensible default is an invisible call site.** A
+missing argument is not a diff, not a warning, and not a test failure; it is
+silence that happens to be right most of the time. The caller being actively
+worked on gets updated because it is in front of you. Every other caller keeps
+the default, and the wrong behaviour surfaces only on the minority
+configuration nobody is testing. Cheap guard: when a shared helper gains a
+project-scoped parameter, grep for *every* caller in the same change and decide
+explicitly for each — the default is a decision, not an absence of one.
+
+The sharper lesson was in the repair, not the defect. The right fix reused an
+existing in-module resolver, `_project_docs_root`, which the bug-018
+stale-citation scan had introduced. Reusing it also inherited its documented
+contract — and that docstring justified swallowing every exception on the
+grounds that the value "only decides where to LOOK for stale citations, so a
+bad config must degrade to a narrower scan." True for a read. The fix silently
+promoted the same value to deciding where files are **written**, where the
+identical fallback means a malformed `scaffold.json` on a `docs_root: "."`
+project silently reproduces the very symptom being fixed. Same code, same
+fallback, materially different consequence.
+
+**A helper's docstring is part of its contract; widening its set of consumers
+without revisiting it leaves a justification that no longer covers the code.**
+Both reviewer passes caught this independently and both called it the blocker —
+the one-line fix was fine, the stale promise around it was not. Worth noting
+that neither reviewer objected to the *behaviour*: degrading was still right.
+They objected to a code comment asserting a reason that had stopped being true.
+
+Two mechanical notes worth keeping:
+
+- **A test that pins a property rather than a defect cannot be red-witnessed.**
+  The degrade contract above was untested; the test added for it would pass
+  before the fix too, so the red→green ritual proves nothing about it. Mutation
+  is the substitute — force the resolver to raise, confirm the test goes red,
+  under `python3 -B` so stale bytecode cannot mask the edit. Compare
+  [[mutation-testing-pycache-false-negative]].
+- **Assert the outcome, not the exit code.** That test first checked only
+  `returncode == 0`, which a copy that wrote nothing at all would also satisfy.
+  Pinning *where the blocks landed* is what makes it mean the documented thing.

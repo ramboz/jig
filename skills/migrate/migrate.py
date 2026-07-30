@@ -1914,12 +1914,24 @@ def _in_repo_skill_path(scaffold_mod, host: str) -> str:
 
 
 def _project_docs_root(project_dir: Path) -> str:
-    """Resolve the target's configured `layout.docs_root` (spec 084).
+    """Resolve the target's configured `layout.docs_root` (spec 084 / ADR-0033).
 
-    Defaults to `"docs"` for an unscaffolded or misconfigured project: this
-    only decides where to LOOK for stale citations, so a bad config must
-    degrade to a narrower scan, never to an error that fails a copy which
-    already succeeded."""
+    Two consumers, and they are not symmetric:
+
+      - the stale-citation scan below, which uses this to decide where to
+        LOOK;
+      - `scaffold.copy_machinery`, which uses it to decide where to WRITE the
+        two managed `workflow.md` blocks (bug 022).
+
+    Defaults to `"docs"` for an unscaffolded or misconfigured project: a bad
+    config must not fail a machinery copy that would otherwise succeed. The
+    fallback is bounded but not free. Bounded, because
+    `project_layout._validate_docs_root` rejects absolute and `..`-escaping
+    roots before this can return one, so the write consumer gains no reach
+    outside the project. Not free, because on a `docs_root: "."` project with
+    a malformed `scaffold.json` the fallback silently reproduces bug 022's
+    symptom — blocks written under a spurious `docs/`, the real `workflow.md`
+    left stale — instead of reporting the bad config."""
     import importlib.util
 
     helper = Path(__file__).resolve().parents[1] / "_common" / "project_layout.py"
@@ -2090,6 +2102,11 @@ def copy_machinery(
         scaffold_mod.copy_machinery(
             plugin, project_dir, force=force, installed_tiers=copy_tiers,
             host=resolved_host,
+            # Bug 022: the façade defaults `docs_root` to `"docs"`. Forward
+            # the target's CONFIGURED root — the same resolver the sibling
+            # stale-citation scan uses — so a track-local (`docs_root="."`)
+            # project keeps its collapsed layout.
+            docs_root=_project_docs_root(project_dir),
         )
     except scaffold_mod.UnmanagedHooksError as exc:
         # Re-raise as a migrate-side typed exception so main()'s
