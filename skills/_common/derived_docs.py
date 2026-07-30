@@ -51,7 +51,7 @@ def duplicate_ids(items) -> dict:
     }
 
 
-def id_from_numeric_prefix(path: Path, prefix: str = "") -> str:
+def id_from_numeric_prefix(path: Path, prefix: str = "") -> str | None:
     """Read a record's id off its filename, or None if it isn't numbered.
 
     Ids keep their zero padding: `017` and `17` are the same number but
