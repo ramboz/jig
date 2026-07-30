@@ -45,6 +45,24 @@ def write_synthetic_spec(path: Path, slice_name: str, status: str = "IN_PROGRESS
     )
 
 
+# Spec 097-02 / issue #124 instance 2, question 4 — the stable anchor of the
+# vacuous-test question both code-review prompts must pose. Asserting a phrase,
+# not a runtime gate: a reviewer subagent reads and applies it (see the
+# no-lexical-marker-gates note). Always matched against `normalize_ws()` output
+# so line-wrapping in the source prompt block can't make the assertion vacuous.
+#
+# In slice 096-01 four tests were found to pass with the feature removed, and
+# the reconciliation reviewer caught the last one essentially by asking this
+# question. Making it an explicit prompt line front-loads the catch onto the
+# always-on compliance and craft passes instead of a late round.
+VACUOUS_TEST_ANCHOR = "would it still pass if the feature under test were deleted"
+
+
+def normalize_ws(text: str) -> str:
+    """Collapse all runs of whitespace to single spaces."""
+    return " ".join(text.split())
+
+
 class ImplementationPromptTests(unittest.TestCase):
     """`review.py implementation <spec> <slice> <deliverable>...` shape."""
 
@@ -108,6 +126,15 @@ class ImplementationPromptTests(unittest.TestCase):
     def test_includes_verdict_options(self):
         prompt = self._prompt()
         self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    # Spec 097-02 AC #2 — the compliance prompt poses the vacuous-test question.
+    def test_asks_vacuous_test_question(self):
+        prompt = self._prompt()
+        self.assertIn(
+            VACUOUS_TEST_ANCHOR, normalize_ws(prompt),
+            "implementation prompt must ask whether each test would still pass "
+            "if the feature under test were deleted (spec 097-02 AC #2)",
+        )
 
 
 class InvestigationGuidanceTests(unittest.TestCase):
@@ -1212,6 +1239,15 @@ class PrReviewPromptTests(unittest.TestCase):
         prompt = self._prompt()
         self.assertRegex(
             prompt, r"(?i)do not\s+(?:write|modify|edit).+files?|read-only",
+        )
+
+    # Spec 097-02 AC #2 — the craft prompt poses the vacuous-test question too.
+    def test_asks_vacuous_test_question(self):
+        prompt = self._prompt()
+        self.assertIn(
+            VACUOUS_TEST_ANCHOR, normalize_ws(prompt),
+            "pr-review prompt must ask whether each test would still pass if "
+            "the feature under test were deleted (spec 097-02 AC #2)",
         )
 
     # Spec path appears for context
