@@ -390,7 +390,9 @@ that variable is unset — that is exactly the population this route
 rescues — so those commands no longer run.
 
 `copy-machinery` prints a warning naming each affected file and its hit
-count, followed by the in-repo form the paths should take.
+count, followed by the in-repo form the paths should take. It looks for the
+plugin-root variable **this host actually renders** and offers this host's
+in-repo replacement, so the paths it quotes are the ones in front of you.
 
 **The command does not touch these files, and you must not silently touch
 them either.** They ship as `Status: Draft (wizard-generated)` with an
