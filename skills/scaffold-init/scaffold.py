@@ -1000,6 +1000,14 @@ class ClaudeScaffoldRenderer(HostRenderer):
     )
     PLUGIN_HOOK_SCRIPT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
     PROJECT_HOOK_SCRIPT_PREFIX = "${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/"
+    # The plugin-root variable this host's rendered docs cite. Codex overrides
+    # it with `${PLUGIN_ROOT}` (see the symmetry table below). Declared here so
+    # every renderer answers the question, and so readers outside scaffold.py
+    # can ask a host what its plugin-root spelling is rather than hard-coding
+    # one — bug 018 shipped a Claude-only literal in migrate.py and the Codex
+    # half of the advisory silently did nothing.
+    PLUGIN_ROOT_PREFIX = "${CLAUDE_PLUGIN_ROOT}"
+    PLUGIN_ROOT_VAR = "CLAUDE_PLUGIN_ROOT"
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
@@ -1545,6 +1553,18 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             "runtime_root": "${CODEX_PROJECT_DIR:-$PWD}/.codex",
             "plugin_root_env": "PLUGIN_ROOT",
         }
+
+
+def renderer_for_host(host: str) -> type:
+    """The renderer CLASS for `host` (not an instance).
+
+    The single place that maps a host name to its renderer. Callers outside
+    scaffold.py use it to read a host's rendering constants — the path shapes
+    and variable spellings a scaffold of that host actually emits — instead of
+    keeping their own copy. Unknown hosts fall back to Claude, matching how
+    `--host` already degrades elsewhere.
+    """
+    return CodexScaffoldRenderer if host == "codex" else ClaudeScaffoldRenderer
 
 
 def _copy_skill_dir(src: Path, dst: Path) -> None:
@@ -2728,11 +2748,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     target = target.resolve()
     template_root = plugin / "templates"
-    renderer: HostRenderer
-    if host == "codex":
-        renderer = CodexScaffoldRenderer(plugin, target, force=force)
-    else:
-        renderer = ClaudeScaffoldRenderer(plugin, target, force=force)
+    renderer: HostRenderer = renderer_for_host(host)(plugin, target, force=force)
 
     if not template_root.exists():
         raise FileNotFoundError(f"Template root not found: {template_root}")

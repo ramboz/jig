@@ -750,6 +750,94 @@ Two corollaries worth keeping:
   [[mutation-testing-pycache-false-negative]]: when a test passes sooner than
   expected, suspect the harness before believing the result.
 
+## Bug 018: a restated contract is a contract that will drift — and a host parameter needs a fixture per host
+
+`copy-machinery` converts a plugin-mode project to in-repo. A project's mode
+lives in three places — the machinery on disk, `scaffold_mode` in
+`scaffold.json`, and the helper paths its rendered docs cite — and the command
+updated only the first. The original defect was not a regression: **spec 099-01
+advertised `copy-machinery` as the plugin-mode recovery route by writing one
+summary line, widening a contract the callee was never told about.** No test,
+review, or diff on either side had cause to ask whether the command did what it
+was now being sold as doing.
+
+The instructive part is what happened next.
+
+**The same failure recurred inside the fix for it, a few hundred lines later.**
+The fix's docs half searched for the single literal `${CLAUDE_PLUGIN_ROOT}`.
+Codex renders its plugin-mode docs against `${PLUGIN_ROOT}`, so the scan
+returned empty for every Codex project: the mode flipped, no advisory printed,
+and the shipped Codex `SKILL.md` promised those users a warning they would never
+see. The Claude-only literal was a *restatement* of a constant that already had
+an owner (`CodexScaffoldRenderer` / `ClaudeScaffoldRenderer`). Writing the
+"widened contract" learning into this very record did not prevent repeating it.
+
+- **Structure beats vigilance.** The fix is now
+  `scaffold.renderer_for_host(host).PLUGIN_ROOT_PREFIX` — read the host's
+  spelling from the host, so there is no second copy to go stale. A per-host
+  constant living in a *consumer* module is a contract restatement, and
+  restatements drift silently: nothing fails, the feature just stops happening.
+  When you catch yourself writing a lookup table keyed by host/mode/variant,
+  check whether the thing you are keying on already owns that answer.
+- **A parameterized path needs a fixture per value, or the untested value is a
+  guess.** The function threaded `resolved_host` all the way through and looked
+  fully covered at 15 green tests — every fixture was a Claude scaffold. Half
+  the supported hosts were never exercised. The reviewers found it; the suite
+  could not.
+- **Two of those 15 were passing without testing anything**, in the specific way
+  that is hardest to see: the assertion was true for a reason unrelated to the
+  code under test. `test_copied_machinery_is_not_reported_as_stale_user_docs`
+  ran on a default-`docs_root` project where `.claude/` is outside the scan root
+  *structurally*, so deleting the entire skip-set left it green. A negative
+  assertion needs a fixture where the positive case is actually reachable.
+- **Never read an exit code through a pipe.** `cmd | tail` reports `tail`'s
+  status. This record spent a full cycle asserting the suite failed on a known
+  flake when it exits 0 and the alarming `ERROR: committed host packages are
+  stale…` text is *expected output* from `DriftCheckTests`, which induces drift
+  on purpose to assert the message shape. Redirect to a file and check `$?`, or
+  use `PIPESTATUS`. See also [[jig-ci-check-needs-pipx]].
+
+Process note: neither required review pass (`bug-review`, `craft`) was recorded
+before the first fix merged as `dd0d350`. Both were run retroactively in
+[#150](https://github.com/ramboz/jig/pull/150) and both returned
+`needs-changes`, which is how the Codex gap surfaced — after shipping. The
+`→ REVIEWED` evidence gate is what would have caught it before.
+
+## Bug 019: a resolver that returns half its answer makes every caller guess the rest
+
+`_common.parsing.load_slice` resolves both *what* a slice is called and *which
+file it lives in*. `review.py`'s wrapper returned the label and dropped the
+path. With the location gone, seven prompt builders had nothing left to name
+but `spec_path` — so all seven sent the read-only reviewer to `spec.md`, which
+under file-per-slice contains none of the acceptance criteria, deviation log, or
+reconciliation sweep it was being asked to verify. **When a lookup computes two
+facts and a wrapper discards one, the discarded fact gets re-invented downstream
+as a guess.** Return the whole answer, or the abstraction is a lie by omission.
+
+Two generalizable points:
+
+- **A defect that a human driver silently corrects is a defect only unattended
+  runs pay for.** Interactively you notice the path is wrong and retype it; the
+  session succeeds and nothing gets filed. The same prompt handed to an
+  unattended reviewer — explicitly told not to look beyond the files it is
+  pointed at — returns a confident verdict about the wrong file. **Anywhere a
+  human-in-the-loop routinely patches output by hand, put a test**: the loop is
+  hiding the bug, not fixing it. Bug 017 above reached the same rule from the
+  opposite direction — a defect visible only when nobody is driving. Two
+  independent bugs, one signature: **"never reproduces by hand" is a clue about
+  the observer, not a verdict on the bug.**
+- **When two layouts coexist, render the difference in exactly one place.** The
+  fix is one `_slice_source()` that decides how the reading target is phrased;
+  the builders interpolate it. Seven independently-worded `## What to read`
+  entries were seven chances to get the layout wrong, and the eighth builder
+  would have made it eight.
+
+The dual-layout support itself was never broken — `MixedLayoutResolutionTests`
+proved the *label* resolved correctly in both layouts, and that green test read
+as coverage of the feature. **Asserting that the right thing was found is not
+asserting that the right thing was reported.**
+
+
 ## Bug 022: a default is a decision, and reuse inherits a contract
 
 `scaffold.copy_machinery` grew a `docs_root` parameter in spec 084 with a

@@ -1880,8 +1880,6 @@ def _resolve_plugin_root() -> Path:
 #       one it fixes. The session that ran the command warns the user and
 #       lets them choose (see skills/migrate/SKILL.md).
 
-_PLUGIN_ROOT_TOKEN = "${CLAUDE_PLUGIN_ROOT}"
-
 # Never scanned for stale citations: the host runtime dirs hold jig-owned
 # machinery that THIS command just refreshed (reporting it would bury the
 # handful of files the user actually owns), plus the usual non-source noise.
@@ -1890,12 +1888,29 @@ _STALE_SCAN_SKIP_DIRS = frozenset({
     "__pycache__", "dist", "build", ".mypy_cache", ".pytest_cache",
 })
 
-# What a correct in-repo citation looks like, per host. Mirrors the
-# `SKILL_PATH_REPLACEMENT` each scaffold renderer applies (scaffold.py).
-_IN_REPO_SKILL_PATH = {
-    "claude": "${CLAUDE_PROJECT_DIR}/.claude/skills/jig-<name>/",
-    "codex": "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-<name>/",
-}
+# Both halves below are READ FROM the scaffold renderers rather than restated
+# here, and that is the point. The first cut of this advisory hard-coded the
+# Claude spellings; Codex renders its plugin-mode docs against `${PLUGIN_ROOT}`
+# (CodexScaffoldRenderer), so the scan matched nothing and every Codex user got
+# silence — while the shipped Codex SKILL.md promised them a warning. Sourcing
+# the strings from the renderer means changing a renderer changes the advisory
+# with it, instead of switching it off unnoticed.
+
+
+def _plugin_root_token(scaffold_mod, host: str) -> str:
+    """The plugin-root variable `host`'s rendered docs cite, e.g.
+    `${CLAUDE_PLUGIN_ROOT}` or `${PLUGIN_ROOT}`."""
+    return scaffold_mod.renderer_for_host(host).PLUGIN_ROOT_PREFIX
+
+
+def _in_repo_skill_path(scaffold_mod, host: str) -> str:
+    """What a correct in-repo skill citation looks like on `host`.
+
+    The renderer stores this as an `re.sub` replacement template, so the
+    capture-group backreference becomes the `<name>` placeholder a human
+    reads in the warning."""
+    template = scaffold_mod.renderer_for_host(host).SKILL_PATH_REPLACEMENT
+    return template.replace("\\1", "<name>")
 
 
 def _project_docs_root(project_dir: Path) -> str:
@@ -1936,24 +1951,21 @@ def _project_docs_root(project_dir: Path) -> str:
         return "docs"
 
 
-def _stale_plugin_root_docs(project_dir: Path) -> list:
-    """Find the PROJECT-OWNED markdown that still cites
-    `${CLAUDE_PLUGIN_ROOT}`. Returns `(relative_path, hit_count)` pairs,
-    sorted by path. Pure read — nothing here writes.
+def _stale_plugin_root_docs(project_dir: Path, token: str) -> list:
+    """Find the PROJECT-OWNED markdown that still cites `token` — the host's
+    plugin-root variable. Returns `(relative_path, hit_count)` pairs, sorted
+    by path. Pure read — nothing here writes.
 
     Scope is the configured docs root plus the host primer at the project
     root (`CLAUDE.md` / `AGENTS.md`), minus `_STALE_SCAN_SKIP_DIRS`. A
     `docs_root="."` project collapses the two roots into one, hence the
-    dedupe."""
+    dedupe by relative path."""
     docs_root = _project_docs_root(project_dir)
-    roots = [_docs_base(project_dir, docs_root)]
+    root = _docs_base(project_dir, docs_root)
     hits: dict = {}
 
     def record(path: Path) -> None:
-        try:
-            count = path.read_text(errors="replace").count(_PLUGIN_ROOT_TOKEN)
-        except OSError:
-            return
+        count = _safe_read_text(path).count(token)
         if count:
             try:
                 rel = path.relative_to(project_dir).as_posix()
@@ -1961,14 +1973,24 @@ def _stale_plugin_root_docs(project_dir: Path) -> list:
                 rel = path.as_posix()
             hits[rel] = count
 
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in root.rglob("*.md"):
-            if any(part in _STALE_SCAN_SKIP_DIRS for part in path.relative_to(root).parts):
+    # Prune rather than filter after the fact: under `docs_root="."` the scan
+    # root IS the project root, so an rglob would descend into `.git`,
+    # `node_modules`, and the `.venv` before discarding them. Matches the
+    # module's existing pruning walkers (`_walk`, `_walk_for_files`).
+    if root.is_dir():
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            try:
+                entries = list(current.iterdir())
+            except OSError:
                 continue
-            if path.is_file():
-                record(path)
+            for entry in entries:
+                if entry.is_dir():
+                    if entry.name not in _STALE_SCAN_SKIP_DIRS:
+                        stack.append(entry)
+                elif entry.suffix == ".md":
+                    record(entry)
 
     for primer in ("CLAUDE.md", "AGENTS.md"):
         candidate = project_dir / primer
@@ -1978,20 +2000,24 @@ def _stale_plugin_root_docs(project_dir: Path) -> list:
     return sorted(hits.items())
 
 
-def _stale_docs_warning(stale: list, host: str) -> str:
+def _stale_docs_warning(stale: list, token: str, replacement: str) -> str:
     """Render the advisory block naming stale files. Reports only — the
-    decision about what to do with them belongs to the user."""
+    decision about what to do with them belongs to the user.
+
+    `token` and `replacement` are the host's own spellings (see
+    `_plugin_root_token` / `_in_repo_skill_path`); naming Claude's variable to
+    a Codex user would send them searching for a string their docs never
+    contained."""
     if not stale:
         return ""
-    replacement = _IN_REPO_SKILL_PATH.get(host, _IN_REPO_SKILL_PATH["claude"])
     lines = [
-        f"warning: {len(stale)} file(s) still cite {_PLUGIN_ROOT_TOKEN}, which is "
+        f"warning: {len(stale)} file(s) still cite {token}, which is "
         "unset in a project that now owns its machinery:",
     ]
     lines += [f"  - {path} ({count})" for path, count in stale]
     lines += [
         "These files are yours to edit, so they were left EXACTLY as they are.",
-        f"The in-repo form is `{_PLUGIN_ROOT_TOKEN}/skills/<name>/` -> "
+        f"The in-repo form is `{token}/skills/<name>/` -> "
         f"`{replacement}`.",
         "Review them before relying on the paths they cite.",
     ]
@@ -2105,9 +2131,13 @@ def copy_machinery(
         mode_note = "scaffold_mode: plugin-only -> in-repo\n"
 
     # Bug 018, half two — the docs. Named, never rewritten. See the block
-    # comment above `_stale_plugin_root_docs` for why the halves differ.
+    # comment above `_stale_plugin_root_docs` for why the halves differ, and
+    # why the host's spellings are read from its renderer.
+    token = _plugin_root_token(scaffold_mod, resolved_host)
     stale_note = _stale_docs_warning(
-        _stale_plugin_root_docs(project_dir), resolved_host,
+        _stale_plugin_root_docs(project_dir, token),
+        token,
+        _in_repo_skill_path(scaffold_mod, resolved_host),
     )
 
     runtime_dir = ".codex" if resolved_host == "codex" else ".claude"

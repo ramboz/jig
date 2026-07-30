@@ -2807,8 +2807,11 @@ class PluginModeConversionTests(unittest.TestCase):
 
     def test_summary_reports_the_mode_flip(self):
         r = run_migrate("copy-machinery", str(self.target))
-        self.assertIn("plugin-only", r.stdout)
-        self.assertIn("in-repo", r.stdout)
+        # The whole line, not the two words separately: the negative cases at
+        # `test_flip_is_idempotent` / `test_already_in_repo_project_is_not_
+        # reflipped` assert exactly this string, so the positive case must too
+        # or the pair is not testing the same thing.
+        self.assertIn("scaffold_mode: plugin-only -> in-repo", r.stdout)
 
     def test_manifest_flip_preserves_other_fields(self):
         before = _json.loads((self.target / "scaffold.json").read_text())
@@ -2818,6 +2821,12 @@ class PluginModeConversionTests(unittest.TestCase):
             if key == "scaffold_mode":
                 continue
             self.assertEqual(after.get(key), value, f"manifest field {key} changed")
+        # Both directions: "preserves other fields" is not just "kept what was
+        # there" but also "invented nothing".
+        self.assertEqual(
+            set(after) - set(before), set(),
+            "the mode flip added manifest fields that were not there before",
+        )
 
     def test_flip_is_idempotent(self):
         run_migrate("copy-machinery", str(self.target))
@@ -2899,21 +2908,11 @@ class PluginModeConversionTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
         self.assertNotIn("still cite", r.stdout)
 
-    def test_copied_machinery_is_not_reported_as_stale_user_docs(self):
-        """`.claude/skills/jig-*/` is jig-owned machinery, refreshed by this very
-        command. Listing it would bury the two files the user actually owns."""
-        r = run_migrate("copy-machinery", str(self.target))
-        listed = [
-            line.strip()[2:].split(" (")[0]
-            for line in r.stdout.splitlines()
-            if line.startswith("  - ")
-        ]
-        self.assertTrue(listed, f"expected stale files to be listed: {r.stdout}")
-        for path in listed:
-            self.assertFalse(
-                path.startswith(".claude/") or path.startswith(".codex/"),
-                f"host runtime machinery reported as a user doc: {path}",
-            )
+    # NOTE: the "copied machinery is not reported as a user doc" case lives in
+    # `CopyMachineryStaleScanScopeTests`, not here. On this default-`docs_root`
+    # fixture the scan root is `docs/`, so `.claude/` is out of scope
+    # structurally and the assertion held even with the skip-set deleted — it
+    # proved nothing. It needs a `docs_root="."` project to have teeth.
 
     def test_skill_documents_the_ask_before_editing_step(self):
         """The helper only reports. The decision belongs to the session, which
@@ -2946,6 +2945,220 @@ class PluginModeConversionTests(unittest.TestCase):
             "the Codex render dropped the conversion advisory",
         )
         self.assertIn("ask the user", body.lower())
+
+
+def _load_scaffold_module_for_test():
+    """Load scaffold.py by path, the same way migrate.py does at runtime.
+
+    `skills/scaffold-init/` has a hyphen, so it is not importable as a
+    package; this mirrors `_load_migrate()` above."""
+    spec = _ilu.spec_from_file_location("_scaffold_module_for_test", _SCAFFOLD_PY)
+    mod = _ilu.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class CodexPluginModeConversionTests(unittest.TestCase):
+    """Bug 018, second pass — the docs half must fire on **both** hosts.
+
+    The first fix detected the single literal `${CLAUDE_PLUGIN_ROOT}`. Codex
+    plugin-mode docs never contain it: `CodexScaffoldRenderer` renders them
+    against `${PLUGIN_ROOT}` instead (the symmetry table in scaffold.py). So
+    the advisory silently found nothing for every Codex project, while the
+    shipped Codex SKILL.md promised those users a warning.
+
+    That is the same failure the bug's own `## Learning` names — a caller
+    widened a contract the callee was never told about — recurring one layer
+    down, at the host boundary. Hence `test_detection_token_tracks_the_renderer`
+    below: the token is sourced FROM the renderer, so a renderer change
+    propagates instead of drifting.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug018-codex-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold(
+            "--no-tests", "--host", "codex", "--plugin-only", str(self.target),
+        )
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mode(self):
+        return _json.loads((self.target / "scaffold.json").read_text()).get(
+            "scaffold_mode"
+        )
+
+    # ----- premise guards ----------------------------------------------------
+    def test_baseline_codex_docs_cite_the_codex_plugin_root(self):
+        """Pin the premise. Without this, the detection tests below could pass
+        for the wrong reason (e.g. if the Codex renderer ever started emitting
+        the Claude token, detection would 'work' by accident)."""
+        wf = (self.target / "docs" / "workflow.md").read_text()
+        self.assertIn("${PLUGIN_ROOT}", wf)
+        self.assertNotIn(
+            "${CLAUDE_PLUGIN_ROOT}", wf,
+            "Codex docs must not carry the Claude token — if they do, this "
+            "whole test class is testing nothing",
+        )
+
+    def test_baseline_manifest_says_plugin_only(self):
+        self.assertEqual(self._mode(), "plugin-only")
+
+    # ----- the blocker: the advisory must fire on Codex ----------------------
+    def test_stale_codex_doc_citations_are_named_in_the_summary(self):
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("still cite", r.stdout,
+                      "the docs advisory never fired for a Codex project")
+        self.assertIn("docs/workflow.md", r.stdout)
+
+    def test_codex_warning_names_the_codex_token(self):
+        """Naming the Claude variable to a Codex user is worse than useless —
+        it sends them grepping for a string their docs do not contain."""
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertIn("${PLUGIN_ROOT}", r.stdout)
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", r.stdout)
+
+    def test_codex_summary_states_the_codex_replacement_path(self):
+        """`_IN_REPO_SKILL_PATH['codex']` was unreachable while detection was
+        Claude-only. Now that the advisory fires, pin the path it offers."""
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-", r.stdout)
+        self.assertNotIn(
+            "${CLAUDE_PROJECT_DIR}/.claude/skills/jig-", r.stdout,
+            "a Codex project was handed the Claude in-repo path",
+        )
+
+    def test_codex_stale_docs_are_not_rewritten(self):
+        """Same ruling as the Claude half: name them, never rewrite them."""
+        wf = self.target / "docs" / "workflow.md"
+        wf.write_text(
+            "# Our workflow\n\nHouse rule: run\n"
+            "`${PLUGIN_ROOT}/skills/spec-workflow/workflow.py` nightly.\n"
+        )
+        before = wf.read_text()
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertTrue(
+            wf.read_text().startswith(before),
+            "hand-written Codex prose was modified by a command that only warns",
+        )
+
+    def test_codex_clean_docs_produce_no_warning(self):
+        for md in (self.target / "docs").rglob("*.md"):
+            md.write_text(md.read_text().replace("${PLUGIN_ROOT}", "PLUGIN"))
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("still cite", r.stdout)
+
+    def test_codex_warning_does_not_fail_the_run(self):
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertIn("still cite", r.stdout)
+        self.assertEqual(r.returncode, 0, "the advisory is not a gate")
+
+    # ----- half one still works on Codex (regression guard) ------------------
+    def test_codex_copy_flips_scaffold_mode_to_in_repo(self):
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(self._mode(), "in-repo")
+        self.assertIn("plugin-only -> in-repo", r.stdout)
+
+    # ----- the anti-drift guard ---------------------------------------------
+    def test_detection_token_tracks_the_renderer(self):
+        """The structural point of this fix. migrate.py must not carry its own
+        copy of each host's plugin-root spelling — it reads them from the
+        scaffold renderers, so changing a renderer cannot silently switch the
+        advisory off again."""
+        scaffold = _load_scaffold_module_for_test()
+        for host, renderer in (
+            ("claude", scaffold.ClaudeScaffoldRenderer),
+            ("codex", scaffold.CodexScaffoldRenderer),
+        ):
+            self.assertEqual(
+                _migrate._plugin_root_token(scaffold, host),
+                renderer.PLUGIN_ROOT_PREFIX,
+                f"{host}: detection token drifted from the renderer",
+            )
+
+    def test_in_repo_replacement_path_tracks_the_renderer(self):
+        """Same argument for the path the warning offers as the fix."""
+        scaffold = _load_scaffold_module_for_test()
+        for host, renderer in (
+            ("claude", scaffold.ClaudeScaffoldRenderer),
+            ("codex", scaffold.CodexScaffoldRenderer),
+        ):
+            self.assertEqual(
+                _migrate._in_repo_skill_path(scaffold, host),
+                renderer.SKILL_PATH_REPLACEMENT.replace("\\1", "<name>"),
+                f"{host}: replacement path drifted from the renderer",
+            )
+
+
+class CopyMachineryStaleScanScopeTests(unittest.TestCase):
+    """The stale-citation scan's scope, on a `docs_root="."` project.
+
+    Split out from `PluginModeConversionTests` because the default-`docs_root`
+    fixture cannot exercise it: there the scan roots are `docs/` plus the root
+    primer, so `.claude/` is out of scope *structurally* and the skip-set is
+    never consulted. Deleting the skip-set entirely left those assertions
+    green. Track-local adoption (spec 084) is the case where the skip-set and
+    `_project_docs_root` actually do work.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug018-scope-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold(
+            "--no-tests", "--plugin-only", "--docs-root", ".", str(self.target),
+        )
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _listed(self, stdout: str) -> list:
+        return [
+            line.strip()[2:].split(" (")[0]
+            for line in stdout.splitlines()
+            if line.startswith("  - ")
+        ]
+
+    def test_docs_root_dot_project_is_scanned(self):
+        """`_project_docs_root` must resolve the configured root; a hard-coded
+        `docs/` would find nothing here."""
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("still cite", r.stdout,
+                      "a docs_root='.' project was never scanned")
+
+    def test_copied_machinery_is_not_reported_as_stale_user_docs(self):
+        """With `docs_root="."` the scan root IS the project root, so
+        `.claude/` is inside it and only `_STALE_SCAN_SKIP_DIRS` keeps the
+        freshly-copied machinery out of the user-facing list."""
+        r = run_migrate("copy-machinery", str(self.target))
+        listed = self._listed(r.stdout)
+        self.assertTrue(listed, f"expected stale files to be listed: {r.stdout}")
+        for path in listed:
+            self.assertFalse(
+                path.startswith(".claude/") or path.startswith(".codex/"),
+                f"host runtime machinery reported as a user doc: {path}",
+            )
+
+    def test_noise_directories_are_skipped(self):
+        noise = self.target / "node_modules" / "pkg"
+        noise.mkdir(parents=True)
+        (noise / "README2.md").write_text("cites ${CLAUDE_PLUGIN_ROOT}/skills/x/\n")
+        r = run_migrate("copy-machinery", str(self.target))
+        for path in self._listed(r.stdout):
+            self.assertFalse(
+                path.startswith("node_modules/"),
+                f"dependency tree scanned: {path}",
+            )
 
 
 class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
