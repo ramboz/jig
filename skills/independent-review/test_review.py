@@ -636,6 +636,206 @@ class MixedLayoutResolutionTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Bug 019 (issue #134) — every prompt must name the file that HOLDS the slice
+# ---------------------------------------------------------------------------
+
+
+# The seven spec+slice prompt modes, with the extra CLI arguments each needs
+# beyond `<spec> <slice>`. `bug-review` is excluded on purpose: it takes a bug
+# record, not a spec, so it has no slice to resolve.
+_SPEC_SLICE_MODES = (
+    "implementation",
+    "pr-review",
+    "arch-review",
+    "code-health",
+    "frame-critique",
+    "design-review",
+    "reconciliation",
+)
+
+
+def extract_what_to_read(prompt: str) -> str:
+    """Return the `## What to read…` section of a reviewer prompt.
+
+    Bounded to that one section so the assertions below test the reading
+    LIST — the instruction that actually sends the reviewer to a file —
+    rather than an incidental path mention elsewhere in the prompt.
+    """
+    start = prompt.find("## What to read")
+    assert start >= 0, "prompt has no '## What to read' section"
+    nxt = prompt.find("\n## ", start + 1)
+    return prompt[start:] if nxt < 0 else prompt[start:nxt]
+
+
+class FilePerSliceReviewTargetTests(unittest.TestCase):
+    """Bug 019 / issue #134: the prompt builders resolved the slice through
+    the shared dual-layout loader for its LABEL, then emitted `spec.md` as the
+    path to read and dropped the resolved location.
+
+    In a file-per-slice project — the layout `workflow.py new` emits — the
+    slice's acceptance criteria, deviation log, and reconciliation sweep live
+    in a sibling `slice-NN-*.md`; `spec.md` is only the overview. The
+    read-only reviewer is told not to assume context beyond the files it is
+    pointed at, so an unattended pass returned a verdict about a file holding
+    none of the artifacts it was asked to verify.
+
+    Red without the fix: the slice file's path never appears in the prompt.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-fps-"))
+        # spec.md is the OVERVIEW only — no slice section, no deviation log.
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\nskill: spec-workflow\n---\n\n"
+            "# Spec 019 — file-per-slice\n\n## Overview\n\nOverview prose.\n"
+        )
+        # The slice — and everything a reviewer is asked to verify — is here.
+        self.slice_file = self.tmpdir / "slice-01-alpha.md"
+        self.slice_file.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 019-01 — alpha\n\n"
+            "**Goal:** placeholder.\n\n"
+            "**Acceptance Criteria:**\n"
+            "1. Thing one happens.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "Some claims about what changed.\n\n"
+            "### Reconciliation sweep\n\n"
+            "Swept the artifacts.\n"
+        )
+        self.summary = self.tmpdir / "health-summary.txt"
+        self.summary.write_text("duplication: none\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run(self, mode: str) -> str:
+        extra = ["x.py"] if mode != "reconciliation" else []
+        if mode == "code-health":
+            extra += ["--summary-file", str(self.summary)]
+        result = run_review(mode, str(self.spec), "019-01", *extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_every_mode_points_at_the_slice_file(self):
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                block = extract_what_to_read(self._run(mode))
+                self.assertIn(
+                    str(self.slice_file), block,
+                    f"{mode} sends the reviewer to a file that does not "
+                    "contain the slice",
+                )
+
+    def test_every_mode_names_the_slice_file_before_the_overview(self):
+        """The slice file is the reading target; `spec.md` is context. If the
+        overview is named first the reviewer still opens the wrong file
+        first — so ordering is part of the fix, not cosmetics."""
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                block = extract_what_to_read(self._run(mode))
+                slice_pos = block.find(str(self.slice_file))
+                spec_pos = block.find(str(self.spec))
+                self.assertGreaterEqual(
+                    slice_pos, 0, f"{mode} never names the slice file")
+                self.assertGreaterEqual(
+                    spec_pos, 0, f"{mode} drops the spec overview entirely")
+                self.assertLess(
+                    slice_pos, spec_pos,
+                    f"{mode} names spec.md before the slice file",
+                )
+
+    def test_reconciliation_anchors_the_deviation_log_on_the_slice_file(self):
+        """The reconciliation prompt names two subsections by title. Both live
+        in the slice file; `spec.md` contains neither."""
+        block = extract_what_to_read(self._run("reconciliation"))
+        slice_pos = block.find(str(self.slice_file))
+        self.assertGreaterEqual(slice_pos, 0, "slice file not named at all")
+        self.assertLess(
+            slice_pos, block.find("Deviation log"),
+            "the 'Deviation log' / 'Reconciliation sweep' instruction must "
+            "hang off the slice file, not spec.md",
+        )
+
+    def test_implementation_focus_instruction_hangs_off_the_slice_file(self):
+        """`Focus on Slice X only` is worthless if it attaches to a file with
+        no slice in it."""
+        block = extract_what_to_read(self._run("implementation"))
+        slice_pos = block.find(str(self.slice_file))
+        self.assertGreaterEqual(slice_pos, 0, "slice file not named at all")
+        self.assertLess(slice_pos, block.find("Focus on Slice"))
+
+
+class EmbeddedLayoutReviewTargetTests(unittest.TestCase):
+    """Bug 019 guard against overcorrection: when the slice IS a section of
+    `spec.md`, the prompt must keep naming `spec.md` and must NOT point at a
+    sibling slice file.
+
+    Two shapes, because they fail differently. The pure embedded dir has no
+    `slice-*.md` to mis-resolve, so it only pins that nothing invents one. The
+    MIXED dir is the shape that can actually go wrong: a sibling slice file
+    exists, but the requested fragment lives in `spec.md`, so a fix that
+    resolved "the spec dir has slice files → point at one" would send the
+    reviewer to the WRONG slice's file.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-emb-"))
+        self.spec = self.tmpdir / "spec.md"
+        write_synthetic_spec(self.spec, "019-02 — beta")
+        # Mixed layout: a sibling slice file for a DIFFERENT slice.
+        self.mixed = Path(tempfile.mkdtemp(prefix="jig-rev-mix-"))
+        self.mixed_spec = self.mixed / "spec.md"
+        write_synthetic_spec(self.mixed_spec, "019-02 — beta")
+        self.other_slice = self.mixed / "slice-01-alpha.md"
+        self.other_slice.write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 019-01 — alpha\n\n**Goal:** a different slice.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        shutil.rmtree(self.mixed, ignore_errors=True)
+
+    def _extra_args(self, mode: str, tmpdir: Path) -> list:
+        extra = ["x.py"] if mode != "reconciliation" else []
+        if mode == "code-health":
+            summary = tmpdir / "s.txt"
+            summary.write_text("ok\n")
+            extra += ["--summary-file", str(summary)]
+        return extra
+
+    def test_embedded_layout_still_reads_spec_md(self):
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                result = run_review(
+                    mode, str(self.spec), "019-02",
+                    *self._extra_args(mode, self.tmpdir))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                block = extract_what_to_read(result.stdout)
+                self.assertIn(str(self.spec), block)
+                self.assertNotIn("slice-", block)
+
+    def test_mixed_layout_reads_spec_md_not_the_other_slices_file(self):
+        """The sibling `slice-01-alpha.md` holds a DIFFERENT slice. Pointing
+        the reviewer at it would be worse than the original bug."""
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                result = run_review(
+                    mode, str(self.mixed_spec), "019-02",
+                    *self._extra_args(mode, self.mixed))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                block = extract_what_to_read(result.stdout)
+                self.assertIn(str(self.mixed_spec), block)
+                self.assertNotIn(
+                    str(self.other_slice), block,
+                    f"{mode} points at a slice file holding a different slice",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Slice 022-02 — contract-surface check conditional on architecture.md slot
 # ---------------------------------------------------------------------------
 
