@@ -651,6 +651,47 @@ def write_installed_tiers(target: Path, new_tiers: list) -> None:
     atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
 
 
+# --- scaffold_mode accessors (bug 018) ------------------------------------
+#
+# `scaffold_mode` is written once at scaffold time (`_build_manifest`) and,
+# until bug 018, never again — so a project converted from plugin-only to
+# in-repo by `migrate.py copy-machinery` kept claiming plugin mode forever.
+# These are the read/write pair that lets the conversion path correct it,
+# deliberately shaped like `read_installed_tiers` / `write_installed_tiers`
+# (its nearest sibling: same manifest, same atomic write, same
+# commit-after-the-copy-succeeds discipline).
+
+def read_scaffold_mode(target: Path) -> "str | None":
+    """Return `scaffold_mode` from `target/scaffold.json`, or None when there
+    is no manifest / it is unreadable / the field is absent or wrong-typed.
+
+    None means "this project makes no mode claim" — a project that was never
+    scaffold-init'd has nothing to contradict, so callers must leave it
+    alone rather than invent a mode for it."""
+    manifest = target / "scaffold.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    mode = data.get("scaffold_mode")
+    return mode if isinstance(mode, str) else None
+
+
+def write_scaffold_mode(target: Path, mode: str) -> None:
+    """Commit `mode` to `target/scaffold.json`, preserving every other field.
+    Atomic.
+
+    Call AFTER the machinery has copied cleanly, for the same reason
+    `write_installed_tiers` does: a refused or failed copy must never leave
+    the manifest claiming a mode the tree does not actually have."""
+    manifest_path = target / "scaffold.json"
+    data = json.loads(manifest_path.read_text())
+    data["scaffold_mode"] = mode
+    atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
+
+
 def _hook_profile(signals: Signals) -> str:
     """CI present → strict; otherwise standard. Inert until dispatch ships."""
     return "strict" if signals.has_ci else "standard"

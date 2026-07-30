@@ -2763,6 +2763,188 @@ class TierUpgradeTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
 
 
+class PluginModeConversionTests(unittest.TestCase):
+    """Bug 018 — `copy-machinery` converts a plugin-mode project to in-repo,
+    so the project's own records must stop describing plugin mode.
+
+    A project's mode lives in three places: the files on disk, the
+    `scaffold_mode` manifest field, and the helper paths its rendered docs
+    cite. Before this fix only the first was updated.
+
+    The split follows the maintainer's ruling on PR #145:
+      - the manifest is mechanical and user-data-free -> flip it silently;
+      - the rendered docs may carry real user content -> **name them, never
+        rewrite them**, and let the session ask the user what to do.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug018-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold("--no-tests", "--plugin-only", str(self.target))
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mode(self):
+        return _json.loads((self.target / "scaffold.json").read_text()).get(
+            "scaffold_mode"
+        )
+
+    # ----- the manifest half -------------------------------------------------
+    def test_baseline_manifest_says_plugin_only(self):
+        """Guard the premise: without this the conversion test proves nothing."""
+        self.assertEqual(self._mode(), "plugin-only")
+
+    def test_successful_copy_flips_scaffold_mode_to_in_repo(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertEqual(
+            self._mode(), "in-repo",
+            "copy-machinery left scaffold_mode claiming plugin mode",
+        )
+
+    def test_summary_reports_the_mode_flip(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertIn("plugin-only", r.stdout)
+        self.assertIn("in-repo", r.stdout)
+
+    def test_manifest_flip_preserves_other_fields(self):
+        before = _json.loads((self.target / "scaffold.json").read_text())
+        run_migrate("copy-machinery", str(self.target))
+        after = _json.loads((self.target / "scaffold.json").read_text())
+        for key, value in before.items():
+            if key == "scaffold_mode":
+                continue
+            self.assertEqual(after.get(key), value, f"manifest field {key} changed")
+
+    def test_flip_is_idempotent(self):
+        run_migrate("copy-machinery", str(self.target))
+        first = (self.target / "scaffold.json").read_text()
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(first, (self.target / "scaffold.json").read_text())
+        # Nothing to convert on the second run, so no conversion line.
+        self.assertNotIn("plugin-only -> in-repo", r.stdout)
+
+    def test_already_in_repo_project_is_not_reflipped(self):
+        other = self.tmpdir / "inrepo"
+        other.mkdir()
+        r = run_scaffold("--no-tests", str(other))
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+        r = run_migrate("copy-machinery", str(other))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        mode = _json.loads((other / "scaffold.json").read_text())["scaffold_mode"]
+        self.assertEqual(mode, "in-repo")
+        self.assertNotIn("plugin-only -> in-repo", r.stdout)
+
+    def test_project_without_a_manifest_is_unaffected(self):
+        """The spec-021 migrate-into-jig case: no scaffold.json, so there is no
+        mode claim to contradict and none must be invented."""
+        bare = self.tmpdir / "bare"
+        bare.mkdir()
+        _seed_spec_driven_project(bare)
+        r = run_migrate("copy-machinery", str(bare))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertFalse(
+            (bare / "scaffold.json").exists(),
+            "copy-machinery must not invent a manifest for an unscaffolded project",
+        )
+
+    # ----- the docs half — warn, never rewrite -------------------------------
+    def test_stale_doc_citations_are_named_in_the_summary(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("docs/workflow.md", r.stdout)
+        self.assertIn("CLAUDE_PLUGIN_ROOT", r.stdout)
+
+    def test_summary_states_the_replacement_path(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/skills/jig-", r.stdout)
+
+    def test_stale_docs_are_not_rewritten(self):
+        """The whole reason this half is a warning: docs/workflow.md is a file
+        the user is invited to edit, and by conversion time it may hold real
+        project content. Hand-written prose must survive byte-for-byte."""
+        wf = self.target / "docs" / "workflow.md"
+        wf.write_text(
+            "# Our workflow\n\nHouse rule: run\n"
+            "`python3 ${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py run` first.\n"
+        )
+        before = wf.read_bytes()
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        after = wf.read_text()
+        self.assertIn("House rule: run", after)
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/", after,
+                      "the stale citation was rewritten — it must only be reported")
+        # The managed convention blocks still append (spec 065-04 / 067-03), so
+        # the file grows; what must not happen is the user's prose being edited.
+        self.assertTrue(after.startswith(before.decode()),
+                        "user prose was modified rather than appended to")
+
+    def test_warning_reaches_stdout_without_failing_the_run(self):
+        """Advisory, not a gate: the copy succeeded, so the exit code stays 0."""
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0)
+
+    def test_clean_docs_produce_no_warning(self):
+        for md in (self.target / "docs").rglob("*.md"):
+            md.write_text(md.read_text().replace("${CLAUDE_PLUGIN_ROOT}", "PLUGIN"))
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertNotIn("still cite", r.stdout)
+
+    def test_copied_machinery_is_not_reported_as_stale_user_docs(self):
+        """`.claude/skills/jig-*/` is jig-owned machinery, refreshed by this very
+        command. Listing it would bury the two files the user actually owns."""
+        r = run_migrate("copy-machinery", str(self.target))
+        listed = [
+            line.strip()[2:].split(" (")[0]
+            for line in r.stdout.splitlines()
+            if line.startswith("  - ")
+        ]
+        self.assertTrue(listed, f"expected stale files to be listed: {r.stdout}")
+        for path in listed:
+            self.assertFalse(
+                path.startswith(".claude/") or path.startswith(".codex/"),
+                f"host runtime machinery reported as a user doc: {path}",
+            )
+
+    def test_skill_documents_the_ask_before_editing_step(self):
+        """The helper only reports. The decision belongs to the session, which
+        must warn the user and let them choose — not silently pick for them."""
+        # Whitespace-normalized: the source is hard-wrapped prose, so a raw
+        # substring search would break on an innocuous re-wrap.
+        body = " ".join(SKILL_MD.read_text().split())
+        marker = "Stale plugin-root citations after conversion"
+        self.assertIn(marker, body, "the conversion advisory is undocumented")
+        section = body.split(marker, 1)[1][:2000].lower()
+        self.assertIn("ask the user", section)
+        self.assertIn("does not touch these files", section)
+        self.assertIn("do not pick for them", section)
+
+    def test_codex_render_keeps_the_ask_before_editing_step(self):
+        """The Codex builder replaces whole named sections of this SKILL.md
+        wholesale. A section written between two of its anchor points is
+        deleted from the Codex package with no error and no diff — which is
+        how the first draft of this advisory vanished. Guard the rendered
+        artifact, not just the source."""
+        rendered = (
+            REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "skills"
+            / "migrate" / "SKILL.md"
+        )
+        if not rendered.is_file():          # package not built in this tree
+            self.skipTest(f"no committed Codex package at {rendered}")
+        body = " ".join(rendered.read_text().split())
+        self.assertIn(
+            "Stale plugin-root citations after conversion", body,
+            "the Codex render dropped the conversion advisory",
+        )
+        self.assertIn("ask the user", body.lower())
+
+
 class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
     """Spec 065-04 AC3 — `migrate copy-machinery` refreshes the self-defining-
     vocabulary convention block into an EXISTING project's docs/workflow.md

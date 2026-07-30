@@ -1,15 +1,15 @@
 ---
-status: ROOT_CAUSED
+status: FIXING
 tier: standard
 severity: medium
 claimed_by: claude/bug-copy-machinery-mode
-regression_test:
-main_repro_checked_at: 2026-07-29
-main_repro_ref: bde9dfc
+regression_test: skills/migrate/test_migrate.py::PluginModeConversionTests
+main_repro_checked_at: 2026-07-30
+main_repro_ref: 00c3333
 main_repro_result: reproduces
-red_confirmed_at:
-green_confirmed_at:
-fix_class:
+red_confirmed_at: 2026-07-30
+green_confirmed_at: 2026-07-30
+fix_class: structural_fix
 security_surface: false
 escalated_to:
 ---
@@ -39,7 +39,8 @@ without a plugin, so the command is now advertised on the default path.
 
 ## Repro
 
-On unmodified `main@bde9dfc`:
+Filed against `main@bde9dfc`; re-verified unchanged on `main@00c3333`
+(2026-07-30) before the fix was written:
 
 ```bash
 mkdir -p /tmp/cmprobe
@@ -105,56 +106,139 @@ command updates only the first.
 
 ## Fix class
 
+`structural_fix`, with one honest qualification. The root cause is "a project's
+mode lives in three places and the command updates one". Part 1 closes that
+structurally for the machine-owned place: the command now converts the mode
+itself, in the right order, and nothing downstream has to remember to. The
+third place — the user's own prose — is deliberately **not** closed by code,
+because closing it means overwriting user content; by the maintainer's ruling
+it is surfaced and handed to the user instead. So this is a structural fix plus
+a deliberate advisory, not a structural fix that quietly leaves a gap. No
+contract is narrowed and exit codes are unchanged.
+
+## Scope decision
+
+The record originally stopped here because part 2 was a genuine judgment call
+with a destructive failure mode. It was put to the maintainer on
+[PR #145](https://github.com/ramboz/jig/pull/145) and resolved there:
+
+> I'd lean towards the warning option, and explicitly asking the user what they
+> want to do. copy machinery will mostly likely be always interactive-triggered,
+> so we should be in a session that can ask the user what they want, warn of the
+> risks, and let them choose the best option for their use case.
+> — @ramboz, 2026-07-30
+
+So: **disposition 1 (warn, don't rewrite)**, with the *asking* placed in the
+skill rather than the helper. Dispositions 2 (marker-block rewrite) and 3
+(`--rewrite-docs` opt-in) are not taken. Neither is refuted — 3 in particular
+stays available if warning proves insufficient in practice — but neither is
+needed to close the gap, and both add a rewrite path that would have to be
+defended. If either is revisited, it needs its own record.
+
 ## Fix
 
-Not yet fixed. **A scope decision is needed first, and it is not obvious**, so
-this is recorded rather than guessed at.
+The two halves are treated differently on purpose.
 
-**Part 1 — the manifest — is unambiguous.** After a successful copy the project
-*is* in-repo, so `scaffold_mode` should say so. Safe, mechanical, no user data
-involved.
+**Part 1 — the manifest.** `scaffold.py` gains `read_scaffold_mode` /
+`write_scaffold_mode`, deliberately shaped like the existing
+`read_installed_tiers` / `write_installed_tiers` pair: same manifest, same
+atomic write, and the same *commit-only-after-the-copy-succeeded* ordering, so
+a refused or failed copy never leaves the manifest claiming a mode the tree
+does not have. `migrate.py copy_machinery` flips `plugin-only` → `in-repo`
+after the copy and reports the flip. A project with **no** `scaffold.json`
+makes no mode claim, so nothing is written for it — the spec-021
+migrate-into-jig case is untouched.
 
-**Part 2 — the docs — is not**, and is why this record does not simply ship a
-fix. Re-rendering `docs/workflow.md` would silently **overwrite a file the user
-is expected to edit**. Scaffolded docs ship as `Status: Draft
-(wizard-generated)` and the workflow invites the project to make them its own;
-by the time anyone runs `copy-machinery`, those docs may carry real project
-content. A conversion command that eats them is a worse bug than the one it
-fixes.
+**Part 2 — the docs.** `copy-machinery` scans the project's *own* markdown
+(configured docs root + host primer, excluding the host runtime dirs whose
+machinery this command just refreshed) for surviving `${CLAUDE_PLUGIN_ROOT}`
+citations, and prints each file with its hit count plus the host-correct
+in-repo form. **It writes nothing.** The advisory is not a gate: the copy
+succeeded, so the exit code stays 0.
 
-Three candidate dispositions for part 2:
+The *decision* lives in [`skills/migrate/SKILL.md`](../../skills/migrate/SKILL.md),
+not in the helper — a new "Converting a plugin-mode project" section instructs
+the session to surface the warning and offer three options (leave them / agent
+edits them showing a diff first / user edits them), and states explicitly that
+a general "migrate my project" is not consent to rewrite documentation. This
+follows the project's standing preference for judgment in the skill over
+keyword logic in the helper.
 
-1. **Warn, don't rewrite.** Emit a note naming the files that still cite the
-   plugin root and what to change. Cheap, safe, honest — the user keeps their
-   edits and knows what is stale. *Current preference.*
-2. **Rewrite only jig-owned marker blocks.** The scaffold already uses delimited
-   blocks elsewhere (`>>> jig secret-ignore >>>`), so a bounded rewrite is
-   conceivable — but `docs/workflow.md`'s plugin-root citations sit in ordinary
-   prose, not inside a marker, so this needs the blocks to exist first.
-3. **`--rewrite-docs` as an explicit opt-in**, default off, refusing when the
-   file has diverged from its rendered template.
-
-**Also worth deciding**: whether `copy-machinery` should own mode conversion at
-all. The command is reached by a user who by definition has **no plugin
-installed** — and `migrate.py` lives *inside the plugin*. The advertised
-recovery route may not be runnable by the population it targets, which is a
-defect in the advice rather than in the command, and belongs to spec 099-01's
-summary line rather than here.
+**Also flagged, not fixed here**: whether `copy-machinery` should be the
+advertised recovery route at all, given it is reached by a user who by
+definition has no plugin installed while `migrate.py` lives *inside* the
+plugin. That is a defect in the advice, and it belongs to spec 099-01's
+summary line ([#136](https://github.com/ramboz/jig/pull/136)), not to this
+command.
 
 ## Already tried
 
-Nothing discarded. H1 and H2 were falsified by reading the call path and probing
-the emitted files, before any edit.
+- H1 and H2 were falsified by reading the call path and probing the emitted
+  files, before any edit.
+- **First placement of the SKILL.md section was wrong and silently discarded.**
+  It was written between the `What it does:` and `### Refusal: unmanaged hooks`
+  headings — a span the Codex builder replaces wholesale via
+  `finalize_codex_migrate_skill`. The build reported success, the Codex package
+  simply did not contain the section, and nothing failed. Section moved after
+  the refusal block; `test_codex_render_keeps_the_ask_before_editing_step` now
+  guards the *rendered* artifact so the same silent drop cannot recur.
 
 ## Regression test
 
-None yet. Once scoped, the manifest half is straightforward: scaffold
-`--plugin-only`, run `copy-machinery`, assert `scaffold_mode == "in-repo"`.
+`skills/migrate/test_migrate.py::PluginModeConversionTests` (15 tests).
 
-It must be written against a *scaffolded* project. `copy-machinery` on a project
-with no `scaffold.json` legitimately has no mode to flip, so a test taking that
-path would pass without proving anything.
+Written against a *scaffolded* project, as the record required: a
+`copy-machinery` run on a project with no `scaffold.json` has no mode to flip,
+so a test on that path would pass without proving anything.
+`test_baseline_manifest_says_plugin_only` pins the premise so the conversion
+test cannot silently start passing for the wrong reason.
+
+Coverage: the flip itself, the reported flip, field preservation, idempotency,
+the already-in-repo no-op, the no-manifest no-op, the docs being named, the
+replacement path being stated, **the docs surviving byte-for-byte**, the exit
+code staying 0, silence when there is nothing stale, machinery not being
+mis-reported as user docs, and the skill (in both source and Codex-rendered
+form) documenting the ask-before-editing step.
 
 ## Proof
 
+Red witnessed before the fix — 5 of 14 failing on unmodified `main@00c3333`:
+
+```
+FAIL: test_successful_copy_flips_scaffold_mode_to_in_repo
+    AssertionError: 'plugin-only' != 'in-repo'
+FAIL: test_summary_reports_the_mode_flip
+FAIL: test_stale_doc_citations_are_named_in_the_summary
+FAIL: test_summary_states_the_replacement_path
+FAIL: test_skill_documents_the_ask_before_editing_step
+```
+
+The `→ FIXING` transition was therefore run with `JIG_BUG_TEST_GATE=0`. The
+gate re-runs the regression test and demands red; by the time this record
+caught up with the maintainer's ruling the fix was already on disk, so the gate
+could only have re-witnessed green. The red above is the real evidence, and it
+was witnessed before any production line was written — not reconstructed after.
+
+Green after: `PluginModeConversionTests` 15/15 OK; full suite **3705 tests OK
+(4 skipped)**, pyright clean. The suite's host-package drift guard reports
+stale packages inside `run_tests.py` but passes 4/4 when run on its own
+(`build_host_packages.py --check`) with the packages freshly built and
+committed — that is bug 008, not this change.
+
 ## Learning
+
+**A caller can widen a callee's contract without touching it, and nothing in
+the toolchain notices.** 099-01 turned `copy-machinery` into the advertised
+plugin-mode recovery route by writing one summary line; `copy-machinery` itself
+was never edited, so no test, review, or diff on either side had cause to ask
+whether the command actually did what it was now being sold as doing.
+
+**A build that rewrites documentation can delete a section and still report
+success.** The Codex renderer replaces named spans of `SKILL.md`; anything an
+author places inside such a span vanishes from the Codex package with no error
+and no diff to notice. Source-only assertions do not catch it — the guard has
+to read the rendered artifact.
+
+## Main recheck
+
+- 2026-07-30 - `00c3333` -> reproduces: scaffold --plugin-only then copy-machinery: scaffold_mode stays plugin-only; docs/workflow.md keeps 3 CLAUDE_PLUGIN_ROOT citations
