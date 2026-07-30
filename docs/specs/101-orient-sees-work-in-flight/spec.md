@@ -6,7 +6,7 @@ use_cases: []
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on first use and link the term to docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "Self-defining vocabulary". -->
 
-# Spec 096: Orientation sees work in flight
+# Spec 101: Orientation sees work in flight
 
 > Reserved on 2026-07-22 via `workflow.py new`.
 
@@ -95,7 +95,7 @@ Read on `origin/main` @ `fd7115a` (2026-07-22):
 
 SPIDR — **Rules** axis. One vertical slice at the orientation boundary.
 
-- **096-01 — orientation reports work in flight.** The deterministic segment,
+- **101-01 — orientation reports work in flight.** The deterministic segment,
   its tests, and the judgment-layer survey ship together. Splitting them would
   be textbook horizontal phasing: a headline that flags unmerged commits while
   the briefing still ignores the PR queue leaves the reported incident only
@@ -109,4 +109,4 @@ directly and are cited above.
 
 ## Slices
 
-- [096-01 — orientation reports work in flight](slice-01-orientation-reports-work-in-flight.md)
+- [101-01 — orientation reports work in flight](slice-01-orientation-reports-work-in-flight.md)

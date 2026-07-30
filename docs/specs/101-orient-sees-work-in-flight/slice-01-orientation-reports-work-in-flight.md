@@ -1,7 +1,7 @@
 ---
 status: DONE
 dependencies: []
-last_verified: 2026-07-22
+last_verified: 2026-07-30
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -13,7 +13,7 @@ last_verified: 2026-07-22
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 096-01 — orientation reports work in flight
+## Slice 101-01 — orientation reports work in flight
 
 **Goal:** An agent picking the project up learns that finished work is sitting
 unmerged or in an open pull request — instead of reporting the project as if
@@ -34,7 +34,7 @@ already put to them.
   `test_workflow.py:8191`.
 
 **Assumptions:** A1 and A2, inherited from
-[spec 096](./spec.md#assumptions). A1 is what AC2 and AC3 exist to contain; A2
+[spec 101](./spec.md#assumptions). A1 is what AC2 and AC3 exist to contain; A2
 is why no `gh` call appears in the CLI.
 
 **Acceptance Criteria:**
@@ -152,7 +152,7 @@ said each git call is "bounded by an explicit timeout well inside the hook's
 2.0 s per-call timeout. Round 1 of the implementation review showed that is not
 a bound at all: `_in_flight_summary` can issue **nine** calls, so the real
 worst case was ~16 s against a hook that gives up at 4 s and then emits *no
-headline* — strictly worse than the pre-096 behaviour this slice was supposed
+headline* — strictly worse than the pre-101 behaviour this slice was supposed
 to improve. Fixed with a single shared wall-clock deadline
 (`_ORIENT_IN_FLIGHT_TOTAL_BUDGET`, 1.5 s); AC3 was rewritten to state the
 aggregate requirement rather than left to be satisfied on a technicality.
@@ -170,7 +170,7 @@ gap was an inconsistency rather than a novel risk. Added `_sanitize_orient_ref`
 consequence of (1): the aggregate budget is 1.5 s and a single call may not
 consume it all. On a very large or cold repository `rev-list --count` can
 exceed 0.75 s, in which case the segment silently disappears. That is
-AC2-compliant — it degrades to exactly the pre-096 headline — but it is a real
+AC2-compliant — it degrades to exactly the pre-101 headline — but it is a real
 behavioural difference from the first implementation and is recorded here
 rather than left to be discovered.
 
@@ -238,6 +238,27 @@ sync. **This is a real limitation of the evidence, not a formality:** every
 executable claim in this record was verified by the implementer, so the
 independent checks are of the *code and the record*, not of the test run.
 
+**13. Renumbered 096 → 101 after the number was taken on `main`.** This spec was
+reserved as `096-orient-sees-work-in-flight`; while the PR sat open awaiting
+review, `096-richer-skill-discovery` landed on `main` under the same number.
+Reserving on `origin/main` does not survive a long-lived branch — it prevents a
+*simultaneous* claim, not a later one. 101 was verified free on `main`, on every
+remote branch, and in all open PRs before the rename. Two references **outside**
+this spec folder addressed this slice by number and were corrected inline rather
+than left pointing at an unrelated DRAFT slice:
+[`097-faithful-recording-guardrails/spec.md`](../097-faithful-recording-guardrails/spec.md)
+(Overview, Instance 2 — cites "slice 096-01 (PR #122)") and the
+`VACUOUS_TEST_ANCHOR` comment in `skills/independent-review/test_review.py`.
+Both are address corrections under [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
+— the finding each cites is unchanged, only its location moved. Re-verified on
+the rebased tree: `Ran 3752 tests in 199.697s … OK (skipped=4)`, `pyright: clean`,
+`build_host_packages.py --check` in sync, `spec_lint.py` clean across 100 specs,
+and `status-board` reporting *already current*. The 3752 ≠ 3527 gap is `main`
+growing (specs 097–100 and bug 018 landed meanwhile), not tests changing here:
+this slice's code diff against `main` is byte-identical to the reviewed one once
+`096` is read as `101`, and `test_workflow.py`'s diff still carries **zero**
+deletion lines — the pinned pre-101 headline test remains provably unedited.
+
 ### Reconciliation sweep
 
 - **Tests:** `python3 scripts/run_tests.py` → `Ran 3527 tests … OK (skipped=4)`,
@@ -258,10 +279,10 @@ independent checks are of the *code and the record*, not of the test run.
   packages; the Codex copy carries the builder's
   `${CLAUDE_PLUGIN_ROOT}` → `${PLUGIN_ROOT}` rewrite, which a hand edit would
   not produce.
-- **Status board:** regenerated with `workflow.py status-board` — spec 096 was
+- **Status board:** regenerated with `workflow.py status-board` — spec 101 was
   absent from `docs/specs/README.md` until this step.
 - **Spec lint:** `scripts/spec_lint.py` reports no AC contradictions across all
-  96 specs.
+  100 specs.
 - **`docs/refinement-todo.md`:** unchanged. Nothing was deferred during
   implementation — every open question raised by either review was resolved in
   this slice or recorded in the deviation log above.

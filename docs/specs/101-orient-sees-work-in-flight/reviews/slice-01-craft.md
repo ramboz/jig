@@ -1,10 +1,10 @@
 ---
-slice: 096-01 — orientation reports work in flight
+slice: 101-01 — orientation reports work in flight
 pass: craft
 verdict: pass
 reviewer: jig:reviewer subagent (craft pass; all 7 findings applied)
 reviewed_at: 2026-07-23T04:57:04Z
-prompt_source: review.py pr-review docs/specs/096-orient-sees-work-in-flight/spec.md orientation <deliverables>
+prompt_source: review.py pr-review docs/specs/101-orient-sees-work-in-flight/spec.md orientation <deliverables>
 ---
 
 Craft pass returned **needs-changes** with seven findings — no correctness

@@ -1653,13 +1653,13 @@ _ORIENT_CLASSIFICATION_LABELS = {
 }
 _ORIENT_MAX_GROUPS = 8
 _ORIENT_SAFE_CLAIM_RE = re.compile(r"[^A-Za-z0-9._/-]+")
-# Slice 096-01. Seconds allowed for any *single* git call inside `orient`.
+# Slice 101-01. Seconds allowed for any *single* git call inside `orient`.
 _ORIENT_IN_FLIGHT_GIT_TIMEOUT = 0.75
 # Seconds allowed for *all* git work in one `orient` call. A per-call timeout
 # is not a bound: `_in_flight_summary` can issue nine calls, and per-call × 9
 # is what actually reaches the SessionStart hook. That hook bounds the whole
 # command at 4 s and swallows a timeout as *no orientation at all* — strictly
-# worse than the pre-096 headline. So the calls share one wall-clock deadline.
+# worse than the pre-101 headline. So the calls share one wall-clock deadline.
 _ORIENT_IN_FLIGHT_TOTAL_BUDGET = 1.5
 # Remote-tracking before local, `main` before `master`; consulted only after
 # `origin/HEAD`, and every entry is verified rather than assumed to exist.
@@ -1774,7 +1774,7 @@ def _in_flight_git(
 
     None on *any* failure — git missing from PATH, not a repository, non-zero
     exit, timeout, undecodable output, or the shared deadline already being
-    spent. Slice 096-01 AC3: orientation must never fail because git did, so
+    spent. Slice 101-01 AC3: orientation must never fail because git did, so
     every call site treats None as "say nothing".
 
     `deadline` is required, not defaulted: it is the shared budget, and a
@@ -1816,7 +1816,7 @@ def _sanitize_orient_ref(value: str) -> str:
 
 
 def _in_flight_base(project_dir: Path, *, deadline: float) -> str:
-    """Resolve the default branch instead of assuming `main` (096-01 AC4).
+    """Resolve the default branch instead of assuming `main` (101-01 AC4).
 
     `origin/HEAD` is consulted first — it is what the remote actually calls
     its trunk — but its target is **verified like any other candidate rather
@@ -1846,7 +1846,7 @@ def _in_flight_base(project_dir: Path, *, deadline: float) -> str:
 
 
 def _in_flight_summary(project_dir: Path) -> str:
-    """`5 commits ahead of main on claude/night-prep`, or "" (slice 096-01).
+    """`5 commits ahead of main on claude/night-prep`, or "" (slice 101-01).
 
     A status board only ever describes the default branch, so work sitting on
     an unmerged branch — or committed locally and never pushed — is invisible
@@ -1856,7 +1856,7 @@ def _in_flight_summary(project_dir: Path) -> str:
     Silence is the default and covers every degraded case: not a git
     repository, no git binary, no resolvable trunk, a detached HEAD, and a
     HEAD level with or behind trunk. AC2 pins that the headline is then
-    byte-identical to its pre-096 form.
+    byte-identical to its pre-101 form.
 
     All git work shares one deadline (`_ORIENT_IN_FLIGHT_TOTAL_BUDGET`) so the
     worst case is bounded no matter how many refs have to be probed, and both
@@ -1902,11 +1902,11 @@ def orient(project_dir: Path) -> str:
     application skeleton or technology-stack state from the shallow source
     tree.
 
-    Slice 096-01 adds one further, clearly-bounded source: local `git` state,
+    Slice 101-01 adds one further, clearly-bounded source: local `git` state,
     used solely to report commits that have not reached the default branch
     (`_in_flight_summary`). That is still not source-tree inference — it is
     read-only VCS fact — and it fails soft, so the headline degrades to its
-    pre-096 form rather than disappearing when git is absent or slow.
+    pre-101 form rather than disappearing when git is absent or slow.
     """
     project_dir = Path(project_dir)
     state = classify_scaffold_state(project_dir)
@@ -1919,8 +1919,8 @@ def orient(project_dir: Path) -> str:
         f"jig hint: {classification} · active specs: {active_specs} · "
         f"focus: {focus}"
     )
-    # Slice 096-01: appended only when there is something to say, so the
-    # pre-096 headline stays byte-identical everywhere else (AC2).
+    # Slice 101-01: appended only when there is something to say, so the
+    # pre-101 headline stays byte-identical everywhere else (AC2).
     in_flight = _in_flight_summary(project_dir)
     if in_flight:
         headline += f" · in flight: {in_flight}"

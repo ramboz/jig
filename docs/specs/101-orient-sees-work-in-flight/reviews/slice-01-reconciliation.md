@@ -1,10 +1,10 @@
 ---
-slice: 096-01 — orientation reports work in flight
+slice: 101-01 — orientation reports work in flight
 pass: reconciliation
 verdict: pass
 reviewer: jig:reviewer subagent (reconciliation pass; all 7 findings applied)
 reviewed_at: 2026-07-23T05:09:13Z
-prompt_source: review.py reconciliation docs/specs/096-orient-sees-work-in-flight/spec.md orientation
+prompt_source: review.py reconciliation docs/specs/101-orient-sees-work-in-flight/spec.md orientation
 ---
 
 Reconciliation pass returned **needs-changes** with seven findings. Its job was
@@ -15,7 +15,7 @@ vacuous test that both compliance rounds had missed.
 ## Applied
 
 1. **Status board was stale.** It still read `IN_PROGRESS (claude/orient-…)` for
-   096-01 after the REVIEWED transition had cleared the claim. The sweep claimed
+   101-01 after the REVIEWED transition had cleared the claim. The sweep claimed
    "regenerated" — true of a pre-transition run, but the artifact it pointed at
    was already wrong. Regenerated after the transition.
 2. **"Reconciliation review passed" was ticked before this review existed.** That

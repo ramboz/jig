@@ -1,4 +1,4 @@
-"""Surface tests for skills/orient/SKILL.md (slice 096-01, AC5–AC8).
+"""Surface tests for skills/orient/SKILL.md (slice 101-01, AC5–AC8).
 
 Half of this slice ships prose, not code. These tests pin the *load-bearing
 phrases* — the ones whose absence reproduces the reported failure — rather

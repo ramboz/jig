@@ -9024,7 +9024,7 @@ class ProjectOrientationTests(unittest.TestCase):
 
 
 class OrientWorkInFlightTests(unittest.TestCase):
-    """Slice 096-01: the headline reports work that has not reached trunk.
+    """Slice 101-01: the headline reports work that has not reached trunk.
 
     A status board describes the default branch, so finished work sitting on
     an unmerged branch is invisible to every artifact orient reads. These
@@ -9272,7 +9272,7 @@ class OrientWorkInFlightTests(unittest.TestCase):
         `ValueError` — *not* an `OSError` or `SubprocessError`. A ref name
         that is invalid in the ambient encoding would otherwise raise
         straight out of `orient()` and the hook would emit no headline at
-        all, which is worse than the pre-096 behaviour."""
+        all, which is worse than the pre-101 behaviour."""
         self._init_repo()
         path = self._stub_git_path(
             'case "$*" in\n'

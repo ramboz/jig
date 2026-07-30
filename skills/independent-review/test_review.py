@@ -51,7 +51,7 @@ def write_synthetic_spec(path: Path, slice_name: str, status: str = "IN_PROGRESS
 # no-lexical-marker-gates note). Always matched against `normalize_ws()` output
 # so line-wrapping in the source prompt block can't make the assertion vacuous.
 #
-# In slice 096-01 four tests were found to pass with the feature removed, and
+# In slice 101-01 four tests were found to pass with the feature removed, and
 # the reconciliation reviewer caught the last one essentially by asking this
 # question. Making it an explicit prompt line front-loads the catch onto the
 # always-on compliance and craft passes instead of a late round.

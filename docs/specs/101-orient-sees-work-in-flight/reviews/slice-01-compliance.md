@@ -1,10 +1,10 @@
 ---
-slice: 096-01 — orientation reports work in flight
+slice: 101-01 — orientation reports work in flight
 pass: compliance
 verdict: pass
 reviewer: jig:reviewer subagents (compliance rounds 1-2); round-2 closures applied by implementer — see 'Who verified what'
 reviewed_at: 2026-07-23T05:06:30Z
-prompt_source: review.py implementation docs/specs/096-orient-sees-work-in-flight/spec.md orientation <deliverables>
+prompt_source: review.py implementation docs/specs/101-orient-sees-work-in-flight/spec.md orientation <deliverables>
 ---
 
 Round 1 returned **needs-changes** and found one genuine defect plus three
@@ -94,7 +94,7 @@ closing** — neither a regression from the fixes, both now closed:
   caught by `except (OSError, SubprocessError)`. A ref name invalid in the
   ambient encoding — or *any* non-ASCII branch under `LC_ALL=C` — raised
   straight out and the hook emitted no headline at all. Exactly the AC3
-  violation, and exactly the "worse than pre-096" failure. Fixed with
+  violation, and exactly the "worse than pre-101" failure. Fixed with
   `errors="replace"` **and** `ValueError` added to the except tuple; test
   `test_undecodable_git_output_does_not_raise`.
 - **Unsanitised repository-controlled text in the injected headline.** Both ref
@@ -117,7 +117,7 @@ full suite `Ran 3527 tests … OK (skipped=4)` with `pyright: clean`;
 `git diff origin/main -- skills/spec-workflow/test_workflow.py` has zero
 deletion lines; `build_host_packages.py --check` reports in sync.
 
-Its remaining reconciliation notes — the status board missing spec 096, the
+Its remaining reconciliation notes — the status board missing spec 101, the
 0.75 s per-call behaviour change, AC4's `origin/<trunk>` phrasing, and the
 first-resolvable-candidate heuristic — are addressed in the deviation log and
 the sweep.
