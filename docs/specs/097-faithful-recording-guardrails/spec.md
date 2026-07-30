@@ -25,7 +25,7 @@ mechanical objected:
   reader could not tell established reasoning from a quiet swap. It happened
   twice independently — the first bad edit taught the second, which followed the
   file's own precedent.
-- **Instance 2 — four tests passed with the feature deleted.** In slice 096-01
+- **Instance 2 — four tests passed with the feature deleted.** In slice 101-01
   (PR #122), across three review rounds, four tests were found to assert things
   that stayed true when the feature was removed (a timeout test satisfied by an
   empty stub, an `assertIn` matching pre-existing words, a whole-file token check,

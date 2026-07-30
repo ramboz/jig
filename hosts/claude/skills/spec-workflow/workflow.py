@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Commands such as `orient` must remain read-only even when this helper and
@@ -1652,6 +1653,22 @@ _ORIENT_CLASSIFICATION_LABELS = {
 }
 _ORIENT_MAX_GROUPS = 8
 _ORIENT_SAFE_CLAIM_RE = re.compile(r"[^A-Za-z0-9._/-]+")
+# Slice 101-01. Seconds allowed for any *single* git call inside `orient`.
+_ORIENT_IN_FLIGHT_GIT_TIMEOUT = 0.75
+# Seconds allowed for *all* git work in one `orient` call. A per-call timeout
+# is not a bound: `_in_flight_summary` can issue nine calls, and per-call × 9
+# is what actually reaches the SessionStart hook. That hook bounds the whole
+# command at 4 s and swallows a timeout as *no orientation at all* — strictly
+# worse than the pre-101 headline. So the calls share one wall-clock deadline.
+_ORIENT_IN_FLIGHT_TOTAL_BUDGET = 1.5
+# Remote-tracking before local, `main` before `master`; consulted only after
+# `origin/HEAD`, and every entry is verified rather than assumed to exist.
+_ORIENT_IN_FLIGHT_BASE_CANDIDATES = (
+    "origin/main", "origin/master", "main", "master")
+# Ref names are repository-controlled and reach the SessionStart headline, so
+# they get the same whitelist as a claim — at a cap that fits a real branch
+# name (`_sanitize_orient_claim`'s 30 would truncate most feature branches).
+_ORIENT_IN_FLIGHT_REF_MAX = 60
 
 
 def _spec_num_from_dirname(spec_dir: str) -> tuple[int, str]:
@@ -1750,14 +1767,146 @@ def _focus_summary(rows: list[tuple]) -> str:
     return focus
 
 
+def _in_flight_git(
+    project_dir: Path, *args: str, deadline: float
+) -> str | None:
+    """Run one read-only git command; return stripped stdout, or None.
+
+    None on *any* failure — git missing from PATH, not a repository, non-zero
+    exit, timeout, undecodable output, or the shared deadline already being
+    spent. Slice 101-01 AC3: orientation must never fail because git did, so
+    every call site treats None as "say nothing".
+
+    `deadline` is required, not defaulted: it is the shared budget, and a
+    caller that forgot it would silently get up to five unbounded calls —
+    which is exactly the hole the round-1 review caught.
+    """
+    budget = min(_ORIENT_IN_FLIGHT_GIT_TIMEOUT, deadline - time.monotonic())
+    if budget <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), *args],
+            capture_output=True,
+            text=True,
+            # A ref name need not be valid in the ambient encoding (and under
+            # LC_ALL=C any non-ASCII branch is not). Strict decoding would
+            # raise UnicodeDecodeError — a ValueError, so not covered by the
+            # except clause below — straight out of orient().
+            errors="replace",
+            timeout=budget,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _sanitize_orient_ref(value: str) -> str:
+    """Ref names are repository-controlled text bound for the hook headline.
+
+    Git forbids spaces and control characters in refs but permits `·` — the
+    headline's own field separator — plus assorted punctuation and arbitrary
+    length, so an unsanitised branch name can forge a headline field. Same
+    whitelist as `_sanitize_orient_claim`, wider cap (see the constant).
+    """
+    cleaned = _ORIENT_SAFE_CLAIM_RE.sub("?", str(value or ""))
+    return cleaned[:_ORIENT_IN_FLIGHT_REF_MAX]
+
+
+def _in_flight_base(project_dir: Path, *, deadline: float) -> str:
+    """Resolve the default branch instead of assuming `main` (101-01 AC4).
+
+    `origin/HEAD` is consulted first — it is what the remote actually calls
+    its trunk — but its target is **verified like any other candidate rather
+    than trusted**. A stale `origin/HEAD` (left behind by a default-branch
+    rename, or pointing at a pruned ref) would otherwise either silence the
+    segment permanently or, worse, produce a confidently wrong count against
+    the old trunk. On a miss we fall through to the conventional names.
+    Returns "" when none resolves, which the caller turns into silence.
+    """
+    head = _in_flight_git(
+        project_dir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD",
+        deadline=deadline)
+    candidates: list[str] = []
+    if head and head.startswith("refs/remotes/"):
+        candidates.append(head[len("refs/remotes/"):])
+    candidates.extend(_ORIENT_IN_FLIGHT_BASE_CANDIDATES)
+    seen: set[str] = set()
+    for ref in candidates:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        if _in_flight_git(
+                project_dir, "rev-parse", "--verify", "--quiet", ref,
+                deadline=deadline) is not None:
+            return ref
+    return ""
+
+
+def _in_flight_summary(project_dir: Path) -> str:
+    """`5 commits ahead of main on claude/night-prep`, or "" (slice 101-01).
+
+    A status board only ever describes the default branch, so work sitting on
+    an unmerged branch — or committed locally and never pushed — is invisible
+    to every artifact orient reads, and the project reads as "nothing in
+    progress" when it is not.
+
+    Silence is the default and covers every degraded case: not a git
+    repository, no git binary, no resolvable trunk, a detached HEAD, and a
+    HEAD level with or behind trunk. AC2 pins that the headline is then
+    byte-identical to its pre-101 form.
+
+    All git work shares one deadline (`_ORIENT_IN_FLIGHT_TOTAL_BUDGET`) so the
+    worst case is bounded no matter how many refs have to be probed, and both
+    ref names are sanitised before they reach the headline.
+    """
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=deadline) != "true":
+        return ""
+    branch = _in_flight_git(
+        project_dir, "rev-parse", "--abbrev-ref", "HEAD", deadline=deadline)
+    if not branch or branch == "HEAD":
+        # Detached HEAD — there is no branch name to report, so say nothing
+        # rather than printing the literal string "HEAD".
+        return ""
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if not base:
+        return ""
+    raw = _in_flight_git(
+        project_dir, "rev-list", "--count", f"{base}..HEAD", deadline=deadline)
+    # `isdecimal`, not `isdigit`: "²".isdigit() is True but int("²") raises,
+    # and AC3 lists unexpected git output as a case that must not raise.
+    if raw is None or not raw.isdecimal():
+        return ""
+    count = int(raw)
+    if count == 0:
+        return ""
+    noun = "commit" if count == 1 else "commits"
+    return (
+        f"{count} {noun} ahead of {_sanitize_orient_ref(base)} "
+        f"on {_sanitize_orient_ref(branch)}"
+    )
+
+
 def orient(project_dir: Path) -> str:
     """Read-only project pickup headline (slice 088-01).
 
     The headline is deliberately one line and starts with `jig hint:` so hook
-    injections cannot be confused for user-authored text. It uses durable jig
-    artifacts only: `scaffold.json` / spec-driven layout classification plus
-    spec and slice lifecycle state. It never infers application skeleton or
-    technology-stack state from the shallow source tree.
+    injections cannot be confused for user-authored text. Its lifecycle content
+    comes from durable jig artifacts only: `scaffold.json` / spec-driven layout
+    classification plus spec and slice lifecycle state. It never infers
+    application skeleton or technology-stack state from the shallow source
+    tree.
+
+    Slice 101-01 adds one further, clearly-bounded source: local `git` state,
+    used solely to report commits that have not reached the default branch
+    (`_in_flight_summary`). That is still not source-tree inference — it is
+    read-only VCS fact — and it fails soft, so the headline degrades to its
+    pre-101 form rather than disappearing when git is absent or slow.
     """
     project_dir = Path(project_dir)
     state = classify_scaffold_state(project_dir)
@@ -1766,10 +1915,16 @@ def orient(project_dir: Path) -> str:
     rows = collect_slices(project_dir)
     active_specs = _active_spec_summary(project_dir, rows)
     focus = _focus_summary(rows)
-    return (
+    headline = (
         f"jig hint: {classification} · active specs: {active_specs} · "
-        f"focus: {focus}\n"
+        f"focus: {focus}"
     )
+    # Slice 101-01: appended only when there is something to say, so the
+    # pre-101 headline stays byte-identical everywhere else (AC2).
+    in_flight = _in_flight_summary(project_dir)
+    if in_flight:
+        headline += f" · in flight: {in_flight}"
+    return headline + "\n"
 
 
 def _write_spec_rollup(spec_path: Path) -> bool:
