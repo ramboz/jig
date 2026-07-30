@@ -412,7 +412,9 @@ existing hook config should be replaced or has been backed up.
 ### Relationship to scaffold-mode
 
 `migrate.py copy-machinery` is the migration-path equivalent of
-`scaffold-init --with-machinery` (default since slice 016-03). Both
+`scaffold-init --in-repo` (the opt-in as of slice 099-01 / ADR-0041;
+`--with-machinery` is an accepted alias, and it was the *default* only between
+slices 016-03 and 099-01). Both
 end up calling the same host-aware `copy_machinery(plugin, target, *,
 force, host)` façade in `scaffold.py`, so the resulting host runtime
 shape is equivalent regardless of which adoption path produced it.

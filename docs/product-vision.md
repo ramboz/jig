@@ -70,6 +70,16 @@ closed the second half by adding content-guidance at init time so a
 new project leaves the wizard with a real vision + architecture seed,
 not three "Deferred — no signal" stanzas.
 
+**Amendment (2026-07, [ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)).**
+Both modes remain first-class, but the *default* is now plugin mode:
+in-repo is the explicit `--in-repo` opt-in. What the 2026-05 audit
+demanded was that owning the machinery be **possible and supported** —
+not that every project be handed ~130 vendored files it did not ask
+for. Copying by default made the machinery *visible* at the cost of
+pinning it to the scaffold-time version (silent drift) and burying the
+project's own history under jig internals. Ownership stays one flag
+away, and choosing it is now a deliberate act rather than a silent one.
+
 ## Competitive landscape
 
 | Option | What it does | Where it falls short for this gap |
@@ -192,13 +202,19 @@ reconciliation.
    → `docs/decisions/` rename was a clean cut, not a dual-read
    transition). Backwards-compat is a tax on every future spec; pay
    the migration cost once instead.
-7. **Owning the scaffolding beats renting the plugin.** Default install
-   mode after [spec 016](specs/016-scaffold-mode/spec.md) and the v2
-   host-adapter work puts the machinery (`skills/`, `agents/`, `hooks/`)
-   in the dev's host-native project directory (`.claude/` or `.codex/`)
-   where it can be read, modified, and extended. Plugin mode stays
-   available for users who want it; scaffolded mode is the default
-   because positioning matters.
+7. **Owning the scaffolding must always be available — one flag away.**
+   [Spec 016](specs/016-scaffold-mode/spec.md) and the v2 host-adapter
+   work make it possible to put the machinery (`skills/`, `agents/`,
+   `hooks/`) in the dev's host-native project directory (`.claude/` or
+   `.codex/`) where it can be read, modified, and extended. As of
+   [ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)
+   that is the `--in-repo` **opt-in**, not the default: vendoring ~130
+   files into every project pinned them to the scaffold-time version and
+   buried the project's own history under jig internals. What positioning
+   requires is that ownership be *supported and reachable*, not imposed —
+   so the default keeps the repo lean and jig updates flow from the
+   plugin, and `--in-repo` is a deliberate choice for the projects that
+   need it (CI, cloud agents, plugin-less teammates, archival).
 8. **Designed to reduce token cost.** Beyond keeping context below the
    dumb zone for *quality* (principle #2), jig is built to keep token
    usage — and the bill — *down*: it favors a lean context, delegates

@@ -11,7 +11,11 @@ This is the worked-example spec that `scaffold-init` seeds into a fresh
 project so the very first turn has a faithful pattern to imitate. It
 records the genuine first unit of work in `{{PROJECT_NAME}}`: adopting
 jig by running `scaffold-init` to lay down the docs tree, AGENTS.md, the
-status board, and the runtime machinery under `.codex/`.
+status board, and a wired-up, runnable jig workflow. (Where the machinery
+itself lives depends on the mode chosen at scaffold time — by default it is
+expected to come from an installed jig plugin; `--in-repo` copies it into
+`.codex/` instead.
+`scaffold.json`'s `scaffold_mode` field records which one this project got.)
 
 It is **real, permanent project history**, not a labelled-deletable
 demo. Scaffolding genuinely was the first thing that happened here, so
@@ -26,12 +30,12 @@ stub waiting for your first real piece of work.
 ## Decomposition
 
 **SPIDR axis: Interface.** Adoption is a one-shot interface change: the
-project goes from "no workflow scaffold" to "jig docs + machinery
-present and wired." A single vertical slice delivers it end-to-end.
+project goes from "no workflow scaffold" to "jig docs present and the
+workflow wired." A single vertical slice delivers it end-to-end.
 
 ### Slices
 
 1. **`001-01 bootstrap`** — Run `scaffold-init` so the project opens
-   with the jig docs tree, AGENTS.md, an honest status board, and the
-   `.codex/` runtime machinery. DONE — see
+   with the jig docs tree, AGENTS.md, an honest status board, and a
+   runnable jig workflow. DONE — see
    [slice-01-bootstrap.md](slice-01-bootstrap.md).

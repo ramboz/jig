@@ -29,8 +29,9 @@ and deliver end-to-end value.
 ## Session workflow
 
 1. Read the automatic `jig hint:` orientation injected at `SessionStart`, or run
-   `python3 .claude/skills/jig-spec-workflow/workflow.py orient --project-dir .`
-   to refresh it. Host rendering rewrites this to the Codex-local path.
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py orient --project-dir .`
+   to refresh it. Host rendering resolves this to wherever jig is installed:
+   the plugin root, or the copied `.claude/skills/` tree under `--in-repo`.
    Architecture/spec artifacts outrank shallow source-tree inference.
 2. Check `docs/specs/README.md` and `docs/bugs/README.md`; route feedback/triage defects to `bug-fix` before drafting spec ACs.
 3. Pick up the focused or next `READY_FOR_IMPLEMENTATION` spec slice.

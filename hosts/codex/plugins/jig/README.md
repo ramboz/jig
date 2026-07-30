@@ -99,7 +99,7 @@ for, what your repo needs, and your first 30 minutes.
 
 ```bash
 git clone https://github.com/ramboz/jig.git
-python3 jig/hosts/claude/skills/scaffold-init/scaffold.py <your-project>
+python3 jig/hosts/claude/skills/scaffold-init/scaffold.py --in-repo <your-project>
 ```
 
 **Codex plugin**
@@ -113,8 +113,15 @@ codex plugin add jig@jig
 
 ```bash
 git clone https://github.com/ramboz/jig.git
-python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex <your-project>
+python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex --in-repo <your-project>
 ```
+
+> **Which pair do I want?** The two **scaffold** recipes are self-contained —
+> they copy jig's machinery into your project, so it works with no plugin
+> installed. The two **plugin** recipes leave the machinery
+> in the plugin and keep your repo lean — that's the default when jig runs as an
+> installed plugin. See
+> [ADR-0041](docs/decisions/adr-0041-scaffold-defaults-to-plugin-mode.md).
 
 ### Project setup
 

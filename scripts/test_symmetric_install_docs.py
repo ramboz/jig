@@ -76,8 +76,12 @@ class Ac1InstallCommandMatrix(unittest.TestCase):
 
     def test_claude_scaffold_from_host_package(self) -> None:
         self.assertIn(
+            # `--in-repo` is load-bearing, not cosmetic: since slice 099-01
+            # made plugin mode the default, this plugin-LESS recipe (clone,
+            # then run the script) needs it or it scaffolds a project with
+            # jig's docs and no runtime — and exits 0 while doing so.
             "python3 jig/hosts/claude/skills/scaffold-init/scaffold.py "
-            "<your-project>",
+            "--in-repo <your-project>",
             self.install,
             "README must document Claude scaffold from the committed host "
             "package path",
@@ -99,7 +103,7 @@ class Ac1InstallCommandMatrix(unittest.TestCase):
     def test_codex_scaffold_from_host_package(self) -> None:
         self.assertIn(
             "python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/"
-            "scaffold.py --host codex <your-project>",
+            "scaffold.py --host codex --in-repo <your-project>",
             self.install,
             "README must document Codex scaffold from the committed host "
             "package path",

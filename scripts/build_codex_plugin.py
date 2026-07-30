@@ -202,6 +202,14 @@ def _copy_templates(source_root: Path, output_dir: Path) -> None:
             continue
         dst = templates_dst / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
+        # Templates ship Codex-NATIVE. Two consumer sets read them, and only
+        # one goes through `scaffold()`: `decisions.py` (lightweight-decisions
+        # seed), `adr.py`, `memory.py` and `workflow.py` read the packaged
+        # template at runtime and copy it verbatim, with no transform of their
+        # own. Shipping canonical here would hand a Codex project a
+        # `${CLAUDE_PLUGIN_ROOT}` it can never resolve. Slice 099-01 briefly did
+        # exactly that; the plugin-mode doc problem it was chasing is fixed in
+        # `_rewrite_host_paths` instead, which can tell the modes apart.
         if entry.name.endswith(".md.template"):
             dst.write_text(
                 scaffold_mod.CodexScaffoldRenderer.rewrite_skill_md_paths(

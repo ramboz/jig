@@ -44,7 +44,14 @@ is the AI's default failure mode.
 ## Scaffolded install / scaffold mode
 
 The second of jig's two install shapes (the other being plugin install). Introduced by
-[spec 016-scaffold-mode](../specs/016-scaffold-mode/spec.md). `scaffold-init` (default-on as of slice 016-03; opt out with `--plugin-only`) copies `skills/`, `agents/`, and `hooks/scripts/` into the
+[spec 016-scaffold-mode](../specs/016-scaffold-mode/spec.md). **Opt-in as of slice 099-01 /
+[ADR-0041](../decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)** — pass `--in-repo`
+(aliases `--with-machinery`, `--copy-machinery`); plugin mode is the default, because copying
+the machinery pins it to the scaffold-time jig version (silent drift), dominates the repo's
+file count and history, and makes ownership of the copies ambiguous. Choose in-repo when the
+plugin cannot be assumed present: CI or cloud agents on a bare checkout, teammates without
+jig installed, archival repos. It was default-on between slices 016-03 and 099-01. When
+selected, `scaffold-init` copies `skills/`, `agents/`, and `hooks/scripts/` into the
 target's `.claude/` directory under `jig-` prefixed names (e.g.
 `.claude/skills/jig-scaffold-init/SKILL.md`, `.claude/hooks/scripts/jig-context-check.sh`).
 SKILL.md path strings are rewritten from `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` to

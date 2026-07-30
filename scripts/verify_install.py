@@ -191,7 +191,8 @@ def _looks_uninstalled(plugin_root: Path) -> bool:
 #
 # The plugin-mode checks above validate that jig's plugin install footprint
 # is on disk (`.claude-plugin/...` etc.). When jig is installed via
-# `scaffold-init` (default-on as of slice 016-03), the artifacts live under
+# `scaffold-init --in-repo` (the opt-in as of slice 099-01 / ADR-0041;
+# default-on between slices 016-03 and 099-01), the artifacts live under
 # `<project>/.claude/` instead, with a `jig-` prefix to namespace them away
 # from user-added project skills. The four scaffold-mode checks mirror the
 # four plugin-mode checks (skills / agents / hook scripts / settings.json
@@ -522,7 +523,8 @@ def run_all_scaffold_checks(project_root: Path) -> list[CheckResult]:
 
 def _looks_unscaffolded(project_root: Path) -> bool:
     """`.claude/` directory entirely absent → the project was never
-    scaffolded with `--with-machinery` (default-on as of slice 016-03).
+    scaffolded with `--in-repo` (the machinery opt-in as of slice 099-01 /
+    ADR-0041; default-on between slices 016-03 and 099-01).
     Mirrors `_looks_uninstalled` semantics for plugin mode."""
     return not (project_root / ".claude").exists()
 
@@ -607,9 +609,12 @@ def run_completion_summary(
 
     Mode-awareness (the correctness nuance): the machinery checks (`skills` /
     `skill-closure` / `agents` / `hooks` / `settings` / `manifest` + the
-    security-floor trio) validate `.claude/` artifacts that exist ONLY in
-    `--with-machinery` (in-repo) mode. In `--plugin-only` mode that machinery
-    lives in the installed plugin, not the target, so running those checks
+    security-floor trio) validate `.claude/` artifacts. Most exist only in
+    `--with-machinery` (in-repo) mode — but `gitignore-floor` (since 052-02)
+    and `permissions-deny` (since 099-01) are now written in plugin mode too,
+    so gating those two here under-checks the default path. Deferred, with a
+    resolution trigger, in `docs/refinement-todo.md`. In `--plugin-only` mode that machinery
+    is expected to come from the installed plugin rather than the target, so running those checks
     would false-fail a perfectly good plugin-only scaffold. They are therefore
     included only when `with_machinery=True`. The seed presence check (AC #3)
     runs in BOTH modes — but only when `seed_expected=True`; a non-greenfield
@@ -659,9 +664,14 @@ def run_completion_summary(
     if not checks:
         # plugin-only + seed skipped (non-greenfield): nothing machinery-
         # specific to verify here. Still emit an explicit, non-silent line.
+        # Slice 099-01: say where the machinery is EXPECTED in this mode, not
+        # where it is — the scaffold cannot see the user's host install. Same
+        # correction as the plugin-mode summary line (ADR-0041 OQ2 residual);
+        # an unconditional "lives in the installed plugin" is false for a
+        # plugin-less run.
         out.write(
-            "  (no scaffold-mode checks apply in this mode; machinery "
-            "lives in the installed plugin)\n"
+            "  (no scaffold-mode checks apply in this mode; machinery is "
+            "expected to come from the jig plugin installed for this host)\n"
         )
         out.write("Scaffold complete and verified — 0/0 checks passed.\n")
         return 0

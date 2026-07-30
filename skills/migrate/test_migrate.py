@@ -2671,7 +2671,11 @@ class TierUpgradeTests(unittest.TestCase):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-038-04-"))
         self.target = self.tmpdir / "proj"
         self.target.mkdir()
-        r = run_scaffold("--no-tests", str(self.target))  # real tier-0 base
+        # Real tier-0 base with machinery ON DISK: the tier-upgrade contract is
+        # "manifest installed_skills == on-disk jig-* skill set", so this needs
+        # in-repo mode (slice 099-01 / ADR-0041 flipped the default to plugin
+        # mode, which copies no skills at all).
+        r = run_scaffold("--in-repo", "--no-tests", str(self.target))
         self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
 
     def tearDown(self):

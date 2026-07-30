@@ -44,10 +44,8 @@ Always-loaded primer, kept lean per jig's context-cost discipline. This is an **
 ## Session Pickup
 
 Read the automatic `jig hint:` orientation injected at `SessionStart`, or run
-`python3 .codex/skills/jig-spec-workflow/workflow.py orient --project-dir .`
-before selecting work. Architecture and spec artifacts outrank shallow
-source-tree inference. Host rendering rewrites the command to the Codex-local
-skill path.
+`/jig:orient` before selecting work. Architecture and spec artifacts outrank
+shallow source-tree inference.
 
 ## Current Sprint Focus
 
