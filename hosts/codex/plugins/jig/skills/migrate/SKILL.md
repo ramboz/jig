@@ -367,6 +367,51 @@ python3 "${PLUGIN_ROOT}/skills/migrate/migrate.py" \
 
 With `--force`, Codex replaces an unmanaged `.codex/hooks.json` with jig's generated hook registration. Use this only when you are sure the existing hook config should be replaced or has been backed up.
 
+### Converting a plugin-mode project (bug 018)
+
+When the target was scaffolded `--plugin-only`, `copy-machinery` is the
+conversion route to in-repo mode. A project's mode lives in **three**
+places, and the command treats them differently:
+
+1. **The machinery on disk** — copied, as described above.
+2. **`scaffold.json`'s `scaffold_mode`** — flipped from `plugin-only` to
+   `in-repo` automatically once the copy succeeds, and reported as
+   `scaffold_mode: plugin-only -> in-repo`. Machine-owned, no user content
+   at stake. A project with no `scaffold.json` makes no mode claim, so
+   nothing is written for it.
+3. **The paths the project's own docs cite** — **reported, never
+   rewritten.** See below.
+
+#### Stale plugin-root citations after conversion
+
+`docs/workflow.md` and `docs/decisions/lightweight-decisions.md` are
+rendered with plugin-root helper commands in plugin mode. After conversion
+that variable is unset — that is exactly the population this route
+rescues — so those commands no longer run.
+
+`copy-machinery` prints a warning naming each affected file and its hit
+count, followed by the in-repo form the paths should take.
+
+**The command does not touch these files, and you must not silently touch
+them either.** They ship as `Status: Draft (wizard-generated)` with an
+explicit invitation to make them the project's own, so by conversion time
+they may hold real project content. Re-rendering them would destroy work
+the user cannot get back — a worse outcome than the stale paths.
+
+`copy-machinery` is effectively always run inside a session, so **ask the
+user** what they want. Surface the warning, then offer the options and
+let them pick:
+
+- **Leave them** — correct if the project still has the plugin installed
+  and the paths resolve.
+- **You edit them** — apply the replacement the warning prints, targeting
+  **only** the cited paths and leaving surrounding prose alone. Show the
+  diff before writing.
+- **They edit them** — hand over the file list and stop.
+
+Do not pick for them, and do not treat a general "go ahead, migrate my
+project" as consent to rewrite their documentation.
+
 ### Relationship to scaffold-mode
 
 `migrate.py copy-machinery` is the migration-path equivalent of
