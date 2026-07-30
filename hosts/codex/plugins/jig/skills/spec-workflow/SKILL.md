@@ -686,8 +686,10 @@ status flip is allowed. Each item is a gate.
       Routing is asked once at first write and never again, so a decision
       re-priced during this slice can stay misfiled. If a revised entry now
       clears the trigger above, promote it (`decisions.py promote --title
-      "<title>"`); if it is still settled, local and bounded, revise it
-      (`decisions.py update`). Never hand-edit `lightweight-decisions.md`.
+      "<title>" --no-push` — push mode reserves the ADR on `origin/main` from
+      an ephemeral worktree, so off `main` it never reaches your working copy
+      and `promote` refuses); if it is still settled, local and bounded, revise
+      it (`decisions.py update`). Never hand-edit `lightweight-decisions.md`.
 - [ ] **Conventions impact** — did this slice introduce or change a rule worth
       recording? If yes, edit `docs/conventions.md` (requires
       `JIG_CONVENTIONS_APPROVED=1`).

@@ -170,3 +170,51 @@ as an explicit edge case; `lint` and `add-lightweight` have coverage, `promote`
 does not. The code path resolves through `project_layout.decisions_dir` exactly
 as the covered helpers do, so this is a coverage gap rather than a known defect
 — stated plainly rather than silently left unticked.
+
+**§7 — push mode off `main` was broken, and the fix is a refusal.** Found by
+independent PR review of this branch (PR #137), reproduced against a real bare
+origin before fixing. §1 above fixed how the created ADR is *resolved* (by
+filename contract, not stdout position), which repaired push mode **on `main`**.
+Off `main` the mechanism is different and survived: `adr.py new` routes
+non-`main` push-mode callers to `_reserve_via_detached_worktree`, which builds
+the reservation in an ephemeral detached worktree at origin/main and pushes
+`HEAD:main` — so the ADR lands on the shared trunk and never in the caller's
+working copy. `promote` found nothing to seed and aborted *after* the push,
+stranding a reserved stub ADR on origin/main; and because the slug was then
+taken there, `adr.py` refused the obvious re-run with a slug collision, leaving
+no self-service way forward. Since jig's normal mode is worktree-per-task, this
+was the default path for most callers, and all three documented invocations
+(memory-sync SKILL.md, both reconcile checklists) showed `promote` without a
+push flag.
+
+Fixed by refusing up-front rather than by teaching `promote` to fetch the trunk
+copy: `_refuse_push_mode_off_main` runs before `_run_adr_new`, so nothing is
+created, nothing is pushed, and nothing needs cleaning up — the same atomicity
+property the rest of this function's ordering exists to provide. Pulling the
+reservation in via a merge was considered and rejected: it would make `promote`
+mutate the caller's branch history as a side effect of recording a decision. The
+three documented invocations now show `--no-push`, which is the correct choice
+from a feature branch (the ADR lands with the rest of the branch's work).
+`PromotePushModeOffMainTests` fixtures a real origin on a real branch —
+deliberately, because a remote-less fixture lets the tests pass for the wrong
+reason (`adr.py`'s own unreachable-origin refusal also quotes `--no-push`); the
+load-bearing assertion is that origin/main carries no ADR after the refusal.
+Mutation-checked: removing the guard turns four tests red.
+
+**§8 — `_find_promoted_stub` still carried the section-bound defect §2 fixed in
+`_real_entries`.** Also from the PR #137 review. `_real_entries` was anchored on
+a real `## Entries` heading line and bounded at the next H2; its sibling kept a
+bare substring `.find()` with no bound, so a promoted stub in a FOLLOWING
+section (`## Archive` — the shape `_foreign_format_error`'s own remedy 1
+invites) answered for a live entry. Because `promote_lightweight` consults it
+first, that surfaced as a false "already promoted" refusing a legitimate
+promotion. Reproduced, then fixed by reusing `_ENTRIES_HEADING_RE` /
+`_NEXT_H2_RE`, so both scan functions are now scoped identically.
+`PromotedStubSectionBoundTests` pins the two halves against each other.
+
+**§9 — a post-creation `ValueError` did not disclose the orphaned ADR.**
+`_cmd_promote` already caught `OSError` on the reasoning that a stranded record
+must be named, but `_seed_adr_from_entry` raises `ValueError` on a drifted ADR
+template and that fell through to the generic handler, reporting the bare
+section-missing text. Now wrapped to name the created ADR, whether it reached
+origin/main, and that its slug is spent.

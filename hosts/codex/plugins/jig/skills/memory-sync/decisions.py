@@ -710,6 +710,76 @@ def update_lightweight(project_dir: Path, title: str,
 # `lightweight-decisions.md` is touched.
 
 
+def _current_branch(project_dir: Path) -> Optional[str]:
+    """The project's current branch name, or None when detached / not a repo.
+
+    Deliberately a local `subprocess.run` rather than a reuse of `adr.py`'s
+    own `_current_branch`: this file stays self-contained by DoR (no
+    cross-tree import), and `promote`'s one carve-out is a SUBPROCESS at the
+    process boundary, not an import.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "--short", "HEAD"],
+            cwd=str(project_dir), capture_output=True, text=True)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _refuse_push_mode_off_main(project_dir: Path, no_push: bool) -> None:
+    """Refuse a push-mode `promote` from anywhere but `main`, BEFORE any ADR
+    is created.
+
+    `adr.py new` reserves push-mode ADR numbers differently depending on the
+    caller's branch. On `main` it writes, commits and pushes in the caller's
+    own tree, so the file is on disk for `_seed_adr_from_entry` to fill in.
+    Off `main` — jig's normal worktree-per-task mode — it builds the
+    reservation commit in an EPHEMERAL DETACHED worktree at origin/main and
+    pushes `HEAD:main`, so the ADR lands on the shared trunk and NEVER in the
+    caller's working copy (`adr.py`'s own `_print_draft_hint` says as much).
+    `promote` then has nothing local to seed or link to.
+
+    Left unguarded that is worse than a plain failure: the ADR is already
+    reserved and pushed to origin/main, and a re-run cannot recover because
+    the slug is now taken there (`adr.py` refuses with a slug collision). The
+    entry stays unpromoted with an orphaned stub ADR on shared main and no
+    self-service way forward.
+
+    So refuse up-front and name the working alternative. Checked BEFORE
+    `_run_adr_new`, which keeps `promote_lightweight`'s atomicity contract
+    honest: nothing is created, nothing is pushed, nothing needs cleaning up.
+    `--no-push` is unaffected — off `main` it routes to
+    `_reserve_local_on_current_branch`, which DOES write into the caller's
+    tree, and is the mode every documented `promote` example should prefer
+    from a feature branch.
+    """
+    if no_push:
+        return
+    branch = _current_branch(project_dir)
+    if branch == "main":
+        return
+    # `git symbolic-ref` also fails outside a repository, not just on a
+    # detached HEAD. Both are correctly NOT `main` and get the same advice, so
+    # they share a message rather than growing a second probe for a
+    # distinction that changes nothing about the remedy.
+    where = ("a detached HEAD (or a directory outside a git repository)"
+             if branch is None else "branch %r" % branch)
+    raise ValueError(
+        "promote from %s needs --no-push. In push mode `adr.py new` reserves "
+        "the ADR on origin/main from an ephemeral worktree, so the file never "
+        "lands in this working copy and there would be nothing to seed or "
+        "link — leaving a reserved ADR on the shared trunk that a re-run "
+        "cannot reuse (its slug is taken). Nothing was written.\n\n"
+        "Either:\n"
+        "  1. re-run with --no-push for a local ADR (the usual choice on a "
+        "feature branch — land it with the rest of your work); or\n"
+        "  2. promote from `main`, where the reservation lands in the tree."
+        % where)
+
+
 def _adr_py_path() -> Optional[Path]:
     """Locate the sibling adr-workflow skill's `adr.py`.
 
@@ -922,12 +992,22 @@ def _find_promoted_stub(file_text: str, title: str,
     instead of `_FIELD_RE`.
 
     Returns the `adr-NNNN-slug.md` filename the entry points to, or None.
+
+    Scoped exactly as `_real_entries` scopes itself — anchored on a real
+    `## Entries` HEADING LINE and bounded at the next H2 — and for the same
+    reasons. A plain substring `.find()` lets prose mentioning `## Entries`
+    move the section start; an unbounded tail lets a FOLLOWING section
+    (`## Archive`, `## Superseded` — the shape `_foreign_format_error`'s own
+    remedy 1 invites) supply the match. Either way an archived stub answers
+    for a live entry, and since `promote_lightweight` consults this FIRST, the
+    result is a false "already promoted" that refuses a legitimate promotion.
     """
-    idx = file_text.find(_ENTRIES_HEADING)
-    if idx == -1:
+    hm = _ENTRIES_HEADING_RE.search(file_text)
+    if hm is None:
         return None
-    body_start = idx + len(_ENTRIES_HEADING)
-    section = file_text[body_start:]
+    body_start = hm.end()
+    nm = _NEXT_H2_RE.search(file_text, body_start)
+    section = file_text[body_start:nm.start() if nm else len(file_text)]
     headings = list(_ENTRY_HEADING_RE.finditer(section))
     norm_title = _normalize(title)
     norm_date = _normalize(date) if date else None
@@ -1032,6 +1112,15 @@ def promote_lightweight(project_dir: Path, title: str,
             "copied machinery), then re-run `promote`."
             % Path(__file__).name)
 
+    # Last check before anything is created: a push-mode promote off `main`
+    # cannot work and would leave a reserved ADR on the shared trunk (see the
+    # helper). Deliberately AFTER the adr.py resolution above — a missing ADR
+    # helper is an install-integrity problem, and reporting "wrong branch for
+    # this mode" to someone who has no `adr.py` at all would send them after
+    # the wrong fix. Both still precede `_run_adr_new`, so the atomicity
+    # contract in this function's docstring holds either way.
+    _refuse_push_mode_off_main(project_dir, no_push)
+
     result = _run_adr_new(adr_py, final_slug, entry.title, project_dir,
                           no_push, pr_mode)
     if result.returncode != 0:
@@ -1063,10 +1152,26 @@ def promote_lightweight(project_dir: Path, title: str,
     adr_path = matches[-1]
 
     # From here on, adr.py has already succeeded — seed + stub are the only
-    # remaining steps, both against files that now exist.
-    _seed_adr_from_entry(adr_path, entry)
-    new_text = _replace_entry_with_stub(text, entry, adr_path)
-    path.write_text(new_text, encoding="utf-8")
+    # remaining steps, both against files that now exist. Any failure past
+    # this point leaves a created (and, in push mode, already-pushed) ADR
+    # behind, so it must SAY so: `_cmd_promote`'s bare ValueError message
+    # would otherwise report e.g. "ADR has no '## Context' section" with no
+    # hint that a record was orphaned. `_cmd_promote` catches OSError for the
+    # same reason; a drifted ADR template raises ValueError instead, and both
+    # need the same disclosure.
+    try:
+        _seed_adr_from_entry(adr_path, entry)
+        new_text = _replace_entry_with_stub(text, entry, adr_path)
+        path.write_text(new_text, encoding="utf-8")
+    except ValueError as exc:
+        raise ValueError(
+            "%s was created%s but could not be seeded, so %s was left "
+            "untouched: %s\nCheck %s before re-running — a re-run allocates a "
+            "new number, and this one's slug is already taken."
+            % (adr_path.name,
+               "" if no_push else " and reserved on origin/main",
+               _display_path(project_dir), exc,
+               project_layout.decisions_dir(project_dir))) from exc
     return adr_path
 
 

@@ -1848,6 +1848,195 @@ class PromoteDefaultPushModeTests(unittest.TestCase):
         self.assertIn("adr-0001-button-copy.md", out)
 
 
+class PromotePushModeOffMainTests(unittest.TestCase):
+    """Push-mode `promote` from anywhere but `main` refuses BEFORE creating
+    anything.
+
+    The defect this guards: `adr.py new` in push mode routes on the caller's
+    branch. On `main` it writes/commits/pushes in the caller's own tree, so
+    the ADR is on disk to seed. OFF `main` — jig's normal worktree-per-task
+    mode — it builds the reservation in an EPHEMERAL DETACHED worktree at
+    origin/main and pushes `HEAD:main`, so the ADR lands on the shared trunk
+    and never in the caller's copy. `promote` then found nothing to seed and
+    aborted AFTER the push, leaving an orphaned ADR on origin/main whose slug
+    a re-run could not reuse (`adr.py` refuses on slug collision) — no
+    self-service way forward.
+
+    `PromoteDefaultPushModeTests` above covers push mode but clones fresh, so
+    it runs on `main`; this class is the off-main half it could not see.
+
+    Deliberately fixtured with a REAL bare origin the branch can reach, rather
+    than reusing `_PromoteE2ETestCase`'s remote-less repo. Without a reachable
+    origin the unguarded code fails anyway — `adr.py` cannot build its
+    reservation worktree — and its refusal happens to quote `--no-push` too, so
+    a remote-less fixture lets these tests pass for the wrong reason. With a
+    live origin the unguarded path really does reserve, push, and only then
+    abort, which is the defect being pinned; `test_..._pushes_nothing_to_origin`
+    is what actually witnesses it.
+    """
+
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.origin = root / "origin.git"
+        self.project = root / "work"
+        env = {**os.environ, **_GIT_IDENTITY}
+        self._saved_env = {k: os.environ.get(k) for k in _GIT_IDENTITY}
+        os.environ.update(_GIT_IDENTITY)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main",
+                        str(self.origin)], env=env, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "clone", "-q", str(self.origin),
+                        str(self.project)], env=env, check=True,
+                       capture_output=True)
+        (self.project / "scaffold.json").write_text("{}\n", encoding="utf-8")
+        self.target = decisions.lightweight_path(self.project)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text(_PROMOTABLE_SEED, encoding="utf-8")
+        for argv in (["git", "add", "-A"],
+                     ["git", "commit", "-q", "-m", "seed"],
+                     ["git", "push", "-q", "origin", "main"],
+                     # The whole point: off `main`, on a real branch.
+                     ["git", "checkout", "-q", "-b", "work"]):
+            subprocess.run(argv, cwd=self.project, env=env, check=True,
+                           capture_output=True)
+
+    def tearDown(self):
+        for k, v in self._saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._tmp.cleanup()
+
+    def _origin_adrs(self):
+        out = subprocess.run(
+            ["git", "ls-tree", "--name-only", "-r", "main"],
+            cwd=self.origin, capture_output=True, text=True, check=True).stdout
+        return [line for line in out.splitlines() if "/adr-" in line]
+
+    def _text(self):
+        return self.target.read_text(encoding="utf-8")
+
+    def test_default_push_mode_off_main_refuses(self):
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(self.project, "Button copy")
+        msg = str(ctx.exception)
+        self.assertIn("needs --no-push", msg)
+        self.assertIn("'work'", msg)
+
+    def test_pr_mode_off_main_refuses(self):
+        """`--pr` off main fails the same way (`_pr_fallback_from_worktree`
+        pushes the reservation to a remote branch, equally out of tree), so the
+        guard covers both push shapes — anything but `--no-push`."""
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(
+                self.project, "Button copy", pr_mode=True)
+        self.assertIn("needs --no-push", str(ctx.exception))
+
+    def test_refusal_pushes_nothing_to_origin(self):
+        """The load-bearing assertion. Unguarded, this reserved and PUSHED
+        `adr-0001-button-copy.md` to origin/main and only then aborted,
+        stranding a record whose slug no re-run could reuse. An empty origin
+        is the proof the refusal happened first."""
+        self.assertEqual(self._origin_adrs(), [])
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "Button copy")
+        self.assertEqual(self._origin_adrs(), [])
+
+    def test_refusal_creates_no_local_adr_and_leaves_the_entry_untouched(self):
+        before = self._text()
+        with self.assertRaises(ValueError):
+            decisions.promote_lightweight(self.project, "Button copy")
+        self.assertEqual(self._text(), before)
+        self.assertEqual(
+            sorted(p.name for p in self.target.parent.glob("adr-*.md")), [])
+
+    def test_detached_head_refuses(self):
+        """A detached HEAD is not `main` either, and is exactly what jig's own
+        ephemeral-worktree machinery leaves a caller sitting on."""
+        subprocess.run(["git", "checkout", "-q", "--detach"],
+                       cwd=self.project, check=True, capture_output=True)
+        with self.assertRaises(ValueError) as ctx:
+            decisions.promote_lightweight(self.project, "Button copy")
+        self.assertIn("detached HEAD", str(ctx.exception))
+
+    def test_no_push_off_main_still_promotes(self):
+        """Control: the guard must not touch `--no-push`, which off main routes
+        to `_reserve_local_on_current_branch` and DOES write into the caller's
+        tree. Without this, the refusals above could pass by breaking promote
+        outright."""
+        adr_path = decisions.promote_lightweight(
+            self.project, "Button copy", no_push=True)
+        self.assertTrue(adr_path.is_file())
+        self.assertIn("**Promoted:**", self._text())
+        # Local-only: the reservation must not have reached the trunk.
+        self.assertEqual(self._origin_adrs(), [])
+
+
+class PromotedStubSectionBoundTests(unittest.TestCase):
+    """`_find_promoted_stub` is scoped exactly as `_real_entries` is.
+
+    `_real_entries` was bounded at the next H2 and anchored on a real
+    `## Entries` heading line; its sibling still used a bare substring
+    `.find()` with no bound, so a stub in a FOLLOWING section answered for a
+    live entry. Because `promote_lightweight` consults it FIRST, that surfaced
+    as a false "already promoted" refusing a legitimate promotion. The file
+    shape is the one `_foreign_format_error`'s remedy 1 invites: `## Entries`
+    added to an existing document whose own content stays below.
+    """
+
+    _WITH_ARCHIVE = """# Lightweight Decisions
+
+## Entries
+
+### 2026-07-01 — Button copy
+
+**Decision:** Use "Save" over "Submit".
+
+**Context:** User testing.
+
+**Scope:** Settings form.
+
+## Archive
+
+### 2024-01-01 — Button copy
+
+**Promoted:** moved to [ADR-0007: Old thing](adr-0007-old-thing.md).
+"""
+
+    def test_stub_in_a_following_section_is_not_found(self):
+        self.assertIsNone(
+            decisions._find_promoted_stub(self._WITH_ARCHIVE, "Button copy"))
+
+    def test_the_live_entry_is_still_the_addressable_one(self):
+        """Pins the two halves against each other: the same title resolves to
+        the live entry, so the archived stub shadows nothing."""
+        entries = decisions._real_entries(self._WITH_ARCHIVE)
+        self.assertEqual([(e.date, e.title) for e in entries],
+                         [("2026-07-01", "Button copy")])
+
+    def test_prose_mentioning_the_heading_does_not_move_the_section(self):
+        """The anchoring half: a passing mention of `## Entries` above the real
+        heading must not pull earlier content into scope."""
+        text = ("# Lightweight Decisions\n\nEntries live under the "
+                "`## Entries` heading below.\n\n" + _ALREADY_PROMOTED_SEED
+                .split("# Lightweight Decisions\n\n", 1)[1])
+        self.assertEqual(
+            decisions._find_promoted_stub(text, "Old decision"),
+            "adr-0007-old-decision.md")
+
+    def test_a_real_stub_inside_the_section_is_still_found(self):
+        """Control: narrowing the scan must not blind it to the case it
+        exists for (AC8's already-promoted refusal)."""
+        self.assertEqual(
+            decisions._find_promoted_stub(_ALREADY_PROMOTED_SEED,
+                                          "Old decision"),
+            "adr-0007-old-decision.md")
+
+
 class PromoteCliTests(_PromoteE2ETestCase):
     """CLI-level (`decisions.main(["promote", ...])`) smoke coverage."""
 
@@ -1931,6 +2120,68 @@ class PromoteAtomicityTests(unittest.TestCase):
             "--project-dir", str(self.project)])
         self.assertNotEqual(rc, 0)
         self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+
+class PromotePostCreationFailureDisclosureTests(_PromoteE2ETestCase):
+    """A failure AFTER `adr.py new` succeeded must name the orphaned ADR.
+
+    `_cmd_promote` already catches `OSError` for this, on the reasoning that a
+    traceback would leave the operator unaware a record was stranded. But
+    `_seed_adr_from_entry` raises `ValueError` on a drifted ADR template ("ADR
+    has no '## Context' section"), which fell to the generic `except
+    ValueError` and reported the bare section-missing text — no hint that an
+    ADR had been created, nor that its slug is now spent.
+
+    The seeder is stubbed to raise rather than shipping a deliberately-broken
+    ADR template: the behaviour under test is the WRAPPING, and the trigger it
+    wraps is template drift, which by definition cannot be reproduced from the
+    template this repo actually ships.
+    """
+
+    def _promote_with_failing_seeder(self):
+        original = decisions._seed_adr_from_entry
+
+        def boom(adr_path, entry):
+            raise ValueError("ADR has no '## Context' section")
+
+        decisions._seed_adr_from_entry = boom
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                decisions.promote_lightweight(
+                    self.project, "Button copy", no_push=True)
+            return str(ctx.exception)
+        finally:
+            decisions._seed_adr_from_entry = original
+
+    def test_message_names_the_created_adr_and_the_underlying_cause(self):
+        self._seed(_PROMOTABLE_SEED)
+        msg = self._promote_with_failing_seeder()
+        self.assertIn("adr-0001-button-copy.md", msg)
+        self.assertIn("was created", msg)
+        self.assertIn("'## Context'", msg)
+
+    def test_message_warns_the_slug_is_spent(self):
+        """The actionable half: a naive re-run allocates a NEW number and
+        collides on the slug, so the operator has to be told to look first."""
+        self._seed(_PROMOTABLE_SEED)
+        msg = self._promote_with_failing_seeder()
+        self.assertIn("slug is already taken", msg)
+
+    def test_the_entry_is_left_unstubbed(self):
+        """The ADR is orphaned, but the entry must still be promotable — the
+        stub write is downstream of the seed and never ran."""
+        self._seed(_PROMOTABLE_SEED)
+        before = self._text()
+        self._promote_with_failing_seeder()
+        self.assertEqual(self._text(), before)
+        self.assertNotIn("**Promoted:**", self._text())
+
+    def test_no_push_omits_the_origin_claim_from_the_message(self):
+        """`--no-push` reserved nothing on the trunk, so the message must not
+        claim it did — the operator's cleanup is local only."""
+        self._seed(_PROMOTABLE_SEED)
+        msg = self._promote_with_failing_seeder()
+        self.assertNotIn("origin/main", msg)
 
 
 # ---- 100-04: `lint` subcommand -----------------------------------------

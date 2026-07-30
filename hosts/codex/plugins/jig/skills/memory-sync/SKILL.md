@@ -146,11 +146,19 @@ time, then persist now.
    - **Clears the trigger** → promote it; do not revise it in place:
      ```bash
      python3 "${PLUGIN_ROOT}/skills/memory-sync/decisions.py" promote \
-       --title "<existing title>" [--slug "<adr-slug>"] [--no-push | --pr]
+       --title "<existing title>" --no-push [--slug "<adr-slug>"]
      ```
      This creates the ADR via `adr.py new`, seeds it from the entry's own
      fields, and leaves a forward-linking stub so old references still land on
      a record.
+
+     **`--no-push` is shown because you are almost always on a feature
+     branch.** Push mode reserves the ADR number on `origin/main` from an
+     ephemeral worktree, so the file never lands in your working copy and
+     there is nothing to seed — `promote` refuses up-front rather than
+     stranding a reserved ADR on the trunk. Drop `--no-push` (or use `--pr`)
+     only when promoting from `main` itself; the local ADR lands with the rest
+     of your branch's work.
    - **Still settled, local, and bounded** (one screen / component / string /
      asset, no *real* rejected alternatives) → revise it in place. Omitted
      fields keep their recorded values:
