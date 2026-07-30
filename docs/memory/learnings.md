@@ -689,3 +689,31 @@ green with either deleted, which no amount of "the tests pass" would have
 revealed. This compounds the [[mutation-testing-pycache-false-negative]] trap:
 a test that cannot fail is worse than a missing test, because the record then
 cites it as evidence.
+
+**`isatty()` answers "is this a terminal", never "is there input waiting"**
+(bug 017). `record-review` guarded a `sys.stdin.read()` fallback with
+`if not sys.stdin.isatty()`. That splits three real cases into two: a terminal
+(skip), a closed stdin (`""` immediately), and **an open pipe nobody ever
+closes — which blocks forever**. A human at a prompt is always the first case;
+an agent harness and most CI runners are always the third. So the failure
+appeared only where nobody was watching, and jig's whole suite could hang for
+13+ minutes on a ~100s run while the bug "never reproduced by hand". That
+signature is itself the tell: **a defect that only shows up when a human is not
+driving points at a terminal-shaped assumption.** The fix removed the branch
+rather than bounding it — `--summary-file -` is now the only route to stdin —
+because a timeout or a readiness poll would have kept behaviour forking on what
+stdin happens to be.
+
+Two corollaries worth keeping:
+
+- **Don't use one property as a proxy for another.** `isatty()` was standing in
+  for "input is available", which no syscall on a pipe can answer without
+  either blocking or racing. When the question can't be asked, make the caller
+  state the answer (an explicit flag) instead of guessing.
+- **The obvious regression test proves nothing here.**
+  `subprocess.run(stdin=subprocess.PIPE)` closes the write end immediately, so
+  the child sees EOF and exits — it passes against the *unfixed* code. Only
+  `os.pipe()` with the write end held open by the test reproduces it. One wrong
+  repro of exactly this shape briefly appeared to *disprove* the bug. Compare
+  [[mutation-testing-pycache-false-negative]]: when a test passes sooner than
+  expected, suspect the harness before believing the result.

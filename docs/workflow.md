@@ -299,8 +299,10 @@ enforced path is:
    (compliance / craft / arch) builds the reviewer prompt; Claude spawns
    the reviewer subagent.
 2. **Record the verdict** — `review.py record-review … --pass <pass>
-   --verdict pass|fail|needs-changes …` writes the artifact beside the
-   slice it grades.
+   --verdict pass|fail|needs-changes --summary-file <path> …` writes the
+   artifact beside the slice it grades. The freeform body is required:
+   pass a file, or `--summary-file -` to pipe it in. stdin is never read
+   implicitly (bug 017).
 3. **Run the gated transition** — `workflow.py transition <spec.md>
    <slice> REVIEWED`. The helper imports the same validator and **refuses**
    the move unless `compliance` + `craft` (+ `arch` when the slice

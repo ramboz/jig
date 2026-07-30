@@ -1298,24 +1298,55 @@ def _now_iso8601() -> str:
     )
 
 
-def _read_summary(args) -> str:
-    """Resolve the freeform verdict body from --summary-file or stdin.
+# `--summary-file -` is the explicit "read the body from stdin" request, the
+# usual Unix spelling. Nothing else in this helper touches stdin (bug 017).
+STDIN_SUMMARY_ARG = "-"
+
+
+def _read_summary(args, *, required: bool = True) -> str:
+    """Resolve the freeform verdict body from `--summary-file`.
 
     A verdict file's body mirrors the existing VERDICT/REASONING/SPECIFIC
     ISSUES/RECONCILIATION NOTES envelope (ADR-0014 §2). The recorder does
     not impose that shape — it stores whatever the reviewer flow produced
-    — so the body is accepted verbatim from a file or stdin.
+    — so the body is accepted verbatim.
+
+    Bug 017: this never reads stdin unless the caller asks for it with
+    `--summary-file -`. The old fallback read stdin whenever it was not a
+    terminal, using `isatty()` as a stand-in for "input is waiting" — a
+    property it does not report. Handed a pipe whose write end nobody closes
+    (an agent harness, most CI runners) that read blocked on an EOF that never
+    arrived, hanging the caller indefinitely. `isatty()` deliberately does not
+    appear here: behaviour that forks on whether stdin is a terminal is the
+    bug, not a guard against it.
+
+    `required=True` (the recording paths) refuses a run with no body — no
+    source given, or a source that resolves to whitespace — naming the option
+    to pass. A verdict whose body is blank is what the enforcement is for, so
+    it is refused as squarely as one with no `--summary-file` at all.
+    `required=False` (the code-health prompt builder) keeps its specified
+    graceful degrade when no summary is given.
     """
-    if args.summary_file:
+    if args.summary_file == STDIN_SUMMARY_ARG:
+        body = sys.stdin.read()
+    elif args.summary_file:
         p = Path(args.summary_file)
         if not p.is_file():
             raise ReviewError(f"summary file not found: {p}")
-        return p.read_text(encoding="utf-8")
-    # Fall back to stdin. An empty body is allowed (the frontmatter carries
-    # the machine-checkable verdict); the body is human context.
-    if not sys.stdin.isatty():
-        return sys.stdin.read()
-    return ""
+        body = p.read_text(encoding="utf-8")
+    elif required:
+        raise ReviewError(
+            "no verdict body: pass --summary-file PATH, or "
+            "--summary-file - to read the body from stdin"
+        )
+    else:
+        return ""
+    if required and not body.strip():
+        raise ReviewError(
+            "empty verdict body: a recorded review needs a body "
+            "(the VERDICT/REASONING envelope), not just frontmatter"
+        )
+    return body
 
 
 def _record_adr_review(args) -> int:
@@ -1344,7 +1375,7 @@ def _record_adr_review(args) -> int:
         out_path = _evidence.adr_evidence_path(decisions_dir, args.adr,
                                                args.pass_name)
         body = _read_summary(args)
-    except (ValueError, _evidence.EvidenceError) as exc:
+    except (ValueError, ReviewError, _evidence.EvidenceError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
 
@@ -1610,7 +1641,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # Slice 060-05: code-health pass — on-demand (gated by
     # `code_health_review: true`), mirrors `arch-review` plus a summary.
     # `health.py` is run by the spine; its tight summary is fed IN via
-    # --summary-file (or stdin) — the read-only reviewer never runs it.
+    # --summary-file PATH (or `--summary-file -` to pipe it) — the read-only
+    # reviewer never runs it. Unlike record-review, omitting it is allowed:
+    # the prompt degrades to a "no summary provided" note (spec 060-05 AC2).
     pch = sub.add_parser(
         "code-health",
         help="construct a code-health-pass prompt",
@@ -1620,7 +1653,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pch.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
     pch.add_argument(
         "--summary-file", dest="summary_file", default=None,
-        help="path to the health.py summary text (default: read stdin)",
+        help=("path to the health.py summary text; `-` reads stdin "
+              "(omitted: no summary, the prompt degrades gracefully)"),
     )
 
     # Slice 071-01: design-review pass — on-demand (gated by
@@ -1647,8 +1681,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "ADR-side frame-critique evidence), or — with --bug NNN — at "
             "docs/bugs/reviews/bug-NNN-<pass>.md. Re-recording the same target "
             "overwrites in place — git history is the audit trail (ADR-0014 "
-            "§4). The freeform summary body is read from --summary-file or "
-            "stdin."
+            "§4). The freeform summary body is required: pass "
+            "--summary-file PATH, or --summary-file - to read it from stdin. "
+            "stdin is never read implicitly (bug 017)."
         ),
     )
     # Slice 064-05: record-review takes EITHER a spec + slice pair (the
@@ -1695,7 +1730,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     prec.add_argument(
         "--summary-file", dest="summary_file", default=None,
-        help="path to the freeform verdict body (default: read stdin)",
+        help=("path to the freeform verdict body; `-` reads stdin. "
+              "Required — a verdict with no body is refused"),
     )
 
     # Slice 045-02: validate the evidence set for a slice at a stage.
@@ -1837,7 +1873,7 @@ def main(argv: list) -> int:
         elif ns.command == "frame-critique":
             prompt = build_frame_critique_prompt(spec, slice_label, ns.deliverables)
         elif ns.command == "code-health":
-            summary = _read_summary(ns)
+            summary = _read_summary(ns, required=False)
             prompt = build_code_health_review_prompt(
                 spec, slice_label, ns.deliverables, summary)
         else:
