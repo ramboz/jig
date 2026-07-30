@@ -1182,7 +1182,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     deviation log and reconciliation sweep are present). The gate is ON
     by default; bypass with `JIG_REVIEW_EVIDENCE_GATE=0`.
 
-    Slice 049-01, as amended by ADR-0043: the lifecycle splits two ways
+    Slice 049-01, as amended by ADR-0045: the lifecycle splits two ways
     for ownership. A transition into a WORKING state
     (`_CLAIM_WORKING_STATUSES` — READY_FOR_REVIEW / IN_PROGRESS /
     REVIEWED / RECONCILED) STAMPS a `claimed_by:` identifier (branch
@@ -1288,8 +1288,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         claim_identifier = _claim_identifier(claim_project_dir)
         foreign = bool(existing_claim and existing_claim != claim_identifier)
         # AC3: refuse a foreign claim that is already IN_PROGRESS on disk.
-        # ADR-0043 holds this refusal at its original width ON PURPOSE — note
-        # BOTH ends must be IN_PROGRESS, which is what the pre-ADR-0043 code
+        # ADR-0045 holds this refusal at its original width ON PURPOSE — note
+        # BOTH ends must be IN_PROGRESS, which is what the pre-ADR-0045 code
         # meant implicitly (it only ever reached here for an IN_PROGRESS
         # target). Two sessions BUILDING one slice stays a hard block; a
         # session moving a slice FORWARD out of IN_PROGRESS, or two sessions
@@ -1306,7 +1306,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                 f"    workflow.py transition <spec> {loc.label} "
                 f'READY_FOR_IMPLEMENTATION --release --reason "..."'
             )
-        # ADR-0043: any OTHER foreign claim is surfaced loudly and proceeds.
+        # ADR-0045: any OTHER foreign claim is surfaced loudly and proceeds.
         # This is the signal that did not exist before — walking into another
         # session's spec-level work used to be completely silent.
         #
@@ -1342,7 +1342,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # and refuses the same DONE / foreign-IN_PROGRESS collisions, so
         # running this guard too would double-fetch for no gain.
         #
-        # ADR-0043 widened the enclosing claim block to every working state, but
+        # ADR-0045 widened the enclosing claim block to every working state, but
         # this guard stays IN_PROGRESS-only: it is a START-of-building check,
         # and running it on every transition would put a `git fetch` on the hot
         # path of routine lifecycle moves.
@@ -1413,7 +1413,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
             "found in slice section"
         )
 
-    # Slice 049-01 + ADR-0043: claim bookkeeping in the slice frontmatter
+    # Slice 049-01 + ADR-0045: claim bookkeeping in the slice frontmatter
     # (no-op on legacy prose-only slices, which have no frontmatter to carry a
     # claim — stamping a field there would synthesize a spurious `---` block).
     #   - release           : clear claimed_by + append a ## Release log entry.
@@ -1445,7 +1445,7 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # BEFORE the local write, so a collision / race / unreachable-origin
         # refusal leaves the caller's slice file untouched.
         #
-        # ADR-0043 widened this to every working state: a session
+        # ADR-0045 widened this to every working state: a session
         # reconciling can now make its claim visible to parallel worktrees,
         # which was impossible while only IN_PROGRESS could be reserved.
         if (new_status in _CLAIM_WORKING_STATUSES and not release
@@ -1812,7 +1812,7 @@ def collect_slices(project_dir: Path) -> list:
     slice's frontmatter, so the marker is never stored separately.
     `claimed_by` (slice 049-02) is the slice's frontmatter `claimed_by:`
     value — the session working the slice, stamped by `transition` on entry
-    to a WORKING state (ADR-0043) and rendered as a suffix on those Status
+    to a WORKING state (ADR-0045) and rendered as a suffix on those Status
     cells.
 
     An empty `claimed_by` means NO CLAIM IS RECORDED — it is not proof the
@@ -1911,7 +1911,7 @@ CLAIM_DISPLAY_TRUNC = 27
 
 
 def _render_claim_suffix(claimed_by: str) -> str:
-    """Slice 049-02: ` (<claim>)` suffix for a WORKING-state Status cell (ADR-0043), or
+    """Slice 049-02: ` (<claim>)` suffix for a WORKING-state Status cell (ADR-0045), or
     "" when unclaimed. Truncates an over-long claim to keep the cell bounded
     (AC6)."""
     claim = (claimed_by or "").strip()
@@ -1943,7 +1943,7 @@ def render_status_table(rows: list, notes_map: dict | None = None) -> str:
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
         status_cell = f"**{status}**" if status == "DONE" else status
         # Slice 049-02: surface the owning worktree on the status cell.
-        # ADR-0043 widened this from IN_PROGRESS-only to every WORKING state —
+        # ADR-0045 widened this from IN_PROGRESS-only to every WORKING state —
         # while the board could only show an owner on IN_PROGRESS rows, it was
         # structurally unable to say "someone is reconciling this", which is
         # exactly the read that sent a second session onto a live slice
@@ -3793,7 +3793,7 @@ def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
 # slice file: it stamps `claimed_by:` on the origin/main copy so two
 # parallel worktrees cannot both pick up the same slice — and, for an
 # IN_PROGRESS target only, also flips `status: IN_PROGRESS` there so the
-# 051-04 start-collision guard can read it (ADR-0043). A single detached-worktree path serves
+# 051-04 start-collision guard can read it (ADR-0045). A single detached-worktree path serves
 # every branch (incl. a linked worktree that can't check out `main`),
 # since the claim edits an existing file rather than creating one. Per
 # ADR-0002's three-callers rule the push/race/PR-fallback shape stays
@@ -3801,7 +3801,7 @@ def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
 
 CLAIM_FIELD = "claimed_by"
 
-# ADR-0043 / bug 013 (issue #130): a claim marks "a session is working this
+# ADR-0045 / bug 013 (issue #130): a claim marks "a session is working this
 # slice right now" across the WORKING states — not just "who is
 # implementing". Spec 049 scoped the stamp to IN_PROGRESS and cleared it on
 # REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT, which left every spec-level
@@ -3872,7 +3872,7 @@ def _build_claim_pr_body(slice_label: str, identifier: str,
                          new_status: str = IN_PROGRESS_STATUS) -> str:
     """PR body for the protected-branch claim fallback.
 
-    ADR-0043: narrates what the commit actually does, which now depends on the
+    ADR-0045: narrates what the commit actually does, which now depends on the
     transition's target state — only an `IN_PROGRESS` reservation publishes
     `status:` to the trunk copy."""
     if new_status == IN_PROGRESS_STATUS:
@@ -3890,7 +3890,7 @@ def _build_claim_pr_body(slice_label: str, identifier: str,
         f"{change}"
         f"\n"
         f"Generated by `workflow.py transition ... {new_status}` "
-        f"(see spec 049-01 + ADR-0043 for rationale).\n"
+        f"(see spec 049-01 + ADR-0045 for rationale).\n"
     )
 
 
@@ -3956,7 +3956,7 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
     reported. (The decline warning above is not deduped — it carries materially
     different information: that nothing was pushed.)
 
-    ADR-0043 widened the caller to every working state, which makes
+    ADR-0045 widened the caller to every working state, which makes
     `new_status` load-bearing: the reservation writes `status:` to the trunk
     copy ONLY for `IN_PROGRESS`. That single write is deliberate and
     load-bearing — `_refuse_start_collision` reads exactly
@@ -3971,7 +3971,7 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
     `DRAFT --push` stamping `DRAFT` over a landed `REVIEWED` are the same
     defect. Worse, a fabricated trunk `IN_PROGRESS` would then hard-block
     every other worktree via `_refuse_start_collision` — the exact
-    false-refusal class ADR-0043 set out to avoid."""
+    false-refusal class ADR-0045 set out to avoid."""
     # ONE name, TWO invariants keyed off it: what the reservation writes
     # (trunk `status:` only for an IN_PROGRESS target) and what the trunk
     # hard-refusal gates on (both ends IN_PROGRESS). Named for the test it
@@ -4015,12 +4015,12 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
             f"origin/main before starting new work."
         )
     # BOTH ends must be IN_PROGRESS, exactly as on the local path.
-    # Pre-ADR-0043 this callee was only ever reached for an IN_PROGRESS target,
+    # Pre-ADR-0045 this callee was only ever reached for an IN_PROGRESS target,
     # so the refusal was structurally both-ends-IN_PROGRESS; widening the call
     # site to every working state made it reachable for `REVIEWED --push`
     # against a trunk copy the implementer is still building — which would have
     # refused a reviewer worktree recording a verdict, the precise false block
-    # ADR-0043 says it avoids. `target_is_in_progress` IS the target-is-IN_PROGRESS
+    # ADR-0045 says it avoids. `target_is_in_progress` IS the target-is-IN_PROGRESS
     # test. Anything else falls through to the warning below. Caught by the
     # bug-review + craft passes.
     if (target_is_in_progress and existing and existing != identifier
@@ -4032,13 +4032,13 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
             f"    workflow.py transition <spec> {slice_label} "
             f'READY_FOR_IMPLEMENTATION --release --reason "..."'
         )
-    # ADR-0043: never TRANSFER AN ENFORCED LOCK sideways. A trunk copy at
+    # ADR-0045: never TRANSFER AN ENFORCED LOCK sideways. A trunk copy at
     # `status: IN_PROGRESS` under a foreign claim is not merely informational —
     # `_refuse_start_collision` hard-blocks on exactly that pair. If a
     # claim-only reservation replaced the `claimed_by:` there while leaving the
     # status alone, the trunk would read "IN_PROGRESS, claimed by the reviewer",
     # and the ORIGINAL BUILDER's next `→ IN_PROGRESS` would be refused, naming
-    # someone else. That manufactures the false-block class ADR-0043 exists to
+    # someone else. That manufactures the false-block class ADR-0045 exists to
     # avoid — indirectly, by moving an enforced lock rather than by refusing.
     # So: warn, leave the trunk claim intact, and let the local transition
     # proceed. Caught by the round-4 bug-review pass.
@@ -4076,7 +4076,7 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
         )
         return
 
-    # ADR-0043: a foreign claim on the TRUNK copy outside IN_PROGRESS is newly
+    # ADR-0045: a foreign claim on the TRUNK copy outside IN_PROGRESS is newly
     # reachable — before the widening, a trunk claim could only ever coexist
     # with `status: IN_PROGRESS`, because that was the only reservation the code
     # could perform. It can now, and overwriting it silently would break this
@@ -4097,7 +4097,7 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
         )
 
     # Idempotent re-claim — already ours on origin/main; nothing to push. Keyed
-    # on what this reservation would actually WRITE (ADR-0043): for a
+    # on what this reservation would actually WRITE (ADR-0045): for a
     # non-IN_PROGRESS state we only publish the claim, so an identical claim is
     # already the whole desired trunk state regardless of the trunk's status.
     if existing == identifier and (
@@ -4269,7 +4269,7 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
 
     Raises `WorkflowError` (CLI exit 2) on a confirmed collision.
 
-    ADR-0043 also emits a NON-BLOCKING warning for a foreign trunk claim at a
+    ADR-0045 also emits a NON-BLOCKING warning for a foreign trunk claim at a
     working state other than IN_PROGRESS (someone reviewing or reconciling the
     slice). `already_warned` carries the identifier the caller's on-disk warning
     has just named, so a single transition never prints two near-identical
@@ -4310,7 +4310,7 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
             f"To override this guard, set {START_COLLISION_GATE_ENV}=0."
         )
 
-    # ADR-0043: a foreign trunk claim at a WORKING state other than IN_PROGRESS
+    # ADR-0045: a foreign trunk claim at a WORKING state other than IN_PROGRESS
     # (someone reviewing or reconciling the slice) warns but does not block —
     # this is the cross-worktree half of the widened claim, and without it the
     # reservation would publish a trunk field that nothing ever reads, making
@@ -4355,7 +4355,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pt.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pt.add_argument("status", help=f"new status; one of: {', '.join(VALID_STATUSES)}")
-    # Slice 049-01 + ADR-0043: slice-claim flags (meaningful on a transition
+    # Slice 049-01 + ADR-0045: slice-claim flags (meaningful on a transition
     # into a WORKING state, + --release — at a release point there is no claim
     # to reserve, so --push/--pr no-op there). The claim is local by default;
     # --push / --pr opt into reserving it on origin/main.

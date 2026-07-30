@@ -1,10 +1,10 @@
 ---
-adr: 0043
+adr: 0045
 pass: frame-critique
 verdict: pass
 reviewer: jig:reviewer
 reviewed_at: 2026-07-25T01:58:13Z
-prompt_source: review.py frame-critique docs/decisions/adr-0043-slice-claim-covers-active-lifecycle.md (round 8 of 8)
+prompt_source: review.py frame-critique docs/decisions/adr-0045-slice-claim-covers-active-lifecycle.md (round 8 of 8)
 ---
 
 Eight rounds of this pass ran against successive drafts of the ADR; this
