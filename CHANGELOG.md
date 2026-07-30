@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.9.0](https://github.com/ramboz/jig/compare/v2.8.0...v2.9.0) (2026-07-30)
+
+
+### Features
+
+* **decisions:** update / promote / advisory lint + update-time routing judgment ([#121](https://github.com/ramboz/jig/issues/121)) ([#137](https://github.com/ramboz/jig/issues/137)) ([5dea12c](https://github.com/ramboz/jig/commit/5dea12c3c0d6eb5322f42192f1ab33104471dad1))
+* **guardrails:** faithful-recording guardrails (spec 097, [#124](https://github.com/ramboz/jig/issues/124)) ([#135](https://github.com/ramboz/jig/issues/135)) ([83661b4](https://github.com/ramboz/jig/commit/83661b4a02bb4c0428089e582aaa98ad9e42f652))
+* **orient:** orientation reports work in flight (open PRs + unmerged branches) (spec 101-01) ([#122](https://github.com/ramboz/jig/issues/122)) ([f0a5be4](https://github.com/ramboz/jig/commit/f0a5be4e903e94691516fcf2b4cacb449216aad3))
+* **scaffold:** default to plugin mode, in-repo behind --in-repo ([#127](https://github.com/ramboz/jig/issues/127)) ([#136](https://github.com/ramboz/jig/issues/136)) ([a03f6c8](https://github.com/ramboz/jig/commit/a03f6c87a8dd3fe9aedf92f02cc1dc904d30a971))
+
+
+### Bug Fixes
+
+* **adr-workflow:** gate accept on classified status, not prose formatting ([#123](https://github.com/ramboz/jig/issues/123)) ([#139](https://github.com/ramboz/jig/issues/139)) ([1e9e7c5](https://github.com/ramboz/jig/commit/1e9e7c54e73ab43065dee56a2a67262bcc9fbee3))
+* **independent-review:** record-review never blocks on stdin (bug 017) ([#146](https://github.com/ramboz/jig/issues/146)) ([d38788a](https://github.com/ramboz/jig/commit/d38788a36ce8e7ad180b623b8eee0251a5928d72))
+* **migrate:** copy-machinery converts the project's mode, and names what it won't touch (bug 018) ([#145](https://github.com/ramboz/jig/issues/145)) ([dd0d350](https://github.com/ramboz/jig/commit/dd0d350a698c35f7abc549a3fbd309529f9a0eda))
+* **scaffold:** the Codex scaffolds no longer tell the user to open CLAUDE.md (bug 015) ([#143](https://github.com/ramboz/jig/issues/143)) ([00c3333](https://github.com/ramboz/jig/commit/00c3333f800bf9c468e94fa93242a011fd67820d))
+* **spec-workflow:** slice claims cover the working lifecycle, not IN_PROGRESS only ([#130](https://github.com/ramboz/jig/issues/130)) ([#138](https://github.com/ramboz/jig/issues/138)) ([bde9dfc](https://github.com/ramboz/jig/commit/bde9dfc9242bd3a4c21536b6ec4e145af603f153))
+
+
+### Documentation
+
+* **bugs:** file bug 017 — record-review blocks forever on stdin (suite hangs in CI/agents) ([#144](https://github.com/ramboz/jig/issues/144)) ([5e3a9eb](https://github.com/ramboz/jig/commit/5e3a9ebe4b17eb83c61c202c82dfa3b00aac9996))
+* **decisions:** reserve adr-0040-richer-skill-discovery-explicit-candidate-channel ([cd2f4db](https://github.com/ramboz/jig/commit/cd2f4dba78d6fffc5bad4310bcd5205ce9c89fc4))
+* **review:** richer-skill discovery for extensible review passes (ADR-0039 + spec 096) ([#141](https://github.com/ramboz/jig/issues/141)) ([a268e00](https://github.com/ramboz/jig/commit/a268e00bde4c188226d5b096e526437db8f46c4a))
+* **specs:** spec 098 + ADR-0044 lifecycle entry gate ([#111](https://github.com/ramboz/jig/issues/111)) ([#128](https://github.com/ramboz/jig/issues/128)) ([8a48085](https://github.com/ramboz/jig/commit/8a48085aecacde8e9c0175cb913f4fd048748f74))
+
 ## [2.8.0](https://github.com/ramboz/jig/compare/v2.7.1...v2.8.0) (2026-07-21)
 
 
