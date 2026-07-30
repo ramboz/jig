@@ -952,7 +952,8 @@ def _gate_frame_critique(adrs_dir: Path, adr_path: Path, number: str) -> None:
             f"it: build the prompt via `review.py frame-critique "
             f"docs/decisions/{adr_path.name}`, run a reviewer, then `review.py "
             f"record-review --adr {num} --pass frame-critique --verdict pass "
-            f"--reviewer <who> --prompt-source <cmd>`. Bypass with "
+            f"--reviewer <who> --prompt-source <cmd> --summary-file <path>`. "
+            f"Bypass with "
             f"JIG_REVIEW_EVIDENCE_GATE=0 (deliberateness signal, ADR-0011)."
         )
 

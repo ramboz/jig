@@ -403,7 +403,7 @@ The orchestrator runs the passes in this order:
    `workflow.py code-health-review-needed`. When it prints `true`, **run
    `health.py` yourself** (the orchestrator / CI), capture its tight
    summary, and feed THAT summary into `review.py code-health … --summary-file`
-   (or via stdin). Then spawn a `reviewer`-shaped subagent. **The reviewer
+   (`--summary-file -` to pipe it in). Then spawn a `reviewer`-shaped subagent. **The reviewer
    is read-only (Read/Glob/Grep, no Bash) — it must NOT run `health.py`;
    it judges the summary you provide.** The reviewer renders the judgment a
    tool can't: is duplication within the [ADR-0002](../../docs/decisions/adr-0002-extract-helper-on-third-caller.md)

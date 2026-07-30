@@ -137,3 +137,19 @@ new plumbing).
 (code-staleness gating, soft Stop-hook nudge, CI consumption) were recorded in
 `docs/refinement-todo.md` by slice 045-01; nothing in this slice added a new
 one.
+
+## Amendments
+
+- **2026-07-30 — bug 017: the verdict body is no longer optional.** This slice
+  logged, as shipped behaviour, that "an empty body and a one-newline body
+  serialize byte-identically (body is optional)". `record-review` now refuses
+  both: a missing `--summary-file`, and a source that resolves to whitespace,
+  each exit 2. The body is required on all three targets (slice, `--adr`,
+  `--bug`). See [bug 017](../../bugs/017-record-review-blocks-on-stdin.md).
+
+  The optional body was not itself the defect — the stdin fallback that made it
+  reachable was, and it hung any caller handed a pipe nobody closes. Requiring
+  the body is the direction the maintainer chose on
+  [#144](https://github.com/ramboz/jig/pull/144) once that fallback had to go:
+  a recorded review with no reasoning is evidence in name only. Frontmatter
+  serialization is unchanged; only the refusal is new.

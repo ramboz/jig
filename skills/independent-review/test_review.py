@@ -51,7 +51,7 @@ def write_synthetic_spec(path: Path, slice_name: str, status: str = "IN_PROGRESS
 # no-lexical-marker-gates note). Always matched against `normalize_ws()` output
 # so line-wrapping in the source prompt block can't make the assertion vacuous.
 #
-# In slice 096-01 four tests were found to pass with the feature removed, and
+# In slice 101-01 four tests were found to pass with the feature removed, and
 # the reconciliation reviewer caught the last one essentially by asking this
 # question. Making it an explicit prompt line front-loads the catch onto the
 # always-on compliance and craft passes instead of a late round.
@@ -387,6 +387,11 @@ class BugReviewEvidenceRecorderTests(unittest.TestCase):
         self.bug.write_text(
             "---\nstatus: FIXING\nsecurity_surface: false\n---\n\n# Bug\n"
         )
+        # Bug 017: this fixture is the one that hung the whole suite — it
+        # inherited the runner's stdin and record-review read it. Pass the
+        # body explicitly, so the fixture never depends on stdin at all.
+        self.summary = self.tmpdir / "summary.md"
+        self.summary.write_text("## VERDICT\npass\n")
 
     def tearDown(self):
         import shutil
@@ -399,6 +404,7 @@ class BugReviewEvidenceRecorderTests(unittest.TestCase):
             "--verdict", "pass",
             "--reviewer", "reviewer",
             "--prompt-source", "review.py bug-review docs/bugs/001-cache-race.md",
+            "--summary-file", str(self.summary),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         evidence = self.tmpdir / "docs" / "bugs" / "reviews" / "bug-001-bug-review.md"
@@ -1628,7 +1634,8 @@ class FrameCritiqueEvidenceRoundTripTests(unittest.TestCase):
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", "frame-critique",
              "--verdict", verdict, "--reviewer", "jig:reviewer",
-             "--prompt-source", "review.py frame-critique x"],
+             "--prompt-source", "review.py frame-critique x",
+             "--summary-file", "-"],
             input="## VERDICT\n" + verdict + "\n", capture_output=True,
             text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -1829,7 +1836,8 @@ class DesignReviewEvidenceRoundTripTests(unittest.TestCase):
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", pass_name,
              "--verdict", verdict, "--reviewer", "jig:reviewer",
-             "--prompt-source", "review.py design-review x"],
+             "--prompt-source", "review.py design-review x",
+             "--summary-file", "-"],
             input="## VERDICT\n" + verdict + "\n", capture_output=True,
             text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -2012,12 +2020,16 @@ class CodeHealthPromptTests(unittest.TestCase):
             "code-health prompt must not re-evaluate ACs",
         )
 
-    def test_summary_read_from_stdin_when_no_file(self):
+    def test_summary_read_from_stdin_when_requested(self):
+        # Bug 017 amendment to slice 060-05: stdin injection still works, but
+        # it must be asked for with `--summary-file -`. The old implicit
+        # fallback read stdin whenever it was not a terminal, which blocked
+        # forever on a pipe nobody closed.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         result = subprocess.run(
             [sys.executable, str(REVIEW), "code-health", str(self.spec),
-             "060-05", "skills/foo/foo.py"],
+             "060-05", "skills/foo/foo.py", "--summary-file", "-"],
             input="STDIN-SUMMARY-SENTINEL\n",
             capture_output=True, text=True, env=env,
         )
@@ -2041,9 +2053,10 @@ class CodeHealthPromptTests(unittest.TestCase):
         self.assertIn("not found", result.stderr.lower())
 
     def test_empty_summary_degrades_gracefully(self):
-        # AC2 graceful-degrade: no summary provided (empty stdin) → the prompt
-        # still builds (exit 0) and tells the reviewer to judge on the
-        # deliverables, rather than emitting an empty/blank summary block.
+        # AC2 graceful-degrade: no summary provided (no --summary-file at all;
+        # stdin is not consulted since bug 017) → the prompt still builds
+        # (exit 0) and tells the reviewer to judge on the deliverables, rather
+        # than emitting an empty/blank summary block.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         result = subprocess.run(
@@ -2595,7 +2608,8 @@ class RecordReviewTests(unittest.TestCase):
 
     def _record(self, *args, summary="## VERDICT\npass\n\n## REASONING\nok.\n"):
         return subprocess.run(
-            [sys.executable, str(REVIEW), "record-review", *args],
+            [sys.executable, str(REVIEW), "record-review", *args,
+             "--summary-file", "-"],
             input=summary, capture_output=True, text=True,
             env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -2763,7 +2777,7 @@ class CheckReviewsTests(unittest.TestCase):
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", pass_name,
              "--verdict", verdict, "--reviewer", "jig:reviewer",
-             "--prompt-source", "x"],
+             "--prompt-source", "x", "--summary-file", "-"],
             input=summary, capture_output=True, text=True,
             env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -3082,7 +3096,8 @@ class RecordReviewAdrModeTests(unittest.TestCase):
 
     def _record(self, *args, summary="## VERDICT\npass\n"):
         return subprocess.run(
-            [sys.executable, str(REVIEW), "record-review", *args],
+            [sys.executable, str(REVIEW), "record-review", *args,
+             "--summary-file", "-"],
             input=summary, capture_output=True, text=True, cwd=str(self.tmp),
             env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -3123,6 +3138,121 @@ class RecordReviewAdrModeTests(unittest.TestCase):
         r = self._record("--pass", "frame-critique", "--verdict", "pass",
                          "--reviewer", "x", "--prompt-source", "x")
         self.assertEqual(r.returncode, 2, f"stdout: {r.stdout}")
+
+
+class Bug017RecordReviewStdinTests(unittest.TestCase):
+    """Bug 017: `record-review` must never block waiting on stdin.
+
+    The old fallback guarded `sys.stdin.read()` with `not sys.stdin.isatty()`.
+    `isatty()` answers "is this a terminal", never "is there input waiting", so
+    a pipe whose write end is still open passes the guard and the read blocks
+    until an EOF that never arrives. A human at a prompt never hits it; an
+    agent harness or CI runner always does — which is why jig's whole suite
+    could hang while the bug never reproduced by hand.
+
+    The teeth are in the pipe shape. `subprocess.run(stdin=subprocess.PIPE)`
+    closes the write end immediately, the child sees EOF and exits, so a test
+    written that way passes against the unfixed helper and proves nothing.
+    Only a pipe whose write end the *test* holds open reproduces the hang.
+    """
+
+    # Generous: the assertion is termination-vs-hang, not latency. The
+    # unfixed helper never returns, so no bound is too short to catch it.
+    TIMEOUT = 15
+
+    ARGS = (
+        "record-review", "--adr", "0001", "--pass", "frame-critique",
+        "--verdict", "pass", "--reviewer", "r", "--prompt-source", "p",
+    )
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-bug017-"))
+        (self.tmp / "docs" / "decisions").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _env(self):
+        return {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+
+    def _evidence_file(self):
+        return (self.tmp / "docs" / "decisions" / "reviews"
+                / "adr-0001-frame-critique.md")
+
+    def test_terminates_when_stdin_is_a_pipe_nobody_closes(self):
+        read_fd, write_fd = os.pipe()
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, str(REVIEW), *self.ARGS],
+                stdin=read_fd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, cwd=str(self.tmp), env=self._env(),
+            )
+            os.close(read_fd)
+            read_fd = -1
+            try:
+                proc.communicate(timeout=self.TIMEOUT)
+                # Terminating by crashing would also clear the timeout, so
+                # pin the exit code: this is the refusal, not a traceback.
+                self.assertEqual(proc.returncode, 2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                self.fail(
+                    "record-review did not terminate within "
+                    f"{self.TIMEOUT}s with stdin a pipe whose write end is "
+                    "still open — it is blocked on sys.stdin.read()"
+                )
+        finally:
+            if read_fd != -1:
+                os.close(read_fd)
+            os.close(write_fd)
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+
+    def test_missing_body_errors_and_names_the_option(self):
+        # Non-interactive with no body source at all: fail fast and say what
+        # to pass, rather than recording a verdict with an empty body.
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), *self.ARGS],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            cwd=str(self.tmp), env=self._env(),
+        )
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("--summary-file", result.stderr)
+        self.assertNotIn("traceback", result.stderr.lower())
+        self.assertFalse(
+            self._evidence_file().exists(),
+            "a refused record-review must not leave a verdict file behind",
+        )
+
+    def test_blank_body_is_refused_like_a_missing_one(self):
+        # The enforcement is on the *body*, not on having typed the option:
+        # a file (or a pipe) that resolves to whitespace is the verdict with
+        # no body that the rule exists to refuse.
+        blank = self.tmp / "blank.md"
+        blank.write_text("\n   \n")
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), *self.ARGS,
+             "--summary-file", str(blank)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            cwd=str(self.tmp), env=self._env(),
+        )
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("empty verdict body", result.stderr)
+        self.assertFalse(self._evidence_file().exists())
+
+    def test_explicit_dash_reads_the_body_from_stdin(self):
+        # Piping a body stays supported — it just has to be asked for, so the
+        # read is the caller's choice and never an implicit gamble on stdin.
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), *self.ARGS, "--summary-file", "-"],
+            input="PIPED-BODY-SENTINEL\n", capture_output=True, text=True,
+            cwd=str(self.tmp), env=self._env(),
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("PIPED-BODY-SENTINEL", self._evidence_file().read_text())
 
 
 if __name__ == "__main__":

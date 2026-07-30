@@ -311,6 +311,7 @@
 | [100-decision-routing-enforcement](100-decision-routing-enforcement/spec.md) | 100-02 — update-subcommand | **DONE** | Gives revision a code path at all (was hand-edit-only). `_real_entries`/`_find_entry` = the "real entry" notion, narrower than `_existing_keys`: excludes the illustrative example (structural `> _Illustrative only` marker, not a hardcoded title) + the `## Template` fence. **Section is bounded at the next `## `** — without that the last entry swallowed, then DELETED, any following section. |
 | [100-decision-routing-enforcement](100-decision-routing-enforcement/spec.md) | 100-03 — promote-subcommand | **DONE** | Entry → ADR via `adr.py new` **by subprocess, never import** (tier-0 self-containment; subprocess is the documented carve-out). Resolves the created ADR **by slug/filename, never by stdout position** — positional parsing broke every push mode *after* the ADR was pushed. Atomic by ordering: everything that can fail runs before the single write. |
 | [100-decision-routing-enforcement](100-decision-routing-enforcement/spec.md) | 100-04 — lint-subcommand | **DONE** | The ONLY home for the lexical evaluator (ADR-0042): advisory, report-only, never gates or edits. `BOUNDARY` markers must stay **qualified phrases** — it flags with no second signal, so one bare word (`protocol`, `schema`) condemns a whole class. Honest risk is false NEGATIVES, not noise. |
+| [101-orient-sees-work-in-flight](101-orient-sees-work-in-flight/spec.md) | 101-01 — orientation reports work in flight | **DONE** |  |
 
 ## Deferred slices
 
