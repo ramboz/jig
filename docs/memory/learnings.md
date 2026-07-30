@@ -690,6 +690,35 @@ revealed. This compounds the [[mutation-testing-pycache-false-negative]] trap:
 a test that cannot fail is worse than a missing test, because the record then
 cites it as evidence.
 
+**A cross-host transform is only ever tested by the non-default host**
+(bug 015). `brief.md` and the seed spec were rendered through paths that never
+received the Claude→Codex host transform, so a Codex project's two
+first-read documents told the user to open `CLAUDE.md` — a file only Claude
+projects have. Both paths were added over time and each simply forgot the hook;
+`_emit_seed_spec` even built its own *narrower* transform, which reads as
+deliberate and is easy to approve in review. Nothing caught it because the
+Claude host is the identity case: on the host every contributor runs,
+untransformed text is already correct. Host-parity assertions have to be
+written on purpose — they will never fall out of ordinary development.
+
+Two corollaries from the same bug, both cheap and both general:
+
+- **A docstring that reassures on a neighbouring axis suppresses the question
+  you needed asked.** `_emit_seed_spec` promised its templates "never leak
+  `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths" — true, and about *paths*.
+  Anyone checking whether the seed needed the host transform found an
+  authoritative-sounding "this is fine" that did not cover *vocabulary*.
+  Reassurance should name its axis.
+- **When a fix reuses an existing hook, check what else flows through that
+  hook.** The obvious fix here (`post_render=doc_rewrite`) resolves the symptom
+  and corrupts user data: `copy_template` substitutes *before* post-rendering,
+  and the Codex transform does a blanket `Claude` → `Codex` replace, so a
+  project directory named `Claude-Tools` is emitted as `Codex-Tools`. That is a
+  live, separate defect on the primer path ([[jig-bug-016]] — filed, not fixed);
+  the 015 fix avoided inheriting it by adding a `pre_render` hook that runs
+  before substitution. A guard test pins it, proven by a single-variable
+  variant: switching only the brief back to post-substitution turns it red.
+
 **`isatty()` answers "is this a terminal", never "is there input waiting"**
 (bug 017). `record-review` guarded a `sys.stdin.read()` fallback with
 `if not sys.stdin.isatty()`. That splits three real cases into two: a terminal
