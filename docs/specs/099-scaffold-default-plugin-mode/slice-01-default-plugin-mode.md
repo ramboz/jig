@@ -443,6 +443,53 @@ mode. §15 fixed "advice that does not run"; this is the residual "advice that
 runs but leaves the project inconsistent". It needs its own record, not a
 widening of this slice.
 
+**17. Round 8 — the fix for the understated security artifact created an
+overstated one on the other host.**
+
+§16 corrected `SKILL.md`'s Output section, which had omitted the
+`settings.json` carrying the ADR-0013 deny floor. That correction named the
+host: *"Claude host only; Codex has no equivalent project-scoped permission
+surface."*
+
+`SKILL.md` bodies are **machine-translated per host**. `_rewrite_host_paths`
+replaces `Claude` → `Codex` and `.claude/` → `.codex/` wholesale, so the shipped
+Codex contract read:
+
+> `.codex/settings.json` — permissions only: the ADR-0013 destructive-command
+> deny floor … **Codex host only; Codex has no equivalent project-scoped
+> permission surface.**
+
+Self-contradictory, and worse than the bug it replaced: it *promises* a Codex
+project the destructive-command floor that `scaffold()` never writes there
+(`_write_permissions_deny_floor` is gated `host == "claude"`). The same sentence
+also mis-stated the in-repo side — Codex registers hooks in `.codex/hooks.json`,
+not a settings file. Both compliance and craft caught it independently, in the
+artifact the host loads every session.
+
+**The rule this makes concrete:** in a machine-translated body, a host named
+inside a *conditional* does not merely leak — it **inverts**. `docs/conventions.md`
+already required host-neutrality; this is the first case where breaking it
+produced a false *factual* claim rather than a stylistic wart, and a
+security-shaped one. Fixed by removing host names *and* host-specific paths from
+the conditional: the bullet now says "a project-scoped permissions file, on
+hosts that provide one", points at `scaffold.json` for what a given project
+actually got, and carries a note explaining why it is worded that way — so the
+next editor does not "improve" it by naming the host again.
+
+**The fixture gap that let it ship**, which is the more useful lesson:
+`test_skill_md_documents_the_machinery_axis` asserted against the **source**
+`SKILL.md`, where the sentence read fine. Nothing asserted the *rendered* text.
+Added `test_skill_md_output_survives_the_codex_translation`, pinned against the
+**shipped** `hosts/codex/.../SKILL.md` rather than a re-render, so it also fails
+if the host build goes stale. Verified to have teeth: restoring the wording that
+shipped turns it red. **Where source is transformed before shipping, a test on
+the source is not a test of the contract.**
+
+Two nits folded in: `--plugin-only`'s `--help` still described the pre-OQ1 path
+(docs + primer only), and `_write_permissions_deny_floor` had grown a
+byte-identical read/parse/raise block — including the error string — alongside
+`_check_hooks_safety`; both now share `_read_settings_json`.
+
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |

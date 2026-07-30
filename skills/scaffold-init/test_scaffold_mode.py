@@ -1596,12 +1596,37 @@ class DefaultPluginModeTests(unittest.TestCase):
         skill = (REPO_ROOT / "skills" / "scaffold-init" / "SKILL.md").read_text()
         # The sixth Q&A question exists and names the opt-in flag.
         self.assertIn("--in-repo", skill)
-        # Output must not understate the default path: settings.json IS written,
-        # and the reason it is not "machinery" must be stated.
-        self.assertIn(".claude/settings.json", skill)
+        # Output must not understate the default path: a permissions floor IS
+        # seeded, and the reason it is not "machinery" must be stated.
         self.assertIn("permissions", skill.lower())
+        self.assertIn("deny floor", skill)
         # And it must not claim the old default.
         self.assertNotIn("in-repo (the default)", skill)
+
+    def test_skill_md_output_survives_the_codex_translation(self):
+        """The Output section is machine-translated per host, so a host named
+        inside a conditional **inverts**.
+
+        This shipped once: "Claude host only; Codex has no equivalent
+        project-scoped permission surface" rendered as "**Codex** host only;
+        Codex has no equivalent…" — self-contradictory, and it promised a Codex
+        project the ADR-0013 destructive-command floor that `scaffold()` never
+        writes there (`_write_permissions_deny_floor` is gated on
+        `host == "claude"`). An understated security artifact was the bug this
+        section was fixed for; overstating one on the other host is worse.
+
+        Pinned against the RENDERED text, because the source read fine — that is
+        precisely why the source-only assertion above did not catch it."""
+        rendered = (REPO_ROOT / "hosts" / "codex" / "plugins" / "jig"
+                    / "skills" / "scaffold-init" / "SKILL.md").read_text()
+        # The scaffold never writes a Codex settings.json in either mode, so the
+        # shipped Codex contract must not name one.
+        self.assertNotIn(".codex/settings.json", rendered)
+        # And the host-conditional must not have inverted into nonsense.
+        self.assertNotIn("Codex host only", rendered)
+        # Asserting the SHIPPED package, not a re-render, so this also fails if
+        # the host build goes stale.
+        self.assertIn("deny floor", rendered)
 
     def test_default_summary_names_plugin_mode(self):
         """AC #3 — the wizard summary names the chosen (plugin) mode and why."""

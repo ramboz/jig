@@ -1813,6 +1813,23 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     return merged
 
 
+def _read_settings_json(settings_path: Path) -> dict:
+    """Parse `settings.json` if present, else `{}`. Raises on invalid JSON
+    rather than silently overwriting a user's file.
+
+    One home for the message: `_write_permissions_deny_floor` and
+    `_check_hooks_safety` both need this, and a duplicated error string drifts
+    silently."""
+    if not settings_path.is_file():
+        return {}
+    try:
+        return json.loads(settings_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"{settings_path} exists but is not valid JSON: {exc}"
+        ) from exc
+
+
 def _write_permissions_deny_floor(target: Path) -> None:
     """Slice 099-01 (ADR-0041 OQ1) — seed the `permissions.deny` security floor
     on the **plugin-mode** path.
@@ -1843,14 +1860,7 @@ def _write_permissions_deny_floor(target: Path) -> None:
     An existing `settings.json` that is not valid JSON still raises, rather
     than being silently overwritten."""
     settings_path = target / ".claude" / "settings.json"
-    existing: dict = {}
-    if settings_path.is_file():
-        try:
-            existing = json.loads(settings_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"{settings_path} exists but is not valid JSON: {exc}"
-            ) from exc
+    existing = _read_settings_json(settings_path)
     merged = dict(existing)
     merged["permissions"] = _merge_permissions_deny(merged.get("permissions"))
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1869,15 +1879,9 @@ def _check_hooks_safety(target: Path, *, force: bool = False) -> dict:
     Raises `RuntimeError` if settings.json exists but is invalid JSON.
     """
     settings_path = target / ".claude" / "settings.json"
-    existing: dict = {}
-    if not settings_path.is_file():
+    existing = _read_settings_json(settings_path)
+    if not existing:
         return existing
-    try:
-        existing = json.loads(settings_path.read_text())
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"{settings_path} exists but is not valid JSON: {exc}"
-        ) from exc
     existing_hooks = existing.get("hooks") or {}
     has_any_hook = any(
         (entries or []) for entries in existing_hooks.values()
@@ -2911,10 +2915,11 @@ def _build_parser() -> argparse.ArgumentParser:
     machinery.add_argument(
         "--plugin-only", dest="with_machinery",
         action="store_false",
-        help="explicitly select the default plugin mode: scaffold only docs/ "
-             "and the host primer; leave skills/ and agents/ under the installed "
-             "plugin runtime. Redundant with the default (kept for clarity and "
-             "back-compat).",
+        help="explicitly select the default plugin mode: scaffold docs/, the "
+             "host primer, the .gitignore secret floor, and (where the host has "
+             "a project-scoped permission surface) the permissions.deny floor; "
+             "leave skills/ and agents/ under the installed plugin runtime. "
+             "Redundant with the default (kept for clarity and back-compat).",
     )
     p.add_argument("--runtime", default=None,
                    help="runtime/language answer from the Q&A wizard "

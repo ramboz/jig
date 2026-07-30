@@ -99,24 +99,29 @@ After running, the target directory contains (plugin mode — the default):
 - `CLAUDE.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
 - `.claude/hooks/` (empty — project-specific gates can go here)
-- `.claude/settings.json` — **permissions only**: the ADR-0013 destructive-command
-  deny floor (`git push --force`, `git reset --hard`, `rm -rf`). Claude host only;
-  Codex has no equivalent project-scoped permission surface.
+- a **project-scoped permissions file**, on hosts that provide one — seeded with
+  the ADR-0013 destructive-command deny floor (`git push --force`,
+  `git reset --hard`, `rm -rf`). Hosts with no project-scoped permission surface
+  get no such file and no deny floor.
 - `.gitignore` (secret-ignore floor)
 - `scaffold.json` (install-state manifest; `scaffold_mode: "plugin-only"`)
 
+> This section is host-neutral **on purpose**: it is machine-translated per
+> host, so naming a host inside a conditional inverts its meaning. Check
+> `scaffold.json` for what your project actually received.
+
 In plugin mode jig's skills, agents, and hooks stay under the installed plugin
-and run from `${CLAUDE_PLUGIN_ROOT}` — no *machinery* is copied into the repo.
-The one exception is that `settings.json` line: `permissions.deny` lives in the
+and run from the plugin root — no *machinery* is copied into the repo. The one
+exception is the permissions file above: `permissions.deny` lives in the
 project's own settings and no plugin mechanism can inject it, so the scaffold
-writes it in both modes (ADR-0041 OQ1). It carries **no** `hooks` block.
+writes it in both modes wherever the host supports it (ADR-0041 OQ1). It
+carries **no** hook registrations.
 The wizard's stdout summary states the mode and why.
 
-With `--in-repo`, the target additionally gets a self-contained
-`.claude/skills/`, `.claude/agents/`, `.claude/hooks/scripts/`,
-`.claude/templates/`, and a `.claude/settings.json` that *also* registers the
-jig hooks (`scaffold_mode: "in-repo"`). Choose it only for CI, cloud agents, or
-teammates without jig installed.
+With `--in-repo`, the target additionally gets a self-contained copy of jig's
+skills, agents, hook scripts, and templates under the host's runtime directory,
+plus the host's own hook-registration file (`scaffold_mode: "in-repo"`). Choose
+it only for CI, cloud agents, or teammates without jig installed.
 
 Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 `docs/memory/people.md` is NOT created (solo-project default — team detection is slice 001-03).
