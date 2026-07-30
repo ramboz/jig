@@ -30,7 +30,7 @@
 - [ADR-0023: The lifecycle-family spine — shared contract and convergence rule for gated-evidence workflows](adr-0023-lifecycle-family-spine.md) — jig has organically grown a **family of work-shaped lifecycles**, each recorded in its own ADR, each independently re-de… (2026-06-09, Proposed)
 - [ADR-0024: Reframe on a load-bearing reference shift — a lightweight correction capability over the spine](adr-0024-reference-reframe.md) — jig is built to keep work **consistent with prior decisions**. (2026-07-02, Accepted)
 - [ADR-0025: Use cases as a first-class breadth layer](adr-0025-use-cases-breadth-layer.md) — jig's artifact stack runs **vision → spec → slice**. (2026-06-10, Accepted)
-- [ADR-0026: Frontmatter is the canonical home for ADR status](adr-0026-adr-status-frontmatter.md) — ADR status lives only in prose; slice status lives in frontmatter. (2026-06-15, Accepted)
+- [ADR-0026: Frontmatter is the canonical home for ADR status](adr-0026-adr-status-frontmatter.md) — ADR status lives only in prose; slice status lives in frontmatter. (2026-07-29, Superseded)
 - [ADR-0027: Host-native phase modes are advisory workflow affordances](adr-0027-host-native-phase-modes.md) — Jig already has a durable workflow model: specs, slices, review evidence, state transitions, deviation logs, and ADRs. (2026-06-21, Accepted)
 - [ADR-0028: Federation supports two topologies (hub-and-referenced first) and composes with existing repo operating models](adr-0028-federation-workspace-provider-model.md) — Federation must compose with mature multi-repo operating models instead of replacing them, and it must not assume every participating repo is a scaffolded jig citizen. (2026-07-08, Accepted)
 - [ADR-0029: Reconciliation sweep manifest](adr-0029-reconciliation-sweep-manifest.md) — Reconciliation is already the right phase for documentation cleanup: it runs after implementation and review, when the agent knows what actually changed. (2026-06-21, Accepted)
@@ -46,6 +46,7 @@
 - [ADR-0039: Host-portable richer-skill discovery for extensible review passes](adr-0039-richer-skill-discovery.md) — jig ships **shallow baselines** for several review/judgment skills and is meant to **defer to a richer skill the user has installed** when one is present. (2026-07-27, Accepted)
 - [ADR-0040: Explicit candidate channel for richer-skill discovery](adr-0040-richer-skill-discovery-explicit-candidate-channel.md) — _TODO: describe the situation, forces, and constraints driving this decision._ (2026-07-27, Proposed)
 - [ADR-0044: Lifecycle entry gate](adr-0044-lifecycle-entry-gate.md) — Every teeth-not-trust gate jig has was built because "the agent will remember" was not good enough. (2026-07-30, Accepted)
+- [ADR-0046: Frontmatter status is authoritative; prose Status is best-effort](adr-0046-adr-status-frontmatter-authority.md) — [ADR-0026](./adr-0026-adr-status-frontmatter.md) made frontmatter `status:` the canonical home for ADR lifecycle state a… (2026-07-29, Accepted)
 
 ## Lightweight decisions
 

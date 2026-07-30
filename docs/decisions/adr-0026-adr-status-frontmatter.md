@@ -2,6 +2,7 @@
 dependencies: []
 last_verified: 2026-06-15
 frame_review: true
+status: Superseded
 ---
 
 # ADR-0026: Frontmatter is the canonical home for ADR status
@@ -9,6 +10,7 @@ frame_review: true
 ## Status
 
 Accepted (2026-06-15)
+Superseded by [ADR-0046](./adr-0046-adr-status-frontmatter-authority.md) (2026-07-29)
 
 ## Context
 

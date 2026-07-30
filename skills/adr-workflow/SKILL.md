@@ -23,11 +23,12 @@ exercise. Five deterministic operations:
   auto-numbering and a slug-collision check. The scaffold carries
   `status: Proposed` in frontmatter (from the template) alongside the prose
   `Proposed (date)` line (spec 073-02 / ADR-0026).
-- **`accept`** — flip Status from `Proposed (YYYY-MM-DD)` to
-  `Accepted (YYYY-MM-DD)`, and stamp the canonical `status: Accepted`
-  frontmatter field in the **same** atomic write (spec 073-02 / ADR-0026 —
-  frontmatter is the canonical status home; prose and frontmatter cannot
-  diverge).
+- **`accept`** — stamp the canonical `status: Accepted` frontmatter field and
+  flip the prose Status line to `Accepted (YYYY-MM-DD)` in the **same** atomic
+  write. Frontmatter is the authoritative status home; the prose line is a
+  best-effort mirror, rewritten only when it is canonical
+  (spec 073-02 / [ADR-0046](../../docs/decisions/adr-0046-adr-status-frontmatter-authority.md),
+  which supersedes ADR-0026).
 - **`supersede`** — append `Superseded by [ADR-NNNN](./adr-NNNN-<slug>.md) (date)`
   to an Accepted ADR's Status block and `Supersedes ADR-NNNN` to the replacement's
   Status block, and stamp the **old** ADR's `status: Superseded` frontmatter field
@@ -140,10 +141,29 @@ Once the prose is settled and the human (or the workflow gate) approves:
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" accept <NNNN>
 ```
 
-This flips `Proposed (date)` to `Accepted (date)` and stamps the canonical
-`status: Accepted` frontmatter field in the same atomic write (spec 073-02 /
-ADR-0026). Refuses if the Status is already Accepted (ADRs are immutable;
-supersede instead — see below).
+This stamps the canonical `status: Accepted` frontmatter field and flips the
+prose `Proposed (date)` line to `Accepted (date)` in the same atomic write
+(spec 073-02 / ADR-0046). Refuses if the ADR is already Accepted (ADRs are
+immutable; supersede instead — see below) or Superseded; the refusal names
+the state it found.
+
+**Prose is best-effort ([ADR-0046](../../docs/decisions/adr-0046-adr-status-frontmatter-authority.md)).**
+The state that gates the flip is read from the frontmatter `status:` field,
+falling back to a lenient prose classifier for legacy ADRs — never from the
+prose *formatting*. A hand-edited or decorated Status line such as
+
+```markdown
+Proposed (2026-07-22) — awaiting owner acceptance.
+```
+
+no longer blocks `accept`. The frontmatter flips; the authored line is left
+**exactly** as written (never truncated, never rewritten into a
+self-contradictory `Accepted (…) — awaiting owner acceptance`), and `accept`
+prints a note on stderr naming the file and the value the prose should carry.
+**Reconciling that line is your job** — deterministic tooling does not rewrite
+prose it cannot fully parse. Until you do, frontmatter and prose are briefly
+out of step; every reader in `adr.py` is frontmatter-first, so the divergence
+is cosmetic, not behavioural.
 
 **Frame-critique gate (spec 064-05 / ADR-0020 OQ2/OQ3).** `accept` also gates
 the flip on a passing adversarial **frame-critique** verdict — the ADR's
@@ -183,8 +203,23 @@ Both ADRs must already be Accepted. The helper:
 
 Refuses (exit 2) if either ADR is Proposed (accept it first), if either
 ADR is already Superseded, if `<old> == <new>` (self-supersession), or if
-either NNNN is malformed. Re-run `adr.py index docs/decisions` after to
-refresh the index entries.
+either NNNN is malformed. State is read frontmatter-first, as for `accept`.
+
+Unlike `accept`, `supersede` also refuses when an ADR is Accepted but its
+prose `## Status` carries no canonical `Accepted (YYYY-MM-DD)` line: the
+supersession lines are *inserted* after that anchor and are load-bearing, so
+there is no best-effort path — put the Status line in canonical form and
+re-run (ADR-0046 ruling 5). The refusal happens before either file is
+written, and it checks **both** ADRs. Re-run `adr.py index docs/decisions`
+after to refresh the index entries.
+
+Writing that canonical line needs the acceptance date, and a diverged ADR
+does **not** hold it: the prose date belongs to the pre-acceptance state, and
+frontmatter `last_verified` is a *freshness* field (`/jig:reframe`'s
+`reaffirm` disposition refreshes it), not an acceptance date. The refusal
+prints the `git log` invocation that recovers the date from the accept
+commit — use that rather than the metadata. Reconciling the prose when
+`accept` first warns about it avoids this entirely.
 
 ### 4. Regenerate the index
 
