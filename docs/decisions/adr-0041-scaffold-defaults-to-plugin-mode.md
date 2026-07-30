@@ -331,8 +331,7 @@ fragile — [spec 011](../specs/011-plugin-self-install/spec.md) considered
 probing `~/.claude/plugins/` and ruled it out for path fragility across scopes,
 which is "we chose not to pay for it", not "it cannot be done". What does exist,
 cheaply and on both hosts, is detection of the **failing population**: whether
-the scaffold is running out of a jig *source checkout* (`hosts/` + `scripts/` at
-the root) rather than an installed plugin. That is what
+the scaffold is running out of a jig *source checkout* (`hosts/` plus `scripts/build_host_packages.py` — a dev-only builder the release zip excludes, tightened from a looser `hosts/` + `scripts/` first draft that an unrelated monorepo could trip) rather than an installed plugin. That is what
 `scaffolding_from_source_checkout()` keys on, and it is what the plugin-mode
 advisory note fires on.
 

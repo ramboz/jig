@@ -1497,7 +1497,7 @@ class DefaultPluginModeTests(unittest.TestCase):
         self.assertIn("Bash(rm -rf*)", settings["permissions"]["deny"])
 
     def test_plugin_mode_notes_when_run_from_source_checkout(self):
-        """Slice 099-01, frame-critique rounds 1-2 — plugin mode is only lean
+        """Slice 099-01 (ADR-0041 OQ2) — plugin mode is only lean
         if a plugin is actually installed; otherwise it is empty, and silently
         so.
 
@@ -2949,7 +2949,9 @@ class TierGatedCopyTests(unittest.TestCase):
 #   AC3 — generated skill names are current (/jig:vision-elicitation, no
 #         stale alias, no future-tense for already-landed work).
 #   AC4 — ${CLAUDE_PLUGIN_ROOT} appears as a command path only in
-#         plugin-mode artifacts, not in a default (in-repo) scaffold.
+#         plugin-mode artifacts. NB: in-repo was the default under 016-03;
+#         since 099-01 plugin mode is, so 'default' below means in-repo only
+#         in the historical sense these tests were written in.
 # --------------------------------------------------------------------------
 
 
@@ -3153,7 +3155,8 @@ class ScaffoldDocSkillNamesCurrentTests(unittest.TestCase):
 
 class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
     """AC4 — ${CLAUDE_PLUGIN_ROOT} is install-shape-aware: absent as a
-    command path in a default (in-repo) scaffold, preserved under
+    command path in an in-repo scaffold (the default under 016-03; since 099-01
+    the default is plugin mode), preserved under
     --plugin-only (where the plugin root IS the correct location)."""
 
     def setUp(self):
@@ -3185,7 +3188,7 @@ class ScaffoldDocPluginRootShapeTests(unittest.TestCase):
                 offenders.append(rel)
         self.assertEqual(
             offenders, [],
-            "default (in-repo) scaffold leaks ${CLAUDE_PLUGIN_ROOT}/skills/ "
+            "in-repo scaffold leaks ${CLAUDE_PLUGIN_ROOT}/skills/ "
             f"command paths in: {offenders}",
         )
 

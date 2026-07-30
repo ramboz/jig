@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: []
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -66,17 +66,17 @@ question + a summary line that names the mode and why). Applies to both hosts.
    opted in).
 
 **DoD:**
-- [ ] All ACs pass; full test suite green on Python 3.9 (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
+- [x] All ACs pass; full test suite green on Python 3.9 (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one fixture.
       Edge cases covered: alias equivalence (`--in-repo` == `--with-machinery`),
       mutual-exclusivity error, both hosts, and the summary text per mode.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed (compliance + craft; +frame — this reverses a
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed (compliance + craft; +frame — this reverses a
       recorded default).
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 **Anti-horizontal-phasing check:** After this slice lands, a user running
 `scaffold.py <dir>` gets a lean plugin-mode project, sees a summary explaining the
@@ -408,7 +408,9 @@ It is also the same AC the compliance pass flagged as the **only one with no
 test fixture**, contrary to the DoD. Those two facts are one fact: AC #4 was
 prose-only, so nothing could fail when the prose went stale. Now pinned by
 `test_skill_md_documents_the_machinery_axis`, which asserts the Output section
-names `settings.json` and does not claim the old default. **Where an AC is
+names the permissions floor (**as written this entry said `settings.json`; §17
+later removed host-specific paths from that section, so the fixture now asserts
+`permissions` / `deny floor`**) and does not claim the old default. **Where an AC is
 satisfied by prose, the fixture is a grep — cheap, and the only thing that
 notices when the prose stops being true.**
 
@@ -705,8 +707,10 @@ Reverted. The packaged templates stay Codex-native; instead
 `_rewrite_host_paths(plugin_mode=True)` normalizes an already-project-local
 input back to the plugin root. That is the better fix regardless: the gate's real
 fragility was that it matched only `${CLAUDE_PLUGIN_ROOT}/skills/`, so *any*
-pre-translated input slipped past. It now handles both input shapes, and only in
-plugin mode — in-repo wants the project-local paths.
+pre-translated input slipped past. It now handles the skill, templates-root and
+root-prefix shapes the packaged templates actually carry — not every conceivable
+pre-rendered shape; see §24 for the bound — and only in plugin mode, since
+in-repo wants the project-local paths.
 
 **The part worth carrying furthest:** `scripts/test_build_codex_committed_package.py`
 asserts exactly this contract (`assertNotIn("CLAUDE_PLUGIN_ROOT", …)` on the
@@ -718,6 +722,97 @@ regressions" for a packaging change, and would not have until CI. Deviation §9'
 the shipped artifact — with one more axis: **on the interpreter that actually
 loads the test.**
 
+**24. Round 7 (PASS) — two bounds recorded, because the whole §21/§23 thread was
+about over-claimed dispositions.**
+
+§21 and §23 say plugin mode "no longer depends on the input being canonical".
+That is broader than the code. The normalization is **not** the exact inverse of
+the in-repo transform: `PROJECT_ROOT_PREFIX` → `${PLUGIN_ROOT}` runs *before* the
+`${CLAUDE_PROJECT_DIR}` → `${CODEX_PROJECT_DIR:-$PWD}` substitution, so a path
+that should stay project-local in plugin mode — `.codex/hooks/`, which
+`scaffold()` creates in *both* modes — would be re-pointed at the plugin root if
+it arrived pre-rendered. **Latent, not live:** probed, the only
+`${CODEX_PROJECT_DIR:-$PWD}/.codex/*` occurrences in the shipped Codex templates
+are `/skills`. Recorded rather than fixed, and the claim is now bounded to
+"handles the skill/templates/root shapes the packaged templates actually
+carry" — which is what it does.
+
+Second bound, on §23's two-consumer split: `decisions.py`'s
+`seed_lightweight_home` copies the packaged Codex template verbatim, and that
+template cites `${CODEX_PROJECT_DIR:-$PWD}/.codex/skills`. On the greenfield
+scaffold path this is unreachable — `scaffold()` renders
+`docs/decisions/lightweight-decisions.md` itself through the mode-gated rewrite
+and the seeder no-ops when the file exists — but a Codex plugin-mode project
+reaching the seeder another way (migrate) would meet the OQ3 defect on the
+*second* consumer set. Filed as a re-probe-first refinement-todo entry; outside
+every AC here.
+
+Both are the same discipline the thread kept failing: state what the fix covers,
+not what it feels like it covers.
+
+**25. Reconciliation review — the grouped sweep row hid a miss, exactly as §8
+said grouped rows would.**
+
+`AGENTS.md`, jig's own Codex primer, never got the 099-01 Active-specs entry that
+`CLAUDE.md` carries. The sweep said `updated` — truthfully, of a row reading
+"Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates". **A grouped
+disposition is true of the group and unfalsifiable per member**, which is the
+whole reason §8 declared grouped rows replaced by file-level ones. That rule was
+applied to the rows §8 was looking at and not to this one, so the row survived as
+a group and the miss rode inside it for nine more entries. Split into three rows;
+`AGENTS.md` updated.
+
+Five smaller record inaccuracies, all the same family — the log describing an
+earlier state of the tree:
+
+- The refinement-todo row said "Three deferrals" and enumerated three; there are
+  four (§24's `seed_lightweight_home` entry was added after the row was written).
+- §16 said the AC #4 fixture "asserts the Output section names `settings.json`" —
+  true when written, false after §17 removed host-specific paths from that
+  section; the fixture now asserts the permissions floor.
+- The `test_symmetric_install_docs.py` row claimed the rationale moved onto "the
+  two assertions"; only the Claude one carries it.
+- ADR-0041 OQ2 still described the detector as "`hosts/` + `scripts/` at the
+  root", the loose form §12 tightened to require
+  `scripts/build_host_packages.py`.
+- Three "default (in-repo)" framings survived in `test_scaffold_mode.py` — a
+  banner, a class docstring, and an assertion message — in the same file §19 and
+  §20 claim to have swept, with a sibling docstring correctly updated beside
+  them. §4's half-updated-file lesson, in the file that keeps teaching it.
+
+Also cleaned: two comments still citing "frame-critique rounds 1–2" against §16's
+own rule that comments cite slices and ADRs, not review rounds no reader can
+resolve.
+
+**The through-line of this log, stated once at the end:** every entry from §4
+onward is some version of *the record described a state the tree had moved past*.
+The failure is not carelessness about the code — the code was probed repeatedly —
+it is that a written disposition feels finished the moment it is written, while
+the thing it describes keeps changing underneath. The only defence that worked
+here was mechanical: re-grep for the retracted claim, re-run rather than re-read,
+and pin the shipped artifact rather than the source.
+
+**26. Close-out — the primer budget caught me adding to the hot cache while
+closing a spec.**
+
+The convention is explicit: *"When a slice closes a spec, compress its
+Active-specs entry; load-bearing per-slice invariants migrate to the status board
+Notes column, not CLAUDE.md."* I compressed the Active-specs entry and then added
+a new key-terms bullet in its place, on both primers — which is the opposite of
+compression, and `test_lean_primer.BudgetGuard` failed at 71 lines against a
+70-line budget.
+
+The budget is doing exactly what spec 055/057 built it for: the hot cache is
+re-read every turn, so its cost is context × turns, and "just one more line"
+is precisely the pressure it exists to resist. Removed. The term was already in
+`docs/memory/glossary.md` (updated earlier in this slice), which is its documented
+home — so the bullet was redundant as well as over budget.
+
+Worth recording because the mistake was made *while following the convention that
+forbids it*: compressing an entry frees characters, not a line, and adding a
+sibling bullet silently spends the saving. The check that caught it is mechanical,
+which is the only kind that works on a rule about restraint.
+
 ### Reconciliation sweep
 
 | Artifact | Disposition | Rationale |
@@ -727,14 +822,16 @@ loads the test.**
 | `docs/product-vision.md` | `updated` | **Two edits.** Dated amendment under the 2026-05 positioning-recovery history, *and* standing **principle #7** rewritten — it asserted scaffolded mode as the default (caught in review round 1; the file had been half-updated). |
 | `docs/philosophy.md` | `updated` | "Own the scaffolding; don't rent the plugin" principle re-premised on the opt-in (caught in review round 1; absent from the original sweep table). |
 | `docs/architecture.md` | `no-op` | Checked: no module-boundary or public-contract drift. No new module, no changed helper seam — the change is one argparse default plus a print. |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `updated` | `CLAUDE.md` Active-specs entry names spec 099 + ADR-0041. Scaffold seed templates (`001-adopt-jig` spec + slice) corrected — they claimed `.claude/` machinery every new project now may not have. |
+| `CLAUDE.md` | `updated` | Active-specs entry names spec 099 + ADR-0041. |
+| `AGENTS.md` | `updated` | **Missed until the reconciliation review.** The old row grouped this with `CLAUDE.md` and scaffold templates and said `updated`, while jig's own Codex primer never got the 099-01 Active-specs entry `CLAUDE.md` carries. §8 declared grouped rows replaced by file-level ones; this row survived as a group, which is exactly how the miss hid — a grouped `updated` is true of the group and unfalsifiable per member. Now split. |
+| Scaffold seed templates | `updated` | `001-adopt-jig` spec + slice corrected — they claimed `.claude/` machinery every new project now may not have. |
 | `skills/scaffold-init/SKILL.md` | `updated` | The sixth Q&A question + invocation example (AC #4), **and** the Output section — which round-5 review found still listed plugin mode's artifacts *without* `.claude/settings.json`, months after OQ1 made the default path write it. A skill contract that understates a security-relevant artifact is worse than one that omits the topic. Now pinned by `test_skill_md_documents_the_machinery_axis`; AC #4 previously had no fixture, contrary to the DoD. |
 | `docs/adoption-readiness.md` | `updated` | Names `--in-repo`, a flag that did not exist before this slice. Absent from the first sweep table entirely — the mirror of §8, where a row over-claimed; here an updated file had no row at all. |
 | `scripts/verify_install.py` | `updated` | Two things: the plugin-only completion line asserted "machinery lives in the installed plugin" (the same unconditional machine-fact claim §13 removed from the mode line), and its docstring repeated it. Both now say *expected to come from*. |
-| `scripts/test_symmetric_install_docs.py` | `updated` | The two README scaffold recipes now pin `--in-repo` (see the `README.md` row). A third test asserting the same fact was removed as redundant; the rationale moved onto the two assertions that already pinned it. |
+| `scripts/test_symmetric_install_docs.py` | `updated` | The two README scaffold recipes now pin `--in-repo` (see the `README.md` row). A third test asserting the same fact was removed as redundant; the rationale moved onto the Claude assertion that already pinned it. |
 | `skills/migrate/SKILL.md` | `updated` | "(default since slice 016-03)" was a stale default claim in a skill contract; now names `--in-repo` as the opt-in and bounds 016-03→099-01 as the interval it *was* the default. Mirrored in both packaged copies. |
 | `docs/inbox.md` | `no-op` | Checked: no parked item resolved or contradicted by this slice. |
-| `docs/refinement-todo.md` | `updated` | Three deferrals from this slice now have entries, because a deferral recorded only in a closing slice's deviation log is undiscoverable — the same problem filing bug 018 fixed for §16: the plugin-mode floor-check gap (§18), the `rewrite_skill_md_paths` naming asymmetry (§19), and the seed template's `.claude/` host leak. Previously marked `no-op` on the rationale that nothing was deferred *into* refinement-todo, which was true of the first sweep and false by §18. One WAS deferred out of it, and now has a record rather than a claim: the `migrate.py copy-machinery` gap §16 named is filed as **bug 018** ([#145](https://github.com/ramboz/jig/pull/145)) — round-2 compliance correctly flagged that §16 said "needs its own record" while no record existed, the same disposition-asserted-from-intent defect as §8/§14. The open questions live in ADR-0041 (§Open questions), which is their proper home. Of the three, OQ1 and OQ3 are now RESOLVED and implemented here; only OQ2 (a *detected* default) stays open — it needs a two-sided plugin-presence probe that jig **considered and declined to pay for** (path fragility across scopes), not one that cannot be built; OQ2 retracts the earlier "does not exist" wording. |
+| `docs/refinement-todo.md` | `updated` | Four deferrals from this slice now have entries, because a deferral recorded only in a closing slice's deviation log is undiscoverable — the same problem filing bug 018 fixed for §16: the plugin-mode floor-check gap (§18), the `rewrite_skill_md_paths` naming asymmetry (§19), the seed template's `.claude/` host leak, and `seed_lightweight_home`'s copy of a Codex template the mode gate never sees (§24). Previously marked `no-op` on the rationale that nothing was deferred *into* refinement-todo, which was true of the first sweep and false by §18. One WAS deferred out of it, and now has a record rather than a claim: the `migrate.py copy-machinery` gap §16 named is filed as **bug 018** ([#145](https://github.com/ramboz/jig/pull/145)) — round-2 compliance correctly flagged that §16 said "needs its own record" while no record existed, the same disposition-asserted-from-intent defect as §8/§14. The open questions live in ADR-0041 (§Open questions), which is their proper home. Of the three, OQ1 and OQ3 are now RESOLVED and implemented here; only OQ2 (a *detected* default) stays open — it needs a two-sided plugin-presence probe that jig **considered and declined to pay for** (path fragility across scopes), not one that cannot be built; OQ2 retracts the earlier "does not exist" wording. |
 | `docs/memory/glossary.md` | `updated` | "Scaffolded install / scaffold mode" entry re-premised: opt-in, the four reasons plugin mode is the default, and when to choose in-repo. |
 | `docs/memory/learnings.md` | `updated` | "Scaffold doc templates render into two install shapes" gotcha said "the default in-repo scaffold"; now names plugin mode as the default and bounds in-repo to the 016-03→099-01 interval. Missed in the first sweep — see deviation §8. |
 | `docs/decisions/README.md` / ADR index | `updated` | ADR-0041 added to the index. Index row and ordering re-resolved after the merge with `main` (ADR-0039/spec 096 landed there meanwhile); both conflicts were additive, so both sides were kept and numeric order restored **by hand** — regenerating via `adr.py index` overwrites the hand-written ADR-0041 summary with the record's first sentence. |

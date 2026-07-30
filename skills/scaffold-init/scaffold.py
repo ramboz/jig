@@ -3110,7 +3110,7 @@ def main(argv: list[str]) -> int:
             "--in-repo also suits CI, cloud agents, and teammates without jig "
             "installed."
         )
-        # Slice 099-01 (ADR-0041, frame-critique rounds 1–2). Plugin mode is
+        # Slice 099-01 (ADR-0041 OQ2). Plugin mode is
         # only lean if a plugin is actually there; otherwise it is EMPTY, and
         # silently so — exit 0, and a summary claiming jig runs from the
         # installed plugin.

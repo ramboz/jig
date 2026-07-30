@@ -2432,9 +2432,12 @@ class PermissionsDenyTests(unittest.TestCase):
         settings.write_text(json.dumps(payload, indent=2) + "\n")
 
     def _rescaffold_force(self) -> subprocess.CompletedProcess:
-        # permissions.deny lives in the generated settings.json, which is only
-        # written in in-repo mode (099-01 / ADR-0041 flipped the default to
-        # plugin mode), so this suite opts in explicitly.
+        # This suite opts into in-repo explicitly because it exercises the
+        # MERGE path — the settings.json that also carries hook registrations.
+        # NB: `permissions.deny` itself is no longer in-repo-only; ADR-0041 OQ1
+        # made plugin mode seed it too (`_write_permissions_deny_floor`, pinned
+        # by `test_default_mode_seeds_permissions_deny_floor`). An earlier
+        # version of this comment said otherwise.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         return subprocess.run(
