@@ -1,106 +1,108 @@
 ---
 bug: 018
 pass: bug-review
-verdict: needs-changes
+verdict: pass
 reviewer: jig:reviewer
-reviewed_at: 2026-07-30T19:32:12Z
-prompt_source: review.py bug-review docs/bugs/018-copy-machinery-leaves-mode-inconsistent.md skills/migrate/migrate.py skills/scaffold-init/scaffold.py skills/migrate/SKILL.md skills/migrate/test_migrate.py
+reviewed_at: 2026-07-30T20:23:43Z
+prompt_source: review.py bug-review docs/bugs/018-copy-machinery-leaves-mode-inconsistent.md skills/migrate/migrate.py skills/scaffold-init/scaffold.py skills/migrate/SKILL.md skills/migrate/test_migrate.py (re-review after follow-up 730bb48)
 ---
 
-Reviewed post-merge, against `origin/main@f0a5be4`. The fix for bug 018 landed
-as `dd0d350` (PR #145) without either required review pass being recorded; this
-pass was run retroactively against the merged deliverable to close that gap.
+Re-review after the follow-up fix. Supersedes the `needs-changes` verdict
+recorded earlier in this file (git history is the audit trail, ADR-0014 §4).
+Reviewed against commits `dd0d350` (original, on main) and `730bb48` (the
+follow-up).
 
-VERDICT: needs-changes
+VERDICT: pass
 
 ## Reasoning
 
-The manifest half is a genuine root-cause fix: `read_scaffold_mode` /
-`write_scaffold_mode` mirror the existing `read_installed_tiers` /
-`write_installed_tiers` pair, the flip is committed only after the copy
-succeeds, a project with no `scaffold.json` is correctly left alone, and
-`PluginModeConversionTests` (15 tests) covers the flip, idempotency, field
-preservation, exit code, and byte-for-byte survival of user docs — with
-`test_baseline_manifest_says_plugin_only` pinning the premise so the conversion
-test cannot pass for the wrong reason. The docs half is deliberately advisory
-per the maintainer's ruling on PR #145, and the record is honest about that
-being a warning rather than a closed gap.
+Both blocking issues from the earlier bug-review are genuinely fixed, not
+relocated: `_plugin_root_token` / `_in_repo_skill_path`
+(`skills/migrate/migrate.py:1900-1913`) read `PLUGIN_ROOT_PREFIX` /
+`SKILL_PATH_REPLACEMENT` off `scaffold.renderer_for_host(host)`, and for Codex
+that is the *same* constant `_rewrite_host_paths` uses to emit the docs
+(`scaffold.py:1165`, `1191`, `1196`), so detection and rendering can no longer
+disagree. The Claude side is additionally pinned end-to-end by a real scaffold
+fixture.
 
-The blocking problem is host coverage. The stale-citation scan matches only the
-literal `${CLAUDE_PLUGIN_ROOT}`, but Codex plugin-mode docs are rendered with
-`${PLUGIN_ROOT}`. On `--host codex` the advisory can therefore never fire —
-while the code is shaped as host-aware and the Codex-rendered `SKILL.md` tells
-Codex users the warning will be printed.
+`CodexPluginModeConversionTests` (11 tests) exercises the previously-dark host,
+and the recorded second red (4 FAIL + 2 ERROR) is consistent with the
+pre-change code — the two `ERROR`s are exactly the two helpers that did not yet
+exist.
 
-## Specific issues
+Blast radius is contained: `ClaudeScaffoldRenderer.PLUGIN_ROOT_PREFIX` /
+`PLUGIN_ROOT_VAR` are read by no Claude render path and are shadowed by Codex's
+own overrides, and `renderer_for_host` is an exact substitution for the inline
+ternary with `scaffold()` still validating the host first
+(`scaffold.py:2740`). The record's correction of the earlier
+drift-guard/bug-008 claim is honest, and its "the gate runs the whole suite
+regardless of the selector" claim checks out (`.jig/test-command` →
+`run_tests.py:162-165` ignores argv).
 
-- `skills/migrate/migrate.py:1883` — `_PLUGIN_ROOT_TOKEN` is the single
-  Claude-only literal `"${CLAUDE_PLUGIN_ROOT}"`. `CodexScaffoldRenderer`
-  rewrites `${CLAUDE_PLUGIN_ROOT}` → `${PLUGIN_ROOT}` and bare
-  `CLAUDE_PLUGIN_ROOT` → `PLUGIN_ROOT` when emitting docs
-  (`scaffold.py:1087`, `1090`, `1186-1191`), so `_stale_plugin_root_docs`
-  returns `[]` for every Codex project and `copy-machinery --host codex` prints
-  no advisory. Detection must be host-aware the same way the replacement path
-  already is.
+Reviewer is read-only, so the suite was not executed; green counts were
+assessed only for internal consistency.
 
-  Confirmed empirically on `origin/main@f0a5be4`:
+## Specific issues (all non-blocking)
 
-  ```
-  scaffold.py <dir> --host codex --plugin-only --solo
-  #   docs/workflow.md: 4 x ${PLUGIN_ROOT}, 0 x ${CLAUDE_PLUGIN_ROOT}
-  migrate.py copy-machinery <dir> --host codex
-  #   -> copied machinery into <dir>/.codex
-  #   -> scaffold_mode: plugin-only -> in-repo
-  #   -> (no warning)                          <-- half two never fires
-  ```
+- `docs/bugs/018-copy-machinery-leaves-mode-inconsistent.md:288` — "Green
+  after: `PluginModeConversionTests` 15/15 OK" is stale relative to the current
+  14-test class. *Addressed after this review*: the paragraph is now explicitly
+  marked as the first cycle's historical record and states the current count.
 
-  The equivalent Claude run on the same commit names 2 files.
+- `skills/migrate/migrate.py:2119,2123` — the host is taken from the invocation
+  (`_resolve_host`, inferred from where `migrate.py` lives,
+  `migrate.py:50-61`), not from the project's own `host_renderer` field
+  (`scaffold.py:2680`). Running a Codex-installed helper against a
+  Claude-scaffolded plugin-mode project flips `scaffold_mode` while scanning
+  for `${PLUGIN_ROOT}` in Claude-rendered docs → advisory silently empty.
+  Narrower than the fixed defect, but the same class, and the manifest already
+  records the answer. **Follow-up, own record.**
 
-- `skills/migrate/migrate.py:1895-1898` — `_IN_REPO_SKILL_PATH["codex"]` is
-  consequently unreachable in practice: it is selected only when
-  `resolved_host == "codex"`, which is exactly the case where the scan finds
-  nothing.
+- `skills/migrate/migrate.py:2090-2093` — `docs_root` is still not forwarded to
+  `scaffold_mod.copy_machinery` (default `"docs"`, `scaffold.py:2224`), while
+  the new scan resolves the configured root (`migrate.py:1951`). On a
+  `docs_root="."` project this makes `_ensure_self_defining_convention_block`
+  (`scaffold.py:2294`, `2516-2534`) create a spurious `docs/workflow.md` next to
+  the real root-level one. Pre-existing and flagged by the prior review; the new
+  `CopyMachineryStaleScanScopeTests` fixture is precisely that shape and asserts
+  nothing about it. **Follow-up, own record.**
 
-- `hosts/codex/plugins/jig/skills/migrate/SKILL.md:392` — the shipped Codex
-  package states that `copy-machinery` "prints a warning naming each affected
-  file and its hit count", which the helper cannot do on Codex. This repeats
-  this bug's own recorded learning: a documented contract wider than the
-  callee's behaviour.
+- `skills/migrate/test_migrate.py:3071-3098` — the two anti-drift guards mirror
+  the one-line implementations exactly (`.replace("\\1", "<name>")` on both
+  sides), so they cannot catch a renderer changing its template form (e.g.
+  `\g<1>`); they only catch a re-introduced literal table. The real host
+  coverage is the end-to-end tests above them. Fine as written, but they are not
+  the drift guard on their own.
 
-- `skills/migrate/test_migrate.py:2766` — no test exercises the docs half under
-  `--host codex`; every fixture in `PluginModeConversionTests` is a Claude
-  scaffold, so the gap above is invisible to the suite.
+- `skills/scaffold-init/scaffold.py:1009-1010` — `PLUGIN_ROOT_VAR` on the Claude
+  renderer is read by nothing (only Codex's override at `:1098` is consumed, at
+  `:1166`), and `PLUGIN_ROOT_PREFIX` restates the literal already embedded in
+  `PLUGIN_HOOK_SCRIPT_PREFIX` (`:1001`). Symmetry is defensible; for Claude the
+  constant remains a restatement of the templates, guarded by the end-to-end
+  test rather than structurally.
 
-- `docs/bugs/018-copy-machinery-leaves-mode-inconsistent.md:258` — the
-  `## Main recheck` log holds only the `00c3333` entry, but frontmatter carries
-  `main_repro_ref: a03f6c8`. `bug.py main-check` appends a line per run
-  (`bug.py:603-611`), so the `a03f6c8` recheck exists only as prose; the
-  machine-readable trail and the log disagree.
-
-- `docs/bugs/018-copy-machinery-leaves-mode-inconsistent.md:200` vs `:217` —
-  "15 tests" versus "5 of 14 failing" on unmodified main. The 15th test
-  (`test_codex_render_keeps_the_ask_before_editing_step`) was added after the
-  fix and its red state was never witnessed against clean main. The record
-  should say so plainly rather than leaving the counts to be reconciled by the
-  reader.
+- `skills/migrate/test_migrate.py:2940-2941` — carried over unresolved: the
+  rendered-artifact guard self-skips when the committed Codex package is
+  absent, so protection against silent section deletion is conditional on
+  package freshness.
 
 ## Reconciliation notes
 
-- The `→ FIXING` transition was run with `JIG_BUG_TEST_GATE=0`, so
-  `red_confirmed_at` was set without the gate stamping it (`bug.py:702`). This
-  is disclosed in the record's `## Proof` section, but it is a gate bypass and
-  should be logged as such.
-- `fix_class: structural_fix` is recorded while one of the three named
-  root-cause locations (rendered docs) is intentionally left to a warning plus
-  a `SKILL.md` instruction, per the maintainer ruling quoted on PR #145. That
-  deliberate partial closure — and the untaken dispositions 2 and 3 — should be
-  logged as a scope deviation.
-- `test_codex_render_keeps_the_ask_before_editing_step` self-skips when the
-  Codex package is absent (`test_migrate.py:2941-2942`), so the guard against
-  silent section deletion is conditional on the committed package being fresh.
-- Pre-existing, not introduced here but surfaced by this change:
-  `migrate.copy_machinery` does not pass `docs_root` to
-  `scaffold.copy_machinery` (defaults to `"docs"`, `scaffold.py:2204`) while
-  the new stale-doc scan does resolve the project's configured
-  `layout.docs_root` — the two halves disagree about where a `docs_root="."`
-  project's docs live.
+- `fix_class: structural_fix` covers two of the three named root-cause
+  locations; the rendered docs are deliberately left to an advisory plus a
+  `SKILL.md` instruction per the maintainer ruling on PR #145. Dispositions 2
+  and 3 untaken. A deliberate scope deviation.
+- The `→ FIXING` transition ran with `JIG_BUG_TEST_GATE=0`, so
+  `red_confirmed_at` was stamped without the gate (`bug.py:686-702`). Disclosed
+  in `## Proof`; a gate bypass.
+- `main_repro_ref: a03f6c8` has no matching `## Main recheck` line; the record
+  now discloses this as a bookkeeping gap and declines to back-date.
+- `regression_test` frontmatter names only `PluginModeConversionTests`; the
+  second cycle's real evidence is `CodexPluginModeConversionTests`. Safe here
+  only because this repo's `.jig/test-command` runs the whole suite. The
+  selector under-names the guard; the record's `## Regression test` table
+  states this explicitly.
+- Two follow-ups worth their own records, not this one: (a) resolving the
+  advisory's host from the project's `host_renderer` instead of the invocation;
+  (b) `migrate.copy_machinery` forwarding `docs_root` to
+  `scaffold.copy_machinery`.

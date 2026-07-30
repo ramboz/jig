@@ -1,5 +1,5 @@
 ---
-status: FIXING
+status: DONE
 tier: standard
 severity: medium
 regression_test: skills/migrate/test_migrate.py::PluginModeConversionTests
@@ -285,8 +285,11 @@ caught up with the maintainer's ruling the fix was already on disk, so the gate
 could only have re-witnessed green. The red above is the real evidence, and it
 was witnessed before any production line was written — not reconstructed after.
 
-Green after: `PluginModeConversionTests` 15/15 OK; full suite **3705 tests OK
-(4 skipped)**, pyright clean.
+Green after, *as of that first cycle*: `PluginModeConversionTests` 15/15 OK;
+full suite **3705 tests OK (4 skipped)**, pyright clean. (That class holds 14
+tests today — one moved to `CopyMachineryStaleScanScopeTests` in the second
+cycle below. The counts in this paragraph are the historical record of the
+first cycle and are deliberately not restated.)
 
 ### Second red → green (the Codex host gap)
 
