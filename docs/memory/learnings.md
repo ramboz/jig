@@ -689,3 +689,45 @@ green with either deleted, which no amount of "the tests pass" would have
 revealed. This compounds the [[mutation-testing-pycache-false-negative]] trap:
 a test that cannot fail is worse than a missing test, because the record then
 cites it as evidence.
+
+**A cross-host transform is only ever tested by the non-default host**
+(bug 015). `brief.md` and the seed spec were rendered through paths that never
+received the Claude→Codex host transform, so a Codex project's two
+first-read documents told the user to open `CLAUDE.md` — a file only Claude
+projects have. Both paths were added over time and each simply forgot the hook;
+`_emit_seed_spec` even built its own *narrower* transform, which reads as
+deliberate and is easy to approve in review. Nothing caught it because the
+Claude host is the identity case: on the host every contributor runs,
+untransformed text is already correct. Host-parity assertions have to be
+written on purpose — they will never fall out of ordinary development.
+
+Two corollaries from the same bug, both cheap and both general:
+
+- **A docstring that reassures on a neighbouring axis suppresses the question
+  you needed asked.** `_emit_seed_spec` promised its templates "never leak
+  `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths" — true, and about *paths*.
+  Anyone checking whether the seed needed the host transform found an
+  authoritative-sounding "this is fine" that did not cover *vocabulary*.
+  Reassurance should name its axis.
+- **When a fix reuses an existing hook, check what else flows through that
+  hook.** The obvious fix here (`post_render=doc_rewrite`) resolves the symptom
+  and corrupts user data: `copy_template` substitutes *before* post-rendering,
+  and the Codex transform does a blanket `Claude` → `Codex` replace, so a
+  project directory named `Claude-Tools` is emitted as `Codex-Tools`. That is a
+  live, separate defect on the primer path ([[jig-bug-016]] — filed, not fixed);
+  the 015 fix avoided inheriting it by adding a `pre_render` hook that runs
+  before substitution. A guard test pins it, proven by a single-variable
+  variant: switching only the brief back to post-substitution turns it red.
+
+**`review.py record-review` blocks forever on stdin when `--summary-file` is
+omitted and stdin is a pipe.** It falls back to `sys.stdin.read()` guarded only
+by `if not sys.stdin.isatty()`. In a terminal stdin *is* a tty, so the read is
+skipped and nothing hangs — which is why this never reproduces by hand. Under
+any agent harness or CI runner stdin is a pipe that never reaches EOF, so the
+process waits indefinitely. This is the long-unexplained hang in
+[[jig-flaky-host-drift-guard]]'s note about `run_tests.py` "hanging on a
+`review.py record-review` subprocess": a test fixture invokes `record-review`
+without `--summary-file`. **Workaround: run jig helpers with `< /dev/null`**
+(`python3 scripts/run_tests.py < /dev/null`) — the suite then completes in ~100s
+instead of hanging. Real fix: guard the fallback on a closed/ready stdin, or
+require `--summary-file` in non-interactive use.

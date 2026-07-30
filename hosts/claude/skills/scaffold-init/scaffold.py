@@ -179,7 +179,7 @@ def render(template_text: str, substitutions: dict) -> str:
 
 
 def copy_template(src: Path, dst: Path, substitutions: dict,
-                  post_render=None, pre_render=None) -> None:
+                  pre_render=None, post_render=None) -> None:
     """Read a `.template` file, render `{{KEY}}` placeholders, write to dst.
 
     `post_render` (slice 046-01) is an optional `str -> str` transform
@@ -2087,9 +2087,8 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
     They ARE host-flavoured, though (bug 015). Like every canonical jig
     template they are authored Claude-side and name `CLAUDE.md`; `host_rewrite`
     is the caller's host transform, and without it a Codex project's seed spec
-    tells the reader to open a file only Claude projects have. Applied
-    pre-substitution (see `copy_template`) so the blanket `Claude` -> `Codex`
-    replacement cannot reach `PROJECT_NAME`."""
+    tells the reader to open a file only Claude projects have. Passed as
+    `pre_render` — see `copy_template` for why the ordering matters."""
     if _specs_dir_has_content(target, docs_root):
         return
     seed_root = template_root / "docs" / "specs" / "seed"
@@ -2569,18 +2568,13 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # mode the machinery stays under the plugin root, so the plugin-root path
     # is correct and we pass no transform (None = leave docs verbatim). Codex
     # never has `CLAUDE_PLUGIN_ROOT`, so its docs always get Codex-native paths.
+    # Bug 015: the host transform keeps its own name, because brief.md and the
+    # seed spec need it applied PRE-substitution (see `copy_template`) while
+    # everything else takes it composed with the layout rewrite, post-render.
     if host == "codex":
-        doc_rewrite = CodexScaffoldRenderer.rewrite_skill_md_paths
+        host_rewrite = CodexScaffoldRenderer.rewrite_skill_md_paths
     else:
-        doc_rewrite = _rewrite_skill_md_paths if with_machinery else None
-
-    # Bug 015: keep the host transform in its own name. `doc_rewrite` is about
-    # to be composed with the layout rewrite and used as a POST-render hook;
-    # brief.md and the seed spec need the host half applied PRE-substitution
-    # instead, so the blanket `Claude` -> `Codex` replacement cannot rewrite a
-    # user's project name (a directory called `Claude-Tools` would otherwise be
-    # emitted as `Codex-Tools`).
-    host_rewrite = doc_rewrite
+        host_rewrite = _rewrite_skill_md_paths if with_machinery else None
 
     # Slice 084-03: layout-aware docs root. Emit the docs tree under
     # <target>/<docs_root> (collapsed to <target> for "."), and compose the
@@ -2588,7 +2582,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # so it applies on BOTH render paths. Default ("docs") is a no-op →
     # byte-identical output (AC1).
     docs_dst_base = _scaffold_docs_base(target, docs_root)
-    doc_rewrite = _compose_layout_rewrite(doc_rewrite, docs_root)
+    doc_rewrite = _compose_layout_rewrite(host_rewrite, docs_root)
 
     # 1. Host primer from the top-level template.
     if host == "codex":
@@ -2644,10 +2638,10 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
 
     # 4. brief.md — human-readable summary of detection results
-    # Bug 015: host-translate the TEMPLATE before rendering, for the same
-    # reason the seed spec does — `_render_brief`'s own dynamic blocks are
-    # jig-authored fixed strings with no host vocabulary, so the transform has
-    # nothing to do there and no chance to corrupt a substituted value.
+    # Bug 015: host-translate the TEMPLATE before rendering (see
+    # `copy_template`). `_render_brief`'s own dynamic blocks are jig-authored
+    # fixed strings with no host vocabulary, so nothing is lost by transforming
+    # the template rather than the result.
     brief_template = (template_root / "brief.md.template").read_text()
     if host_rewrite is not None:
         brief_template = host_rewrite(brief_template)

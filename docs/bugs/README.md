@@ -19,4 +19,5 @@
 | 012 | decisions-no-template-backfill | medium | standard | DONE | yes | skills/memory-sync/test_decisions.py::SeedFromTemplateTests::test_missing_file_is_seeded_and_entry_appended | claude/session-a2-decisions-template-7c3341 |  |  |
 | 013 | adr-accept-strict-prose-gate | low | standard | DONE | yes | skills/adr-workflow/test_adr.py::NonCanonicalProseStatusTests | claude/issue-123-comment-9ba699 |  |  |
 | 014 | slice-claim-covers-only-in-progress | medium | gnarly | DONE | yes | skills/spec-workflow/test_workflow.py::Bug014WidenedClaimTests | claude/issue-130-jig-bugfix-57198e |  |  |
-| 015 | codex-brief-seed-claude-md-leak | medium | standard | FIXING | yes | skills/scaffold-init/test_scaffold_mode.py::CodexScaffoldAdapterTests::test_codex_brief_and_seed_name_agents_md_plugin_mode | claude/bug-codex-brief-claude-md |  |  |
+| 015 | codex-brief-seed-claude-md-leak | medium | standard | DONE | yes | skills/scaffold-init/test_scaffold_mode.py::CodexScaffoldAdapterTests::test_codex_brief_and_seed_name_agents_md_plugin_mode | claude/bug-codex-brief-claude-md |  |  |
+| 016 | codex-host-rewrite-mangles-project-name | low |  | REPORTED | yes |  |  |  |  |

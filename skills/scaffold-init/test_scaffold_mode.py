@@ -1542,7 +1542,14 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         """brief.md plus every seed-spec file, concatenated."""
         parts = [(target / "brief.md").read_text()]
         seed = target / "docs" / "specs" / "001-adopt-jig"
-        parts += [p.read_text() for p in sorted(seed.glob("*.md"))]
+        # Assert the seed exists before globbing it. Without this, a regressed
+        # seed emission yields an empty glob, and the `AGENTS.md` assertions
+        # below would still pass off brief.md alone — the seed half of this
+        # regression test would go vacuous silently.
+        self.assertTrue(seed.is_dir(), f"seed spec missing at {seed}")
+        seed_files = sorted(seed.glob("*.md"))
+        self.assertTrue(seed_files, f"seed spec dir {seed} is empty")
+        parts += [p.read_text() for p in seed_files]
         return "\n".join(parts)
 
     def test_codex_brief_and_seed_name_agents_md_plugin_mode(self):
@@ -1578,31 +1585,36 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         corrupts a project legitimately named after Claude. Pinned because the
         obvious one-line fix (`post_render=doc_rewrite`) passes the two tests
         above while silently renaming the user's project."""
-        tmpdir = tempfile.mkdtemp(prefix="jig-bug015-name-")
-        try:
-            target = Path(tmpdir) / "Claude-Tools"
-            target.mkdir()
-            r = run_scaffold_with_args(target, "--host", "codex", "--plugin-only")
-            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
-            text = self._seed_and_brief_text(target)
-            self.assertIn("Claude-Tools", text,
-                          "the project's own name must survive the host rewrite")
-            self.assertNotIn("Codex-Tools", text)
-        finally:
-            import shutil
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    def test_claude_host_brief_and_seed_are_unchanged(self):
-        """The other side of the same gate: on the Claude host the transform is
-        absent (plugin mode) or path-only, so these documents must still name
-        `CLAUDE.md`. Guards against a fix that translates unconditionally."""
-        target = Path(self.tmpdir) / "claude-project"
+        target = Path(self.tmpdir) / "Claude-Tools"
         target.mkdir()
-        r = run_scaffold_with_args(target, "--plugin-only")
+        r = run_scaffold_with_args(target, "--host", "codex", "--plugin-only")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         text = self._seed_and_brief_text(target)
-        self.assertIn("CLAUDE.md", text)
-        self.assertNotIn("AGENTS.md", text)
+        self.assertIn("Claude-Tools", text,
+                      "the project's own name must survive the host rewrite")
+        self.assertNotIn("Codex-Tools", text)
+
+    def test_claude_host_brief_and_seed_are_unchanged(self):
+        """The control arm of the same gate (Claude host, despite the class
+        name): these documents must still name `CLAUDE.md`. Guards against a
+        fix that translates unconditionally.
+
+        Both modes, because they exercise different transforms. `--plugin-only`
+        passes `host_rewrite=None`; `--with-machinery` passes
+        `_rewrite_skill_md_paths`, which bug 015 made newly reachable on these
+        two documents. That path is inert against today's templates (neither
+        carries a `${CLAUDE_PLUGIN_ROOT}/skills/` pattern) — pinned so it stays
+        that way if the seed grows one, since the seed's whole job is to
+        describe jig machinery."""
+        for mode_flag in ("--plugin-only", "--with-machinery"):
+            with self.subTest(mode=mode_flag):
+                target = Path(self.tmpdir) / f"claude-project{mode_flag}"
+                target.mkdir()
+                r = run_scaffold_with_args(target, mode_flag)
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                text = self._seed_and_brief_text(target)
+                self.assertIn("CLAUDE.md", text)
+                self.assertNotIn("AGENTS.md", text)
 
     def test_codex_scaffold_tree_has_no_claude_only_files(self):
         r = self._run_codex_scaffold()

@@ -1,5 +1,5 @@
 ---
-status: FIXING
+status: DONE
 tier: standard
 severity: medium
 claimed_by: claude/bug-codex-brief-claude-md
@@ -102,8 +102,15 @@ host most contributors run.
 
 ## Fix class
 
-`local_patch`. Two render paths are wired to the transform the other paths
-already receive, plus one new optional parameter on `copy_template`.
+`local_patch`. Two render paths are wired to the **host half** of the transform
+the other paths already receive, plus one new optional parameter on
+`copy_template`.
+
+"Host half" is precise, not hedging: `doc_rewrite` is the host transform
+composed with the layout rewrite, and only the host half is threaded here. So
+`brief.md`'s hard-coded `docs/…` links (`templates/brief.md.template`) stay
+wrong under a non-default `docs_root` — pre-existing, unrelated to this
+symptom, and untouched.
 
 Not `structural_fix`, deliberately, and that is the honest label: the root
 cause is that the host transform is opt-in per call site, so the *next* render
@@ -121,7 +128,7 @@ text, before substitution**, not to the rendered output.
 
 That ordering is load-bearing, and is why this fix is not a one-line
 `post_render=doc_rewrite`. `copy_template` renders substitutions first and
-post-renders second (`scaffold.py:195-197`), so the transform also sees
+post-renders second (see its body), so the transform also sees
 substituted *values*. The Codex transform includes a blanket
 `replace("Claude", "Codex")`, and `PROJECT_NAME` is user-derived. Probed on
 `main@bde9dfc`: a project directory named `Claude-Tools` is emitted into
@@ -137,7 +144,10 @@ host vocabulary, so they need no transform and are unaffected by the ordering.
 `Codex-Tools` mangle on the primer/`docs/` path is a distinct bug in a
 different code path, found while proving this one. Fixing it means moving those
 call sites to the same pre-substitution ordering — a behaviour change to
-already-shipped output that deserves its own record and its own review.
+already-shipped output that deserves its own record and its own review. It has
+one: **[bug 016](016-codex-host-rewrite-mangles-project-name.md)**, filed with
+the repro and the leading hypothesis. A deferral is only a deferral once the
+record exists; until then it is a silently-shipped known bug.
 
 ## Already tried
 
@@ -186,10 +196,26 @@ fix, which is the whole reason it exists.
 
 Full suite on this branch: **3690 tests OK, pyright clean.**
 
-Cross-host no-op check: with the fix applied, a Claude-host scaffold's docs are
-byte-identical to the pre-fix output (compared two scaffolds, differing only by
-project name and timestamp). The Codex diff is exactly the intended line —
-`1. Open [CLAUDE.md](CLAUDE.md)` → `1. Open [AGENTS.md](AGENTS.md)`.
+Cross-host no-op check: with the fix applied, a Claude-host **in-repo**
+scaffold's docs are byte-identical to the pre-fix output (compared two
+scaffolds, differing only by project name and timestamp). in-repo is the mode
+worth comparing: it is the one where `host_rewrite` is non-None on Claude
+(`_rewrite_skill_md_paths`), so it is the arm this change makes newly reachable
+on these two documents. Both Claude modes are pinned by
+`test_claude_host_brief_and_seed_are_unchanged`.
+
+The Codex diff is **wider than the symptom grep suggested**, and stating only
+the brief line would have understated it. The repro grep searched for
+`CLAUDE.md`, so it saw 5 of the 7 changed lines. In full:
+
+- `brief.md` — `1. Open [CLAUDE.md](CLAUDE.md)` → `[AGENTS.md](AGENTS.md)`.
+- seed spec — 4 further `CLAUDE.md` → `AGENTS.md`
+  (`001-adopt-jig/spec.md:13,35`, `slice-01-bootstrap.md:10,27`).
+- seed spec — 2 **undeclared** `.claude/` → `.codex/` rewrites
+  (`spec.md:14`, `slice-01-bootstrap.md:11`), where the seed describes the
+  runtime machinery directory. Correct for a Codex project and part of the same
+  host translation, but invisible to a `CLAUDE.md`-only grep — the fix's real
+  diff is wider than the search that found the symptom.
 
 ## Learning
 
