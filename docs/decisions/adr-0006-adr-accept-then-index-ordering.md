@@ -180,7 +180,7 @@ landed in parallel.
 
 ## Amendments
 
-- **2026-07-31 — the preview pass now has a signal to read
+- **2026-07-30 — the preview pass now has a signal to read
   ([bug 020](../bugs/020-adr-index-summary-degradation.md) /
   [issue #140](https://github.com/ramboz/jig/issues/140)).** This ADR's
   Context notes that the abbreviation allowlist "reduces the frequency at

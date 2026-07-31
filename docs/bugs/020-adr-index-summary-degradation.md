@@ -126,9 +126,13 @@ reports it instead of inventing.
    holds no complete sentence. The `paragraph[:120] + "…"` hard-truncation
    branch is gone. A paragraph that *ends* in a colon but opens with a real
    sentence is truncated to that sentence.
-2. `_is_degenerate_description` guards the write path for the cases that do
-   have a boundary but still are not summaries: a trailing `…`, and the
-   template's `_TODO` / `_TBD` stub.
+2. `_is_degenerate_description` guards the write path for the one shape that
+   does have a boundary and still is not a summary: the template's `_TODO` /
+   `_TBD` stub in a record whose Context was written only far enough to carry
+   a sentence. An authored trailing `…` is deliberately NOT caught — jig no
+   longer emits one, so an ellipsis is now the author's own prose, and
+   blanking it would discard a real sentence and then warn that the record
+   has none (both review passes caught that; it was the last blocker).
 3. A record with no derivable summary gets `(no description)` plus a stderr
    warning naming the record and the reason — lead-in versus unwritten stub —
    and pointing at the source: reword that `## Context` opening. `index` still
@@ -173,7 +177,38 @@ what shipped, because nothing is kept.
 
 ## Proof
 
-_Pending re-review of the reshaped fix._
+**The original reported repro, re-run on the fixed tree.** Issue #140's own
+check — `grep -nE '^- \[ADR-[0-9]{4}.*— .*(:|…) \(' docs/decisions/README.md`
+— returned three lines on `main` (ADR-0022, ADR-0023, ADR-0046) and returns
+nothing after the fix. ADR-0040 renders `(no description)` and warns, which is
+the intended outcome for an unwritten record, not a residual defect.
+
+**Red before, green after**, on the same tree:
+
+- `ExtractDescriptionLeadInTests` — pre-fix, `_extract_description` returned a
+  string for both live lead-in shapes; these assert `""`.
+- `IndexNoSummaryTests::test_lead_in_record_gets_no_description_and_a_warning`
+  — pre-fix the bullet carried the lead-in verbatim; it now reads
+  `(no description)` and stderr names the record.
+- Two guards were verified by mutation rather than assumed: removing the
+  `_is_template_stub` branch from `_is_degenerate_description` turns
+  `test_a_partly_written_stub_is_still_a_stub` red, and the earlier
+  preservation guard was checked the same way before that design was dropped.
+
+**Suite:** 3870 tests, OK (7 skipped). Pyright clean. Host packages in sync.
+
+**Behaviour changes beyond the reported symptom**, deliberate and tested:
+
+- A single-line Context paragraph that ends in a colon *and* opens with a
+  complete sentence is now truncated to that sentence, where it was previously
+  emitted whole.
+- `index` now writes to stderr on a path that was silent before. Exit stays 0
+  and no in-repo caller consumes that stream, but a scaffolded project with
+  unwritten ADRs will start seeing warnings on every regen. That is the point.
+- Four ADR Context openings were edited, two of them on **Accepted** records
+  (ADR-0041, ADR-0046), under ADR-0006's carve-out that Context-prose edits
+  made for index-rendering are not decision-content. Prose only; no decision
+  substance changed.
 
 ## Learning
 

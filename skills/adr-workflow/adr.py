@@ -1470,11 +1470,11 @@ def _extract_description(adr_text: str) -> str:
     in a colon.
 
     Returns '' when the paragraph holds NO complete sentence — the shape of a
-    lead-in to a list or table (`jig has two scaffold topologies, selected by
-    one axis in \\`scaffold.py\\`:`). Bug 020 / [issue #140]: that used to be
-    written verbatim, or hard-truncated with a trailing `…` when it ran past
-    the cap, producing an index line that read like a decision summary and
-    was not one. The index stays a pure function of the ADR files, so the
+    lead-in to a list or table, e.g. "jig has two scaffold topologies,
+    selected by one axis in scaffold.py:". Bug 020 / [issue #140]: that used
+    to be written verbatim, or hard-truncated with a trailing `…` when it ran
+    past the cap, producing an index line that read like a decision summary
+    and was not one. The index stays a pure function of the ADR files, so the
     answer is not to let a human overwrite the bullet — it is to say plainly
     that this record has no derivable summary, and name it, so its `## Context`
     opening gets reworded at the source.
@@ -1501,44 +1501,59 @@ def _extract_description(adr_text: str) -> str:
 _NO_DESCRIPTION = "(no description)"
 
 
+def _is_template_stub(text: str) -> bool:
+    """Is this the ADR template's unwritten-section placeholder? Single owner
+    for the definition — both the write guard and the warning's reason ask,
+    over different inputs (a derived description vs. the raw paragraph)."""
+    return text.startswith("_TODO") or text.startswith("_TBD")
+
+
 def _is_degenerate_description(description: str) -> bool:
-    """True for a summary that is a fragment or a placeholder rather than a
-    sentence. Guards the write path: `_extract_description` returns '' for a
-    paragraph with no sentence in it, but a paragraph CAN end in `…` or open
-    with the template's `_TODO` stub and still carry a boundary, and neither
-    belongs in the index."""
+    """True for a derived summary that should not be written.
+
+    Deliberately narrow. `_extract_description` already returns '' for a
+    paragraph with no complete sentence, so the only shape left to catch is
+    the template's `_TODO` stub in a record whose Context has been *partly*
+    written — enough to carry a sentence boundary, not enough to be prose.
+
+    A trailing `…` is NOT caught here. It used to be jig's own truncation
+    mark, so it read as damage; this change stops emitting it, which means an
+    ellipsis in the output is now the author's own writing. Blanking it would
+    discard a real first sentence and then warn that the record has none —
+    the exact kind of false statement bug 020 exists to remove.
+    """
     text = (description or "").strip()
-    if not text or text == _NO_DESCRIPTION:
-        return True
-    if text.endswith(":") or text.endswith("…"):
-        return True
-    # The ADR template's italic stubs, indexed before the record was written.
-    if text.startswith("_TODO") or text.startswith("_TBD"):
-        return True
-    return False
+    return not text or _is_template_stub(text)
 
 
 def _no_summary_reason(adr_text: str) -> str:
     """Name why no summary could be derived, so the warning is actionable."""
     paragraph, _ = _context_paragraph(adr_text)
     if not paragraph:
-        return "it has no `## Context` prose to summarize"
-    if paragraph.startswith("_TODO") or paragraph.startswith("_TBD"):
+        return "no `## Context` prose to summarize"
+    if _is_template_stub(paragraph):
         return "its `## Context` is still the template stub"
-    # Every remaining case is "the first paragraph has no complete sentence".
-    # A lead-in to a list or table is the common one, but a paragraph that
-    # merely lacks terminal punctuation lands here too — so state the fact,
-    # and name the likely cause without asserting it.
-    return ("its `## Context` opens with no complete first sentence "
-            "(typically a lead-in to a list or table)")
+    # Everything reaching here failed `_first_sentence_end`. A lead-in to a
+    # list or table is the common shape; a paragraph that merely lacks a final
+    # period lands here too — so state the fact and hedge the cause.
+    return ("no complete first sentence in its `## Context` "
+            "(usually a lead-in to a list or table)")
 
 
-def _render_index_entries(adr_paths: list,
-                          warnings: Optional[list] = None) -> list:
+# Printed once per `index` run that warned, rather than per record — the
+# remedy is the same for every one of them (spec 055: prose costs on read).
+_NO_SUMMARY_REMEDY = (
+    "adr.py index: reword each record's `## Context` opening into a "
+    "standalone sentence and re-run. The index is derived from the ADR "
+    "files, so the fix belongs at the source, not in README.md."
+)
+
+
+def _render_index_entries(adr_paths: list, warnings: list) -> list:
     """Return one bullet line per ADR, sorted ascending by NNNN.
 
-    Records with no derivable summary get `(no description)` and append a
-    line to `warnings` naming the record and why."""
+    Records with no derivable summary render as `(no description)` and append
+    a line to `warnings` naming the record and why."""
     rows = []
     for p in sorted(adr_paths, key=lambda x: _parse_adr_number(x.name)):
         text = p.read_text()
@@ -1548,14 +1563,10 @@ def _render_index_entries(adr_paths: list,
         description = _extract_description(text)
         if _is_degenerate_description(description):
             description = _NO_DESCRIPTION
-            if warnings is not None:
-                warnings.append(
-                    f"adr.py index: ADR-{number} ({p.name}) — "
-                    f"{_no_summary_reason(text)}. Wrote {_NO_DESCRIPTION}. "
-                    f"Reword that record's `## Context` opening into a "
-                    f"standalone sentence and re-run — the index is derived "
-                    f"from the ADR files, so the fix belongs at the source."
-                )
+            warnings.append(
+                f"adr.py index: ADR-{number} ({p.name}) — "
+                f"{_no_summary_reason(text)}; rendering {_NO_DESCRIPTION}."
+            )
         # Filename stem is `adr-NNNN-<slug>` (9-char prefix to strip).
         slug = p.stem[9:] if len(p.stem) > 9 else p.stem
         meta = f"({date_str}, {status})" if date_str else f"({status})"
@@ -1593,6 +1604,8 @@ def cmd_index(adrs_dir: Path) -> Path:
     bullets = _render_index_entries(adrs, warnings)
     for line in warnings:
         sys.stderr.write(line + "\n")
+    if warnings:
+        sys.stderr.write(_NO_SUMMARY_REMEDY + "\n")
 
     # New body: two blank lines after the heading, then bullets (or empty if
     # none), then a trailing blank line before the next section (preserves

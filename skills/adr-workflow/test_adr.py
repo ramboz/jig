@@ -747,6 +747,32 @@ class ExtractDescriptionLeadInTests(unittest.TestCase):
         out = self.adr._extract_description(self._ctx("Alpha does a thing."))
         self.assertEqual(out, "Alpha does a thing.")
 
+    def test_an_authored_trailing_ellipsis_is_not_treated_as_truncation(self):
+        """Review finding. `…` used to be jig's own hard-truncation mark, so an
+        early version of this fix blanked any summary ending in one. But this
+        change stops emitting `…`, so an ellipsis is now the author's writing —
+        and blanking it discards a real first sentence and then warns that the
+        record has none, which is the false statement bug 020 exists to remove.
+        """
+        para = "We tried the shared oracle. It did not hold…"
+        self.assertLess(len(para), 120)
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertEqual(out, para, "authored prose must survive intact")
+        self.assertFalse(
+            self.adr._is_degenerate_description(out),
+            "a sentence that merely ends in an ellipsis is still a sentence")
+
+    def test_a_partly_written_stub_is_still_a_stub(self):
+        """The one shape the write guard exists for: a template stub edited
+        just enough to carry a sentence boundary, so the extractor returns it
+        rather than ''."""
+        para = "_TODO: fill this in. Notes below._"
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertTrue(out, "precondition: the extractor returns text here")
+        self.assertTrue(
+            self.adr._is_degenerate_description(out),
+            f"a half-written template stub is not a summary; got {out!r}")
+
 
 class IndexNoSummaryTests(unittest.TestCase):
     """What `index` writes, and says, for a record it cannot summarize."""
@@ -772,7 +798,8 @@ class IndexNoSummaryTests(unittest.TestCase):
         result = self._index()
         line = index_bullet(self.readme.read_text(), "0001")
         self.assertEqual(bullet_description(line), "(no description)")
-        self.assertFalse(line.rstrip().endswith(":"), f"line={line!r}")
+        self.assertNotIn("scaffold.py`:", line,
+                         f"the lead-in itself must not be written: {line!r}")
         self.assertIn("ADR-0001", result.stderr)
         self.assertIn("Context", result.stderr,
                       f"the warning must point at the source: {result.stderr!r}")
@@ -805,6 +832,10 @@ class IndexNoSummaryTests(unittest.TestCase):
         write_sample_adr(adr, "0001", "leadin", "Lead In",
                          context=LIST_LEAD_IN_CONTEXT)
         self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "(no description)",
+            "precondition: the lead-in must be rejected before the reword")
         write_sample_adr(adr, "0001", "leadin", "Lead In",
                          context="jig has two scaffold topologies, selected "
                                  "by one axis in `scaffold.py`.")
@@ -828,6 +859,7 @@ class RepoIndexQualityTests(unittest.TestCase):
             if not line.startswith("- [ADR-"):
                 continue
             desc = bullet_description(line)
+            self.assertTrue(desc, f"bullet did not parse: {line[:100]}")
             if desc.endswith(":") or desc.endswith("…") \
                     or desc.startswith("_TODO"):
                 bad.append(line[:100])

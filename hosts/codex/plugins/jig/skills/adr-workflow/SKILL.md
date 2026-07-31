@@ -37,10 +37,8 @@ exercise. Five deterministic operations:
   write on both files.
 - **`index`** — regenerate the `## Index` section of `docs/decisions/README.md`
   from the actual ADR files present. Idempotent. The index is a **pure
-  function of the ADR files** — a summary hand-written into the README is
-  overwritten on the next regen. A record whose `## Context` opening has no
-  complete sentence in it gets `(no description)` plus a stderr warning
-  naming it (bug 020), so you know which opening to reword.
+  function of the ADR files**; see [section 4](#4-regenerate-the-index) for
+  what that means for hand-edits and for records it cannot summarize.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
   `docs/refinement-todo.md` and append `**Resolved by:** [ADR-NNNN: ...](...)`.
 
@@ -242,25 +240,33 @@ straight into the README is overwritten on the next regen. If a row reads
 badly, fix the ADR's opening paragraph — that is the summary's source.
 
 **When there is nothing to derive, `index` says so instead of inventing.**
-A `## Context` that opens with a lead-in to a list or a table has no complete
-sentence in it, and an unwritten record still carries the template's `_TODO`
-stub. Neither can be summarized, so the bullet reads `(no description)` and a
-warning on stderr names the record and the reason (bug 020). Before that, the
-lead-in was written out verbatim — colon and all — or cut at 120 characters
-with a trailing `…`, which read like a summary and was not one:
+A summary needs a complete sentence to come from. Three openings have none: a
+lead-in to a list or a table (the common one), a paragraph that simply lacks a
+final period, and a record still carrying the template's `_TODO` stub. Each
+renders as `(no description)` with a warning on stderr naming the record and
+the reason (bug 020). Before that, the lead-in was written out verbatim —
+colon and all — or cut at 120 characters with a trailing `…`, which read like
+a summary and was not one:
 
 ```
-adr.py index: ADR-0022 (adr-0022-pluggable-oracle-boundary.md) — its
-`## Context` opens with no complete first sentence (typically a lead-in to a
-list or table). Wrote (no description). Reword that record's `## Context`
-opening into a standalone sentence and re-run — the index is derived from the
-ADR files, so the fix belongs at the source.
+adr.py index: ADR-0040 (adr-0040-richer-skill-discovery-explicit-candidate-channel.md)
+  — its `## Context` is still the template stub; rendering (no description).
+adr.py index: reword each record's `## Context` opening into a standalone
+  sentence and re-run. The index is derived from the ADR files, so the fix
+  belongs at the source, not in README.md.
 ```
 
 The remedy is the one ADR-0006 already prescribes: reword the opening into a
-standalone sentence and keep the list behind it. `(no description)` is a
-correct, honest line for a record that is still a stub — it is not a failure
-state, and `index` exits 0.
+standalone sentence and keep the list behind it. `index` exits 0 either way —
+this is a report, not a gate.
+
+**A record with nothing written in it is meant to keep warning.** ADR-0040 on
+`main` is a template stub in every section; `(no description)` is the honest
+line for it and the warning is the reminder that it is unwritten. Do not
+invent decision prose to silence it — write the decision, or leave it.
+
+An authored trailing `…` is not truncation and is left alone: jig no longer
+emits one, so an ellipsis in a summary is the author's own writing.
 
 ### 5. Resolve a deferred decision
 
@@ -377,9 +383,8 @@ which surface.
 - **Index description extraction may produce ugly first lines.** The helper
   takes the first non-empty paragraph from `## Context`, truncating at the
   first sentence-ending punctuation when the paragraph is multi-line, runs
-  past 120 chars, or ends in a colon. When that paragraph has no complete
-  sentence at all it is a lead-in, not a summary — the bullet gets
-  `(no description)` and a stderr warning naming the record (bug 020).
+  past 120 chars, or ends in a colon. When it has no complete sentence at
+  all, see section 4 — the bullet gets `(no description)` and a warning.
   Common abbreviations (`e.g.`, `i.e.`, `etc.`, `Mr.`, `Dr.`,
   …) are skipped by an explicit allowlist; abbreviations outside that
   list may still cause a mid-word cut. If the resulting bullet reads
@@ -413,9 +418,10 @@ which surface.
 After using this skill in a real session:
 
 - [ ] Did the index regen produce sensible descriptions, and did it warn
-      about any record it could not summarize? For either, reword that ADR's
-      first Context paragraph into a standalone sentence and re-run
-      `adr.py index` — the index is derived, so the fix belongs at the source.
+      about any record it could not summarize? For a written record, reword
+      its first Context paragraph into a standalone sentence and re-run
+      `adr.py index` — the index is derived, so the fix belongs at the
+      source. For an unwritten stub, leave the warning: it is the reminder.
 - [ ] Was the refinement-todo entry actually resolved by this ADR, or did
       a partial overlap make `resolve-todo` apply to the wrong section?
       Verify before committing.
