@@ -31,6 +31,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import (
     project_layout,
+    reservation,
     subtree,
     team_signal,  # noqa: F401  (re-exported for test monkeypatching)
 )
@@ -3028,29 +3029,14 @@ def coverage(project_dir: Path) -> str:
 # existing `docs/specs/NNN-<slug>/` directories.
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
-# Stderr substrings (case-insensitive) that classify a `git push` failure
-# as a protection / permission refusal — these trigger the PR-fallback
-# path (AC #3). Anything else is treated as a hard error (race-on-push
-# gets its own classifier via _PUSH_RACE_SIGNALS).
-_PUSH_PROTECTION_SIGNALS = (
-    "protected branch",
-    "permission denied",
-    "pre-receive hook declined",
-    "not authorized",
-    "cannot lock ref",
-)
-
-# Stderr substrings that classify a `git push origin main` failure as a
-# race (someone else advanced main in the gap between fetch and push).
-# Structurally distinct from protection refusal: PR-fallback would still
-# fail; the right recovery is to re-run after picking the next free
-# number (AC #6).
-_PUSH_RACE_SIGNALS = (
-    "non-fast-forward",
-    "fetch first",
-    "[rejected]",
-    "rejected",
-)
+# Push-failure classification is shared across bug.py / adr.py / workflow.py
+# (spec 107 / ADR-0053): the signal tuples and the classifier live once in
+# `_common/reservation.py`. Protection is checked before race (specific over
+# generic), and `gh013` / `repository rule violations` join the protection set.
+# The re-exports below keep the historical module-level names for existing
+# call sites and tests.
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
 
 
 def _title_case_slug(slug: str) -> str:
@@ -3355,22 +3341,10 @@ def _run(argv: list, cwd: Path) -> tuple:
     return result.returncode, result.stdout or "", result.stderr or ""
 
 
-def _classify_push_failure(stderr: str) -> str:
-    """Classify a `git push origin main` stderr into one of:
-      - "protection" — protected branch / permission denied / ...
-      - "race" — non-fast-forward / fetch first / rejected
-      - "other" — connection refused, DNS errors, anything else
-
-    Case-insensitive substring match. Race wins over protection if both
-    appear (race recovery requires the stranded commit drop)."""
-    low = stderr.lower()
-    for sig in _PUSH_RACE_SIGNALS:
-        if sig in low:
-            return "race"
-    for sig in _PUSH_PROTECTION_SIGNALS:
-        if sig in low:
-            return "protection"
-    return "other"
+# Re-export the shared classifier under the historical module-level name so
+# existing call sites and tests continue to resolve `_classify_push_failure`
+# (spec 107 / ADR-0053).
+_classify_push_failure = reservation.classify_push_failure
 
 
 def _validate_slug(slug: str) -> None:
@@ -3701,8 +3675,14 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
                 f"an 'origin' remote."
             )
 
-        # Number scan reads the freshly checked-out origin/main tree.
+        # Number scan reads the freshly checked-out origin/main tree, then
+        # (spec 107 / ADR-0053) clears every in-flight branch's claim too —
+        # not just what has merged to origin/main. This path is push-only.
         next_n = _next_spec_number(wt / "docs" / "specs")
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+        )
+        next_n = max(next_n, scanned + 1)
         num_str = f"{next_n:03d}"
         spec_dirname = f"{num_str}-{slug}"
         spec_dir = wt / "docs" / "specs" / spec_dirname
@@ -3913,6 +3893,13 @@ def reserve_spec(slug: str, project_dir: Path,
     next_n = _next_spec_number(
         specs_dir, project_dir=project_dir, use_origin=not no_push,
     )
+    # Spec 107 / ADR-0053: in push mode also clear every in-flight branch's
+    # claim, not just origin/main. --no-push stays working-tree-only.
+    if not no_push:
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+        )
+        next_n = max(next_n, scanned + 1)
     num_str = f"{next_n:03d}"
     spec_dirname = f"{num_str}-{slug}"
     spec_dir = specs_dir / spec_dirname

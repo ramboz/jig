@@ -30,6 +30,10 @@ from skills._common.gate_telemetry import (  # noqa: E402
     read_spec_ref as _gt_read_spec_ref,
 )
 from skills._common.parsing import parse_frontmatter  # noqa: E402
+from skills._common.test_reservation import (  # noqa: E402
+    CAPTURED_GH006,
+    CAPTURED_GH013,
+)
 
 
 def load_bug_module():
@@ -952,10 +956,12 @@ class BugReservationTests(unittest.TestCase):
     def test_protected_branch_push_falls_back_to_pr(self):
         module = load_bug_module()
         calls: list[tuple[list[str], Path]] = []
-        # Direct push to main refused by branch protection (GH006).
+        # Direct push to main refused by branch protection (GH006). The stderr
+        # is the CAPTURED multi-line refusal, including the ` ! [remote
+        # rejected]` line that made the old classifier read this as a race.
         fake_run = self._fake_run_factory(
             calls, main_push_rc=1,
-            main_push_err="GH006: Protected branch update failed")
+            main_push_err=CAPTURED_GH006)
 
         with patch.object(module, "_run", side_effect=fake_run), \
                 patch.object(module.shutil, "which", return_value="/usr/bin/gh"):
@@ -982,6 +988,33 @@ class BugReservationTests(unittest.TestCase):
         self.assertTrue(
             any(c[0][:3] == ["git", "worktree", "remove"] for c in calls),
             "protection fallback must remove the ephemeral worktree",
+        )
+
+    def test_ruleset_gh013_push_falls_back_to_pr(self):
+        # issue #147 gap 1 — a repository-rulesets refusal (GH013) must route to
+        # the PR fallback the same way a classic GH006 does. Its trailer is
+        # `push declined due to repository rule violations`, which no older
+        # protection signal matched.
+        module = load_bug_module()
+        calls: list[tuple[list[str], Path]] = []
+        fake_run = self._fake_run_factory(
+            calls, main_push_rc=1, main_push_err=CAPTURED_GH013)
+
+        with patch.object(module, "_run", side_effect=fake_run), \
+                patch.object(module.shutil, "which", return_value="/usr/bin/gh"):
+            number, slug = module.reserve_bug_on_origin(
+                self.root, "alpha", pr_mode=False)
+
+        self.assertEqual((number, slug), ("001", "alpha"))
+        self.assertTrue(
+            any(c[0][:2] == ["git", "push"]
+                and c[0][3].endswith(":refs/heads/reserve/bug-001-alpha")
+                for c in calls),
+            "GH013 fallback must push the reserve/bug-* branch",
+        )
+        self.assertTrue(
+            any(c[0][:2] == ["gh", "pr"] for c in calls),
+            "GH013 fallback must open a PR via gh",
         )
 
     def test_pr_fallback_refuses_when_gh_missing(self):

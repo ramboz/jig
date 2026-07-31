@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import project_layout, subtree
+from _common import project_layout, reservation, subtree
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import frontmatter_flag_truthy as _frontmatter_flag_truthy
@@ -187,29 +187,19 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
 
 # ---------- Slice 028-01: reserve-adr-on-main ----------
 # Inline-mirror of workflow.py 003-03 helpers per ADR-0002's "three-callers
-# triggers extraction" rule (ADR-0003 applied that rule to find_slice_section
-# — this is the same precedent, two callers, extraction deferred). Mirrored:
-# _PUSH_PROTECTION_SIGNALS, _PUSH_RACE_SIGNALS, _run, _classify_push_failure,
-# _current_branch, _refuse_if_dirty, _check_gh_and_remote, _do_pr_fallback,
-# _build_pr_body. `_validate_slug` is shared with cmd_new and uses adr.py's
-# looser `^[a-z0-9][a-z0-9-]*$` regex (intentionally divergent from
-# workflow.py's `^[a-z][a-z0-9-]*$` so existing digit-prefixed ADR slugs
+# triggers extraction" rule. The third caller (bug.py) arrived, so the
+# push-failure classifier is now EXTRACTED to `_common/reservation.py`
+# (spec 107 / ADR-0053); the re-exports below keep the historical
+# module-level names. Still mirrored inline (two callers, extraction deferred):
+# _run, _current_branch, _refuse_if_dirty, _check_gh_and_remote,
+# _do_pr_fallback, _build_pr_body. `_validate_slug` is shared with cmd_new and
+# uses adr.py's looser `^[a-z0-9][a-z0-9-]*$` regex (intentionally divergent
+# from workflow.py's `^[a-z][a-z0-9-]*$` so existing digit-prefixed ADR slugs
 # don't silently break).
 
-_PUSH_PROTECTION_SIGNALS = (
-    "protected branch",
-    "permission denied",
-    "pre-receive hook declined",
-    "not authorized",
-    "cannot lock ref",
-)
-
-_PUSH_RACE_SIGNALS = (
-    "non-fast-forward",
-    "fetch first",
-    "[rejected]",
-    "rejected",
-)
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
+_classify_push_failure = reservation.classify_push_failure
 
 
 def _run(argv: list, cwd: Path) -> tuple:
@@ -225,24 +215,6 @@ def _run(argv: list, cwd: Path) -> tuple:
     except FileNotFoundError:
         return 127, "", f"{argv[0]}: not found on PATH"
     return result.returncode, result.stdout or "", result.stderr or ""
-
-
-def _classify_push_failure(stderr: str) -> str:
-    """Classify a `git push origin main` stderr into one of:
-      - "protection" — protected branch / permission denied / ...
-      - "race" — non-fast-forward / fetch first / rejected
-      - "other" — anything else
-
-    Race wins over protection if both appear (race recovery requires the
-    stranded commit drop)."""
-    low = stderr.lower()
-    for sig in _PUSH_RACE_SIGNALS:
-        if sig in low:
-            return "race"
-    for sig in _PUSH_PROTECTION_SIGNALS:
-        if sig in low:
-            return "protection"
-    return "other"
 
 
 def _validate_slug(slug: str) -> None:
@@ -554,6 +526,13 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
         _check_slug_collision(existing, slug)
         next_n = (max(_parse_adr_number(p.name) for p in existing) + 1
                   if existing else 1)
+        # Spec 107 / ADR-0053: clear every in-flight branch's claim, not just
+        # the origin/main worktree this detached checkout resolved. This path
+        # is push-only (off-main --no-push routes elsewhere).
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/decisions", reservation.ADR_NUMBER_RE, run=_run,
+        )
+        next_n = max(next_n, scanned + 1)
         number = f"{next_n:04d}"
         if not title:
             title = _slug_to_title(slug)
@@ -775,6 +754,14 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
         next_n = max(_parse_adr_number(p.name) for p in existing) + 1
     else:
         next_n = 1
+    # Spec 107 / ADR-0053: in push mode the number must also clear every
+    # in-flight branch's claim, not just origin/main. --no-push stays
+    # working-tree-only (no team-coordination contract).
+    if not no_push:
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/decisions", reservation.ADR_NUMBER_RE, run=_run,
+        )
+        next_n = max(next_n, scanned + 1)
     number = f"{next_n:04d}"
 
     if not title:

@@ -56,6 +56,7 @@
 - [ADR-0050: Durable failure-quarantine and attest-only handshake](adr-0050-durable-failure-quarantine.md) — For a jig/servo pair to run unattended for long horizons (the `oh-my-cli` target), the single hardest failure mode is **thrash**: an agent re-attempting the same doomed fix indefinitely, burning budget without new information. (2026-08-04, Proposed)
 - [ADR-0051: Autonomy governance plane and identity separation](adr-0051-autonomy-governance-plane.md) — `oh-my-cli`'s "the agent can't rewrite its own rules" plane is only as strong as CODEOWNERS + branch protection behind it. (2026-08-04, Proposed)
 - [ADR-0052: Grounding rule: universal/negative claims require enumeration](adr-0052-grounding-enumeration-for-universal-claims.md) — jig's grounding requirement accepts a single citation as sufficient evidence for any factual claim, but a citation of one positive example cannot establish a universal or negative claim. (2026-07-31, Accepted)
+- [ADR-0053: Reservation numbering reads every in-flight branch, not just origin/main](adr-0053-reservation-numbering-sees-in-flight-branches.md) — Reservation exists to stop two sessions claiming the same `NNN`. (2026-07-31, Proposed)
 
 ## Lightweight decisions
 

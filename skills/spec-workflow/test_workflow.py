@@ -18,6 +18,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from skills._common.test_reservation import (  # noqa: E402
+    CAPTURED_GH006,
+    CAPTURED_GH013,
+)
+
 WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
 
@@ -2440,7 +2445,7 @@ class ReserveSpecTests(unittest.TestCase):
         # reserve/ branch falls through to the recorder's rc=0 default.
         rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
                  stdout="https://github.com/user/repo/pull/7\n")
         import shutil as _shutil
@@ -2571,7 +2576,7 @@ class ReserveSpecTests(unittest.TestCase):
         rec.stub(_matches("git", "commit"), returncode=0)
         # push origin main FAILS with protection signal
         rec.stub(_matches("git", "push", "origin", "main"),
-                 returncode=1, stderr="remote: error: GH006: Protected branch update failed.\n")
+                 returncode=1, stderr=CAPTURED_GH006)
         # Fallback sequence
         rec.stub(_matches("git", "branch"), returncode=0)
         rec.stub(_matches("git", "reset", "--hard", "origin/main"),
@@ -5358,15 +5363,19 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
             len(reset_calls), 1,
             f"race-recovery must reset HEAD~1; got: {fake._calls}",
         )
-        # AC #7: classifier helper still importable + behaves
+        # AC #7: classifier helper still importable + behaves, against the
+        # captured multi-line refusals (spec 107 / ADR-0053).
         self.assertEqual(
             _workflow._classify_push_failure(
                 "! [rejected] main -> main (non-fast-forward)"),
             "race",
         )
         self.assertEqual(
-            _workflow._classify_push_failure(
-                "remote: error: GH006: Protected branch update failed."),
+            _workflow._classify_push_failure(CAPTURED_GH006),
+            "protection",
+        )
+        self.assertEqual(
+            _workflow._classify_push_failure(CAPTURED_GH013),
             "protection",
         )
 
@@ -5704,7 +5713,7 @@ class SliceClaimTests(unittest.TestCase):
         origin = self.slice.read_text()
         rec = self._push_recorder(
             origin, push_rc=1,
-            push_stderr="remote: error: GH006: Protected branch update failed.\n")
+            push_stderr=CAPTURED_GH006)
         rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
                  returncode=0, stdout="git@github.com:user/repo.git\n")
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
