@@ -36,7 +36,9 @@ exercise. Five deterministic operations:
   the **one** edit allowed on an immutable ADR per the Nygard convention. Atomic
   write on both files.
 - **`index`** — regenerate the `## Index` section of `docs/decisions/README.md`
-  from the actual ADR files present. Idempotent.
+  from the actual ADR files present. Idempotent. The index is a **pure
+  function of the ADR files**; see [section 4](#4-regenerate-the-index) for
+  what that means for hand-edits and for records it cannot summarize.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
   `docs/refinement-todo.md` and append `**Resolved by:** [ADR-NNNN: ...](...)`.
 
@@ -232,6 +234,40 @@ Reads every `adr-NNNN-*.md` (skipping `README.md`) and rewrites only the
 (header, format spec, "When to write" section) is preserved. Re-running on a
 current README is a no-op.
 
+**The Index section is derived, never hand-edited.** Each bullet's summary is
+generated from that ADR's `## Context` opening, so a better sentence written
+straight into the README is overwritten on the next regen. If a row reads
+badly, fix the ADR's opening paragraph — that is the summary's source.
+
+**When there is nothing to derive, `index` says so instead of inventing.**
+A summary needs a complete sentence to come from. Three openings have none: a
+lead-in to a list or a table (the common one), a paragraph that simply lacks a
+final period, and a record still carrying the template's `_TODO` stub. Each
+renders as `(no description)` with a warning on stderr naming the record and
+the reason (bug 020). Before that, the lead-in was written out verbatim —
+colon and all — or cut at 120 characters with a trailing `…`, which read like
+a summary and was not one:
+
+```
+adr.py index: ADR-0040 (adr-0040-richer-skill-discovery-explicit-candidate-channel.md)
+  — its `## Context` is still the template stub; rendering (no description).
+adr.py index: reword each record's `## Context` opening into a standalone
+  sentence and re-run. The index is derived from the ADR files, so the fix
+  belongs at the source, not in README.md.
+```
+
+The remedy is the one ADR-0006 already prescribes: reword the opening into a
+standalone sentence and keep the list behind it. `index` exits 0 either way —
+this is a report, not a gate.
+
+**A record with nothing written in it is meant to keep warning.** ADR-0040 on
+`main` is a template stub in every section; `(no description)` is the honest
+line for it and the warning is the reminder that it is unwritten. Do not
+invent decision prose to silence it — write the decision, or leave it.
+
+An authored trailing `…` is not truncation and is left alone: jig no longer
+emits one, so an ellipsis in a summary is the author's own writing.
+
 ### 5. Resolve a deferred decision
 
 If the new ADR resolves a `### Decision: ...` entry in
@@ -346,8 +382,10 @@ which surface.
   intricate updates, edit it by hand.
 - **Index description extraction may produce ugly first lines.** The helper
   takes the first non-empty paragraph from `## Context`, truncating at the
-  first sentence-ending punctuation when the paragraph is multi-line or
-  >120 chars. Common abbreviations (`e.g.`, `i.e.`, `etc.`, `Mr.`, `Dr.`,
+  first sentence-ending punctuation when the paragraph is multi-line, runs
+  past 120 chars, or ends in a colon. When it has no complete sentence at
+  all, see section 4 — the bullet gets `(no description)` and a warning.
+  Common abbreviations (`e.g.`, `i.e.`, `etc.`, `Mr.`, `Dr.`,
   …) are skipped by an explicit allowlist; abbreviations outside that
   list may still cause a mid-word cut. If the resulting bullet reads
   oddly, edit the ADR's first Context sentence to be index-friendly.
@@ -379,8 +417,11 @@ which surface.
 
 After using this skill in a real session:
 
-- [ ] Did the index regen produce sensible descriptions? If not, edit the
-      ADR's first Context sentence and re-run `adr.py index`.
+- [ ] Did the index regen produce sensible descriptions, and did it warn
+      about any record it could not summarize? For a written record, reword
+      its first Context paragraph into a standalone sentence and re-run
+      `adr.py index` — the index is derived, so the fix belongs at the
+      source. For an unwritten stub, leave the warning: it is the reminder.
 - [ ] Was the refinement-todo entry actually resolved by this ADR, or did
       a partial overlap make `resolve-todo` apply to the wrong section?
       Verify before committing.

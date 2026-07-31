@@ -655,6 +655,245 @@ class IndexTests(unittest.TestCase):
             self.assertLess(len(b), 400, f"bullet too long: {b}")
 
 
+# ---------- Bug 020: index summaries (issue #140) ----------
+#
+# `index` could WRITE a summary that is not a summary: a `## Context` opening
+# that is a lead-in to a list has no complete sentence, so it was emitted
+# verbatim (colon and all) when short, or cut at 120 chars with a trailing `…`
+# when long. Either reads like a decision summary and is not one.
+#
+# The index stays a pure function of the ADR files (Julien's ruling on #151,
+# reaffirmed on #154): the fix is NOT to let a human overwrite the bullet, it
+# is to refuse to invent a summary and name the record whose opening needs
+# rewording.
+
+# A `## Context` body whose first paragraph is a lead-in to a list — the
+# ADR-0041 shape. The lead-in is 71 chars, under the 120-char cap, so the OLD
+# code emitted it VERBATIM, colon and all. (The ADR-0022 shape — the same
+# defect past the cap, where the old code hard-truncated with `…` — is inlined
+# in `test_long_lead_in_is_not_hard_truncated` below.)
+LIST_LEAD_IN_CONTEXT = (
+    "jig has two scaffold topologies, selected by one axis in `scaffold.py`:\n"
+    "\n"
+    "- **plugin mode** — the lean default.\n"
+    "- **in-repo mode** — copies the machinery into the project.\n"
+)
+
+
+def index_bullet(readme_text: str, number: str) -> str:
+    """Return the `- [ADR-NNNN: …]` line for `number` (or '' when absent)."""
+    for line in readme_text.splitlines():
+        if line.startswith(f"- [ADR-{number}:"):
+            return line
+    return ""
+
+
+def bullet_description(line: str) -> str:
+    """Split the `— <description> (<date>, <Status>)` tail off a bullet."""
+    m = re.match(r"^- \[ADR-\d{4}:.*?\]\([^)]+\) — (.+) \([^()]*\)$", line)
+    return m.group(1) if m else ""
+
+
+class ExtractDescriptionLeadInTests(unittest.TestCase):
+    """A Context paragraph with no complete sentence is a lead-in to a list or
+    table, not a summary. It must not be written at all."""
+
+    def setUp(self):
+        self.adr = _import_adr_module()
+
+    def _ctx(self, paragraph: str) -> str:
+        return (
+            "# ADR-0099: Sample\n\n## Status\n\nAccepted\n\n"
+            f"## Context\n\n{paragraph}\n\n## Decision Options Considered\n\n_TODO_\n"
+        )
+
+    def test_short_colon_lead_in_yields_nothing(self):
+        """The ADR-0041 shape: single line, under the 120-char cap, so the old
+        code returned it verbatim — ending in a colon."""
+        out = self.adr._extract_description(self._ctx(LIST_LEAD_IN_CONTEXT))
+        self.assertEqual(
+            out, "",
+            f"a colon-terminated lead-in is not a summary; got {out!r}")
+
+    def test_long_lead_in_is_not_hard_truncated(self):
+        """The ADR-0022 shape: the lead-in runs past the cap, so the old code
+        cut mid-word and appended `…`."""
+        para = (
+            "jig now has a **family of three gated-evidence lifecycles**, all "
+            "mirroring ADR-0014's transition-gate architecture and reusing "
+            "`_common/`:"
+        )
+        self.assertGreater(len(para), 120)
+        out = self.adr._extract_description(self._ctx(para))
+        # The old code returned `paragraph[:120] + "…"`; assert against that
+        # exact string rather than `assertNotIn("…", out)`, which cannot fail
+        # once `out` is known to be empty.
+        self.assertNotEqual(out, para[:120].rstrip() + "…")
+        self.assertEqual(out, "", f"expected no summary; got {out!r}")
+
+    def test_colon_paragraph_with_an_earlier_sentence_truncates_to_it(self):
+        """A paragraph that ends in a colon but DOES carry a complete first
+        sentence still yields that sentence."""
+        para = (
+            "Frontmatter is the canonical home for ADR status. Three readers "
+            "disagree about the prose mirror:"
+        )
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertEqual(
+            out, "Frontmatter is the canonical home for ADR status.")
+
+    def test_complete_sentence_is_unchanged(self):
+        """Regression guard — the happy path keeps working."""
+        out = self.adr._extract_description(self._ctx("Alpha does a thing."))
+        self.assertEqual(out, "Alpha does a thing.")
+
+    def test_an_authored_trailing_ellipsis_is_not_treated_as_truncation(self):
+        """Review finding. `…` used to be jig's own hard-truncation mark, so an
+        early version of this fix blanked any summary ending in one. But this
+        change stops emitting `…`, so an ellipsis is now the author's writing —
+        and blanking it discards a real first sentence and then warns that the
+        record has none, which is the false statement bug 020 exists to remove.
+        """
+        para = "We tried the shared oracle. It did not hold…"
+        self.assertLess(len(para), 120)
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertEqual(out, para, "authored prose must survive intact")
+        self.assertFalse(
+            self.adr._is_degenerate_description(out),
+            "a sentence that merely ends in an ellipsis is still a sentence")
+
+    def test_a_partly_written_stub_is_still_a_stub(self):
+        """The one shape the write guard exists for: a template stub edited
+        just enough to carry a sentence boundary, so the extractor returns it
+        rather than ''."""
+        para = "_TODO: fill this in. Notes below._"
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertTrue(out, "precondition: the extractor returns text here")
+        self.assertTrue(
+            self.adr._is_degenerate_description(out),
+            f"a half-written template stub is not a summary; got {out!r}")
+
+
+class IndexNoSummaryTests(unittest.TestCase):
+    """What `index` writes, and says, for a record it cannot summarize."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-nosummary-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        self.readme = self.adrs_dir / "README.md"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _index(self):
+        result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result
+
+    def test_lead_in_record_gets_no_description_and_a_warning(self):
+        write_sample_adr(self.adrs_dir / "adr-0001-leadin.md", "0001",
+                         "leadin", "Lead In", context=LIST_LEAD_IN_CONTEXT)
+        result = self._index()
+        line = index_bullet(self.readme.read_text(), "0001")
+        self.assertEqual(bullet_description(line), "(no description)")
+        self.assertNotIn("scaffold.py`:", line,
+                         f"the lead-in itself must not be written: {line!r}")
+        self.assertIn("ADR-0001", result.stderr)
+        self.assertIn("Context", result.stderr,
+                      f"the warning must point at the source: {result.stderr!r}")
+
+    def test_template_stub_reports_the_stub_not_a_lead_in(self):
+        """A brand-new record indexed before its Context is written. The
+        warning must name the real cause, or the author goes looking for a
+        list that isn't there."""
+        write_sample_adr(
+            self.adrs_dir / "adr-0001-stub.md", "0001", "stub", "Stub",
+            context="_TODO: describe the situation, forces, and constraints "
+                    "driving this decision._")
+        result = self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "(no description)")
+        self.assertIn("template stub", result.stderr)
+
+    def test_a_summarizable_record_warns_about_nothing(self):
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha",
+                         "Alpha", context="Alpha context one-liner.")
+        result = self._index()
+        self.assertEqual(result.stderr.strip(), "",
+                         f"unexpected warning: {result.stderr!r}")
+
+    def test_the_remedy_is_printed_once_per_run_not_once_per_record(self):
+        """Two unsummarizable records get two per-record lines but a single
+        remedy line — moving the write back inside the loop would otherwise
+        pass unnoticed."""
+        write_sample_adr(self.adrs_dir / "adr-0001-one.md", "0001", "one",
+                         "One", context=LIST_LEAD_IN_CONTEXT)
+        write_sample_adr(self.adrs_dir / "adr-0002-two.md", "0002", "two",
+                         "Two", context=LIST_LEAD_IN_CONTEXT)
+        result = self._index()
+        self.assertEqual(result.stderr.count("ADR-0001"), 1)
+        self.assertEqual(result.stderr.count("ADR-0002"), 1)
+        self.assertEqual(
+            result.stderr.count("reword each record"), 1,
+            f"the remedy must print once per run: {result.stderr!r}")
+
+    def test_rewording_the_context_updates_the_index(self):
+        """The ruling's remedy must actually work: fix the source, re-run,
+        and the bullet follows."""
+        adr = self.adrs_dir / "adr-0001-leadin.md"
+        write_sample_adr(adr, "0001", "leadin", "Lead In",
+                         context=LIST_LEAD_IN_CONTEXT)
+        self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "(no description)",
+            "precondition: the lead-in must be rejected before the reword")
+        write_sample_adr(adr, "0001", "leadin", "Lead In",
+                         context="jig has two scaffold topologies, selected "
+                                 "by one axis in `scaffold.py`.")
+        result = self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "jig has two scaffold topologies, selected by one axis in "
+            "`scaffold.py`.")
+        self.assertEqual(result.stderr.strip(), "")
+
+
+class RepoIndexQualityTests(unittest.TestCase):
+    """Realism guard on jig's own index — the grep from issue #140."""
+
+    def test_no_degenerate_summaries_in_the_repo_index(self):
+        """A trailing `…` is checked here as a *regression* signal — jig no
+        longer hard-truncates, so one appearing again means the truncation
+        branch came back. It is NOT the rule that an ellipsis is degenerate:
+        an author may legitimately end a Context opening with one, and
+        `_is_degenerate_description` deliberately lets that through (see
+        `test_an_authored_trailing_ellipsis_is_not_treated_as_truncation`).
+        If this fires on `…`, decide which of the two it is before "fixing"
+        the ADR — the failure message says so."""
+        readme = REPO_ROOT / "docs" / "decisions" / "README.md"
+        if not readme.is_file():
+            self.skipTest("repo README.md not present")
+        bad = []
+        for line in readme.read_text().splitlines():
+            if not line.startswith("- [ADR-"):
+                continue
+            desc = bullet_description(line)
+            self.assertTrue(desc, f"bullet did not parse: {line[:100]}")
+            if desc.endswith(":") or desc.endswith("…") \
+                    or desc.startswith("_TODO"):
+                bad.append(line[:100])
+        self.assertEqual(
+            bad, [],
+            "index summaries that read as fragments. A `:` or `_TODO` ending "
+            "is always wrong. A `…` ending is wrong ONLY if jig truncated it "
+            "— if the ADR's own Context opening ends that way, the summary is "
+            "correct and this check needs narrowing, not the ADR.")
+
+
 # ---------- ResolveTodoTests (AC #4) ----------
 
 class ResolveTodoTests(unittest.TestCase):

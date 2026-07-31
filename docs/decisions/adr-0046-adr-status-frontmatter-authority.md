@@ -49,7 +49,7 @@ Supersedes ADR-0026
 
 [ADR-0026](./adr-0026-adr-status-frontmatter.md) made frontmatter `status:`
 the canonical home for ADR lifecycle state and cast the prose `## Status`
-section as a **synchronized** mirror: every `adr.py` status mutation writes
+section as a **synchronized** mirror. Every `adr.py` status mutation writes
 both representations in one atomic write, and a test locks the pairing so
 "prose and frontmatter cannot silently diverge."
 

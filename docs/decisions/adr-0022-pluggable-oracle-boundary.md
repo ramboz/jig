@@ -75,7 +75,8 @@ bug/refactor exit-code binding (§2–§5) is untouched and stays PARKED.**
 ## Context
 
 jig now has a **family of three gated-evidence lifecycles**, all mirroring
-ADR-0014's transition-gate architecture and reusing `_common/`:
+ADR-0014's transition-gate architecture and reusing `_common/`. The three
+members and the gate each one ends on:
 
 | Work shape | Backbone | Workflow | Verification gate |
 |---|---|---|---|
