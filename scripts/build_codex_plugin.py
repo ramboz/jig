@@ -101,6 +101,15 @@ def render_codex_plugin_skill_body(body: str) -> str:
         r"${PLUGIN_ROOT}/skills/\1/",
         out,
     )
+    # NOTE: `test_migrate.host_specific_spellings()` walks THIS WHOLE FILE with
+    # `ast`, collects every two-string-literal `.replace("<from>", "<to>")`
+    # call, and bans both sides from migrate SKILL.md's stale-citation advisory
+    # section (bug 023) rather than keeping its own copy of the table. Two
+    # consequences worth knowing before you edit here: moving ALL these pairs
+    # into a loop or lookup makes the walk find nothing, which fails loudly by
+    # design, while moving only SOME shrinks the set silently; and any new
+    # two-constant `.replace()` anywhere in this file joins the forbidden set,
+    # so an unrelated one could ban legitimate prose in that section.
     out = out.replace("${CLAUDE_PLUGIN_ROOT}/templates/", "${PLUGIN_ROOT}/templates/")
     out = out.replace("${CLAUDE_PLUGIN_ROOT}", "${PLUGIN_ROOT}")
     out = out.replace("${CLAUDE_PROJECT_DIR}", "${CODEX_PROJECT_DIR:-$PWD}")

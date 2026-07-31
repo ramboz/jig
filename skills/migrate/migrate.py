@@ -2004,10 +2004,18 @@ def _stale_docs_warning(stale: list, token: str, replacement: str) -> str:
     """Render the advisory block naming stale files. Reports only — the
     decision about what to do with them belongs to the user.
 
-    `token` and `replacement` are the host's own spellings (see
-    `_plugin_root_token` / `_in_repo_skill_path`); naming Claude's variable to
-    a Codex user would send them searching for a string their docs never
-    contained."""
+    `token` and `replacement` are both host spellings (see
+    `_plugin_root_token` / `_in_repo_skill_path`), but they describe different
+    things and callers must not assume one host answers both:
+
+    - `token` is the plugin-root variable the PROJECT'S DOCS were rendered
+      against. Naming Claude's variable to a Codex user would send them
+      searching for a string their docs never contained.
+    - `replacement` is the in-repo path THE MACHINERY NOW OCCUPIES, so it
+      names a directory that exists.
+
+    Both are quoted verbatim to the user, so both must be independently
+    true (bug 023)."""
     if not stale:
         return ""
     lines = [
@@ -2133,7 +2141,14 @@ def copy_machinery(
     # Bug 018, half two — the docs. Named, never rewritten. See the block
     # comment above `_stale_plugin_root_docs` for why the halves differ, and
     # why the host's spellings are read from its renderer.
-    token = _plugin_root_token(scaffold_mod, resolved_host)
+    #
+    # Bug 023 — the two host arguments below are deliberately DIFFERENT, and
+    # a later reader "fixing the inconsistency" reintroduces the bug. Why
+    # each is what it is: `_stale_docs_warning`'s docstring. A project that
+    # records no usable host leaves the invocation as the only information
+    # there is.
+    advisory_host = scaffold_mod.read_host_renderer(project_dir) or resolved_host
+    token = _plugin_root_token(scaffold_mod, advisory_host)
     stale_note = _stale_docs_warning(
         _stale_plugin_root_docs(project_dir, token),
         token,

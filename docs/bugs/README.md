@@ -26,3 +26,4 @@
 | 019 | review-prompt-hardcodes-spec-md | medium | standard | DONE | yes | skills/independent-review/test_review.py::FilePerSliceReviewTargetTests | claude/github-issue-134-0c6fb4 |  |  |
 | 021 | custom-test-command-drops-selector | medium | standard | REPORTED | no |  | claude/bug-021-tdd-selector-gate |  |  |
 | 022 | copy-machinery-ignores-docs-root | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CopyMachineryTrackLocalDocsRootTests | claude/bug-copy-machinery-docs-root |  |  |
+| 023 | copy-machinery-advisory-host-from-invocation | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CrossHostAdvisoryTests | claude/bug-023-advisory-host |  |  |
