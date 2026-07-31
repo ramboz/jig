@@ -21,9 +21,7 @@ was her call.
 
 ## Context
 
-jig has two scaffold topologies — **plugin mode**, which leaves the machinery in
-the installed jig plugin, and **in-repo mode**, which copies it into the project.
-One axis in `scaffold.py` selects between them:
+jig has two scaffold topologies, selected by one axis in `scaffold.py`:
 
 - **plugin mode** (`scaffold_mode: "plugin-only"`) — scaffold writes only the
   docs tree and the host primer. Skills, agents, hooks, and templates stay under
