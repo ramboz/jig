@@ -1,5 +1,5 @@
 ---
-status: FIXING
+status: DONE
 tier: standard
 severity: low
 claimed_by: claude/github-issue-140-63ae37
@@ -8,7 +8,7 @@ main_repro_checked_at: 2026-07-30
 main_repro_ref: 00c3333
 main_repro_result: reproduces
 red_confirmed_at: 2026-07-30
-green_confirmed_at:
+green_confirmed_at: 2026-07-30
 fix_class: local_patch
 security_surface: false
 escalated_to:
@@ -34,9 +34,9 @@ list or a table, it contains no sentence-ending punctuation, so:
   ADR-0014's transition-gate architecture and r…`
 
 Both read like a decision summary. Neither is one, and neither says what was
-decided. Four records on `main` carried such a line: ADR-0022, ADR-0023,
-ADR-0041 and ADR-0046, plus ADR-0040 whose Context is still the template stub
-(`_TODO: describe the situation, …`).
+decided. Five records on `main` had an opening with no usable summary in it:
+ADR-0022, ADR-0023, ADR-0041 and ADR-0046 (lead-ins), plus ADR-0040 whose
+Context is still the template stub (`_TODO: describe the situation, …`).
 
 Nothing surfaced it. The index looked populated, so the only way to notice was
 to read a bullet and realize it was a fragment.
@@ -86,7 +86,10 @@ python3 skills/adr-workflow/adr.py index docs/decisions
   treated as "one very long sentence" rather than as "not a sentence".
 - The helper had no way to return *nothing*. Every input had to yield a
   string, so a paragraph that cannot be summarized still produced one.
-- Live count on `main`: 5 of 46 index bullets were a fragment or a stub.
+- Live count on `main` at `3e470fb`: **4 of 45 index bullets** were defective —
+  three `…`-truncated (ADR-0022, ADR-0023, ADR-0046) plus ADR-0040's `_TODO`
+  stub. Five *records* had an unusable opening; the counts differ by one, and
+  the difference is itself evidence — see Proof.
 
 ## Hypotheses
 
@@ -182,6 +185,16 @@ check — `grep -nE '^- \[ADR-[0-9]{4}.*— .*(:|…) \(' docs/decisions/README.
 — returned three lines on `main` (ADR-0022, ADR-0023, ADR-0046) and returns
 nothing after the fix. ADR-0040 renders `(no description)` and warns, which is
 the intended outcome for an unwritten record, not a residual defect.
+
+**Why the grep finds three where five records are affected.** ADR-0040's stub
+bullet ends `._`, so that grep cannot see it — four defective bullets, three
+of them grep-visible. ADR-0041 is the fifth *record* but its bullet was not
+defective at that moment: it still carried curated prose written on #136,
+while its own `## Context` had regressed to a lead-in when #157 reverted the
+#151 rewording. In other words the README disagreed with its own source and
+would have degraded on the next regen. That gap is worth naming rather than
+smoothing over — a generated file silently out of sync with what generates it
+is precisely the argument for the derive-only ruling this fix serves.
 
 **Red before, green after**, on the same tree:
 

@@ -825,6 +825,21 @@ class IndexNoSummaryTests(unittest.TestCase):
         self.assertEqual(result.stderr.strip(), "",
                          f"unexpected warning: {result.stderr!r}")
 
+    def test_the_remedy_is_printed_once_per_run_not_once_per_record(self):
+        """Two unsummarizable records get two per-record lines but a single
+        remedy line — moving the write back inside the loop would otherwise
+        pass unnoticed."""
+        write_sample_adr(self.adrs_dir / "adr-0001-one.md", "0001", "one",
+                         "One", context=LIST_LEAD_IN_CONTEXT)
+        write_sample_adr(self.adrs_dir / "adr-0002-two.md", "0002", "two",
+                         "Two", context=LIST_LEAD_IN_CONTEXT)
+        result = self._index()
+        self.assertEqual(result.stderr.count("ADR-0001"), 1)
+        self.assertEqual(result.stderr.count("ADR-0002"), 1)
+        self.assertEqual(
+            result.stderr.count("reword each record"), 1,
+            f"the remedy must print once per run: {result.stderr!r}")
+
     def test_rewording_the_context_updates_the_index(self):
         """The ruling's remedy must actually work: fix the source, re-run,
         and the bullet follows."""
@@ -851,6 +866,14 @@ class RepoIndexQualityTests(unittest.TestCase):
     """Realism guard on jig's own index — the grep from issue #140."""
 
     def test_no_degenerate_summaries_in_the_repo_index(self):
+        """A trailing `…` is checked here as a *regression* signal — jig no
+        longer hard-truncates, so one appearing again means the truncation
+        branch came back. It is NOT the rule that an ellipsis is degenerate:
+        an author may legitimately end a Context opening with one, and
+        `_is_degenerate_description` deliberately lets that through (see
+        `test_an_authored_trailing_ellipsis_is_not_treated_as_truncation`).
+        If this fires on `…`, decide which of the two it is before "fixing"
+        the ADR — the failure message says so."""
         readme = REPO_ROOT / "docs" / "decisions" / "README.md"
         if not readme.is_file():
             self.skipTest("repo README.md not present")
@@ -863,7 +886,12 @@ class RepoIndexQualityTests(unittest.TestCase):
             if desc.endswith(":") or desc.endswith("…") \
                     or desc.startswith("_TODO"):
                 bad.append(line[:100])
-        self.assertEqual(bad, [], "degenerate index summaries on disk")
+        self.assertEqual(
+            bad, [],
+            "index summaries that read as fragments. A `:` or `_TODO` ending "
+            "is always wrong. A `…` ending is wrong ONLY if jig truncated it "
+            "— if the ADR's own Context opening ends that way, the summary is "
+            "correct and this check needs narrowing, not the ADR.")
 
 
 # ---------- ResolveTodoTests (AC #4) ----------
