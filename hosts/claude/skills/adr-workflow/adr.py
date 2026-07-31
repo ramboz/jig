@@ -37,6 +37,7 @@ import sys
 import tempfile
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout, subtree
@@ -1428,19 +1429,30 @@ def _is_abbreviation_ending_at(text: str, period_index: int) -> bool:
     return False
 
 
-def _extract_description(adr_text: str) -> str:
-    """First non-empty paragraph from `## Context`, truncated at first
-    sentence-ending punctuation if multi-line or > 120 chars.
+def _first_sentence_end(paragraph: str) -> Optional[int]:
+    """Index of the first sentence-ending `.` / `?` / `!` followed by a space
+    or EOL, skipping periods that belong to a known abbreviation. Returns
+    None when the paragraph carries no complete sentence."""
+    for i, ch in enumerate(paragraph):
+        if ch in ".?!":
+            after = paragraph[i + 1: i + 2]
+            if after == "" or after.isspace():
+                if ch == "." and _is_abbreviation_ending_at(paragraph, i):
+                    continue
+                return i
+    return None
 
-    Returns '' on miss (caller fills in)."""
+
+def _context_paragraph(adr_text: str) -> tuple:
+    """Return `(paragraph, line_count)` for the first non-empty paragraph of
+    `## Context` — contiguous lines joined with spaces. `('', 0)` on miss."""
     m = re.search(r"(?m)^##\s+Context\s*$", adr_text)
     if not m:
-        return ""
+        return ("", 0)
     rest = adr_text[m.end():]
     next_h2 = re.search(r"(?m)^##\s", rest)
     body = rest[: next_h2.start()] if next_h2 else rest
 
-    # First non-empty paragraph: contiguous lines separated by blank lines.
     paragraph_lines = []
     for raw_line in body.splitlines():
         line = raw_line.rstrip()
@@ -1449,38 +1461,101 @@ def _extract_description(adr_text: str) -> str:
                 break
             continue
         paragraph_lines.append(line.strip())
-    if not paragraph_lines:
+    return (" ".join(paragraph_lines), len(paragraph_lines))
+
+
+def _extract_description(adr_text: str) -> str:
+    """First non-empty paragraph from `## Context`, truncated to its first
+    complete sentence when the paragraph is multi-line, > 120 chars, or ends
+    in a colon.
+
+    Returns '' when the paragraph holds NO complete sentence — the shape of a
+    lead-in to a list or table (`jig has two scaffold topologies, selected by
+    one axis in \\`scaffold.py\\`:`). Bug 020 / [issue #140]: that used to be
+    written verbatim, or hard-truncated with a trailing `…` when it ran past
+    the cap, producing an index line that read like a decision summary and
+    was not one. The index stays a pure function of the ADR files, so the
+    answer is not to let a human overwrite the bullet — it is to say plainly
+    that this record has no derivable summary, and name it, so its `## Context`
+    opening gets reworded at the source.
+
+    Also returns '' on miss (no `## Context`). Caller fills in."""
+    paragraph, line_count = _context_paragraph(adr_text)
+    if not paragraph:
         return ""
-    paragraph = " ".join(paragraph_lines)
 
-    multi_line = len(paragraph_lines) > 1
+    boundary = _first_sentence_end(paragraph)
+    if boundary is None:
+        # No sentence at all — a lead-in, not a summary.
+        return ""
+
+    multi_line = line_count > 1
     too_long = len(paragraph) > _DESCRIPTION_MAX
-
-    if multi_line or too_long:
-        # Truncate at first sentence-ending punctuation (`.` / `?` / `!`) when
-        # followed by space or EOL. Walk char-by-char and skip periods that
-        # belong to known abbreviations (`e.g.`, `i.e.`, `etc.` …).
-        for i, ch in enumerate(paragraph):
-            if ch in ".?!":
-                after = paragraph[i + 1: i + 2]
-                if after == "" or after.isspace():
-                    if ch == "." and _is_abbreviation_ending_at(paragraph, i):
-                        continue
-                    return paragraph[: i + 1]
-        # No sentence boundary found → hard-truncate.
-        return paragraph[: _DESCRIPTION_MAX].rstrip() + "…"
+    # The colon case covers a one-line lead-in that happens to open with a
+    # complete sentence: keep the sentence, drop the dangling lead-in.
+    if multi_line or too_long or paragraph.endswith(":"):
+        return paragraph[: boundary + 1]
     return paragraph
 
 
-def _render_index_entries(adr_paths: list) -> list:
-    """Return one bullet line per ADR, sorted ascending by NNNN."""
+_NO_DESCRIPTION = "(no description)"
+
+
+def _is_degenerate_description(description: str) -> bool:
+    """True for a summary that is a fragment or a placeholder rather than a
+    sentence. Guards the write path: `_extract_description` returns '' for a
+    paragraph with no sentence in it, but a paragraph CAN end in `…` or open
+    with the template's `_TODO` stub and still carry a boundary, and neither
+    belongs in the index."""
+    text = (description or "").strip()
+    if not text or text == _NO_DESCRIPTION:
+        return True
+    if text.endswith(":") or text.endswith("…"):
+        return True
+    # The ADR template's italic stubs, indexed before the record was written.
+    if text.startswith("_TODO") or text.startswith("_TBD"):
+        return True
+    return False
+
+
+def _no_summary_reason(adr_text: str) -> str:
+    """Name why no summary could be derived, so the warning is actionable."""
+    paragraph, _ = _context_paragraph(adr_text)
+    if not paragraph:
+        return "it has no `## Context` prose to summarize"
+    if paragraph.startswith("_TODO") or paragraph.startswith("_TBD"):
+        return "its `## Context` is still the template stub"
+    # Every remaining case is "the first paragraph has no complete sentence".
+    # A lead-in to a list or table is the common one, but a paragraph that
+    # merely lacks terminal punctuation lands here too — so state the fact,
+    # and name the likely cause without asserting it.
+    return ("its `## Context` opens with no complete first sentence "
+            "(typically a lead-in to a list or table)")
+
+
+def _render_index_entries(adr_paths: list,
+                          warnings: Optional[list] = None) -> list:
+    """Return one bullet line per ADR, sorted ascending by NNNN.
+
+    Records with no derivable summary get `(no description)` and append a
+    line to `warnings` naming the record and why."""
     rows = []
     for p in sorted(adr_paths, key=lambda x: _parse_adr_number(x.name)):
         text = p.read_text()
         number = f"{_parse_adr_number(p.name):04d}"
         title = _extract_title(text)
         status, date_str = _extract_status_and_date(text)
-        description = _extract_description(text) or "(no description)"
+        description = _extract_description(text)
+        if _is_degenerate_description(description):
+            description = _NO_DESCRIPTION
+            if warnings is not None:
+                warnings.append(
+                    f"adr.py index: ADR-{number} ({p.name}) — "
+                    f"{_no_summary_reason(text)}. Wrote {_NO_DESCRIPTION}. "
+                    f"Reword that record's `## Context` opening into a "
+                    f"standalone sentence and re-run — the index is derived "
+                    f"from the ADR files, so the fix belongs at the source."
+                )
         # Filename stem is `adr-NNNN-<slug>` (9-char prefix to strip).
         slug = p.stem[9:] if len(p.stem) > 9 else p.stem
         meta = f"({date_str}, {status})" if date_str else f"({status})"
@@ -1514,7 +1589,10 @@ def cmd_index(adrs_dir: Path) -> Path:
     section_end = index_h2.end() + (next_h2.start() if next_h2 else len(rest))
 
     adrs = _adr_files(adrs_dir)
-    bullets = _render_index_entries(adrs)
+    warnings = []
+    bullets = _render_index_entries(adrs, warnings)
+    for line in warnings:
+        sys.stderr.write(line + "\n")
 
     # New body: two blank lines after the heading, then bullets (or empty if
     # none), then a trailing blank line before the next section (preserves

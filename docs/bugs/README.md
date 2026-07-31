@@ -24,6 +24,7 @@
 | 017 | record-review-blocks-on-stdin | high | standard | DONE | yes | skills/independent-review/test_review.py::Bug017RecordReviewStdinTests | claude/bug-017-stdin-fix |  |  |
 | 018 | copy-machinery-leaves-mode-inconsistent | medium | standard | DONE | yes | skills/migrate/test_migrate.py::PluginModeConversionTests | claude/bug-018-close-out |  |  |
 | 019 | review-prompt-hardcodes-spec-md | medium | standard | DONE | yes | skills/independent-review/test_review.py::FilePerSliceReviewTargetTests | claude/github-issue-134-0c6fb4 |  |  |
+| 020 | adr-index-summary-degradation | low | standard | FIXING | yes | skills/adr-workflow/test_adr.py::IndexNoSummaryTests | claude/github-issue-140-63ae37 |  |  |
 | 021 | custom-test-command-drops-selector | medium | standard | REPORTED | no |  | claude/bug-021-tdd-selector-gate |  |  |
 | 022 | copy-machinery-ignores-docs-root | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CopyMachineryTrackLocalDocsRootTests | claude/bug-copy-machinery-docs-root |  |  |
 | 023 | copy-machinery-advisory-host-from-invocation | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CrossHostAdvisoryTests | claude/bug-023-advisory-host |  |  |

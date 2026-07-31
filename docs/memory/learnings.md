@@ -964,3 +964,26 @@ succeeds, so the run looks fine.
   is a spelling the build consumes, the right-hand side one it produces —
   and the second group is exactly what a hand-written list forgets, because
   those strings never appear in the source you are looking at.
+
+**A deterministic extractor needs a way to say "I don't know"** (bug 020,
+[`020-adr-index-summary-degradation`](../bugs/020-adr-index-summary-degradation.md)
+/ [issue #140](https://github.com/ramboz/jig/issues/140)).
+`adr.py index` derives each ADR's one-line summary from the record's first
+`## Context` paragraph, and `_extract_description` had to return a string for
+every input. When the paragraph is a lead-in to a list it contains no complete
+sentence, so the helper emitted the lead-in verbatim — colon and all — or cut
+it at 120 chars with a trailing `…`. Five of 46 bullets were in that state and
+nobody noticed, because **a fragment and a summary are the same shape**: the
+output was well-formed, just meaningless. Letting the helper return `""`, and
+reporting it as `(no description)` plus a warning naming the record, closed
+every live case.
+
+The corollary is about policy, not code. The maintainer's ruling ([#151](https://github.com/ramboz/jig/pull/151),
+reaffirmed on [#154](https://github.com/ramboz/jig/pull/154)) is that a
+generated index stays a **pure function of its sources** — hand edits to the
+generated file are overwritten by design, and the remedy for a bad row is to
+fix the source. That is workable **only if the generator names the source that
+needs fixing**. A derive-only policy plus a generator that silently invents
+something plausible is the worst pairing: the human is told to fix the source
+and given no way to find it. If you rule that a generated artifact may not be
+hand-edited, make sure it reports what it could not derive.

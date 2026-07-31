@@ -13,8 +13,8 @@ Proposed (2026-06-09)
 ## Context
 
 jig has organically grown a **family of work-shaped lifecycles**, each
-recorded in its own ADR, each independently re-deriving the same
-architecture:
+recorded in its own ADR and each independently re-deriving the same
+architecture. The members and their distinctive middles:
 
 | Member | Backbone (distinctive middle) | ADR |
 |---|---|---|
