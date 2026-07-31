@@ -275,7 +275,10 @@ class ReconciliationPromptTests(unittest.TestCase):
         for disposition in ("updated", "no-op", "deferred"):
             self.assertIn(disposition, prompt)
         self.assertRegex(prompt, r"(?i)deferred.+(?:owner|trigger)")
-        self.assertRegex(prompt, r"(?i)no-op.+(?:touched files|landed behavior)")
+        # Issue #160: `no-op` is now checked against the supplied changed-file
+        # list (or landed behavior), not a bare "touched files" mention.
+        self.assertRegex(
+            prompt, r"(?is)no-op.+(?:Files this slice changed|landed behavior)")
 
     def test_keeps_reconciliation_scope_narrow(self):
         prompt = self._prompt()
@@ -2716,6 +2719,102 @@ class TestQualitySnapshotPromptPlacementTests(unittest.TestCase):
         prompt = module.build_reconciliation_prompt(spec, "099-01 alpha")
         self.assertNotIn(TEST_QUALITY_HEADING, prompt)
         self.assertNotIn(TEST_QUALITY_UNAVAIL_PREFIX, prompt)
+
+
+# ---------------------------------------------------------------------------
+# Issue #160 — the reconciliation sweep names "touched files" but never
+# supplied them. `_touched_files_block` derives the changed-file list so the
+# omission check runs on data, not the implementer's recollection.
+# ---------------------------------------------------------------------------
+
+
+TOUCHED_LABEL = "Files this slice changed"
+
+
+class ReconciliationTouchedFilesTests(unittest.TestCase):
+    """Issue #160: the reconciliation prompt must carry the deterministic
+    list of files the slice changed (merge-base against `main`), degrading
+    to a single-line fallback exactly like the test-quality snapshot."""
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_160", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _spec_in_repo_with_diff(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-touched-"))
+        self._tmpdirs.append(root)
+        _make_repo_with_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def test_helper_lists_the_changed_files(self):
+        module = self._import_review_module()
+        spec = self._spec_in_repo_with_diff()
+        block = module._touched_files_block(spec)
+        self.assertIn(TOUCHED_LABEL, block)
+        # The committed diff on the feature branch is tests/test_alpha.py.
+        self.assertIn("tests/test_alpha.py", block)
+        # Guidance tying the list to the sweep's account-for-everything rule.
+        self.assertIn("sweep", block.lower())
+
+    def test_helper_fallback_when_empty_diff(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-touched-empty-"))
+        self._tmpdirs.append(root)
+        _make_repo_no_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._touched_files_block(spec)
+        self.assertIn(TOUCHED_LABEL, block)
+        self.assertIn("unavailable", block.lower())
+
+    def test_helper_fallback_when_no_git_repo(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-touched-nogit-"))
+        self._tmpdirs.append(root)
+        spec = root / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._touched_files_block(spec)
+        self.assertIn("unavailable", block.lower())
+
+    def test_helper_never_raises(self):
+        module = self._import_review_module()
+        block = module._touched_files_block(Path("/no/such/path/spec.md"))
+        self.assertIsInstance(block, str)
+        self.assertIn("unavailable", block.lower())
+
+    def test_reconciliation_prompt_includes_touched_files(self):
+        module = self._import_review_module()
+        spec = self._spec_in_repo_with_diff()
+        prompt = module.build_reconciliation_prompt(spec, "099-01 alpha")
+        self.assertIn(TOUCHED_LABEL, prompt)
+
+    def test_sweep_block_points_at_the_changed_file_list(self):
+        """The sweep check must reference the supplied list, not bare
+        'touched files' — that reference is the whole point of issue #160."""
+        module = self._import_review_module()
+        spec = self._spec_in_repo_with_diff()
+        prompt = module.build_reconciliation_prompt(spec, "099-01 alpha")
+        self.assertIn("Files this slice changed** list above", prompt)
 
 
 # ---------------------------------------------------------------------------
