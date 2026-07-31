@@ -1196,3 +1196,33 @@ introduced). The fix that converged shifted the burden from "classify the set as
 bounded" to "state *why* the search is exhaustive" and routed that articulation
 to the reviewer. A gate that only ever rubber-stamps is not a gate; this one
 changed the decision.
+
+**A retracted claim is content, and content propagates** (bug 032,
+[`032-review-recovery-no-retraction-sweep`](../bugs/032-review-recovery-no-retraction-sweep.md)
+/ [issue #133](https://github.com/ramboz/jig/issues/133)). The "Recovering
+from a failed review" path was written for a code-shaped finding, which is
+local to one file, so it said "re-run the pass against the updated
+deliverable" — singular. But when a review falsifies a *claim*, the same
+sentence is usually copied by design into `CHANGELOG.md`, the slice record,
+the inbox, and cross-referenced docs; fixing only the reviewed artifact leaves
+the retracted version authoritative everywhere else, and the pass re-fails
+round after round on a sibling you never touched — three rounds, in the
+reported case, collapsed by one grep. The durable fix is a corpus-wide sweep
+for the retracted phrasing *before* re-recording, distinguishing surviving
+assertions (must fix) from explicit, labelled retractions (fine).
+
+**Verify a named tool's documented scope before wiring it in as the
+mechanism** (same bug, caught by the craft pass). The maintainer's steer —
+"leverage `/jig:analyze`" — was right in spirit, and the first draft dutifully
+named analyze as the *primary* sweep, claiming it "catches exactly this
+propagation" into `CHANGELOG.md`. It does not: analyze's own
+`skills/analyze/SKILL.md` § Inputs limits the MVP to **one spec's files plus a
+fixed doc whitelist** (`product-vision`, ADRs, glossary, `architecture.md`),
+with cross-spec explicitly unsupported — the changelog and inbox are not
+inputs at all. So the tool named as the mechanism could not reach the exact
+artifact the bug was written about. The plain grep is the corpus-wide
+mechanism; analyze is the structured *within-spec* complement. The overclaim
+survived the author's own read and was caught only because the reviewer opened
+the tool's Inputs section instead of trusting its tagline — a tool's
+self-description ("cross-artifact consistency") is marketing, not a scope
+contract.
