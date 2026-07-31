@@ -1181,5 +1181,131 @@ class DiagnoseGateListShapeTests(unittest.TestCase):
         self.assertIn("[x]", joined, "must name the leading marker shape")
 
 
+class CheckBoardTests(unittest.TestCase):
+    """`bug.py check-board` — the read-only guard that lets the board stop
+    being hand-merged (issue #149).
+
+    The board is a derived file: every parallel PR appends a row at the same
+    end-of-table position, so every parallel PR conflicts on it. Silencing that
+    conflict is only safe if something else catches what the conflict marker
+    was accidentally catching — a **duplicate bug id**, which `_render_board`
+    otherwise renders as two rows without complaint. This subcommand is that
+    something else, plus a drift check that the committed board still matches
+    what the records say. Read-only by contract: CI must be able to run it
+    against a checkout without mutating the tree."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self, rel: str) -> Path:
+        return self.root / "docs" / "bugs" / rel
+
+    def _record(self, num: str, slug: str, **fields: str) -> Path:
+        base = {"status": "REPORTED", "severity": "low", "tier": "standard",
+                "claimed_by": "", "regression_test": "", "red_confirmed_at": "",
+                "green_confirmed_at": "", "fix_class": "",
+                "security_surface": "false", "escalated_to": ""}
+        base.update(fields)
+        fm = "".join(f"{k}: {v}\n" for k, v in base.items())
+        return write(self._bug(f"{num}-{slug}.md"),
+                     f"---\n{fm}---\n\n## Symptom\n")
+
+    def _sync_board(self) -> Path:
+        r = run_bug("status-board", "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return self._bug("README.md")
+
+    def test_clean_project_passes(self):
+        self._record("001", "alpha")
+        self._record("002", "beta")
+        self._sync_board()
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_duplicate_id_fails_and_names_both_records(self):
+        """The core guard. Two records claiming 017 is exactly what a parallel
+        reservation produces once the conflict marker stops being shown."""
+        self._record("017", "alpha")
+        self._sync_board()
+        self._record("017", "beta")
+        self._sync_board()
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertNotEqual(r.returncode, 0)
+        combined = r.stdout + r.stderr
+        self.assertIn("017", combined)
+        self.assertIn("017-alpha.md", combined, "must name the colliding files")
+        self.assertIn("017-beta.md", combined, "must name the colliding files")
+
+    def test_drifted_board_fails_and_names_the_file(self):
+        self._record("001", "alpha")
+        board = self._sync_board()
+        self._record("002", "beta")  # board now stale — row 002 missing
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertNotEqual(r.returncode, 0)
+        combined = r.stdout + r.stderr
+        self.assertIn("README.md", combined)
+        self.assertIn("status-board", combined,
+                      "must name the command that fixes the drift")
+        self.assertEqual(board.read_text().count("| 002 |"), 0,
+                         "check-board must not repair the drift itself")
+
+    def test_is_read_only(self):
+        """CI runs this against a checkout; it must leave the tree untouched
+        even when it fails."""
+        self._record("001", "alpha")
+        board = self._sync_board()
+        before = board.read_text()
+        self._record("002", "beta")
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertEqual(r.returncode, 1,
+                         "expected a real check failure, not an argparse usage "
+                         f"error: {r.stderr}")
+        self.assertEqual(board.read_text(), before)
+
+    def test_curated_notes_do_not_read_as_drift(self):
+        """Notes live only in the board and are preserved across regen, so a
+        hand-written Note must not be reported as the board having drifted."""
+        self._record("001", "alpha")
+        board = self._sync_board()
+        board.write_text(board.read_text().replace(
+            "|  |\n", "| curated note |\n", 1))
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_missing_board_fails_cleanly(self):
+        self._record("001", "alpha")
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("README.md", r.stdout + r.stderr)
+
+    def test_terminal_section_rows_are_checked_too(self):
+        """`_render_board` splits ESCALATED / RESOLVED_ON_MAIN into a second
+        table. A duplicate id spanning the two tables must still be caught."""
+        self._record("017", "alpha")
+        self._record("017", "beta", status="ESCALATED", escalated_to="spec 099")
+        self._sync_board()
+
+        r = run_bug("check-board", "--project-dir", str(self.root))
+
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("017", r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
