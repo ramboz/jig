@@ -39,7 +39,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import derived_docs, project_layout, subtree
+from _common import project_layout, subtree
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import frontmatter_flag_truthy as _frontmatter_flag_truthy
@@ -1491,91 +1491,6 @@ def _render_index_entries(adr_paths: list) -> list:
     return rows
 
 
-def _compose_index(adrs_dir: Path, existing: str) -> str:
-    """Return `existing` with its `## Index` section rebuilt from the ADR
-    files on disk. Everything outside that section is carried over untouched.
-
-    Pure — no writes. Shared by `cmd_index` (which writes the result) and
-    `check_index` (which compares against it), so the check can never drift
-    from what regeneration would produce.
-    """
-    # Match the `## Index` heading line. Use `[ \t]*$` instead of `\s*$` so the
-    # regex does NOT consume the trailing newline — preserving it keeps our
-    # replacement boundary clean (and idempotent).
-    index_h2 = re.search(r"(?m)^##[ \t]+Index[ \t]*$", existing)
-    if not index_h2:
-        raise AdrError(
-            f"README.md has no '## Index' heading: {adrs_dir / 'README.md'}"
-        )
-    # Find the next `## ` heading (or EOF) to bound the section we replace.
-    rest = existing[index_h2.end():]
-    next_h2 = re.search(r"(?m)^##\s", rest)
-    section_end = index_h2.end() + (next_h2.start() if next_h2 else len(rest))
-
-    bullets = _render_index_entries(_adr_files(adrs_dir))
-
-    # New body: two blank lines after the heading, then bullets (or empty if
-    # none), then a trailing blank line before the next section (preserves
-    # spacing for readability).
-    if bullets:
-        body = "\n\n" + "\n".join(bullets) + "\n\n"
-    else:
-        body = "\n\n"
-    return existing[: index_h2.end()] + body + existing[section_end:]
-
-
-def _duplicate_adr_numbers(adrs_dir: Path) -> dict:
-    """Map ADR number -> sorted filenames, for numbers claimed by more than
-    one ADR.
-
-    `_render_index_entries` renders two ADRs sharing a number as two bullets
-    without complaint, and a drift check can't see the problem either — both
-    bullets are faithfully derived. Today the only thing that surfaces it is
-    the merge conflict on the README, which is exactly what we want to stop
-    resolving by hand (issue #149). So it needs its own detector.
-    """
-    return derived_docs.duplicate_ids(
-        (derived_docs.id_from_numeric_prefix(p, prefix="adr-"), p.name)
-        for p in _adr_files(adrs_dir)
-    )
-
-
-def check_index(adrs_dir: Path) -> list:
-    """Read-only audit of the ADR index. Returns a list of human-readable
-    problems — empty means clean.
-
-    Never writes: CI runs this against a checkout, and a check that repairs
-    what it measures can't be trusted to report it.
-    """
-    problems = []
-    for number, names in _duplicate_adr_numbers(adrs_dir).items():
-        problems.append(
-            f"duplicate ADR number {number}: {', '.join(names)} — renumber "
-            "one before landing; parallel branches both allocated it"
-        )
-    readme = adrs_dir / "README.md"
-    if not readme.is_file():
-        problems.append(
-            f"missing ADR index: {readme} — every ADR is listed there; "
-            "restore it and run `adr.py index <decisions-dir>`"
-        )
-        return problems
-    existing = readme.read_text()
-    try:
-        composed = _compose_index(adrs_dir, existing)
-    except AdrError as exc:
-        problems.append(str(exc))
-        return problems
-    if existing != composed:
-        problems.append(
-            f"stale index: {readme} does not match the ADR files — run "
-            "`adr.py index <decisions-dir>` and commit the result. A summary "
-            "edited by hand here is overwritten on the next regen; edit the "
-            "ADR's own `## Context` opening instead"
-        )
-    return problems
-
-
 def cmd_index(adrs_dir: Path) -> Path:
     """Regenerate the `## Index` section of `<decisions-dir>/README.md`."""
     if not adrs_dir.is_dir():
@@ -1584,7 +1499,31 @@ def cmd_index(adrs_dir: Path) -> Path:
     if not readme.is_file():
         raise AdrError(f"README.md not found in: {adrs_dir}")
     text = readme.read_text()
-    new_text = _compose_index(adrs_dir, text)
+
+    # Match the `## Index` heading line. Use `[ \t]*$` instead of `\s*$` so the
+    # regex does NOT consume the trailing newline — preserving it keeps our
+    # replacement boundary clean (and idempotent).
+    index_h2 = re.search(r"(?m)^##[ \t]+Index[ \t]*$", text)
+    if not index_h2:
+        raise AdrError(
+            f"README.md has no '## Index' heading: {readme}"
+        )
+    # Find the next `## ` heading (or EOF) to bound the section we replace.
+    rest = text[index_h2.end():]
+    next_h2 = re.search(r"(?m)^##\s", rest)
+    section_end = index_h2.end() + (next_h2.start() if next_h2 else len(rest))
+
+    adrs = _adr_files(adrs_dir)
+    bullets = _render_index_entries(adrs)
+
+    # New body: two blank lines after the heading, then bullets (or empty if
+    # none), then a trailing blank line before the next section (preserves
+    # spacing for readability).
+    if bullets:
+        body = "\n\n" + "\n".join(bullets) + "\n\n"
+    else:
+        body = "\n\n"
+    new_text = text[: index_h2.end()] + body + text[section_end:]
 
     if new_text == text:
         # Idempotent no-op.
@@ -1766,13 +1705,6 @@ def _build_parser() -> argparse.ArgumentParser:
     pi = sub.add_parser("index", help="regenerate the Index section of ADR README.md")
     pi.add_argument("adrs_dir", help="path to docs/decisions/")
 
-    pci = sub.add_parser(
-        "check-index",
-        help="read-only: verify the ADR README's Index matches the ADR files "
-             "and that no ADR number is claimed twice",
-    )
-    pci.add_argument("adrs_dir", help="path to docs/decisions/")
-
     pr = sub.add_parser("resolve-todo",
                         help="mark a refinement-todo section resolved by an ADR")
     pr.add_argument("number", help="4-digit ADR number")
@@ -1812,13 +1744,6 @@ def main(argv: list) -> int:
             adrs_dir = Path(ns.adrs_dir).resolve()
             target = cmd_index(adrs_dir)
             print(str(target))
-        elif ns.cmd == "check-index":
-            problems = check_index(Path(ns.adrs_dir).resolve())
-            for problem in problems:
-                sys.stderr.write(f"ADR index: {problem}\n")
-            if problems:
-                return 1
-            print("ADR index: clean")
         elif ns.cmd == "resolve-todo":
             project_dir = Path.cwd()
             target = cmd_resolve_todo(project_dir, ns.number, ns.fragment)
