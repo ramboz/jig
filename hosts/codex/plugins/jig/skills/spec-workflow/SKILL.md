@@ -35,6 +35,10 @@ user-invocable: true
   links that reports use cases with no implementing spec (coverage gap) and
   specs citing no parent use case (scope creep). No-op when the project has no
   `## Use cases` section.
+- Guards the status board via `workflow.py check-board <project-dir>` — a
+  read-only audit that exits non-zero when `docs/specs/README.md` no longer
+  matches the spec records, or when two spec directories claim one number.
+  Writes nothing, so it is safe to run in CI against a checkout.
 - Surfaces gate-bypass telemetry via `workflow.py gate-stats [--days N]` — a
   read-only per-gate histogram of how often each gate honored its env-var
   override (an override-frequency audit trail, not a gate-value verdict) from
@@ -577,6 +581,28 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
    `dependencies:` check.
 4. Regenerate the board: `workflow.py status-board <project-dir>`.
 5. Run `/jig:memory-sync` (or `memory.py`) to consolidate any new learnings.
+
+**Before landing, audit the board.** `docs/specs/README.md` is derived — every
+column is computed from the spec records, and the curated Notes column is
+carried across regens — so it is regenerated, never hand-edited. A merge
+conflict on it is resolved by re-running `status-board`, not by picking a side:
+
+```bash
+python3 "${PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+  check-board <project-dir>
+```
+
+Read-only; exits non-zero on either problem it can find. **Stale board** — the
+spec records changed and `status-board` wasn't re-run. **Duplicate spec
+number** — two spec directories claim one number, which is what parallel
+branches produce when the number was never reserved on the trunk. The renderer
+emits both without complaint and a staleness check can't see it (both *are*
+faithfully derived), so it needs its own detector; the message names both
+directories so you know which to renumber.
+
+Notes-column text is not drift — it is hand-written by design and survives
+regen. What *is* drift is any other cell edited by hand: it will be overwritten
+on the next regen, so change the slice record instead.
 
 ## Spec lifecycle states
 
