@@ -261,8 +261,25 @@ SKILL.md hand-off is the documented gate.
    load-bearing factual claim about a *runnable* surface — library/API
    capability, version/perf behavior, behavior of existing code — must be
    backed by an **executed probe** (run the command, read the source /
-   `node_modules`) or a citation. Everything you cannot verify goes in the
-   spec stub's risk-gated `## Assumptions` section, marked explicitly — never
+   `node_modules`) or a citation. **A universal or negative claim** ("the
+   only", "never", "always", "one-way", "nothing reads", "otherwise clean")
+   is established by an ***enumeration*** — a search you can show returns the
+   *complete* set — **not a single positive citation** ([ADR-0052](../../docs/decisions/adr-0052-grounding-enumeration-for-universal-claims.md)):
+   one true example proves nothing about the rest of the set, and these are the
+   highest-value claims a future reader relies on. To claim enumeration, **state
+   why the search is exhaustive** — what closes the set so nothing escapes.
+   Some sets are closed by syntax and this is easy (imports in a package,
+   call-sites in a repo); many only *look* `grep`-bounded — a "nothing reads
+   this" search misses dynamic / reflective / ORM / string-built / config-wired /
+   codegen'd / cross-repo access (illustrative, **not a checklist to clear**: the
+   burden is to show the search captures every member, not to rule out named
+   escapes). When you cannot show the search is exhaustive, an **empty result is
+   absence of evidence, not an enumeration**: weaken the claim, tighten the
+   boundary until the search genuinely closes the set, or move it to
+   `## Assumptions`. Never dress an empty search as an enumeration — the
+   frame-critique reviewer treats "I searched and it was empty" as *un*grounded
+   until you have shown what closes the set. Everything you cannot verify goes in
+   the spec stub's risk-gated `## Assumptions` section, marked explicitly — never
    asserted as fact. This **makes mandatory + derived** the existing informal
    "Current state (verified …)" discipline that the 064-01 retro found jig
    already half-practices by hand: it was grounding-by-probe all along, just

@@ -1161,3 +1161,38 @@ learning): editing a skill's `SKILL.md` *or* a `skills/**/**.py` helper requires
 regenerating the committed `hosts/` mirrors (`python3 scripts/build_host_packages.py`)
 — the drift guard fails on stale mirrors and the craft review will (rightly) block
 on it. Caught in the bug-031 craft pass.
+
+## A judgment-rule change is not bug-fix-shaped; an Accepted ADR is refined by a new ADR, never amended
+
+[Issue #132](https://github.com/ramboz/jig/issues/132) reported a hole in a
+*rule* — ADR-0020 §1's grounding standard accepted one citation for a universal
+claim. The reflex is to route a reported defect to `bug-fix`, but that
+workflow's central tooth is a witnessed red→green regression test, and this fix
+is pure judgment-prose (rule text in an ADR + two SKILL.md files). jig
+deliberately does **not** enforce this kind of rule with code (the standing
+distrust of lexical-marker gates), so there is no honest automated test to put
+through the gate — forcing it through `bug-fix` means switching the gate off,
+i.e. faking the ceremony. **A pure judgment-rule change is decision-shaped, not
+bug-shaped:** the honest route is a new refining ADR + inline edits to the live
+operational prose (the SKILLs) + the frame-critique and craft passes that
+actually apply to a rule, no red→green theatre.
+
+And the ADR is **refined by a new ADR, never amended in place.** [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
+scopes the `## Amendments` mechanism to *closed specs/slices*; ADRs are governed
+by Nygard immutability ([ADR-0006](../decisions/adr-0006-adr-accept-then-index-ordering.md))
+— superseded or extended by a new record, never edited in body (the one allowed
+edit is the supersession line). So [ADR-0052](../decisions/adr-0052-grounding-enumeration-for-universal-claims.md)
+carries the enumeration refinement and cross-links ADR-0020; ADR-0020 §1's prose
+is left untouched, and the operative rule lands inline in the two SKILLs where
+authors actually read it.
+
+The corollary is about the frame-critique gate earning its cost. ADR-0052's
+`accept` gate forced a frame-critique pass, and it took **four rounds** — the
+first three returned `needs-changes`, each naming a real, load-bearing hole (the
+rule was unsound for *unbounded* negative claims a `grep` can't close; the
+"enumerate it" burden was a harder self-classification than the one authors
+already fail; the ADR's own `Assumptions: None` violated the very rule it
+introduced). The fix that converged shifted the burden from "classify the set as
+bounded" to "state *why* the search is exhaustive" and routed that articulation
+to the reviewer. A gate that only ever rubber-stamps is not a gate; this one
+changed the decision.
