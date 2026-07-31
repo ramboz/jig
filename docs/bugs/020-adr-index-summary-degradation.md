@@ -56,6 +56,17 @@ reaffirmed on [#154](https://github.com/ramboz/jig/pull/154) when the conflict
 with this bug's original fix was raised. A summary written into the README is
 still overwritten, deliberately.
 
+**#151 was later reverted ([#157](https://github.com/ramboz/jig/pull/157)) —
+that does not withdraw the ruling.** The revert was procedural: #151 shipped a
+*feature* (drift and duplicate-id checks across three boards) without going
+through the spec lifecycle first, so it was pulled to be specced properly. The
+design question it answered — derive-only versus preserve — was settled on its
+own terms and reaffirmed after the revert. Recorded here because the two facts
+sit next to each other in the history and read as contradictory: a reader
+finding "#151 ruled (a)" and "#151 was reverted" would reasonably wonder
+whether (a) survived. It did. Its *enforcement* (`check_index`) is what is
+pending a spec, not its conclusion.
+
 This fix serves that ruling rather than working around it: under (a) the
 remedy is to reword the ADR's own opening, and the thing that was missing was
 any signal telling you *which* record needs it.
