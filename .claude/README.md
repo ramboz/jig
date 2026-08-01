@@ -42,6 +42,25 @@ skills appear twice. To avoid that collision, **disable the jig plugin for this
 project when developing locally** — this adapter is a superset and runs against
 your *live* edits, whereas the installed plugin is a stale marketplace snapshot.
 
+Do it via `enabledPlugins` in your **local** settings —
+`.claude/settings.local.json` (gitignored, per-machine), *not* the committed
+`settings.json`:
+
+```json
+{
+  "enabledPlugins": { "jig@jig": false }
+}
+```
+
+Why local, not committed: whether *you* have the jig plugin installed is a
+per-machine fact, so it belongs in personal settings — a contributor who never
+installed the plugin shouldn't inherit this toggle. Keeping it out of the
+committed file also guarantees it never reaches a cloud session (where the
+plugin isn't installed anyway). Settings precedence is
+`Managed > CLI > Local > Project > User`, so a Local entry reliably overrides a
+user-scope plugin install and fully deactivates it (skills, hooks, and agents)
+for this project.
+
 Everywhere *else* (other repos), keep using the plugin normally, or adopt jig
 via `scaffold-init` (which writes its own `.claude/skills/jig-*` copies).
 
