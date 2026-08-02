@@ -15,6 +15,9 @@ Readiness checks:
   1. STATUS line under the slice header equals "DONE".
   2. `tdd.py run` (shelled out) returns 0 (green) — exit 2 (no runner)
      surfaces as a yellow warning, not a hard block. Exit 1 is a blocker.
+     If the `tdd.py` helper itself cannot be located (env/layout problem,
+     e.g. a vendored `jig-`-prefixed install), the row is a loud `not_run`
+     ("NOT RUN"), distinct from the doc-only warning (bug 024 / issue #129).
   3. A `### Deviation log` (or case-variant prefix) subsection exists
      within the slice's section bounds.
   4. All DoD `- [ ]` boxes inside the slice section are ticked.
@@ -122,24 +125,67 @@ def check_status(section: str) -> tuple:
     return False, "MISSING"
 
 
+def _resolve_tdd_py() -> Path | None:
+    """Locate the tdd-loop `tdd.py` helper across plugin AND vendored layouts.
+
+    Bug 024 / issue #129: the previous fallback was
+    `Path(__file__).parents[2] / "skills" / "tdd-loop" / "tdd.py"`, which is
+    correct only when the plugin root is exactly two levels above the skill
+    dir AND the sibling is named exactly `tdd-loop`. In a vendored install
+    (jig copied into a consuming repo's `.claude/skills/` with the marketplace
+    `jig-` prefix — `jig-slice-land/`, `jig-tdd-loop/`), that fixed path misses
+    and the check silently disabled itself.
+
+    Resolution order:
+      1. `CLAUDE_PLUGIN_ROOT/skills/tdd-loop/tdd.py` when the env var is set
+         (canonical plugin install).
+      2. A `*tdd-loop/tdd.py` sibling of this file — matched by content, not
+         by exact name, so both `tdd-loop/` and the vendored `jig-tdd-loop/`
+         resolve identically.
+      3. Any sibling skill dir carrying a `tdd.py` (`*/tdd.py`) as a last
+         resort.
+
+    Returns the first existing path, else None.
+    """
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if root:
+        candidate = Path(root).resolve() / "skills" / "tdd-loop" / "tdd.py"
+        if candidate.is_file():
+            return candidate
+    # `land.py` lives at `<skills-dir>/<this-skill>/land.py`; the other skill
+    # dirs are its siblings under `<skills-dir>`. Search them by content so a
+    # `jig-`-prefixed vendored dir resolves the same as an un-prefixed one.
+    skills_dir = Path(__file__).resolve().parent.parent
+    for pattern in ("*tdd-loop/tdd.py", "*/tdd.py"):
+        for candidate in sorted(skills_dir.glob(pattern)):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
 def check_tests(target: Path) -> tuple:
-    """Shell out to tdd.py run. Returns (status, exit_code) where status
-    is one of 'green', 'red', 'warn'."""
-    plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", "")).resolve() \
-        if os.environ.get("CLAUDE_PLUGIN_ROOT") else \
-        Path(__file__).resolve().parents[2]
-    tdd_py = plugin_root / "skills" / "tdd-loop" / "tdd.py"
-    if not tdd_py.is_file():
-        # Helper missing entirely — surface as warning (env error, not
-        # red tests).
-        return "warn", -1
+    """Shell out to tdd.py run. Returns (status, exit_code) where status is
+    one of 'green', 'red', 'warn', 'not_run'.
+
+    - 'warn'    — tdd.py ran and detected no runner (exit 2): legitimately a
+      doc-only slice.
+    - 'not_run' — the `tdd.py` helper could not be located, so the check never
+      ran (an environment/layout problem). Kept DISTINCT from 'warn' (bug 024
+      / issue #129): conflating "check could not run" with "no tests here" let
+      a broken gate hide behind the reassuring doc-only wording. Rendered
+      loudly; non-gating on the exit code because a missing helper is not
+      evidence of red tests.
+    """
+    tdd_py = _resolve_tdd_py()
+    if tdd_py is None:
+        return "not_run", -1
     try:
         result = subprocess.run(
             [sys.executable, str(tdd_py), "run", str(target)],
             capture_output=True, text=True,
         )
     except FileNotFoundError:
-        return "warn", -1
+        return "not_run", -1
     if result.returncode == 0:
         return "green", 0
     if result.returncode == 2:
@@ -332,6 +378,13 @@ def render_readiness_section(checks: dict) -> str:
         # `[?]` marker — warning, neither pass nor fail
         lines.append("- [?] Tests: warning — no test runner detected "
                      "(slice may be doc-only)")
+    elif test_status == "not_run":
+        # Bug 024 / issue #129 — the tdd.py helper could not be located, so
+        # the gate never ran. `[!]` marker + explicit NOT RUN wording so this
+        # cannot be read as a pass or mistaken for the doc-only case above.
+        lines.append("- [!] Tests: NOT RUN — could not locate the `tdd.py` "
+                     "helper; the test gate did not execute (check the install "
+                     "layout / `CLAUDE_PLUGIN_ROOT`). This is NOT a pass.")
     else:  # red
         lines.append(f"- [ ] Tests: red (`tdd.py run` exit {checks['test_exit']})")
 
@@ -667,13 +720,15 @@ def render_servo_suggestion(target: Path, test_status: str) -> str:
     it must stay silent. Pure (no side effects — the once-per-project marker
     write is the caller's job, gated on interactivity).
 
-    Silent unless ALL hold: the slice is not doc-only (a test runner was
-    detected — AC4); the target is NOT servo-scaffolded (`.servo/` absent —
-    mutually exclusive with the 072-01 advisory); servo's host-global marker
-    is available (AC1/AC2); the `.jig/no-servo-hint` opt-out is absent; and the
-    `.jig/servo-hint-shown` once-per-project breadcrumb is absent (AC6)."""
-    if test_status == "warn":              # AC4 — doc-only slice, no runner
-        return ""
+    Silent unless ALL hold: a test runner was actually detected — neither the
+    doc-only `warn` (AC4) NOR the `not_run` case where the tdd.py helper could
+    not be located, so runner presence is unknown (bug 024); the target is NOT
+    servo-scaffolded (`.servo/` absent — mutually exclusive with the 072-01
+    advisory); servo's host-global marker is available (AC1/AC2); the
+    `.jig/no-servo-hint` opt-out is absent; and the `.jig/servo-hint-shown`
+    once-per-project breadcrumb is absent (AC6)."""
+    if test_status in ("warn", "not_run"):  # AC4 — no runner detected, or the
+        return ""                           # gate never ran (runner unknown)
     if _servo_present(target):             # 072-01's case, not this one
         return ""
     if _servo_hint_opted_out(target):      # explicit permanent opt-out (AC2)
