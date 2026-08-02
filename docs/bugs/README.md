@@ -28,4 +28,4 @@
 | 021 | custom-test-command-drops-selector | medium | standard | REPORTED | no |  | claude/bug-021-tdd-selector-gate |  |  |
 | 022 | copy-machinery-ignores-docs-root | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CopyMachineryTrackLocalDocsRootTests | claude/bug-copy-machinery-docs-root |  |  |
 | 023 | copy-machinery-advisory-host-from-invocation | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CrossHostAdvisoryTests | claude/bug-023-advisory-host |  |  |
-| 024 | packaged-plugin-omits-runtime-scripts | high | gnarly | DONE | yes | scripts/test_build_claude_plugin.py::RuntimeScriptsShippedTests | claude/github-issue-167-bug-0078l0 |  |  |
+| 025 | packaged-plugin-omits-runtime-scripts | high | gnarly | DONE | yes | scripts/test_build_claude_plugin.py::RuntimeScriptsShippedTests | claude/github-issue-167-bug-0078l0 |  |  |

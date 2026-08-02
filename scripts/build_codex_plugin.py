@@ -206,7 +206,7 @@ def _copy_runtime_scripts(source_root: Path, output_dir: Path) -> None:
     `install_contract.CODEX_INCLUDE_SCRIPT_FILES` (`spec_lint.py` only) ships
     verbatim so `${PLUGIN_ROOT}/scripts/spec_lint.py` — the pre-implementation
     structural gate the rendered Codex `migrate`/`analyze` skills invoke —
-    resolves in an installed Codex plugin (bug 024 / #167). The Claude-only
+    resolves in an installed Codex plugin (bug 025 / #167). The Claude-only
     trio (`verify_install` / `scaffold_contract`) is excluded: it validates a
     `.claude/` install tree and no Codex skill references it. These modules are
     host-neutral Python and carry no `${CLAUDE_PLUGIN_ROOT}`/`.claude/` tokens,

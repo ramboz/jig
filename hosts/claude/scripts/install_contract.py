@@ -463,7 +463,7 @@ def is_excluded_release_path(rel_path: str) -> bool:
 # `RELEASE_INCLUDE_SCRIPT_FILES`) and `build_codex_plugin.py`
 # (`CODEX_INCLUDE_SCRIPT_FILES`, the host-neutral subset) — plus
 # `build_release_zip.py`, which archives the committed `hosts/<host>/` trees
-# those builders emit. Bug 024 (#167): the builders once walked only directory
+# those builders emit. Bug 025 (#167): the builders once walked only directory
 # roots and skipped these script allowlists, so no `scripts/*.py` module
 # shipped; they now consume the allowlists directly. `iter_release_files`
 # below is the reference enumerator that applies the same INCLUDE/EXCLUDE
@@ -534,7 +534,7 @@ RELEASE_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
 # `scaffold_contract` pair — is hardcoded to a Claude `.claude/` install tree
 # and is imported only by scaffold-init's Claude-mode completion self-check;
 # shipping it into a Codex package would place a `.claude/`-specific validator
-# where no Codex skill references it, so it is deliberately excluded. Bug 024
+# where no Codex skill references it, so it is deliberately excluded. Bug 025
 # (#167): the committed-package builders honour these allowlists directly (they
 # are the shipping consumers — see `iter_release_files`'s note below).
 CODEX_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (

@@ -1,5 +1,5 @@
 ---
-bug: 024
+bug: 025
 pass: bug-review
 verdict: pass
 reviewer: subagent (general-purpose)

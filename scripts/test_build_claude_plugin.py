@@ -69,7 +69,7 @@ class ClaudePackageContentsTests(unittest.TestCase):
 
     # AC #2 — runtime-only excludes. `scripts/` is NOT wholesale-excluded: the
     # allowlisted runtime modules (RELEASE_INCLUDE_SCRIPT_FILES) ship under it
-    # (bug 024/#167). That `scripts/` carries ONLY the allowlist — no dev-only
+    # (bug 025/#167). That `scripts/` carries ONLY the allowlist — no dev-only
     # tooling or tests — is asserted by RuntimeScriptsShippedTests below.
     def test_excludes_source_only_top_level_dirs(self):
         for root in ("docs", ".github"):
@@ -239,7 +239,7 @@ class CommittedClaudePackageTests(unittest.TestCase):
         )
         self.assertFalse((pkg / ".codex-plugin").exists())
         self.assertFalse((pkg / ".claude-plugin" / "marketplace.json").exists())
-        # `scripts/` carries the allowlisted runtime modules (bug 024/#167) and
+        # `scripts/` carries the allowlisted runtime modules (bug 025/#167) and
         # nothing else — the committed tree must match exactly.
         scripts_dir = pkg / "scripts"
         shipped_scripts = (
@@ -259,7 +259,7 @@ class CommittedClaudePackageTests(unittest.TestCase):
 
 
 class RuntimeScriptsShippedTests(unittest.TestCase):
-    """Bug 024 (#167): the runtime-scripts allowlist must ship in the built
+    """Bug 025 (#167): the runtime-scripts allowlist must ship in the built
     Claude package so `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py` references
     resolve in a real install. `spec_lint.py` is the pre-implementation
     structural gate several shipped skills invoke; the verify_install trio is
@@ -289,7 +289,7 @@ class RuntimeScriptsShippedTests(unittest.TestCase):
         for rel in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
             self.assertTrue(
                 (self.out_dir / rel).is_file(),
-                f"{rel} missing from the built Claude package (bug 024/#167)",
+                f"{rel} missing from the built Claude package (bug 025/#167)",
             )
 
     def test_spec_lint_is_shipped(self):

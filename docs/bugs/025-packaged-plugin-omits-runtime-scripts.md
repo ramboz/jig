@@ -14,7 +14,7 @@ security_surface: false
 escalated_to:
 ---
 
-# Bug 024: packaged-plugin-omits-runtime-scripts
+# Bug 025: packaged-plugin-omits-runtime-scripts
 
 Reported as [#167](https://github.com/ramboz/jig/issues/167).
 

@@ -408,7 +408,7 @@ class CodexPluginDocsTests(unittest.TestCase):
 
 
 class CodexRuntimeScriptsShippedTests(unittest.TestCase):
-    """Bug 024 (#167): the Codex package must ship the host-neutral
+    """Bug 025 (#167): the Codex package must ship the host-neutral
     runtime-scripts subset so `${PLUGIN_ROOT}/scripts/spec_lint.py` (referenced
     by the rendered Codex `migrate`/`analyze` skills) resolves in a real
     install. The Claude-only trio (`verify_install`, `scaffold_contract`) is
@@ -439,7 +439,7 @@ class CodexRuntimeScriptsShippedTests(unittest.TestCase):
         for rel in install_contract.CODEX_INCLUDE_SCRIPT_FILES:
             self.assertTrue(
                 (self.plugin_dir / rel).is_file(),
-                f"{rel} missing from the built Codex package (bug 024/#167)",
+                f"{rel} missing from the built Codex package (bug 025/#167)",
             )
 
     def test_referenced_scripts_resolve_in_package(self):

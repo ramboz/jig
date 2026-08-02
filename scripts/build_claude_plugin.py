@@ -46,7 +46,7 @@ _is_excluded_file = build_release_zip._is_excluded_file
 # Individual `scripts/*.py` runtime modules the Claude package must carry
 # (`scripts/` is otherwise excluded — it is not an `_INCLUDE_ROOTS` entry).
 # Single-sourced from install_contract so the shipping payload and the release
-# contract cannot drift. Bug 024 (#167): these were absent before because the
+# contract cannot drift. Bug 025 (#167): these were absent before because the
 # builder walked only directory roots, so `${CLAUDE_PLUGIN_ROOT}/scripts/…`
 # references (spec_lint's pre-implementation gate; scaffold-init's self-check
 # import of the verify_install trio) failed to resolve in installed plugins.
@@ -101,7 +101,7 @@ def _iter_package_files(source_root: Path):
 
     # Runtime `scripts/*.py` modules the plugin needs at
     # `${CLAUDE_PLUGIN_ROOT}/scripts/…` (allowlisted individually so the rest of
-    # dev-only `scripts/` stays out). Bug 024 (#167).
+    # dev-only `scripts/` stays out). Bug 025 (#167).
     for rel_name in _INCLUDE_SCRIPT_FILES:
         if (source_root / rel_name).is_file():
             seen.append(Path(rel_name))

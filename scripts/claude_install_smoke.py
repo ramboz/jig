@@ -54,7 +54,7 @@ UNAVAILABLE = "UNAVAILABLE"
 # (the committed hosts/claude/ tree is runtime-only — AC1). `scripts/` is NOT
 # in this set: the runtime-scripts allowlist (install_contract.
 # RELEASE_INCLUDE_SCRIPT_FILES) legitimately ships under it so
-# `${CLAUDE_PLUGIN_ROOT}/scripts/…` resolves (bug 024/#167). A dedicated check
+# `${CLAUDE_PLUGIN_ROOT}/scripts/…` resolves (bug 025/#167). A dedicated check
 # below asserts `scripts/` carries ONLY that allowlist — no dev-only tooling.
 _DEV_ONLY_DIRS: tuple[str, ...] = ("docs", "tests")
 
@@ -137,7 +137,7 @@ def _validate_committed_package(plugin_root: Path) -> SmokeResult:
                 "Claude package (the package is install-only)"
             )
     # `scripts/` may exist, but only to carry the runtime-scripts allowlist
-    # (bug 024/#167). Anything else under it is dev-only leakage.
+    # (bug 025/#167). Anything else under it is dev-only leakage.
     scripts_dir = plugin_root / "scripts"
     if scripts_dir.is_dir():
         shipped = {

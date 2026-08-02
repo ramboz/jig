@@ -1,5 +1,5 @@
 ---
-bug: 024
+bug: 025
 pass: craft
 verdict: pass
 reviewer: pr-review skill craft pass

@@ -989,7 +989,7 @@ and given no way to find it. If you rule that a generated artifact may not be
 hand-edited, make sure it reports what it could not derive.
 
 **A ship contract only holds if the thing that builds the artifact reads it**
-(bug 024, [`024-packaged-plugin-omits-runtime-scripts`](../bugs/024-packaged-plugin-omits-runtime-scripts.md)
+(bug 025, [`025-packaged-plugin-omits-runtime-scripts`](../bugs/025-packaged-plugin-omits-runtime-scripts.md)
 / [issue #167](https://github.com/ramboz/jig/issues/167)).
 Spec 075 made `scripts/spec_lint.py` (and the `verify_install` runtime trio)
 "ship" by adding them to `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` and
