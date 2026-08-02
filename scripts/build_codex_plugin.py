@@ -25,8 +25,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "skills" / "scaffold-init"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import scaffold as scaffold_mod  # noqa: E402
 import install_contract  # noqa: E402
+import scaffold as scaffold_mod  # noqa: E402
 
 _CODEX_PLUGIN_HOOK_SCRIPT_PREFIX = "${PLUGIN_ROOT}/hooks/scripts/"
 
