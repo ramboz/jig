@@ -749,6 +749,20 @@ status flip is allowed. Each item is a gate.
       (SKILL.md / workflow.md / README): fix it **inline** — git history
       is the audit trail. New ADR (or superseding spec) only for
       decision-content changes.
+      **Authorisation to amend (issue #125).** Amending a closed **record**
+      requires **explicit owner approval** — a separate grant from approval of a
+      *behaviour*. When two canon artifacts disagree, **surface the conflict and
+      stop**: propose the amendment as text in the conversation and write it only
+      after the owner agrees. **Never write the resolution in the same turn as
+      discovering the conflict** — *including when the owner has already approved
+      the underlying behaviour* (approving what the app does is not authority to
+      rewrite what the spec says). And before asserting that artifact X
+      contradicts criterion Y, read **all** of Y's sibling criteria: another may
+      already satisfy X — for a cross-cutting question the unit of reading is the
+      whole criteria block, not the item that appears to speak to it. This
+      authorisation rule governs **records** only; correcting live operational
+      prose inline (per the split above) is git-history-audited and needs no
+      sign-off.
 - [ ] **Reconciliation review** — spawn a second reviewer subagent with a
       reconciliation-review prompt prefixed by
       `[jig:phase=reconciliation] [jig:spec=NNN] [jig:slice=NNN-NN]`: are the

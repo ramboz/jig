@@ -41,6 +41,7 @@ MEMORY_SYNC = REPO_ROOT / "skills" / "memory-sync" / "SKILL.md"
 WORKFLOW_MD = REPO_ROOT / "docs" / "workflow.md"
 README = REPO_ROOT / "README.md"
 SPEC_WORKFLOW_SKILL = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
+ANALYZE_SKILL = REPO_ROOT / "skills" / "analyze" / "SKILL.md"
 
 DATE_HEADING_RE = re.compile(r"^### \d{4}-\d{2}-\d{2} — ", re.MULTILINE)
 AMENDMENTS_HEADING_RE = re.compile(r"^## Amendments\s*$", re.MULTILINE)
@@ -184,6 +185,109 @@ class ReconciliationChecklistGate(unittest.TestCase):
                            "'**Commit**' gate must remain in reconciliation checklist")
         self.assertLess(drift_pos, commit_pos,
                         "closed-spec drift gate must precede the Commit gate")
+
+
+def _flat(text: str) -> str:
+    """Collapse whitespace runs to single spaces so prose assertions are robust
+    to markdown hard line-wraps (the rendered phrase is what matters, not the
+    physical column the source wraps at)."""
+    return re.sub(r"\s+", " ", text)
+
+
+def _closed_spec_drift_item(text: str) -> str:
+    """Return the reconciliation-checklist 'Closed-spec drift' item body — from
+    its bullet down to the next `- [ ]` checklist item — so assertions are
+    scoped to the point-of-use, not a whole-file token match."""
+    section_start = text.find("## Reconciliation checklist")
+    assert section_start != -1, "reconciliation checklist section missing"
+    item_start = text.find("**Closed-spec drift**", section_start)
+    assert item_start != -1, "closed-spec-drift checklist item missing"
+    next_item = text.find("\n- [ ] ", item_start)
+    return text[item_start:next_item if next_item != -1 else len(text)]
+
+
+class AmendmentAuthorizationRule(unittest.TestCase):
+    """Spec 102-01 / issue #125: the closed-spec-drift checklist item carries
+    the surface-and-stop authorization rule, scoped to closed records, sitting
+    before the Commit gate."""
+
+    def setUp(self) -> None:
+        self.text = _read(SPEC_WORKFLOW_SKILL)
+        self.item = _flat(_closed_spec_drift_item(self.text))
+
+    def test_requires_explicit_owner_approval(self) -> None:
+        self.assertIn("explicit owner approval", self.item,
+                      "authorization rule must require explicit owner approval")
+
+    def test_surface_the_conflict_and_stop(self) -> None:
+        self.assertIn("surface the conflict and stop", self.item.lower(),
+                      "rule must tell the agent to surface the conflict and stop")
+
+    def test_behaviour_approval_is_a_separate_grant(self) -> None:
+        self.assertIn("separate grant", self.item,
+                      "rule must distinguish behaviour approval from record authority")
+
+    def test_never_same_turn_as_discovering(self) -> None:
+        self.assertIn("same turn as discovering the conflict", self.item,
+                      "rule must forbid resolving in the same turn as discovery")
+
+    def test_read_all_sibling_criteria(self) -> None:
+        low = self.item.lower()
+        self.assertIn("sibling criteria", low,
+                      "rule must tell the agent to read all sibling criteria")
+        self.assertIn("whole criteria block", low,
+                      "rule must name the whole criteria block as the unit of reading")
+
+    def test_rule_sits_before_commit(self) -> None:
+        approval_pos = self.text.find("explicit owner approval")
+        commit_pos = self.text.find("**Commit**")
+        self.assertGreater(approval_pos, 0)
+        self.assertGreater(commit_pos, 0)
+        self.assertLess(approval_pos, commit_pos,
+                        "authorization rule must precede the Commit gate")
+
+    def test_scoped_to_records_not_live_prose(self) -> None:
+        # The rule must scope amendment-authorization to closed *records* and
+        # explicitly NOT re-gate live-prose inline correction (ADR-0010 split).
+        # Assert phrases unique to the new scoping sentence — "records" alone is
+        # vacuous because the pre-existing ADR-0010 text already contains it.
+        plain = self.item.replace("**", "").lower()
+        self.assertIn("governs records only", plain,
+                      "rule must scope amendment-authorization to closed records only")
+        self.assertIn("needs no sign-off", plain,
+                      "rule must state live-prose inline correction needs no owner sign-off")
+
+
+class AnalyzeSurfacesNeverResolves(unittest.TestCase):
+    """Spec 102-01 / issue #125 item 2: the analyze output contract states
+    findings are surfaced, never auto-resolved — it reports drift and hands
+    off, it does not adjudicate or amend."""
+
+    def setUp(self) -> None:
+        self.text = _read(ANALYZE_SKILL)
+        self.flat = _flat(self.text)
+
+    def test_surfaced_never_auto_resolved(self) -> None:
+        self.assertIn("surfaced, never auto-resolved", self.flat.lower(),
+                      "output contract must state findings are surfaced, never auto-resolved")
+
+    def test_reports_drift_and_hands_off(self) -> None:
+        self.assertIn("reports drift and hands off", self.flat.lower(),
+                      "contract must state the skill reports drift and hands off")
+
+    def test_does_not_adjudicate(self) -> None:
+        low = self.flat.lower()
+        self.assertIn("adjudicate", low,
+                      "contract must state analyze does not adjudicate a canon conflict")
+
+    def test_posture_lives_in_output_section(self) -> None:
+        out_start = self.text.find("## Output format")
+        self.assertNotEqual(out_start, -1, "analyze SKILL.md must have an Output format section")
+        # The hands-off posture must appear at or after the output contract, not
+        # only in some unrelated earlier paragraph.
+        posture_pos = self.text.lower().find("surfaced, never auto-resolved")
+        self.assertGreaterEqual(posture_pos, out_start,
+                                "hands-off posture must live in/after the output contract")
 
 
 if __name__ == "__main__":
