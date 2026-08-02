@@ -67,13 +67,3 @@ deliberate, not a placeholder.
 button-copy convention.
 
 **Commit:** _(example — no SHA)_
-
-### 2026-08-02 — jig repo disables its own plugin via committed settings
-
-**Decision:** Set enabledPlugins {"jig@jig": false} in the committed .claude/settings.json so the jig source repo runs its in-repo machinery (the .claude/ cloud-session adapter) instead of the installed jig plugin.
-
-**Context:** Two reasons. (1) Cloud enablement: Claude Code on the web has no interactive /plugin install and no plugin runtime, so plugin-mode jig never loads; the committed .claude/ adapter (hooks -> ${CLAUDE_PROJECT_DIR}/hooks/scripts, a SessionStart shim exporting CLAUDE_PLUGIN_ROOT=repo root via $CLAUDE_ENV_FILE, and skill/agent symlinks) makes jig active from the fresh clone. (2) Collision: the adapter and a locally-installed plugin both register the same hooks and Claude Code does not dedupe across sources, so running both fires every hook twice. Committed rather than per-machine settings.local.json because 'develop jig against in-repo machinery, not the stale marketplace snapshot' is a repo-level decision. It is a no-op for contributors without the plugin and in cloud (nothing to match), and remains overridable per-machine via settings.local.json since Local > Project precedence.
-
-**Scope:** .claude/settings.json (enabledPlugins) in the jig source repo only; regular jig projects get their .claude/ from scaffold-init instead
-
-**Commit:** 1e2cdb8
