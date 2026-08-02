@@ -2433,9 +2433,20 @@ class LintTests(unittest.TestCase):
         self.assertEqual(report.scanned, 0)
         self.assertEqual(report.findings, [])
 
-    def test_edge_jigs_own_file_has_zero_real_entries_today(self):
-        report = decisions.lint_lightweight(REPO_ROOT)
+    def test_scaffold_template_ships_zero_real_entries(self):
+        # The SCAFFOLD TEMPLATE must ship clean: a freshly seeded project
+        # starts with no REAL lightweight decisions (only the format rubric,
+        # which the linter excludes). This is the invariant worth guarding.
+        #
+        # jig's OWN live docs/decisions/lightweight-decisions.md is a real
+        # decision log and MAY accumulate entries — it is deliberately NOT
+        # constrained to zero here. (The routing discipline that its entries
+        # stay genuinely lightweight, never ADR-worthy, is covered separately
+        # by test_ac3_real_shipped_file_has_zero_findings.)
+        self._seed(decisions._template_path().read_text(encoding="utf-8"))
+        report = decisions.lint_lightweight(self.project)
         self.assertEqual(report.scanned, 0)
+        self.assertEqual(report.findings, [])
 
 
 if __name__ == "__main__":
