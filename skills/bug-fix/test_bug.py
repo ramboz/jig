@@ -20,17 +20,16 @@ BUG_PY = REPO_ROOT / "skills" / "bug-fix" / "bug.py"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from skills._common.parsing import parse_frontmatter  # noqa: E402
-
 # The three existing readers of the `.jig/spec-ref` marker (slice 098-04 AC3).
 # A bug-shaped marker must stay invisible to all three.
 from hooks.scripts.lib.read_attribution import (  # noqa: E402
     read_spec_ref as _ra_read_spec_ref,
 )
+from scripts.usage import read_spec_ref_marker as _usage_read_spec_ref  # noqa: E402
 from skills._common.gate_telemetry import (  # noqa: E402
     read_spec_ref as _gt_read_spec_ref,
 )
-from scripts.usage import read_spec_ref_marker as _usage_read_spec_ref  # noqa: E402
+from skills._common.parsing import parse_frontmatter  # noqa: E402
 
 
 def load_bug_module():
@@ -1430,7 +1429,7 @@ class Slice098BugMarkerTests(unittest.TestCase):
 
         with patch.object(mod, "atomic_write_text",
                           side_effect=only_record_fails):
-            with self.assertRaises(Exception):
+            with self.assertRaises(OSError):
                 mod.transition_bug(self.root, "001", "DIAGNOSING")
         self.assertFalse(self.marker.exists())
 
