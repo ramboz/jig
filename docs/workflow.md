@@ -1,4 +1,4 @@
-> Status: Draft (wizard-generated equivalent — manually seeded for jig itself)
+> Status: Stable
 
 # Workflow: jig
 
@@ -8,11 +8,10 @@ We use the workflow jig is designed to produce — dogfooding from day one.
 
 ## Host packages (`hosts/`) — regenerate, never hand-edit
 
-Per [ADR-0018](decisions/adr-0018-dual-host-generated-plugin-artifacts.md) the repository
-root is canonical source; the committed `hosts/claude/` and `hosts/codex/`
-trees are **generated** runtime install payloads. They are checked in so a
-remote `marketplace add` resolves a clean package, but they are derived
-artifacts — never hand-edit a file under `hosts/`.
+The repository root is canonical source; the committed `hosts/claude/` and
+`hosts/codex/` trees are **generated** runtime install payloads. They are
+checked in so a remote `marketplace add` resolves a clean package, but they are
+derived artifacts — never hand-edit a file under `hosts/`.
 
 The loop when you change source (a skill, hook, agent, manifest, template — or
 bump a version in a `*-plugin/plugin.json` manifest):
@@ -36,28 +35,26 @@ different shape of work, plus the no-ceremony floor:
 
 - **Bug-shaped work** — a reported defect: existing behaviour is wrong, and
   the job is to *diagnose the root cause, prove it, prevent regression*. This
-  goes through **`jig:bug-fix`** ([ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md)),
-  **proportional to tier**. `bug.py triage` enforces this downward: a
-  **trivial** bug (typo, one-liner, mechanical) is bowed out — write the
-  failing test with `tdd-loop`, fix, and commit; **no record**. **Standard**
-  and **gnarly** bugs get the durable `docs/bugs/NNN-slug.md` record, the
-  diagnose-before-fix gate (≥2 hypotheses), a fresh-main recheck after
-  `ROOT_CAUSED` so parallel sessions do not duplicate already-landed fixes,
-  and the red→green teeth.
+  goes through **`jig:bug-fix`**, proportional to tier: a trivial bug (typo,
+  one-liner, mechanical) is bowed out — write the failing test with
+  `tdd-loop`, fix, and commit, no record — while standard and gnarly bugs get
+  the durable record and the diagnose-and-regression gates. See
+  [Bug lifecycle](#bug-lifecycle) below.
 - **Spec-shaped work** — a hard-to-reverse decision, a cross-layer change, or
   new/ambiguous-scope behaviour: the job is to *specify intended behaviour and
-  split it into vertical slices*. This goes through **`spec-workflow`** (the
-  lifecycle below). When a bug turns out to be a *missing* behaviour rather
-  than a defect, `bug.py escalate` is the seam that opens a spec and parks the
-  bug as `ESCALATED`.
+  split it into vertical slices*. This goes through **`spec-workflow`**. When a
+  bug turns out to be a *missing* behaviour rather than a defect, the bug-fix
+  workflow escalates it into a spec instead of grinding it through the bug
+  gates. See [Spec lifecycle](#spec-lifecycle) below.
 - **Trivial work** — a one-liner with no decision and no design — skips both
   workflows: `tdd-loop` + commit.
 
-This is the bookend to `spec-workflow`'s "do not use for bug-shaped work"
-clause: bug-shaped work is no longer routed to a skill that doesn't exist — it
-has a first-class home. The bug lifecycle is documented in
-[skills/bug-fix/SKILL.md](../skills/bug-fix/SKILL.md); the rest of this
-document covers the spec lifecycle.
+Each shape has a first-class home: bug-shaped work is not routed to a skill
+that doesn't exist, and spec-shaped work is not dressed up as a bug. Both
+lifecycles are mapped below; their operational contracts — every command,
+gate, and field — live in
+[spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) and
+[bug-fix/SKILL.md](../skills/bug-fix/SKILL.md).
 
 ## Spec lifecycle
 
@@ -99,17 +96,16 @@ Each forward transition is a checkpoint; each back-edge is a reasoning loop
 (spec review, implementation review, reconciliation review, TDD). The
 review-driven checkpoints are not honour-system prose: `workflow.py
 transition` **refuses** the `REVIEWED` / `RECONCILED` / `DONE` moves unless
-the required review evidence exists and passes (ADR-0014 §5 — see
+the required review evidence exists and passes (see
 [Post-implementation review](#post-implementation-review) and
 [Reconciliation rules](#reconciliation-rules) below). No `Stop` hook is
-involved — the only `Stop` hook, `jig-task-capture.sh`, is a task-capture
-nudge that blocks nothing; the deterministic gate lives in the transition
-helper. State names match `VALID_STATUSES` in
+involved — the task-capture `Stop` hook is a nudge that blocks nothing; the
+deterministic gate lives in the transition helper. State names match
+`VALID_STATUSES` in
 [skills/spec-workflow/workflow.py](../skills/spec-workflow/workflow.py).
 
-**Slice ownership (claim-on-working-state, spec 049-01 as amended by
-[ADR-0045](decisions/adr-0045-slice-claim-covers-active-lifecycle.md)).**
-The lifecycle splits two ways for ownership purposes:
+**Slice ownership (claim-on-working-state).** The lifecycle splits two ways
+for ownership purposes:
 
 - **Working states** — `READY_FOR_REVIEW`, `IN_PROGRESS`, `REVIEWED`,
   `RECONCILED`. A session is doing something here, so transitioning into one
@@ -121,10 +117,10 @@ The lifecycle splits two ways for ownership purposes:
   `DEFERRED` / `ABANDONED`. Entering one **clears** the claim. `--release
   --reason "<why>"` force-clears anywhere and logs to `## Release log`.
 
-The queue-state exclusion is deliberate and preserves spec 049's original
-Non-goal: `DRAFT` and `READY_FOR_IMPLEMENTATION` are exactly the states the
-pickup flow tells a reader to choose from, so a residual owner there would mark
-a *free* slice as occupied — inverting the defect this is meant to fix.
+The queue-state exclusion is deliberate: `DRAFT` and
+`READY_FOR_IMPLEMENTATION` are exactly the states the pickup flow tells a reader
+to choose from, so a residual owner there would mark a *free* slice as occupied
+— inverting the defect this exclusion is meant to fix.
 
 The claim is **local by default**; `--push` (or `--pr`) reserves it on
 `origin/main` so other worktrees see it, at any working state rather than only
@@ -170,8 +166,8 @@ pushed, so a parallel worktree's unpushed claim is invisible, and a plain
 anyone is still there either: a claim transfers to whoever transitions next, and
 one can survive a merge naming a branch that no longer exists. Treat a blank
 owner as "unknown" rather than "available" — reading it as "available" is exactly
-the failure [bug 014](bugs/014-slice-claim-covers-only-in-progress.md) was filed
-for — and treat a stale-looking owner as worth a question, not a blocker.
+the failure mode this claim model exists to prevent — and treat a stale-looking
+owner as worth a question, not a blocker.
 
 **Worktree baseline and post-land sync.** Reservations from `workflow.py new`
 and `--push` slice claims land on `origin/main`; that remote ref remains the
@@ -186,6 +182,64 @@ merges. For worktree-heavy sessions, `worktree.baseRef: "fresh"` in
 `origin/HEAD` rather than any stale local `main`. Mechanism, verification, and
 fallback: [memory/learnings.md](memory/learnings.md) → "Worktrees fork off
 stale local `main`".
+
+## Bug lifecycle
+
+Reported defects run through their own lifecycle — a peer of the spec lifecycle
+above, not a lightweight offshoot of it. `jig:bug-fix` owns it, and the
+operational contract lives in
+[bug-fix/SKILL.md](../skills/bug-fix/SKILL.md); this section is the onboarding
+map.
+
+The forward path diagnoses the root cause, proves it with a witnessed
+red→green test, reviews the fix, and closes with a recorded learning. Two
+terminal off-ramps branch off it: a "bug" that turns out to be a *missing*
+behaviour escalates to a spec, and a bug already fixed on trunk closes as
+resolved-on-main rather than generating a duplicate patch.
+
+```mermaid
+stateDiagram-v2
+    [*] --> REPORTED
+    REPORTED --> DIAGNOSING: triage (standard / gnarly)
+    DIAGNOSING --> ROOT_CAUSED: ≥2 hypotheses + evidence
+    ROOT_CAUSED --> FIXING: fresh-main recheck + red test
+    ROOT_CAUSED --> RESOLVED_ON_MAIN: already clean on main
+    ROOT_CAUSED --> ESCALATED: missing behaviour → spec
+    FIXING --> REVIEWED: green test + review verdicts
+    REVIEWED --> FIXING: review needs changes
+    REVIEWED --> VERIFIED: original repro re-run clean
+    REVIEWED --> DONE: standard tier
+    VERIFIED --> DONE: gnarly / security tier
+    DONE --> [*]
+    RESOLVED_ON_MAIN --> [*]
+    ESCALATED --> [*]
+```
+
+Proportionality is enforced *downward* — the workflow refuses to build ceremony
+for a one-liner. Triage is the de-escalation gate, not an escalation ramp:
+
+| Tier | What it gets |
+|---|---|
+| **trivial** (typo, one-liner, mechanical) | No record. Triage bows out to `tdd-loop` + commit. |
+| **standard** | A durable `docs/bugs/NNN-slug.md` record, the diagnose gate, the red→green teeth, and bug-review + craft passes. Closes `REVIEWED → DONE`. |
+| **gnarly** (cross-layer, security, regression-that-didn't-stick, design-gap) | Full rigor: mandatory ≥2 hypotheses, the extra `VERIFIED` step, a conditional security pass, and a trunk-reserved number. May escalate to a spec. |
+
+Three gates give the lifecycle its teeth. Each checks presence and shape, never
+quality — quality stays the reviewer's job:
+
+- **Diagnose gate** (`→ ROOT_CAUSED`) — at least two candidate hypotheses with a
+  marked leading one and an evidence pointer, so the first explanation is never
+  taken as the last word.
+- **Fresh-main recheck** (`ROOT_CAUSED → FIXING`) — the original repro is re-run
+  against fresh `origin/main` before any fix is written. If it is already clean
+  there, the bug closes as `RESOLVED_ON_MAIN` instead of duplicating a landed
+  fix.
+- **Red→green teeth** (`→ FIXING`, then `→ REVIEWED`) — the helper witnesses the
+  regression test fail before the fix and pass after, so "there is a regression
+  test" is machine-attested rather than claimed.
+
+Like every jig gate, each is a *deliberateness* mechanism — bypassable as an
+explicit out-of-band act, not a hard human-only wall.
 
 ## Host phase modes
 
@@ -241,10 +295,9 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
 1. **Compliance pass — `jig:independent-review`** (always). A reviewer
    subagent with a fresh, self-contained prompt and read-only tools
    evaluates the deliverable against the slice's acceptance criteria.
-   The prompt embeds a deterministic
-   test-quality snapshot (spec 043-04 — `quality.py` reads the slice's
-   merge-base-to-HEAD diff and reports `per-file-flood` /
-   `assertion-thin` / `mock-heavy` signals) so findings can cite a
+   The prompt embeds a deterministic test-quality snapshot — `quality.py`
+   reads the slice's merge-base-to-HEAD diff and reports `per-file-flood` /
+   `assertion-thin` / `mock-heavy` signals — so findings can cite a
    fired signal by name. Verdict envelope: VERDICT / REASONING /
    SPECIFIC ISSUES / RECONCILIATION NOTES. `fail` or `needs-changes`
    blocks the transition.
@@ -253,10 +306,10 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    a skill via Claude's skill router. Instead `review.py` detects a
    user-installed `pr-review` skill on disk (`~/.claude/skills/pr-review/`)
    and points the reviewer at that concrete path to read-and-apply; absent
-   one, it inlines jig's baseline buckets. (File-read dispatch — spec 031
-   Open-question-#1 option (b); the original prose-router dispatch was inert
-   on the no-Skill-tool subagent path.) Output: scope / blockers / nits /
-   strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES entries
+   one, it inlines jig's baseline buckets. (This file-read dispatch is what
+   makes the pass work on a subagent that has no `Skill` tool: a prose
+   skill-router instruction would be inert there.) Output: scope / blockers /
+   nits / strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES entries
    tagged `[blocker]` / `[nit]` / `[strength]`. Only `[blocker]`-tagged
    entries block; `[nit]` and `needs-changes` become reconciliation-log
    items.
@@ -266,15 +319,14 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    Output: summary / strengths / concerns / open questions. Same block
    rule as the craft pass.
 4. **Code-health pass — `jig:code-health`** (on-demand, **gated** by
-   `code_health_review: true` — spec 060-05 / ADR-0017). The orchestrator
-   runs `health.py` and feeds its **tight summary** into
-   `review.py code-health … --summary-file`; the read-only reviewer (no
-   Bash) judges that summary — never raw logs, never runs the tool itself
-   (AC2). It renders the judgment a tool can't: duplication within the
-   ADR-0002 inline-mirror budget? complexity inherent or fixable? lint
-   findings worth blocking on? Same `[blocker]`/`[nit]` block rule as the
-   craft pass. Gated (not always-on) because ADR-0017 flags the per-slice
-   review cost (specs 055/057 context-cost discipline); it defaults off.
+   `code_health_review: true`). The orchestrator runs `health.py` and feeds
+   its **tight summary** into `review.py code-health … --summary-file`; the
+   read-only reviewer (no Bash) judges that summary — never raw logs, never
+   runs the tool itself. It renders the judgment a tool can't: is the
+   duplication within the inline-mirror budget? is the complexity inherent or
+   fixable? are the lint findings worth blocking on? Same `[blocker]`/`[nit]`
+   block rule as the craft pass. It is gated rather than always-on because the
+   per-slice review carries a real context cost; it defaults off.
 
 Order: compliance → craft → (arch if `arch_review: true`) → (code-health
 if `code_health_review: true`). All required passes must `pass` for the
@@ -291,9 +343,8 @@ Each pass produces a **durable verdict artifact**, not ephemeral chat.
 After a pass returns, record its verdict with `review.py record-review`,
 which writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
 (`<pass>` ∈ `compliance` / `craft` / `arch` / `code-health` /
-`reconciliation`; schema
-in `skills/_common/review_evidence.py`, ADR-0014 §1–3). The end-to-end
-enforced path is:
+`reconciliation`; the schema lives in
+`skills/_common/review_evidence.py`). The end-to-end enforced path is:
 
 1. **Build the prompt** — `review.py implementation|pr-review|arch-review`
    (compliance / craft / arch) builds the reviewer prompt; Claude spawns
@@ -302,7 +353,7 @@ enforced path is:
    --verdict pass|fail|needs-changes --summary-file <path> …` writes the
    artifact beside the slice it grades. The freeform body is required:
    pass a file, or `--summary-file -` to pipe it in. stdin is never read
-   implicitly (bug 017).
+   implicitly — the body path is always explicit.
 3. **Run the gated transition** — `workflow.py transition <spec.md>
    <slice> REVIEWED`. The helper imports the same validator and **refuses**
    the move unless `compliance` + `craft` (+ `arch` when the slice
@@ -313,14 +364,13 @@ enforced path is:
    runs the same check ahead of the transition.)
 
 The gate enforces **evidence consistency**, not human sign-off — it lives
-inside the agent's trust boundary, so it is a *deliberateness* mechanism,
-not human-only enforcement (ADR-0011, the same framing as the conventions
-gate). A deliberate out-of-band flow can bypass it with
-`JIG_REVIEW_EVIDENCE_GATE=0` (also `false`/`off`/`no`); the status still
-transitions and the `DONE` dependency check still runs — only the evidence
-check is skipped. The 003-04 auto-tick of the two review-passed DoD boxes
-still happens, but now **after** the gate clears, so a ticked box always
-has passing evidence behind it.
+inside the agent's trust boundary, so it is a *deliberateness* mechanism, not
+human-only enforcement, the same framing as the conventions gate. A deliberate
+out-of-band flow can bypass it with `JIG_REVIEW_EVIDENCE_GATE=0` (also
+`false`/`off`/`no`); the status still transitions and the `DONE` dependency
+check still runs — only the evidence check is skipped. The auto-tick of the two
+review-passed DoD boxes still happens, but now **after** the gate clears, so a
+ticked box always has passing evidence behind it.
 
 Review/reconcile test failures are only evidence about the checked-out base.
 Before recording a failure as "pre-existing on main", fetch `origin/main` and
@@ -339,7 +389,7 @@ non-`pass` verdict). To recover:
 2. Re-run the review pass against the updated deliverable.
 3. `record-review` the new verdict — it **overwrites in place** the earlier
    file for that `(slice, pass)`, so the latest verdict is operative and
-   git history keeps the prior one (ADR-0014 §4).
+   git history keeps the prior one.
 4. Re-run `workflow.py transition … REVIEWED`. With every required pass now
    `pass`, the gate clears. A non-`pass` artifact that was never overwritten
    by a later `pass` keeps blocking — that is exactly the "superseded
@@ -356,12 +406,9 @@ After implementation, before marking DONE:
   `docs/decisions/lightweight-decisions.md`. (Not a gate — a checklist nudge.)
 - Update `architecture.md` ONLY if module boundaries or contracts changed (signal: write an ADR).
 - **Load-bearing decision (ADR trigger, judgment — not just a boundary change).**
-  Canonical wording — single-sourced from ADR-0031, drift-tested verbatim across
-  all four surfaces:
   A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
-- **Re-ask that question when a recorded decision is REVISED** (spec 100 /
-  [ADR-0042](decisions/adr-0042-decision-routing-gate.md)). Routing is asked once
-  at first write and never again, so a decision re-priced by review can stay
+- **Re-ask that question when a recorded decision is REVISED.** Routing is asked
+  once at first write and never again, so a decision re-priced by review can stay
   misfiled indefinitely. If a revised entry now clears the trigger above, promote
   it — `decisions.py promote --title "<title>" --no-push` — rather than editing it
   in place; if it is still settled, local and bounded, revise with `decisions.py
@@ -371,21 +418,20 @@ After implementation, before marking DONE:
   rather than stranding one there.)
 - ADRs are immutable after acceptance — new decisions supersede, never edit.
 - Closed records (DONE / SUPERSEDED specs and slices) preserve drift via a
-  `## Amendments` section ([ADR-0010](decisions/adr-0010-amendment-scope-records-vs-live-prose.md));
-  run `python3 skills/spec-workflow/workflow.py amendments` for a read-only
-  digest of the current overrides so you don't have to reread each
-  historical block to find effective state.
+  `## Amendments` section; run `python3 skills/spec-workflow/workflow.py
+  amendments` for a read-only digest of the current overrides so you don't have
+  to reread each historical block to find effective state.
 - `docs/conventions.md` changes require explicit human approval. The
   `jig-spec-gate` hook backstops this rule — but it is a *deliberateness*
   gate that catches accidental side-effect edits, not a hard human-only
   guarantee (the env var is satisfiable by any shell, including the agent's).
   Where a team needs mechanical human-only enforcement, use an out-of-band
   channel — `CODEOWNERS` on the file, a CI check on the PR diff, or branch
-  protection. See [ADR-0011](decisions/adr-0011-spec-gate-model.md).
+  protection.
 - A second reviewer pass runs on the reconciliation itself. Record its
   verdict with `review.py record-review … --pass reconciliation`, then
   `workflow.py transition <spec.md> <slice> RECONCILED`. That move is
-  **gated** (ADR-0014 §5): it refuses unless the `reconciliation` verdict
+  **gated**: it refuses unless the `reconciliation` verdict
   is recorded and `pass` **and** `### Deviation log` plus
   `### Reconciliation sweep` subsections are present under the slice heading
   (the reviewer attests the content; the gate only checks the headings are
@@ -397,8 +443,8 @@ After implementation, before marking DONE:
   memory, ADR indexes, and any other live prose the slice affected. Use
   `updated` when the surface changed, `no-op` when it was checked and still
   matches reality, and `deferred` when cleanup remains; deferred rows name an
-  owner or trigger. Live prose stays inline-correct per ADR-0010; closed
-  records preserve corrections in amendments.
+  owner or trigger. Live prose stays inline-correct; closed records preserve
+  corrections in amendments.
 - `transition … DONE` re-validates the post-implementation set —
   `compliance` + `craft` (+ any REVIEWED-stage gated passes such as `arch`,
   `code-health`, or `design-review`) + `reconciliation` — plus the deviation log and
@@ -425,10 +471,10 @@ orchestrator lean.
 
 **Rule:** when picking up a spec, plan the delegation up front and then run
 the orchestrator as a thin *dispatch-and-integrate* loop. The cross-session
-deep-dive (spec 057) confirmed the dominant cost driver is **turn count**:
-because the orchestrator re-reads its full context on every turn, cost is
-roughly *context-size × turns*, and turn count correlates with cost-equivalent
-spend at r = 0.92. The plannable lever is to **front-load the delegation
+deep-dive confirmed the dominant cost driver is **turn count**: because the
+orchestrator re-reads its full context on every turn, cost is roughly
+*context-size × turns*, and turn count correlates with cost-equivalent spend at
+r = 0.92. The plannable lever is to **front-load the delegation
 decisions** so the orchestrator dispatches against a plan rather than
 improvising work across many turns.
 
@@ -441,7 +487,7 @@ improvising work across many turns.
   reconcile → land — naming the **subagent type** and **skill** for each
   phase. It is a
   pure function of the slices + their frontmatter, stdout-only, with no side
-  effects on spec/slice state (advisory, not a gate — ADR-0011).
+  effects on spec/slice state (advisory, not a gate).
 - **Dispatch each phase to a subagent; keep only the summary.** Each phase the
   plan marks DELEGATED runs in a subagent's isolated, disposable context (the
   implementer writes code and runs tests; the reviewer subagents review). The
@@ -501,11 +547,11 @@ The levers above cut the *cost per turn*; a **semantic/code index** cuts the
 *number of turns*. Locating a definition or every caller with `Grep` is usually
 several speculative searches spread across turns ("where is `foo` declared?",
 "who calls it?", "is this the only overload?"); a code index answers each in
-one deterministic query. Because cost ≈ context-size × turns (specs 055/057)
-and turn count is the dominant driver (r = 0.92, spec 057), collapsing those
-search-and-disambiguate round-trips is the highest-leverage deterministic move
-EngTip #26 ("Token Saving") / #23 names — and jig's delegate-reading and
-read-lean rules above only attack the per-turn side of the product.
+one deterministic query. Because cost ≈ context-size × turns and turn count is
+the dominant driver (r = 0.92), collapsing those search-and-disambiguate
+round-trips is the highest-leverage deterministic move available — and jig's
+delegate-reading and read-lean rules above only attack the per-turn side of the
+product.
 
 **When it pays for itself.** Roughly: a codebase large or unfamiliar enough
 that "find where X is defined / used" is a multi-search, multi-turn operation —
@@ -536,8 +582,8 @@ scaffold side effect.
 
 **Honest about limits — a recommendation is not a savings guarantee.** An index
 is itself context the agent consumes: query results land in the orchestrator
-and are re-read every turn, so EngTip #23's "context isn't free" caution applies
-to index output too, and a stale index can mislead. The win is real only when
+and are re-read every turn, so the "context isn't free" caution applies to
+index output too, and a stale index can mislead. The win is real only when
 one good query replaces *several* speculative searches — reach for it
 deliberately, not as a default switched on everywhere.
 
@@ -563,8 +609,8 @@ orchestrator context.
 ### Keep emitted output lean — concise prompts, tight return envelopes
 
 Output tokens are **5×-priced** and measured at ~22% of cost-equivalent spend
-on jig (the 2026-06-03 deep-dive, spec 057) — separate from the *context ×
-turns* product but a real share. This is the **output-volume** lever, sibling
+on jig — separate from the *context × turns* product but a real share. This is
+the **output-volume** lever, sibling
 to the verbose-Bash containment above: that rule kept verbose *Bash* output
 out of the orchestrator's context; this one bounds what the orchestrator
 *emits* — the delegation prompts it writes to subagents and the summaries
@@ -587,14 +633,14 @@ boundary lean.
   (codified in `agents/implementer.md` and `agents/reviewer.md`). This is the
   return-side of the verbose-Bash rule: the orchestrator pays output price for
   what the subagent emits, then re-reads it on every subsequent turn.
-- **Soft, not enforced.** Guidance only; nothing gates on output size (ADR-0011
-  — deliberateness, not a firewall).
+- **Soft, not enforced.** Guidance only; nothing gates on output size —
+  deliberateness, not a firewall.
 
 ### Worked example: the "$540 session"
 
-A codebase-gap review run *entirely in the orchestrator* (spec 008's
-`quizzical-moore` worktree) read and reasoned over the whole codebase in the
-main session: **985 turns**, only one context reset, context climbing to
+A codebase-gap review run *entirely in the orchestrator* read and reasoned over
+the whole codebase in the main session: **985 turns**, only one context reset,
+context climbing to
 ~840K tokens — **≈$540** for a single session, because every file read stayed
 in context and was re-read on every one of those turns.
 
@@ -629,7 +675,7 @@ language — the back-catalogue escape hatch this convention complements.
 
 Skills auto-trigger via description matching. No explicit `/command` required for day-to-day work. Slash commands exist for deliberate bulk operations (`/jig:memory-sync`, `/jig:scaffold-init`).
 
-The spec-workflow, independent-review, and contracts skills all auto-trigger via description matching and carry `user-invocable: true` — none carry `disable-model-invocation: true` (promotions: spec 003 / 004 / 022).
+The spec-workflow, independent-review, and contracts skills all auto-trigger via description matching and carry `user-invocable: true` — none carry `disable-model-invocation: true`.
 
 <!-- >>> jig reframe-practice >>> -->
 ## Bringing in a new load-bearing reference

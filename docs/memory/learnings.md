@@ -1013,3 +1013,25 @@ test suite over a dead enumerator is a false all-clear; (2) ship what each host
 actually references — `spec_lint.py` is host-neutral so it ships to both, but
 `verify_install`/`scaffold_contract` are `.claude/`-hardcoded and belong only
 in the Claude package.
+
+**A safety gate that fails "open" reads exactly like a gate that passed** (bug 024,
+[`024-slice-land-tests-inert-vendored`](../bugs/024-slice-land-tests-inert-vendored.md)
+/ [issue #129](https://github.com/ramboz/jig/issues/129)).
+`slice-land`'s `check_tests` located `tdd.py` with a fixed
+`Path(__file__).parents[2] / "skills" / "tdd-loop" / "tdd.py"`. That path is
+only correct for an un-prefixed plugin install; in a **vendored** layout — jig
+copied into a consuming repo's `.claude/skills/` with the marketplace `jig-`
+prefix (`jig-slice-land/`, `jig-tdd-loop/`) and `CLAUDE_PLUGIN_ROOT` unset — it
+missed, and the "helper missing" branch returned a **non-blocking** `warn`
+worded as *"no test runner detected (slice may be doc-only)"*. So a repo with a
+full green suite (and one with genuinely red tests) both rendered the same
+reassuring doc-only line, and the Tests gate was a silent no-op. Two lessons:
+(1) **resolve sibling helpers by content, not by a hard-coded parent name** —
+glob `*tdd-loop/tdd.py` / `*/tdd.py` off `land.py`'s own directory so the
+resolution survives a renamed/prefixed parent; and (2) **"the check could not
+run" and "there was nothing to check" must be different states.** Collapsing an
+environment failure into the legitimate doc-only case is what let the failure
+hide — the fix split them (`not_run` vs `warn`) and rendered `not_run` as a
+loud `[!] NOT RUN … This is NOT a pass`. A bonus corollary: when you widen a
+status enum, re-audit every consumer — the doc-only servo-suggestion guard
+keyed on `== "warn"` had to learn about `not_run` too, or it would leak.

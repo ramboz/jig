@@ -85,8 +85,7 @@ shapes start from that same install:
 When in doubt, take the default: the repo stays lean and jig updates flow from the
 plugin. Reach for `--in-repo` deliberately — it is the heavier commitment (a
 self-contained copy, pinned to the jig version at scaffold time), which is exactly
-why it is opt-in as of
-[ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md).
+why it is opt-in rather than the default.
 
 ## Your first 30 minutes
 

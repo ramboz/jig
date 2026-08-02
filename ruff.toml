@@ -16,7 +16,7 @@ target-version = "py39"
 # gate lints the source, not the artifact (the parallel to gitignored dist/,
 # which ruff already skips via .gitignore). Drift between source and these
 # copies is caught by the host-package drift guard, not by ruff.
-extend-exclude = ["hosts/"]
+extend-exclude = ["hosts/", ".claude/"]
 
 [lint]
 select = ["F", "E", "W", "I", "B"]
