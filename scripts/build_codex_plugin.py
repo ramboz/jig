@@ -23,7 +23,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "skills" / "scaffold-init"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import install_contract  # noqa: E402
 import scaffold as scaffold_mod  # noqa: E402
 
 _CODEX_PLUGIN_HOOK_SCRIPT_PREFIX = "${PLUGIN_ROOT}/hooks/scripts/"
@@ -198,6 +200,26 @@ def _rewrite_codex_hook_scripts(output_dir: Path) -> None:
             )
 
 
+def _copy_runtime_scripts(source_root: Path, output_dir: Path) -> None:
+    """Copy the host-neutral runtime-scripts subset into the Codex package.
+
+    `install_contract.CODEX_INCLUDE_SCRIPT_FILES` (`spec_lint.py` only) ships
+    verbatim so `${PLUGIN_ROOT}/scripts/spec_lint.py` — the pre-implementation
+    structural gate the rendered Codex `migrate`/`analyze` skills invoke —
+    resolves in an installed Codex plugin (bug 025 / #167). The Claude-only
+    trio (`verify_install` / `scaffold_contract`) is excluded: it validates a
+    `.claude/` install tree and no Codex skill references it. These modules are
+    host-neutral Python and carry no `${CLAUDE_PLUGIN_ROOT}`/`.claude/` tokens,
+    so they are copied byte-for-byte with no host rewrite."""
+    for rel_name in install_contract.CODEX_INCLUDE_SCRIPT_FILES:
+        src = source_root / rel_name
+        if not src.is_file():
+            continue
+        dst = output_dir / rel_name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+
+
 def _copy_templates(source_root: Path, output_dir: Path) -> None:
     templates_src = source_root / "templates"
     templates_dst = output_dir / "templates"
@@ -354,6 +376,7 @@ def build(source_root: Path, output_dir: Path) -> int:
     _rewrite_codex_hook_scripts(output_dir)
     _copy_templates(source_root, output_dir)
     _copy_skills(source_root, output_dir)
+    _copy_runtime_scripts(source_root, output_dir)
     _render_codex_agent_templates(source_root, output_dir)
 
     for file_name in _ROOT_FILES:
