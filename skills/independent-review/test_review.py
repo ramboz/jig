@@ -578,17 +578,21 @@ class SkillRecipeIntegrationTests(unittest.TestCase):
 
 
 class ArchitectureNoteTests(unittest.TestCase):
-    """AC #8: a sentence under 'Three subagents, no more' notes spec 011 reachability."""
+    """AC #8: a sentence under 'Three subagents, no more' records that the three
+    subagents are reachable as real subagent types when jig is installed as a
+    plugin. Per ADR-0047 the evergreen doc states the reachability substance
+    rather than citing the spec that introduced it."""
 
-    def test_architecture_md_records_spec_011_reachability(self):
+    def test_architecture_md_records_subagent_reachability(self):
         arch = (REPO_ROOT / "docs" / "architecture.md").read_text()
-        # Look for any sentence under "Three subagents" that mentions
-        # spec 011 and reachable / installed / live
+        # Look for a sentence under "Three subagents" that records reachability
+        # as real subagent types when installed as a plugin.
         self.assertRegex(
             arch,
-            r"(?is)Three\s+subagents.*?(spec\s*011|011-0[12]|plugin-self-install)",
-            "docs/architecture.md must record that subagents are reachable "
-            "in jig's dev env as of spec 011",
+            r"(?is)Three\s+subagents.*?reachable.*?subagent_type.*?plugin",
+            "docs/architecture.md must record that the three subagents are "
+            "reachable as real subagent_type values when jig is installed as a "
+            "plugin",
         )
 
 

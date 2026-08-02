@@ -70,10 +70,9 @@ already invested in*.
 `scaffold-init --in-repo` and jig copies its machinery into your repo's
 host-native project directory (`.claude/` or `.codex/`), where you can read and
 edit it under version control rather than have it hidden behind a plugin runtime
-you can't see. That is the opt-in, not the default
-([ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)): copying
-~130 files into every project pinned them to the version installed that day and
-drowned the project's own history in jig internals. The principle is that
+you can't see. That is the opt-in, not the default: copying
+~130 files into every project pins them to the version installed that day and
+drowns the project's own history in jig internals. The principle is that
 ownership stays *reachable and supported* — reach for it when the plugin can't be
 assumed present (CI, cloud agents, teammates without jig, archival repos).
 
