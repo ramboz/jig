@@ -181,7 +181,10 @@ class SourceBoundaryTests(EntryGateTestBase):
                               f"{rel} is a lifecycle artifact — must be silent")
 
     def test_infra_dirs_are_silent(self):
-        for rel in (".jig/spec-ref", ".claude/settings.json"):
+        # Both host adapter dirs count as infra on the Claude host (dual-host
+        # robustness — a Claude session editing an also-present `.codex/` is
+        # silent, not nudged).
+        for rel in (".jig/spec-ref", ".claude/settings.json", ".codex/hooks.json"):
             self.assertIsNone(self._eval(str(self.root / rel)))
 
     def test_source_file_nudges(self):

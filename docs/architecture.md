@@ -40,6 +40,40 @@ the workflow model.
 | Codex | Plugin | v2 supported | `.codex-plugin/plugin.json` plus rendered Codex skills, root `hooks/hooks.json`, templates, and canonical agent prompts are produced by `scripts/build_codex_plugin.py`. |
 | Other harnesses | Any | out of scope | Future adapters need their own real user signal and spec slices. |
 
+### Lifecycle entry gate — host capability (spec 098 / ADR-0044)
+
+The `PostToolUse` entry gate (`jig-entry-gate.sh` + `lib/entry_gate.py`) nudges on
+an out-of-lifecycle source edit. Its logic is one host-agnostic Python helper; the
+build applies the standard Codex substitutions (`CLAUDE_PROJECT_DIR` →
+`CODEX_PROJECT_DIR`, infra dir `.claude` → `.codex`), while the host-agnostic
+`.jig/spec-ref` marker path is preserved.
+
+Cell states (same legend as 083-08): **supported** = verified on this host;
+**degraded** = works via shared/host-neutral code but not independently
+runtime-probed on this host, and degrades in the safe direction (fail-open, never
+a false block) if the host differs; **unsupported** = the mechanism cannot work.
+
+| Mechanism | Claude | Codex | Fallback for `degraded` |
+|---|---|---|---|
+| Packaging (hook + `lib/` + registration) | supported | supported | — (built + `--check`-verified for both) |
+| Detection logic (claim + status + boundary) | supported | supported | — (same helper; Codex substitutions verified by `test_codex_entry_gate_parity.py`) |
+| Opt-out `JIG_ENTRY_GATE` / fail-open | supported | supported | — (env + `except`-swallow are host-neutral) |
+| `PostToolUse` payload (`tool_input.file_path`, `session_id`) | supported (probed 2026-07-30) | degraded — not re-probed on the Codex runtime | Shares the exact payload contract of `jig-boundary-change-warn.sh`, which already ships in the same Codex matcher; if Codex omits a field the gate fails open (silent), never errors. |
+| Once-per-session cadence (`$TMPDIR` state) | supported | degraded — depends on Codex's session model | If Codex reuses/omits `session_id`, cadence degrades to safe over-fire (never global silence — see `entry_gate._cadence_allows`). |
+
+Runtime confirmation of the two `degraded` rows needs the Codex host in hand
+(the 083-08 constraint); they are recorded honestly rather than claimed as
+`supported`. Both degrade in the safe direction, so neither is `unsupported`.
+
+**AC3 boundary caveat — dual-host projects.** The two-part source boundary
+resolves identically on both hosts for a single-host project. For a project that
+carries *both* `.claude/` and `.codex/` adapter dirs, coverage is asymmetric: the
+Claude gate lists both dirs as infra (`_INFRA_DIRS` = `.jig`/`.claude`/`.codex`/`.git`),
+but the Codex build's blind `.claude`→`.codex` rewrite collapses them, so a Codex
+session still nudges on a `.claude/` edit. This is an accepted limit — advisory,
+fail-open, safe-over-fire — pinned by `test_codex_entry_gate_parity.py`; closing
+it fully needs a build change, deferred until a real dual-host project reports it.
+
 ## Host adapter boundary
 
 The architecture boundary is between jig's **logical workflow model**
@@ -59,7 +93,7 @@ Every adapter must account for the same logical operations:
 3. **Agent installation.** Render `implementer`, `reviewer`, and
    `architect` into the host's custom-agent format while preserving the
    intended capability shape.
-4. **Hook installation.** Register the fourteen logical jig hooks against
+4. **Hook installation.** Register the fifteen logical jig hooks against
    host-native lifecycle events.
 5. **Hook protocol translation.** Convert jig-level results into the
    host protocol. The logical outcomes are `continue`,
@@ -86,7 +120,7 @@ checking in a second skill tree.
 
 How a session actually flows in Claude plugin-install mode. The LLM layer
 (user → Claude → skill router → SKILL.md → helper or subagent → on-disk
-state) is non-deterministic; the fourteen hooks form the deterministic spine
+state) is non-deterministic; the fifteen hooks form the deterministic spine
 that fires on fixed events and can inject context or block tool calls.
 
 ```mermaid
@@ -108,7 +142,7 @@ flowchart TB
     subs --> specs
     subs --> memory[(CLAUDE.md<br/>+ docs/memory/)]
 
-    subgraph hookspine["Deterministic spine — 14 hooks"]
+    subgraph hookspine["Deterministic spine — 15 hooks"]
         direction TB
         h1["SessionStart · UserPromptSubmit · PreToolUse·Read<br/>jig-context-check<br/>context-fill + in-session growth/compact nudge"]
         h2["UserPromptSubmit<br/>jig-memory-scan<br/>surface unknown references"]
@@ -124,6 +158,7 @@ flowchart TB
         h12["PostToolUse·AskUserQuestion · UserPromptSubmit<br/>jig-decision-inflight<br/>async write-only: in-flight decision stubs to scratch"]
         h13["Stop<br/>jig-claim-check<br/>flag unresolved spec/slice/ADR claims next turn"]
         h14["SessionStart<br/>jig-project-orient<br/>bounded lifecycle orientation hint"]
+        h15["PostToolUse · Edit/Write<br/>jig-entry-gate<br/>nudge on out-of-lifecycle source edit"]
     end
 
     h1 -. additionalContext .-> claude
@@ -137,12 +172,13 @@ flowchart TB
     h11 -. next-turn context .-> claude
     h13 -. next-turn context .-> claude
     h14 -. additionalContext .-> claude
+    h15 -. additionalContext .-> claude
 ```
 
 - **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
 - **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only. `pr-review` and `arch-review` stay judgment-only as skills, but are *invoked* deterministically from the post-implementation flow via `review.py pr-review` / `review.py arch-review` prompt builders (see [skills/spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) § "After implementation").
 - **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
-- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via fourteen hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); one is async write-only, capturing in-flight decision stubs to a per-session scratch log without blocking or injecting (`decision-inflight`); nine can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `task-capture`, `decision-capture`, `jig-semantic-index`, `claim-check`, `project-orient`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`). `project-orient` emits one self-labeled, bounded headline from scaffold/spec lifecycle artifacts at SessionStart and fails open; it never infers application state from a shallow source-tree listing. The three Stop hooks (`task-capture`, `decision-capture`, `claim-check`) are siblings — the same scan-and-surface pattern applied to a different signal: tasks, decisions, and spec/slice/ADR claims that don't resolve on disk. `decision-inflight` is the deterministic fast path feeding `decision-capture`'s triage.
+- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via fifteen hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); one is async write-only, capturing in-flight decision stubs to a per-session scratch log without blocking or injecting (`decision-inflight`); ten can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `entry-gate`, `task-capture`, `decision-capture`, `jig-semantic-index`, `claim-check`, `project-orient`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`). `entry-gate` (spec 098 / ADR-0044) nudges when an edit to project source happens outside a live working-lifecycle claim held by this checkout — the teeth-not-trust gate for lifecycle *entry*; fail-open, once-per-session. `project-orient` emits one self-labeled, bounded headline from scaffold/spec lifecycle artifacts at SessionStart and fails open; it never infers application state from a shallow source-tree listing. The three Stop hooks (`task-capture`, `decision-capture`, `claim-check`) are siblings — the same scan-and-surface pattern applied to a different signal: tasks, decisions, and spec/slice/ADR claims that don't resolve on disk. `decision-inflight` is the deterministic fast path feeding `decision-capture`'s triage.
 
 Scaffold-mode wiring is identical in shape — only path strings differ
 (`${CLAUDE_PROJECT_DIR}/.claude/...` instead of `${CLAUDE_PLUGIN_ROOT}/...`).

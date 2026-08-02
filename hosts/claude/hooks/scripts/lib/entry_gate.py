@@ -77,7 +77,15 @@ _BUG_OPEN_STATUSES = {
 # source boundary. NAMED subtrees only, never docs_base wholesale.
 _ARTIFACT_SUBDIRS = ("specs", "bugs", "decisions", "memory")
 # Repo-infra directories at the project root that are never project source.
-_INFRA_DIRS = (".jig", ".claude", ".git")
+# Both host adapter dirs are listed so a Claude session treats an also-present
+# `.codex/` as infra (and vice versa) — dual-host robustness. NOTE the Codex
+# build rewrites `.claude`→`.codex` here (blind global transform), so the Codex
+# copy becomes (".jig", ".codex", ".codex", ".git"): harmless dup, but it means
+# a Codex session still nudges on a `.claude/` edit. That residual dual-host
+# gap is an accepted limit (advisory, fail-open; see docs/architecture.md AC3
+# caveat) — closing it fully needs a build change, deferred until a real
+# dual-host project reports it.
+_INFRA_DIRS = (".jig", ".claude", ".codex", ".git")
 
 _MARKER_REL = Path(".jig") / "spec-ref"
 _STATE_PREFIX = "jig-entry-gate-"

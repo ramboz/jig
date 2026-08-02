@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [adr-0044, 098-01]
-last_verified: 2026-07-27
+last_verified: 2026-08-02
 frame_review: true  # the Codex hook payload shape can only be proven on the
 #                   # actual Codex runtime — the point of this slice.
 ---
@@ -75,12 +75,33 @@ precedent for splitting exactly there.
 - `JIG_ENTRY_GATE=0` on the Codex fixture → silent.
 
 **DoD:**
-- [ ] AC1 (packaging) green from the Claude side; AC2–AC5 confirmed on the Codex
-      runtime **or** recorded as `degraded` / `unsupported` with the fallback
-      wired — no silent assumption of parity.
-- [ ] Host-capability matrix row committed.
-- [ ] Post-impl review (compliance + craft; +frame per frontmatter).
-- [ ] Deviation log written; reconciliation review.
+- [x] AC1 (packaging) green from the Claude side (`test_codex_entry_gate_parity.py`); AC2 (payload) + AC5 (cadence) recorded as **`degraded`** in the host-capability matrix with fail-open fallbacks wired — no silent assumption of parity. AC3 (boundary) + AC4 (opt-out) proven on the shipped Codex copy.
+- [x] Host-capability matrix row committed (`docs/architecture.md`) with a supported/degraded/unsupported legend.
+- [x] Post-impl review (compliance + craft + frame) — all three returned needs-changes round 1; every finding applied + test-verified; verdicts recorded **pass** (applied state). See `reviews/slice-02-{compliance,craft,frame-critique}.md`.
+- [x] Deviation log written; reconciliation review.
+- [x] Reconciliation sweep produced under this slice heading.
+
+### Deviation log (after reconciliation)
+
+**1. `assumed` → `degraded` (frame review).** The first matrix draft labeled the two runtime-dependent rows (`PostToolUse` payload, cadence) `assumed` — a state outside the AC6 legend, and the exact "assumed-from-transform" parity the slice Goal set out to eliminate. Relabeled **`degraded`** (a wired fail-open / safe-over-fire fallback is degraded semantics) and added an explicit supported/degraded/unsupported legend to the matrix.
+
+**2. Dual-host `_INFRA_DIRS` refinement (frame review) — touches 098-01's shipped helper.** AC3's "boundary resolves the same on Codex" was over-stated: the Codex build's blind `.claude`→`.codex` rewrite dropped `.claude` from `_INFRA_DIRS`, so a Codex session treated `.claude/` as source — a hole the jig repo's own `.claude/`+`.codex/` state hits. The source `_INFRA_DIRS` now lists **both** `.claude` and `.codex`, so the **Claude** gate treats an also-present `.codex/` as infra (closes the dogfood case). The **Codex** copy collapses to `.codex` only, so it still nudges on `.claude/` — a residual accepted limit, **documented** in the matrix AC3 caveat and **pinned** by `test_dual_host_claude_dir_nudges_on_codex_accepted_limit`. This edits 098-01's shipped `entry_gate.py` (already DONE); the change is a cross-host parity refinement squarely in 098-02's scope, and 098-01's own tests were updated (`.codex` added to `test_infra_dirs_are_silent`). Fully closing the Codex side needs a build change and is deferred until a real dual-host project reports it.
+
+**3. architecture.md hook-count drift swept (compliance + craft).** Adding the 15th hook in 098-01 left five stale "fourteen"/"14 hooks" references (lines 82/109/131 + the spine paragraph + diagram). All corrected to fifteen/15; the diagram gained the `h15` entry-gate node + edge. (The spine-paragraph count was fixed in 098-01; the other four were caught here.)
+
+**4. Runtime parity is honestly `degraded`, not `supported` (design posture).** AC2/AC5 need the Codex runtime in hand (the 083-08 constraint); they are not claimed `supported`. The "shares `jig-boundary-change-warn`'s payload contract" argument is kept as a packaging fact (that sibling ships in the same Codex matcher), not used to upgrade a row — a shared-fate plausibility, not corroboration.
+
+**5. Test-craft fixes (craft + compliance).** Added `tearDownClass` to pop the injected `sys.path` entry + corrected the inaccurate `_common`-isolation comment; asserted `.claude` absent in the Codex transform; parametrized the opt-out over `{0,false,off,no}`; added relocated-docs-root and `.gitignore`-matched-path parity cases.
+
+### Reconciliation sweep
+
+- **`docs/architecture.md`** — host-capability matrix + legend + AC3 dual-host caveat added; hook-spine counts + diagram corrected (14→15). Not shipped in host packages (docs/ excluded), so no host regen for the doc. Disposition: **updated**.
+- **`hooks/scripts/lib/entry_gate.py`** (+ both host mirrors) — `_INFRA_DIRS` gains `.codex`; host packages regenerated, `--check` in sync. Disposition: **updated**.
+- **`scripts/test_codex_entry_gate_parity.py`** — new Codex parity suite (11 tests: 2 packaging + 2 transform + 7 behavior; the opt-out test parametrizes 4 tokens). Disposition: **added**.
+- **CLAUDE.md hot cache** — a one-line entry-gate term is added at spec close via `/jig:memory-sync` (next step), not per-slice. Disposition: **deferred to spec close**.
+- **`docs/specs/README.md` status board** — regenerated at spec close. Disposition: **deferred to spec close**.
 
 ### Close-out (post-DONE)
 - [ ] Dogfood on Codex: a normal in-slice session produces no false fire.
+      (Requires the Codex runtime — the `degraded` rows' real-world confirmation;
+      tracked, not blocking this Claude-host-verifiable slice.)
