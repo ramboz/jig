@@ -51,8 +51,12 @@ FAIL = "FAIL"
 UNAVAILABLE = "UNAVAILABLE"
 
 # Dev-only directories that must never appear inside a runtime Claude package
-# (the committed hosts/claude/ tree is runtime-only — AC1).
-_DEV_ONLY_DIRS: tuple[str, ...] = ("scripts", "docs", "tests")
+# (the committed hosts/claude/ tree is runtime-only — AC1). `scripts/` is NOT
+# in this set: the runtime-scripts allowlist (install_contract.
+# RELEASE_INCLUDE_SCRIPT_FILES) legitimately ships under it so
+# `${CLAUDE_PLUGIN_ROOT}/scripts/…` resolves (bug 024/#167). A dedicated check
+# below asserts `scripts/` carries ONLY that allowlist — no dev-only tooling.
+_DEV_ONLY_DIRS: tuple[str, ...] = ("docs", "tests")
 
 _SURFACE_UNAVAILABLE_MARKERS = (
     "unrecognized subcommand",
@@ -131,6 +135,21 @@ def _validate_committed_package(plugin_root: Path) -> SmokeResult:
             problems.append(
                 f"{dev_dir}/: dev-only directory must NOT appear in the runtime "
                 "Claude package (the package is install-only)"
+            )
+    # `scripts/` may exist, but only to carry the runtime-scripts allowlist
+    # (bug 024/#167). Anything else under it is dev-only leakage.
+    scripts_dir = plugin_root / "scripts"
+    if scripts_dir.is_dir():
+        shipped = {
+            p.relative_to(plugin_root).as_posix()
+            for p in scripts_dir.rglob("*")
+            if p.is_file()
+        }
+        stray = sorted(shipped - set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES))
+        if stray:
+            problems.append(
+                "scripts/: only the runtime-scripts allowlist may ship; "
+                f"unexpected file(s): {stray}"
             )
     if problems:
         return SmokeResult(

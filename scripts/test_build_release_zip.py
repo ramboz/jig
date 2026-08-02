@@ -120,12 +120,26 @@ class ClaudeZipShapeTests(unittest.TestCase):
         self.assertIn("README.md", self.names)
 
     def test_dev_only_files_absent(self):
-        # The committed Claude package is runtime-only: no scripts/docs/tests.
-        for prefix in ("scripts/", "docs/", ".github/", ".codex-plugin/"):
+        # The committed Claude package is runtime-only: no docs/tests/CI.
+        for prefix in ("docs/", ".github/", ".codex-plugin/"):
             offenders = [n for n in self.names if n.startswith(prefix)]
             self.assertEqual(
                 offenders, [], f"Claude zip must exclude {prefix}; found {offenders!r}"
             )
+
+    def test_scripts_are_the_runtime_allowlist_only(self):
+        # `scripts/` is not wholesale-excluded: the allowlisted runtime modules
+        # ship under it so `${CLAUDE_PLUGIN_ROOT}/scripts/…` resolves in an
+        # installed plugin (bug 024/#167). Nothing else from dev-only scripts/
+        # may leak.
+        shipped_scripts = {n for n in self.names if n.startswith("scripts/")}
+        self.assertEqual(
+            shipped_scripts,
+            set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES),
+            "Claude zip scripts/ must equal RELEASE_INCLUDE_SCRIPT_FILES; "
+            f"got {sorted(shipped_scripts)!r}",
+        )
+        self.assertIn("scripts/spec_lint.py", shipped_scripts)
 
     def test_no_pycache_or_dsstore(self):
         junk = [n for n in self.names if "__pycache__" in n or n.endswith(".pyc")

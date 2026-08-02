@@ -8,6 +8,7 @@ documenting the Codex hook trust step that runs after plugin installation.
 """
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import build_codex_plugin  # noqa: E402
+import install_contract  # noqa: E402
 
 CLAUDE_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 CODEX_MANIFEST = REPO_ROOT / ".codex-plugin" / "plugin.json"
@@ -403,6 +405,92 @@ class CodexPluginDocsTests(unittest.TestCase):
         self.assertIn("TOML custom-agent templates", architecture)
         self.assertIn("plugin-level custom-agent discovery", refinement)
         self.assertIn("AC #3 deviation: custom-agent discovery", slice_doc)
+
+
+class CodexRuntimeScriptsShippedTests(unittest.TestCase):
+    """Bug 024 (#167): the Codex package must ship the host-neutral
+    runtime-scripts subset so `${PLUGIN_ROOT}/scripts/spec_lint.py` (referenced
+    by the rendered Codex `migrate`/`analyze` skills) resolves in a real
+    install. The Claude-only trio (`verify_install`, `scaffold_contract`) is
+    hardcoded to a `.claude/` install tree and is deliberately NOT shipped to
+    Codex — `install_contract.CODEX_INCLUDE_SCRIPT_FILES` is the source of
+    truth for the Codex-appropriate subset."""
+
+    _SCRIPT_REF_RE = re.compile(
+        r"\$\{PLUGIN_ROOT\}/(scripts/[A-Za-z0-9_./-]+\.py)"
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.plugin_dir = _build_codex_plugin_dir()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.plugin_dir.parent, ignore_errors=True)
+
+    def test_spec_lint_ships(self):
+        self.assertTrue(
+            (self.plugin_dir / "scripts" / "spec_lint.py").is_file(),
+            "scripts/spec_lint.py must ship so "
+            "${PLUGIN_ROOT}/scripts/spec_lint.py resolves for Codex (#167)",
+        )
+
+    def test_codex_allowlist_ships(self):
+        for rel in install_contract.CODEX_INCLUDE_SCRIPT_FILES:
+            self.assertTrue(
+                (self.plugin_dir / rel).is_file(),
+                f"{rel} missing from the built Codex package (bug 024/#167)",
+            )
+
+    def test_referenced_scripts_resolve_in_package(self):
+        referenced: set[str] = set()
+        skills_root = self.plugin_dir / "skills"
+        for path in skills_root.rglob("*"):
+            if not path.is_file() or path.suffix != ".md":
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            referenced.update(self._SCRIPT_REF_RE.findall(text))
+        missing = sorted(
+            rel for rel in referenced if not (self.plugin_dir / rel).is_file()
+        )
+        self.assertEqual(
+            missing, [],
+            f"rendered Codex text references scripts absent from the package: "
+            f"{missing}",
+        )
+        self.assertIn("scripts/spec_lint.py", referenced)
+
+    def test_claude_only_trio_absent_from_codex(self):
+        # These validate a `.claude/` tree and are not referenced by Codex
+        # skill text — shipping them to Codex would be wrong, not just noise.
+        for rel in ("scripts/verify_install.py", "scripts/scaffold_contract.py"):
+            self.assertFalse(
+                (self.plugin_dir / rel).exists(),
+                f"{rel} is Claude-only and must not ship in the Codex package",
+            )
+
+    def test_no_dev_tooling_or_tests_leak(self):
+        scripts_dir = self.plugin_dir / "scripts"
+        shipped = (
+            {
+                p.relative_to(self.plugin_dir).as_posix()
+                for p in scripts_dir.rglob("*")
+                if p.is_file()
+            }
+            if scripts_dir.is_dir()
+            else set()
+        )
+        self.assertNotIn("scripts/run_tests.py", shipped)
+        self.assertFalse(
+            [s for s in shipped if Path(s).name.startswith("test_")],
+            f"test_*.py leaked into the Codex package: {sorted(shipped)}",
+        )
+        self.assertEqual(
+            shipped, set(install_contract.CODEX_INCLUDE_SCRIPT_FILES),
+            "shipped Codex scripts must equal CODEX_INCLUDE_SCRIPT_FILES; extra="
+            f"{sorted(shipped - set(install_contract.CODEX_INCLUDE_SCRIPT_FILES))} "
+            f"missing={sorted(set(install_contract.CODEX_INCLUDE_SCRIPT_FILES) - shipped)}",
+        )
 
 
 if __name__ == "__main__":

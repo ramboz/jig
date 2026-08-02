@@ -987,3 +987,29 @@ needs fixing**. A derive-only policy plus a generator that silently invents
 something plausible is the worst pairing: the human is told to fix the source
 and given no way to find it. If you rule that a generated artifact may not be
 hand-edited, make sure it reports what it could not derive.
+
+**A ship contract only holds if the thing that builds the artifact reads it**
+(bug 024, [`024-packaged-plugin-omits-runtime-scripts`](../bugs/024-packaged-plugin-omits-runtime-scripts.md)
+/ [issue #167](https://github.com/ramboz/jig/issues/167)).
+Spec 075 made `scripts/spec_lint.py` (and the `verify_install` runtime trio)
+"ship" by adding them to `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` and
+teaching the `iter_release_files` enumerator to yield them. Correct at the
+time — the release zip was built by walking source through that enumerator.
+Then spec 061 rearchitected packaging (ADR-0018): the shipped artifact became
+the committed `hosts/<host>/` tree, built by `build_claude_plugin.py` /
+`build_codex_plugin.py`, and the release zip just archives that tree. Those
+builders walk directory roots only and never call `iter_release_files`, so the
+allowlist quietly stopped being consumed by **anything on the shipping path** —
+`iter_release_files` became dead code with passing tests, and every shipped
+skill's `${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py` invocation broke with "No
+such file or directory." The lesson: **a "must ship" allowlist is only real if
+the code that produces the shipped artifact reads it** — pin the contract to a
+freshly *built package*, not to an enumerator that merely *describes* one. The
+trio's failure hid behind a `try/except ImportError` guard so nobody noticed;
+`spec_lint.py` had no guard, which is the only reason the drift surfaced.
+Two corollaries: (1) when a re-architecture moves the build path, re-audit
+which contracts the OLD path enforced and re-wire them to the new one — a green
+test suite over a dead enumerator is a false all-clear; (2) ship what each host
+actually references — `spec_lint.py` is host-neutral so it ships to both, but
+`verify_install`/`scaffold_contract` are `.claude/`-hardcoded and belong only
+in the Claude package.
