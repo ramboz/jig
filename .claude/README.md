@@ -33,33 +33,32 @@ live source — no recipe rewriting, no file duplication. It also satisfies
 subagent to the real read-only `reviewer` agent when
 `${CLAUDE_PLUGIN_ROOT}/agents/reviewer.md` is present.
 
-## The one rule for local development: disable the *plugin* for this project
+## Repo decision: develop jig against the in-repo machinery, not the plugin
 
-This adapter and a locally-installed jig **plugin** both register the same
-hooks. Claude Code does not dedupe hooks across sources, so running both means
-every hook **fires twice** (doubled SessionStart context injection, etc.) and
-skills appear twice. To avoid that collision, **disable the jig plugin for this
-project when developing locally** — this adapter is a superset and runs against
-your *live* edits, whereas the installed plugin is a stale marketplace snapshot.
-
-Do it via `enabledPlugins` in your **local** settings —
-`.claude/settings.local.json` (gitignored, per-machine), *not* the committed
-`settings.json`:
+When you work *on jig*, the installed jig **plugin** is a stale marketplace
+snapshot of the very code you're editing — so this repo deliberately runs the
+in-repo machinery (this adapter) instead. That is a repo-level decision, not a
+per-developer preference, so it lives in the **committed** `settings.json`:
 
 ```json
-{
-  "enabledPlugins": { "jig@jig": false }
-}
+{ "enabledPlugins": { "jig@jig": false } }
 ```
 
-Why local, not committed: whether *you* have the jig plugin installed is a
-per-machine fact, so it belongs in personal settings — a contributor who never
-installed the plugin shouldn't inherit this toggle. Keeping it out of the
-committed file also guarantees it never reaches a cloud session (where the
-plugin isn't installed anyway). Settings precedence is
-`Managed > CLI > Local > Project > User`, so a Local entry reliably overrides a
-user-scope plugin install and fully deactivates it (skills, hooks, and agents)
-for this project.
+This also resolves a collision: the adapter and a locally-installed plugin both
+register the same hooks, and Claude Code does not dedupe hooks across sources —
+running both would fire every hook **twice** (doubled SessionStart context
+injection, etc.) and surface skills twice. Disabling the plugin here is a full
+deactivation (skills, hooks, and agents) for this project.
+
+Notes:
+- **Harmless everywhere else it lands.** For a contributor who never installed
+  the plugin — and in cloud sessions, where the `jig` marketplace isn't
+  installed at all — the entry has nothing to match and is a no-op.
+- **Still overridable per-machine.** Settings precedence is
+  `Managed > CLI > Local > Project > User`. This committed entry (Project) beats
+  a user-scope install (User), but a developer who *wants* the plugin on for
+  this repo can flip it back in their own `.claude/settings.local.json`
+  (Local), which is gitignored.
 
 Everywhere *else* (other repos), keep using the plugin normally, or adopt jig
 via `scaffold-init` (which writes its own `.claude/skills/jig-*` copies).

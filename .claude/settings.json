@@ -1,4 +1,5 @@
 {
+  "enabledPlugins": { "jig@jig": false },
   "hooks": {
     "PreToolUse": [
       {
