@@ -9363,5 +9363,64 @@ class OrientWorkInFlightTests(unittest.TestCase):
         self.assertNotIn("in flight", result.stdout)
 
 
+class ReconciliationGroundingRequirementTests(unittest.TestCase):
+    """Bug 024 / issue #131 — the reconciliation checklist's "Architecture
+    impact" item must carry ADR-0020 §1's grounding requirement (a load-bearing
+    factual claim about a runnable surface needs an executed probe or a
+    ``file:line`` citation, and anything unverifiable is marked as an
+    assumption). The requirement must be present, and in sync, across all three
+    generated copies of spec-workflow/SKILL.md — the drift guard keeps the two
+    host mirrors byte-identical to source, and this test pins the load-bearing
+    prose so a future edit cannot silently drop it.
+
+    The assertion is scoped to the ``## Reconciliation checklist`` section so a
+    match against the identically-themed spec-authoring step 6 (which also says
+    "executed probe", earlier in the file) cannot satisfy it.
+    """
+
+    SKILL_COPIES = (
+        REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md",
+        REPO_ROOT / "hosts" / "claude" / "skills" / "spec-workflow" / "SKILL.md",
+        REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "skills"
+        / "spec-workflow" / "SKILL.md",
+    )
+
+    # Distinctive of the reconciliation item — this exact clause does not appear
+    # in spec-authoring step 6's phrasing, so a match can only come from the
+    # reconciliation "Architecture impact" item. The phrase is load-bearing and
+    # pinned verbatim: this is a canonical-wording drift guard, so a benign
+    # reorder ("a `file:line` citation or an executed probe") is intended to turn
+    # it red — update this constant deliberately when the wording changes.
+    GROUNDING_CLAUSE = "executed probe or a `file:line` citation"
+    ASSUMPTION_CLAUSE = "marked as an assumption"
+
+    def _reconciliation_section(self, text, path):
+        match = re.search(
+            r"^## Reconciliation checklist\b.*?(?=^## )",
+            text, re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match, "no bounded '## Reconciliation checklist' section in %s" % path)
+        return match.group(0)
+
+    def test_grounding_requirement_present_in_all_skill_copies(self):
+        for path in self.SKILL_COPIES:
+            self.assertTrue(path.exists(), "missing SKILL.md copy: %s" % path)
+            section = self._reconciliation_section(
+                path.read_text(encoding="utf-8"), path)
+            self.assertIn(
+                "Architecture impact", section,
+                "reconciliation checklist is missing the 'Architecture impact' "
+                "item in %s" % path)
+            self.assertIn(
+                self.GROUNDING_CLAUSE, section,
+                "reconciliation 'Architecture impact' item lacks the ADR-0020 "
+                "grounding requirement (%r) in %s" % (self.GROUNDING_CLAUSE, path))
+            self.assertIn(
+                self.ASSUMPTION_CLAUSE, section,
+                "reconciliation grounding rule must mark unverifiable claims as "
+                "assumptions rather than assert them in %s" % path)
+
+
 if __name__ == "__main__":
     unittest.main()
