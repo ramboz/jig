@@ -188,5 +188,44 @@ class GrowOnDiscoveryContractTests(unittest.TestCase):
         )
 
 
+class SliceAuthoringReferenceAnchorTests(unittest.TestCase):
+    """Bug 027 (GitHub issue 173) — the slice-authoring guidance must point at
+    the in-project scaffolded worked example, not an unanchored template path.
+
+    `templates/docs/specs/slice-template.md` is a bare, unanchored relative path
+    that (a) names no root and (b) is mislocated post-ship: scaffold copies
+    `templates/` to `<project>/.claude/templates/`, so the project-root path
+    the wording implies does not exist inside a scaffolded repo. The authoritative
+    structural reference is the scaffolded first spec `docs/specs/001-adopt-jig/`,
+    which lands at project root (host-agnostic) and is named "the worked example
+    to imitate" by the scaffolded `CLAUDE.md`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+
+    def test_no_unanchored_slice_template_path(self):
+        # The bare, unanchored, post-ship-mislocated path must not appear as an
+        # authoring instruction. Authors get a well-formed starter slice via
+        # `workflow.py new`; the raw template location is host-dependent and
+        # must not be cited by hand.
+        self.assertNotIn(
+            "templates/docs/specs/slice-template.md", self.body,
+            "SKILL.md must not send slice authors to the unanchored / "
+            "post-ship-mislocated `templates/docs/specs/slice-template.md` "
+            "path (bug 027 / issue 173)",
+        )
+
+    def test_cites_in_project_worked_example(self):
+        # The in-project, host-agnostic worked example is the structural
+        # reference authors should mirror.
+        self.assertIn(
+            "001-adopt-jig", self.body,
+            "SKILL.md slice-authoring guidance must cite the in-project "
+            "scaffolded worked example `docs/specs/001-adopt-jig/` as the "
+            "structural reference (bug 027 / issue 173)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -245,12 +245,18 @@ SKILL.md hand-off is the documented gate.
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers
    end-to-end value. Spike is the last resort, not the first reach.
-5. For each new slice, use the template at
-   `templates/docs/specs/slice-template.md` — it ships the canonical
-   frontmatter shape (`status`, `dependencies`, `last_verified`) plus
-   DoR / AC / DoD / Close-out sections. Set `status: DRAFT` in the
-   frontmatter. Legacy slices that use prose `**STATUS: DRAFT**` markers
-   still work (lazy migration); no need to rewrite them.
+5. Each slice is a whole-file document with the canonical frontmatter shape
+   (`status`, `dependencies`, `last_verified`) plus DoR / AC / DoD / Close-out
+   sections. `workflow.py new` (step 2) already emitted a well-formed starter
+   `slice-01-tbd.md` from the packaged slice template, so you never hand-resolve
+   a template path; add any further slices in that same shape. For the
+   **structural reference** — what a filled-in slice looks like — mirror the
+   in-project worked example that scaffolding installs at project root:
+   `docs/specs/001-adopt-jig/` (`spec.md` + `slice-01-bootstrap.md`), the first
+   spec, which your project's `AGENTS.md` names as the worked example to
+   imitate. Set `status: DRAFT` in the frontmatter. Legacy slices that use prose
+   `**STATUS: DRAFT**` markers still work (lazy migration); no need to rewrite
+   them.
 6. **Ground your factual claims (spec 064-02 / ADR-0020 §1–§2).** Any
    load-bearing factual claim about a *runnable* surface — library/API
    capability, version/perf behavior, behavior of existing code — must be
@@ -655,11 +661,12 @@ or cascades (a human decides what a live dependent should do next).
 
 ### Slice frontmatter (slice 015-01 convention, file shape per 018-03)
 
-New slices written from `templates/docs/specs/slice-template.md` are
-whole-file templates — frontmatter at the top, `## Slice ...` heading
-immediately following the closing frontmatter delimiter. `workflow.py
+New slices are whole-file templates — frontmatter at the top, `## Slice ...`
+heading immediately following the closing frontmatter delimiter. `workflow.py
 new` emits a starter `slice-01-tbd.md` alongside `spec.md` in this
-shape. Legacy specs that embed `## Slice` sections inside `spec.md`
+shape (from the packaged slice template); for a filled-in reference, mirror the
+scaffolded worked example `docs/specs/001-adopt-jig/slice-01-bootstrap.md`.
+Legacy specs that embed `## Slice` sections inside `spec.md`
 (heading-first, frontmatter-after) remain supported by every helper —
 no forced migration.
 
