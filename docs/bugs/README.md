@@ -28,3 +28,4 @@
 | 021 | custom-test-command-drops-selector | medium | standard | REPORTED | no |  | claude/bug-021-tdd-selector-gate |  |  |
 | 022 | copy-machinery-ignores-docs-root | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CopyMachineryTrackLocalDocsRootTests | claude/bug-copy-machinery-docs-root |  |  |
 | 023 | copy-machinery-advisory-host-from-invocation | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CrossHostAdvisoryTests | claude/bug-023-advisory-host |  |  |
+| 024 | slice-land-tests-inert-vendored | medium | standard | DONE | yes | skills/slice-land/test_land.py::CheckTestsHelperResolutionTests | claude/issue-129-bug-review-jsr2cp |  |  |
