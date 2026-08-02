@@ -67,6 +67,12 @@
             "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-boundary-change-warn.sh",
             "timeout": 5,
             "statusMessage": "jig: warn on boundary changes"
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-entry-gate.sh",
+            "timeout": 5,
+            "statusMessage": "jig: nudge on out-of-lifecycle edits"
           }
         ]
       },

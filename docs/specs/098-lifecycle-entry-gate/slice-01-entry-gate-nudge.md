@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [adr-0044, 098-04]
-last_verified: 2026-07-30
+last_verified: 2026-08-02
 frame_review: true
 ---
 
@@ -19,19 +19,18 @@ else. No block, no owner prompt, no failure mode for the session.
 **Scope:** the Claude host. The Codex-host equivalent is slice 098-02 (settled
 call #4 — same spec, separately verifiable slice).
 
-**NOT YET STARTABLE — waiting on two work items, not on a decision.** AC2's
-definition is settled (maintainer, 2026-07-30), but the surface it reads does not
-exist yet:
+**STARTABLE — both sequencing dependencies satisfied (2026-08).** AC2's
+definition was settled (maintainer, 2026-07-30); both surfaces it reads now exist:
 
-1. **[#138](https://github.com/ramboz/jig/pull/138) must merge.** It is what makes
-   a slice claim span the whole working lifecycle instead of clearing at
-   REVIEWED. Without it this gate fires at every slice's reconciliation — the
-   objection that killed the previous definition.
-2. **Slice 098-04 must be DONE.** It supplies the same signal for the bug
-   lifecycle, which #138 does not touch.
+1. **[#138](https://github.com/ramboz/jig/pull/138) merged 2026-07-30.** A slice
+   claim spans the whole working lifecycle (`_CLAIM_WORKING_STATUSES` in
+   `workflow.py`) instead of clearing at REVIEWED, so the gate stays silent
+   through reconciliation.
+2. **Slice 098-04 is DONE.** It stamps the same working-tree marker for the bug
+   lifecycle (`bug=NNN` in `.jig/spec-ref`), which #138 does not touch.
 
-Both are declared in the frontmatter. This is a sequencing gate: nothing here
-needs another answer from the maintainer.
+Both are declared in the frontmatter and confirmed in the tree
+(`workflow.py._CLAIM_WORKING_STATUSES`, `bug.py` marker stamping).
 
 **DoR:**
 - ✅ [ADR-0044](../../decisions/adr-0044-lifecycle-entry-gate.md) is **Accepted**
@@ -39,8 +38,8 @@ needs another answer from the maintainer.
   rounds.
 - ✅ Question #5 (what signal means "inside the lifecycle") is answered — see
   [ADR-0044 resolved question #5](../../decisions/adr-0044-lifecycle-entry-gate.md#resolved-question-5).
-- ⏳ #138 merged — **not yet** (open, draft).
-- ⏳ Slice 098-04 DONE — **not yet**.
+- ✅ #138 merged (2026-07-30) — `_CLAIM_WORKING_STATUSES` present in `workflow.py`.
+- ✅ Slice 098-04 DONE — `bug.py` stamps the `bug=NNN` marker.
 - ✅ The **four** questions this spec was opened with are settled by the
   maintainer on [#128](https://github.com/ramboz/jig/pull/128); the criteria
   below are written against those calls, not against the draft's
@@ -54,13 +53,11 @@ needs another answer from the maintainer.
   `lib/read_attribution.append_additional_context_event`.
 - ✅ The anti-nag mechanism exists: `jig-context-check.sh` once-per-band-per-session
   `$TMPDIR` state file.
-- ⏳ **Lifecycle-state sources become sufficient only once both dependencies
-  land.** `claimed_by` (spec 049) and `docs/bugs/*.md` are readable today, but
-  on `main` as it stands neither answers "is *this session* inside the
-  lifecycle" — the claim is cleared at REVIEWED before reconciliation runs
-  (#138 fixes that), and a `--push` bug reservation leaves nothing in the
-  working tree (098-04 fixes that). This DoR item was ✅ in the original draft;
-  the frame critique falsified it, and it stays ⏳ until both are in.
+- ✅ **Lifecycle-state sources are now sufficient.** `claimed_by` (spec 049) spans
+  the working lifecycle via #138's `_CLAIM_WORKING_STATUSES`, and the bug arm reads
+  098-04's `bug=NNN` marker — so the gate answers "is *this session* inside the
+  lifecycle" for both arms. (This DoR item was ✅ in the original draft, falsified
+  by the frame critique, and is now genuinely satisfied by the two merged deps.)
 - ✅ **`session_id` is present in the `PostToolUse` payload** — probed on the
   Claude host 2026-07-30 (spec Assumptions). AC5's cadence keying is safe here;
   the Codex equivalent is 098-02's to re-probe.
@@ -192,16 +189,45 @@ needs another answer from the maintainer.
 - scaffold parity: `_EXPECTED_HOOK_SCRIPTS` lists the new script.
 
 **DoD:**
-- [ ] All acceptance criteria met, tests green (red→green witnessed).
-- [ ] `hooks.json` + scaffold writer updated; parity test green.
-- [ ] Post-impl review (compliance + craft; +frame per frontmatter).
-- [ ] Deviation log written; reconciliation review.
-- [ ] Any deviation from the boundary rule (AC3) is carried into slice 098-02, so
-      the two hosts cannot drift apart at implementation time.
+- [x] All acceptance criteria met, tests green (red→green witnessed). 30 entry-gate tests green; the two anti-dead-gate behaviors were **manually mutation-checked** — the code was hand-edited to drop the status cross-check / use `docs_base` wholesale, the pinning tests were witnessed to go red, then the edits reverted (not an automated mutation-testing run).
+- [x] `hooks.json` + scaffold registration updated; parity test green: hooks.json now references **15** scripts (`test_real_hooks_json_references_fifteen_scripts`), and the separate scaffolded-scripts tuple `verify_install._EXPECTED_HOOK_SCRIPTS` includes `jig-entry-gate.sh`; a scaffolded install ships + registers the hook — validated end-to-end incl. the `_common` import.
+- [x] Post-impl review (compliance + craft + frame) — all three **pass**; see `reviews/slice-01-{compliance,craft,frame-critique}.md`.
+- [x] Deviation log written; reconciliation review.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Boundary rule (AC3) implemented as specified — NO deviation to carry into 098-02. The bug-arm/slice-arm liveness asymmetry (bug arm uses full OPEN_STATUSES) is recorded as an accepted limit in code and must be mirrored by 098-02.
+
+### Deviation log (after reconciliation)
+
+**1. `subprocess.run` timeouts added (craft review).** `_claim_identifier` (git branch — runs on every edit) and `_git_ignores` (git check-ignore) had no `timeout=`; `except Exception` catches errors but not a *hang*, so a locked index or slow FS could stall the session on every edit. Both now pass `timeout=5`; `TimeoutExpired` is an `Exception`, so the existing handlers still fail open. Pinned by `test_hung_git_times_out_and_still_evaluates` + `test_git_subprocess_calls_pass_a_timeout`.
+
+**2. Testable helper + thin wrapper split (design choice).** All logic lives in `hooks/scripts/lib/entry_gate.py`; `jig-entry-gate.sh` only marshals stdin, prints, and logs — matching the `context_fill.py` / `jig-context-check.sh` pattern. The wrapper adds `../../skills` to `sys.path` so the helper can `from _common import project_layout` (spec AC3 mandates reading the docs base via `project_layout`); the same relative path resolves in both plugin and scaffold layouts (validated end-to-end).
+
+**3. Status sets re-listed for hook self-containment, pinned in sync.** `_SLICE_WORKING_STATUSES` / `_BUG_OPEN_STATUSES` / `_DISABLE_VALUES` are inlined rather than imported (the established hook-self-containment pattern); `ConstantSyncTests` exec the real `workflow.py` / `bug.py` / `parsing.py` and assert equality, so a lifecycle change cannot silently drift them.
+
+**4. Bug-arm liveness span is broader than the slice arm (accepted limit, frame review).** The bug arm uses the full `OPEN_STATUSES` (incl. REPORTED — `pickup` stamps before the first transition — and VERIFIED); the slice arm uses the curated `_CLAIM_WORKING_STATUSES`. Recorded as an accepted limit in code at the `_BUG_OPEN_STATUSES` definition; bounded because 098-04 clears the marker at every terminal state; 098-02 must keep the same span.
+
+**5. Stale DoR corrected (frame review).** The "NOT YET STARTABLE" banner and the ⏳ DoR items for #138 / 098-04 were false by the time of implementation (both merged/DONE); corrected to ✅ with in-tree confirmation, rather than left asserting the slice could not start.
+
+**6. Branch re-home (process note).** The primary working tree was switched off the intended `claude/issue-111-lifecycle-entry-gate` onto a stray `claude/bug-028-scaffold-gitignore-runtime-state` branch mid-session (unrelated to the real concurrent bug-028 session, which runs in its own linked worktree on a differently-named branch). Detected via the reviewers' `claimed_by` mismatch note; the branch was re-homed to `claude/issue-111-…` (commits preserved) and the claim re-stamped on the REVIEWED transition. No work lost. Inherited bug-027/028 WIP was isolated in a tagged stash before any 098 work began.
+
+### Reconciliation sweep
+
+- **`hooks/hooks.json`** — 3rd PostToolUse `Edit|Write|MultiEdit` entry added; mirrored to both host packages. Disposition: **updated**.
+- **`scripts/verify_install.py` `_EXPECTED_HOOK_SCRIPTS` + `scripts/test_install_contract.py`** — script registered; hook-count contract test moved 14→15. Disposition: **updated**.
+- **`skills/scaffold-init/scaffold.py`** — Codex status-message map gains a friendly `jig-entry-gate.sh` label. Disposition: **updated**.
+- **Host packages** — regenerated via `scripts/build_host_packages.py`; `--check` in sync (115 files). Disposition: **updated**.
+- **CLAUDE.md hot cache** — the Active-specs line already names spec 098; a one-line hot-cache term for the entry gate will be added at spec close (098-02) via `/jig:memory-sync`, not per-slice. Disposition: **deferred to spec close**.
+- **`docs/refinement-todo.md`** — nothing deferred during implementation (the fine-tuning of boundary part (b) is already an ADR-0044 "still open" item, unchanged). Disposition: **no-op**.
+- **`docs/architecture.md` host support matrix** — the per-mechanism entry-gate capability row is 098-02's deliverable (AC6). Disposition: **deferred to 098-02**.
 
 ### Close-out (post-DONE)
-- [ ] Dogfood, both directions. Silence alone proves nothing — a dead gate is
-      silent too (ADR-0044 under-fire kill criterion):
-      - [ ] a normal in-slice jig session on this repo produces no false fire; **and**
-      - [ ] a deliberate out-of-lifecycle edit, made on a tree that has an
-            unrelated `IN_PROGRESS` slice and an open bug, **does** fire.
+- [x] Dogfood, both directions (real-repo, 2026-08). Silence alone proves nothing
+      — a dead gate is silent too (ADR-0044 under-fire kill criterion):
+      - [x] a normal in-slice session on this repo produces no false fire — an
+            edit to `skills/bug-fix/bug.py` while this checkout holds the live
+            claim on 098-01 (REVIEWED) is **silent**; **and**
+      - [x] a deliberate out-of-lifecycle edit, on this repo (which carries an
+            unrelated `IN_PROGRESS` slice 088-02 and open bug 008), under a
+            foreign claim identity, **does** fire the nudge.
+      - _Continued real-session dogfooding over time still feeds the 8-week
+        under-fire kill criterion; this is the shipping-gate proof, not the end._
