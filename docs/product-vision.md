@@ -1,8 +1,8 @@
-> Status: Draft (hand-seeded as the worked-example artifact for [spec 017](specs/017-vision-elicitation/spec.md))
+> Status: Draft (hand-seeded as the worked example of what `vision-elicitation` produces)
 >
 > This document captures *why* jig exists, *for whom*, and *with what
 > principles*. Architectural mechanics live in [architecture.md](architecture.md).
-> Update via reconciliation, or via `/jig:vision-elicitation` (shipped in spec 017).
+> Update via reconciliation, or via `/jig:vision-elicitation`.
 
 # Vision: jig
 
@@ -56,29 +56,24 @@ There's a gap in the middle: **a focused, opinionated, *extensible*
 workflow layer that respects context economy and dogfoods its own
 conventions.** That's what jig is.
 
-### The positioning recovery (2026-05 audit)
+### Ownership is a first-class option
 
-A user-led audit in May 2026 surfaced that jig was drifting from its
-original framing — *"scaffolding library: puts the machinery in your
-repo, then gets out of the way"* — toward an install-and-forget plugin
-where the machinery lives under `${CLAUDE_PLUGIN_ROOT}` and stays
-opaque to the dev. **The dev should own and extend the scaffolding,
-not depend on a plugin runtime they can't see.** [Spec 016](specs/016-scaffold-mode/spec.md)
-shipped dual-mode install (plugin OR scaffolded-in-repo) to recover
-that framing, and [spec 017](specs/017-vision-elicitation/spec.md)
-closed the second half by adding content-guidance at init time so a
-new project leaves the wizard with a real vision + architecture seed,
-not three "Deferred — no signal" stanzas.
+jig's original framing is a *scaffolding library*: it puts the machinery in
+your repo, then gets out of the way. The risk it guards against is drifting into
+an install-and-forget plugin where the machinery lives under
+`${CLAUDE_PLUGIN_ROOT}` and stays opaque to the dev. **The dev should be able to
+own and extend the scaffolding, not be forced to depend on a plugin runtime they
+can't see.** jig supports both a plugin install and a scaffolded-in-repo install,
+and the elicitation wizard seeds a new project with a real vision + architecture
+draft rather than empty "Deferred — no signal" stanzas.
 
-**Amendment (2026-07, [ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)).**
-Both modes remain first-class, but the *default* is now plugin mode:
-in-repo is the explicit `--in-repo` opt-in. What the 2026-05 audit
-demanded was that owning the machinery be **possible and supported** —
-not that every project be handed ~130 vendored files it did not ask
-for. Copying by default made the machinery *visible* at the cost of
-pinning it to the scaffold-time version (silent drift) and burying the
-project's own history under jig internals. Ownership stays one flag
-away, and choosing it is now a deliberate act rather than a silent one.
+Both modes are first-class, but the *default* is plugin mode; in-repo is the
+explicit `--in-repo` opt-in. What matters is that owning the machinery be
+**possible and supported** — not that every project be handed ~130 vendored
+files it did not ask for. Copying by default made the machinery *visible* at the
+cost of pinning it to the scaffold-time version and burying the project's own
+history under jig internals. Ownership stays one flag away, and choosing it is a
+deliberate act rather than a silent one.
 
 ## Competitive landscape
 
@@ -113,7 +108,7 @@ The minimum coherent workflow. Nothing useful without all seven.
 4. **`independent-review`** — reviewer subagent with a fresh prompt and read-only tools. Owns the compliance pass (always) and the reconciliation pass; also builds the verdict-envelope prompts that wrap the Tier 1 `pr-review` + `arch-review` skills when `spec-workflow` invokes them.
 5. **`migrate`** — sibling entry path for projects that already have specs
 6. **`vision-elicitation`** — lightweight wizard that fills the elicitation slots in this document and `architecture.md` after `scaffold-init`; re-runnable with hash-based edit detection (per-section refresh / skip / diff)
-7. **`contracts`** — judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL); defers to richer user skills. Deliberate stub per [ADR-0002](decisions/adr-0002-contracts-stays-deferred.md), still installed at Tier 0.
+7. **`contracts`** — judgment-skill nudging toward standard external-interface artifacts (OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL); defers to richer user skills. A deliberate stub, still installed at Tier 0.
 
 ### Tier 1 — default-on (the working surface)
 
@@ -125,14 +120,14 @@ drivers once Tier 0 is in place.
 10. **`slice-land`** — readiness check + landing checklist (direct merge or PR)
 11. **`pr-review`** — slim baseline four-section review; defers to richer user skills. `spec-workflow` invokes it automatically as the **craft pass** of the post-implementation review (always runs).
 12. **`arch-review`** — slim baseline architecture / RFC / design-doc review; same deferral pattern. `spec-workflow` invokes it automatically as the **arch pass** of the post-implementation review, **on-demand** when the slice's frontmatter declares `arch_review: true`.
-13. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications` (per spec 023, **no** deferral hint to spec-kit per explicit user direction 2026-05-18)
-14. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate (per spec 024 AC #6 — `_principles_check_block()` appended unconditionally to every reviewer prompt). Same no-deferral-hint stance as clarify
-15. **`security-review`** — slim baseline security review; orchestrates installed scanners (semgrep / bandit / gosec / npm audit / osv-scanner) + defers to a richer installed security skill (the user's own, Adobe's `adobe-security-*`, or a built-in `security-review`) via the same per-skill deferral pattern as `pr-review`. Heuristic-only floor when no scanner is present (per [ADR-0013](decisions/adr-0013-security-floor-policy.md))
-16. **`code-health`** — the static-analysis sibling of `tdd-loop`: detects the project's linter and drives it via `health.py` with normalized exit codes (0 clean / 1 findings / 2 no-linter). Scope today is Python + ruff (resolved on PATH or ephemerally via `uvx` / `pipx`); degrades to a recommendation when no linter is present and defers to a richer installed lint/static-analysis skill (per [ADR-0017](decisions/adr-0017-scaffolded-code-health.md))
-17. **`explain`** — on-demand vocabulary/artifact explainer (third consumer of the shipped lexicon): term mode defines a single jig term from the merged lexicon (shipped + project-glossary overlay) and flags an absent term rather than inventing one; artifact mode produces a junior-grade walkthrough of a spec/ADR, auto-pulling the refs it links. Ephemeral (chat-only), judgment-only/no-`.py`; defers to a richer installed plain-language/onboarding/walkthrough skill (per spec 065)
-18. **`bug-fix`** — proportional, teeth-gated bug-fix workflow (peer of `spec-workflow`, owns its orchestration) backed by `bug.py`: diagnose-before-fix gate (≥2 hypotheses) + red→green teeth that witness the regression test fail before the fix and pass after, a durable `docs/bugs/NNN-slug.md` record + board, and de-escalation (trivial bugs bow out to `tdd-loop`). Reuses the ADR-0014 evidence gate; only the craft (`pr-review`) and conditional security (`security-review`) passes defer (per [ADR-0016](decisions/adr-0016-bug-fix-lifecycle.md))
-19. **`reframe`** — re-baseline the corpus when a load-bearing reference moves (a design system, vendor / API contract, test infra, compliance regime, target platform, or product-positioning / strategic-vision shift): reads the accepted corpus against the new reference and drafts a **keystone reframe-ADR** (new reference authoritative, old premise superseded) + a re-baselining manifest assigning every affected artifact a disposition + a two-level coverage floor; a competent session then executes through the existing ADR / spec lifecycles. A lightweight correction *capability over the spine* (not a gated lifecycle member); judgment-only, no `.py`; defers to a richer installed re-baselining skill (per spec 067 / [ADR-0024](decisions/adr-0024-reference-reframe.md))
-20. **`orient`** — the on-demand project-orientation briefing (the judgment layer over `workflow.py orient`, spec 088): starts from the deterministic `jig hint:` headline, then surveys the project's own artifacts (`Proposed` ADRs, DEFERRED slices and their triggers, refinement-todo, release plans, the inbox, standalone bugs) and answers in one fixed, readable shape — an honest headline, titled sections, a single recommendation, and an offer to hand off to the skill that owns the work. Entirely read-only — it writes nothing (renders to stdout for a scheduled job or dashboard to capture; any persistence/export is deferred to the dashboard work in [#91](https://github.com/ramboz/jig/issues/91)). Judgment-only, no `.py`; defers to a richer installed project-orientation / status skill
+13. **`clarify`** — slim baseline pre-spec ambiguity scan; six-category coverage + up to 5 prioritized questions appended as `## Clarifications`. Ships as a standalone baseline — no deferral hint to an external spec-kit alternative
+14. **`analyze`** — non-destructive cross-artifact consistency report; six finding categories with CRITICAL/HIGH/MEDIUM/LOW severity. Bundles the constitution-gate — `_principles_check_block()` is appended unconditionally to every reviewer prompt. Same no-deferral-hint stance as clarify
+15. **`security-review`** — slim baseline security review; orchestrates installed scanners (semgrep / bandit / gosec / npm audit / osv-scanner) + defers to a richer installed security skill (the user's own, Adobe's `adobe-security-*`, or a built-in `security-review`) via the same per-skill deferral pattern as `pr-review`. Heuristic-only floor when no scanner is present
+16. **`code-health`** — the static-analysis sibling of `tdd-loop`: detects the project's linter and drives it via `health.py` with normalized exit codes (0 clean / 1 findings / 2 no-linter). Scope today is Python + ruff (resolved on PATH or ephemerally via `uvx` / `pipx`); degrades to a recommendation when no linter is present and defers to a richer installed lint/static-analysis skill
+17. **`explain`** — on-demand vocabulary/artifact explainer (third consumer of the shipped lexicon): term mode defines a single jig term from the merged lexicon (shipped + project-glossary overlay) and flags an absent term rather than inventing one; artifact mode produces a junior-grade walkthrough of a spec/ADR, auto-pulling the refs it links. Ephemeral (chat-only), judgment-only/no-`.py`; defers to a richer installed plain-language/onboarding/walkthrough skill
+18. **`bug-fix`** — proportional, teeth-gated bug-fix workflow (peer of `spec-workflow`, owns its orchestration) backed by `bug.py`: diagnose-before-fix gate (≥2 hypotheses) + red→green teeth that witness the regression test fail before the fix and pass after, a durable `docs/bugs/NNN-slug.md` record + board, and de-escalation (trivial bugs bow out to `tdd-loop`). Reuses jig's evidence gate; only the craft (`pr-review`) and conditional security (`security-review`) passes defer
+19. **`reframe`** — re-baseline the corpus when a load-bearing reference moves (a design system, vendor / API contract, test infra, compliance regime, target platform, or product-positioning / strategic-vision shift): reads the accepted corpus against the new reference and drafts a **keystone reframe-ADR** (new reference authoritative, old premise superseded) + a re-baselining manifest assigning every affected artifact a disposition + a two-level coverage floor; a competent session then executes through the existing ADR / spec lifecycles. A lightweight correction *capability over the spine* (not a gated lifecycle member); judgment-only, no `.py`; defers to a richer installed re-baselining skill
+20. **`orient`** — the on-demand project-orientation briefing (the judgment layer over `workflow.py orient`): starts from the deterministic `jig hint:` headline, then surveys the project's own artifacts (`Proposed` ADRs, DEFERRED slices and their triggers, refinement-todo, release plans, the inbox, standalone bugs) and answers in one fixed, readable shape — an honest headline, titled sections, a single recommendation, and an offer to hand off to the skill that owns the work. Entirely read-only — it writes nothing (renders to stdout for a scheduled job or dashboard to capture). Judgment-only, no `.py`; defers to a richer installed project-orientation / status skill
 
 ### Tier 2 — opt-in by signal (deferred until pain reported)
 
@@ -198,23 +193,22 @@ reconciliation.
    auto-routed to, or whether jig's baseline is the right standalone
    default for that surface.
 6. **No backwards-compat shims when conventions change.** When a
-   convention is wrong, flip it wholly (e.g. ADR-0004's `docs/adrs/`
+   convention is wrong, flip it wholly (e.g. the `docs/adrs/`
    → `docs/decisions/` rename was a clean cut, not a dual-read
    transition). Backwards-compat is a tax on every future spec; pay
    the migration cost once instead.
 7. **Owning the scaffolding must always be available — one flag away.**
-   [Spec 016](specs/016-scaffold-mode/spec.md) and the v2 host-adapter
-   work make it possible to put the machinery (`skills/`, `agents/`,
-   `hooks/`) in the dev's host-native project directory (`.claude/` or
-   `.codex/`) where it can be read, modified, and extended. As of
-   [ADR-0041](decisions/adr-0041-scaffold-defaults-to-plugin-mode.md)
-   that is the `--in-repo` **opt-in**, not the default: vendoring ~130
-   files into every project pinned them to the scaffold-time version and
-   buried the project's own history under jig internals. What positioning
-   requires is that ownership be *supported and reachable*, not imposed —
-   so the default keeps the repo lean and jig updates flow from the
-   plugin, and `--in-repo` is a deliberate choice for the projects that
-   need it (CI, cloud agents, plugin-less teammates, archival).
+   jig's scaffold and host-adapter machinery can put the runtime
+   (`skills/`, `agents/`, `hooks/`) in the dev's host-native project
+   directory (`.claude/` or `.codex/`) where it can be read, modified, and
+   extended. That is the `--in-repo` **opt-in**, not the default:
+   vendoring ~130 files into every project pins them to the scaffold-time
+   version and buries the project's own history under jig internals. What
+   positioning requires is that ownership be *supported and reachable*,
+   not imposed — so the default keeps the repo lean and jig updates flow
+   from the plugin, and `--in-repo` is a deliberate choice for the
+   projects that need it (CI, cloud agents, plugin-less teammates,
+   archival).
 8. **Designed to reduce token cost.** Beyond keeping context below the
    dumb zone for *quality* (principle #2), jig is built to keep token
    usage — and the bill — *down*: it favors a lean context, delegates
@@ -230,12 +224,11 @@ when one of the following lands:
 - **User signal**: a real pain hit two or more times across sessions,
   or once and clearly load-bearing.
 - **Dogfooding revelation**: a gap found while using jig on jig
-  (e.g. [spec 009](specs/009-dod-close-out-separation/spec.md)
-  separated post-DONE close-out items from blocking DoD checks after
-  the chicken-and-egg hit slice 008-01).
+  (e.g. separating post-DONE close-out items from the blocking DoD
+  checks, after the chicken-and-egg problem surfaced mid-build).
 - **Cross-project comparison**: a pattern that recurs in multiple
-  projects (e.g. [spec 015](specs/015-structured-lifecycle-metadata/spec.md)
-  was born from comparing spec frontmatter across projects).
+  projects (e.g. structured lifecycle metadata, born from comparing
+  spec frontmatter across projects).
 
 Speculative tier promotion — "what if we also shipped X?" — is
 explicitly disallowed. Tier 2 stays empty until a real user reports
@@ -247,24 +240,17 @@ Track in [docs/specs/README.md](specs/README.md) and
 [docs/refinement-todo.md](refinement-todo.md). High-level horizon:
 
 - **Multi-host portability** — shipped in the v2 line through the
-  host-adapter layer for Claude Code and Codex
-  ([spec 033](specs/033-host-adapter-portability/spec.md)). The next
-  horizon is a multi-repo federation tier
-  ([spec 034](specs/034-federation-tier/spec.md)), tracked in
-  [docs/roadmap.md](roadmap.md).
+  host-adapter layer for Claude Code and Codex. The next horizon is a
+  multi-repo federation tier, tracked in [docs/roadmap.md](roadmap.md).
 - **Tier 2 stays empty** until `local-dev-parity` (or another
   candidate) gets a real user signal.
-- **`contracts` skill stays a deliberate stub** ([ADR-0002](decisions/adr-0002-contracts-stays-deferred.md))
-  until a third caller needs the duplicated lookup logic.
+- **`contracts` skill stays a deliberate stub** until a third caller
+  needs the duplicated lookup logic.
 
 ## References
 
 - [README.md](../README.md) — install + entry points
 - [docs/architecture.md](architecture.md) — technical mechanics; this
   vision document supplies the *why*, architecture.md supplies the *how*
-- [docs/workflow.md](workflow.md) — spec lifecycle, session workflow
+- [docs/workflow.md](workflow.md) — spec + bug lifecycles, session workflow
 - [docs/specs/README.md](specs/README.md) — current status board
-- [docs/specs/016-scaffold-mode/spec.md](specs/016-scaffold-mode/spec.md)
-  — positioning recovery (mechanical)
-- [docs/specs/017-vision-elicitation/spec.md](specs/017-vision-elicitation/spec.md)
-  — positioning recovery (content) — this document is its worked-example artifact
