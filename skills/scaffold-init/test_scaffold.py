@@ -2252,9 +2252,9 @@ class SecurityFloorTests(unittest.TestCase):
         mod = _load_scaffold_module()
         gi = self.target / ".gitignore"
         gi.write_text("existing-line\n")
-        mod._write_gitignore_secret_block(self.target)
+        mod._write_gitignore_managed_blocks(self.target)
         once = gi.read_text()
-        mod._write_gitignore_secret_block(self.target)
+        mod._write_gitignore_managed_blocks(self.target)
         twice = gi.read_text()
         self.assertEqual(once, twice, "second merge must be a no-op")
         self.assertIn("existing-line", twice)
@@ -2392,6 +2392,119 @@ class SecurityFloorTests(unittest.TestCase):
         self.assertIn("blocks a workflow", workflow)
         self.assertNotIn("Scout", claude_md)
         self.assertNotIn("Scout", workflow)
+
+
+class Bug028RuntimeStateGitignoreTests(unittest.TestCase):
+    """Bug 028 (#107) — runtime-state .gitignore block.
+
+    jig's hooks/helpers write per-checkout runtime state under `.claude/` and
+    `.jig/`. jig's own repo git-ignores these, but that list never reached
+    scaffolded projects (the scaffolder shipped only the secret block), so every
+    downstream project tracked jig's telemetry + per-checkout markers — churning
+    each session and colliding at merge. The fix adds a second managed block
+    carrying the runtime-state list, on every path that writes the secret block.
+    """
+
+    # The runtime-state paths that must reach a scaffolded project's .gitignore.
+    # NOTE: the semantic-index / servo-hint runtime files intentionally ride in
+    # the SECRET block (spec 080 / slice 072-02) and must NOT be duplicated here.
+    # NOTE: the review-queue.json runtime file is intentionally excluded — it is
+    # a removed feature (spec 039) that jig only self-ignores defensively; a
+    # guard test (test_review_queue_cleanup) forbids live-code references to that
+    # path literal, so it must not be propagated to scaffolded projects. (This
+    # file uses the bare filename, never the `.claude/`-prefixed literal.)
+    RUNTIME_PATHS = (
+        ".claude/skill-usage.jsonl",
+        ".claude/context-growth-read-events.jsonl",
+        ".claude/settings.local.json",
+        ".claude/scheduled_tasks.lock",
+        ".jig/spec-ref",
+        ".jig/decision-scratch/",
+        ".jig/decision-suppressions.log",
+    )
+
+    def test_review_queue_json_is_not_propagated(self):
+        """The review-queue.json runtime file is a removed feature jig only
+        self-ignores defensively; scaffolded projects must not carry it. (Uses
+        the bare filename so this file doesn't trip test_review_queue_cleanup's
+        live-reference guard.)"""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertNotIn("review-queue.json", text)
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-028-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_fresh_scaffold_ignores_runtime_state_paths(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        for pat in self.RUNTIME_PATHS:
+            self.assertIn(
+                pat, text, f".gitignore missing runtime-state path: {pat}"
+            )
+
+    def test_runtime_block_is_marker_delimited(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig runtime state", text)
+        self.assertIn("<<< jig runtime state", text)
+
+    def test_runtime_block_written_in_plugin_only_mode(self):
+        """The runtime-state block must land on the `--plugin-only` path too
+        (parity with the secret floor, slice 052-04)."""
+        result = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig runtime state", text)
+        self.assertIn(".claude/skill-usage.jsonl", text)
+
+    def test_runtime_block_does_not_duplicate_secret_block_entries(self):
+        """The semantic-index / servo-hint runtime files already ride in the
+        secret block; they must not be re-listed by the runtime block."""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        for pat in (".jig/semantic-index-claude-hook.json",
+                    ".jig/servo-hint-shown"):
+            self.assertEqual(
+                text.count(pat), 1,
+                f"{pat} should appear exactly once (secret block only)",
+            )
+
+    def test_runtime_block_is_idempotent_across_reruns(self):
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        second = subprocess.run(
+            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertEqual(text.count(">>> jig runtime state (do not track) >>>"), 1,
+                         "re-scaffold duplicated the jig runtime-state block")
+        self.assertEqual(text.count("<<< jig runtime state <<<"), 1)
+
+    def test_runtime_block_preserves_preexisting_lines(self):
+        gi = self.target / ".gitignore"
+        gi.write_text("# my project\nnode_modules/\n")
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = gi.read_text()
+        self.assertIn("node_modules/", text)
+        self.assertIn("# my project", text)
+        self.assertIn(">>> jig runtime state", text)
+        self.assertIn(".jig/spec-ref", text)
 
 
 class PermissionsDenyTests(unittest.TestCase):
