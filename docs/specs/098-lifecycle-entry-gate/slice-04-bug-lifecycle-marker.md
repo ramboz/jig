@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [adr-0044]
-last_verified: 2026-07-30
+last_verified: 2026-08-02
 frame_review: false
 ---
 
@@ -116,11 +116,28 @@ lifecycle, and it belongs in `bug.py`.
 - transition ordering: a *failed* status write leaves no marker behind.
 
 **DoD:**
-- [ ] All acceptance criteria met, tests green (red→green witnessed).
-- [ ] The three readers exercised directly, not assumed (AC3).
-- [ ] `bug-fix/SKILL.md` updated (AC7).
-- [ ] Post-impl review (compliance + craft).
-- [ ] Deviation log written; reconciliation review.
-- [ ] If AC3 forced a sibling marker file rather than extending `.jig/spec-ref`,
-      that choice and its reason are in the deviation log, and slice 098-01's
-      AC2 is updated to name the file it actually reads.
+- [x] All acceptance criteria met, tests green (red→green witnessed). `Slice098BugMarkerTests` red before impl, green after; full bug-fix module `Ran 78 tests … OK`.
+- [x] The three readers exercised directly, not assumed (AC3) — `test_spec_shaped_marker_read_identically_by_all_three` + `test_bug_shaped_marker_invisible_to_spec_readers` pin real return values from all three.
+- [x] `bug-fix/SKILL.md` updated (AC7).
+- [x] Post-impl review (compliance + craft) — both **pass**; see `reviews/slice-04-compliance.md`, `reviews/slice-04-craft.md`.
+- [x] Deviation log written; reconciliation review.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] AC3 did **not** force a sibling marker file — `.jig/spec-ref` was extended in place with a `bug=NNN` shape (invisible to all three `spec=`-keyed readers), so slice 098-01's AC2 needs no file-name change and the conditional below does not apply.
+
+### Deviation log (after reconciliation)
+
+**1. Marker path is sentinel-anchored, not `project_dir/.jig` (hardening from craft review).** As first written, `_spec_ref_marker_path` returned `project_dir / ".jig" / "spec-ref"`, while the spec-side writer (`workflow.py._write_spec_ref_marker`) anchors `.jig` on the sentinel-resolved project root (ADR-0033 `_project_root_for_spec`). For the common `docs_root="docs"` case these coincide, but under track-local adoption (`docs_root="."`) or a non-root `--project-dir` they could diverge, so the entry gate might not read the bug marker where it reads the spec marker — undercutting the "one signal for both lifecycles" claim. Fixed by resolving through `project_layout.project_root_for(project_dir, fallback=lambda p: p)`; sentinel-less trees (jig's own repo, test fixtures) fall back to the given dir, so behaviour is unchanged there.
+
+**2. Ordering test strengthened after compliance review.** `test_failed_status_write_leaves_no_marker` originally patched `atomic_write_text` to raise on *every* call, so it would have passed even if the stamp preceded the status write. It now fails only the bug-record (`*.md`) write and lets the marker write succeed if reached, so it genuinely pins the after-write ordering (AC2).
+
+**3. `.jig/spec-ref` extended, not repurposed; no sibling file (AC3).** All three existing readers key strictly on a `spec=` line, so a `bug=NNN` marker is invisible to them (probed + tested). The DoD's conditional sibling-file deviation therefore does not fire, and 098-01's AC2 reads the same file for both arms, branching on shape.
+
+**4. Marker clear/stamp wired at four call sites, kept inline (ADR-0002).** `pickup_bug`, `transition_bug`, `record_main_check`, and `escalate_bug` each recompute the bug id and stamp/clear. `bug.py` is the *second* writer of this marker (workflow.py is the first); per ADR-0002 the write stays inline here rather than being extracted to `_common` until a third caller appears.
+
+### Reconciliation sweep
+
+- **Host packages** — regenerated via `scripts/build_host_packages.py`; `--check` reports in sync. `hosts/claude/**` and `hosts/codex/**` bug-fix mirrors updated (compliance MEDIUM finding). Disposition: **updated**.
+- **`bug-fix/SKILL.md`** — §1 claim/release paragraph names the marker + gate (AC7). Disposition: **updated**.
+- **CLAUDE.md / architecture.md / roadmap.md** — no change needed: 098-04 adds no new hot-cache term, module boundary, or milestone; it is a signal-plumbing change consumed by 098-01. Disposition: **no-op**.
+- **`docs/refinement-todo.md`** — nothing deferred during implementation. Disposition: **no-op**.
+- **`docs/bugs/README.md`** — untouched; this is spec-slice work, not a bug record. Disposition: **no-op**.

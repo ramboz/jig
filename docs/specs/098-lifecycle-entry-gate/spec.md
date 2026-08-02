@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow
 use_cases: []
 frame_review: true

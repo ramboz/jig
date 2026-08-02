@@ -210,6 +210,7 @@ _EXPECTED_HOOK_SCRIPTS = (
     "jig-context-check.sh",
     "jig-decision-capture.sh",  # slice 083-04 — Stop decision-scan (sibling of task-capture)
     "jig-decision-inflight.sh",  # slice 083-07 — in-flight AskUserQuestion/override capture
+    "jig-entry-gate.sh",  # slice 098-01 — lifecycle entry gate (ADR-0044)
     "jig-memory-scan.sh",
     "jig-post-edit-verify.sh",
     "jig-project-orient.sh",  # slice 088-01 — SessionStart project orientation

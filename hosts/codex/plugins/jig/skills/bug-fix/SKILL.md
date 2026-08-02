@@ -151,7 +151,10 @@ If `triage` bows out, **stop here** — write the failing test with
 
 Claim/release reuses the spec 049 machinery: `bug.py pickup <id>` claims;
 `bug.py pickup <id> --release --reason "<why>"` force-releases a stale claim
-(logged to the record's `## Release log`).
+(logged to the record's `## Release log`). `pickup` also stamps the working-tree
+`.jig/spec-ref` marker naming this bug (slice 098-04) — the signal that tells
+jig's lifecycle entry gate a bug fix is in flight, so ad-hoc-edit nudges stay
+silent while you work. Release and terminal transitions clear it.
 
 ### 2. Diagnose (`→ DIAGNOSING → ROOT_CAUSED`)
 

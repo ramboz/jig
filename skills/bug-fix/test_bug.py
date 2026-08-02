@@ -20,6 +20,15 @@ BUG_PY = REPO_ROOT / "skills" / "bug-fix" / "bug.py"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# The three existing readers of the `.jig/spec-ref` marker (slice 098-04 AC3).
+# A bug-shaped marker must stay invisible to all three.
+from hooks.scripts.lib.read_attribution import (  # noqa: E402
+    read_spec_ref as _ra_read_spec_ref,
+)
+from scripts.usage import read_spec_ref_marker as _usage_read_spec_ref  # noqa: E402
+from skills._common.gate_telemetry import (  # noqa: E402
+    read_spec_ref as _gt_read_spec_ref,
+)
 from skills._common.parsing import parse_frontmatter  # noqa: E402
 
 
@@ -1179,6 +1188,250 @@ class DiagnoseGateListShapeTests(unittest.TestCase):
         joined = "\n".join(gaps)
         self.assertIn("list item", joined, "must name the list-item shape")
         self.assertIn("[x]", joined, "must name the leading marker shape")
+
+
+class Slice098BugMarkerTests(unittest.TestCase):
+    """Spec 098-04 — a bug fix opened the prescribed way leaves the SAME
+    working-tree lifecycle marker (`.jig/spec-ref`) a spec slice does, so the
+    entry gate (098-01) reads one signal for both lifecycles."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.marker = self.root / ".jig" / "spec-ref"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self, rel: str = "001-alpha.md") -> Path:
+        return self.root / "docs" / "bugs" / rel
+
+    def _status(self) -> str:
+        fields, _ = parse_frontmatter(self._bug().read_text())
+        return str(fields.get("status") or "").strip()
+
+    def _claimed_by(self) -> str:
+        fields, _ = parse_frontmatter(self._bug().read_text())
+        return str(fields.get("claimed_by") or "").strip()
+
+    def _write_record(self, *, status: str = "REPORTED", claimed_by: str = "",
+                      fix_class: str = "") -> Path:
+        return write(self._bug(), (
+            "---\n"
+            f"status: {status}\n"
+            "severity: high\n"
+            "tier: standard\n"
+            f"claimed_by: {claimed_by}\n"
+            "regression_test: tests/test_alpha.py::test_bug\n"
+            "main_repro_checked_at:\n"
+            "main_repro_ref:\n"
+            "main_repro_result:\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            f"fix_class: {fix_class}\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            "---\n\n"
+            "## Symptom\n"
+        ))
+
+    def _seed_marker(self, body: str) -> None:
+        self.marker.parent.mkdir(parents=True, exist_ok=True)
+        self.marker.write_text(body)
+
+    # ---- AC1: pickup stamps a bug-shaped marker ----
+    def test_pickup_stamps_bug_marker(self):
+        self._write_record(status="REPORTED")
+        r = run_bug("pickup", "001", "--project-dir", str(self.root),
+                    env={"JIG_CLAIM_ID": "wt-me"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.marker.is_file())
+        self.assertEqual(self.marker.read_text().strip(), "bug=001")
+
+    def test_pickup_after_push_reservation_stamps_marker(self):
+        # new_bug(push=True) commits to origin/main and returns None — nothing
+        # lands locally. Before `pickup`, the record is fetched from origin/main
+        # into the working tree (bug-fix/SKILL.md §1) ALREADY claimed_by the
+        # reserving checkout. Re-picking it up here (existing == owner) is the
+        # distinct path this test exercises: the marker is stamped even when the
+        # claim field is unchanged. This is the case the gate's bug arm exists for.
+        self._write_record(status="REPORTED", claimed_by="wt-me")
+        r = run_bug("pickup", "001", "--project-dir", str(self.root),
+                    env={"JIG_CLAIM_ID": "wt-me"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._claimed_by(), "wt-me")
+        self.assertEqual(self.marker.read_text().strip(), "bug=001")
+
+    # ---- AC2: transition into a working status stamps ----
+    def test_working_status_set_is_derived_from_open_statuses(self):
+        """AC2 — the stamping set is exactly OPEN_STATUSES - {REPORTED},
+        derived from the constant so a future status cannot silently fall
+        outside the gate's notion of 'working'."""
+        mod = load_bug_module()
+        self.assertEqual(mod._BUG_WORKING_STATUSES,
+                         set(mod.OPEN_STATUSES) - {"REPORTED"})
+        self.assertNotIn("REPORTED", mod._BUG_WORKING_STATUSES)
+        # Every working status is a valid, open, non-terminal status.
+        for status in mod._BUG_WORKING_STATUSES:
+            self.assertIn(status, mod.OPEN_STATUSES)
+
+    def test_transition_into_working_stamps_without_prior_pickup(self):
+        # No prior pickup: the record is unclaimed, and a resumed session that
+        # transitions it straight into a working status is still 'inside'.
+        self._write_record(status="REPORTED", claimed_by="")
+        r = run_bug("transition", "001", "DIAGNOSING",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status(), "DIAGNOSING")
+        self.assertEqual(self.marker.read_text().strip(), "bug=001")
+
+    def test_transition_into_fixing_stamps_marker(self):
+        self._write_record(status="ROOT_CAUSED", fix_class="local_patch")
+        r = run_bug("transition", "001", "FIXING",
+                    "--project-dir", str(self.root),
+                    env={"JIG_BUG_MAIN_CHECK_GATE": "0",
+                         "JIG_BUG_TEST_GATE": "0"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.marker.read_text().strip(), "bug=001")
+
+    def test_transition_to_reported_never_stamps(self):
+        # REPORTED is deliberately excluded (AC2): a bug can sit reported with
+        # nobody on it. There is no transition INTO REPORTED, so the guard is
+        # that a same-status no-op transition does not stamp either.
+        self._write_record(status="REPORTED")
+        r = run_bug("transition", "001", "REPORTED",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.marker.exists())
+
+    # ---- AC3: compatibility + no cross-talk ----
+    def test_spec_shaped_marker_read_identically_by_all_three(self):
+        self._seed_marker("spec=098\nslice=098-04\n")
+        self.assertEqual(_ra_read_spec_ref(self.root), ("098", "098-04"))
+        self.assertEqual(_gt_read_spec_ref(self.root), "098")
+        self.assertEqual(_usage_read_spec_ref(self.root), "098")
+
+    def test_bug_shaped_marker_invisible_to_spec_readers(self):
+        self._seed_marker("bug=001\n")
+        self.assertEqual(_ra_read_spec_ref(self.root), ("", ""))
+        self.assertEqual(_gt_read_spec_ref(self.root), "")
+        self.assertIsNone(_usage_read_spec_ref(self.root))
+
+    # ---- AC5: release clears the marker (only when it names this bug) ----
+    def test_release_clears_marker(self):
+        self._write_record(status="DIAGNOSING", claimed_by="wt-me")
+        self._seed_marker("bug=001\n")
+        r = run_bug("pickup", "001", "--release", "--reason", "stepping away",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.marker.exists())
+
+    def test_release_leaves_foreign_marker_untouched(self):
+        # Releasing bug 001 must not clobber a marker that names a spec slice
+        # (or a different bug) — the session may still be inside that item.
+        self._write_record(status="DIAGNOSING", claimed_by="wt-me")
+        self._seed_marker("spec=055\nslice=055-01\n")
+        r = run_bug("pickup", "001", "--release", "--reason", "x",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.marker.read_text(), "spec=055\nslice=055-01\n")
+
+    def test_release_leaves_a_different_bugs_marker_untouched(self):
+        # The clear must key on THIS bug's number: a marker naming bug 002 is
+        # left alone when bug 001 is released (the '002' != '001' branch).
+        self._write_record(status="DIAGNOSING", claimed_by="wt-me")
+        self._seed_marker("bug=002\n")
+        r = run_bug("pickup", "001", "--release", "--reason", "x",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.marker.read_text().strip(), "bug=002")
+
+    def test_marker_names_bug_is_lenient_and_normalizes(self):
+        # The regex tolerates surrounding whitespace and zero-pads the number.
+        mod = load_bug_module()
+        self.assertEqual(mod._marker_names_bug("  bug = 1 \n"), "001")
+        self.assertEqual(mod._marker_names_bug("bug=027\n"), "027")
+        self.assertEqual(mod._marker_names_bug("spec=098\nslice=098-04\n"), "")
+        self.assertEqual(mod._marker_names_bug(""), "")
+
+    # ---- AC6: terminal statuses clear the marker ----
+    def test_main_check_resolved_on_main_clears_marker(self):
+        self._write_record(status="ROOT_CAUSED")
+        self._seed_marker("bug=001\n")
+        r = run_bug("main-check", "001", "--result", "resolved-on-main",
+                    "--ref", "origin/main@abc123",
+                    "--evidence", "ran the repro on fresh main; gone",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status(), "RESOLVED_ON_MAIN")
+        self.assertFalse(self.marker.exists())
+
+    def test_transition_to_done_clears_marker(self):
+        mod = load_bug_module()
+        self._write_record(status="REVIEWED", fix_class="local_patch")
+        self._seed_marker("bug=001\n")
+        # Isolate the marker wiring from the (separately tested) DONE evidence
+        # and learning gates.
+        with patch.object(mod._evidence, "validate_bug_evidence",
+                          return_value=[]), \
+                patch.object(mod, "_learning_recorded", return_value=True):
+            mod.transition_bug(self.root, "001", "DONE")
+        self.assertEqual(self._status(), "DONE")
+        self.assertFalse(self.marker.exists())
+
+    def test_escalate_clears_marker(self):
+        mod = load_bug_module()
+        self._write_record(status="ROOT_CAUSED")
+        self._seed_marker("bug=001\n")
+        spec_dir = self.root / "docs" / "specs" / "099-x"
+        spec_dir.mkdir(parents=True)
+        spec_md = spec_dir / "spec.md"
+        spec_md.write_text("---\nstatus: DRAFT\n---\n# Spec 099\n")
+        fake = subprocess.CompletedProcess(
+            [], 0, stdout=f"reserved 099-x\n{spec_md}\n", stderr="")
+        with patch.object(mod.subprocess, "run", return_value=fake):
+            mod.escalate_bug(self.root, "001")
+        self.assertEqual(self._status(), "ESCALATED")
+        self.assertFalse(self.marker.exists())
+
+    # ---- AC4: best-effort, never blocking ----
+    def test_marker_write_failure_does_not_break_pickup(self):
+        self._write_record(status="REPORTED")
+        # Occupy .jig with a regular file so the marker write cannot succeed.
+        (self.root / ".jig").write_text("not a directory")
+        r = run_bug("pickup", "001", "--project-dir", str(self.root),
+                    env={"JIG_CLAIM_ID": "wt-me"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._claimed_by(), "wt-me")
+
+    def test_marker_write_failure_does_not_break_transition(self):
+        self._write_record(status="REPORTED")
+        (self.root / ".jig").write_text("not a directory")
+        r = run_bug("transition", "001", "DIAGNOSING",
+                    "--project-dir", str(self.root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status(), "DIAGNOSING")
+
+    def test_failed_status_write_leaves_no_marker(self):
+        # Ordering (AC2): the marker is stamped only AFTER the status write
+        # succeeds. Fail ONLY the bug-record write (the *.md path), letting the
+        # marker write succeed if reached — so this fails loudly if the stamp
+        # were ever placed BEFORE the status write.
+        mod = load_bug_module()
+        self._write_record(status="REPORTED")
+        self.assertFalse(self.marker.exists())
+        real_awt = mod.atomic_write_text
+
+        def only_record_fails(path, text):
+            if str(path).endswith(".md"):
+                raise OSError("disk full")
+            return real_awt(path, text)
+
+        with patch.object(mod, "atomic_write_text",
+                          side_effect=only_record_fails):
+            with self.assertRaises(OSError):
+                mod.transition_bug(self.root, "001", "DIAGNOSING")
+        self.assertFalse(self.marker.exists())
 
 
 if __name__ == "__main__":
