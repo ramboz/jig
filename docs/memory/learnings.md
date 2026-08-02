@@ -1099,3 +1099,30 @@ other sessions' git operations and keeps the PR free of their WIP. Also budget
 for the full-suite bug gate: `run_tests.py` ignores the selector and runs all
 ~3800 tests + pyright (>9 min under CPU contention here), so run FIXING/REVIEWED
 gates in the background, not a foreground call.
+
+## Bug 027: a doc reference in a shipped skill must anchor to the destination tree, not the source repo
+
+`skills/spec-workflow/SKILL.md` told slice authors to use the template at
+`templates/docs/specs/slice-template.md` — a bare, unanchored path. It resolves
+correctly from the jig *source* repo root, but the skill *ships* into scaffolded
+projects, where (a) the scaffolder copies `templates/` under `.claude/templates/`
+(so the project-root path doesn't exist) and (b) the authoritative structural
+exemplar, `docs/specs/001-adopt-jig/`, sits at project root and is what the
+scaffolded `CLAUDE.md` already calls "the worked example to imitate." The fix
+removed the fragile path from both references (redirecting to `workflow.py new`
+for the mechanical starter and `001-adopt-jig` for the filled-in exemplar) and
+**regenerated the host mirrors** — editing a `skills/` source file without
+running `scripts/build_host_packages.py` leaves `hosts/claude/…` and
+`hosts/codex/…` stale, which the CI host-package drift guard (`--check`) fails.
+General rule: when prose ships to a different tree than it was authored in,
+resolve every relative path against the *destination*, and regenerate every
+committed mirror in the same change.
+
+Process learning (dogfood): shared jig checkout hazard bit again. A parallel
+session (`bug-028`) switched the primary worktree's branch out from under this
+session and a bare `git stash` collided — git's stash stack is **shared across
+all worktrees of a repo**, so `git stash push -- <file>` from one worktree can be
+popped by another. Recovery: move real work into a dedicated linked worktree off
+`origin/main` early, re-apply edits directly rather than fighting the shared
+stash, and never `git stash` in a shared jig checkout. (Reinforces the existing
+"isolate real work in a dedicated worktree" learning.)
