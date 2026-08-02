@@ -1,4 +1,4 @@
-> Status: Draft (wizard-generated equivalent — manually seeded for jig itself)
+> Status: Stable
 
 # Workflow: jig
 

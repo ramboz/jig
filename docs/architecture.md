@@ -1,6 +1,4 @@
-> Status: Draft (technical mechanics; vision and design principles live in [product-vision.md](product-vision.md))
->
-> This document evolves as we make decisions. Open questions are explicit, not papered over.
+> Status: Stable
 
 # Architecture: jig
 

@@ -1,4 +1,4 @@
-> Status: Draft (hand-seeded as the worked example of what `vision-elicitation` produces)
+> Status: Stable
 >
 > This document captures *why* jig exists, *for whom*, and *with what
 > principles*. Architectural mechanics live in [architecture.md](architecture.md).
