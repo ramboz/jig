@@ -1035,3 +1035,28 @@ hide — the fix split them (`not_run` vs `warn`) and rendered `not_run` as a
 loud `[!] NOT RUN … This is NOT a pass`. A bonus corollary: when you widen a
 status enum, re-audit every consumer — the doc-only servo-suggestion guard
 keyed on `== "warn"` had to learn about `not_run` too, or it would leak.
+
+## Bug 026: a discipline wired into one authoring surface won't cover its siblings
+
+ADR-0020 §1's grounding rule (a factual claim about a runnable surface needs an
+executed probe or a `file:line` citation; unverifiable claims are marked as
+assumptions) lived only in spec-workflow's "Creating a new spec" step 6. The
+reconciliation checklist's "Architecture impact" item — the surface that
+actually rewrites live front-door prose like `docs/architecture.md`, the highest
+blast radius of any authoring surface — inherited none of it. When a rule has
+more than one authoring entry point, enumerate them all; the one you forget is
+often the one that matters most. The fix extends the rule to reconciliation and
+pins it with a canonical-wording drift test scoped to the reconciliation section
+(so it can't false-pass off step 6's similar phrasing).
+
+Tooling gotcha, surfaced while running this through `bug-fix`: jig's
+`.jig/test-command` is `python3 scripts/run_tests.py`, whose `main()` ignores
+argv and always runs the full discovered suite. `tdd.py`'s custom-runner path
+appends the `path::Class` selector, but `run_tests.py` drops it — so a bug's
+`regression_test` gate (FIXING red-check, REVIEWED green-check) runs the entire
+suite (~256s in the cloud env, 3872 tests), not the named class. The red→green
+teeth still hold — one failing test turns the whole suite red, and it must be
+fully green to pass REVIEWED — but budget for a full-suite run at each gate, and
+don't point a `regression_test` at a huge file expecting narrowing. (If per-test
+narrowing is wanted, `run_tests.py` would need to honor a selector arg; parked,
+not filed.)

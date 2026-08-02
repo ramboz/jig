@@ -30,3 +30,4 @@
 | 023 | copy-machinery-advisory-host-from-invocation | medium | standard | DONE | yes | skills/migrate/test_migrate.py::CrossHostAdvisoryTests | claude/bug-023-advisory-host |  |  |
 | 024 | slice-land-tests-inert-vendored | medium | standard | DONE | yes | skills/slice-land/test_land.py::CheckTestsHelperResolutionTests | claude/issue-129-bug-review-jsr2cp |  |  |
 | 025 | packaged-plugin-omits-runtime-scripts | high | gnarly | DONE | yes | scripts/test_build_claude_plugin.py::RuntimeScriptsShippedTests | claude/github-issue-167-bug-0078l0 |  |  |
+| 026 | grounding-rule-misses-reconciliation | low | standard | DONE | yes | skills/spec-workflow/test_workflow.py::ReconciliationGroundingRequirementTests | claude/jig-131-ceremony-review-6v7g4l |  |  |

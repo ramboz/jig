@@ -700,7 +700,14 @@ status flip is allowed. Each item is a gate.
       corrections, scoped brand/icon calls)? If yes, record them in
       `docs/decisions/lightweight-decisions.md`. (Non-blocking nudge; not a gate.)
 - [ ] **Architecture impact** — did module boundaries or public contracts change?
-      If yes, update `docs/architecture.md` AND write an ADR.
+      If yes, update `docs/architecture.md` AND write an ADR. **Ground what you
+      write (ADR-0020 §1, same rule as spec-authoring step 6).** Reconciliation
+      rewrites long-lived front-door prose that everyone reads and nobody
+      re-derives, so any load-bearing factual claim about a runnable surface —
+      library/API capability, version/perf behavior, behavior of existing code —
+      must be backed by an executed probe or a `file:line` citation. Anything you
+      cannot verify is marked as an assumption, never asserted as fact. (A prose
+      claim naming a code symbol but citing no line is a candidate warning.)
 - [ ] **Load-bearing decision (ADR trigger, judgment)** — beyond a boundary
       change, was a load-bearing design choice with rejected alternatives made?
       Canonical wording — single-sourced from ADR-0031, drift-tested verbatim
