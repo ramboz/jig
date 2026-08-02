@@ -1060,3 +1060,42 @@ fully green to pass REVIEWED — but budget for a full-suite run at each gate, a
 don't point a `regression_test` at a huge file expecting narrowing. (If per-test
 narrowing is wanted, `run_tests.py` would need to honor a selector arg; parked,
 not filed.)
+
+## Bug 028: a list the source repo maintains for itself won't reach generated projects unless the generator emits it
+
+jig git-ignores its own per-checkout runtime state (`.claude/*` hook telemetry +
+queues + the settings-local overlay, `.jig/spec-ref`, the decision-capture
+markers) in its own `.gitignore`. But the scaffolder's `.gitignore` generator
+only emitted the ADR-0013 **secret** floor, so none of that runtime list reached
+scaffolded projects — every downstream repo re-discovered the churn (and, for
+per-checkout markers, merge conflicts) by hand. The lesson: when the canonical
+repo hand-maintains a list that generated projects also need, the knowledge has
+to be **emitted by the generator**, not left in the maintainers' working copy —
+otherwise it's invisibly repo-local. The fix adds a second managed block beside
+the secret one (same idempotent `_upsert_marked_block` mechanic), deliberately
+kept separate (different rationale, independently opt-out-able), and reuses the
+existing three write paths so `migrate copy-machinery` back-fills existing
+installs. Note the no-op-on-tracked-files wrinkle: a `.gitignore` line does
+nothing for an already-tracked file, so the block carries an inline
+`git rm --cached` hint rather than silently helping only new projects.
+
+Don't-blind-copy corollary: jig's own `.gitignore` is NOT a clean source to copy
+verbatim. It self-ignores `.claude/review-queue.json` — a *removed* feature (spec
+039) kept only as a defensive block — and a guard test forbids live-code
+references to that literal. The first attempt propagated it and the full-suite
+green check caught the guard (targeted class runs would not have). Filter dead
+entries; and when you must name a guarded path literal in a live comment/test,
+use the bare filename so the substring guard doesn't trip.
+
+Process gotcha (worth more than the fix): the jig **primary worktree is shared
+by concurrent sessions**. Mid-implementation, another session (issue-111 /
+spec-098) ran `git stash` on the shared branch and swept this bug's uncommitted
+work into a stash — uncommitted tracked edits reverted, untracked bug doc
+vanished. Nothing was lost (it was in `stash@{0}`), but it looked destroyed.
+Lesson: for any non-trivial change in the jig primary tree, **work in a
+dedicated `git worktree` off `origin/main`** (like the `jig-bug027-wt` /
+`jig-bug028-wt` siblings), not the contended primary — it isolates you from
+other sessions' git operations and keeps the PR free of their WIP. Also budget
+for the full-suite bug gate: `run_tests.py` ignores the selector and runs all
+~3800 tests + pyright (>9 min under CPU contention here), so run FIXING/REVIEWED
+gates in the background, not a foreground call.

@@ -102,7 +102,7 @@ jig's security floor (ADR-0013)? Probed against `hooks/hooks.json` and the
 
 | Floor part | in-repo | plugin mode | Source in plugin mode |
 |---|---|---|---|
-| `.gitignore` secret patterns | ✅ | ✅ | scaffold writes it in **both** modes (`_write_gitignore_secret_block`) |
+| `.gitignore` secret + runtime-state patterns | ✅ | ✅ | scaffold writes both managed blocks in **both** modes (`_write_gitignore_managed_blocks`) |
 | secret-scan hook (`jig-secret-scan.sh`) | ✅ copied + registered in project `settings.json` | ✅ **runs from the plugin** | plugin `hooks/hooks.json` `Edit\|Write\|MultiEdit` |
 | spec-gate / context-check / other gates | ✅ copied | ✅ **run from the plugin** | plugin `hooks/hooks.json` |
 | `## Security (MUST)` primer block | ✅ | ✅ | primer template, written in both modes |
@@ -254,7 +254,7 @@ Probed on this branch (`main@fd7115a`), not asserted:
   floor table's "runs from the plugin" rows true.
 - **plugin mode already writes the `.gitignore` floor and omits the settings
   write.** The `scaffold()` `else` (plugin-only) branch calls
-  `_write_gitignore_secret_block`, `_ensure_self_defining_convention_block`, and
+  `_write_gitignore_managed_blocks`, `_ensure_self_defining_convention_block`, and
   `_ensure_reframe_practice_block`, and does **not** call `copy_machinery` — so no
   `settings.json` and no `permissions.deny` on that path. *Probed and true when
   drafted; deliberately no longer true.* OQ1 added `_write_permissions_deny_floor`
