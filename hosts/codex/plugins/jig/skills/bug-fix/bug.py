@@ -65,6 +65,16 @@ OPEN_STATUSES = {
 # closure is legible (see `_render_board`). DONE is deliberately excluded: it
 # is terminal-*success* and stays in the active table.
 TERMINAL_NON_DONE_STATUSES = frozenset({"ESCALATED", "RESOLVED_ON_MAIN"})
+# Slice 098-04: the working statuses whose entry re-stamps the `.jig/spec-ref`
+# lifecycle marker (so a resumed session that skips `pickup` is still "inside").
+# Derived from OPEN_STATUSES so a status added to the lifecycle cannot silently
+# fall outside the entry gate's notion of "working". REPORTED is excluded: a bug
+# can sit reported for weeks with nobody on it — `pickup` (AC1) marks entry.
+_BUG_WORKING_STATUSES = OPEN_STATUSES - {"REPORTED"}
+# Statuses that END the work and clear the marker: DONE (terminal success) plus
+# the resolution paths RESOLVED_ON_MAIN / ESCALATED (set outside transition_bug,
+# so the clear is wired at each of those call sites too — AC6).
+_BUG_TERMINAL_STATUSES = frozenset({"DONE", "ESCALATED", "RESOLVED_ON_MAIN"})
 _ORDERED_TRANSITIONS = {
     "REPORTED": {"DIAGNOSING"},
     "DIAGNOSING": {"ROOT_CAUSED"},
@@ -456,6 +466,70 @@ def _append_release_log(text: str, released_from: str, reason: str) -> str:
     return body + "\n\n## Release log\n\n" + entry
 
 
+# ---------- Slice 098-04: bug-lifecycle claim marker ----------
+#
+# The entry gate (spec 098-01) answers one question — "is this session inside
+# jig?" — from one working-tree marker: `.jig/spec-ref`, which `workflow.py`
+# stamps at IN_PROGRESS (slice 056-03). A bug fix opened the way
+# `bug-fix/SKILL.md` prescribes must leave the SAME marker, or the gate's bug
+# arm has no local signal at all (ADR-0044 resolved question #5(a)).
+#
+# The marker is EXTENDED, not repurposed (AC3): a bug-shaped marker is a single
+# `bug=NNN` line. All three existing spec-marker readers
+# (`read_attribution.read_spec_ref`, `_common.gate_telemetry.read_spec_ref`,
+# `scripts/usage.py`) key strictly on a `spec=` line, so a bug-shaped marker is
+# invisible to them — no cross-talk — while the entry gate branches on shape.
+# That is why no sibling marker file is needed. `bug.py` is the SECOND writer of
+# this marker (workflow.py is the first); per ADR-0002 the write stays inline
+# here rather than extracted to `_common` until a third caller appears.
+_BUG_MARKER_RE = re.compile(r"(?m)^\s*bug\s*=\s*(\d{1,3})\s*$")
+
+
+def _spec_ref_marker_path(project_dir: Path) -> Path:
+    # Anchor `.jig` on the SAME sentinel-resolved project root workflow.py uses
+    # (ADR-0033 `project_root_for`), so the spec-side writer, the bug-side writer,
+    # and the entry gate that reads them all agree on ONE marker location — even
+    # under track-local adoption (`docs_root="."`) or invocation from a subdir,
+    # where a bare `project_dir / .jig` could diverge. Falls back to project_dir
+    # for sentinel-less trees (jig's own repo, test fixtures).
+    root = project_layout.project_root_for(project_dir, fallback=lambda p: p)
+    return root / ".jig" / "spec-ref"
+
+
+def _marker_names_bug(text: str) -> str:
+    """Return the zero-padded bug number a bug-shaped marker names, or ""."""
+    m = _BUG_MARKER_RE.search(text)
+    return f"{int(m.group(1)):03d}" if m else ""
+
+
+def _write_bug_marker(project_dir: Path, bug_number: str) -> None:
+    """Best-effort: stamp `<project-root>/.jig/spec-ref` with a bug-shaped
+    marker naming `bug_number`. Side-effect-isolated (AC4): ANY failure
+    (unwritable `.jig`, a file occupying the path, a permission error) is
+    swallowed so a marker write can never fail `pickup` or `transition`."""
+    try:
+        marker = _spec_ref_marker_path(project_dir)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(marker, f"bug={bug_number}\n")
+    except Exception:  # noqa: BLE001 — best-effort; never block a lifecycle step
+        return
+
+
+def _clear_bug_marker(project_dir: Path, bug_number: str) -> None:
+    """Best-effort: remove the marker IFF it currently names this bug. A marker
+    naming a spec slice or a different bug is left untouched — the session may
+    still be inside that other work item (AC5/AC6)."""
+    try:
+        marker = _spec_ref_marker_path(project_dir)
+        if not marker.is_file():
+            return
+        text = marker.read_text(encoding="utf-8", errors="replace")
+        if _marker_names_bug(text) == bug_number:
+            marker.unlink()
+    except Exception:  # noqa: BLE001 — best-effort; never block a lifecycle step
+        return
+
+
 def pickup_bug(project_dir: Path, ident: str, release: bool = False,
                reason: str | None = None) -> Path:
     if release and not (reason and reason.strip()):
@@ -465,11 +539,15 @@ def pickup_bug(project_dir: Path, ident: str, release: bool = False,
     fields, _ = parse_frontmatter(text)
     existing = str(fields.get("claimed_by") or "").strip()
     status = str(fields.get("status") or "").strip()
+    bug_number, _ = _bug_id_and_slug(path)
     if release:
         released_from = existing or "(unclaimed)"
         text = clear_frontmatter_field(text, "claimed_by")
         text = _append_release_log(text, released_from, reason or "")
         atomic_write_text(path, text)
+        # AC5: releasing the claim means the session is no longer inside this
+        # work item — drop its marker (only if it names this bug).
+        _clear_bug_marker(project_dir, bug_number)
         return path
 
     owner = _claim_identifier(project_dir)
@@ -482,6 +560,9 @@ def pickup_bug(project_dir: Path, ident: str, release: bool = False,
         )
     text = set_frontmatter_field(text, "claimed_by", owner)
     atomic_write_text(path, text)
+    # AC1: stamp AFTER the claim write succeeds — pickup is the working-tree
+    # entry step, including in the --push flow (record originated on origin/main).
+    _write_bug_marker(project_dir, bug_number)
     return path
 
 
@@ -754,6 +835,16 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
 
     text = set_frontmatter_field(text, "status", new_status)
     atomic_write_text(path, text)
+    # Slice 098-04: stamp/clear the lifecycle marker AFTER the status write
+    # succeeds (AC2 ordering — a failed write above leaves no marker behind).
+    bug_number, _ = _bug_id_and_slug(path)
+    if new_status in _BUG_WORKING_STATUSES:
+        _write_bug_marker(project_dir, bug_number)
+    elif new_status in _BUG_TERMINAL_STATUSES:
+        # Only DONE is reachable here via `_validate_order`; ESCALATED /
+        # RESOLVED_ON_MAIN are set in escalate_bug / record_main_check and clear
+        # the marker there. The full set is kept for defensive symmetry.
+        _clear_bug_marker(project_dir, bug_number)
     return path
 
 
@@ -790,6 +881,10 @@ def record_main_check(
     if result == "resolved_on_main":
         text = set_frontmatter_field(text, "status", "RESOLVED_ON_MAIN")
     atomic_write_text(path, text)
+    # Slice 098-04 AC6: RESOLVED_ON_MAIN ends the work — clear the marker.
+    if result == "resolved_on_main":
+        bug_number, _ = _bug_id_and_slug(path)
+        _clear_bug_marker(project_dir, bug_number)
     return path
 
 
@@ -858,6 +953,9 @@ def escalate_bug(project_dir: Path, ident: str, slug: str | None = None) -> Path
     text = set_frontmatter_field(text, "escalated_to", spec_num)
     text = set_frontmatter_field(text, "status", "ESCALATED")
     atomic_write_text(path, text)
+    # Slice 098-04 AC6: ESCALATED reclassifies the work to a spec — clear the
+    # marker (the bug lifecycle is over; the spec lifecycle owns it now).
+    _clear_bug_marker(project_dir, bug_id)
     return path
 
 
