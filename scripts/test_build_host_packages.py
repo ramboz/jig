@@ -134,6 +134,24 @@ class DriftCheckTests(unittest.TestCase):
         )
         self.assertEqual(code, 0, out.getvalue())
 
+    def test_check_ignores_runtime_hook_logs(self):
+        # A hook fired during the test suite (project_dir resolving to the repo)
+        # writes per-checkout runtime state under a `.claude/` dir — e.g.
+        # hooks/scripts/.claude/context-growth-read-events.jsonl. The builders
+        # never emit these, so the freshly-built scratch tree lacks them; the
+        # guard must treat them as ephemeral or a stray log reads as drift.
+        hosts = self._seed_committed()
+        log_dir = hosts / "claude" / "hooks" / "scripts" / ".claude"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "context-growth-read-events.jsonl").write_text(
+            '{"event": "stray"}\n'
+        )
+        out = io.StringIO()
+        code = build_host_packages.check_drift(
+            source_root=REPO_ROOT, hosts_root=hosts, out=out
+        )
+        self.assertEqual(code, 0, out.getvalue())
+
     def test_check_detects_stale_modified_file(self):
         hosts = self._seed_committed()
         # Simulate a committed package that lags source (an edited file).
