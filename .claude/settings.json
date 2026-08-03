@@ -68,6 +68,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-boundary-change-warn.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-entry-gate.sh",
+            "timeout": 5
           }
         ]
       },
