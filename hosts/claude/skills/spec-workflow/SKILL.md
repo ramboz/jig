@@ -257,6 +257,39 @@ SKILL.md hand-off is the documented gate.
    imitate. Set `status: DRAFT` in the frontmatter. Legacy slices that use prose
    `**STATUS: DRAFT**` markers still work (lazy migration); no need to rewrite
    them.
+5a. **Design-fidelity authoring nudge (spec 104-02 / ADR-0049).** When a
+   slice you just wrote in step 5 ships **visual design** (a mockup, a design
+   system spec, a screen with colours/spacing/sizes/layout rules to hit),
+   don't let "doesn't match the mockup" live only in a picture:
+   - **(a) Extract the design values into checkable ACs.** Pull the concrete
+     values — colours, spacing, sizes, layout rules — out of the mockup and
+     write them as this slice's acceptance criteria, the same way any other
+     observable behavior becomes an AC. This is what turns a fuzzy "looks
+     right" into something a reviewer (or an eval) can actually check.
+   - **(b) When fidelity must *gate*, wire the servo rail.** If a screen's
+     visual fidelity needs to be a hard, enforced condition of `DONE` — not
+     just an eyeballed check — set `design_review: true` in the slice
+     frontmatter and wire a servo `design-eval` (screenshots the running app
+     against the reference, scores it with a pinned vision judge) as the
+     done-condition. `design_review: true` is attested, read-only, at
+     `REVIEWED` by spec 071's design-review pass (the deriver
+     `slice_needs_design_review` in `workflow.py` reads the flag) — jig never
+     re-derives the eval score itself.
+
+   **Graduated, not mandatory — jig offers, never forces, servo.** Not
+   every screen earns a frozen eval:
+   - **Low-stakes visual polish** → design-values-in-ACs plus
+     attest-by-eyeball at review time is enough; no servo `design-eval`
+     required.
+   - **A hard fidelity gate** (fidelity must not regress, or is a stated
+     product requirement) → servo `design-eval` + `design_review: true`.
+
+   Pick the tier that matches the stakes; when in doubt, start with (a) and
+   add (b) only when eyeballing genuinely isn't enough. See
+   [spec 071](../../docs/specs/071-design-review-pass/spec.md) and
+   [ADR-0049](../../docs/decisions/adr-0049-design-fidelity-routing-to-originating-spec.md)
+   for the full routing rationale; this step adds no new mechanism — teeth
+   stay anchored to the existing `design_review` flag.
 6. **Ground your factual claims (spec 064-02 / ADR-0020 §1–§2).** Any
    load-bearing factual claim about a *runnable* surface — library/API
    capability, version/perf behavior, behavior of existing code — must be

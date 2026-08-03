@@ -1,7 +1,8 @@
 ---
-status: READY_FOR_IMPLEMENTATION
+status: RECONCILED
 dependencies: [adr-0049, 104-01]
-last_verified:
+last_verified: 2026-08-03
+claimed_by: claude/issue-179-ac-review-0eb6e1
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
@@ -52,17 +53,72 @@ diff against instead of living only in a picture (ADR-0049; issue #179 option 2)
    `slice_needs_design_review` is unchanged.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions) — `scripts/run_tests.py`.
-- [ ] A test asserts the authoring nudge (design-values-into-ACs + the
+- [x] All ACs pass; full test suite green (no regressions) — `scripts/run_tests.py`
+      (`Ran 3996 tests … OK (skipped=7)`, pyright clean).
+- [x] A test asserts the authoring nudge (design-values-into-ACs + the
       `design_review`/servo rail + the graduated tiers) is present in
       `spec-workflow` SKILL.md, and fails when the nudge text is removed.
-- [ ] A test asserts the enriched slice-template comment references the authoring
+- [x] A test asserts the enriched slice-template comment references the authoring
       action (AC3), and confirms AC4 — no new flag deriver was added to
       `workflow.py`.
-- [ ] `uvx ruff check` clean on changed files; `spec_lint.py` clean on spec 104;
-      any skill/template content manifest re-synced if one covers these files.
-- [ ] Reviewed by `reviewer` subagent (compliance) + `pr-review` (craft).
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] `uvx ruff check` clean on changed files; `spec_lint.py` clean on spec 104;
+      host packages regenerated (`hosts/**/spec-workflow/SKILL.md` + slice-template mirrors).
+- [x] Reviewed by `reviewer` subagent (compliance) + `pr-review` (craft).
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred (n/a — none deferred).
+
+### Deviation log (after reconciliation)
+
+Original ACs preserved above; this records what changed during implementation
+and why.
+
+- **Placement as sub-step `5a`.** The nudge was inserted as step `5a` in the
+  "Creating a new spec" numbered flow (between slice-authoring step 5 and
+  grounding step 6), matching the existing `1a`/`2a` house style — rather than
+  renumbering the whole flow. It carries an explicit "adds no new mechanism —
+  teeth stay anchored to the existing `design_review` flag" disclaimer so the
+  guidance doesn't over-claim enforcement (AC4).
+- **Craft nits (non-blocking; recorded, not fixed this slice).** The craft pass
+  returned `pass` with three `[nit][impl]` items, all on the AC4 guard test's
+  robustness, none affecting behavior: (1) `test_no_visual_design_keyword_detector_added`
+  matches only function names containing `visual`/`fidelity`, so a
+  differently-named detector (`slice_has_mockup`) could slip past — and, to be
+  precise, `test_review_flag_deriver_set_unchanged` would *not* catch that name
+  either (it pins only the `slice_needs_*_review` set, so it catches a fourth
+  `*_review` deriver, not an arbitrarily-named detector); (2) the exact
+  single-line signature assertion for `slice_needs_design_review` is brittle to
+  a future reflow; (3) some asserts couple to verbatim phrasing (the repo's
+  established surface-test style). Left as-is — AC4's real teeth are that no new
+  derived flag/gate is added and `workflow.py` logic is untouched (both
+  verified); the name-regex test is a narrow heuristic on top, not a complete
+  guard, and the rest is proportionate to jig's existing surface-test convention.
+- **Host packages regenerated.** SKILL.md + slice-template changes were mirrored
+  into `hosts/claude` + `hosts/codex` via `scripts/build_host_packages.py` (the
+  committed host tree is drift-checked in CI).
+
+### Reconciliation sweep
+
+Drift-prone surfaces checked (`updated` / `no-op` / `deferred`):
+
+- **`hosts/claude` + `hosts/codex` skill/template mirrors — `updated`.**
+  Regenerated from source; the committed-package drift check passes
+  (`test_build_codex_committed_package.py`, `test_claude_install_smoke.py`).
+- **`docs/workflow.md` "Post-implementation review" / spec-authoring prose —
+  `no-op`.** The nudge lives in the `spec-workflow` SKILL flow (the authoring
+  hot-path); workflow.md's routing rule already gained its design-fidelity
+  pointer in slice 104-01. No second home needed.
+- **Scaffold seed slice templates (`templates/docs/specs/seed/…`) — `no-op`.**
+  Those are worked-example slices, not the generic slice template; they carry no
+  `design_review:` comment to enrich. Only the generic
+  `templates/docs/specs/slice-template.md` is the authoring surface (updated).
+- **`CLAUDE.md` primer — `no-op` (kept lean, spec 055/057).** 104 is a small
+  routing ruling closed in-session; it was never in Active-specs, so there is
+  nothing to compress. The ruling's homes are ADR-0049 + the bug-fix/spec-workflow
+  read-surfaces + `docs/workflow.md`; captured additionally via memory-sync and
+  the status-board Notes rather than the hot cache.
+- **`docs/architecture.md` — `no-op`.** No module boundary or public contract
+  changed (workflow.py logic untouched; the nudge is prose + a template comment).
+- **`docs/inbox.md` design-eval items — `no-op` (not resolved; cross-referenced
+  in 104-01's sweep).**

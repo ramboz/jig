@@ -1,8 +1,7 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [adr-0049]
 last_verified: 2026-08-03
-claimed_by: claude/issue-179-ac-review-0eb6e1
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
