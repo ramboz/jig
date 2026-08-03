@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: spec-workflow
 use_cases: []
 ---
@@ -98,7 +98,7 @@ the slice DoD rather than split out.
 
 | Slice | Title | Status | Why |
 |-------|-------|--------|-----|
-| 103-01 | SessionStart git-freshness nudge | DRAFT | The whole spec: a fail-open SessionStart hook that fetches (timeout-guarded) and actively nudges to sync when the branch is behind its upstream. Host-agnostic; scaffold + both-host parity in DoD. |
+| 103-01 | SessionStart git-freshness nudge | DONE | The whole spec: a fail-open SessionStart hook that fetches (timeout-guarded) and actively nudges to sync when the branch is behind its integration base. Host-agnostic; scaffold + both-host parity in DoD. |
 
 ### Settled calls (maintainer)
 
