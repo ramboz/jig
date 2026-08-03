@@ -385,17 +385,92 @@ def _reconciliation_sweep_check_block() -> str:
     return (
         "- **Reconciliation sweep check**: read both the Deviation log and "
         "Reconciliation sweep subsections for this slice.\n"
-        "  1. **Omissions** — is any obvious drift-prone artifact missing "
-        "from the sweep,\n"
-        "     especially front-door docs, primers/templates, inbox,\n"
-        "     refinement todo, memory, ADR index, or generated status board?\n"
+        "  1. **Omissions** — cross-check the **Files this slice changed** "
+        "list above: does\n"
+        "     every changed path appear in the sweep, or a deliberate "
+        "exclusion? Also\n"
+        "     flag obvious drift-prone artifacts missing from the sweep — "
+        "front-door docs,\n"
+        "     primers/templates, inbox, refinement todo, memory, ADR index, "
+        "or\n"
+        "     generated status board.\n"
         "  2. **Disposition quality** — is each `updated`, `no-op`, or "
         "`deferred`\n"
         "     rationale credible? `deferred` entries should name an owner "
         "or trigger;\n"
-        "     `no-op` claims should not conflict with touched files or "
-        "landed behavior."
+        "     `no-op` claims should not conflict with the **Files this "
+        "slice changed** list\n"
+        "     above or with landed behavior."
     )
+
+
+def _touched_files_block(spec_path: Path) -> str:
+    """Deterministic list of the files this slice changed, embedded in the
+    reconciliation prompt so the sweep's omission check runs on data rather
+    than the implementer's recollection (issue #160).
+
+    The reconciliation sweep already asks whether any drift-prone artifact is
+    missing from the sweep table and whether `no-op` rows conflict with
+    "touched files" — but the prompt never supplied that list. This block
+    derives it the same way the test-quality snapshot does: merge-base against
+    `main`, then `git diff --name-only`, best-effort.
+
+    Every failure mode collapses to a single-line
+    `- **Files this slice changed**: _unavailable (<reason>)._` fallback, so
+    the prompt builder never crashes and the reviewer falls back to judgment.
+    The list is capped so a large refactor can't bloat the prompt.
+    """
+    unavailable = (
+        "- **Files this slice changed**: _unavailable ({reason})._ Fall back "
+        "to judgment — check the sweep covers the artifacts the deviation "
+        "log describes."
+    )
+    try:
+        project_root = _find_project_root(spec_path)
+        if project_root is None:
+            spec_resolved = Path(spec_path).resolve()
+            cwd = spec_resolved.parent if spec_resolved.parent.exists() else None
+            if cwd is None:
+                return unavailable.format(reason="merge-base not found")
+        else:
+            cwd = project_root
+
+        mb = subprocess.run(
+            ["git", "merge-base", _TEST_QUALITY_BASE_BRANCH, "HEAD"],
+            cwd=str(cwd), capture_output=True, text=True, check=False,
+        )
+        if mb.returncode != 0 or not mb.stdout.strip():
+            return unavailable.format(reason="merge-base not found")
+        merge_base = mb.stdout.strip()
+
+        diff = subprocess.run(
+            ["git", "diff", "--name-only", f"{merge_base}...HEAD"],
+            cwd=str(cwd), capture_output=True, text=True, check=False,
+        )
+        if diff.returncode != 0:
+            return unavailable.format(reason="git diff failed")
+        files = [ln.strip() for ln in diff.stdout.splitlines() if ln.strip()]
+        if not files:
+            return unavailable.format(reason="empty diff")
+
+        cap = 50
+        shown = files[:cap]
+        listing = "\n".join(f"    - {f}" for f in shown)
+        if len(files) > cap:
+            listing += (
+                f"\n    - …and {len(files) - cap} more "
+                f"(`git diff --name-only {_TEST_QUALITY_BASE_BRANCH}...HEAD`)"
+            )
+        return (
+            "- **Files this slice changed** (`git diff --name-only "
+            f"{_TEST_QUALITY_BASE_BRANCH}...HEAD`) — each path below should be "
+            "accounted for in the Reconciliation sweep (`updated` / `no-op` / "
+            "`deferred`) or deliberately excluded; a changed file absent from "
+            "the sweep is the omission this check exists to catch:\n"
+            f"{listing}"
+        )
+    except Exception as exc:  # noqa: BLE001 — graceful degradation, mirror snapshot
+        return unavailable.format(reason=f"helper error: {exc.__class__.__name__}")
 
 
 def _test_quality_snapshot_block(spec_path: Path) -> str:
@@ -1279,6 +1354,9 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str,
     # reconciliation pass verifies the deviation log didn't paper over
     # task / approach / ADR / tech-debt gaps.
     extra_check += "\n" + _practices_check_block()
+    # Issue #160: supply the changed-file list the sweep check references, so
+    # the omission check has data. Placed just before the sweep block it feeds.
+    extra_check += "\n" + _touched_files_block(spec_path)
     extra_check += "\n" + _reconciliation_sweep_check_block()
     return f"""{_PREAMBLE}
 
