@@ -1823,6 +1823,7 @@ _CODEX_HOOK_STATUS_MESSAGES = {
     "jig-claim-check.sh": "jig: verify spec/slice/ADR claims",
     "jig-entry-gate.sh": "jig: nudge on out-of-lifecycle edits",
     "jig-context-check.sh": "jig: check context budget",
+    "jig-git-freshness.sh": "jig: check branch freshness",
     "jig-memory-scan.sh": "jig: scan memory references",
     "jig-post-edit-verify.sh": "jig: verify edit landed",
     "jig-project-orient.sh": "jig: orient project state",

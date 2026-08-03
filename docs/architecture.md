@@ -142,7 +142,7 @@ flowchart TB
     subs --> specs
     subs --> memory[(CLAUDE.md<br/>+ docs/memory/)]
 
-    subgraph hookspine["Deterministic spine — 15 hooks"]
+    subgraph hookspine["Deterministic spine — 16 hooks"]
         direction TB
         h1["SessionStart · UserPromptSubmit · PreToolUse·Read<br/>jig-context-check<br/>context-fill + in-session growth/compact nudge"]
         h2["UserPromptSubmit<br/>jig-memory-scan<br/>surface unknown references"]
@@ -159,6 +159,7 @@ flowchart TB
         h13["Stop<br/>jig-claim-check<br/>flag unresolved spec/slice/ADR claims next turn"]
         h14["SessionStart<br/>jig-project-orient<br/>bounded lifecycle orientation hint"]
         h15["PostToolUse · Edit/Write<br/>jig-entry-gate<br/>nudge on out-of-lifecycle source edit"]
+        h16["SessionStart<br/>jig-git-freshness<br/>nudge when branch is behind its integration base"]
     end
 
     h1 -. additionalContext .-> claude
@@ -173,12 +174,13 @@ flowchart TB
     h13 -. next-turn context .-> claude
     h14 -. additionalContext .-> claude
     h15 -. additionalContext .-> claude
+    h16 -. additionalContext .-> claude
 ```
 
 - **Skill router** is a Claude Code internal — it auto-matches the user's message against every `SKILL.md` `description` field and loads the first match. Skills marked `disable-model-invocation: true` are skipped.
 - **`bash recipe` arrow**: most `SKILL.md` bodies end with a deterministic bash block that calls the matching `.py` helper. Skills without a helper (`pr-review`, `arch-review`, `contracts`, `vision-elicitation`, plus the slice-to-spec workflow inside `migrate`) are judgment-only. `pr-review` and `arch-review` stay judgment-only as skills, but are *invoked* deterministically from the post-implementation flow via `review.py pr-review` / `review.py arch-review` prompt builders (see [skills/spec-workflow/SKILL.md](../skills/spec-workflow/SKILL.md) § "After implementation").
 - **`Task tool` arrow**: `SKILL.md` can dispatch a fresh subagent via the `Task` tool. The three roles in `agents/` (`implementer`, `reviewer`, `architect`) are real `subagent_type` values when jig is installed as a plugin; outside the plugin they fall back to `general-purpose`.
-- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via fifteen hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); one is async write-only, capturing in-flight decision stubs to a per-session scratch log without blocking or injecting (`decision-inflight`); ten can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `entry-gate`, `task-capture`, `decision-capture`, `jig-semantic-index`, `claim-check`, `project-orient`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`). `entry-gate` (spec 098 / ADR-0044) nudges when an edit to project source happens outside a live working-lifecycle claim held by this checkout — the teeth-not-trust gate for lifecycle *entry*; fail-open, once-per-session. `project-orient` emits one self-labeled, bounded headline from scaffold/spec lifecycle artifacts at SessionStart and fails open; it never infers application state from a shallow source-tree listing. The three Stop hooks (`task-capture`, `decision-capture`, `claim-check`) are siblings — the same scan-and-surface pattern applied to a different signal: tasks, decisions, and spec/slice/ADR claims that don't resolve on disk. `decision-inflight` is the deterministic fast path feeding `decision-capture`'s triage.
+- **Hook spine** intercepts at five Claude Code event types (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) via sixteen hook scripts. Two are async log-only — never block, never inject (`telemetry`, `skill-trace`); one is async write-only, capturing in-flight decision stubs to a per-session scratch log without blocking or injecting (`decision-inflight`); eleven can inject `additionalContext` (`context-check`, `memory-scan`, `post-edit-verify`, `boundary-change-warn`, `entry-gate`, `task-capture`, `decision-capture`, `jig-semantic-index`, `claim-check`, `project-orient`, `git-freshness`); two can block tool calls with exit-code 2 (`spec-gate`, `secret-scan`). `entry-gate` (spec 098 / ADR-0044) nudges when an edit to project source happens outside a live working-lifecycle claim held by this checkout — the teeth-not-trust gate for lifecycle *entry*; fail-open, once-per-session. `git-freshness` (spec 103 / ADR-0048) is the SessionStart sibling that fires at *time-zero*: it fetches (timeout-guarded, best-effort) the branch's integration base and nudges to sync when `HEAD` is behind, before the agent forms a stale premise — the earlier tripwire that bug 001's command-time warning could not provide; fail-open, opt-out `JIG_GIT_FRESHNESS`. `project-orient` emits one self-labeled, bounded headline from scaffold/spec lifecycle artifacts at SessionStart and fails open; it never infers application state from a shallow source-tree listing. The three Stop hooks (`task-capture`, `decision-capture`, `claim-check`) are siblings — the same scan-and-surface pattern applied to a different signal: tasks, decisions, and spec/slice/ADR claims that don't resolve on disk. `decision-inflight` is the deterministic fast path feeding `decision-capture`'s triage.
 
 Scaffold-mode wiring is identical in shape — only path strings differ
 (`${CLAUDE_PROJECT_DIR}/.claude/...` instead of `${CLAUDE_PLUGIN_ROOT}/...`).

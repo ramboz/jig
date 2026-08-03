@@ -118,6 +118,16 @@
             "statusMessage": "jig: semantic index"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh",
+            "timeout": 10,
+            "statusMessage": "jig: check branch freshness"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

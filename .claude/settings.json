@@ -129,6 +129,16 @@
             "timeout": 25
           }
         ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-git-freshness.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
