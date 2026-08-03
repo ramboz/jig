@@ -1126,3 +1126,18 @@ popped by another. Recovery: move real work into a dedicated linked worktree off
 `origin/main` early, re-apply edits directly rather than fighting the shared
 stash, and never `git stash` in a shared jig checkout. (Reinforces the existing
 "isolate real work in a dedicated worktree" learning.)
+
+Testing learning (hooks that log): a jig hook whose fire calls
+`append_additional_context_event` writes its audit line under
+`<project_dir>/.claude/context-growth-read-events.jsonl`. In a hook-wrapper test,
+if `CLAUDE_PROJECT_DIR` is unset the wrapper defaults `project_dir` to `.`, and if
+the test subprocess also inherits the repo as its `cwd`, the hook writes that log
+**into the source tree** — dirtying it and breaking `build_host_packages.py
+--check` (whose `_is_ephemeral` doesn't skip `.claude/*.jsonl`). Worse, a hook
+that shells `git` (e.g. `jig-git-freshness`) will run a **live network fetch**
+against the real repo. Rule: every hook-wrapper test must pin `project_dir` (and,
+for the no-`CLAUDE_PROJECT_DIR` case, the subprocess `cwd`) to an isolated temp
+dir, never let either resolve to the source tree. Caught during spec 103
+(git-freshness) landing, by the orchestrator's own `--check` verification — the
+implementer's focused-suite run had missed it because it only surfaces when the
+default-`.` path meets a repo cwd.
