@@ -76,13 +76,32 @@ def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
 REGEN_COMMAND = "python3 scripts/build_host_packages.py"
 
 
+# Per-checkout runtime-state file types a hook may write into a `.claude/` dir
+# (telemetry/read-attribution logs, queues, locks, the per-user settings
+# overlay). Bug 028 establishes `.claude/` runtime paths as per-checkout state
+# that is never tracked or shipped, so none appear in a built package.
+_EPHEMERAL_CLAUDE_SUFFIXES = frozenset({".jsonl", ".json", ".log", ".lock"})
+
+
 def _is_ephemeral(rel: Path) -> bool:
     """True for paths the builders never emit but a test/import run may leave
-    behind in a committed tree (Python bytecode caches). Excluding them keeps
-    the drift compare deterministic: CI runs the test suite *before* the guard,
-    and importing a module out of `hosts/` would otherwise seed a `__pycache__`
-    that the freshly-built scratch tree lacks, spuriously reading as drift."""
-    return "__pycache__" in rel.parts or rel.suffix == ".pyc"
+    behind in a committed tree. Excluding them keeps the drift compare
+    deterministic: CI runs the test suite *before* the guard, so anything a
+    test seeds must not read as drift against the freshly-built scratch tree.
+
+    Two families:
+      - Python bytecode caches (`__pycache__` / `.pyc`) — importing a module
+        out of `hosts/` seeds a `__pycache__` the scratch tree lacks.
+      - Per-checkout runtime state under a `.claude/` dir (e.g.
+        `hooks/scripts/.claude/context-growth-read-events.jsonl`, written by
+        `read_attribution.append_additional_context_event`) — a hook that fires
+        with `project_dir` resolving to the repo drops a log the builders never
+        emit. Same rationale as the bytecode caches; see bug 028."""
+    if "__pycache__" in rel.parts or rel.suffix == ".pyc":
+        return True
+    if ".claude" in rel.parts and rel.suffix in _EPHEMERAL_CLAUDE_SUFFIXES:
+        return True
+    return False
 
 
 def _file_map(root: Path) -> dict[str, bytes]:
