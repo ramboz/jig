@@ -44,4 +44,4 @@ consumer appears, not a generalization paid for up front.
 
 | Slice | Title | Status |
 |---|---|---|
-| [071-01](slice-01-design-review-pass.md) | design-review pass + REVIEWED gate | IN_PROGRESS |
+| [071-01](slice-01-design-review-pass.md) | design-review pass + REVIEWED gate | DONE |
