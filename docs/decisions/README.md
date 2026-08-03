@@ -51,6 +51,7 @@
 - [ADR-0045: Slice Claim Covers Active Lifecycle](adr-0045-slice-claim-covers-active-lifecycle.md) — `claimed_by:` is jig's only machine-readable "a session is working here" signal. (2026-07-24, Accepted)
 - [ADR-0046: Frontmatter status is authoritative; prose Status is best-effort](adr-0046-adr-status-frontmatter-authority.md) — [ADR-0026](./adr-0026-adr-status-frontmatter.md) made frontmatter `status:` the canonical home for ADR lifecycle state and cast the prose `## Status` section as a **synchronized** mirror. (2026-07-29, Accepted)
 - [ADR-0047: Evergreen docs carry provenance off the reading path](adr-0047-evergreen-docs-provenance-off-reading-path.md) — jig's front-door docs — `product-vision.md`, `architecture.md`, `workflow.md`, `philosophy.md`, `adoption-readiness.md` — are meant to read as **evergreen prose**: a newcomer opens them to learn what jig is and how it works *today*, not how it got here. (2026-08-02, Accepted)
+- [ADR-0048: SessionStart git-freshness — always-fetch, timeout-guarded, active nudge](adr-0048-session-git-freshness-fetch-and-nudge.md) — A jig session can start on a worktree/branch that has silently drifted behind its upstream. (2026-08-03, Proposed)
 
 ## Lightweight decisions
 

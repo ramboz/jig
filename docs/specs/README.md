@@ -313,6 +313,7 @@
 | [100-decision-routing-enforcement](100-decision-routing-enforcement/spec.md) | 100-04 — lint-subcommand | **DONE** | The ONLY home for the lexical evaluator (ADR-0042): advisory, report-only, never gates or edits. `BOUNDARY` markers must stay **qualified phrases** — it flags with no second signal, so one bare word (`protocol`, `schema`) condemns a whole class. Honest risk is false NEGATIVES, not noise. |
 | [101-orient-sees-work-in-flight](101-orient-sees-work-in-flight/spec.md) | 101-01 — orientation reports work in flight | **DONE** |  |
 | [102-amendment-authorization-guardrail](102-amendment-authorization-guardrail/spec.md) | 102-01 — surface-and-stop-authorization-rule | **DONE** | Issue #125 items 1&2. Surface-and-stop authorization rule in spec-workflow's closed-spec-drift checklist step (amending a closed record needs explicit owner approval; behaviour-approval ≠ record authority; read the whole criteria block) + `analyze` "surfaced, never auto-resolved / reports drift and hands off" output contract. Sibling of spec 097 (faithful recording). Item 3 (hard `PreToolUse`/semantic gate on `docs/decisions/**`) deferred → refinement-todo (trigger: recurrently hits ADRs). Advisory rule, ADR-0011 trust boundary. Host mirrors regenerated. |
+| [103-session-git-freshness](103-session-git-freshness/spec.md) | 103-01 — SessionStart git-freshness nudge | READY_FOR_IMPLEMENTATION |  |
 
 ## Deferred slices
 
