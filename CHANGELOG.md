@@ -1,5 +1,43 @@
 # Changelog
 
+## [2.10.0](https://github.com/ramboz/jig/compare/v2.9.0...v2.10.0) (2026-08-03)
+
+
+### Features
+
+* **bug-fix,specs,adr:** guard the derived boards and ADR index against drift and duplicate numbers ([#151](https://github.com/ramboz/jig/issues/151)) ([8ea1ff9](https://github.com/ramboz/jig/commit/8ea1ff906018e94c129fe674a93dd9ad6d7a106f))
+* **hooks:** add SessionStart git-freshness nudge (spec 103, closes [#105](https://github.com/ramboz/jig/issues/105)) ([#180](https://github.com/ramboz/jig/issues/180)) ([3a41434](https://github.com/ramboz/jig/commit/3a41434d1453afb8ea3ba88b6aed00f2a2b432ec))
+* **independent-review:** supply the changed-file list the reconciliation sweep checks against ([#160](https://github.com/ramboz/jig/issues/160)) ([#163](https://github.com/ramboz/jig/issues/163)) ([5954a81](https://github.com/ramboz/jig/commit/5954a81104e754614a9d0d00607c61287e71b4e6))
+* **lifecycle:** lifecycle entry gate — nudge on out-of-lifecycle source edits (spec 098, closes [#111](https://github.com/ramboz/jig/issues/111)) ([#176](https://github.com/ramboz/jig/issues/176)) ([acfb856](https://github.com/ramboz/jig/commit/acfb856ea53aa32be2edf0d2bad54669b16e9cac))
+* **spec-workflow,analyze:** amendment-authorization guardrail (spec 102, closes [#125](https://github.com/ramboz/jig/issues/125)) ([#178](https://github.com/ramboz/jig/issues/178)) ([96acd90](https://github.com/ramboz/jig/commit/96acd9005ebb3df20264dc9908a614e4aa94b156))
+
+
+### Bug Fixes
+
+* **adr-workflow:** index reports what it cannot summarize (bug 020) ([#154](https://github.com/ramboz/jig/issues/154)) ([7cad562](https://github.com/ramboz/jig/commit/7cad5624a642f4b93e98852af28d5416fd30aaff))
+* **build:** ignore .claude/ runtime logs in host-package drift guard ([#183](https://github.com/ramboz/jig/issues/183)) ([d6bb92e](https://github.com/ramboz/jig/commit/d6bb92e60fabc1e0e13eb7a119ea356890c377f6))
+* **dogfood:** wire jig-entry-gate.sh into .claude PostToolUse ([#182](https://github.com/ramboz/jig/issues/182)) ([e804117](https://github.com/ramboz/jig/commit/e8041172a36b58c561f4747c2a2c2d2c1beba36e))
+* **independent-review:** reviewer prompts name the file that holds the slice (bug 019) ([#148](https://github.com/ramboz/jig/issues/148)) ([12230ad](https://github.com/ramboz/jig/commit/12230ada84df2818d78ff5c4fb5a33382fe4db7c))
+* **migrate:** copy-machinery writes its managed blocks under the configured docs root (bug 022) ([#152](https://github.com/ramboz/jig/issues/152)) ([bd0d8ee](https://github.com/ramboz/jig/commit/bd0d8ee35f41b4e85175b65317085b045e1b0409))
+* **migrate:** copy-machinery's docs advisory asks the project, not the invocation (bug 023) ([#156](https://github.com/ramboz/jig/issues/156)) ([fd82a12](https://github.com/ramboz/jig/commit/fd82a1272b61e9a0bc583cd9eca9f0db3d1ee19a))
+* **migrate:** copy-machinery's docs advisory fires on Codex too; bug 018 -&gt; DONE ([#150](https://github.com/ramboz/jig/issues/150)) ([1c1583c](https://github.com/ramboz/jig/commit/1c1583c2494dfdbf93b0e57b2cb27639a7b75c37))
+* **packaging:** ship the runtime-scripts allowlist in the committed host packages (bug 025, [#167](https://github.com/ramboz/jig/issues/167)) ([#174](https://github.com/ramboz/jig/issues/174)) ([d34b343](https://github.com/ramboz/jig/commit/d34b3431a13586643498a1ccf831e62494dd0b4b))
+* **scaffold-init:** propagate jig runtime-state .gitignore block to scaffolded projects (bug 028, [#107](https://github.com/ramboz/jig/issues/107)) ([#175](https://github.com/ramboz/jig/issues/175)) ([fd64f19](https://github.com/ramboz/jig/commit/fd64f19857aa019c80d2911e53c3f00170cba9cd))
+* **slice-land:** resolve tdd.py in vendored installs; distinguish NOT RUN from doc-only ([#129](https://github.com/ramboz/jig/issues/129)) ([#172](https://github.com/ramboz/jig/issues/172)) ([e139a4d](https://github.com/ramboz/jig/commit/e139a4d20ae4468ef0e0bcd1d54e11f73d1717e0))
+* **spec-workflow:** anchor slice-authoring reference to in-project worked example (bug 027 / [#173](https://github.com/ramboz/jig/issues/173)) ([#177](https://github.com/ramboz/jig/issues/177)) ([38fa6dd](https://github.com/ramboz/jig/commit/38fa6dd6221dc873ecd2bd2b1f58a5bec7d8086c))
+* **spec-workflow:** ground reconciliation doc edits (bug 026 / [#131](https://github.com/ramboz/jig/issues/131)) ([#164](https://github.com/ramboz/jig/issues/164)) ([80110ba](https://github.com/ramboz/jig/commit/80110ba5cf0c02b7a0fc7ff829059ac6575e2532))
+
+
+### Documentation
+
+* **bugs:** file bug 021 — a custom test command silently drops the --test selector ([#155](https://github.com/ramboz/jig/issues/155)) ([96cf64b](https://github.com/ramboz/jig/commit/96cf64b930a8c4a9368777ae170b994aa0ae16e0))
+* **decisions:** reserve adr-0048-session-git-freshness-fetch-and-nudge ([af31eec](https://github.com/ramboz/jig/commit/af31eec79fb2adc5df0039ff316c87870e3b965f))
+* **decisions:** reserve adr-0049-design-fidelity-routing-to-originating-spec ([d693980](https://github.com/ramboz/jig/commit/d693980e6e592ab150034837183e8185a4d41c76))
+* **onboarding:** read evergreen docs as prose; add bug lifecycle map ([#170](https://github.com/ramboz/jig/issues/170)) ([2850a09](https://github.com/ramboz/jig/commit/2850a096a69155bfcb74b31bb49a7ffabababe94))
+* **refinement:** defer the main-check vocabulary decision behind a 3-occurrence trigger ([#158](https://github.com/ramboz/jig/issues/158)) ([4cb68a1](https://github.com/ramboz/jig/commit/4cb68a159a6ac6e74e1ae3a37b30cde97a98f2dc))
+* **specs:** reserve 103-session-git-freshness ([7c13885](https://github.com/ramboz/jig/commit/7c13885cb5edac66e0a4084c1ceee871dfd56cfe))
+* **specs:** reserve 104-design-fidelity-routing ([b8e6a1f](https://github.com/ramboz/jig/commit/b8e6a1f2e35b119baf9615a3137d92897642a4f7))
+
 ## [2.9.0](https://github.com/ramboz/jig/compare/v2.8.0...v2.9.0) (2026-07-30)
 
 
