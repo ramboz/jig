@@ -9,7 +9,7 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 
 ### Project codenames / active work
 - **jig** = this skill pack repo (the plugin itself).
-- **Branch routing** — 1.x shipped on `main`; 2.0 multi-host also lives on `main` after the v2 merge. `v2` remains the integration/maintenance branch for the 2.0 line. See [docs/roadmap.md](docs/roadmap.md).
+- **Branch routing** — `main` is the sole active line: 1.x and the 2.0 multi-host work both shipped here (latest tag `v2.10.0`). The legacy `v2` branch is closed — don't route work to it. See [docs/roadmap.md](docs/roadmap.md).
 - **Active specs:** 088-02 — `/jig:orient` skill (adopting contributed `compass`; arch review on [#90](https://github.com/ramboz/jig/pull/90)). **Recorded, not yet built:** spec 091 — bug-fix repository-closure evidence ([ADR-0037](docs/decisions/adr-0037-bug-fix-repository-closure-evidence.md), Proposed); gates don't exist yet. **Long-horizon-autonomy bridge (oh-my-cli follow-on), recorded not built:** spec 105 — durable failure-quarantine jig-half ([ADR-0050](docs/decisions/adr-0050-durable-failure-quarantine.md), Proposed) + spec 106 — autonomy governance plane & identity separation ([ADR-0051](docs/decisions/adr-0051-autonomy-governance-plane.md), Proposed); servo halves live in `ramboz/servo` (servo specs 023/024/025, ADR-0029/0030). Nothing built yet. See [docs/specs/README.md](docs/specs/README.md). Deferred → [docs/refinement-todo.md](docs/refinement-todo.md).
 
 ### Key terms (one-line index — full defs via `/jig:explain <term>`)
@@ -41,7 +41,7 @@ Always-loaded primer, kept lean per [spec 055/057](docs/specs/055-context-cost-d
 | [docs/decisions/](docs/decisions/) | ADR index |
 | [docs/specs/README.md](docs/specs/README.md) | Spec status board — pick up next work |
 | [docs/bugs/README.md](docs/bugs/README.md) | Bug status board — check before folding defects into specs |
-| [docs/roadmap.md](docs/roadmap.md) | Milestone / branch overlay (1.x `main`, 2.0 `v2`) |
+| [docs/roadmap.md](docs/roadmap.md) | Milestone / branch overlay |
 | [docs/refinement-todo.md](docs/refinement-todo.md) | Deferred decisions |
 | [docs/memory/glossary.md](docs/memory/glossary.md) | Domain terms (the on-demand home for the index above) |
 | [docs/memory/learnings.md](docs/memory/learnings.md) | Dead ends and gotchas |
