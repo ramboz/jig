@@ -53,6 +53,8 @@
 - [ADR-0047: Evergreen docs carry provenance off the reading path](adr-0047-evergreen-docs-provenance-off-reading-path.md) — jig's front-door docs — `product-vision.md`, `architecture.md`, `workflow.md`, `philosophy.md`, `adoption-readiness.md` — are meant to read as **evergreen prose**: a newcomer opens them to learn what jig is and how it works *today*, not how it got here. (2026-08-02, Accepted)
 - [ADR-0048: SessionStart git-freshness — always-fetch, timeout-guarded, active nudge](adr-0048-session-git-freshness-fetch-and-nudge.md) — A jig session can start on a worktree/branch that has silently drifted behind its upstream. (2026-08-03, Accepted)
 - [ADR-0049: Design-fidelity work routes to the originating spec, not a new lifecycle vehicle](adr-0049-design-fidelity-routing-to-originating-spec.md) — (no description) (2026-08-03, Proposed)
+- [ADR-0050: Durable failure-quarantine and attest-only handshake](adr-0050-durable-failure-quarantine.md) — For a jig/servo pair to run unattended for long horizons (the `oh-my-cli` target), the single hardest failure mode is **thrash**: an agent re-attempting the same doomed fix indefinitely, burning budget without new information. (2026-08-04, Proposed)
+- [ADR-0051: Autonomy governance plane and identity separation](adr-0051-autonomy-governance-plane.md) — `oh-my-cli`'s "the agent can't rewrite its own rules" plane is only as strong as CODEOWNERS + branch protection behind it. (2026-08-04, Proposed)
 
 ## Lightweight decisions
 
