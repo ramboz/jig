@@ -33,3 +33,11 @@
 | 026 | grounding-rule-misses-reconciliation | low | standard | DONE | yes | skills/spec-workflow/test_workflow.py::ReconciliationGroundingRequirementTests | claude/jig-131-ceremony-review-6v7g4l |  |  |
 | 027 | slice-authoring-unanchored-template-path | low | standard | DONE | yes | skills/spec-workflow/test_spec_workflow_skill_surface.py::SliceAuthoringReferenceAnchorTests | claude/bug-027-slice-template-anchor |  |  |
 | 028 | scaffold-gitignore-runtime-state | medium | standard | DONE | yes | skills/scaffold-init/test_scaffold.py::Bug028RuntimeStateGitignoreTests::test_fresh_scaffold_ignores_runtime_state_paths | claude/bug-028-gitignore-runtime-state |  |  |
+
+## Terminal — closed (not fixed as bugs)
+
+> Bugs in a terminal non-DONE state: **ESCALATED** (reclassified to a spec — see `escalated_to`) or **RESOLVED_ON_MAIN** (fixed by another session on trunk). These are closed, not unfinished — blank `reproduces?` / `regression test` columns are expected. Don't flag them stale or advance them to DONE.
+
+| ID | slug | severity | tier | status | reproduces? | regression test | claimed_by | escalated_to | Notes |
+|----|------|----------|------|--------|-------------|-----------------|------------|--------------|-------|
+| 029 | slice-path-transition-silent-noop | medium | standard | RESOLVED_ON_MAIN | no | skills/spec-workflow/test_workflow.py::TransitionTests::test_slice_path_transition_is_not_overwritten_by_spec_rollup | claude/github-issue-187-fix-6836d0 |  |  |
