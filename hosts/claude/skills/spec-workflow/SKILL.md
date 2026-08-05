@@ -550,6 +550,28 @@ the new verdict (it **overwrites in place** the earlier file for that
 clears. A non-`pass` artifact never overwritten by a later `pass` keeps
 blocking — the "superseded without a later pass" case (ADR-0014 §4).
 
+**When a review retracts a *claim*, sweep the corpus before re-recording.**
+The recovery above is written for a code-shaped finding, which is local to one
+file. A finding about **content** is not: a retracted assertion is usually
+copied by design into `CHANGELOG.md`, the slice record, the inbox, and
+cross-referenced docs. Fixing only the reviewed deliverable leaves the
+retracted version authoritative in every **sibling** artifact — and the stale
+copy is frequently the one the next session reads first (the project's own
+rules make `CHANGELOG.md` a read-before-you-fix record), so the pass re-fails
+round after round on a document you never touched. Before you `record-review`
+the new verdict, **grep the retracted phrasing across the docs root and
+`CHANGELOG.md`, and reconcile every hit** — the plain sweep is what reaches
+the changelog, the inbox, and arbitrary cross-referenced files. Within the
+spec itself, `/jig:analyze` is the structured complement: its **Duplication**
+and **Terminology Drift** categories catch a retracted claim surviving across
+the spec's own slice files and the docs it cross-references (`product-vision`,
+accepted ADRs, the glossary, `architecture.md`) — but it audits one spec's
+files plus that fixed set, not the whole corpus, so it sharpens the sweep
+rather than replacing it. Distinguish **surviving** assertions (the claim
+still stated as true — must fix) from **explicit** retractions (the claim
+named as withdrawn in a changelog or history entry — correct, and worth
+keeping).
+
 ```bash
 # Compliance pass (always)
 PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
