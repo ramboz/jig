@@ -1141,3 +1141,23 @@ dir, never let either resolve to the source tree. Caught during spec 103
 (git-freshness) landing, by the orchestrator's own `--check` verification — the
 implementer's focused-suite run had missed it because it only surfaces when the
 default-`.` path meets a repo cwd.
+
+Orientation/status learning (bug 031): a read-only project-state reporter
+(`/jig:orient`, `workflow.py orient`) that narrates *local* artifacts — spec/bug
+boards, ADRs, slice `STATUS` — is only ever as current as the last fetch. Reading
+them without checking origin confidently reports a stale premise: work already
+shipped on trunk reads as still open. spec 103's `SessionStart` git-freshness hook
+fetches once at time-zero, but an interactive orient later in the session
+re-reads the boards with no re-check, so drift accrued after time-zero is
+invisible. Fix pattern: give the interactive path its *own* bounded, fail-soft
+`git fetch` (a `--fetch` flag; timeout `_ORIENT_FRESHNESS_FETCH_TIMEOUT = 5s`,
+`GIT_TERMINAL_PROMPT=0` so an auth-required origin fails fast) and report
+commits-**behind** (`· freshness: N behind <base>`), or `could not reach origin`
+when the fetch failed — never silently "fresh" against refs you didn't refresh.
+Gate the fetch behind the flag so the 4s `SessionStart` hot path stays
+byte-identical and spec 103 remains the sole time-zero signal (two consumers, one
+helper). Process corollary (reinforces the "verify the full jig CI gate locally"
+learning): editing a skill's `SKILL.md` *or* a `skills/**/**.py` helper requires
+regenerating the committed `hosts/` mirrors (`python3 scripts/build_host_packages.py`)
+— the drift guard fails on stale mirrors and the craft review will (rightly) block
+on it. Caught in the bug-031 craft pass.

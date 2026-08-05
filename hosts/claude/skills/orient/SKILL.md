@@ -45,11 +45,22 @@ Do not re-derive the project's lifecycle state by hand — jig already computes 
 Run the read-only command spec 088 added and use its line as your factual base:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" orient --project-dir .
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" orient --project-dir . --fetch
 # → jig hint: <scaffold state> · active specs: <rollup> · focus: <slice needing attention>
 #   …and, only when the checkout is ahead of its default branch:
 #   · in flight: <n> commit(s) ahead of <base> on <branch>
+#   …and, only when the --fetch check finds a problem:
+#   · freshness: <n> commit(s) behind <base>   |   could not reach origin
 ```
+
+Pass **`--fetch`**. Orient reads *local* boards, ADRs, and slice `STATUS` — all only as
+current as your last fetch — so an interactive orientation must refresh against origin
+first, or it will confidently narrate a stale picture (work already shipped on trunk
+reported as still open). `--fetch` runs one bounded, fail-soft `git fetch` and adds a
+`freshness:` segment when the checkout is **behind** origin, or when origin **could not
+be reached** (offline: the local view is unverified, not confirmed fresh). This flag is
+for the interactive path only — the SessionStart hook never passes it (spec 103's
+git-freshness hook already fetches at time-zero), so the hot-path headline is unchanged.
 
 That single `jig hint:` line — scaffold classification, active-spec rollup, and the
 slice currently requiring lifecycle attention — is the **deterministic headline**.
@@ -57,6 +68,12 @@ Reusing it (rather than re-implementing a second lifecycle-focus algorithm) keep
 Orient's headline from drifting away from jig's own computed state. Orient's job is to
 **layer judgment on top**: the ADRs, deferrals, release plans, refinement-todo, inbox,
 and standalone bugs that the one-line command does not weigh, then recommend one thing.
+
+**If the headline shows `freshness: … behind …`, treat every local artifact below as
+possibly stale** — say so in the headline, and recommend integrating origin (or
+re-running after a pull) before trusting the boards. A `could not reach origin` reading
+means you could not verify freshness at all; report that honestly rather than implying
+the state is current.
 
 ---
 

@@ -9363,6 +9363,153 @@ class OrientWorkInFlightTests(unittest.TestCase):
         self.assertNotIn("in flight", result.stdout)
 
 
+class OrientOriginFreshnessTests(unittest.TestCase):
+    """Bug 031 — orient must check origin freshness on the interactive path.
+
+    Orient's whole picture is built from local artifacts (boards, slice
+    STATUS, ADRs) that are only as current as the last fetch. A checkout whose
+    base drifted behind trunk otherwise renders stale state as current. The
+    `--fetch` path (the `/jig:orient` skill, never the 4s SessionStart hook)
+    does a bounded, fail-soft `git fetch` and appends a `freshness:` segment
+    when the checkout is behind or origin could not be reached. The default
+    (hot) path stays byte-identical so the SessionStart hook is untouched.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-fresh-"))
+        (self.tmpdir / "docs" / "specs").mkdir(parents=True)
+        (self.tmpdir / "scaffold.json").write_text("{}\n")
+        self.origin = Path(tempfile.mkdtemp(prefix="jig-wf-fresh-origin-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        shutil.rmtree(self.origin, ignore_errors=True)
+
+    def _git(self, *args, cwd=None):
+        env = os.environ.copy()
+        env.update({
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com",
+        })
+        return subprocess.run(
+            ["git", "-C", str(cwd or self.tmpdir), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit(self, name):
+        (self.tmpdir / name).write_text(name)
+        self._git("add", name)
+        self._git("commit", "-q", "-m", name)
+
+    def _init_with_origin(self):
+        """Local repo on `main`, tracking a bare origin, initially in sync."""
+        # A bare origin (the mkdtemp dir already exists) so `git push`/`fetch`
+        # work fully offline.
+        self._git("init", "-q", "--bare", cwd=self.origin)
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+        self._git("remote", "add", "origin", str(self.origin))
+        self._git("push", "-q", "origin", "main")
+        self._git("fetch", "-q", "origin")
+
+    def _advance_origin(self, n=1):
+        """Push `n` extra commits to origin, then rewind local `main` behind
+        them — leaving the local checkout `n` commits behind origin/main
+        WITHOUT the local remote-tracking ref knowing yet (only a fetch will
+        reveal it, which is the point of the --fetch path)."""
+        base = self._git("rev-parse", "HEAD").stdout.strip()
+        for i in range(n):
+            self._commit(f"trunk-{i}.txt")
+        self._git("push", "-q", "origin", "main")
+        # Rewind local main + its stale remote-tracking ref back to `base` so
+        # the drift is only discoverable by fetching origin afresh.
+        self._git("reset", "-q", "--hard", base)
+        self._git("update-ref", "refs/remotes/origin/main", base)
+
+    # -- the segment: behind origin is surfaced on --fetch ----------------
+
+    def test_fetch_reports_commits_behind_origin(self):
+        self._init_with_origin()
+        self._advance_origin(2)
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("· freshness: 2 commits behind origin/main", headline)
+
+    def test_single_commit_behind_is_singular(self):
+        self._init_with_origin()
+        self._advance_origin(1)
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("· freshness: 1 commit behind origin/main", headline)
+        self.assertNotIn("1 commits behind", headline)
+
+    # -- silence when there is nothing to say -----------------------------
+
+    def test_up_to_date_with_fetch_is_silent(self):
+        self._init_with_origin()
+
+        self.assertNotIn("freshness:", _workflow.orient(self.tmpdir, fetch=True))
+
+    def test_default_path_never_fetches_or_reports_freshness(self):
+        """The SessionStart hot path must stay byte-identical: no freshness
+        segment even when the checkout is behind origin."""
+        self._init_with_origin()
+        self._advance_origin(2)
+
+        self.assertNotIn("freshness:", _workflow.orient(self.tmpdir))
+
+    def test_local_only_repo_is_silent(self):
+        """No origin remote → nothing to be stale against → silence."""
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+
+        self.assertNotIn("freshness:", _workflow.orient(self.tmpdir, fetch=True))
+
+    # -- a configured-but-unreachable origin is surfaced, not silenced ----
+
+    def test_unreachable_origin_is_flagged_not_silently_fresh(self):
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+        self._git("remote", "add", "origin",
+                  str(self.tmpdir / "does-not-exist.git"))
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("· freshness: could not reach origin", headline)
+
+    # -- orientation never fails because git/fetch did (fail-soft) --------
+
+    def test_non_git_project_with_fetch_is_silent_and_wellformed(self):
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertNotIn("freshness:", headline)
+        self.assertTrue(headline.startswith("jig hint:"))
+        self.assertTrue(headline.endswith("\n"))
+
+    # -- the CLI flag wires through ---------------------------------------
+
+    def test_cli_fetch_flag_reports_behind(self):
+        self._init_with_origin()
+        self._advance_origin(1)
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+
+        result = subprocess.run(
+            [sys.executable, str(WORKFLOW), "orient",
+             "--project-dir", str(self.tmpdir), "--fetch"],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("· freshness: 1 commit behind origin/main", result.stdout)
+
+
 class ReconciliationGroundingRequirementTests(unittest.TestCase):
     """Bug 024 / issue #131 — the reconciliation checklist's "Architecture
     impact" item must carry ADR-0020 §1's grounding requirement (a load-bearing

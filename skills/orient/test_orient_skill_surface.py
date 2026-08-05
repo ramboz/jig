@@ -165,5 +165,34 @@ class OrientJudgmentRuleTests(unittest.TestCase):
         self.assertRegex(judgment, r"re-?ask|again|same session")
 
 
+class OrientOriginFreshnessSurfaceTests(unittest.TestCase):
+    """Bug 031: the interactive path must refresh against origin, or it will
+    narrate stale local boards as current. These pin the load-bearing phrases
+    whose absence reproduces the reported failure."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SKILL.read_text()
+
+    def test_headline_command_passes_fetch(self):
+        """The documented `orient` invocation must carry `--fetch`; without it
+        the skill reads stale boards without checking origin."""
+        self.assertRegex(
+            self.text,
+            r"workflow\.py\"?\s+orient\s+--project-dir\s+\.\s+--fetch",
+        )
+
+    def test_behind_reading_is_flagged_as_possibly_stale(self):
+        """A `behind` reading must be tied to 'treat the boards as stale',
+        not left as a bare number the reader can ignore."""
+        lowered = self.text.lower()
+        self.assertIn("freshness", lowered)
+        self.assertRegex(lowered, r"behind")
+        self.assertRegex(lowered, r"stale")
+
+    def test_unreachable_origin_is_reported_not_assumed_fresh(self):
+        self.assertRegex(self.text.lower(), r"could not reach origin")
+
+
 if __name__ == "__main__":
     unittest.main()

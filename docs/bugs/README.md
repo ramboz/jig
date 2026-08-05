@@ -34,6 +34,7 @@
 | 027 | slice-authoring-unanchored-template-path | low | standard | DONE | yes | skills/spec-workflow/test_spec_workflow_skill_surface.py::SliceAuthoringReferenceAnchorTests | claude/bug-027-slice-template-anchor |  |  |
 | 028 | scaffold-gitignore-runtime-state | medium | standard | DONE | yes | skills/scaffold-init/test_scaffold.py::Bug028RuntimeStateGitignoreTests::test_fresh_scaffold_ignores_runtime_state_paths | claude/bug-028-gitignore-runtime-state |  |  |
 | 030 | usage-report-misses-agent-subagents | high | standard | DONE | yes | scripts/test_usage.py::Bug030UndercountDetectionTests::test_report_flags_undercounted_background_delegation | claude/pr-186-review-fix-1bc497 |  |  |
+| 031 | orient-skips-origin-freshness | medium | standard | DONE | yes | skills/spec-workflow/test_workflow.py::OrientOriginFreshnessTests::test_fetch_reports_commits_behind_origin | claude/jig-orient-origin-check-1ccf06 |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 
