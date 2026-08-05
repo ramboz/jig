@@ -15,8 +15,17 @@ routing. One fixture per acceptance criterion:
   - AC #4: cross-references name the real skill — spec-workflow's bookend
     no longer points at the non-existent debug-workflow, and the project
     CLAUDE.md helper roster lists bug-fix (bug.py).
+
+Slice 104-01 (design-fidelity triage disambiguation, ADR-0049) adds
+`DesignFidelityTriageTests` — the gnarly "design-gap" tier is disambiguated
+into malfunction (bug) vs. fidelity gap (spec spine), with both routing
+branches, the ambiguous-case tie-breaker, and the fidelity-vs-refinement
+test present and self-consistent across the whole surface — plus
+`BugPyUnchangedTests`, which guards that this stays prose/judgment routing
+(no new tier token in bug.py).
 """
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -28,6 +37,7 @@ import verify_install  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL_MD = REPO_ROOT / "skills" / "bug-fix" / "SKILL.md"
+BUG_PY = REPO_ROOT / "skills" / "bug-fix" / "bug.py"
 
 
 class BugFixSkillContentTests(unittest.TestCase):
@@ -146,6 +156,104 @@ class CrossReferenceTests(unittest.TestCase):
     def test_claude_md_helper_roster(self):
         text = (REPO_ROOT / "CLAUDE.md").read_text()
         self.assertIn("`bug-fix` (`bug.py`)", text)
+
+
+class DesignFidelityTriageTests(unittest.TestCase):
+    """Slice 104-01 — design-gap tier disambiguation + triage rule
+    (ADR-0049). One fixture per acceptance criterion."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SKILL_MD.read_text()
+        # Normalize whitespace (incl. markdown line-wraps) so a multi-word
+        # phrase assertion isn't brittle to where prose happens to wrap.
+        cls.lower = re.sub(r"\s+", " ", cls.text.lower())
+
+    def test_malfunction_vs_fidelity_distinction_present(self):
+        # AC1: the gnarly-tier "design-gap" entry must name both the
+        # malfunction case and the pure visual fidelity-gap case, and their
+        # different routes.
+        self.assertIn("malfunction", self.lower)
+        self.assertIn("fidelity gap", self.lower)
+        self.assertIn("spec spine", self.lower)
+
+    def test_routing_branches_present(self):
+        # AC2: both routing branches so a mockup-first rebuild is not
+        # dead-ended — originating spec exists vs. no originating spec.
+        self.assertIn("originating spec", self.lower)
+        self.assertIn("no originating spec", self.lower)
+        self.assertIn("new spec", self.lower)
+
+    def test_malfunction_test_stated(self):
+        # AC2: the canonical triage test in prose.
+        self.assertIn("only when the ui", self.lower)
+        self.assertIn("malfunctions", self.lower)
+
+    def test_ambiguous_case_tie_breaker_present(self):
+        # AC3: ADR-0049 §2's tie-breaker for the ambiguous-but-functional
+        # case (behaves correctly, only looks off) defaults to the spine.
+        self.assertIn("ambiguous", self.lower)
+        self.assertIn("behaves correctly", self.lower)
+
+    def test_fidelity_vs_refinement_target_change_test_present(self):
+        # AC3: ADR-0049 §3's operative test — does the visual target change?
+        self.assertIn("target", self.lower)
+        self.assertIn("refinement", self.lower)
+        self.assertIn("carry", self.lower)
+
+    def test_pointers_to_spec_workflow_and_adr(self):
+        # AC2: the triage SECTION (not just the file) names spec-workflow and
+        # links ADR-0049 — scoped so the assertion can't be satisfied by the
+        # word "spec-workflow" appearing elsewhere in the SKILL. Anchor on the
+        # `###` heading (not the earlier description mention of the section).
+        self.assertIn("### design-fidelity triage", self.lower)
+        section = self.lower.split("### design-fidelity triage", 1)[-1][:2500]
+        self.assertIn("spec-workflow", section)
+        self.assertIn(
+            "adr-0049-design-fidelity-routing-to-originating-spec.md", section
+        )
+
+    def test_no_undifferentiated_design_gap_surface(self):
+        # AC5: self-consistency across the WHOLE bug-fix surface — after the
+        # disambiguation, no read-surface may still carry the undifferentiated
+        # "design-gap" term that routes a pure visual fidelity gap into
+        # bug-fix. (The de-escalation bullet was a second surface beyond the
+        # tier table; this guards against that whole class of miss.)
+        self.assertNotIn("design-gap", self.lower)
+
+    def test_description_boundary_names_fidelity_as_spec_shaped(self):
+        # AC5: self-consistency — the description's "Do not use for
+        # spec-shaped work" boundary agrees with the new triage text.
+        self.assertIn("do not use for spec-shaped work", self.lower)
+        self.assertIn("design-fidelity", self.lower)
+
+
+class BugPyUnchangedTests(unittest.TestCase):
+    """AC4 — the routing is prose/judgment only: no new tier token,
+    classifier branch, or CLI behaviour added to bug.py."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = BUG_PY.read_text()
+        cls.lower = cls.text.lower()
+
+    def test_valid_tiers_unchanged(self):
+        sys.path.insert(0, str((REPO_ROOT / "skills" / "bug-fix")))
+        try:
+            import bug  # noqa: E402
+
+            self.assertEqual(bug.VALID_TIERS, ("trivial", "standard", "gnarly"))
+        finally:
+            if str((REPO_ROOT / "skills" / "bug-fix")) in sys.path:
+                sys.path.remove(str((REPO_ROOT / "skills" / "bug-fix")))
+
+    def test_no_new_design_fidelity_tier_token(self):
+        for token in ("design-gap", "fidelity", "mockup", "design-fidelity"):
+            self.assertNotIn(
+                token,
+                self.lower,
+                f"bug.py must not gain a new design/fidelity tier token: {token!r}",
+            )
 
 
 if __name__ == "__main__":

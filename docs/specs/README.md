@@ -314,7 +314,8 @@
 | [101-orient-sees-work-in-flight](101-orient-sees-work-in-flight/spec.md) | 101-01 — orientation reports work in flight | **DONE** |  |
 | [102-amendment-authorization-guardrail](102-amendment-authorization-guardrail/spec.md) | 102-01 — surface-and-stop-authorization-rule | **DONE** | Issue #125 items 1&2. Surface-and-stop authorization rule in spec-workflow's closed-spec-drift checklist step (amending a closed record needs explicit owner approval; behaviour-approval ≠ record authority; read the whole criteria block) + `analyze` "surfaced, never auto-resolved / reports drift and hands off" output contract. Sibling of spec 097 (faithful recording). Item 3 (hard `PreToolUse`/semantic gate on `docs/decisions/**`) deferred → refinement-todo (trigger: recurrently hits ADRs). Advisory rule, ADR-0011 trust boundary. Host mirrors regenerated. |
 | [103-session-git-freshness](103-session-git-freshness/spec.md) | 103-01 — SessionStart git-freshness nudge | **DONE** |  |
-| [104-design-fidelity-routing](104-design-fidelity-routing/spec.md) | 104-01 — tbd | DRAFT |  |
+| [104-design-fidelity-routing](104-design-fidelity-routing/spec.md) | 104-01 — triage-disambiguation | **DONE** |  |
+| [104-design-fidelity-routing](104-design-fidelity-routing/spec.md) | 104-02 — authoring-nudge | **DONE** |  |
 | [105-durable-failure-quarantine](105-durable-failure-quarantine/spec.md) | 105-01 — quarantine state, attempts counter, and attest-only ingest | DRAFT |  |
 | [106-autonomy-governance-plane](106-autonomy-governance-plane/spec.md) | 106-01 — scaffold the protected plane and the identity-separation gate | DRAFT |  |
 

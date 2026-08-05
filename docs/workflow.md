@@ -49,6 +49,13 @@ different shape of work, plus the no-ceremony floor:
 - **Trivial work** — a one-liner with no decision and no design — skips both
   workflows: `tdd-loop` + commit.
 
+A **pure visual design-fidelity gap** — the screen works but hasn't reached its
+agreed mockup — is **spec-shaped, not a bug** ([ADR-0049](decisions/adr-0049-design-fidelity-routing-to-originating-spec.md)):
+it routes to the spec spine (the originating spec when one exists, a new spec
+with the mockup as design-value ACs when it doesn't), never `jig:bug-fix`. A
+design issue is bug-shaped only when the UI *malfunctions*. See bug-fix's
+"Design-fidelity triage" for the full test.
+
 Each shape has a first-class home: bug-shaped work is not routed to a skill
 that doesn't exist, and spec-shaped work is not dressed up as a bug. Both
 lifecycles are mapped below; their operational contracts — every command,

@@ -9,8 +9,10 @@ description: >
   fixing, or investigate this failure. Two modes: `diagnose` stops at
   ROOT_CAUSED; `diagnose_and_fix` runs through DONE. Uses a durable bug record,
   multiple hypotheses, a fresh-main recheck, and a witnessed red→green test.
-  Do not use for spec-shaped work (use `spec-workflow`) or trivial one-liners
-  (use `tdd-loop`).
+  Do not use for spec-shaped work (use `spec-workflow`) — including a pure
+  visual design-fidelity gap against an agreed mockup, which is spec-shaped, not
+  a bug (see "Design-fidelity triage" below) — or trivial one-liners (use
+  `tdd-loop`).
 user-invocable: true
 ---
 
@@ -68,10 +70,40 @@ workflow that **refuses** to build ceremony for a one-liner.
 |---|---|
 | **trivial** (typo, one-liner, mechanical) | `triage --tier trivial` **deletes the record** and tells you to write the failing test with `tdd-loop`, fix, and commit. The workflow bows out. |
 | **standard** | Single-file record + diagnose gate + red→green teeth + bug-review + craft. ≥2 hypotheses advisory. |
-| **gnarly** (cross-layer, security, regression that didn't stick, design-gap) | Full rigor: ≥2 hypotheses **mandatory**, keeps the `VERIFIED` step, conditional security pass, `new --push` reserves the number on `origin/main`. May escalate to a spec. |
+| **gnarly** (cross-layer, security, regression that didn't stick, design **malfunction** — *not* a pure visual fidelity gap, which is spec-shaped; see "Design-fidelity triage") | Full rigor: ≥2 hypotheses **mandatory**, keeps the `VERIFIED` step, conditional security pass, `new --push` reserves the number on `origin/main`. May escalate to a spec. |
 
 When in doubt about whether a bug is trivial, ask: would a regression test for
 it be worth keeping? If yes, it is at least standard.
+
+### Design-fidelity triage — malfunction vs. fidelity gap ([ADR-0049](../../docs/decisions/adr-0049-design-fidelity-routing-to-originating-spec.md))
+
+A design complaint is `bug-fix` **only when the UI malfunctions**: a control
+that looks active but isn't, or a layout that overlaps so content is
+unreadable. A pure visual gap against an agreed mockup — the screen works, it
+just hasn't reached the agreed look — is **fidelity work on the spec spine**,
+not `bug-fix`. Route it:
+
+- **An originating spec exists** (the gap surfaced under a spec whose slice
+  built the screen) → continue that slice if still open, or open a follow-up
+  slice **under the same spec**, carrying the mockup forward as design-value ACs.
+- **No originating spec exists** (a mockup-first / cross-platform rebuild that
+  never entered spec-workflow) → open a **new spec** via `spec-workflow`'s
+  greenfield path, with the mockup as design-value ACs. A mockup-first rebuild is
+  never dead-ended into `bug-fix` for lack of an owning spec.
+
+**Ambiguous-case tie-breaker:** an issue that "looks broken, but maybe just
+mis-styled" (a control that mis-signals its state, or overlap that only *might*
+block interaction) is decided by a quick behavioral check — does it actually
+*do* the wrong thing? An ambiguous-but-functional gap (it behaves correctly,
+only looks off) defaults to the **spine**, not `bug-fix`; reserve `bug-fix` for
+a confirmed behavioral malfunction.
+
+**Fidelity vs. refinement — does the visual target change?** If the mockup is
+still the agreed target and the build simply hasn't reached it yet, that is
+**fidelity**: carry the *existing* mockup forward as the AC, don't re-decide the
+target. If we now want a *different* look than the mockup, that is a genuine
+**refinement** (a new target), authored as such — not smuggled in as mere
+unfinished work.
 
 ## Lifecycle
 
@@ -291,9 +323,11 @@ The single most important judgment in this workflow is **down-shifting**:
 - A standard bug does **not** need the `VERIFIED` step or a security pass —
   `REVIEWED → DONE` is the path.
 - Reach for gnarly only for genuinely cross-layer, security-surfaced,
-  regression-that-didn't-stick, or design-gap bugs. If a "gnarly" bug is
-  really a missing behaviour, **escalate** — don't grind it through the bug
-  gates.
+  regression-that-didn't-stick, or design-**malfunction** bugs (a control that
+  looks active but isn't; overlap that makes content unreadable — *not* a pure
+  visual fidelity gap, which is spec-shaped; see "Design-fidelity triage"). If a
+  "gnarly" bug is really a missing behaviour, **escalate** — don't grind it
+  through the bug gates.
 
 ## Routing — bug-shaped vs spec-shaped
 
