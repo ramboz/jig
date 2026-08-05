@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: [adr-0015]
-last_verified: 2026-07-31
+last_verified: 2026-08-05
 frame_review: true
 ---
 
@@ -9,7 +9,7 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-07-31)
+Accepted (2026-08-05)
 
 Drafted under [spec 107](../specs/107-reservation-sees-in-flight-work/spec.md),
 from [issue #147](https://github.com/ramboz/jig/issues/147). The mechanism is

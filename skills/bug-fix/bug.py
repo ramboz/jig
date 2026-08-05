@@ -322,11 +322,14 @@ def reserve_bug_on_origin(project_dir: Path, slug: str,
     """Reserve a bug number on origin/main from an ephemeral detached
     worktree. The caller's worktree and branch tip are not touched."""
     slug = _slugify(slug)
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Origin-wide fetch (not just main) so the in-flight-branch scan below
+    # runs `fetch=False` off fresh refs; a narrower `git fetch origin main`
+    # would leave in-flight branches stale (spec 107 / ADR-0053).
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         print(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            "proceeding with the local origin/main view",
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            "proceeding with the local origin view",
             file=sys.stderr,
         )
 
@@ -349,6 +352,7 @@ def reserve_bug_on_origin(project_dir: Path, slug: str,
         # origin/main view the detached worktree already resolved.
         scanned = reservation.scan_max_reserved_number(
             project_dir, "docs/bugs", reservation.BUG_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
         )
         number = max(_next_number(bugs_dir), scanned + 1)
         bug_name = f"{number:03d}-{slug}"

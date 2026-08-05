@@ -3650,12 +3650,16 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
     branch, and branch tip are never touched. Race + protection handling
     mirror the on-main 003-03 flow; race recovery is trivial here (the
     stranded commit lives only in the worktree we remove in `finally`)."""
-    # Fresh origin/main so the number scan + commit parent are current.
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Fetch every origin ref (not just main) so the number scan below sees
+    # in-flight branch claims and the commit parent is current. This single
+    # fetch is why the scan runs `fetch=False` — a narrower `git fetch origin
+    # main` would refresh origin/main but leave in-flight branches stale,
+    # reintroducing the blindness spec 107 / ADR-0053 exists to fix.
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         sys.stderr.write(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            f"proceeding with the local origin/main view\n"
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            f"proceeding with the local origin view\n"
         )
 
     wt = Path(tempfile.mkdtemp(prefix="jig-reserve-spec-"))
@@ -3681,6 +3685,7 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
         next_n = _next_spec_number(wt / "docs" / "specs")
         scanned = reservation.scan_max_reserved_number(
             project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
         )
         next_n = max(next_n, scanned + 1)
         num_str = f"{next_n:03d}"
@@ -3865,12 +3870,15 @@ def reserve_spec(slug: str, project_dir: Path,
     # The branch check already happened at the dispatch above.
     _refuse_if_dirty(project_dir)
 
-    # Fetch origin/main first; both the next-number scan and the
-    # divergence preflight read from it (spec 037-02 AC #1 + AC #4 +
-    # AC #8). Skipped for --no-push (no remote contract).
+    # Fetch every origin ref first; the divergence preflight and the
+    # next-number scan both read from origin (spec 037-02 AC #1 + AC #4 +
+    # AC #8). Origin-wide (not just main) so the in-flight-branch scan
+    # below can run `fetch=False` off these refs — a narrower `git fetch
+    # origin main` would leave in-flight branches stale and reintroduce
+    # the blindness spec 107 / ADR-0053 fixes. Skipped for --no-push.
     if not no_push:
         rc, _out, err = _run(
-            ["git", "fetch", "origin", "main"], cwd=project_dir,
+            ["git", "fetch", "origin"], cwd=project_dir,
         )
         # A failed fetch isn't fatal — we still proceed with the local
         # view (spec 037-02 AC #6 preserves this verbatim). The push
@@ -3878,7 +3886,7 @@ def reserve_spec(slug: str, project_dir: Path,
         # push classifier (003-03 AC #6 / 037-02 AC #7).
         if rc != 0:
             sys.stderr.write(
-                f"warning: `git fetch origin main` failed: "
+                f"warning: `git fetch origin` failed: "
                 f"{err.strip()}; proceeding with local view\n"
             )
         # Spec 037-02 AC #4: refuse if local main is strictly behind
@@ -3898,6 +3906,7 @@ def reserve_spec(slug: str, project_dir: Path,
     if not no_push:
         scanned = reservation.scan_max_reserved_number(
             project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
         )
         next_n = max(next_n, scanned + 1)
     num_str = f"{next_n:03d}"

@@ -499,11 +499,14 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
     Claims the next free ADR number on origin/main by building the
     reservation commit in an ephemeral detached worktree checked out at
     origin/main, then pushing `HEAD:main`. Mirrors workflow.py."""
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Origin-wide fetch (not just main) so the in-flight-branch scan below
+    # runs `fetch=False` off fresh refs; a narrower `git fetch origin main`
+    # would leave in-flight branches stale (spec 107 / ADR-0053).
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         sys.stderr.write(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            f"proceeding with the local origin/main view\n"
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            f"proceeding with the local origin view\n"
         )
 
     wt = Path(tempfile.mkdtemp(prefix="jig-reserve-adr-"))
@@ -531,6 +534,7 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
         # is push-only (off-main --no-push routes elsewhere).
         scanned = reservation.scan_max_reserved_number(
             project_dir, "docs/decisions", reservation.ADR_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
         )
         next_n = max(next_n, scanned + 1)
         number = f"{next_n:04d}"
@@ -729,18 +733,21 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     # The branch check already happened at the dispatch above.
     _refuse_if_dirty(project_dir)
 
-    # Fetch origin/main so the next-number scan + slug-collision check
-    # reflect the freshest state. Skipped for --no-push.
+    # Fetch every origin ref so the next-number scan + slug-collision check
+    # reflect the freshest state. Origin-wide (not just main) so the
+    # in-flight-branch scan below runs `fetch=False` off these refs; a
+    # narrower `git fetch origin main` would leave in-flight branches stale
+    # (spec 107 / ADR-0053). Skipped for --no-push.
     if not no_push:
         rc, _out, err = _run(
-            ["git", "fetch", "origin", "main"], cwd=project_dir,
+            ["git", "fetch", "origin"], cwd=project_dir,
         )
         # A failed fetch isn't fatal — we proceed with the local view.
         # The push step catches any out-of-date condition via the
         # race-on-push classifier.
         if rc != 0:
             sys.stderr.write(
-                f"warning: `git fetch origin main` failed: "
+                f"warning: `git fetch origin` failed: "
                 f"{err.strip()}; proceeding with local view\n"
             )
 
@@ -760,6 +767,7 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     if not no_push:
         scanned = reservation.scan_max_reserved_number(
             project_dir, "docs/decisions", reservation.ADR_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
         )
         next_n = max(next_n, scanned + 1)
     number = f"{next_n:04d}"

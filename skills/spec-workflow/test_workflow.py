@@ -5278,10 +5278,12 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
     # ----------- AC #6: fetch failure preserves warn-and-proceed ------
 
     def test_fetch_failure_preserves_warn_and_proceed(self):
-        """AC #6 — `git fetch origin main` fails → existing warning to
+        """AC #6 — `git fetch origin` fails → existing warning to
         stderr (workflow.py:1278-1282) is emitted verbatim; the new
         diverged-main check is skipped (no origin/main to compare); the
-        scan falls back to working-tree per AC #3."""
+        scan falls back to working-tree per AC #3. The reservation path
+        fetches origin-wide (spec 107 / ADR-0053) so the in-flight scan
+        can reuse the refs without a second fetch."""
         import io
         from unittest.mock import patch
         self._mkspec("001-existing")
@@ -5308,7 +5310,7 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
         # AC #6: existing warn-and-proceed text preserved
         stderr_text = captured.getvalue()
         self.assertIn("warning:", stderr_text)
-        self.assertIn("git fetch origin main", stderr_text)
+        self.assertIn("git fetch origin", stderr_text)
         self.assertIn("proceeding with local view", stderr_text)
         # AC #6: scan fell back to working-tree (max=004 → 005)
         spec_dir = self.target / "docs" / "specs" / "005-warnslot"
