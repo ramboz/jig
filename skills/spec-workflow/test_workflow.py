@@ -18,6 +18,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from skills._common.test_reservation import (  # noqa: E402
+    CAPTURED_GH006,
+    CAPTURED_GH013,
+)
+
 WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
 
@@ -2440,7 +2445,7 @@ class ReserveSpecTests(unittest.TestCase):
         # reserve/ branch falls through to the recorder's rc=0 default.
         rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
                  stdout="https://github.com/user/repo/pull/7\n")
         import shutil as _shutil
@@ -2571,7 +2576,7 @@ class ReserveSpecTests(unittest.TestCase):
         rec.stub(_matches("git", "commit"), returncode=0)
         # push origin main FAILS with protection signal
         rec.stub(_matches("git", "push", "origin", "main"),
-                 returncode=1, stderr="remote: error: GH006: Protected branch update failed.\n")
+                 returncode=1, stderr=CAPTURED_GH006)
         # Fallback sequence
         rec.stub(_matches("git", "branch"), returncode=0)
         rec.stub(_matches("git", "reset", "--hard", "origin/main"),
@@ -5273,10 +5278,12 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
     # ----------- AC #6: fetch failure preserves warn-and-proceed ------
 
     def test_fetch_failure_preserves_warn_and_proceed(self):
-        """AC #6 — `git fetch origin main` fails → existing warning to
+        """AC #6 — `git fetch origin` fails → existing warning to
         stderr (workflow.py:1278-1282) is emitted verbatim; the new
         diverged-main check is skipped (no origin/main to compare); the
-        scan falls back to working-tree per AC #3."""
+        scan falls back to working-tree per AC #3. The reservation path
+        fetches origin-wide (spec 107 / ADR-0053) so the in-flight scan
+        can reuse the refs without a second fetch."""
         import io
         from unittest.mock import patch
         self._mkspec("001-existing")
@@ -5303,7 +5310,7 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
         # AC #6: existing warn-and-proceed text preserved
         stderr_text = captured.getvalue()
         self.assertIn("warning:", stderr_text)
-        self.assertIn("git fetch origin main", stderr_text)
+        self.assertIn("git fetch origin", stderr_text)
         self.assertIn("proceeding with local view", stderr_text)
         # AC #6: scan fell back to working-tree (max=004 → 005)
         spec_dir = self.target / "docs" / "specs" / "005-warnslot"
@@ -5358,15 +5365,19 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
             len(reset_calls), 1,
             f"race-recovery must reset HEAD~1; got: {fake._calls}",
         )
-        # AC #7: classifier helper still importable + behaves
+        # AC #7: classifier helper still importable + behaves, against the
+        # captured multi-line refusals (spec 107 / ADR-0053).
         self.assertEqual(
             _workflow._classify_push_failure(
                 "! [rejected] main -> main (non-fast-forward)"),
             "race",
         )
         self.assertEqual(
-            _workflow._classify_push_failure(
-                "remote: error: GH006: Protected branch update failed."),
+            _workflow._classify_push_failure(CAPTURED_GH006),
+            "protection",
+        )
+        self.assertEqual(
+            _workflow._classify_push_failure(CAPTURED_GH013),
             "protection",
         )
 
@@ -5704,7 +5715,7 @@ class SliceClaimTests(unittest.TestCase):
         origin = self.slice.read_text()
         rec = self._push_recorder(
             origin, push_rc=1,
-            push_stderr="remote: error: GH006: Protected branch update failed.\n")
+            push_stderr=CAPTURED_GH006)
         rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
                  returncode=0, stdout="git@github.com:user/repo.git\n")
         rec.stub(_matches("gh", "pr", "create"), returncode=0,

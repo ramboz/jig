@@ -16,6 +16,13 @@ from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from skills._common.test_reservation import (  # noqa: E402
+    CAPTURED_GH006,
+    CAPTURED_GH013,
+)
+
 ADR_PY = REPO_ROOT / "skills" / "adr-workflow" / "adr.py"
 SKILL_MD = REPO_ROOT / "skills" / "adr-workflow" / "SKILL.md"
 TEMPLATE = (
@@ -2324,6 +2331,19 @@ class ReserveAdrTests(unittest.TestCase):
         self.assertNotIn("git checkout main", flat)
         self.assertNotIn("git reset --hard", flat)
 
+    def test_classifier_reads_captured_refusals(self):
+        # spec 107 / ADR-0053 — adr.py's re-exported classifier reads the
+        # CAPTURED multi-line refusals correctly: protection (incl. the
+        # rulesets GH013 case) over the bare `rejected` the old ordering
+        # matched first.
+        self.assertEqual(
+            _adr_mod._classify_push_failure(CAPTURED_GH006), "protection")
+        self.assertEqual(
+            _adr_mod._classify_push_failure(CAPTURED_GH013), "protection")
+        self.assertEqual(
+            _adr_mod._classify_push_failure(
+                "! [rejected] HEAD -> main (fetch first)"), "race")
+
     # Worktree path race recovery: teardown only, no `git reset --hard HEAD~1`.
     def test_new_off_main_race_cleans_up_worktree(self):
         rec = _SubprocessRecorder()
@@ -2362,7 +2382,7 @@ class ReserveAdrTests(unittest.TestCase):
         # reserve/ branch falls through to the recorder's rc=0 default.
         rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
                  stdout="https://github.com/user/repo/pull/7\n")
         import shutil as _shutil
@@ -2531,7 +2551,7 @@ class ReserveAdrTests(unittest.TestCase):
         rec.stub(_matches("git", "commit"), returncode=0)
         rec.stub(_matches("git", "push", "origin", "main"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("git", "branch"), returncode=0)
         rec.stub(_matches("git", "reset", "--hard", "origin/main"),
                  returncode=0)
@@ -3071,6 +3091,39 @@ class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
         self.assertEqual(feat_head_before, feat_head_after)
         self.assertFalse(
             (self.feat / "docs/decisions/adr-0003-gamma.md").exists())
+
+    def test_reserve_skips_number_claimed_on_in_flight_branch(self):
+        # AC6 (spec 107 / ADR-0053) — the #161/#162 shape. origin/main holds
+        # adr-0001/0002; a FIRST reservation is in flight on a side branch
+        # carrying adr-0003 (never merged). The SECOND reservation must skip
+        # 0003 and land 0004 — not re-allocate 0003 the way the origin/main-
+        # only scan did. Real git, no gh, no mocks.
+        dec = "docs/decisions/adr-0003-frontmatter.md"
+        # Build the in-flight reservation branch off origin/main and push it.
+        self._git("worktree", "add", "--detach",
+                  str(self.tmp / "res"), "origin/main", cwd=self.work)
+        res = self.tmp / "res"
+        (res / "docs" / "decisions").mkdir(parents=True, exist_ok=True)
+        (res / dec).write_text("# adr-0003\n")
+        self._git("add", "-A", cwd=res)
+        self._git("commit", "-m", "reserve adr-0003", cwd=res)
+        push = self._git("push", "origin",
+                         "HEAD:refs/heads/reserve/adr-0003-frontmatter",
+                         cwd=res)
+        self.assertEqual(push.returncode, 0, f"reserve push failed: {push.stderr}")
+        self._git("worktree", "remove", "--force", str(res), cwd=self.work)
+
+        # The next real reservation, from the feature worktree, must see 0003
+        # in flight and pick 0004.
+        code = _adr_mod.reserve_adr(
+            "derived", project_dir=self.feat, title="", no_push=False,
+            pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        ls = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.origin)
+        self.assertIn("docs/decisions/adr-0004-derived.md", ls.stdout)
+        self.assertNotIn("adr-0003-derived", ls.stdout)
 
     def test_reserve_from_linked_worktree_with_relative_origin_url(self):
         # B1 regression lock: with a RELATIVE origin URL, the old code (push

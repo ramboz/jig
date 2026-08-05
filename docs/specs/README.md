@@ -318,6 +318,8 @@
 | [104-design-fidelity-routing](104-design-fidelity-routing/spec.md) | 104-02 — authoring-nudge | **DONE** |  |
 | [105-durable-failure-quarantine](105-durable-failure-quarantine/spec.md) | 105-01 — quarantine state, attempts counter, and attest-only ingest | DRAFT |  |
 | [106-autonomy-governance-plane](106-autonomy-governance-plane/spec.md) | 106-01 — scaffold the protected plane and the identity-separation gate | DRAFT |  |
+| [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-01 — protection refusals reach the pull-request fallback | IN_PROGRESS |  |
+| [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-02 — numbering counts every in-flight branch | IN_PROGRESS |  |
 
 ## Deferred slices
 

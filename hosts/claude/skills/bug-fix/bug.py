@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import project_layout
+from _common import project_layout, reservation
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import (
@@ -84,18 +84,13 @@ _ORDERED_TRANSITIONS = {
     "VERIFIED": {"DONE", "DIAGNOSING"},
 }
 _DISABLE_VALUES = {"0", "false", "off", "no"}
-_PUSH_RACE_SIGNALS = (
-    "non-fast-forward",
-    "fetch first",
-    "stale info",
-    "rejected",
-)
-_PUSH_PROTECTION_SIGNALS = (
-    "protected branch",
-    "gh006",
-    "permission denied",
-    "pre-receive hook declined",
-)
+# Push-failure classification is shared across bug.py / adr.py / workflow.py
+# (spec 107 / ADR-0053). The signal tuples and the classifier live once in
+# `_common/reservation.py`; the re-exports below keep the historical
+# module-level names for existing call sites and tests.
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_classify_push_failure = reservation.classify_push_failure
 
 
 class BugError(RuntimeError):
@@ -268,17 +263,6 @@ def _record_text(number: int, slug: str, claimed_by: str) -> str:
     return "\n".join(fields)
 
 
-def _classify_push_failure(stderr: str) -> str:
-    low = stderr.lower()
-    for sig in _PUSH_RACE_SIGNALS:
-        if sig in low:
-            return "race"
-    for sig in _PUSH_PROTECTION_SIGNALS:
-        if sig in low:
-            return "protection"
-    return "other"
-
-
 def _check_gh_and_remote(project_dir: Path) -> None:
     if shutil.which("gh") is None:
         raise BugError(
@@ -338,11 +322,14 @@ def reserve_bug_on_origin(project_dir: Path, slug: str,
     """Reserve a bug number on origin/main from an ephemeral detached
     worktree. The caller's worktree and branch tip are not touched."""
     slug = _slugify(slug)
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Origin-wide fetch (not just main) so the in-flight-branch scan below
+    # runs `fetch=False` off fresh refs; a narrower `git fetch origin main`
+    # would leave in-flight branches stale (spec 107 / ADR-0053).
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         print(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            "proceeding with the local origin/main view",
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            "proceeding with the local origin view",
             file=sys.stderr,
         )
 
@@ -359,7 +346,15 @@ def reserve_bug_on_origin(project_dir: Path, slug: str,
             )
         bugs_dir = _bugs_dir(wt)
         bugs_dir.mkdir(parents=True, exist_ok=True)
-        number = _next_number(bugs_dir)
+        # Spec 107 / ADR-0053: the next number must account for claims sitting
+        # on any in-flight branch, not only files merged to origin/main. Scan
+        # every local + remote-tracking ref and never fall below the
+        # origin/main view the detached worktree already resolved.
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/bugs", reservation.BUG_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        number = max(_next_number(bugs_dir), scanned + 1)
         bug_name = f"{number:03d}-{slug}"
         path = bugs_dir / f"{bug_name}.md"
         if path.exists():
