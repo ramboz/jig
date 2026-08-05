@@ -3181,5 +3181,120 @@ class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
         self.assertIn("unrelated.txt", staged)
 
 
+class CheckIndexTests(unittest.TestCase):
+    """adr.py check-index — read-only audit of the ADR README's Index.
+
+    Same shape as the bug and spec boards: one generated file that every
+    parallel branch appends to at the same position, over a numbered record
+    space where branches routinely pick the same number (issue #147). Two ADRs
+    claiming one number render as two bullets without complaint, and a
+    staleness check can't see it either — both bullets are faithfully derived.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-check-index-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha",
+                         "Alpha", context="Alpha context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.readme = self.adrs_dir / "README.md"
+        self.adr = _import_adr_module()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_clean_index_reports_no_problems(self):
+        self.assertEqual(self.adr.check_index(self.adrs_dir), [])
+
+    def test_detects_an_index_that_was_not_regenerated(self):
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta",
+                         "Beta", context="Beta context.")
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("stale index", problems[0])
+        self.assertIn("adr.py index", problems[0])
+
+    def test_detects_two_adrs_claiming_one_number(self):
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta",
+                         "Beta", context="Beta context.")
+        write_sample_adr(self.adrs_dir / "adr-0002-gamma.md", "0002", "gamma",
+                         "Gamma", context="Gamma context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertTrue(
+            any("duplicate ADR number 0002" in p for p in problems), problems
+        )
+
+    def test_duplicate_message_names_both_files(self):
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta",
+                         "Beta", context="Beta context.")
+        write_sample_adr(self.adrs_dir / "adr-0002-gamma.md", "0002", "gamma",
+                         "Gamma", context="Gamma context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        dupe = next(p for p in self.adr.check_index(self.adrs_dir)
+                    if "duplicate ADR number" in p)
+        self.assertIn("adr-0002-beta.md", dupe)
+        self.assertIn("adr-0002-gamma.md", dupe)
+
+    def test_a_regenerated_index_passes_its_own_check(self):
+        """The check compares against what `index` would write, so
+        regen-then-check must always be clean. If this fails, the checker and
+        the generator have drifted and the check measures the wrong thing."""
+        write_sample_adr(self.adrs_dir / "adr-0003-delta.md", "0003", "delta",
+                         "Delta", context="Delta context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.assertEqual(self.adr.check_index(self.adrs_dir), [])
+
+    def test_hand_written_summary_reads_as_drift(self):
+        """The reason this landed: on `main` one row carried a hand-written
+        summary the generator does not reproduce, so the index had quietly
+        stopped being derived. Julien's ruling was to fix the source ADR —
+        which requires the check to notice in the first place."""
+        text = self.readme.read_text().replace(
+            "Alpha context.", "a much better hand-written summary."
+        )
+        self.readme.write_text(text)
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertTrue(any("stale index" in p for p in problems), problems)
+
+    def test_missing_readme_is_reported_not_raised(self):
+        self.readme.unlink()
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("missing", problems[0])
+
+    def test_prose_outside_the_index_section_is_not_drift(self):
+        """`index` only rewrites the `## Index` section. Hand-written prose
+        elsewhere in the README is legitimate and must not be flagged."""
+        text = self.readme.read_text() + "\n## How we use these\n\nHand-written.\n"
+        self.readme.write_text(text)
+        self.assertEqual(self.adr.check_index(self.adrs_dir), [])
+
+    def test_is_read_only(self):
+        """CI runs this against a checkout; a check that repairs what it
+        measures can't be trusted to report it."""
+        write_sample_adr(self.adrs_dir / "adr-0004-eps.md", "0004", "eps",
+                         "Eps", context="Eps context.")
+        before = self.readme.read_text()
+        self.assertNotEqual(self.adr.check_index(self.adrs_dir), [])
+        self.assertEqual(self.readme.read_text(), before)
+
+    def test_cli_exits_zero_and_says_clean(self):
+        result = run_adr("check-index", str(self.adrs_dir),
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("clean", result.stdout)
+
+    def test_cli_exits_nonzero_and_names_the_problem_on_stderr(self):
+        write_sample_adr(self.adrs_dir / "adr-0005-zeta.md", "0005", "zeta",
+                         "Zeta", context="Zeta context.")
+        result = run_adr("check-index", str(self.adrs_dir),
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("stale index", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
