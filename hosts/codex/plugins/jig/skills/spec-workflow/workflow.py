@@ -30,6 +30,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import (
+    derived_docs,
     project_layout,
     reservation,
     subtree,
@@ -2295,6 +2296,85 @@ def render_abandoned_table(rows: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _compose_board(project_dir: Path, existing: str, rows: list | None = None) -> str:
+    """Render the board text from the spec records on disk, carrying the
+    curated Notes column and the preamble over from `existing`.
+
+    Pure — no writes, no `status:` rollup. Shared by `regenerate_status_board`
+    (which writes the result) and `check_board` (which compares against it),
+    so the check can never drift from what regeneration would produce.
+    """
+    if rows is None:
+        rows = collect_slices(project_dir)
+    notes_map = parse_existing_notes(existing)
+    body = (
+        render_status_table(rows, notes_map)
+        + render_deferred_table(rows)
+        + render_abandoned_table(rows)
+    )
+    m = re.search(r"(?m)^\|\s*Spec\b", existing)
+    if m:
+        preamble = existing[: m.start()]
+    else:
+        preamble = existing
+        if not preamble.endswith("\n"):
+            preamble += "\n"
+    return preamble + body
+
+
+def _duplicate_spec_ids(project_dir: Path) -> dict:
+    """Map spec number -> sorted directory names, for numbers claimed by more
+    than one spec.
+
+    `render_status_table` renders two specs sharing a number as two groups of
+    rows without complaint, and a drift check can't see the problem either —
+    both groups are faithfully derived. Today the only thing that surfaces it
+    is the merge conflict on the board, which is exactly what we want to stop
+    resolving by hand (issue #149). So it needs its own detector.
+    """
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return {}
+    pairs = []
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        spec_dir = spec_md.parent
+        spec_id = derived_docs.id_from_numeric_prefix(spec_dir)
+        if spec_id is not None:
+            pairs.append((spec_id, spec_dir.name))
+    return derived_docs.duplicate_ids(pairs)
+
+
+def check_board(project_dir: Path) -> list:
+    """Read-only audit of `docs/specs/README.md`. Returns a list of
+    human-readable problems — empty means clean.
+
+    Never writes. CI runs this against a checkout, and a check that repairs
+    what it measures can't be trusted to report it. Note this rules out
+    calling `regenerate_status_board` and diffing: that helper also writes a
+    `status:` rollup into every spec.md it walks.
+    """
+    problems = []
+    for spec_id, names in _duplicate_spec_ids(project_dir).items():
+        problems.append(
+            f"duplicate spec id {spec_id}: {', '.join(names)} — renumber one "
+            "before landing; parallel branches both allocated it"
+        )
+    board_path = project_layout.specs_dir(project_dir) / "README.md"
+    if not board_path.is_file():
+        problems.append(
+            f"missing board: {board_path} — run `workflow.py status-board "
+            "<project-dir>` to create it"
+        )
+        return problems
+    existing = board_path.read_text()
+    if existing != _compose_board(project_dir, existing):
+        problems.append(
+            f"stale board: {board_path} does not match the spec records — run "
+            "`workflow.py status-board <project-dir>` and commit the result"
+        )
+    return problems
+
+
 def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     """Regenerate docs/specs/README.md table from spec.md files.
     Preserves preamble before the first `| Spec` line AND Notes column
@@ -2328,12 +2408,9 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     # mid-regen mutation by another writer. Skipped when `force=True`
     # since a forced overwrite intentionally bypasses the guard.
     pre_checksum = None if force else _checksum(board_path)
-    notes_map = parse_existing_notes(existing)
 
     rows = collect_slices(project_dir)
-    new_table = render_status_table(rows, notes_map)
-    deferred_section = render_deferred_table(rows)
-    abandoned_section = render_abandoned_table(rows)
+    new_content = _compose_board(project_dir, existing, rows)
 
     # Slice 030-01: roll up spec-level status to spec.md frontmatter for
     # every spec walked. Side-effect of regen — independent of whether
@@ -2345,15 +2422,6 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
         for spec_md in sorted(specs_dir.glob("*/spec.md")):
             _write_spec_rollup(spec_md)
 
-    m = re.search(r"(?m)^\|\s*Spec\b", existing)
-    if m:
-        preamble = existing[: m.start()]
-    else:
-        preamble = existing
-        if not preamble.endswith("\n"):
-            preamble += "\n"
-
-    new_content = preamble + new_table + deferred_section + abandoned_section
     if new_content == existing:
         return "status board already current; no changes"
     # Slice 028-03 AC #2: re-checksum right before the write. If the file
@@ -4642,6 +4710,13 @@ def _build_parser() -> argparse.ArgumentParser:
                          "if docs/specs/README.md changed mid-regen "
                          "(slice 028-03)")
 
+    pcb = sub.add_parser(
+        "check-board",
+        help="read-only: verify docs/specs/README.md matches the spec "
+             "records and that no spec number is claimed twice",
+    )
+    pcb.add_argument("project", help="project root directory")
+
     ps = sub.add_parser(
         "stale",
         help="list slices/ADRs whose last_verified is > N days old AND "
@@ -4807,6 +4882,13 @@ def main(argv: list) -> int:
         elif ns.command == "status-board":
             summary = regenerate_status_board(Path(ns.project), force=ns.force)
             print(summary)
+        elif ns.command == "check-board":
+            problems = check_board(Path(ns.project))
+            for problem in problems:
+                print(f"spec board: {problem}", file=sys.stderr)
+            if problems:
+                return 1
+            print("spec board: clean")
         elif ns.command == "stale":
             report = stale(Path(ns.project_dir), days=ns.days)
             sys.stdout.write(report)

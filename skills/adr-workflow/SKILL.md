@@ -39,6 +39,9 @@ exercise. Five deterministic operations:
   from the actual ADR files present. Idempotent. The index is a **pure
   function of the ADR files**; see [section 4](#4-regenerate-the-index) for
   what that means for hand-edits and for records it cannot summarize.
+- **`check-index`** — read-only audit of that index: exits non-zero if it no
+  longer matches the ADR files, or if two ADRs claim one number. Writes
+  nothing.
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
   `docs/refinement-todo.md` and append `**Resolved by:** [ADR-NNNN: ...](...)`.
 
@@ -267,6 +270,22 @@ invent decision prose to silence it — write the decision, or leave it.
 
 An authored trailing `…` is not truncation and is left alone: jig no longer
 emits one, so an ellipsis in a summary is the author's own writing.
+
+**Audit the index before landing.** `check-index` is a read-only companion to
+`index`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" \
+  check-index docs/decisions
+```
+
+Exits non-zero on either problem it can find. **Stale index** — an ADR changed
+and `index` wasn't re-run (or a summary was hand-edited). **Duplicate ADR
+number** — two ADRs claim one number, which is what parallel branches produce
+when the number was never reserved on the trunk. The index renders both bullets
+without complaint and a staleness check can't see it (both *are* faithfully
+derived), so it needs its own detector; the message names both files so you
+know which to renumber.
 
 ### 5. Resolve a deferred decision
 
