@@ -198,7 +198,25 @@ explanation is rarely the right one). Write the hypotheses as a Markdown list
 under `## Hypotheses` — any marker works (`-`, `*`, `+`, or `1.`) and the gate
 counts **top-level** items only, so indented `- Confirm:` / `- Falsify:`
 sub-bullets read as notes, not as extra hypotheses. Mark the leading one with
-`[x]`, an inline `(leading)` tag, or a `Leading:` line. Then:
+`[x]`, an inline `(leading)` tag, or a `Leading:` line.
+
+**Ground a `## Root cause` claim; enumerate a universal one
+([ADR-0052](../../docs/decisions/adr-0052-grounding-enumeration-for-universal-claims.md)).**
+A root-cause claim of *universal or negative* shape — "**nothing else** calls
+this", "**only** this path writes the column", "this is the **one** place the
+value is set" — is established by an **enumeration** (a search you can show
+returns the *complete* set: `grep` every caller / writer / call-site), **not**
+by a single citation of one example. One true example says nothing about the
+rest of the set, and a false "only/nothing" here sends the fix to the wrong
+place. To claim it, **state why the search is exhaustive** — what closes the set
+so nothing escapes. Many sets only *look* `grep`-bounded: a column written
+through an ORM, a string-built query, reflection, config-wiring, codegen, or an
+external consumer is invisible to `grep` (illustrative, not a checklist), so an
+empty result is **absence of evidence, not proof nothing writes it**. When you
+cannot show the search closes the set, weaken the claim or record it under
+`## Already tried` / the record's assumptions rather than asserting it as the
+root cause — the bug-review pass treats an empty search as *un*grounded until you
+have shown what closes the set. Then:
 
 ```bash
 python3 "${PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> DIAGNOSING
