@@ -1669,6 +1669,12 @@ _ORIENT_IN_FLIGHT_BASE_CANDIDATES = (
 # they get the same whitelist as a claim — at a cap that fits a real branch
 # name (`_sanitize_orient_claim`'s 30 would truncate most feature branches).
 _ORIENT_IN_FLIGHT_REF_MAX = 60
+# Bug 031. Seconds the *interactive* `/jig:orient` path (the `--fetch` flag)
+# may spend on one best-effort `git fetch` to refresh remote-tracking refs
+# before reporting staleness. Aligned with spec 103's git-freshness default.
+# This never runs in the 4 s SessionStart hook (which passes no `--fetch`),
+# so a network round-trip is affordable here; it is fail-soft regardless.
+_ORIENT_FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
 def _spec_num_from_dirname(spec_dir: str) -> tuple[int, str]:
@@ -1892,7 +1898,91 @@ def _in_flight_summary(project_dir: Path) -> str:
     )
 
 
-def orient(project_dir: Path) -> str:
+def _orient_fetch_origin(project_dir: Path) -> bool:
+    """Best-effort bounded `git fetch origin`; True iff it succeeded.
+
+    Bug 031. Never raises: git missing, offline, auth failure, or timeout all
+    return False. The caller uses the boolean to distinguish "in sync against
+    refs we actually refreshed" from "cannot vouch — the fetch failed", so a
+    stale local view is never silently reported as fresh.
+
+    `GIT_TERMINAL_PROMPT=0` disables git's interactive credential prompt: on an
+    auth-required origin the fetch fails fast (returns False) instead of the
+    timeout having to backstop a stalled prompt.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), "fetch", "--quiet", "origin"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_ORIENT_FRESHNESS_FETCH_TIMEOUT,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return result.returncode == 0
+
+
+def _freshness_summary(project_dir: Path) -> str:
+    """`2 commits behind origin/main`, `could not reach origin`, or "".
+
+    Bug 031. Orient builds its whole picture from local artifacts (boards,
+    slice STATUS, ADRs) that are only as current as the last fetch; a checkout
+    whose base has drifted behind trunk otherwise renders stale state as
+    current. This runs ONLY on the interactive `--fetch` path (the `/jig:orient`
+    skill), never the 4 s SessionStart hook, so a bounded network fetch is
+    affordable.
+
+    Fail-soft in orient's tradition — not a git repo, no `origin` remote, an
+    unresolvable trunk, or unexpected git output all return "" (silence). The
+    one case surfaced rather than silenced is a configured-but-unreachable
+    origin: reporting "not behind" against refs we failed to refresh is exactly
+    the false-fresh signal this bug is about.
+    """
+    # Local ref probing shares the same bounded budget as `_in_flight_summary`;
+    # resolved fresh *after* the fetch so the fetch's own timeout does not eat
+    # into it.
+    probe_deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=probe_deadline) != "true":
+        return ""
+    origin_url = _in_flight_git(
+        project_dir, "config", "--get", "remote.origin.url",
+        deadline=probe_deadline)
+    if not origin_url:
+        # Local-only repo: nothing to be stale against.
+        return ""
+
+    fetch_ok = _orient_fetch_origin(project_dir)
+
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if base:
+        behind = _in_flight_git(
+            project_dir, "rev-list", "--count", f"HEAD..{base}",
+            deadline=deadline)
+        if behind is not None and behind.isdecimal():
+            count = int(behind)
+            if count > 0:
+                noun = "commit" if count == 1 else "commits"
+                return (
+                    f"{count} {noun} behind {_sanitize_orient_ref(base)}"
+                )
+            # count == 0: in sync against refs we DID refresh → silence, unless
+            # the fetch failed (then the "0" is against a stale ref we can't
+            # trust — fall through to the could-not-reach signal below).
+            if fetch_ok:
+                return ""
+    # No resolvable base, unexpected output, or a zero count we can't vouch
+    # for: surface unreachability, stay silent when the fetch actually worked.
+    return "" if fetch_ok else "could not reach origin"
+
+
+def orient(project_dir: Path, *, fetch: bool = False) -> str:
     """Read-only project pickup headline (slice 088-01).
 
     The headline is deliberately one line and starts with `jig hint:` so hook
@@ -1907,6 +1997,13 @@ def orient(project_dir: Path) -> str:
     (`_in_flight_summary`). That is still not source-tree inference — it is
     read-only VCS fact — and it fails soft, so the headline degrades to its
     pre-101 form rather than disappearing when git is absent or slow.
+
+    Bug 031 adds `fetch`: when True (the interactive `/jig:orient` path only,
+    never the 4 s SessionStart hook) orient does one bounded, fail-soft
+    `git fetch` and appends a `freshness:` segment when the checkout is behind
+    origin or origin could not be reached — so a stale local view is never
+    presented as current. When False the headline is byte-identical to its
+    pre-031 form, keeping the hot path untouched.
     """
     project_dir = Path(project_dir)
     state = classify_scaffold_state(project_dir)
@@ -1924,6 +2021,12 @@ def orient(project_dir: Path) -> str:
     in_flight = _in_flight_summary(project_dir)
     if in_flight:
         headline += f" · in flight: {in_flight}"
+    # Bug 031: only on the interactive path; the SessionStart hook passes no
+    # `fetch`, so its headline stays byte-identical.
+    if fetch:
+        freshness = _freshness_summary(project_dir)
+        if freshness:
+            headline += f" · freshness: {freshness}"
     return headline + "\n"
 
 
@@ -4587,6 +4690,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     po.add_argument("--project-dir", default=".",
                     help="project root directory (default: cwd)")
+    po.add_argument("--fetch", action="store_true",
+                    help="bug 031: do one bounded, fail-soft `git fetch` and "
+                         "report when the checkout is behind origin (for the "
+                         "interactive `/jig:orient` path, not the "
+                         "SessionStart hook)")
 
     pn = sub.add_parser(
         "new",
@@ -4715,7 +4823,7 @@ def main(argv: list) -> int:
                 gate_stats(Path(ns.project_dir), days=ns.days)
             )
         elif ns.command == "orient":
-            sys.stdout.write(orient(Path(ns.project_dir)))
+            sys.stdout.write(orient(Path(ns.project_dir), fetch=ns.fetch))
         elif ns.command == "new":
             return reserve_spec(
                 ns.slug,
