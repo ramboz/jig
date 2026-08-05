@@ -877,6 +877,91 @@ class SubagentSumTests(_SubagentTreeMixin, unittest.TestCase):
         self.assertNotIn("arrives in slice 056-02", low)
 
 
+# ---------------------------------------------------------------------------
+# Bug 030 — background/detached Agent-tool delegation is under-counted
+# ---------------------------------------------------------------------------
+
+class Bug030UndercountDetectionTests(unittest.TestCase):
+    """Foreground `Agent` delegation nests at
+    `<session>/subagents/agent-*.jsonl`; background/detached delegation
+    (`run_in_background: true` — the task queue) does NOT. The report can't
+    recover those tokens, but it MUST detect the gap (Agent tool_use count >
+    nested files found) and warn, instead of silently reporting `turns: 0`.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="jig-usage-bug030-"))
+        self.projects = self._tmp / "projects"
+        self.projects.mkdir()
+        # A spec-099 session that made THREE Agent-tool delegation calls but
+        # has NO nested subagents dir (the background/detached case).
+        _write_session(
+            self.projects, ENC_MAIN, "sessBG",
+            [
+                _user_record(MAIN_CWD,
+                             "Work on specs/099-delegated — spec 099, slice 099-01.",
+                             session="sessBG"),
+                _assistant_record(
+                    "claude-opus-4-8",
+                    _usage(inp=100, out=200, cache_read=3000, cache_create=400),
+                    MAIN_CWD, session="sessBG",
+                    text="099-01, specs/099-delegated."),
+                _tool_use_record(MAIN_CWD, {"subagent_type": "jig:reviewer"},
+                                 name="Agent", session="sessBG"),
+                _tool_use_record(MAIN_CWD, {"subagent_type": "jig:reviewer"},
+                                 name="Agent", session="sessBG"),
+                _tool_use_record(MAIN_CWD, {"subagent_type": "general-purpose"},
+                                 name="Agent", session="sessBG"),
+            ],
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_count_agent_tool_calls_counts_agent_blocks_only(self):
+        recs = [
+            _tool_use_record(MAIN_CWD, {}, name="Agent"),
+            _tool_use_record(MAIN_CWD, {}, name="Read"),
+            _tool_use_record(MAIN_CWD, {}, name="Agent"),
+            _user_record(MAIN_CWD, "no tool_use here"),
+        ]
+        self.assertEqual(uu.count_agent_tool_calls(recs), 2)
+
+    def test_report_flags_undercounted_background_delegation(self):
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        # Three Agent calls, zero nested transcripts -> shortfall of 3.
+        self.assertEqual(rep.unattributed_subagent_calls, 3)
+        self.assertEqual(rep.undercounted_session_count, 1)
+        # The measured subagent total stays a floor (nothing recovered).
+        self.assertEqual(rep.subagent_total_tokens, 0)
+
+    def test_render_warns_when_undercounted(self):
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        low = uu.render(rep).lower()
+        self.assertIn("under-counted", low)
+        self.assertIn("bug 030", low)
+
+    def test_no_warning_when_all_delegation_nests(self):
+        # A session whose Agent calls are matched 1:1 by nested files must NOT
+        # be flagged. Add a nested transcript per Agent call.
+        for name in ("agent-a", "agent-b", "agent-c"):
+            _write_subagents(
+                self.projects, ENC_MAIN, "sessBG", name,
+                [_subagent_record(
+                    "claude-opus-4-8",
+                    _usage(inp=1, out=1, cache_read=1, cache_create=1),
+                    "jig:reviewer", cwd=MAIN_CWD, session="sessBG")],
+            )
+        rep = uu.build_report(spec="099", projects_dir=self.projects,
+                              encoded_prefix=ENC_MAIN, ccusage_runner=None)
+        self.assertEqual(rep.unattributed_subagent_calls, 0)
+        self.assertEqual(rep.undercounted_session_count, 0)
+        self.assertNotIn("under-counted", uu.render(rep).lower())
+
+
 class SubagentCostTests(_SubagentTreeMixin, unittest.TestCase):
 
     def test_combined_cost_prices_orchestrator_and_subagent_tokens(self):
