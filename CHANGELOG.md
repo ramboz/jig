@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.11.0](https://github.com/ramboz/jig/compare/v2.10.0...v2.11.0) (2026-08-05)
+
+
+### Features
+
+* **bug-fix,spec-workflow:** design-fidelity routing ruling + authoring nudge (spec 104, ADR-0049) ([#181](https://github.com/ramboz/jig/issues/181)) ([a8ec0f3](https://github.com/ramboz/jig/commit/a8ec0f3fc4a98dbb0938b79e8f1452be869760d1))
+* **bug-fix,specs,adr:** guard the derived boards and ADR index against drift and duplicate numbers ([#159](https://github.com/ramboz/jig/issues/159)) ([adc7bb5](https://github.com/ramboz/jig/commit/adc7bb5fff62c53d4e9e80065a959a52725d3749))
+
+
+### Bug Fixes
+
+* **orient:** check origin freshness on the interactive path (bug 031) ([#190](https://github.com/ramboz/jig/issues/190)) ([fafa42a](https://github.com/ramboz/jig/commit/fafa42a989b72fe9404099deb317d7c2658547c6))
+* **reserve:** reservation sees in-flight branches; protection refusals reach the PR fallback ([#147](https://github.com/ramboz/jig/issues/147)) ([#165](https://github.com/ramboz/jig/issues/165)) ([409ba19](https://github.com/ramboz/jig/commit/409ba19005dca209e545309548d947bd6277e500))
+* **spec-workflow:** retraction-propagation sweep in failed-review recovery ([#133](https://github.com/ramboz/jig/issues/133)) ([#166](https://github.com/ramboz/jig/issues/166)) ([fd5baf4](https://github.com/ramboz/jig/commit/fd5baf4b6307a67020611f010c566280a9363445))
+* **usage:** detect + warn on under-counted background Agent subagents (bug 030) ([#186](https://github.com/ramboz/jig/issues/186)) ([5d4aeb7](https://github.com/ramboz/jig/commit/5d4aeb79c16ffb42d8ce018036bc7b6aac9c8bc6))
+
+
+### Documentation
+
+* **adr,specs,bug-fix:** universal/negative claims require enumeration ([#132](https://github.com/ramboz/jig/issues/132)) ([#171](https://github.com/ramboz/jig/issues/171)) ([50d692f](https://github.com/ramboz/jig/commit/50d692fff37dd2eb70a4c1afb2e122d114428b7d))
+* **autonomy:** record the long-horizon-autonomy bridge (jig half) — ADR-0050/0051 + specs 105/106 ([#184](https://github.com/ramboz/jig/issues/184)) ([eadd853](https://github.com/ramboz/jig/commit/eadd8533c8fd2aabfa8bd0a18800638116217174))
+* **bug-fix:** record issue 187 as resolved-on-main (bug 029) ([#188](https://github.com/ramboz/jig/issues/188)) ([16eb943](https://github.com/ramboz/jig/commit/16eb943083fd345524342639925c75f985d91007))
+* **primer:** sync AGENTS.md to CLAUDE.md + retire stale v2 branch-routing ([#189](https://github.com/ramboz/jig/issues/189)) ([afb7185](https://github.com/ramboz/jig/commit/afb718579126c904e80b500d01cab4cdeb88b05b))
+
 ## [2.10.0](https://github.com/ramboz/jig/compare/v2.9.0...v2.10.0) (2026-08-03)
 
 
