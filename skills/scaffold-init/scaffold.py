@@ -27,6 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout
 from _common.atomic_io import atomic_write_text
 
+# Sibling module in this same skill dir. Insert THIS dir on sys.path so the
+# import resolves no matter how scaffold.py is loaded — as a script (dir already
+# on sys.path), as a namespace-package import, or via importlib
+# `spec_from_file_location` (migrate.py / build_codex_plugin.py, which do NOT
+# add the dir). Owns the governance-plane renderers + protected-glob set
+# (ADR-0051 / slice 106-01).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import governance  # noqa: E402
+
 # Team-signal detection + the .jig/no-people-md marker contract live in
 # _common per ADR-0002's rule-of-three (slice 050-02): scaffold-init,
 # memory-sync, and workflow.py stale are the three callers. Re-exported
@@ -2340,6 +2349,10 @@ def copy_machinery(plugin: Path, target: Path, *,
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
     _write_gitignore_managed_blocks(target)
+    # Slice 106-01 (ADR-0051): scaffold the governance plane (CODEOWNERS + the
+    # protected-path CI workflow + the governance doc). Dual-wired with the
+    # plugin-only branch of `scaffold()`, mirroring the .gitignore blocks.
+    _write_governance_plane(target, docs_root)
     # Spec 065-04: refresh the self-defining-vocabulary convention block into
     # the project's docs/workflow.md (the only path that reaches an EXISTING
     # project — copy-machinery does not otherwise touch docs/). Idempotent.
@@ -2597,6 +2610,31 @@ def _write_gitignore_managed_blocks(target: Path) -> None:
         atomic_write_text(gitignore, merged)
 
 
+def _write_governance_plane(target: Path, docs_root: str = "docs") -> None:
+    """Write the scaffoldable half of the governance firewall (ADR-0051 /
+    slice 106-01): `CODEOWNERS`, the `jig-governance` protected-path CI
+    workflow, and the governance doc under the configured docs base.
+
+    Dual-wired like `_write_gitignore_managed_blocks` — called on BOTH the
+    with-machinery (`copy_machinery`) and plugin-only paths. Atomic writes with
+    `mkdir` parents; idempotent (re-writing identical content is a no-op in
+    effect) and non-clobbering of unrelated user files. The protected-glob set
+    itself is `governance.PROTECTED_PATHS`, mirrored into
+    `scaffold.json.protected_paths` by `_scaffold_manifest`."""
+    codeowners = target / "CODEOWNERS"
+    codeowners.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(codeowners, governance.render_codeowners())
+
+    workflow = target / ".github" / "workflows" / "jig-governance.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(workflow, governance.render_governance_workflow())
+
+    base = _scaffold_docs_base(target, docs_root)
+    doc = base / "governance.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(doc, governance.render_governance_doc())
+
+
 # --- Self-defining-vocabulary convention block (spec 065-04) --------------
 #
 # A marker-delimited managed block injected into a project's
@@ -2791,6 +2829,10 @@ def _scaffold_manifest(
     manifest = json.loads(render(template, substitutions))
     manifest["installed_tiers"] = installed_tiers
     manifest["installed_skills"] = _enumerate_skills(installed_tiers)
+    # Slice 106-01 (ADR-0051): the single source of truth for the protected-glob
+    # set. A computed key (like installed_tiers), so it flows to both greenfield
+    # scaffold and adoption_manifest without touching scaffold.json.template.
+    manifest["protected_paths"] = list(governance.PROTECTED_PATHS)
     manifest["scaffold_signals"] = asdict(signals)
     manifest["hook_profile"] = hook_profile
     if offered_tiers:
@@ -3076,6 +3118,11 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # and no equivalent project-scoped permission surface.
         if host == "claude":
             _write_permissions_deny_floor(target)
+        # Slice 106-01 (ADR-0051): governance plane on the plugin-only path
+        # (with-machinery gets it via copy_machinery above). Host-agnostic —
+        # CODEOWNERS + `.github/workflows/` are GitHub artifacts, not
+        # host-runtime files.
+        _write_governance_plane(target, docs_root)
         # Spec 065-04: --with-machinery gets the convention block via
         # copy_machinery above; the --plugin-only path writes it here (the
         # workflow.md template was already rendered earlier in scaffold()).
