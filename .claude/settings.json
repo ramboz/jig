@@ -1,0 +1,200 @@
+{
+  "enabledPlugins": { "jig@jig": false },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-telemetry.sh",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-skill-trace.sh",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-spec-gate.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-secret-scan.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-context-check.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-post-edit-verify.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-boundary-change-warn.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-entry-gate.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-decision-inflight.sh",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"CLAUDE_PLUGIN_ROOT=${CLAUDE_PROJECT_DIR}\" >> \"$CLAUDE_ENV_FILE\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-context-check.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-project-orient.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-semantic-index.sh",
+            "timeout": 25
+          }
+        ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-git-freshness.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-memory-scan.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-context-check.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-decision-inflight.sh",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "metadata": { "managed_by_jig": true },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-task-capture.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-decision-capture.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/hooks/scripts/jig-claim-check.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -67,6 +67,12 @@
             "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-boundary-change-warn.sh",
             "timeout": 5,
             "statusMessage": "jig: warn on boundary changes"
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-entry-gate.sh",
+            "timeout": 5,
+            "statusMessage": "jig: nudge on out-of-lifecycle edits"
           }
         ]
       },
@@ -110,6 +116,16 @@
             "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-semantic-index.sh",
             "timeout": 25,
             "statusMessage": "jig: semantic index"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh",
+            "timeout": 10,
+            "statusMessage": "jig: check branch freshness"
           }
         ]
       }

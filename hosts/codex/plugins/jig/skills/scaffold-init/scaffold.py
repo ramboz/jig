@@ -27,6 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout
 from _common.atomic_io import atomic_write_text
 
+# Sibling module in this same skill dir. Insert THIS dir on sys.path so the
+# import resolves no matter how scaffold.py is loaded — as a script (dir already
+# on sys.path), as a namespace-package import, or via importlib
+# `spec_from_file_location` (migrate.py / build_codex_plugin.py, which do NOT
+# add the dir). Owns the governance-plane renderers + protected-glob set
+# (ADR-0051 / slice 106-01).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import governance  # noqa: E402
+
 # Team-signal detection + the .jig/no-people-md marker contract live in
 # _common per ADR-0002's rule-of-three (slice 050-02): scaffold-init,
 # memory-sync, and workflow.py stale are the three callers. Re-exported
@@ -106,6 +115,49 @@ _SKILL_TO_TIER = {
 }
 
 
+def _is_jig_source_checkout(path: Path) -> bool:
+    """True if `path` is the root of a jig *source* checkout rather than any
+    packaged form of jig.
+
+    Keyed on markers that exist **only** in the source repo, not on generic
+    directory names: `hosts/` (the per-host package tree, which no package
+    contains — a Claude install is `hosts/claude` repackaged) plus
+    `scripts/build_host_packages.py` (a dev-only builder; the release zip ships
+    just four allowlisted `scripts/` files, per
+    `install_contract.RELEASE_INCLUDE_SCRIPT_FILES`, and this is not one).
+
+    The second marker earns its keep: `hosts/` + `scripts/` alone are common
+    enough that an unrelated monorepo vendoring jig underneath it would trip
+    the walk-up in `scaffolding_from_source_checkout`."""
+    return (path / "hosts").is_dir() and (
+        path / "scripts" / "build_host_packages.py"
+    ).is_file()
+
+
+def scaffolding_from_source_checkout(plugin: Path) -> bool:
+    """Slice 099-01 (ADR-0041 OQ2) — is this run the README **clone-and-run
+    shape**: driven out of a jig source checkout?
+
+    This detects a **topology**, not the condition "no plugin is installed".
+    It is a positive, host-independent signal for the largest known
+    plugin-less population — README's two `git clone … && python3
+    …/scaffold.py` recipes — and is **not** a general answer to "will jig work
+    here". Shapes it does not catch, each of which also yields an empty
+    scaffold: an unzipped release package run directly (that tree is
+    `hosts/claude` repackaged, so it reads as installed-plugin-shaped), a
+    hand-copied plugin tree, and a cross-host run (`--host codex` from an
+    installed *Claude* plugin).
+
+    So a quiet result is not proof that jig will work. ADR-0041 OQ2 prices that
+    residual, and records the two rejected alternatives — keying on the host
+    plugin-root variable being unset was one-sided, and its Codex arm rested on
+    an environment claim `docs/architecture.md` does not support."""
+    for candidate in (plugin, *plugin.parents):
+        if _is_jig_source_checkout(candidate):
+            return True
+    return False
+
+
 def plugin_root(host: str = "claude") -> Path:
     """Locate the jig runtime root, falling back to this script's parents."""
     env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
@@ -179,7 +231,7 @@ def render(template_text: str, substitutions: dict) -> str:
 
 
 def copy_template(src: Path, dst: Path, substitutions: dict,
-                  post_render=None) -> None:
+                  pre_render=None, post_render=None) -> None:
     """Read a `.template` file, render `{{KEY}}` placeholders, write to dst.
 
     `post_render` (slice 046-01) is an optional `str -> str` transform
@@ -190,9 +242,20 @@ def copy_template(src: Path, dst: Path, substitutions: dict,
     rewrite SKILL.md bodies already get, now applied to rendered docs so
     the commands they document actually run inside the scaffolded target.
     `--plugin-only` passes `None` (no rewrite — the plugin-root path is
-    correct when machinery is NOT copied locally)."""
+    correct when machinery is NOT copied locally).
+
+    `pre_render` (bug 015) is an optional `str -> str` transform applied to the
+    RAW template, *before* substitution — so it rewrites jig's own prose while
+    leaving substituted values alone. Use it for the host translation
+    (`Claude` -> `Codex`, `CLAUDE.md` -> `AGENTS.md`), whose blanket word
+    replacements must not reach user-derived values such as `PROJECT_NAME`.
+    `post_render` stays the right hook for transforms that are safe on values
+    too (the layout link rewrite)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    rendered = render(src.read_text(), substitutions)
+    body = src.read_text()
+    if pre_render is not None:
+        body = pre_render(body)
+    rendered = render(body, substitutions)
     if post_render is not None:
         rendered = post_render(rendered)
     atomic_write_text(dst, rendered)
@@ -597,6 +660,91 @@ def write_installed_tiers(target: Path, new_tiers: list) -> None:
     atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
 
 
+# --- scaffold_mode + host_renderer accessors (bugs 018, 023) ---------------
+#
+# `scaffold_mode` is written once at scaffold time (`_build_manifest`) and,
+# until bug 018, never again — so a project converted from plugin-only to
+# in-repo by `migrate.py copy-machinery` kept claiming plugin mode forever.
+# These are the read/write pair that lets the conversion path correct it,
+# deliberately shaped like `read_installed_tiers` / `write_installed_tiers`
+# (its nearest sibling: same manifest, same atomic write, same
+# commit-after-the-copy-succeeds discipline).
+#
+# `read_host_renderer` (bug 023) joins them as the third read accessor: same
+# manifest, same degrade-to-None contract. It reads `_HOST_RENDERERS`, which
+# is defined further down beside the renderers themselves — a module global
+# resolved at call time, so the accessor stays here with its siblings rather
+# than migrating to the registry.
+
+def read_scaffold_mode(target: Path) -> "str | None":
+    """Return `scaffold_mode` from `target/scaffold.json`, or None when there
+    is no manifest / it is unreadable / the field is absent or wrong-typed.
+
+    None means "this project makes no mode claim" — a project that was never
+    scaffold-init'd has nothing to contradict, so callers must leave it
+    alone rather than invent a mode for it."""
+    manifest = target / "scaffold.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    mode = data.get("scaffold_mode")
+    return mode if isinstance(mode, str) else None
+
+
+def write_scaffold_mode(target: Path, mode: str) -> None:
+    """Commit `mode` to `target/scaffold.json`, preserving every other field.
+    Atomic.
+
+    Call AFTER the machinery has copied cleanly, for the same reason
+    `write_installed_tiers` does: a refused or failed copy must never leave
+    the manifest claiming a mode the tree does not actually have."""
+    manifest_path = target / "scaffold.json"
+    data = json.loads(manifest_path.read_text())
+    data["scaffold_mode"] = mode
+    atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n")
+
+
+def read_host_renderer(target: Path) -> "str | None":
+    """Return `host_renderer` from `target/scaffold.json` — the host this
+    project's manifest was written for — or None when the manifest cannot
+    answer.
+
+    For a scaffolded project that is the renderer that produced its docs,
+    which is what bug 023's caller wants. For one adopted via
+    `migrate.py adopt-layout` it is the host the corpus was adopted FOR
+    (`adoption_manifest` takes it from the invocation), and the docs are
+    user-authored, so no renderer produced them — there is nothing better to
+    read there, and the field is still the project's own claim rather than a
+    passing helper's.
+
+    Same contract as the two accessors above: every unusable shape — no
+    manifest, unreadable, field absent or wrong-typed — collapses to None,
+    "this project makes no renderer claim", so callers need exactly one
+    fallback branch.
+
+    An unrecognised host collapses to None too, rather than riding
+    `renderer_for_host`'s fallback to Claude: that fallback answers "give me
+    some renderer", while this answers "what was this project rendered with",
+    where a wrong guess is bug 023. (Whether the fallback should exist is
+    open — `docs/refinement-todo.md`.)
+    """
+    manifest = target / "scaffold.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    host = data.get("host_renderer")
+    # `isinstance` first: a wrong-typed field can be unhashable (a list from a
+    # hand-edited manifest), and `unhashable in dict` raises rather than
+    # returning False.
+    return host if isinstance(host, str) and host in _HOST_RENDERERS else None
+
+
 def _hook_profile(signals: Signals) -> str:
     """CI present → strict; otherwise standard. Inert until dispatch ships."""
     return "strict" if signals.has_ci else "standard"
@@ -758,6 +906,16 @@ _PLUGIN_SKILL_PATH_RE = re.compile(
     r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/([A-Za-z0-9_-]+)/"
 )
 
+# Slice 099-01 (ADR-0041 OQ3) — the Codex PROJECT-LOCAL skill path, for
+# normalizing back to the plugin root. Needed because the packaged Codex
+# templates ship in this shape, so plugin-mode rendering starts from it
+# rather than from the canonical `${CLAUDE_PLUGIN_ROOT}` form. The `jig-`
+# prefix is stripped: the copied tree namespaces skill dirs, the plugin
+# root does not.
+_PROJECT_LOCAL_SKILL_RE = re.compile(
+    r"\$\{CODEX_PROJECT_DIR:-\$PWD\}/\.codex/skills/jig-([A-Za-z0-9_-]+)/"
+)
+
 
 _SKILL_DIR_EXCLUDES: frozenset[str] = frozenset({"__pycache__", "fixtures"})
 
@@ -895,6 +1053,14 @@ class ClaudeScaffoldRenderer(HostRenderer):
     )
     PLUGIN_HOOK_SCRIPT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
     PROJECT_HOOK_SCRIPT_PREFIX = "${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/"
+    # The plugin-root variable this host's rendered docs cite. Codex overrides
+    # it with `${PLUGIN_ROOT}` (see the symmetry table below). Declared here so
+    # every renderer answers the question, and so readers outside scaffold.py
+    # can ask a host what its plugin-root spelling is rather than hard-coding
+    # one — bug 018 shipped a Claude-only literal in migrate.py and the Codex
+    # half of the advisory silently did nothing.
+    PLUGIN_ROOT_PREFIX = "${CLAUDE_PLUGIN_ROOT}"
+    PLUGIN_ROOT_VAR = "CLAUDE_PLUGIN_ROOT"
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
@@ -952,6 +1118,43 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         r"${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-\1/"
     )
     PROJECT_HOOK_SCRIPT_PREFIX = "${CODEX_PROJECT_DIR:-$PWD}/.codex/hooks/scripts/"
+
+    # Slice 099-01 (ADR-0041 OQ3) — plugin-mode counterparts of the three
+    # PROJECT-LOCAL runtime targets (`SKILL_PATH_REPLACEMENT` just above;
+    # `PROJECT_TEMPLATES_ROOT` / `PROJECT_ROOT_PREFIX` just below).
+    #
+    # Those targets all name `.codex/skills/`,
+    # `.codex/templates/`, `.codex/` — directories that exist only because
+    # in-repo mode copied the machinery there. Plugin mode copies nothing, so
+    # rendering docs against them cites a tree the scaffold never created.
+    #
+    # The fix is the exact analogue of what Claude plugin mode already does:
+    # leave the path pointing at the INSTALLED plugin rather than at the
+    # project. `${PLUGIN_ROOT}` is Codex's own plugin-root variable, not an
+    # invention for this slice — jig already depends on Codex expanding it for
+    # every hook command in the packaged `hooks/hooks.json`, and
+    # `scripts/build_codex_plugin.py` renders the plugin's own SKILL.md bodies
+    # against it. That makes the two hosts symmetric:
+    #
+    #     in-repo   Claude  .claude/skills/jig-<name>/
+    #               Codex   .codex/skills/jig-<name>/
+    #     plugin    Claude  ${CLAUDE_PLUGIN_ROOT}/skills/<name>/
+    #               Codex   ${PLUGIN_ROOT}/skills/<name>/
+    #
+    # Note the skill-name shape differs by mode, and deliberately: the copied
+    # tree namespaces directories as `jig-<name>` to avoid colliding with the
+    # project's own skills, while the packaged plugin owns its whole root and
+    # keeps the bare `<name>`. Both mirror what each mode actually puts on disk.
+    PLUGIN_SKILL_PATH_REPLACEMENT = r"${PLUGIN_ROOT}/skills/\1/"
+    PLUGIN_TEMPLATES_ROOT = "${PLUGIN_ROOT}/templates/"
+    PLUGIN_ROOT_PREFIX = "${PLUGIN_ROOT}"
+    PLUGIN_ROOT_VAR = "PLUGIN_ROOT"
+    PLUGIN_SCAFFOLD_SKILL_DIR = "scaffold-init"
+
+    PROJECT_TEMPLATES_ROOT = "${CODEX_PROJECT_DIR:-$PWD}/.codex/templates/"
+    PROJECT_ROOT_PREFIX = "${CODEX_PROJECT_DIR:-$PWD}/.codex"
+    PROJECT_ROOT_VAR = "CODEX_PROJECT_DIR"
+    PROJECT_SCAFFOLD_SKILL_DIR = "jig-scaffold-init"
     CODEX_AGENT_MANAGED_MARKER = "# Generated by jig. managed_by_jig: true\n"
     CODEX_AGENT_SANDBOX_BY_ROLE = {
         "architect": "read-only",
@@ -988,14 +1191,65 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
-        out = cls.SKILL_PATH_RE.sub(cls.SKILL_PATH_REPLACEMENT, body)
-        out = out.replace(
-            "${CLAUDE_PLUGIN_ROOT}/templates/",
-            "${CODEX_PROJECT_DIR:-$PWD}/.codex/templates/",
-        )
-        out = out.replace("${CLAUDE_PLUGIN_ROOT}", "${CODEX_PROJECT_DIR:-$PWD}/.codex")
+        """In-repo rendering: point at the machinery copied under `.codex/`.
+
+        Unchanged by slice 099-01 — still the transform applied to SKILL.md
+        bodies during the machinery copy, and to docs under `--in-repo`."""
+        return cls._rewrite_host_paths(body, plugin_mode=False)
+
+    @classmethod
+    def rewrite_doc_paths_plugin_mode(cls, body: str) -> str:
+        """Plugin-mode doc rendering (slice 099-01 / ADR-0041 OQ3).
+
+        Identical host-vocabulary translation (`Claude` → `Codex`, `CLAUDE.md`
+        → `AGENTS.md`, …); only the runtime-root targets differ, naming the
+        installed plugin instead of a project-local `.codex/` tree that plugin
+        mode never creates."""
+        return cls._rewrite_host_paths(body, plugin_mode=True)
+
+    @classmethod
+    def _rewrite_host_paths(cls, body: str, *, plugin_mode: bool) -> str:
+        """Shared Claude → Codex translation, parameterized on where the jig
+        runtime lives. One body means the host-vocabulary rules cannot drift
+        between the modes — only the root targets are mode-specific."""
+        if plugin_mode:
+            skill_repl = cls.PLUGIN_SKILL_PATH_REPLACEMENT
+            templates_root = cls.PLUGIN_TEMPLATES_ROOT
+            root_prefix = cls.PLUGIN_ROOT_PREFIX
+            root_var = cls.PLUGIN_ROOT_VAR
+            scaffold_skill_dir = cls.PLUGIN_SCAFFOLD_SKILL_DIR
+        else:
+            skill_repl = cls.SKILL_PATH_REPLACEMENT
+            templates_root = cls.PROJECT_TEMPLATES_ROOT
+            root_prefix = cls.PROJECT_ROOT_PREFIX
+            root_var = cls.PROJECT_ROOT_VAR
+            scaffold_skill_dir = cls.PROJECT_SCAFFOLD_SKILL_DIR
+
+        if plugin_mode:
+            # The input may ALREADY be Codex project-local, and usually is: the
+            # packaged templates ship Codex-native (see
+            # `build_codex_plugin.py` for why — runtime readers copy them
+            # verbatim). `SKILL_PATH_RE` only matches `${CLAUDE_PLUGIN_ROOT}/`,
+            # so on a packaged template it matches nothing and the project-local
+            # shape survives — which is how plugin mode ended up emitting docs
+            # citing a `.codex/skills/` tree it never creates.
+            #
+            # Normalize that shape to the plugin root first. Only in plugin
+            # mode: in-repo WANTS the project-local paths, and re-pointing them
+            # at the plugin would break the self-contained install.
+            out = _PROJECT_LOCAL_SKILL_RE.sub(
+                cls.PLUGIN_SKILL_PATH_REPLACEMENT, body)
+            out = out.replace(cls.PROJECT_TEMPLATES_ROOT,
+                              cls.PLUGIN_TEMPLATES_ROOT)
+            out = out.replace(cls.PROJECT_ROOT_PREFIX, cls.PLUGIN_ROOT_PREFIX)
+            body = out
+
+        out = cls.SKILL_PATH_RE.sub(skill_repl, body)
+        out = out.replace("${CLAUDE_PLUGIN_ROOT}/templates/", templates_root)
+        out = out.replace("${CLAUDE_PLUGIN_ROOT}", root_prefix)
         out = out.replace("${CLAUDE_PROJECT_DIR}", "${CODEX_PROJECT_DIR:-$PWD}")
-        out = out.replace("CLAUDE_PLUGIN_ROOT", "CODEX_PROJECT_DIR")
+        # Bare (unbraced) prose mentions, after the `${…}` forms above.
+        out = out.replace("CLAUDE_PLUGIN_ROOT", root_var)
         out = out.replace("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR")
         out = out.replace(".claude/", ".codex/")
         out = out.replace("CLAUDE.md", "AGENTS.md")
@@ -1004,8 +1258,7 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         out = cls.finalize_codex_migrate_skill(out)
         out = cls.rewrite_skill_override_guidance(out)
         scaffold_invocation = (
-            'python3 "${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/'
-            'jig-scaffold-init/scaffold.py" \\\n'
+            f'python3 "{root_prefix}/skills/{scaffold_skill_dir}/scaffold.py" \\\n'
         )
         if scaffold_invocation in out and "--host codex" not in out:
             out = out.replace(
@@ -1355,6 +1608,24 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         }
 
 
+_HOST_RENDERERS = {
+    "claude": ClaudeScaffoldRenderer,
+    "codex": CodexScaffoldRenderer,
+}
+
+
+def renderer_for_host(host: str) -> type:
+    """The renderer CLASS for `host` (not an instance).
+
+    The single place that maps a host name to its renderer. Callers outside
+    scaffold.py use it to read a host's rendering constants — the path shapes
+    and variable spellings a scaffold of that host actually emits — instead of
+    keeping their own copy. Unknown hosts fall back to Claude, matching how
+    `--host` already degrades elsewhere.
+    """
+    return _HOST_RENDERERS.get(host, ClaudeScaffoldRenderer)
+
+
 def _copy_skill_dir(src: Path, dst: Path) -> None:
     """Copy a single skill directory. SKILL.md gets path-substitution on
     its body; other .py files (excluding test_*.py) are copied verbatim;
@@ -1559,7 +1830,9 @@ def _rewrite_hook_command(command: str) -> str:
 _CODEX_HOOK_STATUS_MESSAGES = {
     "jig-boundary-change-warn.sh": "jig: warn on boundary changes",
     "jig-claim-check.sh": "jig: verify spec/slice/ADR claims",
+    "jig-entry-gate.sh": "jig: nudge on out-of-lifecycle edits",
     "jig-context-check.sh": "jig: check context budget",
+    "jig-git-freshness.sh": "jig: check branch freshness",
     "jig-memory-scan.sh": "jig: scan memory references",
     "jig-post-edit-verify.sh": "jig: verify edit landed",
     "jig-project-orient.sh": "jig: orient project state",
@@ -1703,6 +1976,60 @@ def _merge_settings(existing: dict, jig_hooks: dict) -> dict:
     return merged
 
 
+def _read_settings_json(settings_path: Path) -> dict:
+    """Parse `settings.json` if present, else `{}`. Raises on invalid JSON
+    rather than silently overwriting a user's file.
+
+    One home for the message: `_write_permissions_deny_floor` and
+    `_check_hooks_safety` both need this, and a duplicated error string drifts
+    silently."""
+    if not settings_path.is_file():
+        return {}
+    try:
+        return json.loads(settings_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"{settings_path} exists but is not valid JSON: {exc}"
+        ) from exc
+
+
+def _write_permissions_deny_floor(target: Path) -> None:
+    """Slice 099-01 (ADR-0041 OQ1) — seed the `permissions.deny` security floor
+    on the **plugin-mode** path.
+
+    ADR-0013 part 3 puts the destructive-command guardrail in the *project's*
+    `.claude/settings.json`, which a plugin cannot inject — so before 099-01
+    made plugin mode the default, only `--in-repo` projects got it (it rides
+    `_merge_settings` inside `_copy_hooks_and_register`). Flipping the default
+    without this would have left the floor's one project-scoped part off by
+    default in every new project.
+
+    Deliberately **settings-only**: it writes `permissions.deny` and nothing
+    else — no hooks block, no hook scripts, no skills. Plugin mode's whole
+    point is that the machinery stays under the plugin root; this is the one
+    datum that provably cannot live there.
+
+    Consequences of being hooks-free:
+
+    - It reuses `_merge_permissions_deny` (set-membership marker, user denies
+      preserved in order, idempotent), NOT `_merge_settings` — the latter
+      would materialize an empty `hooks` key that plugin mode has no business
+      writing.
+    - It does **not** run the `UnmanagedHooksError` check. That refusal
+      protects third-party *hook* configuration from being clobbered; this
+      write never touches `hooks`, so the hazard does not exist. Plugin mode
+      therefore stays refusal-free, as slice 099-01's test contract requires.
+
+    An existing `settings.json` that is not valid JSON still raises, rather
+    than being silently overwritten."""
+    settings_path = target / ".claude" / "settings.json"
+    existing = _read_settings_json(settings_path)
+    merged = dict(existing)
+    merged["permissions"] = _merge_permissions_deny(merged.get("permissions"))
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(settings_path, json.dumps(merged, indent=2) + "\n")
+
+
 def _check_hooks_safety(target: Path, *, force: bool = False) -> dict:
     """Inbox 2026-05-15 — extract the settings.json safety check so callers
     that orchestrate multiple copy steps (`copy_machinery`) can run it
@@ -1715,15 +2042,9 @@ def _check_hooks_safety(target: Path, *, force: bool = False) -> dict:
     Raises `RuntimeError` if settings.json exists but is invalid JSON.
     """
     settings_path = target / ".claude" / "settings.json"
-    existing: dict = {}
-    if not settings_path.is_file():
+    existing = _read_settings_json(settings_path)
+    if not existing:
         return existing
-    try:
-        existing = json.loads(settings_path.read_text())
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"{settings_path} exists but is not valid JSON: {exc}"
-        ) from exc
     existing_hooks = existing.get("hooks") or {}
     has_any_hook = any(
         (entries or []) for entries in existing_hooks.values()
@@ -1914,7 +2235,7 @@ def copy_codex_machinery(plugin: Path, target: Path, *,
     _copy_codex_skills(plugin, target, installed_tiers)
     _copy_codex_agents(plugin, target)
     _copy_codex_hooks_and_register(plugin, target, force=force)
-    _write_gitignore_secret_block(target)
+    _write_gitignore_managed_blocks(target)
 
 
 def install_codex_agents(plugin: Path, agents_dir: Path, *,
@@ -2027,7 +2348,11 @@ def copy_machinery(plugin: Path, target: Path, *,
     _copy_claude_templates(plugin, target)
     _copy_skills_and_agents(plugin, target, installed_tiers)
     _copy_hooks_and_register(plugin, target, force=force)
-    _write_gitignore_secret_block(target)
+    _write_gitignore_managed_blocks(target)
+    # Slice 106-01 (ADR-0051): scaffold the governance plane (CODEOWNERS + the
+    # protected-path CI workflow + the governance doc). Dual-wired with the
+    # plugin-only branch of `scaffold()`, mirroring the .gitignore blocks.
+    _write_governance_plane(target, docs_root)
     # Spec 065-04: refresh the self-defining-vocabulary convention block into
     # the project's docs/workflow.md (the only path that reaches an EXISTING
     # project — copy-machinery does not otherwise touch docs/). Idempotent.
@@ -2059,7 +2384,7 @@ def _specs_dir_has_content(target: Path, docs_root: str = "docs") -> bool:
 
 
 def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
-                    docs_root: str = "docs") -> None:
+                    docs_root: str = "docs", host_rewrite=None) -> None:
     """Emit the worked-example reference spec (slice 048-05) into a
     greenfield `docs/specs/`:
 
@@ -2071,7 +2396,13 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
     content, the seed is skipped silently and never overwrites the user's
     work. The seed templates carry only the `{{PROJECT_NAME}}` substitution
     and never leak `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths — they
-    read correctly inside the target tree (coordinated with spec 046)."""
+    read correctly inside the target tree (coordinated with spec 046).
+
+    They ARE host-flavoured, though (bug 015). Like every canonical jig
+    template they are authored Claude-side and name `CLAUDE.md`; `host_rewrite`
+    is the caller's host transform, and without it a Codex project's seed spec
+    tells the reader to open a file only Claude projects have. Passed as
+    `pre_render` — see `copy_template` for why the ordering matters."""
     if _specs_dir_has_content(target, docs_root):
         return
     seed_root = template_root / "docs" / "specs" / "seed"
@@ -2089,7 +2420,8 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
         # emitted by the generic doc copy (step 2); the spec/slice files
         # land in their 001-adopt-jig / 002-first-spec subdirs.
         dst = specs_dst / dst_name
-        copy_template(src, dst, subs, post_render=seed_rewrite)
+        copy_template(src, dst, subs, post_render=seed_rewrite,
+                      pre_render=host_rewrite)
 
 
 # ---------- Slice 052-02: secret-ignore .gitignore floor (ADR-0013) ----------
@@ -2145,6 +2477,64 @@ def _render_gitignore_block() -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------- Bug 028 (#107): runtime-state .gitignore block ----------
+# jig's hooks/helpers write per-checkout runtime state under `.claude/` and
+# `.jig/`. jig's OWN repo git-ignores these, but that knowledge never reached
+# scaffolded projects (the scaffolder shipped only the secret block above), so
+# every downstream project tracked jig's telemetry + per-checkout markers —
+# churning every session and, for the per-checkout markers, colliding at
+# merge/rebase time. A SEPARATE block from the secret floor: different rationale
+# (not secrets, so a different ADR/comment), and users may opt out of one
+# without the other.
+_GITIGNORE_RUNTIME_BEGIN = "# >>> jig runtime state (do not track) >>>"
+_GITIGNORE_RUNTIME_END = "# <<< jig runtime state <<<"
+
+# Per-checkout / per-session runtime paths jig writes but must never track.
+# Keep in sync with jig's own `.gitignore`. NOTE: the semantic-index and
+# servo-hint runtime files already ride in `_GITIGNORE_SECRET_PATTERNS` above
+# (spec 080 / slice 072-02) — do NOT duplicate them here.
+_GITIGNORE_RUNTIME_PATTERNS = (
+    # Hook telemetry + queues/locks, rewritten every session (local
+    # observability only; read from the local checkout, never shared).
+    ".claude/skill-usage.jsonl",
+    ".claude/context-growth-read-events.jsonl",
+    ".claude/scheduled_tasks.lock",
+    # NOTE: the review-queue.json runtime file is deliberately NOT propagated.
+    # It was a removed feature (spec 039 cleanup); jig keeps it in its OWN
+    # `.gitignore` only as a defensive block against a stray file resurging in
+    # the jig repo, and a guard test forbids any live code from referencing that
+    # path literal. Scaffolded projects have no review-queue writer, so it would
+    # be dead noise here. (Comment uses the bare filename to avoid the guard.)
+    # Per-user local settings overlay — conventionally never shared.
+    ".claude/settings.local.json",
+    # Working-tree-local spec-attribution marker (slice 056-03): per-checkout,
+    # must NOT travel across branches. File-scoped, NOT a blanket `.jig/` —
+    # `.jig/test-command` IS tracked.
+    ".jig/spec-ref",
+    # Decision-capture runtime state (slice 083-07 / bug 011 option 4):
+    # per-session in-flight stubs + the local suppression audit log.
+    ".jig/decision-scratch/",
+    ".jig/decision-suppressions.log",
+)
+
+
+def _render_gitignore_runtime_block() -> str:
+    """The marker-delimited jig runtime-state block (bug 028, #107), including a
+    one-line intent comment and the migration hint for already-tracked files.
+    Trailing newline included."""
+    lines = [
+        _GITIGNORE_RUNTIME_BEGIN,
+        "# jig runtime state (bug 028) — per-checkout telemetry, queues, and",
+        "# spec/decision markers jig writes each session. Tracking them churns",
+        "# every commit; per-checkout markers also collide at merge. Edit",
+        "# above/below the markers; regenerated by jig, re-runs are idempotent.",
+        "# Already tracking these? Untrack without deleting: git rm --cached <path>",
+        *_GITIGNORE_RUNTIME_PATTERNS,
+        _GITIGNORE_RUNTIME_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _upsert_marked_block(existing: str, begin: str, end: str, block: str) -> str:
     """Insert-or-replace a `begin`…`end` marker-delimited managed `block` in
     `existing` text, returning the new content (a pure string transform — the
@@ -2184,29 +2574,65 @@ def _upsert_marked_block(existing: str, begin: str, end: str, block: str) -> str
     return existing + sep + block
 
 
-def _write_gitignore_secret_block(target: Path) -> None:
-    """Write or merge the marker-delimited jig secret-ignore block into
-    `target/.gitignore` (slice 052-02, AC #1).
+def _write_gitignore_managed_blocks(target: Path) -> None:
+    """Write or merge jig's marker-delimited managed `.gitignore` blocks into
+    `target/.gitignore`: the secret-prevention floor (slice 052-02, ADR-0013)
+    and the runtime-state block (bug 028, #107). One read + one atomic write;
+    each block is independently upserted via `_upsert_marked_block` (replace
+    in place if present, else append), so re-runs stay idempotent and any
+    pre-existing user lines are preserved.
 
-    - No existing `.gitignore` → create it with just the jig block.
-    - Existing `.gitignore` → upsert the marked block via `_upsert_marked_block`
-      (replace-in-place if present, else append), preserving all other lines.
+    - No existing `.gitignore` → create it with just the jig blocks (one blank
+      line between them, no leading blank).
+    - Existing `.gitignore` → upsert each block, preserving all other lines.
 
     Atomic write via `atomic_write_text`, consistent with the other scaffold
     writes."""
     gitignore = target / ".gitignore"
-    block = _render_gitignore_block()
+    managed = (
+        (_GITIGNORE_BLOCK_BEGIN, _GITIGNORE_BLOCK_END, _render_gitignore_block()),
+        (_GITIGNORE_RUNTIME_BEGIN, _GITIGNORE_RUNTIME_END,
+         _render_gitignore_runtime_block()),
+    )
 
     if not gitignore.exists():
-        atomic_write_text(gitignore, block)
+        # Fresh file: concatenate the managed blocks with a single blank-line
+        # separator and no leading blank (matches the pre-bug-028 write shape).
+        content = "\n\n".join(block.rstrip("\n") for _, _, block in managed) + "\n"
+        atomic_write_text(gitignore, content)
         return
 
     existing = gitignore.read_text()
-    merged = _upsert_marked_block(
-        existing, _GITIGNORE_BLOCK_BEGIN, _GITIGNORE_BLOCK_END, block
-    )
+    merged = existing
+    for begin, end, block in managed:
+        merged = _upsert_marked_block(merged, begin, end, block)
     if merged != existing:
         atomic_write_text(gitignore, merged)
+
+
+def _write_governance_plane(target: Path, docs_root: str = "docs") -> None:
+    """Write the scaffoldable half of the governance firewall (ADR-0051 /
+    slice 106-01): `CODEOWNERS`, the `jig-governance` protected-path CI
+    workflow, and the governance doc under the configured docs base.
+
+    Dual-wired like `_write_gitignore_managed_blocks` — called on BOTH the
+    with-machinery (`copy_machinery`) and plugin-only paths. Atomic writes with
+    `mkdir` parents; idempotent (re-writing identical content is a no-op in
+    effect) and non-clobbering of unrelated user files. The protected-glob set
+    itself is `governance.PROTECTED_PATHS`, mirrored into
+    `scaffold.json.protected_paths` by `_scaffold_manifest`."""
+    codeowners = target / "CODEOWNERS"
+    codeowners.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(codeowners, governance.render_codeowners())
+
+    workflow = target / ".github" / "workflows" / "jig-governance.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(workflow, governance.render_governance_workflow())
+
+    base = _scaffold_docs_base(target, docs_root)
+    doc = base / "governance.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(doc, governance.render_governance_doc())
 
 
 # --- Self-defining-vocabulary convention block (spec 065-04) --------------
@@ -2251,7 +2677,7 @@ def _ensure_self_defining_convention_block(target: Path,
     """Create / append / replace-in-place the self-defining-vocabulary block in
     the project's `workflow.md` under the configured docs root (spec 065-04 AC3;
     layout-aware per slice 084-03). Idempotent and non-clobbering, mirroring
-    `_write_gitignore_secret_block`:
+    `_write_gitignore_managed_blocks`:
 
     - No `docs/workflow.md` → create it (parents included) with a minimal
       header + the block.
@@ -2403,6 +2829,10 @@ def _scaffold_manifest(
     manifest = json.loads(render(template, substitutions))
     manifest["installed_tiers"] = installed_tiers
     manifest["installed_skills"] = _enumerate_skills(installed_tiers)
+    # Slice 106-01 (ADR-0051): the single source of truth for the protected-glob
+    # set. A computed key (like installed_tiers), so it flows to both greenfield
+    # scaffold and adoption_manifest without touching scaffold.json.template.
+    manifest["protected_paths"] = list(governance.PROTECTED_PATHS)
     manifest["scaffold_signals"] = asdict(signals)
     manifest["hook_profile"] = hook_profile
     if offered_tiers:
@@ -2455,7 +2885,7 @@ def adoption_manifest(
 
 def scaffold(target: Path, plugin: Path, *, force: bool = False,
              overrides: Overrides | None = None,
-             with_machinery: bool = True,
+             with_machinery: bool = False,
              host: str = "claude",
              docs_root: str = "docs") -> None:
     """Run the greenfield scaffold against `target`. Refuses to overwrite an
@@ -2463,10 +2893,13 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     Q&A wizard answers from slice 001-05; None fields fall back to filesystem
     inference. Plugin templates live at `plugin/templates/`.
 
-    When `with_machinery=True` (slice 016-01; default-on as of slice 016-03),
-    also copies host-local runtime machinery into the target, rewriting
-    SKILL.md path placeholders. The CLI's `--plugin-only` flag sets this to
-    `False` to preserve the pre-016-03 docs-only behavior."""
+    When `with_machinery=True` (slice 016-01), also copies host-local runtime
+    machinery into the target, rewriting SKILL.md path placeholders — the
+    self-contained in-repo mode. The default is `False` (plugin mode: docs +
+    primer only) as of slice 099-01 / ADR-0041, matching the CLI's `--in-repo`
+    opt-in; it kept `True` between slices 016-03 and 099-01. The parameter
+    default and the CLI default (`_build_parser`) are deliberately kept in
+    step."""
     if host not in {"claude", "codex"}:
         raise ValueError(f"unsupported scaffold host: {host}")
 
@@ -2478,11 +2911,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
 
     target = target.resolve()
     template_root = plugin / "templates"
-    renderer: HostRenderer
-    if host == "codex":
-        renderer = CodexScaffoldRenderer(plugin, target, force=force)
-    else:
-        renderer = ClaudeScaffoldRenderer(plugin, target, force=force)
+    renderer: HostRenderer = renderer_for_host(host)(plugin, target, force=force)
 
     if not template_root.exists():
         raise FileNotFoundError(f"Template root not found: {template_root}")
@@ -2550,10 +2979,25 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # mode the machinery stays under the plugin root, so the plugin-root path
     # is correct and we pass no transform (None = leave docs verbatim). Codex
     # never has `CLAUDE_PLUGIN_ROOT`, so its docs always get Codex-native paths.
+    # Bug 015: the host transform keeps its own name, because brief.md and the
+    # seed spec need it applied PRE-substitution (see `copy_template`) while
+    # everything else takes it composed with the layout rewrite, post-render.
+    #
+    # Slice 099-01 (ADR-0041 OQ3): Codex is mode-gated too. It always needs SOME
+    # transform — its docs must never speak Claude — but *which* runtime root
+    # they name depends on the mode, exactly as it does for Claude. Under
+    # `--in-repo` the machinery is at `.codex/skills/…`; in plugin mode nothing
+    # is copied, so docs name the installed plugin via `${PLUGIN_ROOT}`. Before
+    # this gate the Codex rewrite was unconditional, so a Codex plugin-mode
+    # project's AGENTS.md and docs/workflow.md cited a `.codex/skills/` tree the
+    # scaffold never created.
     if host == "codex":
-        doc_rewrite = CodexScaffoldRenderer.rewrite_skill_md_paths
+        host_rewrite = (
+            CodexScaffoldRenderer.rewrite_skill_md_paths if with_machinery
+            else CodexScaffoldRenderer.rewrite_doc_paths_plugin_mode
+        )
     else:
-        doc_rewrite = _rewrite_skill_md_paths if with_machinery else None
+        host_rewrite = _rewrite_skill_md_paths if with_machinery else None
 
     # Slice 084-03: layout-aware docs root. Emit the docs tree under
     # <target>/<docs_root> (collapsed to <target> for "."), and compose the
@@ -2561,7 +3005,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # so it applies on BOTH render paths. Default ("docs") is a no-op →
     # byte-identical output (AC1).
     docs_dst_base = _scaffold_docs_base(target, docs_root)
-    doc_rewrite = _compose_layout_rewrite(doc_rewrite, docs_root)
+    doc_rewrite = _compose_layout_rewrite(host_rewrite, docs_root)
 
     # 1. Host primer from the top-level template.
     if host == "codex":
@@ -2597,7 +3041,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # docs/specs/. Greenfield-only (Clarification Q1): skipped silently
     # when any spec already exists, so a migrate path / --force re-scaffold
     # never overwrites the user's work.
-    _emit_seed_spec(template_root, target, subs, docs_root)
+    _emit_seed_spec(template_root, target, subs, docs_root,
+                    host_rewrite=host_rewrite)
 
     # 2c. Slice 050-01: an EXPLICIT `--solo` (overrides.is_team is False)
     # writes the tracked `.jig/no-people-md` opt-out marker so memory-sync's
@@ -2616,14 +3061,21 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
 
     # 4. brief.md — human-readable summary of detection results
+    # Bug 015: host-translate the TEMPLATE before rendering (see
+    # `copy_template`). `_render_brief`'s own dynamic blocks are jig-authored
+    # fixed strings with no host vocabulary, so nothing is lost by transforming
+    # the template rather than the result.
     brief_template = (template_root / "brief.md.template").read_text()
+    if host_rewrite is not None:
+        brief_template = host_rewrite(brief_template)
     brief = _render_brief(brief_template, signals, installed_tiers, offered_tiers,
                           subs, docs_root)
     atomic_write_text(target / "brief.md", brief)
 
     # 5. Slice 016-01 + 016-02: copy skills/, agents/, hook scripts, and
-    # write/merge host hook configuration when --with-machinery is on
-    # (default since 016-03). `force` propagates so that --force also
+    # write/merge host hook configuration when in-repo mode is selected
+    # (`--in-repo`; the opt-in as of slice 099-01 / ADR-0041 — it was
+    # default-on between slices 016-03 and 099-01). `force` propagates so --force also
     # overrides the unmanaged-hooks safety check (same escape hatch as
     # AlreadyScaffoldedError). Slice 021-01 lifted the two-call sequence
     # behind a public `copy_machinery()` façade so `migrate.py
@@ -2639,21 +3091,38 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         # manifest records (installed_skills is derived from these per
         # ADR-0007), so disk == manifest.
         #
-        # Slice 052-04: copy_machinery now also writes the secret-ignore
-        # .gitignore floor (so `migrate copy-machinery` brings it too), which
-        # covers the --with-machinery path here. The --plugin-only branch
-        # below writes it directly since copy_machinery is not called there.
+        # Slice 052-04 + bug 028 (#107): copy_machinery now also writes the jig
+        # managed .gitignore blocks (secret-ignore floor + runtime-state block),
+        # so `migrate copy-machinery` brings them to already-scaffolded projects
+        # too, which covers the --with-machinery path here. The --plugin-only
+        # branch below writes them directly since copy_machinery isn't called.
         copy_machinery(plugin, target, force=force,
                        installed_tiers=installed_tiers, host=host,
                        docs_root=docs_root)
     else:
-        # 5b. Slice 052-02 (ADR-0013): write/merge the secret-ignore
-        # .gitignore floor on the --plugin-only path (with-machinery gets it
-        # via copy_machinery above — slice 052-04). Runs BEFORE the
+        # 5b. Slice 052-02 (ADR-0013) + bug 028 (#107): write/merge the jig
+        # managed .gitignore blocks — the secret-ignore floor and the
+        # runtime-state block — on the --plugin-only path (with-machinery gets
+        # them via copy_machinery above — slice 052-04). Runs BEFORE the
         # scaffold.json completion sentinel so a crash before the manifest
         # leaves a re-runnable partial state. Idempotent + append-not-clobber,
         # so --force re-scaffold and a pre-existing user .gitignore are safe.
-        _write_gitignore_secret_block(target)
+        _write_gitignore_managed_blocks(target)
+        # 5c. Slice 099-01 (ADR-0041 OQ1): seed `permissions.deny` here too.
+        # It is the ONE part of the ADR-0013 security floor that cannot be
+        # served from the plugin root — it lives in the project's own
+        # `.claude/settings.json`. In-repo mode gets it via `_merge_settings`
+        # inside `copy_machinery`; without this branch, making plugin mode the
+        # default would silently drop the destructive-command guardrail from
+        # every new project. Claude-only: Codex has no `.claude/settings.json`
+        # and no equivalent project-scoped permission surface.
+        if host == "claude":
+            _write_permissions_deny_floor(target)
+        # Slice 106-01 (ADR-0051): governance plane on the plugin-only path
+        # (with-machinery gets it via copy_machinery above). Host-agnostic —
+        # CODEOWNERS + `.github/workflows/` are GitHub artifacts, not
+        # host-runtime files.
+        _write_governance_plane(target, docs_root)
         # Spec 065-04: --with-machinery gets the convention block via
         # copy_machinery above; the --plugin-only path writes it here (the
         # workflow.md template was already rendered earlier in scaffold()).
@@ -2706,26 +3175,36 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--force", action="store_true",
                    help="overwrite an already-scaffolded directory")
-    # Slice 016-03 flipped the default ON. The two flags are mutually
-    # exclusive: --with-machinery is now redundant (default) but kept for
-    # documentation symmetry and back-compat with explicit slice 016-01/02
-    # invocations; --plugin-only is the new opt-out for users who want the
-    # old docs-only behavior.
+    # Slice 099-01 (ADR-0041) flipped the default back to plugin mode,
+    # reversing slice 016-03's in-repo default. The axis is one mutually
+    # exclusive group over `with_machinery`:
+    #   * default (no flag) → plugin mode: the repo stays lean and jig runs
+    #     from the installed plugin.
+    #   * --in-repo (aliases --with-machinery / --copy-machinery) → in-repo
+    #     mode: copy jig's machinery into the target so the project is
+    #     self-contained. The deliberate opt-in for CI, cloud agents, or
+    #     teammates without jig installed.
+    #   * --plugin-only → plugin mode explicitly (redundant with the default,
+    #     kept for clarity and back-compat).
     machinery = p.add_mutually_exclusive_group()
     machinery.add_argument(
-        "--with-machinery", dest="with_machinery",
-        action="store_true", default=True,
-        help="copy skills/, agents/, and hooks/ into the target's host-local "
-             "runtime so the dev owns and can edit the runtime artifacts "
-             "(default-on as of slice 016-03; flag is now redundant but kept "
-             "for symmetry)",
+        "--in-repo", "--with-machinery", "--copy-machinery",
+        dest="with_machinery",
+        action="store_true", default=False,
+        help="copy jig's machinery (skills/, agents/, hooks/, templates/, and a "
+             "generated settings.json) into the target's host-local runtime so "
+             "the project is self-contained and needs no installed plugin — the "
+             "deliberate opt-in for CI, cloud agents, or teammates without jig. "
+             "(--with-machinery / --copy-machinery are aliases.)",
     )
     machinery.add_argument(
         "--plugin-only", dest="with_machinery",
         action="store_false",
-        help="opt out of scaffold-mode: only scaffold docs/ and the host "
-             "primer into the target; leave skills/ and agents/ under the "
-             "installed plugin runtime (pre-016-03 default behavior)",
+        help="explicitly select the default plugin mode: scaffold docs/, the "
+             "host primer, the .gitignore secret floor, and (where the host has "
+             "a project-scoped permission surface) the permissions.deny floor; "
+             "leave skills/ and agents/ under the installed plugin runtime. "
+             "Redundant with the default (kept for clarity and back-compat).",
     )
     p.add_argument("--runtime", default=None,
                    help="runtime/language answer from the Q&A wizard "
@@ -2830,6 +3309,64 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(f"scaffolded {target.name} → {target}")
+
+    # Slice 099-01 (ADR-0041): name the scaffold mode and why, so the axis is
+    # visible in the summary rather than a silent default. Emitted for both
+    # hosts (before the Codex early return below).
+    if ns.with_machinery:
+        print(
+            "mode: in-repo — jig's machinery was copied into the project, so it "
+            "is self-contained and needs no installed plugin (chosen via "
+            "--in-repo)."
+        )
+    else:
+        # Printed unconditionally, so its wording must hold for EVERY
+        # population — including the plugin-less shapes no detector catches.
+        # It must not assert that a plugin IS installed: the scaffold cannot
+        # know that, and for a plugin-less run such a claim is worse than
+        # silence. This conditional wording is the residual's cheapest
+        # mitigation — it needs no detection at all (ADR-0041 OQ2).
+        print(
+            "mode: plugin — the repo stays lean and jig runs from the jig "
+            "plugin installed for your host (the default). If none is "
+            "installed there, this project has jig's docs but not its "
+            "runtime: install the plugin, or add the machinery with "
+            "jig's `migrate.py copy-machinery <project-dir>` (re-running the "
+            "scaffold needs "
+            "--in-repo --force, since this directory is now scaffolded). "
+            "--in-repo also suits CI, cloud agents, and teammates without jig "
+            "installed."
+        )
+        # Slice 099-01 (ADR-0041 OQ2). Plugin mode is
+        # only lean if a plugin is actually there; otherwise it is EMPTY, and
+        # silently so — exit 0, and a summary claiming jig runs from the
+        # installed plugin.
+        #
+        # Fire on POSITIVE detection of the clone-and-run shape, not on a
+        # missing env var — see scaffolding_from_source_checkout for what it
+        # does and does not cover.
+        #
+        # A set plugin-root variable suppresses the note. Well-grounded on
+        # Claude; on Codex `PLUGIN_ROOT` is a generic name any unrelated export
+        # could set, so a false negative is possible. Erring toward silence is
+        # the wrong direction on this decision's own terms, and is tolerable
+        # ONLY because the mode line above is unconditional and already names
+        # the plugin-less case. If that line is ever made conditional, revisit
+        # this suppression with it.
+        #
+        # Advisory, never fatal: it must not gate the exit code.
+        plugin_driven = bool(os.environ.get(
+            "CLAUDE_PLUGIN_ROOT" if ns.host == "claude" else "PLUGIN_ROOT"
+        ))
+        if not plugin_driven and scaffolding_from_source_checkout(
+            plugin_root(ns.host)
+        ):
+            print(
+                "note: this scaffold ran from a jig source checkout rather "
+                "than an installed plugin, and no plugin host was driving it. "
+                "If you do have the jig plugin installed for this host, "
+                "nothing is wrong. If you don't, see the mode line above."
+            )
 
     if ns.host == "codex":
         return 0

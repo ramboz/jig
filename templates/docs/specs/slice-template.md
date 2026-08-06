@@ -5,8 +5,12 @@ last_verified:
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
-# design_review: true  # set true when this slice ships UI gated by an external
-#                      # design-fidelity eval (attest-only; ADR-0014/0022).
+# design_review: true  # set true when this slice's fidelity must be a HARD
+#                      # gate: extract the mockup's design values (colours,
+#                      # spacing, sizes, layout rules) into this slice's ACs,
+#                      # then wire a servo `design-eval` as the done-condition
+#                      # (attest-only at REVIEWED; ADR-0014, ADR-0022,
+#                      # ADR-0049).
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -41,6 +45,9 @@ check below)._
 - [ ] All ACs pass; full test suite green (no regressions).
 - [ ] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
+- [ ] Each new test has been shown to fail when its feature is removed —
+      the test is capable of failing, not vacuously green (mutate the
+      feature, watch the test go red, restore).
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
 - [ ] Implementation review passed.

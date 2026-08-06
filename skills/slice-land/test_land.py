@@ -2804,5 +2804,111 @@ class ServoSuggestionTests(unittest.TestCase):
         self.assertEqual(code_with, code_without)
 
 
+class CheckTestsHelperResolutionTests(unittest.TestCase):
+    """Bug 024 / issue #129 — in a vendored install (`.claude/skills/` with
+    `jig-`-prefixed skill dirs and `CLAUDE_PLUGIN_ROOT` unset), `check_tests`
+    must still locate `tdd.py` instead of silently reporting the doc-only
+    warning. And a genuinely missing helper must surface as a distinct, loud
+    `not_run` state — never as the non-blocking, reassuring doc-only `warn`."""
+
+    def _vendored_land(self, with_tdd: bool = True):
+        """Build a temp `.claude/skills/` vendored layout with `jig-` prefixes
+        and load land.py from it. Returns (module, tmp_root)."""
+        import shutil
+        tmp = Path(tempfile.mkdtemp(prefix="jig-vendored-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        skills = tmp / ".claude" / "skills"
+        skills.mkdir(parents=True)
+        # `_common` is a sibling of the skill dirs (land.py imports from it).
+        shutil.copytree(REPO_ROOT / "skills" / "_common", skills / "_common")
+        (skills / "jig-slice-land").mkdir()
+        shutil.copy2(LAND_PY, skills / "jig-slice-land" / "land.py")
+        if with_tdd:
+            (skills / "jig-tdd-loop").mkdir()
+            shutil.copy2(TDD_PY, skills / "jig-tdd-loop" / "tdd.py")
+        spec = _ilu.spec_from_file_location(
+            "_vendored_land_module", skills / "jig-slice-land" / "land.py")
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod, tmp
+
+    def test_vendored_prefixed_layout_resolves_tdd_helper(self):
+        """The core regression: with a `jig-`-prefixed sibling and no
+        `CLAUDE_PLUGIN_ROOT`, the resolver still finds `jig-tdd-loop/tdd.py`."""
+        from unittest.mock import patch
+        mod, _tmp = self._vendored_land(with_tdd=True)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            resolved = mod._resolve_tdd_py()
+        self.assertIsNotNone(
+            resolved,
+            "resolver must find jig-tdd-loop/tdd.py in a vendored layout")
+        self.assertEqual(Path(resolved).name, "tdd.py")
+        self.assertIn("jig-tdd-loop", str(resolved))
+
+    def test_missing_helper_reports_not_run_not_doc_only_warn(self):
+        """A helper that cannot be located is `not_run`, distinct from the
+        doc-only `warn` (exit 2). Conflating them is what hid the failure."""
+        from unittest.mock import patch
+        mod, tmp = self._vendored_land(with_tdd=False)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            status, _code = mod.check_tests(tmp)
+        self.assertEqual(status, "not_run")
+        self.assertNotEqual(
+            status, "warn",
+            "a missing helper must not masquerade as a doc-only slice")
+
+    def test_report_renders_not_run_loudly_and_not_as_pass(self):
+        """The `not_run` row is loud (NOT RUN) and is neither a ticked pass
+        nor the reassuring doc-only wording."""
+        checks = {
+            "status_ok": True,
+            "status_actual": "DONE",
+            "test_status": "not_run",
+            "test_exit": -1,
+            "deviation_log_ok": True,
+            "dod_ok": True,
+            "dod_ticked": 3,
+            "dod_total": 3,
+            "skip_deviation_log": False,
+        }
+        section = _land.render_readiness_section(checks)
+        self.assertIn("NOT RUN", section)
+        self.assertNotIn("[x] Tests", section)
+        self.assertNotIn("no test runner detected", section)
+
+    def test_not_run_suppresses_servo_suggestion_like_doc_only(self):
+        """Bug 024 blast radius: `not_run` means runner presence is unknown,
+        so the 072-02 servo suggestion must stay silent for it exactly as it
+        does for the doc-only `warn` — otherwise adding the status would leak
+        the suggestion into a case the old `warn` used to guard."""
+        import shutil
+        tmp = Path(tempfile.mkdtemp(prefix="jig-servo-notrun-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        # No `.servo/`, no opt-out — the only thing keeping it silent here is
+        # the runner-status guard.
+        self.assertEqual(_land.render_servo_suggestion(tmp, "not_run"), "")
+        self.assertEqual(_land.render_servo_suggestion(tmp, "warn"), "")
+
+    @unittest.skipUnless(_pytest_available(),
+                         "needs pytest for a green vendored run")
+    def test_vendored_layout_reports_green_for_passing_suite(self):
+        """End-to-end symptom from issue #129: a real green suite in a
+        vendored layout reports `green`, not the doc-only `warn`."""
+        from unittest.mock import patch
+        mod, tmp = self._vendored_land(with_tdd=True)
+        proj = tmp / "proj"
+        (proj / "tests").mkdir(parents=True)
+        (proj / "tests" / "test_sample.py").write_text(
+            "def test_ok():\n    assert 1 + 1 == 2\n")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            status, code = mod.check_tests(proj)
+        self.assertEqual(
+            status, "green",
+            f"vendored green suite must report green, got {status} ({code})")
+
+
 if __name__ == "__main__":
     unittest.main()

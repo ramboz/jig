@@ -37,25 +37,24 @@ thin-orchestrator discipline ([spec 055](specs/055-context-cost-discipline/spec.
 | [078 — gate-bypass telemetry](specs/078-gate-bypass-telemetry/spec.md) | Instrument deliberate gate overrides so soft gates stay auditable. | 1.x observability work; later hosts should preserve the same event semantics. |
 | [079 — semantic-index guidance](specs/079-semantic-index-guidance/spec.md) | Document when to reach for an installed semantic/code index without adding a new always-loaded surface. | Shipped in 1.x; its passive guidance feeds the v2 auto-activation work. |
 
-### 2.0 — Multi-host portability _(final · integration branch `v2`)_
+### 2.0 — Multi-host portability _(shipped · merged into `main`)_
 
 Decouple jig's workflow model from any one LLM harness. One canonical source
 tree; materialized, host-native files per supported host (**copy prose, share
 code**). Adds Codex as a first-class host alongside Claude Code, with symmetric
 packaging and install paths.
 
-- **Branch:** `v2` (kept current with `main`; see "Working model" below)
-- **Release:** 2.0.0
-- **Board:** the `v2` branch's [status board](specs/README.md) is the
-  per-slice source of truth for these specs until `v2` lands.
+- **Branch:** landed on `main` — no separate branch remains.
+- **Released:** 2.0.0; the line continues on `main` (latest tag `v2.10.0`).
+- **Board:** these specs' DONE rows now live on `main`'s [status board](specs/README.md).
 
-| Spec | Theme | Status on `v2` |
-|------|-------|----------------|
+| Spec | Theme | Status |
+|------|-------|--------|
 | [033 — host-adapter-portability](specs/033-host-adapter-portability/spec.md) | Host-adapter architecture; Codex scaffold + plugin packaging + TOML custom-agent adapter | **DONE** |
 | [074 — host-native phase modes](specs/074-host-native-phase-modes/spec.md) | Map jig phases onto Claude/Codex planning and implementation modes without making host mode state a lifecycle gate. | **DONE** |
 | [080 — semantic-index auto-activation](specs/080-semantic-index-auto-activation/spec.md) | Provider-neutral semantic-index activation contract with a public default provider profile, internal Scout overlay support, and Claude/Codex adapter materialization so provider-specific readiness commands become transparent after opt-in. | **DONE** |
-| 059 — codex-port-polish _(on `v2`)_ | Parity polish after the core port: host-aware migrate, hook-trust onboarding, install smoke, override deferral, role-capability dogfood | **DONE** (all slices) |
-| 061 — dual-host-plugin-artifacts _(on `v2`)_ | Symmetric Claude + Codex plugin packages, drift guard, host-explicit release zips (ADR-0018) | **DONE** |
+| 059 — codex-port-polish _(on `main`)_ | Parity polish after the core port: host-aware migrate, hook-trust onboarding, install smoke, override deferral, role-capability dogfood | **DONE** (all slices) |
+| 061 — dual-host-plugin-artifacts _(on `main`)_ | Symmetric Claude + Codex plugin packages, drift guard, host-explicit release zips (ADR-0018) | **DONE** |
 
 ### Future — Federation & beyond _(exploring)_
 
@@ -68,10 +67,8 @@ into 2.0.
 
 ## Working model
 
-- **`main` is the released trunk.** Single-host capability work lands here
-  directly and ships in the 1.x line.
-- **`v2` is the 2.0 release-candidate branch.** Multi-host work landed on `v2`.
-  Keep it current with `main` before final release validation.
-- **When 2.0 is accepted, `v2` merges into `main`** as the 2.0 release. At that
-  point its specs' DONE rows flow into `main`'s board and these roadmap entries
-  collapse into the 1.x-style "shipped" record.
+- **`main` is the sole active trunk.** All capability work — 1.x single-host and
+  the 2.0 multi-host line — lands here directly and ships from `main` (latest
+  tag `v2.10.0`).
+- **The `v2` integration branch has merged and is closed.** Its specs' DONE rows
+  flow through `main`'s board; don't route new work to `v2`.

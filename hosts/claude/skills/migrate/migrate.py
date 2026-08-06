@@ -1858,6 +1858,180 @@ def _resolve_plugin_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+# --- bug 018: the project's mode lives in three places, not one -----------
+#
+# `copy-machinery` converts a plugin-mode project to in-repo. A project's
+# mode is expressed by (a) the machinery on disk, (b) `scaffold_mode` in
+# scaffold.json, and (c) the helper paths its rendered docs cite. The
+# command used to update only (a), leaving a "converted" project whose own
+# records still described plugin mode — with `${CLAUDE_PLUGIN_ROOT}`
+# citations that are unset for exactly the plugin-less population this
+# route exists to rescue.
+#
+# The two halves are handled DIFFERENTLY, on purpose (maintainer ruling,
+# PR #145):
+#   (b) the manifest is machine-owned and carries no user content, so the
+#       conversion just corrects it;
+#   (c) the docs are USER-owned — scaffolded as `Status: Draft
+#       (wizard-generated)` with an explicit invitation to make them the
+#       project's own. By conversion time they may hold real project
+#       content, so this command names them and stops. A conversion command
+#       that silently ate hand-written prose would be a worse bug than the
+#       one it fixes. The session that ran the command warns the user and
+#       lets them choose (see skills/migrate/SKILL.md).
+
+# Never scanned for stale citations: the host runtime dirs hold jig-owned
+# machinery that THIS command just refreshed (reporting it would bury the
+# handful of files the user actually owns), plus the usual non-source noise.
+_STALE_SCAN_SKIP_DIRS = frozenset({
+    ".git", ".claude", ".codex", ".venv", "venv", "node_modules",
+    "__pycache__", "dist", "build", ".mypy_cache", ".pytest_cache",
+})
+
+# Both halves below are READ FROM the scaffold renderers rather than restated
+# here, and that is the point. The first cut of this advisory hard-coded the
+# Claude spellings; Codex renders its plugin-mode docs against `${PLUGIN_ROOT}`
+# (CodexScaffoldRenderer), so the scan matched nothing and every Codex user got
+# silence — while the shipped Codex SKILL.md promised them a warning. Sourcing
+# the strings from the renderer means changing a renderer changes the advisory
+# with it, instead of switching it off unnoticed.
+
+
+def _plugin_root_token(scaffold_mod, host: str) -> str:
+    """The plugin-root variable `host`'s rendered docs cite, e.g.
+    `${CLAUDE_PLUGIN_ROOT}` or `${PLUGIN_ROOT}`."""
+    return scaffold_mod.renderer_for_host(host).PLUGIN_ROOT_PREFIX
+
+
+def _in_repo_skill_path(scaffold_mod, host: str) -> str:
+    """What a correct in-repo skill citation looks like on `host`.
+
+    The renderer stores this as an `re.sub` replacement template, so the
+    capture-group backreference becomes the `<name>` placeholder a human
+    reads in the warning."""
+    template = scaffold_mod.renderer_for_host(host).SKILL_PATH_REPLACEMENT
+    return template.replace("\\1", "<name>")
+
+
+def _project_docs_root(project_dir: Path) -> str:
+    """Resolve the target's configured `layout.docs_root` (spec 084 / ADR-0033).
+
+    Two consumers, and they are not symmetric:
+
+      - the stale-citation scan below, which uses this to decide where to
+        LOOK;
+      - `scaffold.copy_machinery`, which uses it to decide where to WRITE the
+        two managed `workflow.md` blocks (bug 022).
+
+    Defaults to `"docs"` for an unscaffolded or misconfigured project: a bad
+    config must not fail a machinery copy that would otherwise succeed. The
+    fallback is bounded but not free. Bounded, because
+    `project_layout._validate_docs_root` rejects absolute and `..`-escaping
+    roots before this can return one, so the write consumer gains no reach
+    outside the project. Not free, because on a `docs_root: "."` project with
+    a malformed `scaffold.json` the fallback silently reproduces bug 022's
+    symptom — blocks written under a spurious `docs/`, the real `workflow.md`
+    left stale — instead of reporting the bad config."""
+    import importlib.util
+
+    helper = Path(__file__).resolve().parents[1] / "_common" / "project_layout.py"
+    if not helper.is_file():
+        return "docs"
+    spec = importlib.util.spec_from_file_location(
+        "jig_project_layout_for_copy_machinery", helper,
+    )
+    if spec is None or spec.loader is None:
+        return "docs"
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        return module.docs_root(project_dir)
+    except Exception:
+        return "docs"
+
+
+def _stale_plugin_root_docs(project_dir: Path, token: str) -> list:
+    """Find the PROJECT-OWNED markdown that still cites `token` — the host's
+    plugin-root variable. Returns `(relative_path, hit_count)` pairs, sorted
+    by path. Pure read — nothing here writes.
+
+    Scope is the configured docs root plus the host primer at the project
+    root (`CLAUDE.md` / `AGENTS.md`), minus `_STALE_SCAN_SKIP_DIRS`. A
+    `docs_root="."` project collapses the two roots into one, hence the
+    dedupe by relative path."""
+    docs_root = _project_docs_root(project_dir)
+    root = _docs_base(project_dir, docs_root)
+    hits: dict = {}
+
+    def record(path: Path) -> None:
+        count = _safe_read_text(path).count(token)
+        if count:
+            try:
+                rel = path.relative_to(project_dir).as_posix()
+            except ValueError:
+                rel = path.as_posix()
+            hits[rel] = count
+
+    # Prune rather than filter after the fact: under `docs_root="."` the scan
+    # root IS the project root, so an rglob would descend into `.git`,
+    # `node_modules`, and the `.venv` before discarding them. Matches the
+    # module's existing pruning walkers (`_walk`, `_walk_for_files`).
+    if root.is_dir():
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            try:
+                entries = list(current.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.is_dir():
+                    if entry.name not in _STALE_SCAN_SKIP_DIRS:
+                        stack.append(entry)
+                elif entry.suffix == ".md":
+                    record(entry)
+
+    for primer in ("CLAUDE.md", "AGENTS.md"):
+        candidate = project_dir / primer
+        if candidate.is_file():
+            record(candidate)
+
+    return sorted(hits.items())
+
+
+def _stale_docs_warning(stale: list, token: str, replacement: str) -> str:
+    """Render the advisory block naming stale files. Reports only — the
+    decision about what to do with them belongs to the user.
+
+    `token` and `replacement` are both host spellings (see
+    `_plugin_root_token` / `_in_repo_skill_path`), but they describe different
+    things and callers must not assume one host answers both:
+
+    - `token` is the plugin-root variable the PROJECT'S DOCS were rendered
+      against. Naming Claude's variable to a Codex user would send them
+      searching for a string their docs never contained.
+    - `replacement` is the in-repo path THE MACHINERY NOW OCCUPIES, so it
+      names a directory that exists.
+
+    Both are quoted verbatim to the user, so both must be independently
+    true (bug 023)."""
+    if not stale:
+        return ""
+    lines = [
+        f"warning: {len(stale)} file(s) still cite {token}, which is "
+        "unset in a project that now owns its machinery:",
+    ]
+    lines += [f"  - {path} ({count})" for path, count in stale]
+    lines += [
+        "These files are yours to edit, so they were left EXACTLY as they are.",
+        f"The in-repo form is `{token}/skills/<name>/` -> "
+        f"`{replacement}`.",
+        "Review them before relying on the paths they cite.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def copy_machinery(
     project_dir: Path, *, force: bool = False, add_tiers: list | None = None,
     host: str = "claude",
@@ -1936,6 +2110,11 @@ def copy_machinery(
         scaffold_mod.copy_machinery(
             plugin, project_dir, force=force, installed_tiers=copy_tiers,
             host=resolved_host,
+            # Bug 022: the façade defaults `docs_root` to `"docs"`. Forward
+            # the target's CONFIGURED root — the same resolver the sibling
+            # stale-citation scan uses — so a track-local (`docs_root="."`)
+            # project keeps its collapsed layout.
+            docs_root=_project_docs_root(project_dir),
         )
     except scaffold_mod.UnmanagedHooksError as exc:
         # Re-raise as a migrate-side typed exception so main()'s
@@ -1949,9 +2128,37 @@ def copy_machinery(
     if commit_tiers is not None:
         scaffold_mod.write_installed_tiers(project_dir, commit_tiers)
 
+    # Bug 018, half one — the manifest. The copy succeeded, so the project
+    # now owns its machinery and is in-repo whatever it used to claim. Same
+    # commit-after-the-copy ordering as the tier write above. A project with
+    # no manifest makes no mode claim, so there is nothing to correct and we
+    # must not invent one.
+    mode_note = ""
+    if scaffold_mod.read_scaffold_mode(project_dir) == "plugin-only":
+        scaffold_mod.write_scaffold_mode(project_dir, "in-repo")
+        mode_note = "scaffold_mode: plugin-only -> in-repo\n"
+
+    # Bug 018, half two — the docs. Named, never rewritten. See the block
+    # comment above `_stale_plugin_root_docs` for why the halves differ, and
+    # why the host's spellings are read from its renderer.
+    #
+    # Bug 023 — the two host arguments below are deliberately DIFFERENT, and
+    # a later reader "fixing the inconsistency" reintroduces the bug. Why
+    # each is what it is: `_stale_docs_warning`'s docstring. A project that
+    # records no usable host leaves the invocation as the only information
+    # there is.
+    advisory_host = scaffold_mod.read_host_renderer(project_dir) or resolved_host
+    token = _plugin_root_token(scaffold_mod, advisory_host)
+    stale_note = _stale_docs_warning(
+        _stale_plugin_root_docs(project_dir, token),
+        token,
+        _in_repo_skill_path(scaffold_mod, resolved_host),
+    )
+
     runtime_dir = ".codex" if resolved_host == "codex" else ".claude"
     return (
-        f"{upgrade_note}copied machinery into {project_dir / runtime_dir}\n",
+        f"{upgrade_note}copied machinery into {project_dir / runtime_dir}\n"
+        f"{mode_note}{stale_note}",
         0,
     )
 

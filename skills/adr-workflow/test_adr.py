@@ -16,6 +16,13 @@ from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from skills._common.test_reservation import (  # noqa: E402
+    CAPTURED_GH006,
+    CAPTURED_GH013,
+)
+
 ADR_PY = REPO_ROOT / "skills" / "adr-workflow" / "adr.py"
 SKILL_MD = REPO_ROOT / "skills" / "adr-workflow" / "SKILL.md"
 TEMPLATE = (
@@ -346,7 +353,11 @@ class AcceptTests(unittest.TestCase):
         # Second accept should refuse
         result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
         self.assertEqual(result.returncode, 2)
-        self.assertIn("proposed", result.stderr.lower())
+        # Assert the refusal names the state it found. (The old
+        # case-insensitive `"proposed"` check passed only because the fixture
+        # FILENAME is `adr-0001-proposed-thing.md`, which the message echoes —
+        # the post-ADR-0046 message contains no "Proposed" of its own.)
+        self.assertIn("already Accepted", result.stderr)
 
     def test_accept_writes_atomically(self):
         """Accept leaves no stray .tmp file behind."""
@@ -649,6 +660,245 @@ class IndexTests(unittest.TestCase):
         # Each bullet stays under a sane width.
         for b in bullets:
             self.assertLess(len(b), 400, f"bullet too long: {b}")
+
+
+# ---------- Bug 020: index summaries (issue #140) ----------
+#
+# `index` could WRITE a summary that is not a summary: a `## Context` opening
+# that is a lead-in to a list has no complete sentence, so it was emitted
+# verbatim (colon and all) when short, or cut at 120 chars with a trailing `…`
+# when long. Either reads like a decision summary and is not one.
+#
+# The index stays a pure function of the ADR files (Julien's ruling on #151,
+# reaffirmed on #154): the fix is NOT to let a human overwrite the bullet, it
+# is to refuse to invent a summary and name the record whose opening needs
+# rewording.
+
+# A `## Context` body whose first paragraph is a lead-in to a list — the
+# ADR-0041 shape. The lead-in is 71 chars, under the 120-char cap, so the OLD
+# code emitted it VERBATIM, colon and all. (The ADR-0022 shape — the same
+# defect past the cap, where the old code hard-truncated with `…` — is inlined
+# in `test_long_lead_in_is_not_hard_truncated` below.)
+LIST_LEAD_IN_CONTEXT = (
+    "jig has two scaffold topologies, selected by one axis in `scaffold.py`:\n"
+    "\n"
+    "- **plugin mode** — the lean default.\n"
+    "- **in-repo mode** — copies the machinery into the project.\n"
+)
+
+
+def index_bullet(readme_text: str, number: str) -> str:
+    """Return the `- [ADR-NNNN: …]` line for `number` (or '' when absent)."""
+    for line in readme_text.splitlines():
+        if line.startswith(f"- [ADR-{number}:"):
+            return line
+    return ""
+
+
+def bullet_description(line: str) -> str:
+    """Split the `— <description> (<date>, <Status>)` tail off a bullet."""
+    m = re.match(r"^- \[ADR-\d{4}:.*?\]\([^)]+\) — (.+) \([^()]*\)$", line)
+    return m.group(1) if m else ""
+
+
+class ExtractDescriptionLeadInTests(unittest.TestCase):
+    """A Context paragraph with no complete sentence is a lead-in to a list or
+    table, not a summary. It must not be written at all."""
+
+    def setUp(self):
+        self.adr = _import_adr_module()
+
+    def _ctx(self, paragraph: str) -> str:
+        return (
+            "# ADR-0099: Sample\n\n## Status\n\nAccepted\n\n"
+            f"## Context\n\n{paragraph}\n\n## Decision Options Considered\n\n_TODO_\n"
+        )
+
+    def test_short_colon_lead_in_yields_nothing(self):
+        """The ADR-0041 shape: single line, under the 120-char cap, so the old
+        code returned it verbatim — ending in a colon."""
+        out = self.adr._extract_description(self._ctx(LIST_LEAD_IN_CONTEXT))
+        self.assertEqual(
+            out, "",
+            f"a colon-terminated lead-in is not a summary; got {out!r}")
+
+    def test_long_lead_in_is_not_hard_truncated(self):
+        """The ADR-0022 shape: the lead-in runs past the cap, so the old code
+        cut mid-word and appended `…`."""
+        para = (
+            "jig now has a **family of three gated-evidence lifecycles**, all "
+            "mirroring ADR-0014's transition-gate architecture and reusing "
+            "`_common/`:"
+        )
+        self.assertGreater(len(para), 120)
+        out = self.adr._extract_description(self._ctx(para))
+        # The old code returned `paragraph[:120] + "…"`; assert against that
+        # exact string rather than `assertNotIn("…", out)`, which cannot fail
+        # once `out` is known to be empty.
+        self.assertNotEqual(out, para[:120].rstrip() + "…")
+        self.assertEqual(out, "", f"expected no summary; got {out!r}")
+
+    def test_colon_paragraph_with_an_earlier_sentence_truncates_to_it(self):
+        """A paragraph that ends in a colon but DOES carry a complete first
+        sentence still yields that sentence."""
+        para = (
+            "Frontmatter is the canonical home for ADR status. Three readers "
+            "disagree about the prose mirror:"
+        )
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertEqual(
+            out, "Frontmatter is the canonical home for ADR status.")
+
+    def test_complete_sentence_is_unchanged(self):
+        """Regression guard — the happy path keeps working."""
+        out = self.adr._extract_description(self._ctx("Alpha does a thing."))
+        self.assertEqual(out, "Alpha does a thing.")
+
+    def test_an_authored_trailing_ellipsis_is_not_treated_as_truncation(self):
+        """Review finding. `…` used to be jig's own hard-truncation mark, so an
+        early version of this fix blanked any summary ending in one. But this
+        change stops emitting `…`, so an ellipsis is now the author's writing —
+        and blanking it discards a real first sentence and then warns that the
+        record has none, which is the false statement bug 020 exists to remove.
+        """
+        para = "We tried the shared oracle. It did not hold…"
+        self.assertLess(len(para), 120)
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertEqual(out, para, "authored prose must survive intact")
+        self.assertFalse(
+            self.adr._is_degenerate_description(out),
+            "a sentence that merely ends in an ellipsis is still a sentence")
+
+    def test_a_partly_written_stub_is_still_a_stub(self):
+        """The one shape the write guard exists for: a template stub edited
+        just enough to carry a sentence boundary, so the extractor returns it
+        rather than ''."""
+        para = "_TODO: fill this in. Notes below._"
+        out = self.adr._extract_description(self._ctx(para))
+        self.assertTrue(out, "precondition: the extractor returns text here")
+        self.assertTrue(
+            self.adr._is_degenerate_description(out),
+            f"a half-written template stub is not a summary; got {out!r}")
+
+
+class IndexNoSummaryTests(unittest.TestCase):
+    """What `index` writes, and says, for a record it cannot summarize."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-nosummary-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        self.readme = self.adrs_dir / "README.md"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _index(self):
+        result = run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return result
+
+    def test_lead_in_record_gets_no_description_and_a_warning(self):
+        write_sample_adr(self.adrs_dir / "adr-0001-leadin.md", "0001",
+                         "leadin", "Lead In", context=LIST_LEAD_IN_CONTEXT)
+        result = self._index()
+        line = index_bullet(self.readme.read_text(), "0001")
+        self.assertEqual(bullet_description(line), "(no description)")
+        self.assertNotIn("scaffold.py`:", line,
+                         f"the lead-in itself must not be written: {line!r}")
+        self.assertIn("ADR-0001", result.stderr)
+        self.assertIn("Context", result.stderr,
+                      f"the warning must point at the source: {result.stderr!r}")
+
+    def test_template_stub_reports_the_stub_not_a_lead_in(self):
+        """A brand-new record indexed before its Context is written. The
+        warning must name the real cause, or the author goes looking for a
+        list that isn't there."""
+        write_sample_adr(
+            self.adrs_dir / "adr-0001-stub.md", "0001", "stub", "Stub",
+            context="_TODO: describe the situation, forces, and constraints "
+                    "driving this decision._")
+        result = self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "(no description)")
+        self.assertIn("template stub", result.stderr)
+
+    def test_a_summarizable_record_warns_about_nothing(self):
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha",
+                         "Alpha", context="Alpha context one-liner.")
+        result = self._index()
+        self.assertEqual(result.stderr.strip(), "",
+                         f"unexpected warning: {result.stderr!r}")
+
+    def test_the_remedy_is_printed_once_per_run_not_once_per_record(self):
+        """Two unsummarizable records get two per-record lines but a single
+        remedy line — moving the write back inside the loop would otherwise
+        pass unnoticed."""
+        write_sample_adr(self.adrs_dir / "adr-0001-one.md", "0001", "one",
+                         "One", context=LIST_LEAD_IN_CONTEXT)
+        write_sample_adr(self.adrs_dir / "adr-0002-two.md", "0002", "two",
+                         "Two", context=LIST_LEAD_IN_CONTEXT)
+        result = self._index()
+        self.assertEqual(result.stderr.count("ADR-0001"), 1)
+        self.assertEqual(result.stderr.count("ADR-0002"), 1)
+        self.assertEqual(
+            result.stderr.count("reword each record"), 1,
+            f"the remedy must print once per run: {result.stderr!r}")
+
+    def test_rewording_the_context_updates_the_index(self):
+        """The ruling's remedy must actually work: fix the source, re-run,
+        and the bullet follows."""
+        adr = self.adrs_dir / "adr-0001-leadin.md"
+        write_sample_adr(adr, "0001", "leadin", "Lead In",
+                         context=LIST_LEAD_IN_CONTEXT)
+        self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "(no description)",
+            "precondition: the lead-in must be rejected before the reword")
+        write_sample_adr(adr, "0001", "leadin", "Lead In",
+                         context="jig has two scaffold topologies, selected "
+                                 "by one axis in `scaffold.py`.")
+        result = self._index()
+        self.assertEqual(
+            bullet_description(index_bullet(self.readme.read_text(), "0001")),
+            "jig has two scaffold topologies, selected by one axis in "
+            "`scaffold.py`.")
+        self.assertEqual(result.stderr.strip(), "")
+
+
+class RepoIndexQualityTests(unittest.TestCase):
+    """Realism guard on jig's own index — the grep from issue #140."""
+
+    def test_no_degenerate_summaries_in_the_repo_index(self):
+        """A trailing `…` is checked here as a *regression* signal — jig no
+        longer hard-truncates, so one appearing again means the truncation
+        branch came back. It is NOT the rule that an ellipsis is degenerate:
+        an author may legitimately end a Context opening with one, and
+        `_is_degenerate_description` deliberately lets that through (see
+        `test_an_authored_trailing_ellipsis_is_not_treated_as_truncation`).
+        If this fires on `…`, decide which of the two it is before "fixing"
+        the ADR — the failure message says so."""
+        readme = REPO_ROOT / "docs" / "decisions" / "README.md"
+        if not readme.is_file():
+            self.skipTest("repo README.md not present")
+        bad = []
+        for line in readme.read_text().splitlines():
+            if not line.startswith("- [ADR-"):
+                continue
+            desc = bullet_description(line)
+            self.assertTrue(desc, f"bullet did not parse: {line[:100]}")
+            if desc.endswith(":") or desc.endswith("…") \
+                    or desc.startswith("_TODO"):
+                bad.append(line[:100])
+        self.assertEqual(
+            bad, [],
+            "index summaries that read as fragments. A `:` or `_TODO` ending "
+            "is always wrong. A `…` ending is wrong ONLY if jig truncated it "
+            "— if the ADR's own Context opening ends that way, the summary is "
+            "correct and this check needs narrowing, not the ADR.")
 
 
 # ---------- ResolveTodoTests (AC #4) ----------
@@ -1227,12 +1477,18 @@ class WriterStampsFrontmatterStatusTests(unittest.TestCase):
                          "Accepted",
                          "new (superseding) ADR retains Accepted")
 
-    # ---- AC #5: synchronized-write lock (regression guard) ----
+    # ---- AC #5: synchronized-write lock, canonical-prose case ----
+    #
+    # ADR-0046 narrows ADR-0026's unconditional sync-lock: prose is now a
+    # BEST-EFFORT mirror, so the lock holds only while the prose Status
+    # line is canonical (`<State> (YYYY-MM-DD)`). Both tests below seed
+    # canonical prose via `cmd_new`, so the pairing is still guaranteed.
+    # The deliberate-divergence case is pinned in
+    # `NonCanonicalProseStatusTests` below.
 
-    def test_supersede_frontmatter_and_prose_cannot_diverge(self):
-        """ADR-0026 sync-lock: after supersede, the OLD ADR has BOTH
-        frontmatter `status: Superseded` AND the prose `Superseded by` line
-        — they cannot diverge."""
+    def test_supersede_syncs_frontmatter_and_canonical_prose(self):
+        """After supersede, the OLD ADR has BOTH frontmatter
+        `status: Superseded` AND the prose `Superseded by` line."""
         old, new = self._two_accepted_adrs()
         old_path, _ = self.adr.cmd_supersede(self.adrs_dir, old, new)
         content = old_path.read_text()
@@ -1243,9 +1499,10 @@ class WriterStampsFrontmatterStatusTests(unittest.TestCase):
             "prose Superseded-by line must accompany frontmatter Superseded",
         )
 
-    def test_accept_frontmatter_and_prose_cannot_diverge(self):
-        """ADR-0026 sync-lock (mirror): after accept, the ADR has BOTH
-        frontmatter `status: Accepted` AND the prose `Accepted (date)`."""
+    def test_accept_syncs_frontmatter_and_canonical_prose(self):
+        """Mirror: after accept, an ADR whose prose Status line is
+        canonical has BOTH frontmatter `status: Accepted` AND the prose
+        `Accepted (date)`."""
         target = self.adr.cmd_new(self.adrs_dir, "sync-accept", "")
         number = self.adr._parse_adr_number(target.name)
         _write_adr_frame_verdict(self.adrs_dir, f"{number:04d}", "pass")
@@ -1304,6 +1561,347 @@ class WriterStampsFrontmatterStatusTests(unittest.TestCase):
             _write_adr_frame_verdict(self.adrs_dir, num, "pass")
             self.adr.cmd_accept(self.adrs_dir, num)
         return old, new
+
+
+# ---------- ADR-0046 / bug 013: non-canonical prose Status line ----------
+
+
+# The exact shape reported in issue #123: a hand-edited Status line that is
+# genuinely `Proposed`, carrying an authored trailing clause.
+TRAILING_CLAUSE = " — awaiting owner acceptance."
+
+
+def _write_adr_with_prose_status(path: Path, number: str, slug: str,
+                                 title: str, prose_status_line: str,
+                                 *, frontmatter_status: str = None) -> None:
+    """Seed an ADR whose prose `## Status` body is `prose_status_line`
+    verbatim. `frontmatter_status=None` seeds a legacy (pre-073) ADR with
+    no `status:` field, exercising the prose-classifier fallback; passing a
+    value seeds the frontmatter-canonical case."""
+    front = ""
+    if frontmatter_status is not None:
+        front = (
+            "---\n"
+            f"status: {frontmatter_status}\n"
+            "dependencies: []\n"
+            "last_verified: 2026-01-02\n"
+            "---\n\n"
+        )
+    path.write_text(
+        f"{front}"
+        f"# ADR-{number}: {title}\n\n"
+        f"## Status\n\n{prose_status_line}\n\n"
+        f"## Context\n\nSample context paragraph for the ADR.\n\n"
+        f"## Decision Options Considered\n\n_TODO_\n\n"
+        f"## Recommended Decision\n\n_TODO_\n\n"
+        f"## Consequences\n\n_TODO_\n\n"
+        f"## Open questions\n\nNone.\n"
+    )
+
+
+class NonCanonicalProseStatusTests(unittest.TestCase):
+    """ADR-0046 (supersedes ADR-0026 ruling 2) / bug 013 / issue #123.
+
+    Frontmatter `status:` is authoritative; the prose `## Status` line is a
+    best-effort human-readable mirror. `accept` gates on the *classified*
+    state and never refuses because of prose formatting; it rewrites the
+    prose line only when that line is canonical, and otherwise leaves the
+    authored text byte-identical and emits a touch-up note.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-prose-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        self.adr = _import_adr_module()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _seed(self, prose_line: str, *, frontmatter_status: str = None,
+              number: str = "0001", slug: str = "trailing-text") -> Path:
+        path = self.adrs_dir / f"adr-{number}-{slug}.md"
+        _write_adr_with_prose_status(path, number, slug, "Trailing Text",
+                                     prose_line,
+                                     frontmatter_status=frontmatter_status)
+        return path
+
+    # ---- the reported repro: accept no longer refuses ----
+
+    def test_accept_succeeds_with_trailing_text_legacy_adr(self):
+        """Issue #123 repro, legacy shape (no frontmatter `status:`): the
+        lenient prose classifier reads `Proposed`, so accept proceeds."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+    def test_accept_succeeds_with_trailing_text_frontmatter_adr(self):
+        """Same line, frontmatter-canonical ADR: frontmatter decides."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+
+    def test_accept_flips_frontmatter_despite_non_canonical_prose(self):
+        """ADR-0046 ruling 2: the frontmatter flip is unconditional."""
+        path = self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                          frontmatter_status="Proposed")
+        run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(_frontmatter_status(path.read_text()), "Accepted")
+
+    def test_accept_leaves_non_canonical_prose_byte_identical(self):
+        """The authored line survives untouched — not truncated, not
+        rewritten into the self-contradictory
+        `Accepted (today) — awaiting owner acceptance.`"""
+        line = f"Proposed (2026-07-22){TRAILING_CLAUSE}"
+        path = self._seed(line, frontmatter_status="Proposed")
+        run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        content = path.read_text()
+        self.assertIn(line, content, "authored Status line must survive")
+        self.assertNotIn(f"Accepted ({TODAY}){TRAILING_CLAUSE}", content)
+        self.assertNotIn(f"Accepted ({TODAY})\n", content,
+                         "prose must NOT be flipped when non-canonical")
+
+    def test_accept_notes_that_prose_needs_touch_up(self):
+        """A note on stderr names the file and the stale line, so the agent
+        can reconcile the prose (ADR-0046 ruling 2)."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("adr-0001-trailing-text.md", result.stderr)
+        self.assertIn("Status", result.stderr)
+        self.assertIn(f"Accepted ({TODAY})", result.stderr,
+                      "the note must state the value the prose should carry")
+
+    def test_accept_prints_path_to_stdout_with_non_canonical_prose(self):
+        """The note goes to stderr; stdout stays the machine-readable path."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.stdout.strip(),
+                         "docs/decisions/adr-0001-trailing-text.md")
+
+    def test_accept_emits_no_note_when_prose_is_canonical(self):
+        """The canonical path is unchanged and silent."""
+        path = self._seed("Proposed (2026-07-22)",
+                          frontmatter_status="Proposed")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertEqual(result.stderr.strip(), "",
+                         "no touch-up note when the prose was rewritten")
+        self.assertIn(f"Accepted ({TODAY})", path.read_text())
+
+    # ---- gating is on state, never on prose formatting ----
+
+    def test_accept_refuses_when_frontmatter_says_accepted(self):
+        """Divergence guard: frontmatter Accepted + stale `Proposed` prose
+        must NOT re-accept. Frontmatter decides (ruling 3)."""
+        self._seed("Proposed (2026-07-22)", frontmatter_status="Accepted")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("already Accepted", result.stderr)
+
+    def test_accept_refuses_superseded_and_names_the_state(self):
+        """A Superseded ADR is refused with the state named — not with the
+        old catch-all `Status is not 'Proposed (...)'` message."""
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Superseded")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        # Assert the phrase unique to the Superseded branch — `Superseded`
+        # alone is also produced by the generic `state: <X>` catch-all, so it
+        # cannot distinguish the dedicated branch from its own fallback.
+        self.assertIn("accept its superseder instead", result.stderr)
+
+    def test_accept_refusal_names_the_actual_state(self):
+        """An unclassifiable Status body refuses with a message that names
+        what was found — the diagnosis cost that produced issue #123."""
+        self._seed("_TODO: decide this._")
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("Unknown", result.stderr)
+
+    def test_blank_frontmatter_status_falls_through_to_prose(self):
+        """A stamped-but-empty `status:` carries no state, so it must not be
+        read as one — the classifier falls through to prose. Pins the
+        docstring claim on `_frontmatter_status`; without it the
+        blank-vs-absent distinction is only asserted in a comment, which is
+        the artifact class that filed this bug."""
+        path = self.adrs_dir / "adr-0001-blank-status.md"
+        path.write_text(
+            "---\nstatus:\ndependencies: []\nlast_verified:\n---\n\n"
+            "# ADR-0001: Blank Status\n\n"
+            f"## Status\n\nProposed (2026-07-22){TRAILING_CLAUSE}\n\n"
+            "## Context\n\nSample context paragraph for the ADR.\n"
+        )
+        # Prose says Proposed, so accept proceeds — a blank `status:` read as
+        # a state would classify Unknown and refuse.
+        result = run_adr("accept", "0001", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("status: Accepted", path.read_text())
+
+    # ---- ruling 3: every reader is frontmatter-first ----
+
+    def test_index_renders_frontmatter_status_over_stale_prose(self):
+        """The README index must not advertise a stale prose state."""
+        self._seed("Proposed (2026-07-22)", frontmatter_status="Accepted")
+        result = run_adr("index", str(self.adrs_dir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        index = (self.adrs_dir / "README.md").read_text()
+        entry = next(line for line in index.splitlines()
+                     if "adr-0001-trailing-text.md" in line)
+        # State comes from frontmatter, and NO date is published: the prose
+        # date (2026-07-22) belongs to the stale `Proposed` state, and
+        # `last_verified` (2026-01-02) is a freshness stamp, not an
+        # acceptance date — a plausible wrong date is worse than none.
+        # Scoped to this ADR's bullet; the fixture README names other ADRs.
+        self.assertIn("(Accepted)", entry)
+        self.assertNotIn("Proposed", entry,
+                         "index must read frontmatter, not stale prose")
+        self.assertNotIn("2026-07-22", entry,
+                         "index must not pair a frontmatter state with the "
+                         "stale prose date")
+        self.assertNotIn("2026-01-02", entry,
+                         "index must not pass `last_verified` off as an "
+                         "acceptance date")
+
+    def test_resolve_todo_accepts_frontmatter_accepted_with_stale_prose(self):
+        """`resolve-todo`'s Accepted check is frontmatter-first."""
+        self._seed(f"Proposed (2026-07-22){TRAILING_CLAUSE}",
+                   frontmatter_status="Accepted")
+        todo = Path(self.tmpdir) / "docs" / "refinement-todo.md"
+        write_refinement_todo(todo)
+        result = run_adr("resolve-todo", "0001", "Hook strictness",
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("~~Decision: Hook strictness profiles~~",
+                      todo.read_text())
+
+    def test_supersede_gate_reads_frontmatter_not_prose(self):
+        """Frontmatter `Proposed` beats a stale prose `Accepted` line."""
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Proposed",
+                   number="0001", slug="old-one")
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Accepted",
+                   number="0002", slug="new-one")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("Proposed", result.stderr)
+
+    def test_supersede_refuses_when_prose_anchor_is_missing(self):
+        """ADR-0046 ruling 5: the `Superseded by` link is load-bearing, so
+        supersede refuses (rather than silently dropping it) when the prose
+        carries no canonical `Accepted (date)` anchor."""
+        old = self._seed(f"Accepted (2026-01-02){TRAILING_CLAUSE}",
+                         frontmatter_status="Accepted",
+                         number="0001", slug="old-one")
+        new = self._seed("Accepted (2026-01-02)",
+                         frontmatter_status="Accepted",
+                         number="0002", slug="new-one")
+        before_old, before_new = old.read_text(), new.read_text()
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("adr-0001-old-one.md", result.stderr)
+        # Assert the ANCHOR-specific refusal, not just "Status": the pre-fix
+        # strict reader refused this same input for an entirely different
+        # reason (`_classify_status` → Unknown → "Status is not Accepted"),
+        # so a looser assertion passes with or without ruling 5 in place.
+        self.assertIn("no canonical", result.stderr)
+        self.assertIn("anchor the supersession link", result.stderr)
+        self.assertIn("ruling 5", result.stderr)
+        # Refusal is atomic: neither file was touched.
+        self.assertEqual(old.read_text(), before_old)
+        self.assertEqual(new.read_text(), before_new)
+
+    def test_supersede_refusal_points_at_the_accept_commit_not_metadata(self):
+        """ADR-0046 "Why not Option C" residual: the deferred prose fix needs
+        the acceptance date, and the record no longer holds it — the prose
+        date belongs to the pre-acceptance state.
+
+        The refusal must send the operator to the accept commit and must NOT
+        offer `last_verified` as the answer: that field is a *freshness*
+        stamp (ADR-0024's `reaffirm` refreshes it), so on a reaffirmed ADR it
+        is a plausible-looking wrong date, and this repair writes into an
+        immutable record."""
+        self._seed(f"Accepted (2026-01-02){TRAILING_CLAUSE}",
+                   frontmatter_status="Accepted",
+                   number="0001", slug="old-one")
+        self._seed("Accepted (2026-01-02)", frontmatter_status="Accepted",
+                   number="0002", slug="new-one")
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("git log", result.stderr)
+        self.assertIn("adr-0001-old-one.md", result.stderr)
+        self.assertIn("freshness field, not an acceptance date",
+                      result.stderr)
+        # The seeded frontmatter carries `last_verified: 2026-01-02`. It must
+        # not be presented as the line to write.
+        self.assertNotIn("last_verified: 2026-01-02", result.stderr)
+        # The pathspec must carry its directory, not just the basename: git
+        # resolves pathspecs relative to cwd, so `-- adr-0001-old-one.md` from
+        # a repo root matches nothing and exits 0 — output indistinguishable
+        # from "there is no accept commit". This is the defect the printed
+        # command shipped with once; assert the shape, not just the verb.
+        # `.resolve()` because `adr.py` resolves the decisions dir before
+        # building the path (and on macOS the temp dir is symlinked under
+        # /private, so the unresolved form would not match).
+        expected = (self.adrs_dir / "adr-0001-old-one.md").resolve()
+        self.assertIn(f"-- '{expected}'", result.stderr)
+        self.assertIn(os.sep, str(expected))
+        # `-S` matches every commit that changed the string's count, so the
+        # ordering has to be pinned or "the first line" is wrong.
+        self.assertIn("--reverse", result.stderr)
+
+    def test_supersede_refuses_when_the_new_adr_lacks_the_anchor(self):
+        """Ruling 5 guards BOTH ADRs, and the new-ADR branch needs its own
+        test: without it, the old ADR gains `Superseded by …` plus
+        `status: Superseded` while the new ADR never gains
+        `Supersedes ADR-NNNN` — exactly the information loss ruling 5 exists
+        to prevent. Mutating this branch away leaves the rest of the suite
+        green, so the symmetric case is not covered by the old-ADR test."""
+        old = self._seed("Accepted (2026-01-02)",
+                         frontmatter_status="Accepted",
+                         number="0001", slug="old-one")
+        new = self._seed(f"Accepted (2026-01-02){TRAILING_CLAUSE}",
+                         frontmatter_status="Accepted",
+                         number="0002", slug="new-one")
+        before_old, before_new = old.read_text(), new.read_text()
+        result = run_adr("supersede", "0001", "0002", cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        # The refusal names the NEW ADR — the one actually missing an anchor.
+        self.assertIn("adr-0002-new-one.md", result.stderr)
+        self.assertIn("anchor the supersession link", result.stderr)
+        # Atomic across both files: the old ADR must not have been written
+        # even though its own anchor was fine.
+        self.assertEqual(old.read_text(), before_old)
+        self.assertEqual(new.read_text(), before_new)
+
+    # ---- the comment/code disagreement that filed the issue ----
+
+    def test_proposed_rewrite_pattern_stays_canonical_only(self):
+        """Issue #123's comment/code disagreement, pinned behaviourally
+        rather than by matching comment text.
+
+        `_STATUS_PROPOSED_RE` drives the prose *rewrite*, so it must keep
+        refusing trailing content: a pattern that matched it would either
+        drop the authored clause or emit the self-contradictory
+        `Accepted (today) — awaiting owner acceptance`. Leniency belongs in
+        the gate (`_adr_status`), not in this pattern."""
+        self.assertFalse(
+            self.adr._STATUS_PROPOSED_RE.search(
+                f"Proposed (2026-07-22){TRAILING_CLAUSE}"),
+            "the rewrite pattern must stay canonical-only",
+        )
+        self.assertTrue(
+            self.adr._STATUS_PROPOSED_RE.search("Proposed (2026-07-22)"),
+            "the rewrite pattern must still match the canonical form",
+        )
+        # The gate, by contrast, is lenient about the same line.
+        self.assertEqual(
+            self.adr._adr_status(
+                "# ADR-0001: x\n", f"\nProposed (2026-07-22){TRAILING_CLAUSE}\n"),
+            "Proposed",
+        )
 
 
 # ---------- Supersede SKILL.md surface (slice 005-02 AC #5) ----------
@@ -1733,6 +2331,19 @@ class ReserveAdrTests(unittest.TestCase):
         self.assertNotIn("git checkout main", flat)
         self.assertNotIn("git reset --hard", flat)
 
+    def test_classifier_reads_captured_refusals(self):
+        # spec 107 / ADR-0053 — adr.py's re-exported classifier reads the
+        # CAPTURED multi-line refusals correctly: protection (incl. the
+        # rulesets GH013 case) over the bare `rejected` the old ordering
+        # matched first.
+        self.assertEqual(
+            _adr_mod._classify_push_failure(CAPTURED_GH006), "protection")
+        self.assertEqual(
+            _adr_mod._classify_push_failure(CAPTURED_GH013), "protection")
+        self.assertEqual(
+            _adr_mod._classify_push_failure(
+                "! [rejected] HEAD -> main (fetch first)"), "race")
+
     # Worktree path race recovery: teardown only, no `git reset --hard HEAD~1`.
     def test_new_off_main_race_cleans_up_worktree(self):
         rec = _SubprocessRecorder()
@@ -1771,7 +2382,7 @@ class ReserveAdrTests(unittest.TestCase):
         # reserve/ branch falls through to the recorder's rc=0 default.
         rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
                  stdout="https://github.com/user/repo/pull/7\n")
         import shutil as _shutil
@@ -1940,7 +2551,7 @@ class ReserveAdrTests(unittest.TestCase):
         rec.stub(_matches("git", "commit"), returncode=0)
         rec.stub(_matches("git", "push", "origin", "main"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("git", "branch"), returncode=0)
         rec.stub(_matches("git", "reset", "--hard", "origin/main"),
                  returncode=0)
@@ -2481,6 +3092,39 @@ class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
         self.assertFalse(
             (self.feat / "docs/decisions/adr-0003-gamma.md").exists())
 
+    def test_reserve_skips_number_claimed_on_in_flight_branch(self):
+        # AC6 (spec 107 / ADR-0053) — the #161/#162 shape. origin/main holds
+        # adr-0001/0002; a FIRST reservation is in flight on a side branch
+        # carrying adr-0003 (never merged). The SECOND reservation must skip
+        # 0003 and land 0004 — not re-allocate 0003 the way the origin/main-
+        # only scan did. Real git, no gh, no mocks.
+        dec = "docs/decisions/adr-0003-frontmatter.md"
+        # Build the in-flight reservation branch off origin/main and push it.
+        self._git("worktree", "add", "--detach",
+                  str(self.tmp / "res"), "origin/main", cwd=self.work)
+        res = self.tmp / "res"
+        (res / "docs" / "decisions").mkdir(parents=True, exist_ok=True)
+        (res / dec).write_text("# adr-0003\n")
+        self._git("add", "-A", cwd=res)
+        self._git("commit", "-m", "reserve adr-0003", cwd=res)
+        push = self._git("push", "origin",
+                         "HEAD:refs/heads/reserve/adr-0003-frontmatter",
+                         cwd=res)
+        self.assertEqual(push.returncode, 0, f"reserve push failed: {push.stderr}")
+        self._git("worktree", "remove", "--force", str(res), cwd=self.work)
+
+        # The next real reservation, from the feature worktree, must see 0003
+        # in flight and pick 0004.
+        code = _adr_mod.reserve_adr(
+            "derived", project_dir=self.feat, title="", no_push=False,
+            pr_mode=False,
+        )
+        self.assertEqual(code, 0)
+
+        ls = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.origin)
+        self.assertIn("docs/decisions/adr-0004-derived.md", ls.stdout)
+        self.assertNotIn("adr-0003-derived", ls.stdout)
+
     def test_reserve_from_linked_worktree_with_relative_origin_url(self):
         # B1 regression lock: with a RELATIVE origin URL, the old code (push
         # from the ephemeral temp worktree under $TMPDIR) resolved the URL
@@ -2535,6 +3179,121 @@ class ReserveAdrFromLinkedWorktreeE2E(unittest.TestCase):
         staged = self._git(
             "diff", "--cached", "--name-only", cwd=self.feat).stdout
         self.assertIn("unrelated.txt", staged)
+
+
+class CheckIndexTests(unittest.TestCase):
+    """adr.py check-index — read-only audit of the ADR README's Index.
+
+    Same shape as the bug and spec boards: one generated file that every
+    parallel branch appends to at the same position, over a numbered record
+    space where branches routinely pick the same number (issue #147). Two ADRs
+    claiming one number render as two bullets without complaint, and a
+    staleness check can't see it either — both bullets are faithfully derived.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-adr-check-index-")
+        self.adrs_dir = Path(self.tmpdir) / "docs" / "decisions"
+        self.adrs_dir.mkdir(parents=True)
+        write_sample_readme(self.adrs_dir / "README.md")
+        write_sample_adr(self.adrs_dir / "adr-0001-alpha.md", "0001", "alpha",
+                         "Alpha", context="Alpha context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.readme = self.adrs_dir / "README.md"
+        self.adr = _import_adr_module()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_clean_index_reports_no_problems(self):
+        self.assertEqual(self.adr.check_index(self.adrs_dir), [])
+
+    def test_detects_an_index_that_was_not_regenerated(self):
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta",
+                         "Beta", context="Beta context.")
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("stale index", problems[0])
+        self.assertIn("adr.py index", problems[0])
+
+    def test_detects_two_adrs_claiming_one_number(self):
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta",
+                         "Beta", context="Beta context.")
+        write_sample_adr(self.adrs_dir / "adr-0002-gamma.md", "0002", "gamma",
+                         "Gamma", context="Gamma context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertTrue(
+            any("duplicate ADR number 0002" in p for p in problems), problems
+        )
+
+    def test_duplicate_message_names_both_files(self):
+        write_sample_adr(self.adrs_dir / "adr-0002-beta.md", "0002", "beta",
+                         "Beta", context="Beta context.")
+        write_sample_adr(self.adrs_dir / "adr-0002-gamma.md", "0002", "gamma",
+                         "Gamma", context="Gamma context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        dupe = next(p for p in self.adr.check_index(self.adrs_dir)
+                    if "duplicate ADR number" in p)
+        self.assertIn("adr-0002-beta.md", dupe)
+        self.assertIn("adr-0002-gamma.md", dupe)
+
+    def test_a_regenerated_index_passes_its_own_check(self):
+        """The check compares against what `index` would write, so
+        regen-then-check must always be clean. If this fails, the checker and
+        the generator have drifted and the check measures the wrong thing."""
+        write_sample_adr(self.adrs_dir / "adr-0003-delta.md", "0003", "delta",
+                         "Delta", context="Delta context.")
+        run_adr("index", str(self.adrs_dir), cwd=Path(self.tmpdir))
+        self.assertEqual(self.adr.check_index(self.adrs_dir), [])
+
+    def test_hand_written_summary_reads_as_drift(self):
+        """The reason this landed: on `main` one row carried a hand-written
+        summary the generator does not reproduce, so the index had quietly
+        stopped being derived. Julien's ruling was to fix the source ADR —
+        which requires the check to notice in the first place."""
+        text = self.readme.read_text().replace(
+            "Alpha context.", "a much better hand-written summary."
+        )
+        self.readme.write_text(text)
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertTrue(any("stale index" in p for p in problems), problems)
+
+    def test_missing_readme_is_reported_not_raised(self):
+        self.readme.unlink()
+        problems = self.adr.check_index(self.adrs_dir)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("missing", problems[0])
+
+    def test_prose_outside_the_index_section_is_not_drift(self):
+        """`index` only rewrites the `## Index` section. Hand-written prose
+        elsewhere in the README is legitimate and must not be flagged."""
+        text = self.readme.read_text() + "\n## How we use these\n\nHand-written.\n"
+        self.readme.write_text(text)
+        self.assertEqual(self.adr.check_index(self.adrs_dir), [])
+
+    def test_is_read_only(self):
+        """CI runs this against a checkout; a check that repairs what it
+        measures can't be trusted to report it."""
+        write_sample_adr(self.adrs_dir / "adr-0004-eps.md", "0004", "eps",
+                         "Eps", context="Eps context.")
+        before = self.readme.read_text()
+        self.assertNotEqual(self.adr.check_index(self.adrs_dir), [])
+        self.assertEqual(self.readme.read_text(), before)
+
+    def test_cli_exits_zero_and_says_clean(self):
+        result = run_adr("check-index", str(self.adrs_dir),
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("clean", result.stdout)
+
+    def test_cli_exits_nonzero_and_names_the_problem_on_stderr(self):
+        write_sample_adr(self.adrs_dir / "adr-0005-zeta.md", "0005", "zeta",
+                         "Zeta", context="Zeta context.")
+        result = run_adr("check-index", str(self.adrs_dir),
+                         cwd=Path(self.tmpdir))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("stale index", result.stderr)
 
 
 if __name__ == "__main__":

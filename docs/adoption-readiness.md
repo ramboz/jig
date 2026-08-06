@@ -78,19 +78,23 @@ shapes start from that same install:
 
 | Shape | Pick it when | Start with |
 |---|---|---|
-| **Own it** (default) | You want to **own, edit, and version-control** the machinery and customize it per-project. | `/jig:scaffold-init` |
-| **Central machinery** | You want the workspace docs in your repo but the machinery to **upgrade centrally** with the plugin. | `/jig:scaffold-init --plugin-only` |
+| **Central machinery** (default) | You want the workspace docs in your repo and the machinery to **upgrade centrally** with the plugin — the lean repo. | `/jig:scaffold-init` |
+| **Own it** | You want to **own, edit, and version-control** the machinery and customize it per-project — or the plugin **cannot be assumed present** (CI, cloud agents, teammates without jig, archival repos). | `/jig:scaffold-init --in-repo` |
 | **Plugin only** (full manual) | You already have your own setup and conventions and just want jig's skills + hooks available to **wire into your project by hand** — no generated `docs/` workspace, you place the pieces where your project wants them. | _(skip scaffold)_ |
 
-When in doubt, scaffold and own it — owning the scaffolding is jig's default
-posture (product-vision § Design principle 7).
+When in doubt, take the default: the repo stays lean and jig updates flow from the
+plugin. Reach for `--in-repo` deliberately — it is the heavier commitment (a
+self-contained copy, pinned to the jig version at scaffold time), which is exactly
+why it is opt-in rather than the default.
 
 ## Your first 30 minutes
 
 1. **Scaffold** — run `/jig:scaffold-init` at your repo root. You get
-   `docs/`, a host primer (`CLAUDE.md` or `AGENTS.md`), host-native hooks +
-   skills under `.claude/` or `.codex/`, and a completion check that reports
-   "scaffold complete and verified."
+   `docs/`, a host primer (`CLAUDE.md` or `AGENTS.md`), a `.gitignore` secret
+   floor, and a completion check that reports "scaffold complete and verified."
+   The skills and hooks run from the installed plugin; add `--in-repo` to copy
+   them into `.claude/` or `.codex/` instead. The closing summary names which
+   mode ran.
 2. **Read the worked example** — a fresh scaffold seeds
    `docs/specs/001-adopt-jig/` (a `DONE` reference spec to imitate) plus a
    `002-first-spec` `DRAFT` stub. Skim `001-adopt-jig` to see the shape of a

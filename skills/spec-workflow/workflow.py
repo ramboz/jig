@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Commands such as `orient` must remain read-only even when this helper and
@@ -29,7 +30,9 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import (
+    derived_docs,
     project_layout,
+    reservation,
     subtree,
     team_signal,  # noqa: F401  (re-exported for test monkeypatching)
 )
@@ -1183,13 +1186,31 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     deviation log and reconciliation sweep are present). The gate is ON
     by default; bypass with `JIG_REVIEW_EVIDENCE_GATE=0`.
 
-    Slice 049-01: → IN_PROGRESS stamps a `claimed_by:` identifier
-    (branch name, or `JIG_CLAIM_ID`) and refuses an on-disk foreign
-    claim that is still IN_PROGRESS (AC3); `push`/`pr_mode` additionally
-    reserve the claim on origin/main so parallel worktrees see it (local
-    by default). → REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT clear the
-    claim. `release` (with a `reason`) force-clears a stale claim and
-    appends a `## Release log` entry.
+    Slice 049-01, as amended by ADR-0045: the lifecycle splits two ways
+    for ownership. A transition into a WORKING state
+    (`_CLAIM_WORKING_STATUSES` — READY_FOR_REVIEW / IN_PROGRESS /
+    REVIEWED / RECONCILED) STAMPS a `claimed_by:` identifier (branch
+    name, or `JIG_CLAIM_ID`), so spec-level work is marked and not just
+    implementation. A transition into a RELEASE POINT
+    (`_CLAIM_RELEASE_STATUSES` — the pickup-queue states DRAFT /
+    READY_FOR_IMPLEMENTATION, plus terminal DONE / DEFERRED /
+    ABANDONED) CLEARS it, as does `release` (with a `reason`), which
+    additionally appends a `## Release log` entry. The two sets
+    partition VALID_STATUSES.
+
+    The queue-state exclusion is load-bearing, NOT an oversight: those
+    two states are the ones the pickup flow tells a reader to choose
+    work from, so a residual owner there would mark a FREE slice as
+    occupied — inverting the very bug this amendment exists to fix.
+
+    Two levels of protection, deliberately different widths: a foreign
+    claim HARD-REFUSES only when both ends are IN_PROGRESS (spec 049
+    AC3, unchanged) — two sessions building one slice — on the local
+    copy and, symmetrically, on origin/main. Any other foreign claim
+    emits a non-blocking warning and the claim transfers to this
+    session. `push`/`pr_mode` additionally reserve the claim on
+    origin/main (local by default) for any working state; only an
+    IN_PROGRESS reservation also publishes `status:` there.
 
     Slice 051-04: → IN_PROGRESS also consults the AUTHORITATIVE
     origin/main copy of the slice (`git fetch` + `git show
@@ -1265,18 +1286,51 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     # (docs/specs/<dir>/spec.md → parents[3]), via a depth-safe helper.
     existing_claim = str(fm_fields.get(CLAIM_FIELD) or "").strip()
     claim_identifier = None
-    if has_frontmatter and new_status == IN_PROGRESS_STATUS and not release:
+    if (has_frontmatter and new_status in _CLAIM_WORKING_STATUSES
+            and not release):
         claim_project_dir = _project_root_for_spec(spec_md)
         claim_identifier = _claim_identifier(claim_project_dir)
+        foreign = bool(existing_claim and existing_claim != claim_identifier)
         # AC3: refuse a foreign claim that is already IN_PROGRESS on disk.
-        if (existing_claim and existing_claim != claim_identifier
-                and current_status == "IN_PROGRESS"):
+        # ADR-0045 holds this refusal at its original width ON PURPOSE — note
+        # BOTH ends must be IN_PROGRESS, which is what the pre-ADR-0045 code
+        # meant implicitly (it only ever reached here for an IN_PROGRESS
+        # target). Two sessions BUILDING one slice stays a hard block; a
+        # session moving a slice FORWARD out of IN_PROGRESS, or two sessions
+        # editing one spec, can be legitimate — a reviewer worktree recording
+        # a verdict on the implementer's slice is the everyday case. Widening
+        # the block would manufacture false refusals. The gap being closed was
+        # the missing SIGNAL, not a missing refusal.
+        if (foreign and current_status == IN_PROGRESS_STATUS
+                and new_status == IN_PROGRESS_STATUS):
             raise WorkflowError(
                 f"slice {loc.label} is currently claimed by "
                 f"{existing_claim!r} (status IN_PROGRESS). To take it over, "
                 f"have the owner release it, or force-release with:\n"
                 f"    workflow.py transition <spec> {loc.label} "
                 f'READY_FOR_IMPLEMENTATION --release --reason "..."'
+            )
+        # ADR-0045: any OTHER foreign claim is surfaced loudly and proceeds.
+        # This is the signal that did not exist before — walking into another
+        # session's spec-level work used to be completely silent.
+        #
+        # Wording notes, both from the craft pass: (a) this fires BEFORE the
+        # evidence gate and the start-collision guard, either of which can
+        # still refuse, so it must not assert a completed takeover; (b) the
+        # suggested `--release` target is the ungated
+        # READY_FOR_IMPLEMENTATION (mirroring the refusal above) rather than
+        # `current_status`, which may be an evidence-gated state or `None` on
+        # a slice with neither a frontmatter `status:` nor a prose marker.
+        if foreign:
+            where = (f" (status {current_status})" if current_status
+                     else "")
+            sys.stderr.write(
+                f"warning: slice {loc.label} is claimed by {existing_claim!r}"
+                f"{where} — another session may be working it right now. If "
+                f"this transition succeeds the claim will transfer to you. If "
+                f"that is wrong, coordinate first, or force-release with:\n"
+                f"    workflow.py transition <spec> {loc.label} "
+                f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
             )
 
         # Slice 051-04: the on-disk guard above trusts a possibly-stale local
@@ -1291,7 +1345,13 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # `_reserve_claim_on_main` already fetches + reads the origin/main copy
         # and refuses the same DONE / foreign-IN_PROGRESS collisions, so
         # running this guard too would double-fetch for no gain.
-        if loc.path.name != "spec.md" and not (push or pr_mode):
+        #
+        # ADR-0045 widened the enclosing claim block to every working state, but
+        # this guard stays IN_PROGRESS-only: it is a START-of-building check,
+        # and running it on every transition would put a `git fetch` on the hot
+        # path of routine lifecycle moves.
+        if (new_status == IN_PROGRESS_STATUS
+                and loc.path.name != "spec.md" and not (push or pr_mode)):
             try:
                 start_rel_path = loc.path.resolve().relative_to(
                     claim_project_dir).as_posix()
@@ -1306,7 +1366,8 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
             if start_rel_path is not None:
                 _refuse_start_collision(
                     claim_project_dir, start_rel_path, claim_identifier,
-                    loc.label)
+                    loc.label,
+                    already_warned=existing_claim if foreign else "")
 
     # Pre-flight: DONE transition validates `dependencies:` from frontmatter.
     if new_status == "DONE" and fm_fields.get("dependencies"):
@@ -1356,13 +1417,15 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
             "found in slice section"
         )
 
-    # Slice 049-01: claim bookkeeping in the slice frontmatter (no-op on
-    # legacy prose-only slices, which have no frontmatter to carry a claim —
-    # stamping a field there would synthesize a spurious `---` block).
-    #   - release        : clear claimed_by + append a ## Release log entry.
-    #   - → IN_PROGRESS  : stamp claimed_by (the identifier resolved above).
-    #   - → REVIEWED /
-    #     READY_FOR_IMPLEMENTATION / DRAFT : clear claimed_by (AC4).
+    # Slice 049-01 + ADR-0045: claim bookkeeping in the slice frontmatter
+    # (no-op on legacy prose-only slices, which have no frontmatter to carry a
+    # claim — stamping a field there would synthesize a spurious `---` block).
+    #   - release           : clear claimed_by + append a ## Release log entry.
+    #   - → a WORKING state : stamp claimed_by (the identifier resolved above).
+    #   - → a RELEASE POINT : clear claimed_by — the slice is either queued for
+    #                         whoever comes next (DRAFT /
+    #                         READY_FOR_IMPLEMENTATION) or finished, parked, or
+    #                         dropped (DONE / DEFERRED / ABANDONED).
     if has_frontmatter:
         if release:
             if reason is None:
@@ -1372,11 +1435,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                 new_section, CLAIM_FIELD)
             new_section = _append_release_log(
                 new_section, released_from, reason)
-        elif new_status == IN_PROGRESS_STATUS:
+        elif new_status in _CLAIM_WORKING_STATUSES:
             new_section = _set_slice_frontmatter_field(
                 new_section, CLAIM_FIELD, claim_identifier,
             )
-        elif new_status in _CLAIM_CLEARING_STATUSES and existing_claim:
+        elif new_status in _CLAIM_RELEASE_STATUSES and existing_claim:
             new_section = _clear_slice_frontmatter_field(
                 new_section, CLAIM_FIELD)
 
@@ -1385,7 +1448,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # origin/main so parallel worktrees see it. The reservation runs
         # BEFORE the local write, so a collision / race / unreachable-origin
         # refusal leaves the caller's slice file untouched.
-        if (new_status == IN_PROGRESS_STATUS and not release
+        #
+        # ADR-0045 widened this to every working state: a session
+        # reconciling can now make its claim visible to parallel worktrees,
+        # which was impossible while only IN_PROGRESS could be reserved.
+        if (new_status in _CLAIM_WORKING_STATUSES and not release
                 and (push or pr_mode)):
             if claim_identifier is None:
                 raise WorkflowError("cannot reserve a claim without a claim identifier")
@@ -1394,9 +1461,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                 claim_project_dir).as_posix()
             _reserve_claim_on_main(
                 claim_project_dir, rel_path, claim_identifier, loc.label,
-                pr_mode=pr_mode,
+                pr_mode=pr_mode, new_status=new_status,
+                already_warned=existing_claim if foreign else "",
             )
-    elif release or (new_status == IN_PROGRESS_STATUS and (push or pr_mode)):
+    elif release or (new_status in _CLAIM_WORKING_STATUSES
+                     and (push or pr_mode)):
         # Claims require a frontmatter slice; surface rather than silently
         # synthesize a block on a legacy prose-only slice.
         raise WorkflowError(
@@ -1587,6 +1656,28 @@ _ORIENT_CLASSIFICATION_LABELS = {
 }
 _ORIENT_MAX_GROUPS = 8
 _ORIENT_SAFE_CLAIM_RE = re.compile(r"[^A-Za-z0-9._/-]+")
+# Slice 101-01. Seconds allowed for any *single* git call inside `orient`.
+_ORIENT_IN_FLIGHT_GIT_TIMEOUT = 0.75
+# Seconds allowed for *all* git work in one `orient` call. A per-call timeout
+# is not a bound: `_in_flight_summary` can issue nine calls, and per-call × 9
+# is what actually reaches the SessionStart hook. That hook bounds the whole
+# command at 4 s and swallows a timeout as *no orientation at all* — strictly
+# worse than the pre-101 headline. So the calls share one wall-clock deadline.
+_ORIENT_IN_FLIGHT_TOTAL_BUDGET = 1.5
+# Remote-tracking before local, `main` before `master`; consulted only after
+# `origin/HEAD`, and every entry is verified rather than assumed to exist.
+_ORIENT_IN_FLIGHT_BASE_CANDIDATES = (
+    "origin/main", "origin/master", "main", "master")
+# Ref names are repository-controlled and reach the SessionStart headline, so
+# they get the same whitelist as a claim — at a cap that fits a real branch
+# name (`_sanitize_orient_claim`'s 30 would truncate most feature branches).
+_ORIENT_IN_FLIGHT_REF_MAX = 60
+# Bug 031. Seconds the *interactive* `/jig:orient` path (the `--fetch` flag)
+# may spend on one best-effort `git fetch` to refresh remote-tracking refs
+# before reporting staleness. Aligned with spec 103's git-freshness default.
+# This never runs in the 4 s SessionStart hook (which passes no `--fetch`),
+# so a network round-trip is affordable here; it is fail-soft regardless.
+_ORIENT_FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
 def _spec_num_from_dirname(spec_dir: str) -> tuple[int, str]:
@@ -1685,14 +1776,237 @@ def _focus_summary(rows: list[tuple]) -> str:
     return focus
 
 
-def orient(project_dir: Path) -> str:
+def _in_flight_git(
+    project_dir: Path, *args: str, deadline: float
+) -> str | None:
+    """Run one read-only git command; return stripped stdout, or None.
+
+    None on *any* failure — git missing from PATH, not a repository, non-zero
+    exit, timeout, undecodable output, or the shared deadline already being
+    spent. Slice 101-01 AC3: orientation must never fail because git did, so
+    every call site treats None as "say nothing".
+
+    `deadline` is required, not defaulted: it is the shared budget, and a
+    caller that forgot it would silently get up to five unbounded calls —
+    which is exactly the hole the round-1 review caught.
+    """
+    budget = min(_ORIENT_IN_FLIGHT_GIT_TIMEOUT, deadline - time.monotonic())
+    if budget <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), *args],
+            capture_output=True,
+            text=True,
+            # A ref name need not be valid in the ambient encoding (and under
+            # LC_ALL=C any non-ASCII branch is not). Strict decoding would
+            # raise UnicodeDecodeError — a ValueError, so not covered by the
+            # except clause below — straight out of orient().
+            errors="replace",
+            timeout=budget,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _sanitize_orient_ref(value: str) -> str:
+    """Ref names are repository-controlled text bound for the hook headline.
+
+    Git forbids spaces and control characters in refs but permits `·` — the
+    headline's own field separator — plus assorted punctuation and arbitrary
+    length, so an unsanitised branch name can forge a headline field. Same
+    whitelist as `_sanitize_orient_claim`, wider cap (see the constant).
+    """
+    cleaned = _ORIENT_SAFE_CLAIM_RE.sub("?", str(value or ""))
+    return cleaned[:_ORIENT_IN_FLIGHT_REF_MAX]
+
+
+def _in_flight_base(project_dir: Path, *, deadline: float) -> str:
+    """Resolve the default branch instead of assuming `main` (101-01 AC4).
+
+    `origin/HEAD` is consulted first — it is what the remote actually calls
+    its trunk — but its target is **verified like any other candidate rather
+    than trusted**. A stale `origin/HEAD` (left behind by a default-branch
+    rename, or pointing at a pruned ref) would otherwise either silence the
+    segment permanently or, worse, produce a confidently wrong count against
+    the old trunk. On a miss we fall through to the conventional names.
+    Returns "" when none resolves, which the caller turns into silence.
+    """
+    head = _in_flight_git(
+        project_dir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD",
+        deadline=deadline)
+    candidates: list[str] = []
+    if head and head.startswith("refs/remotes/"):
+        candidates.append(head[len("refs/remotes/"):])
+    candidates.extend(_ORIENT_IN_FLIGHT_BASE_CANDIDATES)
+    seen: set[str] = set()
+    for ref in candidates:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        if _in_flight_git(
+                project_dir, "rev-parse", "--verify", "--quiet", ref,
+                deadline=deadline) is not None:
+            return ref
+    return ""
+
+
+def _in_flight_summary(project_dir: Path) -> str:
+    """`5 commits ahead of main on claude/night-prep`, or "" (slice 101-01).
+
+    A status board only ever describes the default branch, so work sitting on
+    an unmerged branch — or committed locally and never pushed — is invisible
+    to every artifact orient reads, and the project reads as "nothing in
+    progress" when it is not.
+
+    Silence is the default and covers every degraded case: not a git
+    repository, no git binary, no resolvable trunk, a detached HEAD, and a
+    HEAD level with or behind trunk. AC2 pins that the headline is then
+    byte-identical to its pre-101 form.
+
+    All git work shares one deadline (`_ORIENT_IN_FLIGHT_TOTAL_BUDGET`) so the
+    worst case is bounded no matter how many refs have to be probed, and both
+    ref names are sanitised before they reach the headline.
+    """
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=deadline) != "true":
+        return ""
+    branch = _in_flight_git(
+        project_dir, "rev-parse", "--abbrev-ref", "HEAD", deadline=deadline)
+    if not branch or branch == "HEAD":
+        # Detached HEAD — there is no branch name to report, so say nothing
+        # rather than printing the literal string "HEAD".
+        return ""
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if not base:
+        return ""
+    raw = _in_flight_git(
+        project_dir, "rev-list", "--count", f"{base}..HEAD", deadline=deadline)
+    # `isdecimal`, not `isdigit`: "²".isdigit() is True but int("²") raises,
+    # and AC3 lists unexpected git output as a case that must not raise.
+    if raw is None or not raw.isdecimal():
+        return ""
+    count = int(raw)
+    if count == 0:
+        return ""
+    noun = "commit" if count == 1 else "commits"
+    return (
+        f"{count} {noun} ahead of {_sanitize_orient_ref(base)} "
+        f"on {_sanitize_orient_ref(branch)}"
+    )
+
+
+def _orient_fetch_origin(project_dir: Path) -> bool:
+    """Best-effort bounded `git fetch origin`; True iff it succeeded.
+
+    Bug 031. Never raises: git missing, offline, auth failure, or timeout all
+    return False. The caller uses the boolean to distinguish "in sync against
+    refs we actually refreshed" from "cannot vouch — the fetch failed", so a
+    stale local view is never silently reported as fresh.
+
+    `GIT_TERMINAL_PROMPT=0` disables git's interactive credential prompt: on an
+    auth-required origin the fetch fails fast (returns False) instead of the
+    timeout having to backstop a stalled prompt.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), "fetch", "--quiet", "origin"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_ORIENT_FRESHNESS_FETCH_TIMEOUT,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return result.returncode == 0
+
+
+def _freshness_summary(project_dir: Path) -> str:
+    """`2 commits behind origin/main`, `could not reach origin`, or "".
+
+    Bug 031. Orient builds its whole picture from local artifacts (boards,
+    slice STATUS, ADRs) that are only as current as the last fetch; a checkout
+    whose base has drifted behind trunk otherwise renders stale state as
+    current. This runs ONLY on the interactive `--fetch` path (the `/jig:orient`
+    skill), never the 4 s SessionStart hook, so a bounded network fetch is
+    affordable.
+
+    Fail-soft in orient's tradition — not a git repo, no `origin` remote, an
+    unresolvable trunk, or unexpected git output all return "" (silence). The
+    one case surfaced rather than silenced is a configured-but-unreachable
+    origin: reporting "not behind" against refs we failed to refresh is exactly
+    the false-fresh signal this bug is about.
+    """
+    # Local ref probing shares the same bounded budget as `_in_flight_summary`;
+    # resolved fresh *after* the fetch so the fetch's own timeout does not eat
+    # into it.
+    probe_deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=probe_deadline) != "true":
+        return ""
+    origin_url = _in_flight_git(
+        project_dir, "config", "--get", "remote.origin.url",
+        deadline=probe_deadline)
+    if not origin_url:
+        # Local-only repo: nothing to be stale against.
+        return ""
+
+    fetch_ok = _orient_fetch_origin(project_dir)
+
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if base:
+        behind = _in_flight_git(
+            project_dir, "rev-list", "--count", f"HEAD..{base}",
+            deadline=deadline)
+        if behind is not None and behind.isdecimal():
+            count = int(behind)
+            if count > 0:
+                noun = "commit" if count == 1 else "commits"
+                return (
+                    f"{count} {noun} behind {_sanitize_orient_ref(base)}"
+                )
+            # count == 0: in sync against refs we DID refresh → silence, unless
+            # the fetch failed (then the "0" is against a stale ref we can't
+            # trust — fall through to the could-not-reach signal below).
+            if fetch_ok:
+                return ""
+    # No resolvable base, unexpected output, or a zero count we can't vouch
+    # for: surface unreachability, stay silent when the fetch actually worked.
+    return "" if fetch_ok else "could not reach origin"
+
+
+def orient(project_dir: Path, *, fetch: bool = False) -> str:
     """Read-only project pickup headline (slice 088-01).
 
     The headline is deliberately one line and starts with `jig hint:` so hook
-    injections cannot be confused for user-authored text. It uses durable jig
-    artifacts only: `scaffold.json` / spec-driven layout classification plus
-    spec and slice lifecycle state. It never infers application skeleton or
-    technology-stack state from the shallow source tree.
+    injections cannot be confused for user-authored text. Its lifecycle content
+    comes from durable jig artifacts only: `scaffold.json` / spec-driven layout
+    classification plus spec and slice lifecycle state. It never infers
+    application skeleton or technology-stack state from the shallow source
+    tree.
+
+    Slice 101-01 adds one further, clearly-bounded source: local `git` state,
+    used solely to report commits that have not reached the default branch
+    (`_in_flight_summary`). That is still not source-tree inference — it is
+    read-only VCS fact — and it fails soft, so the headline degrades to its
+    pre-101 form rather than disappearing when git is absent or slow.
+
+    Bug 031 adds `fetch`: when True (the interactive `/jig:orient` path only,
+    never the 4 s SessionStart hook) orient does one bounded, fail-soft
+    `git fetch` and appends a `freshness:` segment when the checkout is behind
+    origin or origin could not be reached — so a stale local view is never
+    presented as current. When False the headline is byte-identical to its
+    pre-031 form, keeping the hot path untouched.
     """
     project_dir = Path(project_dir)
     state = classify_scaffold_state(project_dir)
@@ -1701,10 +2015,22 @@ def orient(project_dir: Path) -> str:
     rows = collect_slices(project_dir)
     active_specs = _active_spec_summary(project_dir, rows)
     focus = _focus_summary(rows)
-    return (
+    headline = (
         f"jig hint: {classification} · active specs: {active_specs} · "
-        f"focus: {focus}\n"
+        f"focus: {focus}"
     )
+    # Slice 101-01: appended only when there is something to say, so the
+    # pre-101 headline stays byte-identical everywhere else (AC2).
+    in_flight = _in_flight_summary(project_dir)
+    if in_flight:
+        headline += f" · in flight: {in_flight}"
+    # Bug 031: only on the interactive path; the SessionStart hook passes no
+    # `fetch`, so its headline stays byte-identical.
+    if fetch:
+        freshness = _freshness_summary(project_dir)
+        if freshness:
+            headline += f" · freshness: {freshness}"
+    return headline + "\n"
 
 
 def _write_spec_rollup(spec_path: Path) -> bool:
@@ -1746,8 +2072,14 @@ def collect_slices(project_dir: Path) -> list:
     marker in `render_status_table` — recomputed every regen from the
     slice's frontmatter, so the marker is never stored separately.
     `claimed_by` (slice 049-02) is the slice's frontmatter `claimed_by:`
-    value (set by `transition … IN_PROGRESS`, spec 049-01; `""` when
-    unclaimed), rendered as a suffix on IN_PROGRESS Status cells."""
+    value — the session working the slice, stamped by `transition` on entry
+    to a WORKING state (ADR-0045) and rendered as a suffix on those Status
+    cells.
+
+    An empty `claimed_by` means NO CLAIM IS RECORDED — it is not proof the
+    slice is free. Claims are local by default (`--push`/`--pr` opt into
+    origin/main), so a parallel worktree's unpushed claim is invisible here,
+    and a plain `Edit`-tool write to a slice never takes a claim at all."""
     specs_dir = project_layout.specs_dir(project_dir)
     if not specs_dir.is_dir():
         return []
@@ -1840,7 +2172,7 @@ CLAIM_DISPLAY_TRUNC = 27
 
 
 def _render_claim_suffix(claimed_by: str) -> str:
-    """Slice 049-02: ` (<claim>)` suffix for an IN_PROGRESS Status cell, or
+    """Slice 049-02: ` (<claim>)` suffix for a WORKING-state Status cell (ADR-0045), or
     "" when unclaimed. Truncates an over-long claim to keep the cell bounded
     (AC6)."""
     claim = (claimed_by or "").strip()
@@ -1871,10 +2203,15 @@ def render_status_table(rows: list, notes_map: dict | None = None) -> str:
         claimed_by = row[5] if len(row) >= 6 else ""
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
         status_cell = f"**{status}**" if status == "DONE" else status
-        # Slice 049-02: surface the owning worktree on IN_PROGRESS rows.
-        # Other states are untouched (byte-identical render); legacy /
-        # unclaimed IN_PROGRESS rows fall back to plain `IN_PROGRESS`.
-        if status == "IN_PROGRESS":
+        # Slice 049-02: surface the owning worktree on the status cell.
+        # ADR-0045 widened this from IN_PROGRESS-only to every WORKING state —
+        # while the board could only show an owner on IN_PROGRESS rows, it was
+        # structurally unable to say "someone is reconciling this", which is
+        # exactly the read that sent a second session onto a live slice
+        # (bug 014). Release-point rows (pickup-queue + terminal) never
+        # carry a claim; legacy / unclaimed
+        # rows fall back to the plain status (empty suffix).
+        if status in _CLAIM_WORKING_STATUSES:
             status_cell = status + _render_claim_suffix(claimed_by)
         notes = notes_map.get((spec_dir, label), "")
         # Slice 029-02: prepend the spike marker on the slice cell only
@@ -2007,6 +2344,86 @@ def _substrate_audit_section(project_dir: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _compose_board(project_dir: Path, existing: str, rows: list | None = None) -> str:
+    """Render the board text from the spec records on disk, carrying the
+    curated Notes column and the preamble over from `existing`.
+
+    Pure — no writes, no `status:` rollup. Shared by `regenerate_status_board`
+    (which writes the result) and `check_board` (which compares against it),
+    so the check can never drift from what regeneration would produce.
+    """
+    if rows is None:
+        rows = collect_slices(project_dir)
+    notes_map = parse_existing_notes(existing)
+    body = (
+        render_status_table(rows, notes_map)
+        + render_deferred_table(rows)
+        + render_abandoned_table(rows)
+        + _substrate_audit_section(project_dir)
+    )
+    m = re.search(r"(?m)^\|\s*Spec\b", existing)
+    if m:
+        preamble = existing[: m.start()]
+    else:
+        preamble = existing
+        if not preamble.endswith("\n"):
+            preamble += "\n"
+    return preamble + body
+
+
+def _duplicate_spec_ids(project_dir: Path) -> dict:
+    """Map spec number -> sorted directory names, for numbers claimed by more
+    than one spec.
+
+    `render_status_table` renders two specs sharing a number as two groups of
+    rows without complaint, and a drift check can't see the problem either —
+    both groups are faithfully derived. Today the only thing that surfaces it
+    is the merge conflict on the board, which is exactly what we want to stop
+    resolving by hand (issue #149). So it needs its own detector.
+    """
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return {}
+    pairs = []
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        spec_dir = spec_md.parent
+        spec_id = derived_docs.id_from_numeric_prefix(spec_dir)
+        if spec_id is not None:
+            pairs.append((spec_id, spec_dir.name))
+    return derived_docs.duplicate_ids(pairs)
+
+
+def check_board(project_dir: Path) -> list:
+    """Read-only audit of `docs/specs/README.md`. Returns a list of
+    human-readable problems — empty means clean.
+
+    Never writes. CI runs this against a checkout, and a check that repairs
+    what it measures can't be trusted to report it. Note this rules out
+    calling `regenerate_status_board` and diffing: that helper also writes a
+    `status:` rollup into every spec.md it walks.
+    """
+    problems = []
+    for spec_id, names in _duplicate_spec_ids(project_dir).items():
+        problems.append(
+            f"duplicate spec id {spec_id}: {', '.join(names)} — renumber one "
+            "before landing; parallel branches both allocated it"
+        )
+    board_path = project_layout.specs_dir(project_dir) / "README.md"
+    if not board_path.is_file():
+        problems.append(
+            f"missing board: {board_path} — run `workflow.py status-board "
+            "<project-dir>` to create it"
+        )
+        return problems
+    existing = board_path.read_text()
+    if existing != _compose_board(project_dir, existing):
+        problems.append(
+            f"stale board: {board_path} does not match the spec records — run "
+            "`workflow.py status-board <project-dir>` and commit the result"
+        )
+    return problems
+
+
 def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     """Regenerate docs/specs/README.md table from spec.md files.
     Preserves preamble before the first `| Spec` line AND Notes column
@@ -2040,12 +2457,9 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     # mid-regen mutation by another writer. Skipped when `force=True`
     # since a forced overwrite intentionally bypasses the guard.
     pre_checksum = None if force else _checksum(board_path)
-    notes_map = parse_existing_notes(existing)
 
     rows = collect_slices(project_dir)
-    new_table = render_status_table(rows, notes_map)
-    deferred_section = render_deferred_table(rows)
-    abandoned_section = render_abandoned_table(rows)
+    new_content = _compose_board(project_dir, existing, rows)
 
     # Slice 030-01: roll up spec-level status to spec.md frontmatter for
     # every spec walked. Side-effect of regen — independent of whether
@@ -2057,16 +2471,6 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
         for spec_md in sorted(specs_dir.glob("*/spec.md")):
             _write_spec_rollup(spec_md)
 
-    m = re.search(r"(?m)^\|\s*Spec\b", existing)
-    if m:
-        preamble = existing[: m.start()]
-    else:
-        preamble = existing
-        if not preamble.endswith("\n"):
-            preamble += "\n"
-
-    new_content = (preamble + new_table + deferred_section + abandoned_section
-                   + _substrate_audit_section(project_dir))
     if new_content == existing:
         return "status board already current; no changes"
     # Slice 028-03 AC #2: re-checksum right before the write. If the file
@@ -2742,29 +3146,14 @@ def coverage(project_dir: Path) -> str:
 # existing `docs/specs/NNN-<slug>/` directories.
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
-# Stderr substrings (case-insensitive) that classify a `git push` failure
-# as a protection / permission refusal — these trigger the PR-fallback
-# path (AC #3). Anything else is treated as a hard error (race-on-push
-# gets its own classifier via _PUSH_RACE_SIGNALS).
-_PUSH_PROTECTION_SIGNALS = (
-    "protected branch",
-    "permission denied",
-    "pre-receive hook declined",
-    "not authorized",
-    "cannot lock ref",
-)
-
-# Stderr substrings that classify a `git push origin main` failure as a
-# race (someone else advanced main in the gap between fetch and push).
-# Structurally distinct from protection refusal: PR-fallback would still
-# fail; the right recovery is to re-run after picking the next free
-# number (AC #6).
-_PUSH_RACE_SIGNALS = (
-    "non-fast-forward",
-    "fetch first",
-    "[rejected]",
-    "rejected",
-)
+# Push-failure classification is shared across bug.py / adr.py / workflow.py
+# (spec 107 / ADR-0053): the signal tuples and the classifier live once in
+# `_common/reservation.py`. Protection is checked before race (specific over
+# generic), and `gh013` / `repository rule violations` join the protection set.
+# The re-exports below keep the historical module-level names for existing
+# call sites and tests.
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
 
 
 def _title_case_slug(slug: str) -> str:
@@ -3069,22 +3458,10 @@ def _run(argv: list, cwd: Path) -> tuple:
     return result.returncode, result.stdout or "", result.stderr or ""
 
 
-def _classify_push_failure(stderr: str) -> str:
-    """Classify a `git push origin main` stderr into one of:
-      - "protection" — protected branch / permission denied / ...
-      - "race" — non-fast-forward / fetch first / rejected
-      - "other" — connection refused, DNS errors, anything else
-
-    Case-insensitive substring match. Race wins over protection if both
-    appear (race recovery requires the stranded commit drop)."""
-    low = stderr.lower()
-    for sig in _PUSH_RACE_SIGNALS:
-        if sig in low:
-            return "race"
-    for sig in _PUSH_PROTECTION_SIGNALS:
-        if sig in low:
-            return "protection"
-    return "other"
+# Re-export the shared classifier under the historical module-level name so
+# existing call sites and tests continue to resolve `_classify_push_failure`
+# (spec 107 / ADR-0053).
+_classify_push_failure = reservation.classify_push_failure
 
 
 def _validate_slug(slug: str) -> None:
@@ -3390,12 +3767,16 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
     branch, and branch tip are never touched. Race + protection handling
     mirror the on-main 003-03 flow; race recovery is trivial here (the
     stranded commit lives only in the worktree we remove in `finally`)."""
-    # Fresh origin/main so the number scan + commit parent are current.
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Fetch every origin ref (not just main) so the number scan below sees
+    # in-flight branch claims and the commit parent is current. This single
+    # fetch is why the scan runs `fetch=False` — a narrower `git fetch origin
+    # main` would refresh origin/main but leave in-flight branches stale,
+    # reintroducing the blindness spec 107 / ADR-0053 exists to fix.
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         sys.stderr.write(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            f"proceeding with the local origin/main view\n"
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            f"proceeding with the local origin view\n"
         )
 
     wt = Path(tempfile.mkdtemp(prefix="jig-reserve-spec-"))
@@ -3415,8 +3796,15 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
                 f"an 'origin' remote."
             )
 
-        # Number scan reads the freshly checked-out origin/main tree.
+        # Number scan reads the freshly checked-out origin/main tree, then
+        # (spec 107 / ADR-0053) clears every in-flight branch's claim too —
+        # not just what has merged to origin/main. This path is push-only.
         next_n = _next_spec_number(wt / "docs" / "specs")
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        next_n = max(next_n, scanned + 1)
         num_str = f"{next_n:03d}"
         spec_dirname = f"{num_str}-{slug}"
         spec_dir = wt / "docs" / "specs" / spec_dirname
@@ -3599,12 +3987,15 @@ def reserve_spec(slug: str, project_dir: Path,
     # The branch check already happened at the dispatch above.
     _refuse_if_dirty(project_dir)
 
-    # Fetch origin/main first; both the next-number scan and the
-    # divergence preflight read from it (spec 037-02 AC #1 + AC #4 +
-    # AC #8). Skipped for --no-push (no remote contract).
+    # Fetch every origin ref first; the divergence preflight and the
+    # next-number scan both read from origin (spec 037-02 AC #1 + AC #4 +
+    # AC #8). Origin-wide (not just main) so the in-flight-branch scan
+    # below can run `fetch=False` off these refs — a narrower `git fetch
+    # origin main` would leave in-flight branches stale and reintroduce
+    # the blindness spec 107 / ADR-0053 fixes. Skipped for --no-push.
     if not no_push:
         rc, _out, err = _run(
-            ["git", "fetch", "origin", "main"], cwd=project_dir,
+            ["git", "fetch", "origin"], cwd=project_dir,
         )
         # A failed fetch isn't fatal — we still proceed with the local
         # view (spec 037-02 AC #6 preserves this verbatim). The push
@@ -3612,7 +4003,7 @@ def reserve_spec(slug: str, project_dir: Path,
         # push classifier (003-03 AC #6 / 037-02 AC #7).
         if rc != 0:
             sys.stderr.write(
-                f"warning: `git fetch origin main` failed: "
+                f"warning: `git fetch origin` failed: "
                 f"{err.strip()}; proceeding with local view\n"
             )
         # Spec 037-02 AC #4: refuse if local main is strictly behind
@@ -3627,6 +4018,14 @@ def reserve_spec(slug: str, project_dir: Path,
     next_n = _next_spec_number(
         specs_dir, project_dir=project_dir, use_origin=not no_push,
     )
+    # Spec 107 / ADR-0053: in push mode also clear every in-flight branch's
+    # claim, not just origin/main. --no-push stays working-tree-only.
+    if not no_push:
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        next_n = max(next_n, scanned + 1)
     num_str = f"{next_n:03d}"
     spec_dirname = f"{num_str}-{slug}"
     spec_dir = specs_dir / spec_dirname
@@ -3761,17 +4160,60 @@ def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
 # directly: _run, _classify_push_failure, _check_gh_and_remote,
 # _current_branch) and the spec 051 / ADR-0015 worktree-aware
 # detached-checkout shape. Where `workflow.py new` reserves a NEW spec
-# number by CREATING files, the IN_PROGRESS transition reserves a CLAIM
-# on an EXISTING slice file: it flips `status: IN_PROGRESS` and stamps
-# `claimed_by:` on the origin/main copy so two parallel worktrees cannot
-# both pick up the same slice. A single detached-worktree path serves
+# number by CREATING files, a transition reserves a CLAIM on an EXISTING
+# slice file: it stamps `claimed_by:` on the origin/main copy so two
+# parallel worktrees cannot both pick up the same slice — and, for an
+# IN_PROGRESS target only, also flips `status: IN_PROGRESS` there so the
+# 051-04 start-collision guard can read it (ADR-0045). A single detached-worktree path serves
 # every branch (incl. a linked worktree that can't check out `main`),
 # since the claim edits an existing file rather than creating one. Per
 # ADR-0002's three-callers rule the push/race/PR-fallback shape stays
 # inline-mirrored, not extracted (this is the second caller).
 
 CLAIM_FIELD = "claimed_by"
-_CLAIM_CLEARING_STATUSES = ("REVIEWED", "READY_FOR_IMPLEMENTATION", "DRAFT")
+
+# ADR-0045 / bug 014 (issue #130): a claim marks "a session is working this
+# slice right now" across the WORKING states — not just "who is
+# implementing". Spec 049 scoped the stamp to IN_PROGRESS and cleared it on
+# REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT, which left every spec-level
+# phase unmarked — most damagingly REVIEWED → RECONCILED, the heaviest write
+# phase in the lifecycle. Readers then took "no claim" for "nobody here".
+#
+# The split is by what a state MEANS, not by "non-terminal vs terminal". Two
+# kinds of state exist:
+#
+#   WORKING states — a session is doing something here. Stamp the claim.
+#   QUEUE states   — the slice is parked awaiting whoever comes next. Release.
+#
+# `DRAFT` and `READY_FOR_IMPLEMENTATION` are QUEUE states: they are precisely
+# the two states `spec-workflow/SKILL.md` names when it says "check the board
+# for the next slice in READY_FOR_IMPLEMENTATION (or DRAFT for a slice you
+# intend to plan now)".
+# Stamping them INVERTS this bug instead of fixing it — the spec author's
+# `→ READY_FOR_IMPLEMENTATION` would leave their branch name on a slice that is
+# now free, so the board would label every ready slice with a departed owner and
+# the implementer's first `→ IN_PROGRESS` would warn on the routine path. Bug
+# 013's "blank reads as free" would become "residue reads as occupied", which is
+# the same defect with the sign flipped. Spec 049's Non-goal on
+# `READY_FOR_IMPLEMENTATION` was right and is PRESERVED; caught by the
+# frame-critique pass and reproduced before narrowing.
+#
+# Entering a queue state is therefore a RELEASE ("I am done here; it is
+# available"), which is also why two of spec 049 AC4's three original clearing
+# edges survive unchanged — only the REVIEWED edge is reversed.
+_CLAIM_WORKING_STATUSES = (
+    "READY_FOR_REVIEW",
+    IN_PROGRESS_STATUS,
+    "REVIEWED",
+    "RECONCILED",
+)
+_CLAIM_RELEASE_STATUSES = (
+    "DRAFT",
+    "READY_FOR_IMPLEMENTATION",
+    "DONE",
+    "DEFERRED",
+    "ABANDONED",
+)
 
 
 def _claim_identifier(project_dir: Path) -> str:
@@ -3797,17 +4239,29 @@ def _ref_safe(label: str) -> str:
 
 
 def _build_claim_pr_body(slice_label: str, identifier: str,
-                         rel_path: str) -> str:
-    """PR body for the protected-branch claim fallback."""
+                         rel_path: str,
+                         new_status: str = IN_PROGRESS_STATUS) -> str:
+    """PR body for the protected-branch claim fallback.
+
+    ADR-0045: narrates what the commit actually does, which now depends on the
+    transition's target state — only an `IN_PROGRESS` reservation publishes
+    `status:` to the trunk copy."""
+    if new_status == IN_PROGRESS_STATUS:
+        change = (f"This PR flips `status: IN_PROGRESS` and stamps "
+                  f"`claimed_by: {identifier}` on `{rel_path}`.\n")
+    else:
+        change = (f"This PR stamps `claimed_by: {identifier}` on `{rel_path}`, "
+                  f"leaving the trunk copy's `status:` untouched (the local "
+                  f"transition target is `{new_status}`; trunk lifecycle state "
+                  f"is owned by the landing flow).\n")
     return (
         f"Claims slice `{slice_label}` for `{identifier}` on the shared "
         f"trunk, so parallel worktrees cannot both pick it up.\n"
         f"\n"
-        f"This PR flips `status: IN_PROGRESS` and stamps "
-        f"`claimed_by: {identifier}` on `{rel_path}`.\n"
+        f"{change}"
         f"\n"
-        f"Generated by `workflow.py transition ... IN_PROGRESS` "
-        f"(see spec 049-01 slice-claim-on-IN_PROGRESS for rationale).\n"
+        f"Generated by `workflow.py transition ... {new_status}` "
+        f"(see spec 049-01 + ADR-0045 for rationale).\n"
     )
 
 
@@ -3848,20 +4302,59 @@ def _claim_pr_fallback(sha: str, project_dir: Path, claim_branch: str,
 
 def _reserve_claim_on_main(project_dir: Path, rel_path: str,
                            identifier: str, slice_label: str,
-                           pr_mode: bool = False) -> None:
+                           pr_mode: bool = False,
+                           new_status: str = IN_PROGRESS_STATUS,
+                           already_warned: str = "") -> None:
     """Reserve a slice claim on origin/main. Fetches origin/main, reads
-    the slice's origin/main copy, refuses if it is already claimed by a
-    different identifier while IN_PROGRESS (the collision backstop), then
+    the slice's origin/main copy, refuses if BOTH the trunk copy and this
+    transition's target are IN_PROGRESS under a different identifier (the
+    collision backstop — both ends, matching the local path), then
     builds the claim commit in an ephemeral detached worktree and pushes
     `HEAD:main` BY SHA. Race → re-run; protected branch → PR fallback.
     Raises WorkflowError on collision / race / unreachable origin; the
-    caller's working tree, branch, and branch tip are never touched."""
+    caller's working tree, branch, and branch tip are never touched.
+
+    MAY RETURN WITHOUT RESERVING ANYTHING. A claim-only reservation (any
+    non-IN_PROGRESS target) declines to write when the trunk copy is at
+    `status: IN_PROGRESS` under someone else's claim (or none), because that
+    state is enforced by `_refuse_start_collision`. Stamping a claim onto it
+    would either move a live lock and get the previous owner refused in this
+    session's name, or — on an unclaimed copy — manufacture the enforced pair
+    from the other direction and refuse everyone. So `--push` at a
+    working state is BEST-EFFORT: it warns, exits 0, and pushes nothing.
+    `already_warned` carries an identifier the caller has already named, so the
+    REPLACE warning never repeats a holder the caller's on-disk warning already
+    reported. (The decline warning above is not deduped — it carries materially
+    different information: that nothing was pushed.)
+
+    ADR-0045 widened the caller to every working state, which makes
+    `new_status` load-bearing: the reservation writes `status:` to the trunk
+    copy ONLY for `IN_PROGRESS`. That single write is deliberate and
+    load-bearing — `_refuse_start_collision` reads exactly
+    `status: IN_PROGRESS` + a foreign `claimed_by` off origin/main, so
+    publishing it is what makes the start-time guard work (spec 049 AC2 /
+    051-04). For every other working state the reservation publishes the
+    **claim alone** and leaves the trunk's `status:` untouched: trunk
+    lifecycle state is owned by the landing flow, not by a feature branch's
+    in-flight transitions. Writing it here would regress the trunk copy in
+    whichever direction the local branch happened to be moving — a
+    `RECONCILED --push` stamping `IN_PROGRESS` (the pre-fix bug) or a
+    `DRAFT --push` stamping `DRAFT` over a landed `REVIEWED` are the same
+    defect. Worse, a fabricated trunk `IN_PROGRESS` would then hard-block
+    every other worktree via `_refuse_start_collision` — the exact
+    false-refusal class ADR-0045 set out to avoid."""
+    # ONE name, TWO invariants keyed off it: what the reservation writes
+    # (trunk `status:` only for an IN_PROGRESS target) and what the trunk
+    # hard-refusal gates on (both ends IN_PROGRESS). Named for the test it
+    # performs, not for one of its uses, so a future change to the publish
+    # rule cannot silently re-widen the refusal (craft pass).
+    target_is_in_progress = new_status == IN_PROGRESS_STATUS
     rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
     if rc != 0:
         raise WorkflowError(
             f"cannot reserve the claim: `git fetch origin main` failed "
-            f"({err.strip()}). origin/main is unreachable — re-run with "
-            f"--no-push for a local provisional claim."
+            f"({err.strip()}). origin/main is unreachable — re-run without "
+            f"--push for a local-only claim."
         )
 
     rc, content, err = _run(
@@ -3870,8 +4363,8 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
     if rc != 0:
         raise WorkflowError(
             f"cannot reserve the claim: {rel_path} is not on origin/main "
-            f"({err.strip()}). Land the slice on main first, or use "
-            f"--no-push for a local provisional claim."
+            f"({err.strip()}). Land the slice on main first, or re-run "
+            f"without --push for a local-only claim."
         )
 
     fields, _ = parse_frontmatter(content)
@@ -3887,11 +4380,22 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
     if origin_status == "DONE":
         raise WorkflowError(
             f"slice {slice_label} is already DONE on origin/main — refusing to "
-            f"reserve a claim, which would regress its status to IN_PROGRESS on "
-            f"the shared trunk. Your local copy is stale; integrate origin/main "
-            f"before starting new work."
+            f"reserve a claim on landed work (it would advertise an owner for a "
+            f"finished slice, and for a → IN_PROGRESS claim would regress its "
+            f"status on the shared trunk). Your local copy is stale; integrate "
+            f"origin/main before starting new work."
         )
-    if existing and existing != identifier and origin_status == "IN_PROGRESS":
+    # BOTH ends must be IN_PROGRESS, exactly as on the local path.
+    # Pre-ADR-0045 this callee was only ever reached for an IN_PROGRESS target,
+    # so the refusal was structurally both-ends-IN_PROGRESS; widening the call
+    # site to every working state made it reachable for `REVIEWED --push`
+    # against a trunk copy the implementer is still building — which would have
+    # refused a reviewer worktree recording a verdict, the precise false block
+    # ADR-0045 says it avoids. `target_is_in_progress` IS the target-is-IN_PROGRESS
+    # test. Anything else falls through to the warning below. Caught by the
+    # bug-review + craft passes.
+    if (target_is_in_progress and existing and existing != identifier
+            and origin_status == IN_PROGRESS_STATUS):
         raise WorkflowError(
             f"slice {slice_label} is already claimed by {existing!r} on "
             f"origin/main (status IN_PROGRESS). Have the current owner "
@@ -3899,12 +4403,84 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
             f"    workflow.py transition <spec> {slice_label} "
             f'READY_FOR_IMPLEMENTATION --release --reason "..."'
         )
-    if existing == identifier and origin_status == "IN_PROGRESS":
-        # Idempotent re-claim — already ours on origin/main; nothing to push.
+    # ADR-0045: never TRANSFER AN ENFORCED LOCK sideways. A trunk copy at
+    # `status: IN_PROGRESS` under a foreign claim is not merely informational —
+    # `_refuse_start_collision` hard-blocks on exactly that pair. If a
+    # claim-only reservation replaced the `claimed_by:` there while leaving the
+    # status alone, the trunk would read "IN_PROGRESS, claimed by the reviewer",
+    # and the ORIGINAL BUILDER's next `→ IN_PROGRESS` would be refused, naming
+    # someone else. That manufactures the false-block class ADR-0045 exists to
+    # avoid — indirectly, by moving an enforced lock rather than by refusing.
+    # So: warn, leave the trunk claim intact, and let the local transition
+    # proceed. Caught by the round-4 bug-review pass.
+    #
+    # The condition takes TWO tests, not one. `status: IN_PROGRESS` on the trunk
+    # copy is what makes a lock enforceable — not the name beside it, so
+    # publishing our claim onto an UNCLAIMED IN_PROGRESS trunk copy manufactures
+    # the same enforced pair from the other direction,
+    # and that copy is reachable through supported commands (`transition …
+    # IN_PROGRESS --release` leaves IN_PROGRESS with no claim; a plain
+    # `Edit`-tool write never takes one). Keying on a NON-EMPTY `existing` left
+    # exactly that hole, silently — caught by the round-5 bug-review pass.
+    #
+    # But it must still exclude OUR OWN claim, which the round-5 fix swept in and
+    # the round-6 passes caught: what makes a lock *enforceable* (the trunk
+    # status) and what makes replacing it *harmful* (it belongs to someone else)
+    # are two different tests, and both are required. Without the identity test,
+    # the documented `IN_PROGRESS --push` → `REVIEWED --push` sequence warned the
+    # session about its own live claim and advised force-releasing it — a false
+    # alarm on this fix's flagship path. An own claim falls through to the
+    # idempotent short-circuit below, which says so benignly. `existing == ""`
+    # still trips the guard, so the unclaimed hole stays closed.
+    if (not target_is_in_progress and existing != identifier
+            and origin_status == IN_PROGRESS_STATUS):
+        held = f"claimed by {existing!r} and " if existing else ""
+        sys.stderr.write(
+            f"warning: slice {slice_label} is {held}IN_PROGRESS on "
+            f"origin/main — that state is ENFORCED (it blocks other sessions "
+            f"from starting the slice), so this reservation is SKIPPED rather "
+            f"than stamping a claim onto it. Your local transition to "
+            f"{new_status} proceeds, but nothing was pushed. There is no "
+            f"self-service fix for a trunk-side claim — `--release` clears only "
+            f"your own copy — so coordinate with the holder, or wait for their "
+            f"work to land on main.\n"
+        )
+        return
+
+    # ADR-0045: a foreign claim on the TRUNK copy outside IN_PROGRESS is newly
+    # reachable — before the widening, a trunk claim could only ever coexist
+    # with `status: IN_PROGRESS`, because that was the only reservation the code
+    # could perform. It can now, and overwriting it silently would break this
+    # decision's headline promise (a loud warning for every foreign claim the
+    # block does not cover). The on-disk warning in `transition` cannot cover
+    # this case: it reads the CALLER's copy, which in the cross-branch scenario
+    # that motivated bug 014 does not carry the other session's claim at all.
+    # Caught by the craft + bug-review passes.
+    if existing and existing != identifier and existing != already_warned:
+        sys.stderr.write(
+            f"warning: slice {slice_label} is claimed by {existing!r} on "
+            f"origin/main (status {origin_status or 'unknown'}) — another "
+            f"session may be working it right now. This reservation will "
+            f"replace that claim on the shared trunk. If that is wrong, "
+            f"coordinate first, or force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+        )
+
+    # Idempotent re-claim — already ours on origin/main; nothing to push. Keyed
+    # on what this reservation would actually WRITE (ADR-0045): for a
+    # non-IN_PROGRESS state we only publish the claim, so an identical claim is
+    # already the whole desired trunk state regardless of the trunk's status.
+    if existing == identifier and (
+            not target_is_in_progress or origin_status == IN_PROGRESS_STATUS):
         print(f"claim already held by {identifier!r} on origin/main")
         return
 
-    new_content = set_frontmatter_field(content, "status", "IN_PROGRESS")
+    if target_is_in_progress:
+        new_content = set_frontmatter_field(
+            content, "status", IN_PROGRESS_STATUS)
+    else:
+        new_content = content
     new_content = set_frontmatter_field(new_content, CLAIM_FIELD, identifier)
 
     wt = Path(tempfile.mkdtemp(prefix="jig-claim-"))
@@ -3945,7 +4521,8 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
             )
         sha = sha.strip()
 
-        pr_body = _build_claim_pr_body(slice_label, identifier, rel_path)
+        pr_body = _build_claim_pr_body(slice_label, identifier, rel_path,
+                                       new_status)
         claim_branch = f"claim/{_ref_safe(slice_label)}"
 
         if pr_mode:
@@ -4053,7 +4630,8 @@ def _origin_slice_state(project_dir: Path, rel_path: str) -> tuple:
 
 
 def _refuse_start_collision(project_dir: Path, rel_path: str,
-                            identifier: str, slice_label: str) -> None:
+                            identifier: str, slice_label: str,
+                            already_warned: str = "") -> None:
     """Slice 051-04: hard-block a → IN_PROGRESS that would duplicate landed
     work (slice DONE on origin/main) or collide with a foreign active claim
     (IN_PROGRESS under a different `claimed_by` on origin/main). Warns and
@@ -4061,6 +4639,12 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
     or a brand-new (absent-on-origin) slice. No-op when the gate is bypassed.
 
     Raises `WorkflowError` (CLI exit 2) on a confirmed collision.
+
+    ADR-0045 also emits a NON-BLOCKING warning for a foreign trunk claim at a
+    working state other than IN_PROGRESS (someone reviewing or reconciling the
+    slice). `already_warned` carries the identifier the caller's on-disk warning
+    has just named, so a single transition never prints two near-identical
+    warnings about the same holder.
     """
     if not env_gate_enabled(START_COLLISION_GATE_ENV):
         # Deliberateness override honored — leave a content-free audit trail
@@ -4086,7 +4670,7 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
             f"picking up new work. To override this guard for a deliberate "
             f"re-open, set {START_COLLISION_GATE_ENV}=0."
         )
-    if (origin_status == "IN_PROGRESS" and origin_claim
+    if (origin_status == IN_PROGRESS_STATUS and origin_claim
             and origin_claim != identifier):
         raise WorkflowError(
             f"slice {slice_label} is claimed by {origin_claim!r} on "
@@ -4095,6 +4679,25 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
             f"    workflow.py transition <spec> {slice_label} "
             f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
             f"To override this guard, set {START_COLLISION_GATE_ENV}=0."
+        )
+
+    # ADR-0045: a foreign trunk claim at a WORKING state other than IN_PROGRESS
+    # (someone reviewing or reconciling the slice) warns but does not block —
+    # this is the cross-worktree half of the widened claim, and without it the
+    # reservation would publish a trunk field that nothing ever reads, making
+    # "--push so other worktrees see it" true only after a merge. Non-blocking
+    # for the same reason as the on-disk warning: it is not the both-ends-
+    # IN_PROGRESS case, so a refusal would be a false block. Caught by the
+    # bug-review + craft passes.
+    if (origin_status in _CLAIM_WORKING_STATUSES
+            and origin_status != IN_PROGRESS_STATUS
+            and origin_claim and origin_claim != identifier
+            and origin_claim != already_warned):
+        sys.stderr.write(
+            f"warning: slice {slice_label} is claimed by {origin_claim!r} on "
+            f"origin/main (status {origin_status}) — another session may be "
+            f"working it right now. Starting here anyway; coordinate first if "
+            f"that is wrong.\n"
         )
 
 
@@ -4123,15 +4726,21 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pt.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
     pt.add_argument("status", help=f"new status; one of: {', '.join(VALID_STATUSES)}")
-    # Slice 049-01: slice-claim flags (meaningful on the IN_PROGRESS
-    # transition + --release). The claim is local by default; --push / --pr
-    # opt into reserving it on origin/main.
+    # Slice 049-01 + ADR-0045: slice-claim flags (meaningful on a transition
+    # into a WORKING state, + --release — at a release point there is no claim
+    # to reserve, so --push/--pr no-op there). The claim is local by default;
+    # --push / --pr opt into reserving it on origin/main.
     pt.add_argument("--push", action="store_true",
-                    help="(IN_PROGRESS) reserve the claim on origin/main so "
-                         "parallel worktrees see it (default: local-only)")
+                    help="(any working state) reserve the claim on "
+                         "origin/main so parallel worktrees see it "
+                         "(default: local-only). BEST-EFFORT at a working "
+                         "state other than IN_PROGRESS: declines with a "
+                         "warning, and exits 0, if the origin/main copy is "
+                         "IN_PROGRESS under another claim or none")
     pt.add_argument("--pr", dest="pr_mode", action="store_true",
-                    help="(IN_PROGRESS) reserve the claim on origin/main via "
-                         "a PR instead of a direct push (implies --push)")
+                    help="(any working state) reserve the claim on "
+                         "origin/main via a PR instead of a direct push "
+                         "(implies --push; same best-effort caveat)")
     pt.add_argument("--release", action="store_true",
                     help="force-release an existing claim (clears claimed_by); "
                          "requires --reason")
@@ -4149,6 +4758,13 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="bypass the race-detection guard and overwrite even "
                          "if docs/specs/README.md changed mid-regen "
                          "(slice 028-03)")
+
+    pcb = sub.add_parser(
+        "check-board",
+        help="read-only: verify docs/specs/README.md matches the spec "
+             "records and that no spec number is claimed twice",
+    )
+    pcb.add_argument("project", help="project root directory")
 
     ps = sub.add_parser(
         "stale",
@@ -4194,6 +4810,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     po.add_argument("--project-dir", default=".",
                     help="project root directory (default: cwd)")
+    po.add_argument("--fetch", action="store_true",
+                    help="bug 031: do one bounded, fail-soft `git fetch` and "
+                         "report when the checkout is behind origin (for the "
+                         "interactive `/jig:orient` path, not the "
+                         "SessionStart hook)")
 
     pn = sub.add_parser(
         "new",
@@ -4310,6 +4931,13 @@ def main(argv: list) -> int:
         elif ns.command == "status-board":
             summary = regenerate_status_board(Path(ns.project), force=ns.force)
             print(summary)
+        elif ns.command == "check-board":
+            problems = check_board(Path(ns.project))
+            for problem in problems:
+                print(f"spec board: {problem}", file=sys.stderr)
+            if problems:
+                return 1
+            print("spec board: clean")
         elif ns.command == "stale":
             report = stale(Path(ns.project_dir), days=ns.days)
             sys.stdout.write(report)
@@ -4322,7 +4950,7 @@ def main(argv: list) -> int:
                 gate_stats(Path(ns.project_dir), days=ns.days)
             )
         elif ns.command == "orient":
-            sys.stdout.write(orient(Path(ns.project_dir)))
+            sys.stdout.write(orient(Path(ns.project_dir), fetch=ns.fetch))
         elif ns.command == "new":
             return reserve_spec(
                 ns.slug,

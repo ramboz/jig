@@ -66,10 +66,15 @@ baselines that step aside when you've installed a richer one. jig stays
 opinionated about *workflow* and out of the way of *judgment skills you've
 already invested in*.
 
-**Own the scaffolding; don't rent the plugin.** By default jig copies its
-machinery into your repo's host-native project directory (`.claude/` or
-`.codex/`), where you can read and edit it under version control — rather than
-hiding it behind a plugin runtime you can't see.
+**You can always own the scaffolding — it's one flag away.** Run
+`scaffold-init --in-repo` and jig copies its machinery into your repo's
+host-native project directory (`.claude/` or `.codex/`), where you can read and
+edit it under version control rather than have it hidden behind a plugin runtime
+you can't see. That is the opt-in, not the default: copying
+~130 files into every project pins them to the version installed that day and
+drowns the project's own history in jig internals. The principle is that
+ownership stays *reachable and supported* — reach for it when the plugin can't be
+assumed present (CI, cloud agents, teammates without jig, archival repos).
 
 **Dogfood everything.** Every jig feature is built using jig's own spec
 lifecycle. This repository's `docs/` is the worked example of what jig

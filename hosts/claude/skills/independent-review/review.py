@@ -77,21 +77,58 @@ class ReviewError(RuntimeError):
     """User-facing error; CLI exits 2."""
 
 
-def find_slice_label(spec_path, slice_fragment: str) -> str:
-    """Return the full label of the slice whose `## Slice` heading contains
-    `slice_fragment` (e.g. `001-01 — greenfield-scaffold`). Raises
-    ReviewError on miss or ambiguity.
+def find_slice_target(spec_path, slice_fragment: str) -> tuple[str, Path]:
+    """Return `(label, path)` for the slice `slice_fragment` names.
 
-    Dual-read via `_common.parsing.load_slice`: resolves to either a
-    sibling `slice-*.md` file or a `## Slice` section in `spec_path`,
-    transparently. Slice 018-02 migrated this from text-based to
-    path-based; the prompt builder only needs the label, not the body.
+    `label` is the full `## Slice` heading content (e.g.
+    `001-01 — greenfield-scaffold`). `path` is the file that actually
+    CONTAINS that slice: a sibling `slice-*.md` under the file-per-slice
+    layout, or `spec_path` itself when the slice is a `## Slice` section
+    inside the overview. Raises ReviewError on miss or ambiguity.
+
+    Dual-read via `_common.parsing.load_slice` — the same loader
+    `workflow.py` uses, so review prompts and lifecycle transitions agree on
+    where a slice lives.
+
+    Bug 019 (issue #134): this used to return the label alone. The loader had
+    already resolved the location, and discarding it left every prompt builder
+    with nothing to name but `spec_path` — the wrong file in exactly the
+    layout `workflow.py new` emits, and the reviewer is told not to look
+    beyond the files it is pointed at.
     """
     try:
         loc = _load_slice_common(spec_path, slice_fragment)
     except SliceLookupError as e:
         raise ReviewError(str(e)) from e
-    return loc.label
+    return loc.label, Path(loc.path)
+
+
+def find_slice_label(spec_path, slice_fragment: str) -> str:
+    """Return the full label of the slice whose `## Slice` heading contains
+    `slice_fragment`. Thin wrapper over `find_slice_target` for callers that
+    need the label but not the location — currently `record_review`, which
+    writes the label into the verdict file's frontmatter."""
+    return find_slice_target(spec_path, slice_fragment)[0]
+
+
+def _slice_source(spec_path, slice_path=None) -> tuple[str, str]:
+    """Return `(noun, phrase)` naming the file a reviewer must OPEN to read
+    the slice — the `## What to read` entry every spec+slice builder shares.
+
+    - Embedded layout (or no distinct slice file, e.g. the ADR
+      `frame-critique` target): `("The spec", "`<spec>`")`.
+    - File-per-slice: `("The slice", "`<slice>` (spec overview: `<spec>`)")` —
+      the slice file first, because that is the file to read; the overview
+      trails as context.
+
+    Rendered in ONE place so the two layouts cannot drift apart builder by
+    builder — the drift that produced bug 019.
+    """
+    spec_path = Path(spec_path)
+    slice_path = spec_path if slice_path is None else Path(slice_path)
+    if slice_path == spec_path:
+        return "The spec", f"`{spec_path}`"
+    return "The slice", f"`{slice_path}` (spec overview: `{spec_path}`)"
 
 
 # -------- Prompt templates --------
@@ -353,17 +390,92 @@ def _reconciliation_sweep_check_block() -> str:
     return (
         "- **Reconciliation sweep check**: read both the Deviation log and "
         "Reconciliation sweep subsections for this slice.\n"
-        "  1. **Omissions** — is any obvious drift-prone artifact missing "
-        "from the sweep,\n"
-        "     especially front-door docs, primers/templates, inbox,\n"
-        "     refinement todo, memory, ADR index, or generated status board?\n"
+        "  1. **Omissions** — cross-check the **Files this slice changed** "
+        "list above: does\n"
+        "     every changed path appear in the sweep, or a deliberate "
+        "exclusion? Also\n"
+        "     flag obvious drift-prone artifacts missing from the sweep — "
+        "front-door docs,\n"
+        "     primers/templates, inbox, refinement todo, memory, ADR index, "
+        "or\n"
+        "     generated status board.\n"
         "  2. **Disposition quality** — is each `updated`, `no-op`, or "
         "`deferred`\n"
         "     rationale credible? `deferred` entries should name an owner "
         "or trigger;\n"
-        "     `no-op` claims should not conflict with touched files or "
-        "landed behavior."
+        "     `no-op` claims should not conflict with the **Files this "
+        "slice changed** list\n"
+        "     above or with landed behavior."
     )
+
+
+def _touched_files_block(spec_path: Path) -> str:
+    """Deterministic list of the files this slice changed, embedded in the
+    reconciliation prompt so the sweep's omission check runs on data rather
+    than the implementer's recollection (issue #160).
+
+    The reconciliation sweep already asks whether any drift-prone artifact is
+    missing from the sweep table and whether `no-op` rows conflict with
+    "touched files" — but the prompt never supplied that list. This block
+    derives it the same way the test-quality snapshot does: merge-base against
+    `main`, then `git diff --name-only`, best-effort.
+
+    Every failure mode collapses to a single-line
+    `- **Files this slice changed**: _unavailable (<reason>)._` fallback, so
+    the prompt builder never crashes and the reviewer falls back to judgment.
+    The list is capped so a large refactor can't bloat the prompt.
+    """
+    unavailable = (
+        "- **Files this slice changed**: _unavailable ({reason})._ Fall back "
+        "to judgment — check the sweep covers the artifacts the deviation "
+        "log describes."
+    )
+    try:
+        project_root = _find_project_root(spec_path)
+        if project_root is None:
+            spec_resolved = Path(spec_path).resolve()
+            cwd = spec_resolved.parent if spec_resolved.parent.exists() else None
+            if cwd is None:
+                return unavailable.format(reason="merge-base not found")
+        else:
+            cwd = project_root
+
+        mb = subprocess.run(
+            ["git", "merge-base", _TEST_QUALITY_BASE_BRANCH, "HEAD"],
+            cwd=str(cwd), capture_output=True, text=True, check=False,
+        )
+        if mb.returncode != 0 or not mb.stdout.strip():
+            return unavailable.format(reason="merge-base not found")
+        merge_base = mb.stdout.strip()
+
+        diff = subprocess.run(
+            ["git", "diff", "--name-only", f"{merge_base}...HEAD"],
+            cwd=str(cwd), capture_output=True, text=True, check=False,
+        )
+        if diff.returncode != 0:
+            return unavailable.format(reason="git diff failed")
+        files = [ln.strip() for ln in diff.stdout.splitlines() if ln.strip()]
+        if not files:
+            return unavailable.format(reason="empty diff")
+
+        cap = 50
+        shown = files[:cap]
+        listing = "\n".join(f"    - {f}" for f in shown)
+        if len(files) > cap:
+            listing += (
+                f"\n    - …and {len(files) - cap} more "
+                f"(`git diff --name-only {_TEST_QUALITY_BASE_BRANCH}...HEAD`)"
+            )
+        return (
+            "- **Files this slice changed** (`git diff --name-only "
+            f"{_TEST_QUALITY_BASE_BRANCH}...HEAD`) — each path below should be "
+            "accounted for in the Reconciliation sweep (`updated` / `no-op` / "
+            "`deferred`) or deliberately excluded; a changed file absent from "
+            "the sweep is the omission this check exists to catch:\n"
+            f"{listing}"
+        )
+    except Exception as exc:  # noqa: BLE001 — graceful degradation, mirror snapshot
+        return unavailable.format(reason=f"helper error: {exc.__class__.__name__}")
 
 
 def _test_quality_snapshot_block(spec_path: Path) -> str:
@@ -476,7 +588,8 @@ def _test_quality_unavailable(reason: str) -> str:
 
 
 def build_implementation_prompt(spec_path: Path, slice_label: str,
-                                deliverables: list) -> str:
+                                deliverables: list,
+                                slice_path: Path | None = None) -> str:
     """Construct the standard implementation-review prompt.
 
     Slice 022-02 added a conditional contract-surface check: if the
@@ -489,7 +602,10 @@ def build_implementation_prompt(spec_path: Path, slice_label: str,
     review (regardless of project state) gets a line asking the reviewer
     to verify the slice doesn't violate any of the seven principles in
     `docs/product-vision.md` § Design principles.
+
+    `slice_path`: see `_slice_source` (bug 019).
     """
+    slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     # Slice 022-02: contract-surface bullet sits at the tail of the Evaluate
     # bullet list when the project declared surfaces.
@@ -519,9 +635,9 @@ acceptance criteria.
 
 ## What to read (in this order)
 
-1. The spec — `{spec_path}`. **Focus on Slice {slice_label} only.** Other
+1. {slice_noun} — {slice_ref}. **Focus on Slice {slice_label} only.** Other
    slices in the same spec (DONE or DRAFT) are out of scope; do not re-review them.
-2. The slice's plan and tasks if present (alongside `spec.md`).
+2. The slice's plan and tasks if present (in the same spec directory).
 3. The deliverables:
 {deliverable_lines}
 
@@ -532,6 +648,9 @@ acceptance criteria.
 For each acceptance criterion in slice {slice_label}, verify:
 - Is it met by the deliverable?
 - Are tests exercising the AC meaningfully (not just superficial assertions)?
+- **Vacuous-test check** — for each test covering this AC, would it still pass
+  if the feature under test were deleted? Flag any that would: a test that
+  cannot fail proves nothing (issue #124 instance 2).
 - Are there bugs (correctness, edge cases)?
 - Any security or robustness concerns relevant to this change?{pre_snapshot_check}
 
@@ -724,8 +843,8 @@ Be terse but specific. Cite file:line when flagging issues."""
 
 
 def build_pr_review_prompt(spec_path: Path, slice_label: str,
-                           deliverables: list, *,
-                           richer_skill: "str | None" = None,
+                           deliverables: list, slice_path: Path | None = None,
+                           *, richer_skill: "str | None" = None,
                            non_interactive: bool = False) -> str:
     """Construct the standard pr-review (craft pass) prompt.
 
@@ -755,7 +874,10 @@ def build_pr_review_prompt(spec_path: Path, slice_label: str,
     compliance pass's job (and is repeated on the reconciliation pass).
     Adding it here would duplicate work and conflict with the four-bucket
     framing the `jig:pr-review` skill description establishes.
+
+    `slice_path`: see `_slice_source` (bug 019).
     """
+    slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     richer = _resolve_richer_for_pass(
         spec_path, slice_label, "pr_review", "craft",
@@ -797,7 +919,7 @@ implementation: scope, blockers, nits, and strengths.
 
 ## What to read (in this order)
 
-1. The spec — `{spec_path}`. Read slice **{slice_label}** for context,
+1. {slice_noun} — {slice_ref}. Read slice **{slice_label}** for context,
    but do NOT re-evaluate the acceptance criteria — that's the
    compliance pass's job.
 2. The deliverables:
@@ -812,6 +934,9 @@ implementation: scope, blockers, nits, and strengths.
 - Does the implementation match the spec's stated scope?
 - Are there correctness, security, or robustness concerns?
 - Are tests exercising the change meaningfully?
+- **Vacuous-test check** — for each test touching this change, would it still
+  pass if the feature under test were deleted? Flag any that would: a test that
+  cannot fail proves nothing (issue #124 instance 2).
 - Are there nits worth flagging (naming, structure, idioms)?
 - What does the change get right that's worth calling out?
 
@@ -869,8 +994,8 @@ Evaluate whether the fix resolves the recorded bug honestly and narrowly.
 
 
 def build_arch_review_prompt(spec_path: Path, slice_label: str,
-                             deliverables: list, *,
-                             richer_skill: "str | None" = None,
+                             deliverables: list, slice_path: Path | None = None,
+                             *, richer_skill: "str | None" = None,
                              non_interactive: bool = False) -> str:
     """Construct the standard arch-review (architecture pass) prompt.
 
@@ -896,7 +1021,10 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     `_principles_check_block()`. Constitution-adherence is checked in
     the compliance + reconciliation passes; the arch pass is scoped to
     architectural concerns only.
+
+    `slice_path`: see `_slice_source` (bug 019).
     """
+    slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     richer = _resolve_richer_for_pass(
         spec_path, slice_label, "arch_review", "arch",
@@ -944,7 +1072,7 @@ boundaries, public contracts, and design coherence?
 
 ## What to read (in this order)
 
-1. The spec — `{spec_path}`. Read slice **{slice_label}** for context,
+1. {slice_noun} — {slice_ref}. Read slice **{slice_label}** for context,
    but do NOT re-evaluate the acceptance criteria — that's the
    compliance pass's job.
 2. The deliverables:
@@ -976,7 +1104,8 @@ boundaries, public contracts, and design coherence?
 
 
 def build_code_health_review_prompt(spec_path: Path, slice_label: str,
-                                    deliverables: list, summary: str, *,
+                                    deliverables: list, summary: str,
+                                    slice_path: Path | None = None, *,
                                     richer_skill: "str | None" = None,
                                     non_interactive: bool = False) -> str:
     """Construct the standard code-health-review prompt (slice 060-05).
@@ -1011,7 +1140,10 @@ def build_code_health_review_prompt(spec_path: Path, slice_label: str,
     `--richer-skill` pick (096-03) → baseline. (Before 096-01 this builder had no
     richer dispatch — the ADR-0040 D1 decision makes `code_health` one of the
     three extensible categories.)
+
+    `slice_path`: see `_slice_source` (bug 019).
     """
+    slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     summary_block = summary.rstrip() if summary and summary.strip() else \
         "_(no health.py summary was provided — judge on the deliverables " \
@@ -1054,7 +1186,7 @@ provided below; judge THAT summary (and the deliverables), never raw logs.
 
 ## What to read (in this order)
 
-1. The spec — `{spec_path}`. Read slice **{slice_label}** for context,
+1. {slice_noun} — {slice_ref}. Read slice **{slice_label}** for context,
    but do NOT re-evaluate the acceptance criteria — that's the
    compliance pass's job.
 2. The deliverables:
@@ -1111,7 +1243,8 @@ there is any implementation to reconcile.)"""
 
 
 def build_frame_critique_prompt(spec_path: Path, slice_label: str,
-                                deliverables: list) -> str:
+                                deliverables: list,
+                                slice_path: Path | None = None) -> str:
     """Construct the adversarial frame-critique prompt (slice 064-03 / ADR-0020).
 
     UNLIKE every other review pass, this one gates the **pre-implementation**
@@ -1143,7 +1276,13 @@ def build_frame_critique_prompt(spec_path: Path, slice_label: str,
     NOTE: like the other craft/arch passes, this builder does NOT append
     `_principles_check_block()` — its scope is the single highest-risk
     assumption, nothing else.
+
+    `slice_path`: see `_slice_source`. It stays `None` for the ADR target
+    (slice 064-05), which has no slice file — `spec_path` IS the artifact under
+    critique. The noun is dropped here: this builder supplies its own ("The
+    artifact under critique").
     """
+    slice_ref = _slice_source(spec_path, slice_path)[1]
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     return f"""{_PREAMBLE}
 
@@ -1171,7 +1310,7 @@ building the wrong thing — be the strongest skeptic they will face.
 
 ## What to read (in this order)
 
-1. The artifact under critique — `{spec_path}`. Read **{slice_label}** and
+1. The artifact under critique — {slice_ref}. Read **{slice_label}** and
    its stated goal, grounding, and assumptions/kill-criteria (if present)
    closely.
 2. The supporting material:
@@ -1230,7 +1369,8 @@ craft.)"""
 
 
 def build_design_review_prompt(spec_path: Path, slice_label: str,
-                               deliverables: list) -> str:
+                               deliverables: list,
+                               slice_path: Path | None = None) -> str:
     """Construct the ATTEST-ONLY design-review prompt (slice 071-01 / ADR-0022).
 
     The orchestrator runs this pass AFTER the compliance + craft (+ arch +
@@ -1255,7 +1395,10 @@ def build_design_review_prompt(spec_path: Path, slice_label: str,
 
     NOTE: like the other craft/arch passes, this builder does NOT append
     `_principles_check_block()` — its scope is the attestation, nothing else.
+
+    `slice_path`: see `_slice_source` (bug 019).
     """
+    slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
     return f"""{_PREAMBLE}
 
@@ -1295,7 +1438,7 @@ read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
    threshold, and `ledger.jsonl`'s latest composite), or whatever
    equivalent eval verdict location the slice/spec names. Read the frozen
    THRESHOLD and the latest COMPOSITE.
-2. The spec — `{spec_path}`. Read slice **{slice_label}** only to learn
+2. {slice_noun} — {slice_ref}. Read slice **{slice_label}** only to learn
    WHERE the eval evidence lives and what it gates — do NOT re-evaluate the
    acceptance criteria (that's the compliance pass's job) and do NOT review
    craft (that's the craft pass's job).
@@ -1317,7 +1460,8 @@ read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
 """
 
 
-def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
+def build_reconciliation_prompt(spec_path: Path, slice_label: str,
+                                slice_path: Path | None = None) -> str:
     """Construct the standard reconciliation-review prompt.
 
     Slice 022-02 added a conditional contract-surface check: if the
@@ -1329,7 +1473,13 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     Slice 024-01 added an UNCONDITIONAL principles-check block — every
     reconciliation review gets a line asking the reviewer to verify
     the deviation log doesn't paper over principle violations.
+
+    `slice_path`: see `_slice_source`. This builder was bug 019 / issue #134's
+    reported symptom — it names the "Deviation log" and "Reconciliation sweep"
+    subsections by title, and neither exists in `spec.md` when the slice lives
+    in its own file.
     """
+    slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     extra_check = ""
     project_root = _find_project_root(spec_path)
     if project_root and has_declared_contract_surfaces(project_root):
@@ -1340,6 +1490,9 @@ def build_reconciliation_prompt(spec_path: Path, slice_label: str) -> str:
     # reconciliation pass verifies the deviation log didn't paper over
     # task / approach / ADR / tech-debt gaps.
     extra_check += "\n" + _practices_check_block()
+    # Issue #160: supply the changed-file list the sweep check references, so
+    # the omission check has data. Placed just before the sweep block it feeds.
+    extra_check += "\n" + _touched_files_block(spec_path)
     extra_check += "\n" + _reconciliation_sweep_check_block()
     return f"""{_PREAMBLE}
 
@@ -1355,9 +1508,9 @@ re-reviewing against original ACs — that's done.
 
 ## What to read
 
-1. `{spec_path}` — focus on the Slice {slice_label} section, especially the
-   "Deviation log (after reconciliation)" and "Reconciliation sweep"
-   subsections.
+1. {slice_noun} — {slice_ref}. Focus on the Slice {slice_label} section there,
+   especially its "Deviation log (after reconciliation)" and "Reconciliation
+   sweep" subsections.
 2. Any implementation files the deviation log claims to describe — read them
    as needed to verify claims.
 
@@ -1430,24 +1583,55 @@ def _now_iso8601() -> str:
     )
 
 
-def _read_summary(args) -> str:
-    """Resolve the freeform verdict body from --summary-file or stdin.
+# `--summary-file -` is the explicit "read the body from stdin" request, the
+# usual Unix spelling. Nothing else in this helper touches stdin (bug 017).
+STDIN_SUMMARY_ARG = "-"
+
+
+def _read_summary(args, *, required: bool = True) -> str:
+    """Resolve the freeform verdict body from `--summary-file`.
 
     A verdict file's body mirrors the existing VERDICT/REASONING/SPECIFIC
     ISSUES/RECONCILIATION NOTES envelope (ADR-0014 §2). The recorder does
     not impose that shape — it stores whatever the reviewer flow produced
-    — so the body is accepted verbatim from a file or stdin.
+    — so the body is accepted verbatim.
+
+    Bug 017: this never reads stdin unless the caller asks for it with
+    `--summary-file -`. The old fallback read stdin whenever it was not a
+    terminal, using `isatty()` as a stand-in for "input is waiting" — a
+    property it does not report. Handed a pipe whose write end nobody closes
+    (an agent harness, most CI runners) that read blocked on an EOF that never
+    arrived, hanging the caller indefinitely. `isatty()` deliberately does not
+    appear here: behaviour that forks on whether stdin is a terminal is the
+    bug, not a guard against it.
+
+    `required=True` (the recording paths) refuses a run with no body — no
+    source given, or a source that resolves to whitespace — naming the option
+    to pass. A verdict whose body is blank is what the enforcement is for, so
+    it is refused as squarely as one with no `--summary-file` at all.
+    `required=False` (the code-health prompt builder) keeps its specified
+    graceful degrade when no summary is given.
     """
-    if args.summary_file:
+    if args.summary_file == STDIN_SUMMARY_ARG:
+        body = sys.stdin.read()
+    elif args.summary_file:
         p = Path(args.summary_file)
         if not p.is_file():
             raise ReviewError(f"summary file not found: {p}")
-        return p.read_text(encoding="utf-8")
-    # Fall back to stdin. An empty body is allowed (the frontmatter carries
-    # the machine-checkable verdict); the body is human context.
-    if not sys.stdin.isatty():
-        return sys.stdin.read()
-    return ""
+        body = p.read_text(encoding="utf-8")
+    elif required:
+        raise ReviewError(
+            "no verdict body: pass --summary-file PATH, or "
+            "--summary-file - to read the body from stdin"
+        )
+    else:
+        return ""
+    if required and not body.strip():
+        raise ReviewError(
+            "empty verdict body: a recorded review needs a body "
+            "(the VERDICT/REASONING envelope), not just frontmatter"
+        )
+    return body
 
 
 def _record_adr_review(args) -> int:
@@ -1476,7 +1660,7 @@ def _record_adr_review(args) -> int:
         out_path = _evidence.adr_evidence_path(decisions_dir, args.adr,
                                                args.pass_name)
         body = _read_summary(args)
-    except (ValueError, _evidence.EvidenceError) as exc:
+    except (ValueError, ReviewError, _evidence.EvidenceError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
 
@@ -1680,7 +1864,7 @@ def _emit_substrate_anomaly_warnings(spec: Path, slice_fragment: str) -> None:
                     f"applied (applied={applied}); declined high-confidence "
                     f"candidate(s): {', '.join(declined)}. Advisory only "
                     f"(ADR-0040 auditability); does not block.\n")
-    except (OSError, ValueError, AttributeError):
+    except Exception:  # noqa: BLE001 — advisory must never break the gate
         return
 
 
@@ -1693,7 +1877,11 @@ def check_reviews(args) -> int:
         sys.stderr.write(f"spec not found: {spec}\n")
         return 2
 
-    diagnostics = _evidence.validate_evidence(spec, args.slice, args.stage)
+    try:
+        diagnostics = _evidence.validate_evidence(spec, args.slice, args.stage)
+    except (ReviewError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
     # Advisory anomaly warning (096-05) — emitted regardless of gate outcome,
     # and never affects the exit code.
     _emit_substrate_anomaly_warnings(spec, args.slice)
@@ -1796,7 +1984,7 @@ def _run_pass_with_selection(ns, command: str) -> int:
     this seam owns the CLI-level side effects."""
     spec = Path(ns.spec)
     try:
-        slice_label = find_slice_label(spec, ns.slice)
+        slice_label, slice_path = find_slice_target(spec, ns.slice)
     except (ReviewError, _evidence.EvidenceError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
@@ -1827,18 +2015,18 @@ def _run_pass_with_selection(ns, command: str) -> int:
     try:
         if command == "pr-review":
             prompt = build_pr_review_prompt(
-                spec, slice_label, ns.deliverables,
+                spec, slice_label, ns.deliverables, slice_path,
                 richer_skill=ns.richer_skill,
                 non_interactive=ns.non_interactive)
         elif command == "arch-review":
             prompt = build_arch_review_prompt(
-                spec, slice_label, ns.deliverables,
+                spec, slice_label, ns.deliverables, slice_path,
                 richer_skill=ns.richer_skill,
                 non_interactive=ns.non_interactive)
         else:  # code-health
-            summary = _read_summary(ns)
+            summary = _read_summary(ns, required=False)
             prompt = build_code_health_review_prompt(
-                spec, slice_label, ns.deliverables, summary,
+                spec, slice_label, ns.deliverables, summary, slice_path,
                 richer_skill=ns.richer_skill,
                 non_interactive=ns.non_interactive)
     except _review_config.ReviewConfigError as exc:
@@ -1933,7 +2121,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # Slice 060-05: code-health pass — on-demand (gated by
     # `code_health_review: true`), mirrors `arch-review` plus a summary.
     # `health.py` is run by the spine; its tight summary is fed IN via
-    # --summary-file (or stdin) — the read-only reviewer never runs it.
+    # --summary-file PATH (or `--summary-file -` to pipe it) — the read-only
+    # reviewer never runs it. Unlike record-review, omitting it is allowed:
+    # the prompt degrades to a "no summary provided" note (spec 060-05 AC2).
     pch = sub.add_parser(
         "code-health",
         help="construct a code-health-pass prompt",
@@ -1943,7 +2133,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pch.add_argument("deliverables", nargs="+", help="one or more deliverable paths")
     pch.add_argument(
         "--summary-file", dest="summary_file", default=None,
-        help="path to the health.py summary text (default: read stdin)",
+        help=("path to the health.py summary text; `-` reads stdin "
+              "(omitted: no summary, the prompt degrades gracefully)"),
     )
     _add_richer_skill_args(pch)
 
@@ -1989,8 +2180,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "ADR-side frame-critique evidence), or — with --bug NNN — at "
             "docs/bugs/reviews/bug-NNN-<pass>.md. Re-recording the same target "
             "overwrites in place — git history is the audit trail (ADR-0014 "
-            "§4). The freeform summary body is read from --summary-file or "
-            "stdin."
+            "§4). The freeform summary body is required: pass "
+            "--summary-file PATH, or --summary-file - to read it from stdin. "
+            "stdin is never read implicitly (bug 017)."
         ),
     )
     # Slice 064-05: record-review takes EITHER a spec + slice pair (the
@@ -2037,7 +2229,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     prec.add_argument(
         "--summary-file", dest="summary_file", default=None,
-        help="path to the freeform verdict body (default: read stdin)",
+        help=("path to the freeform verdict body; `-` reads stdin. "
+              "Required — a verdict with no body is refused"),
     )
     prec.add_argument(
         "--non-interactive", dest="non_interactive", action="store_true",
@@ -2202,15 +2395,22 @@ def main(argv: list) -> int:
     # pr-review / arch-review / code-health are intercepted above (the 096-03
     # selection seam); this block handles the remaining passes.
     try:
-        slice_label = find_slice_label(spec, ns.slice)
+        # Bug 019: resolve WHAT the slice is called and WHERE it lives in one
+        # step, and hand both to the builder — under file-per-slice layout the
+        # slice is not in `spec`, and the read-only reviewer opens only what
+        # the prompt names.
+        slice_label, slice_path = find_slice_target(spec, ns.slice)
         if ns.command == "implementation":
-            prompt = build_implementation_prompt(spec, slice_label, ns.deliverables)
+            prompt = build_implementation_prompt(
+                spec, slice_label, ns.deliverables, slice_path)
         elif ns.command == "design-review":
-            prompt = build_design_review_prompt(spec, slice_label, ns.deliverables)
+            prompt = build_design_review_prompt(
+                spec, slice_label, ns.deliverables, slice_path)
         elif ns.command == "frame-critique":
-            prompt = build_frame_critique_prompt(spec, slice_label, ns.deliverables)
+            prompt = build_frame_critique_prompt(
+                spec, slice_label, ns.deliverables, slice_path)
         else:
-            prompt = build_reconciliation_prompt(spec, slice_label)
+            prompt = build_reconciliation_prompt(spec, slice_label, slice_path)
         sys.stdout.write(prompt)
     except ReviewError as exc:
         sys.stderr.write(f"{exc}\n")

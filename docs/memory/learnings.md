@@ -372,8 +372,11 @@ from slice 058-06 implementation + review, 2026-06-25.
 
 ## Scaffold doc templates render into two install shapes — `${CLAUDE_PLUGIN_ROOT}` paths break in scaffold mode
 The `templates/docs/*.md.template` + `CLAUDE.md.template` files render for BOTH
-install shapes: `--plugin-only` (machinery stays under the plugin root) and the
-default in-repo scaffold (machinery copied to `.claude/skills/jig-*`). A
+install shapes: plugin mode (machinery stays under the plugin root — the
+**default** as of slice 099-01 / [ADR-0041](../decisions/adr-0041-scaffold-defaults-to-plugin-mode.md);
+also reachable explicitly via `--plugin-only`) and the in-repo scaffold
+(`--in-repo`, machinery copied to `.claude/skills/jig-*`; it was the default only
+between slices 016-03 and 099-01). A
 `${CLAUDE_PLUGIN_ROOT}/skills/<name>/...` command path in a doc template is correct
 for plugin-only but **silently broken in a scaffolded project** — the env var is
 unset there and the helper actually lives at `.claude/skills/jig-<name>/...`. A real
@@ -582,3 +585,644 @@ Runner adapters must preserve the distinction between an implicit project target
 ## Bug 011: correct withdrawn prose by sweeping, not by chasing cited lines
 When a fix withdraws a documented rationale, correcting only the lines a reviewer names leaves siblings behind — a stale `spec.md` constraint survived three consecutive review passes that way. Grep the withdrawn *phrasing* across `docs/` instead (here: "repeat runs stay quiet", "dedup-against-recorded", "until recorded", "then pruned"). Two traps make this worse than ordinary doc drift: prose under a heading like "Design constraints (locked in, all phases)" reads as binding and can license re-introducing the bug, and `workflow.py status-board` *preserves* the Notes column across regeneration, so a stale note there never self-corrects.
 
+## Bug 013: a field's meaning lives in its readers, not its writers
+Three lessons from one gate, in ascending order of how easy they are to repeat.
+
+**A regex that both gates and transforms exports the transform's strictness
+into the gate**, where it reads as an arbitrary format rule. `cmd_accept`'s
+pattern legitimately needed an exact `Proposed (YYYY-MM-DD)` match to *rewrite*
+the line, and that requirement leaked into the *decision to proceed*. When one
+pattern serves both roles the tolerant read and the exact rewrite want different
+patterns — and a comment claiming otherwise ("or with extra trailing content",
+never true) is the tell that the two roles were never separated.
+
+**Do not infer a field's semantics from its provenance.** Fixing this bug, the
+implementer needed an acceptance date, found that only `cmd_accept` writes
+`last_verified` in code, and concluded it *is* the acceptance date. It is not: it
+is a freshness stamp. [ADR-0024](../decisions/adr-0024-reference-reframe.md)'s
+`reaffirm` disposition refreshes it as a documented judgment step (no code path
+to grep), `workflow.py`'s staleness check reads it as "verified N days ago", and
+eight prose-`Proposed` ADRs already carry a filled value. The grep answered
+"who writes this?" while the question was "what does this mean?" — and a field's
+contract lives in its defining ADR and in what *reads* it. The near-miss cost:
+a plausible wrong date published in the README index and offered to a human to
+write into an immutable record. **A plausible wrong value is worse than an
+absent one**, because nothing about it looks wrong; the diverged index entry now
+publishes no date at all.
+
+**Run the remediation command you print.** The refusal message told the operator
+to recover the date with `git log … -- <basename>`. Git resolves pathspecs
+relative to cwd, so from a repo root it matched nothing and exited 0 — output
+indistinguishable from "there is no such commit". An error message is a
+deliverable; an unexecuted one is an untested code path with a human on the
+other end.
+
+**Process note:** the frame-critique earned its cost here, but only because it
+ran four times. Rounds 1–3 each found something verifiable, and round 2 refuted
+round 1's *fix* rather than the original design — an adversarial pass is worth
+re-running against your own repairs, not just against the initial draft.
+
+## Bug 014: a partial signal teaches a total inference
+A mechanism that answers a *narrow* question reliably will be read as answering
+the *broad* one — and the working cases are what make the misreading stick.
+`claimed_by:` honestly meant "who is implementing this slice"; every reader
+generalized it to "jig tracks who is working on what", because it was correct
+every single time they checked. It looked reliable right up until it silently
+wasn't, which is worse than having no marker at all: nothing prompts you to
+doubt a signal that has never yet been wrong in front of you.
+
+Three things generalize. First: **when one system produces a signal and another
+routes decisions on it, the coverage limit must be written where the reader is,
+not where the writer is.** Spec 049 documented its `IN_PROGRESS`-only scoping
+precisely and correctly — in spec 049. `orient`, the status board, and the
+pickup flow never repeated it, and they are what an agent actually reads.
+Second: **the phase with the heaviest writes deserves the strongest signal, and
+lifecycle machinery tends to give it the weakest** — the claim was deliberately
+*cleared* on entry to `REVIEWED`, i.e. immediately before reconciliation, the
+single biggest write phase jig has. Check the ordering whenever a marker is
+released on a state change. Third: **absence-of-record is not evidence-of-
+absence, and prose must say so out loud.** jig's own `collect_slices` docstring
+called an empty field "unclaimed"; that one word is the whole bug in miniature.
+The fix now states, in the docstring and in both skill surfaces, that blank
+means *no claim recorded* — unpushed claims are invisible and plain `Edit`
+writes take no claim, so blank can never mean free.
+
+**The sharpest lesson is about the fix, not the bug: widening a signal can
+invert the very defect it was meant to close.** The first cut stamped every
+non-terminal state, including the two the pickup flow tells readers to choose
+work from. That left the spec author's branch name on slices that were now free,
+so the board labelled available work as owned and the routine
+author→implementer handoff warned every single time. "Blank reads as free" became
+"residue reads as occupied" — same surface, same class, sign flipped. The rule
+that fixes it generalizes: **classify lifecycle states by whether a session is
+DOING something there or the item is QUEUED for whoever comes next, and only mark
+the first kind.** Marking a queue is what produces false occupancy, and a warning
+that fires on the most routine path trains readers to ignore warnings. A
+corollary for reversals: check whether a recorded non-goal makes *more than one*
+claim before rebutting it — spec 049's said both "browsing doesn't reserve" and
+"no claim on READY_FOR_IMPLEMENTATION", and rebutting only the first missed that
+the real objection is *the actor is not the future worker*.
+
+Process notes. Reversing a recorded non-goal makes pre-existing tests fail
+*correctly* — that is the design conversation surfacing, not breakage — but
+rewriting them is legitimate only with the reversal recorded first (ADR + spec
+`## Amendments`); and the count of inverted tests is a useful proxy for how big
+the reversal really is (ours fell from four to two once the design was narrowed).
+Three separate over-reaches all came from the same root: **widening a marker,
+widening the blocking that shares its condition, and widening the machinery that
+consumes it are three decisions, not one.** The suite caught the first (a session
+could no longer move its own slice out of `IN_PROGRESS`); review caught the
+second (the trunk reservation still hardcoded one status, and later still
+overwrote a foreign trunk claim silently); and the third only surfaced when a
+reviewer asked what *reads* the newly-written field — the answer was nothing, so
+the docs' promise of cross-worktree visibility was untrue until a read path was
+added. When widening a write, always ask what consumes it.
+
+**A batched edit script's per-step log is not evidence the edit landed.** Two
+regression tests were recorded in the bug record as pinning a fix, and neither
+existed: the script that added them raised on a *later* assertion and returned
+before its single `write_text`, discarding every earlier substitution — after
+already printing `ok: <step>` for each one. Per-step logging plus
+all-or-nothing writing makes partial failure look exactly like success. It
+happened twice in one session. **Verify by grepping for the artifact
+(`grep -c '<test name>' <file>`), never by trusting the script's own echo** —
+and for a guard, go further: remove each conjunct, re-run under `python3 -B`,
+confirm red, restore. Both refusal conjuncts here were unpinned; the suite stayed
+green with either deleted, which no amount of "the tests pass" would have
+revealed. This compounds the [[mutation-testing-pycache-false-negative]] trap:
+a test that cannot fail is worse than a missing test, because the record then
+cites it as evidence.
+
+**A cross-host transform is only ever tested by the non-default host**
+(bug 015). `brief.md` and the seed spec were rendered through paths that never
+received the Claude→Codex host transform, so a Codex project's two
+first-read documents told the user to open `CLAUDE.md` — a file only Claude
+projects have. Both paths were added over time and each simply forgot the hook;
+`_emit_seed_spec` even built its own *narrower* transform, which reads as
+deliberate and is easy to approve in review. Nothing caught it because the
+Claude host is the identity case: on the host every contributor runs,
+untransformed text is already correct. Host-parity assertions have to be
+written on purpose — they will never fall out of ordinary development.
+
+Two corollaries from the same bug, both cheap and both general:
+
+- **A docstring that reassures on a neighbouring axis suppresses the question
+  you needed asked.** `_emit_seed_spec` promised its templates "never leak
+  `${CLAUDE_PLUGIN_ROOT}` or source-checkout paths" — true, and about *paths*.
+  Anyone checking whether the seed needed the host transform found an
+  authoritative-sounding "this is fine" that did not cover *vocabulary*.
+  Reassurance should name its axis.
+- **When a fix reuses an existing hook, check what else flows through that
+  hook.** The obvious fix here (`post_render=doc_rewrite`) resolves the symptom
+  and corrupts user data: `copy_template` substitutes *before* post-rendering,
+  and the Codex transform does a blanket `Claude` → `Codex` replace, so a
+  project directory named `Claude-Tools` is emitted as `Codex-Tools`. That is a
+  live, separate defect on the primer path ([[jig-bug-016]] — filed, not fixed);
+  the 015 fix avoided inheriting it by adding a `pre_render` hook that runs
+  before substitution. A guard test pins it, proven by a single-variable
+  variant: switching only the brief back to post-substitution turns it red.
+
+**`isatty()` answers "is this a terminal", never "is there input waiting"**
+(bug 017). `record-review` guarded a `sys.stdin.read()` fallback with
+`if not sys.stdin.isatty()`. That splits three real cases into two: a terminal
+(skip), a closed stdin (`""` immediately), and **an open pipe nobody ever
+closes — which blocks forever**. A human at a prompt is always the first case;
+an agent harness and most CI runners are always the third. So the failure
+appeared only where nobody was watching, and jig's whole suite could hang for
+13+ minutes on a ~100s run while the bug "never reproduced by hand". That
+signature is itself the tell: **a defect that only shows up when a human is not
+driving points at a terminal-shaped assumption.** The fix removed the branch
+rather than bounding it — `--summary-file -` is now the only route to stdin —
+because a timeout or a readiness poll would have kept behaviour forking on what
+stdin happens to be.
+
+Two corollaries worth keeping:
+
+- **Don't use one property as a proxy for another.** `isatty()` was standing in
+  for "input is available", which no syscall on a pipe can answer without
+  either blocking or racing. When the question can't be asked, make the caller
+  state the answer (an explicit flag) instead of guessing.
+- **The obvious regression test proves nothing here.**
+  `subprocess.run(stdin=subprocess.PIPE)` closes the write end immediately, so
+  the child sees EOF and exits — it passes against the *unfixed* code. Only
+  `os.pipe()` with the write end held open by the test reproduces it. One wrong
+  repro of exactly this shape briefly appeared to *disprove* the bug. Compare
+  [[mutation-testing-pycache-false-negative]]: when a test passes sooner than
+  expected, suspect the harness before believing the result.
+
+## Bug 018: a restated contract is a contract that will drift — and a host parameter needs a fixture per host
+
+`copy-machinery` converts a plugin-mode project to in-repo. A project's mode
+lives in three places — the machinery on disk, `scaffold_mode` in
+`scaffold.json`, and the helper paths its rendered docs cite — and the command
+updated only the first. The original defect was not a regression: **spec 099-01
+advertised `copy-machinery` as the plugin-mode recovery route by writing one
+summary line, widening a contract the callee was never told about.** No test,
+review, or diff on either side had cause to ask whether the command did what it
+was now being sold as doing.
+
+The instructive part is what happened next.
+
+**The same failure recurred inside the fix for it, a few hundred lines later.**
+The fix's docs half searched for the single literal `${CLAUDE_PLUGIN_ROOT}`.
+Codex renders its plugin-mode docs against `${PLUGIN_ROOT}`, so the scan
+returned empty for every Codex project: the mode flipped, no advisory printed,
+and the shipped Codex `SKILL.md` promised those users a warning they would never
+see. The Claude-only literal was a *restatement* of a constant that already had
+an owner (`CodexScaffoldRenderer` / `ClaudeScaffoldRenderer`). Writing the
+"widened contract" learning into this very record did not prevent repeating it.
+
+- **Structure beats vigilance.** The fix is now
+  `scaffold.renderer_for_host(host).PLUGIN_ROOT_PREFIX` — read the host's
+  spelling from the host, so there is no second copy to go stale. A per-host
+  constant living in a *consumer* module is a contract restatement, and
+  restatements drift silently: nothing fails, the feature just stops happening.
+  When you catch yourself writing a lookup table keyed by host/mode/variant,
+  check whether the thing you are keying on already owns that answer.
+- **A parameterized path needs a fixture per value, or the untested value is a
+  guess.** The function threaded `resolved_host` all the way through and looked
+  fully covered at 15 green tests — every fixture was a Claude scaffold. Half
+  the supported hosts were never exercised. The reviewers found it; the suite
+  could not.
+- **Two of those 15 were passing without testing anything**, in the specific way
+  that is hardest to see: the assertion was true for a reason unrelated to the
+  code under test. `test_copied_machinery_is_not_reported_as_stale_user_docs`
+  ran on a default-`docs_root` project where `.claude/` is outside the scan root
+  *structurally*, so deleting the entire skip-set left it green. A negative
+  assertion needs a fixture where the positive case is actually reachable.
+- **Never read an exit code through a pipe.** `cmd | tail` reports `tail`'s
+  status. This record spent a full cycle asserting the suite failed on a known
+  flake when it exits 0 and the alarming `ERROR: committed host packages are
+  stale…` text is *expected output* from `DriftCheckTests`, which induces drift
+  on purpose to assert the message shape. Redirect to a file and check `$?`, or
+  use `PIPESTATUS`. See also [[jig-ci-check-needs-pipx]].
+
+Process note: neither required review pass (`bug-review`, `craft`) was recorded
+before the first fix merged as `dd0d350`. Both were run retroactively in
+[#150](https://github.com/ramboz/jig/pull/150) and both returned
+`needs-changes`, which is how the Codex gap surfaced — after shipping. The
+`→ REVIEWED` evidence gate is what would have caught it before.
+
+## Bug 019: a resolver that returns half its answer makes every caller guess the rest
+
+`_common.parsing.load_slice` resolves both *what* a slice is called and *which
+file it lives in*. `review.py`'s wrapper returned the label and dropped the
+path. With the location gone, seven prompt builders had nothing left to name
+but `spec_path` — so all seven sent the read-only reviewer to `spec.md`, which
+under file-per-slice contains none of the acceptance criteria, deviation log, or
+reconciliation sweep it was being asked to verify. **When a lookup computes two
+facts and a wrapper discards one, the discarded fact gets re-invented downstream
+as a guess.** Return the whole answer, or the abstraction is a lie by omission.
+
+Two generalizable points:
+
+- **A defect that a human driver silently corrects is a defect only unattended
+  runs pay for.** Interactively you notice the path is wrong and retype it; the
+  session succeeds and nothing gets filed. The same prompt handed to an
+  unattended reviewer — explicitly told not to look beyond the files it is
+  pointed at — returns a confident verdict about the wrong file. **Anywhere a
+  human-in-the-loop routinely patches output by hand, put a test**: the loop is
+  hiding the bug, not fixing it. Bug 017 above reached the same rule from the
+  opposite direction — a defect visible only when nobody is driving. Two
+  independent bugs, one signature: **"never reproduces by hand" is a clue about
+  the observer, not a verdict on the bug.**
+- **When two layouts coexist, render the difference in exactly one place.** The
+  fix is one `_slice_source()` that decides how the reading target is phrased;
+  the builders interpolate it. Seven independently-worded `## What to read`
+  entries were seven chances to get the layout wrong, and the eighth builder
+  would have made it eight.
+
+The dual-layout support itself was never broken — `MixedLayoutResolutionTests`
+proved the *label* resolved correctly in both layouts, and that green test read
+as coverage of the feature. **Asserting that the right thing was found is not
+asserting that the right thing was reported.**
+
+
+## Bug 022: a default is a decision, and reuse inherits a contract
+
+`scaffold.copy_machinery` grew a `docs_root` parameter in spec 084 with a
+default of `"docs"`. Spec 084 updated the greenfield caller and missed the
+other one, `migrate.copy_machinery` — so `migrate copy-machinery` wrote its two
+managed `workflow.md` blocks into a hardcoded `docs/` on every project,
+correct for the majority and wrong for exactly the track-local (`docs_root:
+"."`) shape that spec 084 existed to support.
+
+**An optional parameter with a sensible default is an invisible call site.** A
+missing argument is not a diff, not a warning, and not a test failure; it is
+silence that happens to be right most of the time. The caller being actively
+worked on gets updated because it is in front of you. Every other caller keeps
+the default, and the wrong behaviour surfaces only on the minority
+configuration nobody is testing. Cheap guard: when a shared helper gains a
+project-scoped parameter, grep for *every* caller in the same change and decide
+explicitly for each — the default is a decision, not an absence of one.
+
+The sharper lesson was in the repair, not the defect. The right fix reused an
+existing in-module resolver, `_project_docs_root`, which the bug-018
+stale-citation scan had introduced. Reusing it also inherited its documented
+contract — and that docstring justified swallowing every exception on the
+grounds that the value "only decides where to LOOK for stale citations, so a
+bad config must degrade to a narrower scan." True for a read. The fix silently
+promoted the same value to deciding where files are **written**, where the
+identical fallback means a malformed `scaffold.json` on a `docs_root: "."`
+project silently reproduces the very symptom being fixed. Same code, same
+fallback, materially different consequence.
+
+**A helper's docstring is part of its contract; widening its set of consumers
+without revisiting it leaves a justification that no longer covers the code.**
+Both reviewer passes caught this independently and both called it the blocker —
+the one-line fix was fine, the stale promise around it was not. Worth noting
+that neither reviewer objected to the *behaviour*: degrading was still right.
+They objected to a code comment asserting a reason that had stopped being true.
+
+Two mechanical notes worth keeping:
+
+- **A test that pins a property rather than a defect cannot be red-witnessed.**
+  The degrade contract above was untested; the test added for it would pass
+  before the fix too, so the red→green ritual proves nothing about it. Mutation
+  is the substitute — force the resolver to raise, confirm the test goes red,
+  under `python3 -B` so stale bytecode cannot mask the edit. Compare
+  [[mutation-testing-pycache-false-negative]].
+- **Assert the outcome, not the exit code.** That test first checked only
+  `returncode == 0`, which a copy that wrote nothing at all would also satisfy.
+  Pinning *where the blocks landed* is what makes it mean the documented thing.
+## Bug 023: a `host` argument answers *some* host's question — say which one
+
+`migrate.py copy_machinery` takes one `host`, and it was answering two
+different questions with it:
+
+- **where does the machinery go?** — a property of *this invocation*
+  (`--host`, or inferred from where the copied helper sits on disk);
+- **what variable do this project's docs cite?** — a property of *the project*,
+  fixed when its docs were rendered, and already recorded in `scaffold.json`
+  as `host_renderer`.
+
+Feeding the invocation host to the second question makes a Codex-installed
+helper scan Claude-rendered docs for `${PLUGIN_ROOT}`, match nothing, and print
+nothing — output identical to a clean project. The manifest flip still
+succeeds, so the run looks fine.
+
+- **A variable that is in scope and plausible is still a guess.**
+  `resolved_host` was correct for the copy and merely *available* for the
+  advisory. Nothing at the call site distinguished the two meanings, so one
+  name served both and the second answer was right only by coincidence. When a
+  helper takes a `host` (or `mode`, or `profile`) argument, name whose it is —
+  in the signature or the comment.
+- **Varying two inputs together is not coverage.** Bug 018 shipped 28 tests
+  across both hosts, and every one scaffolded and invoked the *same* host. All
+  28 would pass against a hard-coded constant. Only a fixture where project
+  host ≠ invocation host can show which input the code actually reads.
+- **Splitting a conflated read means splitting it in both directions.** The
+  token now follows the project; the offered replacement path deliberately
+  stays on the invocation, because after `--host codex` the skills really are
+  under `.codex/skills/` and no `.claude/skills/` exists. Moving *both* halves
+  to the project host would have traded one false statement for another.
+- **Third instance in one function.** Bug 018 recorded "a caller widened a
+  contract the callee was never told about", then repeated it a few hundred
+  lines later, and its fix moved the *spellings* to their owner while leaving
+  the *host selection* pointing at the invocation. Recording a learning does
+  not enforce it; the enforcement here is `read_host_renderer` returning `None`
+  for a host it does not recognise instead of quietly defaulting to Claude, so
+  an unknown answer cannot masquerade as a known one. See the bug 018 entry
+  above.
+- **A host name written inside a cross-host contrast will invert in the other
+  host's package.** `build_codex_plugin.py` rewrites `Claude` → `Codex`
+  wholesale, so "run a Codex-installed helper against a Claude-scaffolded
+  project" ships to Codex users as "...against a Codex-scaffolded project" —
+  the same-host case the sentence just dismissed. This happened here, in the
+  documentation *of the two-host fix*, and it had already happened once in
+  scaffold-init's SKILL.md (`test_scaffold_mode.py::test_skill_md_output_
+  survives_the_codex_translation`). The rule: in any host-translated file,
+  phrase host contrasts **neutrally** ("a helper installed for one host
+  against a project scaffolded for the other") so there is no literal for the
+  builder to rewrite — and pin it against the RENDERED artifact, because the
+  source always reads fine. That is why a source-only assertion cannot catch
+  it. It recurred a *third* time in the same cycle: the editor comment added
+  to warn future editors off host literals named both hosts itself, and
+  shipped as `NO host literals ("Codex", "Codex", .codex/, .codex/) …
+  rewrites the first to the second`. A rule stated in prose that violates
+  itself is worth less than no rule.
+- **Because the rewrite runs one way, "renders identically" is only half a
+  guard.** The builder maps Claude spellings to Codex ones and never the
+  reverse, so section identity catches every Claude spelling *the builder
+  rewrites* and is **blind** to a Codex one — both packages render it
+  verbatim, and the other host's readers get a sentence about a host they are
+  not using. Pin both directions: identity for the translated side, an
+  explicit absence check for the untranslated one. The guard's **second**
+  version asserted identity alone and claimed it held "iff the section
+  contains nothing host-specific", which was false in exactly that direction.
+  (The first banned two known-bad sentences and was useless; four versions in
+  total — the sequence is in bug 023's `## Proof`.)
+- **And take the forbidden set FROM the translator, not from memory.** The
+  **third** version kept identity and hand-wrote `Codex` / `.codex/` /
+  `CODEX_` for the blind direction — and let `${PLUGIN_ROOT}`, `AGENTS.md`,
+  `--host codex` / `--host claude` (lowercase — the builder is
+  case-sensitive) and unslashed `.codex` straight through. A restated table
+  is the bug-018 defect, and writing it *inside the guard built to stop this
+  bug's version of it* is how little the lesson transfers by memory alone.
+  It is now parsed out of `build_codex_plugin.py` by an AST walk over its
+  `.replace()` calls, taking **both** sides of each pair: the left-hand side
+  is a spelling the build consumes, the right-hand side one it produces —
+  and the second group is exactly what a hand-written list forgets, because
+  those strings never appear in the source you are looking at.
+
+**A deterministic extractor needs a way to say "I don't know"** (bug 020,
+[`020-adr-index-summary-degradation`](../bugs/020-adr-index-summary-degradation.md)
+/ [issue #140](https://github.com/ramboz/jig/issues/140)).
+`adr.py index` derives each ADR's one-line summary from the record's first
+`## Context` paragraph, and `_extract_description` had to return a string for
+every input. When the paragraph is a lead-in to a list it contains no complete
+sentence, so the helper emitted the lead-in verbatim — colon and all — or cut
+it at 120 chars with a trailing `…`. Five of 46 bullets were in that state and
+nobody noticed, because **a fragment and a summary are the same shape**: the
+output was well-formed, just meaningless. Letting the helper return `""`, and
+reporting it as `(no description)` plus a warning naming the record, closed
+every live case.
+
+The corollary is about policy, not code. The maintainer's ruling ([#151](https://github.com/ramboz/jig/pull/151),
+reaffirmed on [#154](https://github.com/ramboz/jig/pull/154)) is that a
+generated index stays a **pure function of its sources** — hand edits to the
+generated file are overwritten by design, and the remedy for a bad row is to
+fix the source. That is workable **only if the generator names the source that
+needs fixing**. A derive-only policy plus a generator that silently invents
+something plausible is the worst pairing: the human is told to fix the source
+and given no way to find it. If you rule that a generated artifact may not be
+hand-edited, make sure it reports what it could not derive.
+
+**A ship contract only holds if the thing that builds the artifact reads it**
+(bug 025, [`025-packaged-plugin-omits-runtime-scripts`](../bugs/025-packaged-plugin-omits-runtime-scripts.md)
+/ [issue #167](https://github.com/ramboz/jig/issues/167)).
+Spec 075 made `scripts/spec_lint.py` (and the `verify_install` runtime trio)
+"ship" by adding them to `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` and
+teaching the `iter_release_files` enumerator to yield them. Correct at the
+time — the release zip was built by walking source through that enumerator.
+Then spec 061 rearchitected packaging (ADR-0018): the shipped artifact became
+the committed `hosts/<host>/` tree, built by `build_claude_plugin.py` /
+`build_codex_plugin.py`, and the release zip just archives that tree. Those
+builders walk directory roots only and never call `iter_release_files`, so the
+allowlist quietly stopped being consumed by **anything on the shipping path** —
+`iter_release_files` became dead code with passing tests, and every shipped
+skill's `${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py` invocation broke with "No
+such file or directory." The lesson: **a "must ship" allowlist is only real if
+the code that produces the shipped artifact reads it** — pin the contract to a
+freshly *built package*, not to an enumerator that merely *describes* one. The
+trio's failure hid behind a `try/except ImportError` guard so nobody noticed;
+`spec_lint.py` had no guard, which is the only reason the drift surfaced.
+Two corollaries: (1) when a re-architecture moves the build path, re-audit
+which contracts the OLD path enforced and re-wire them to the new one — a green
+test suite over a dead enumerator is a false all-clear; (2) ship what each host
+actually references — `spec_lint.py` is host-neutral so it ships to both, but
+`verify_install`/`scaffold_contract` are `.claude/`-hardcoded and belong only
+in the Claude package.
+
+**A safety gate that fails "open" reads exactly like a gate that passed** (bug 024,
+[`024-slice-land-tests-inert-vendored`](../bugs/024-slice-land-tests-inert-vendored.md)
+/ [issue #129](https://github.com/ramboz/jig/issues/129)).
+`slice-land`'s `check_tests` located `tdd.py` with a fixed
+`Path(__file__).parents[2] / "skills" / "tdd-loop" / "tdd.py"`. That path is
+only correct for an un-prefixed plugin install; in a **vendored** layout — jig
+copied into a consuming repo's `.claude/skills/` with the marketplace `jig-`
+prefix (`jig-slice-land/`, `jig-tdd-loop/`) and `CLAUDE_PLUGIN_ROOT` unset — it
+missed, and the "helper missing" branch returned a **non-blocking** `warn`
+worded as *"no test runner detected (slice may be doc-only)"*. So a repo with a
+full green suite (and one with genuinely red tests) both rendered the same
+reassuring doc-only line, and the Tests gate was a silent no-op. Two lessons:
+(1) **resolve sibling helpers by content, not by a hard-coded parent name** —
+glob `*tdd-loop/tdd.py` / `*/tdd.py` off `land.py`'s own directory so the
+resolution survives a renamed/prefixed parent; and (2) **"the check could not
+run" and "there was nothing to check" must be different states.** Collapsing an
+environment failure into the legitimate doc-only case is what let the failure
+hide — the fix split them (`not_run` vs `warn`) and rendered `not_run` as a
+loud `[!] NOT RUN … This is NOT a pass`. A bonus corollary: when you widen a
+status enum, re-audit every consumer — the doc-only servo-suggestion guard
+keyed on `== "warn"` had to learn about `not_run` too, or it would leak.
+
+## Bug 026: a discipline wired into one authoring surface won't cover its siblings
+
+ADR-0020 §1's grounding rule (a factual claim about a runnable surface needs an
+executed probe or a `file:line` citation; unverifiable claims are marked as
+assumptions) lived only in spec-workflow's "Creating a new spec" step 6. The
+reconciliation checklist's "Architecture impact" item — the surface that
+actually rewrites live front-door prose like `docs/architecture.md`, the highest
+blast radius of any authoring surface — inherited none of it. When a rule has
+more than one authoring entry point, enumerate them all; the one you forget is
+often the one that matters most. The fix extends the rule to reconciliation and
+pins it with a canonical-wording drift test scoped to the reconciliation section
+(so it can't false-pass off step 6's similar phrasing).
+
+Tooling gotcha, surfaced while running this through `bug-fix`: jig's
+`.jig/test-command` is `python3 scripts/run_tests.py`, whose `main()` ignores
+argv and always runs the full discovered suite. `tdd.py`'s custom-runner path
+appends the `path::Class` selector, but `run_tests.py` drops it — so a bug's
+`regression_test` gate (FIXING red-check, REVIEWED green-check) runs the entire
+suite (~256s in the cloud env, 3872 tests), not the named class. The red→green
+teeth still hold — one failing test turns the whole suite red, and it must be
+fully green to pass REVIEWED — but budget for a full-suite run at each gate, and
+don't point a `regression_test` at a huge file expecting narrowing. (If per-test
+narrowing is wanted, `run_tests.py` would need to honor a selector arg; parked,
+not filed.)
+
+## Bug 028: a list the source repo maintains for itself won't reach generated projects unless the generator emits it
+
+jig git-ignores its own per-checkout runtime state (`.claude/*` hook telemetry +
+queues + the settings-local overlay, `.jig/spec-ref`, the decision-capture
+markers) in its own `.gitignore`. But the scaffolder's `.gitignore` generator
+only emitted the ADR-0013 **secret** floor, so none of that runtime list reached
+scaffolded projects — every downstream repo re-discovered the churn (and, for
+per-checkout markers, merge conflicts) by hand. The lesson: when the canonical
+repo hand-maintains a list that generated projects also need, the knowledge has
+to be **emitted by the generator**, not left in the maintainers' working copy —
+otherwise it's invisibly repo-local. The fix adds a second managed block beside
+the secret one (same idempotent `_upsert_marked_block` mechanic), deliberately
+kept separate (different rationale, independently opt-out-able), and reuses the
+existing three write paths so `migrate copy-machinery` back-fills existing
+installs. Note the no-op-on-tracked-files wrinkle: a `.gitignore` line does
+nothing for an already-tracked file, so the block carries an inline
+`git rm --cached` hint rather than silently helping only new projects.
+
+Don't-blind-copy corollary: jig's own `.gitignore` is NOT a clean source to copy
+verbatim. It self-ignores `.claude/review-queue.json` — a *removed* feature (spec
+039) kept only as a defensive block — and a guard test forbids live-code
+references to that literal. The first attempt propagated it and the full-suite
+green check caught the guard (targeted class runs would not have). Filter dead
+entries; and when you must name a guarded path literal in a live comment/test,
+use the bare filename so the substring guard doesn't trip.
+
+Process gotcha (worth more than the fix): the jig **primary worktree is shared
+by concurrent sessions**. Mid-implementation, another session (issue-111 /
+spec-098) ran `git stash` on the shared branch and swept this bug's uncommitted
+work into a stash — uncommitted tracked edits reverted, untracked bug doc
+vanished. Nothing was lost (it was in `stash@{0}`), but it looked destroyed.
+Lesson: for any non-trivial change in the jig primary tree, **work in a
+dedicated `git worktree` off `origin/main`** (like the `jig-bug027-wt` /
+`jig-bug028-wt` siblings), not the contended primary — it isolates you from
+other sessions' git operations and keeps the PR free of their WIP. Also budget
+for the full-suite bug gate: `run_tests.py` ignores the selector and runs all
+~3800 tests + pyright (>9 min under CPU contention here), so run FIXING/REVIEWED
+gates in the background, not a foreground call.
+
+## Bug 027: a doc reference in a shipped skill must anchor to the destination tree, not the source repo
+
+`skills/spec-workflow/SKILL.md` told slice authors to use the template at
+`templates/docs/specs/slice-template.md` — a bare, unanchored path. It resolves
+correctly from the jig *source* repo root, but the skill *ships* into scaffolded
+projects, where (a) the scaffolder copies `templates/` under `.claude/templates/`
+(so the project-root path doesn't exist) and (b) the authoritative structural
+exemplar, `docs/specs/001-adopt-jig/`, sits at project root and is what the
+scaffolded `CLAUDE.md` already calls "the worked example to imitate." The fix
+removed the fragile path from both references (redirecting to `workflow.py new`
+for the mechanical starter and `001-adopt-jig` for the filled-in exemplar) and
+**regenerated the host mirrors** — editing a `skills/` source file without
+running `scripts/build_host_packages.py` leaves `hosts/claude/…` and
+`hosts/codex/…` stale, which the CI host-package drift guard (`--check`) fails.
+General rule: when prose ships to a different tree than it was authored in,
+resolve every relative path against the *destination*, and regenerate every
+committed mirror in the same change.
+
+Process learning (dogfood): shared jig checkout hazard bit again. A parallel
+session (`bug-028`) switched the primary worktree's branch out from under this
+session and a bare `git stash` collided — git's stash stack is **shared across
+all worktrees of a repo**, so `git stash push -- <file>` from one worktree can be
+popped by another. Recovery: move real work into a dedicated linked worktree off
+`origin/main` early, re-apply edits directly rather than fighting the shared
+stash, and never `git stash` in a shared jig checkout. (Reinforces the existing
+"isolate real work in a dedicated worktree" learning.)
+
+Testing learning (hooks that log): a jig hook whose fire calls
+`append_additional_context_event` writes its audit line under
+`<project_dir>/.claude/context-growth-read-events.jsonl`. In a hook-wrapper test,
+if `CLAUDE_PROJECT_DIR` is unset the wrapper defaults `project_dir` to `.`, and if
+the test subprocess also inherits the repo as its `cwd`, the hook writes that log
+**into the source tree** — dirtying it and breaking `build_host_packages.py
+--check` (whose `_is_ephemeral` doesn't skip `.claude/*.jsonl`). Worse, a hook
+that shells `git` (e.g. `jig-git-freshness`) will run a **live network fetch**
+against the real repo. Rule: every hook-wrapper test must pin `project_dir` (and,
+for the no-`CLAUDE_PROJECT_DIR` case, the subprocess `cwd`) to an isolated temp
+dir, never let either resolve to the source tree. Caught during spec 103
+(git-freshness) landing, by the orchestrator's own `--check` verification — the
+implementer's focused-suite run had missed it because it only surfaces when the
+default-`.` path meets a repo cwd.
+
+Orientation/status learning (bug 031): a read-only project-state reporter
+(`/jig:orient`, `workflow.py orient`) that narrates *local* artifacts — spec/bug
+boards, ADRs, slice `STATUS` — is only ever as current as the last fetch. Reading
+them without checking origin confidently reports a stale premise: work already
+shipped on trunk reads as still open. spec 103's `SessionStart` git-freshness hook
+fetches once at time-zero, but an interactive orient later in the session
+re-reads the boards with no re-check, so drift accrued after time-zero is
+invisible. Fix pattern: give the interactive path its *own* bounded, fail-soft
+`git fetch` (a `--fetch` flag; timeout `_ORIENT_FRESHNESS_FETCH_TIMEOUT = 5s`,
+`GIT_TERMINAL_PROMPT=0` so an auth-required origin fails fast) and report
+commits-**behind** (`· freshness: N behind <base>`), or `could not reach origin`
+when the fetch failed — never silently "fresh" against refs you didn't refresh.
+Gate the fetch behind the flag so the 4s `SessionStart` hot path stays
+byte-identical and spec 103 remains the sole time-zero signal (two consumers, one
+helper). Process corollary (reinforces the "verify the full jig CI gate locally"
+learning): editing a skill's `SKILL.md` *or* a `skills/**/**.py` helper requires
+regenerating the committed `hosts/` mirrors (`python3 scripts/build_host_packages.py`)
+— the drift guard fails on stale mirrors and the craft review will (rightly) block
+on it. Caught in the bug-031 craft pass.
+
+## A judgment-rule change is not bug-fix-shaped; an Accepted ADR is refined by a new ADR, never amended
+
+[Issue #132](https://github.com/ramboz/jig/issues/132) reported a hole in a
+*rule* — ADR-0020 §1's grounding standard accepted one citation for a universal
+claim. The reflex is to route a reported defect to `bug-fix`, but that
+workflow's central tooth is a witnessed red→green regression test, and this fix
+is pure judgment-prose (rule text in an ADR + two SKILL.md files). jig
+deliberately does **not** enforce this kind of rule with code (the standing
+distrust of lexical-marker gates), so there is no honest automated test to put
+through the gate — forcing it through `bug-fix` means switching the gate off,
+i.e. faking the ceremony. **A pure judgment-rule change is decision-shaped, not
+bug-shaped:** the honest route is a new refining ADR + inline edits to the live
+operational prose (the SKILLs) + the frame-critique and craft passes that
+actually apply to a rule, no red→green theatre.
+
+And the ADR is **refined by a new ADR, never amended in place.** [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
+scopes the `## Amendments` mechanism to *closed specs/slices*; ADRs are governed
+by Nygard immutability ([ADR-0006](../decisions/adr-0006-adr-accept-then-index-ordering.md))
+— superseded or extended by a new record, never edited in body (the one allowed
+edit is the supersession line). So [ADR-0052](../decisions/adr-0052-grounding-enumeration-for-universal-claims.md)
+carries the enumeration refinement and cross-links ADR-0020; ADR-0020 §1's prose
+is left untouched, and the operative rule lands inline in the two SKILLs where
+authors actually read it.
+
+The corollary is about the frame-critique gate earning its cost. ADR-0052's
+`accept` gate forced a frame-critique pass, and it took **four rounds** — the
+first three returned `needs-changes`, each naming a real, load-bearing hole (the
+rule was unsound for *unbounded* negative claims a `grep` can't close; the
+"enumerate it" burden was a harder self-classification than the one authors
+already fail; the ADR's own `Assumptions: None` violated the very rule it
+introduced). The fix that converged shifted the burden from "classify the set as
+bounded" to "state *why* the search is exhaustive" and routed that articulation
+to the reviewer. A gate that only ever rubber-stamps is not a gate; this one
+changed the decision.
+
+**A retracted claim is content, and content propagates** (bug 032,
+[`032-review-recovery-no-retraction-sweep`](../bugs/032-review-recovery-no-retraction-sweep.md)
+/ [issue #133](https://github.com/ramboz/jig/issues/133)). The "Recovering
+from a failed review" path was written for a code-shaped finding, which is
+local to one file, so it said "re-run the pass against the updated
+deliverable" — singular. But when a review falsifies a *claim*, the same
+sentence is usually copied by design into `CHANGELOG.md`, the slice record,
+the inbox, and cross-referenced docs; fixing only the reviewed artifact leaves
+the retracted version authoritative everywhere else, and the pass re-fails
+round after round on a sibling you never touched — three rounds, in the
+reported case, collapsed by one grep. The durable fix is a corpus-wide sweep
+for the retracted phrasing *before* re-recording, distinguishing surviving
+assertions (must fix) from explicit, labelled retractions (fine).
+
+**Verify a named tool's documented scope before wiring it in as the
+mechanism** (same bug, caught by the craft pass). The maintainer's steer —
+"leverage `/jig:analyze`" — was right in spirit, and the first draft dutifully
+named analyze as the *primary* sweep, claiming it "catches exactly this
+propagation" into `CHANGELOG.md`. It does not: analyze's own
+`skills/analyze/SKILL.md` § Inputs limits the MVP to **one spec's files plus a
+fixed doc whitelist** (`product-vision`, ADRs, glossary, `architecture.md`),
+with cross-spec explicitly unsupported — the changelog and inbox are not
+inputs at all. So the tool named as the mechanism could not reach the exact
+artifact the bug was written about. The plain grep is the corpus-wide
+mechanism; analyze is the structured *within-spec* complement. The overclaim
+survived the author's own read and was caught only because the reviewer opened
+the tool's Inputs section instead of trusting its tagline — a tool's
+self-description ("cross-artifact consistency") is marketing, not a scope
+contract.

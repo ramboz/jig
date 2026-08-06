@@ -35,6 +35,10 @@ user-invocable: true
   links that reports use cases with no implementing spec (coverage gap) and
   specs citing no parent use case (scope creep). No-op when the project has no
   `## Use cases` section.
+- Guards the status board via `workflow.py check-board <project-dir>` — a
+  read-only audit that exits non-zero when `docs/specs/README.md` no longer
+  matches the spec records, or when two spec directories claim one number.
+  Writes nothing, so it is safe to run in CI against a checkout.
 - Surfaces gate-bypass telemetry via `workflow.py gate-stats [--days N]` — a
   read-only per-gate histogram of how often each gate honored its env-var
   override (an override-frequency audit trail, not a gate-value verdict) from
@@ -245,18 +249,74 @@ SKILL.md hand-off is the documented gate.
    structure: status frontmatter, overview, SPIDR analysis, ordered slices.
 4. SPIDR-split: for each slice, the goal is **one vertical piece** that delivers
    end-to-end value. Spike is the last resort, not the first reach.
-5. For each new slice, use the template at
-   `templates/docs/specs/slice-template.md` — it ships the canonical
-   frontmatter shape (`status`, `dependencies`, `last_verified`) plus
-   DoR / AC / DoD / Close-out sections. Set `status: DRAFT` in the
-   frontmatter. Legacy slices that use prose `**STATUS: DRAFT**` markers
-   still work (lazy migration); no need to rewrite them.
+5. Each slice is a whole-file document with the canonical frontmatter shape
+   (`status`, `dependencies`, `last_verified`) plus DoR / AC / DoD / Close-out
+   sections. `workflow.py new` (step 2) already emitted a well-formed starter
+   `slice-01-tbd.md` from the packaged slice template, so you never hand-resolve
+   a template path; add any further slices in that same shape. For the
+   **structural reference** — what a filled-in slice looks like — mirror the
+   in-project worked example that scaffolding installs at project root:
+   `docs/specs/001-adopt-jig/` (`spec.md` + `slice-01-bootstrap.md`), the first
+   spec, which your project's `CLAUDE.md` names as the worked example to
+   imitate. Set `status: DRAFT` in the frontmatter. Legacy slices that use prose
+   `**STATUS: DRAFT**` markers still work (lazy migration); no need to rewrite
+   them.
+5a. **Design-fidelity authoring nudge (spec 104-02 / ADR-0049).** When a
+   slice you just wrote in step 5 ships **visual design** (a mockup, a design
+   system spec, a screen with colours/spacing/sizes/layout rules to hit),
+   don't let "doesn't match the mockup" live only in a picture:
+   - **(a) Extract the design values into checkable ACs.** Pull the concrete
+     values — colours, spacing, sizes, layout rules — out of the mockup and
+     write them as this slice's acceptance criteria, the same way any other
+     observable behavior becomes an AC. This is what turns a fuzzy "looks
+     right" into something a reviewer (or an eval) can actually check.
+   - **(b) When fidelity must *gate*, wire the servo rail.** If a screen's
+     visual fidelity needs to be a hard, enforced condition of `DONE` — not
+     just an eyeballed check — set `design_review: true` in the slice
+     frontmatter and wire a servo `design-eval` (screenshots the running app
+     against the reference, scores it with a pinned vision judge) as the
+     done-condition. `design_review: true` is attested, read-only, at
+     `REVIEWED` by spec 071's design-review pass (the deriver
+     `slice_needs_design_review` in `workflow.py` reads the flag) — jig never
+     re-derives the eval score itself.
+
+   **Graduated, not mandatory — jig offers, never forces, servo.** Not
+   every screen earns a frozen eval:
+   - **Low-stakes visual polish** → design-values-in-ACs plus
+     attest-by-eyeball at review time is enough; no servo `design-eval`
+     required.
+   - **A hard fidelity gate** (fidelity must not regress, or is a stated
+     product requirement) → servo `design-eval` + `design_review: true`.
+
+   Pick the tier that matches the stakes; when in doubt, start with (a) and
+   add (b) only when eyeballing genuinely isn't enough. See
+   [spec 071](../../docs/specs/071-design-review-pass/spec.md) and
+   [ADR-0049](../../docs/decisions/adr-0049-design-fidelity-routing-to-originating-spec.md)
+   for the full routing rationale; this step adds no new mechanism — teeth
+   stay anchored to the existing `design_review` flag.
 6. **Ground your factual claims (spec 064-02 / ADR-0020 §1–§2).** Any
    load-bearing factual claim about a *runnable* surface — library/API
    capability, version/perf behavior, behavior of existing code — must be
    backed by an **executed probe** (run the command, read the source /
-   `node_modules`) or a citation. Everything you cannot verify goes in the
-   spec stub's risk-gated `## Assumptions` section, marked explicitly — never
+   `node_modules`) or a citation. **A universal or negative claim** ("the
+   only", "never", "always", "one-way", "nothing reads", "otherwise clean")
+   is established by an ***enumeration*** — a search you can show returns the
+   *complete* set — **not a single positive citation** ([ADR-0052](../../docs/decisions/adr-0052-grounding-enumeration-for-universal-claims.md)):
+   one true example proves nothing about the rest of the set, and these are the
+   highest-value claims a future reader relies on. To claim enumeration, **state
+   why the search is exhaustive** — what closes the set so nothing escapes.
+   Some sets are closed by syntax and this is easy (imports in a package,
+   call-sites in a repo); many only *look* `grep`-bounded — a "nothing reads
+   this" search misses dynamic / reflective / ORM / string-built / config-wired /
+   codegen'd / cross-repo access (illustrative, **not a checklist to clear**: the
+   burden is to show the search captures every member, not to rule out named
+   escapes). When you cannot show the search is exhaustive, an **empty result is
+   absence of evidence, not an enumeration**: weaken the claim, tighten the
+   boundary until the search genuinely closes the set, or move it to
+   `## Assumptions`. Never dress an empty search as an enumeration — the
+   frame-critique reviewer treats "I searched and it was empty" as *un*grounded
+   until you have shown what closes the set. Everything you cannot verify goes in
+   the spec stub's risk-gated `## Assumptions` section, marked explicitly — never
    asserted as fact. This **makes mandatory + derived** the existing informal
    "Current state (verified …)" discipline that the 064-01 retro found jig
    already half-practices by hand: it was grounding-by-probe all along, just
@@ -311,18 +371,42 @@ SKILL.md hand-off is the documented gate.
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" transition \
      "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" IN_PROGRESS
    ```
-   **Claim-on-IN_PROGRESS (spec 049-01).** On a frontmatter (file-per-slice)
-   slice this stamps `claimed_by:` (the current branch name, or
-   `JIG_CLAIM_ID`) so parallel worktrees don't both pick up the same slice.
-   It refuses if the slice is already claimed by a *different* identifier and
-   still `IN_PROGRESS` — naming the holder and pointing at `--release`. The
-   claim is **local by default**; add `--push` (direct) or `--pr` (via PR) to
-   reserve it on `origin/main` so other worktrees see it (race / protected-
-   branch handling mirrors `workflow.py new`). The claim is cleared on the
-   forward move to `REVIEWED` and on any back-transition to
-   `READY_FOR_IMPLEMENTATION` / `DRAFT`. To force-release a stale claim:
-   `transition <spec> <slice> READY_FOR_IMPLEMENTATION --release --reason
-   "<why>"` (clears `claimed_by:`, logs to the slice's `## Release log`).
+   **Claim-on-working-state (spec 049-01, amended by
+   [ADR-0045](../../docs/decisions/adr-0045-slice-claim-covers-active-lifecycle.md)).**
+   On a frontmatter (file-per-slice) slice, a transition into a **working
+   state** — `READY_FOR_REVIEW` / `IN_PROGRESS` / `REVIEWED` / `RECONCILED` —
+   stamps `claimed_by:` (the current branch name, or `JIG_CLAIM_ID`), so
+   spec-level work is marked too, not just implementation. Entering a **release
+   point** clears it: the two pickup-queue states `DRAFT` /
+   `READY_FOR_IMPLEMENTATION` (step 2 above tells you to choose work from
+   exactly those, so a leftover owner there would mark a free slice as
+   occupied), plus the terminal `DONE` / `DEFERRED` / `ABANDONED`.
+
+   It **refuses** only when the slice is already `IN_PROGRESS` under a
+   *different* identifier and you are moving it to `IN_PROGRESS` (naming the
+   holder, pointing at `--release`); any other foreign claim — on your copy or
+   on `origin/main` — is a loud **non-blocking warning**, because two sessions
+   working one spec can be legitimate. The claim is **local by default**; add
+   `--push` (direct) or `--pr` (via PR) to reserve it on `origin/main` so other
+   worktrees see it, at any working state, though only an `IN_PROGRESS`
+   reservation also publishes `status:` there (race / protected-branch handling
+   mirrors `workflow.py new`). At a working state that reservation is
+   **best-effort** (for a target other than `IN_PROGRESS`): if the trunk copy is
+   already `status: IN_PROGRESS` under someone else's claim or none, it warns and
+   pushes nothing, because that state is what the start-of-build guard
+   hard-blocks on — stamping a claim over it would move a live lock, or
+   manufacture the enforced pair on an unclaimed copy. Your own trunk claim just
+   reports a benign no-op. To force-release a stale claim: `transition
+   <spec> <slice> <state> --release --reason "<why>"` (clears `claimed_by:`,
+   logs to `## Release log`).
+
+   **Do not read a blank `claimed_by:` as "free".** It means *no claim is
+   recorded*: claims are local unless pushed, so another worktree's unpushed
+   claim is invisible, and a plain `Edit`-tool write to a slice takes no claim
+   at all. A claim that IS present names the session that last *moved* the
+   slice into a working state — a presence hint, not a live lock. When it
+   matters, ask rather than assume — see
+   [bug 014](../../docs/bugs/014-slice-claim-covers-only-in-progress.md).
 4. Fill in / refresh `plan.md` and `tasks.md` for the slice.
 5. Spawn the `implementer` subagent with the spec path. Prefix the Task prompt
    with `[jig:phase=implementation] [jig:spec=NNN] [jig:slice=NNN-NN]` so
@@ -398,7 +482,7 @@ The orchestrator runs the passes in this order:
    `workflow.py code-health-review-needed`. When it prints `true`, **run
    `health.py` yourself** (the orchestrator / CI), capture its tight
    summary, and feed THAT summary into `review.py code-health … --summary-file`
-   (or via stdin). Then spawn a `reviewer`-shaped subagent. **The reviewer
+   (`--summary-file -` to pipe it in). Then spawn a `reviewer`-shaped subagent. **The reviewer
    is read-only (Read/Glob/Grep, no Bash) — it must NOT run `health.py`;
    it judges the summary you provide.** The reviewer renders the judgment a
    tool can't: is duplication within the [ADR-0002](../../docs/decisions/adr-0002-extract-helper-on-third-caller.md)
@@ -488,6 +572,28 @@ the new verdict (it **overwrites in place** the earlier file for that
 `transition … REVIEWED`. With every required pass now `pass`, the gate
 clears. A non-`pass` artifact never overwritten by a later `pass` keeps
 blocking — the "superseded without a later pass" case (ADR-0014 §4).
+
+**When a review retracts a *claim*, sweep the corpus before re-recording.**
+The recovery above is written for a code-shaped finding, which is local to one
+file. A finding about **content** is not: a retracted assertion is usually
+copied by design into `CHANGELOG.md`, the slice record, the inbox, and
+cross-referenced docs. Fixing only the reviewed deliverable leaves the
+retracted version authoritative in every **sibling** artifact — and the stale
+copy is frequently the one the next session reads first (the project's own
+rules make `CHANGELOG.md` a read-before-you-fix record), so the pass re-fails
+round after round on a document you never touched. Before you `record-review`
+the new verdict, **grep the retracted phrasing across the docs root and
+`CHANGELOG.md`, and reconcile every hit** — the plain sweep is what reaches
+the changelog, the inbox, and arbitrary cross-referenced files. Within the
+spec itself, `/jig:analyze` is the structured complement: its **Duplication**
+and **Terminology Drift** categories catch a retracted claim surviving across
+the spec's own slice files and the docs it cross-references (`product-vision`,
+accepted ADRs, the glossary, `architecture.md`) — but it audits one spec's
+files plus that fixed set, not the whole corpus, so it sharpens the sweep
+rather than replacing it. Distinguish **surviving** assertions (the claim
+still stated as true — must fix) from **explicit** retractions (the claim
+named as withdrawn in a changelog or history entry — correct, and worth
+keeping).
 
 ```bash
 # Compliance pass (always)
@@ -589,6 +695,28 @@ Walk the **Reconciliation checklist** below. Every item is a gate.
 4. Regenerate the board: `workflow.py status-board <project-dir>`.
 5. Run `/jig:memory-sync` (or `memory.py`) to consolidate any new learnings.
 
+**Before landing, audit the board.** `docs/specs/README.md` is derived — every
+column is computed from the spec records, and the curated Notes column is
+carried across regens — so it is regenerated, never hand-edited. A merge
+conflict on it is resolved by re-running `status-board`, not by picking a side:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+  check-board <project-dir>
+```
+
+Read-only; exits non-zero on either problem it can find. **Stale board** — the
+spec records changed and `status-board` wasn't re-run. **Duplicate spec
+number** — two spec directories claim one number, which is what parallel
+branches produce when the number was never reserved on the trunk. The renderer
+emits both without complaint and a staleness check can't see it (both *are*
+faithfully derived), so it needs its own detector; the message names both
+directories so you know which to renumber.
+
+Notes-column text is not drift — it is hand-written by design and survives
+regen. What *is* drift is any other cell edited by hand: it will be overwritten
+on the next regen, so change the slice record instead.
+
 ## Spec lifecycle states
 
 ```
@@ -666,11 +794,12 @@ or cascades (a human decides what a live dependent should do next).
 
 ### Slice frontmatter (slice 015-01 convention, file shape per 018-03)
 
-New slices written from `templates/docs/specs/slice-template.md` are
-whole-file templates — frontmatter at the top, `## Slice ...` heading
-immediately following the closing frontmatter delimiter. `workflow.py
+New slices are whole-file templates — frontmatter at the top, `## Slice ...`
+heading immediately following the closing frontmatter delimiter. `workflow.py
 new` emits a starter `slice-01-tbd.md` alongside `spec.md` in this
-shape. Legacy specs that embed `## Slice` sections inside `spec.md`
+shape (from the packaged slice template); for a filled-in reference, mirror the
+scaffolded worked example `docs/specs/001-adopt-jig/slice-01-bootstrap.md`.
+Legacy specs that embed `## Slice` sections inside `spec.md`
 (heading-first, frontmatter-after) remain supported by every helper —
 no forced migration.
 
@@ -711,12 +840,27 @@ status flip is allowed. Each item is a gate.
       corrections, scoped brand/icon calls)? If yes, record them in
       `docs/decisions/lightweight-decisions.md`. (Non-blocking nudge; not a gate.)
 - [ ] **Architecture impact** — did module boundaries or public contracts change?
-      If yes, update `docs/architecture.md` AND write an ADR.
+      If yes, update `docs/architecture.md` AND write an ADR. **Ground what you
+      write (ADR-0020 §1, same rule as spec-authoring step 6).** Reconciliation
+      rewrites long-lived front-door prose that everyone reads and nobody
+      re-derives, so any load-bearing factual claim about a runnable surface —
+      library/API capability, version/perf behavior, behavior of existing code —
+      must be backed by an executed probe or a `file:line` citation. Anything you
+      cannot verify is marked as an assumption, never asserted as fact. (A prose
+      claim naming a code symbol but citing no line is a candidate warning.)
 - [ ] **Load-bearing decision (ADR trigger, judgment)** — beyond a boundary
       change, was a load-bearing design choice with rejected alternatives made?
       Canonical wording — single-sourced from ADR-0031, drift-tested verbatim
       across all four surfaces:
       A load-bearing design choice with rejected alternatives — one a future agent would need to know about to avoid undoing it — warrants an ADR even when it changes no module boundary or public contract.
+- [ ] **Revised a recorded decision?** (spec 100 / [ADR-0042](../../docs/decisions/adr-0042-decision-routing-gate.md))
+      Routing is asked once at first write and never again, so a decision
+      re-priced during this slice can stay misfiled. If a revised entry now
+      clears the trigger above, promote it (`decisions.py promote --title
+      "<title>" --no-push` — push mode reserves the ADR on `origin/main` from
+      an ephemeral worktree, so off `main` it never reaches your working copy
+      and `promote` refuses); if it is still settled, local and bounded, revise
+      it (`decisions.py update`). Never hand-edit `lightweight-decisions.md`.
 - [ ] **Conventions impact** — did this slice introduce or change a rule worth
       recording? If yes, edit `docs/conventions.md` (requires
       `JIG_CONVENTIONS_APPROVED=1`).
@@ -745,6 +889,20 @@ status flip is allowed. Each item is a gate.
       (SKILL.md / workflow.md / README): fix it **inline** — git history
       is the audit trail. New ADR (or superseding spec) only for
       decision-content changes.
+      **Authorisation to amend (issue #125).** Amending a closed **record**
+      requires **explicit owner approval** — a separate grant from approval of a
+      *behaviour*. When two canon artifacts disagree, **surface the conflict and
+      stop**: propose the amendment as text in the conversation and write it only
+      after the owner agrees. **Never write the resolution in the same turn as
+      discovering the conflict** — *including when the owner has already approved
+      the underlying behaviour* (approving what the app does is not authority to
+      rewrite what the spec says). And before asserting that artifact X
+      contradicts criterion Y, read **all** of Y's sibling criteria: another may
+      already satisfy X — for a cross-cutting question the unit of reading is the
+      whole criteria block, not the item that appears to speak to it. This
+      authorisation rule governs **records** only; correcting live operational
+      prose inline (per the split above) is git-history-audited and needs no
+      sign-off.
 - [ ] **Reconciliation review** — spawn a second reviewer subagent with a
       reconciliation-review prompt prefixed by
       `[jig:phase=reconciliation] [jig:spec=NNN] [jig:slice=NNN-NN]`: are the

@@ -37,9 +37,10 @@ import sys
 import tempfile
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import project_layout, subtree
+from _common import derived_docs, project_layout, reservation, subtree
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.parsing import frontmatter_flag_truthy as _frontmatter_flag_truthy
@@ -186,29 +187,19 @@ def cmd_new(adrs_dir: Path, slug: str, title: str) -> Path:
 
 # ---------- Slice 028-01: reserve-adr-on-main ----------
 # Inline-mirror of workflow.py 003-03 helpers per ADR-0002's "three-callers
-# triggers extraction" rule (ADR-0003 applied that rule to find_slice_section
-# — this is the same precedent, two callers, extraction deferred). Mirrored:
-# _PUSH_PROTECTION_SIGNALS, _PUSH_RACE_SIGNALS, _run, _classify_push_failure,
-# _current_branch, _refuse_if_dirty, _check_gh_and_remote, _do_pr_fallback,
-# _build_pr_body. `_validate_slug` is shared with cmd_new and uses adr.py's
-# looser `^[a-z0-9][a-z0-9-]*$` regex (intentionally divergent from
-# workflow.py's `^[a-z][a-z0-9-]*$` so existing digit-prefixed ADR slugs
+# triggers extraction" rule. The third caller (bug.py) arrived, so the
+# push-failure classifier is now EXTRACTED to `_common/reservation.py`
+# (spec 107 / ADR-0053); the re-exports below keep the historical
+# module-level names. Still mirrored inline (two callers, extraction deferred):
+# _run, _current_branch, _refuse_if_dirty, _check_gh_and_remote,
+# _do_pr_fallback, _build_pr_body. `_validate_slug` is shared with cmd_new and
+# uses adr.py's looser `^[a-z0-9][a-z0-9-]*$` regex (intentionally divergent
+# from workflow.py's `^[a-z][a-z0-9-]*$` so existing digit-prefixed ADR slugs
 # don't silently break).
 
-_PUSH_PROTECTION_SIGNALS = (
-    "protected branch",
-    "permission denied",
-    "pre-receive hook declined",
-    "not authorized",
-    "cannot lock ref",
-)
-
-_PUSH_RACE_SIGNALS = (
-    "non-fast-forward",
-    "fetch first",
-    "[rejected]",
-    "rejected",
-)
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
+_classify_push_failure = reservation.classify_push_failure
 
 
 def _run(argv: list, cwd: Path) -> tuple:
@@ -224,24 +215,6 @@ def _run(argv: list, cwd: Path) -> tuple:
     except FileNotFoundError:
         return 127, "", f"{argv[0]}: not found on PATH"
     return result.returncode, result.stdout or "", result.stderr or ""
-
-
-def _classify_push_failure(stderr: str) -> str:
-    """Classify a `git push origin main` stderr into one of:
-      - "protection" — protected branch / permission denied / ...
-      - "race" — non-fast-forward / fetch first / rejected
-      - "other" — anything else
-
-    Race wins over protection if both appear (race recovery requires the
-    stranded commit drop)."""
-    low = stderr.lower()
-    for sig in _PUSH_RACE_SIGNALS:
-        if sig in low:
-            return "race"
-    for sig in _PUSH_PROTECTION_SIGNALS:
-        if sig in low:
-            return "protection"
-    return "other"
 
 
 def _validate_slug(slug: str) -> None:
@@ -526,11 +499,14 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
     Claims the next free ADR number on origin/main by building the
     reservation commit in an ephemeral detached worktree checked out at
     origin/main, then pushing `HEAD:main`. Mirrors workflow.py."""
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Origin-wide fetch (not just main) so the in-flight-branch scan below
+    # runs `fetch=False` off fresh refs; a narrower `git fetch origin main`
+    # would leave in-flight branches stale (spec 107 / ADR-0053).
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         sys.stderr.write(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            f"proceeding with the local origin/main view\n"
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            f"proceeding with the local origin view\n"
         )
 
     wt = Path(tempfile.mkdtemp(prefix="jig-reserve-adr-"))
@@ -553,6 +529,14 @@ def _reserve_via_detached_worktree(slug: str, project_dir: Path,
         _check_slug_collision(existing, slug)
         next_n = (max(_parse_adr_number(p.name) for p in existing) + 1
                   if existing else 1)
+        # Spec 107 / ADR-0053: clear every in-flight branch's claim, not just
+        # the origin/main worktree this detached checkout resolved. This path
+        # is push-only (off-main --no-push routes elsewhere).
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/decisions", reservation.ADR_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        next_n = max(next_n, scanned + 1)
         number = f"{next_n:04d}"
         if not title:
             title = _slug_to_title(slug)
@@ -749,18 +733,21 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
     # The branch check already happened at the dispatch above.
     _refuse_if_dirty(project_dir)
 
-    # Fetch origin/main so the next-number scan + slug-collision check
-    # reflect the freshest state. Skipped for --no-push.
+    # Fetch every origin ref so the next-number scan + slug-collision check
+    # reflect the freshest state. Origin-wide (not just main) so the
+    # in-flight-branch scan below runs `fetch=False` off these refs; a
+    # narrower `git fetch origin main` would leave in-flight branches stale
+    # (spec 107 / ADR-0053). Skipped for --no-push.
     if not no_push:
         rc, _out, err = _run(
-            ["git", "fetch", "origin", "main"], cwd=project_dir,
+            ["git", "fetch", "origin"], cwd=project_dir,
         )
         # A failed fetch isn't fatal — we proceed with the local view.
         # The push step catches any out-of-date condition via the
         # race-on-push classifier.
         if rc != 0:
             sys.stderr.write(
-                f"warning: `git fetch origin main` failed: "
+                f"warning: `git fetch origin` failed: "
                 f"{err.strip()}; proceeding with local view\n"
             )
 
@@ -774,6 +761,15 @@ def reserve_adr(slug: str, project_dir: Path, title: str = "",
         next_n = max(_parse_adr_number(p.name) for p in existing) + 1
     else:
         next_n = 1
+    # Spec 107 / ADR-0053: in push mode the number must also clear every
+    # in-flight branch's claim, not just origin/main. --no-push stays
+    # working-tree-only (no team-coordination contract).
+    if not no_push:
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/decisions", reservation.ADR_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        next_n = max(next_n, scanned + 1)
     number = f"{next_n:04d}"
 
     if not title:
@@ -898,10 +894,19 @@ def _find_adr_by_number(adrs_dir: Path, number: str) -> Path:
     return matches[0]
 
 
-# Match a Status line body of `Proposed (YYYY-MM-DD)` (or with extra trailing
-# content). Captures the date so we can preserve formatting if needed.
+# Match a *canonical* Status line body — exactly `Proposed (YYYY-MM-DD)`,
+# nothing after the date. Deliberately strict: this pattern drives the prose
+# REWRITE (`Proposed (…)` → `Accepted (today)`), and a looser pattern would
+# either drop authored trailing text or produce the self-contradictory
+# `Accepted (today) — awaiting owner acceptance` (issue #123).
+#
+# It is NOT the accept gate. Per ADR-0046, `cmd_accept` gates on the
+# classified state (frontmatter-first) and uses this pattern only to decide
+# whether the prose line is safe to rewrite; a non-canonical line is left
+# exactly as authored. Groups are non-capturing: the rewrite substitutes the
+# whole line, so no caller reads the state or the date back out of the match.
 _STATUS_PROPOSED_RE = re.compile(
-    r"(?m)^(Proposed)[ \t]*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\)[ \t]*$"
+    r"(?m)^(?:Proposed)[ \t]*\((?:[0-9]{4}-[0-9]{2}-[0-9]{2})\)[ \t]*$"
 )
 
 
@@ -943,13 +948,80 @@ def _gate_frame_critique(adrs_dir: Path, adr_path: Path, number: str) -> None:
             f"it: build the prompt via `review.py frame-critique "
             f"docs/decisions/{adr_path.name}`, run a reviewer, then `review.py "
             f"record-review --adr {num} --pass frame-critique --verdict pass "
-            f"--reviewer <who> --prompt-source <cmd>`. Bypass with "
+            f"--reviewer <who> --prompt-source <cmd> --summary-file <path>`. "
+            f"Bypass with "
             f"JIG_REVIEW_EVIDENCE_GATE=0 (deliberateness signal, ADR-0011)."
         )
 
 
+def _frontmatter_status(adr_text: str) -> str:
+    """The ADR's canonical `status:` frontmatter value, or `''` when the
+    field is absent **or present but blank**.
+
+    ADR-0046 ruling 1 (carried forward from ADR-0026): where this field
+    carries a value it decides the ADR's lifecycle state, and the value is
+    compared exactly and case-sensitively. Collapsing blank-to-absent is
+    deliberate — a stamped-but-empty `status:` carries no state, so callers
+    fall through to the prose classifier rather than reading `''` as a
+    lifecycle value. Note this is *not* identical to
+    `workflow.py::_lookup_adr_accepted`, which branches on the field's
+    presence; the exact-match discipline is shared, the blank handling is
+    not."""
+    fields, _ = _parse_frontmatter(adr_text)
+    value = fields.get("status", "")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _adr_status(adr_text: str, section_body: str) -> str:
+    """Classify an ADR's lifecycle state **frontmatter-first**
+    (ADR-0046 ruling 3).
+
+    Prose is consulted only as the legacy fallback, for ADRs authored
+    before spec 073 started stamping `status:`. Because prose is a
+    best-effort mirror that may lag the frontmatter (ruling 2), no gate or
+    reader in this module may take the state from prose while a `status:`
+    field exists — that is what keeps divergence cosmetic rather than
+    behaviour-changing. (`_classify_status` is defined in the supersede
+    section below; both are module-level, so the order is immaterial.)"""
+    return _frontmatter_status(adr_text) or _classify_status(section_body)
+
+
+def _first_nonempty_line(section_body: str) -> str:
+    for raw_line in section_body.splitlines():
+        if raw_line.strip():
+            return raw_line.strip()
+    return ""
+
+
+def _note_stale_prose_status(adr_path: Path, section_body: str,
+                             expected: str) -> None:
+    """ADR-0046 ruling 2: the prose Status line was not canonical, so it was
+    left exactly as authored. Name the file, the surviving line, and the
+    value it should carry, so the agent can reconcile the prose."""
+    found = _first_nonempty_line(section_body) or "(empty)"
+    sys.stderr.write(
+        f"note: {adr_path.name} frontmatter is now `status: Accepted`, but "
+        f"its prose `## Status` line is not a canonical "
+        f"`Proposed (YYYY-MM-DD)` line — the only shape the rewrite can "
+        f"safely replace — so it was left untouched:\n"
+        f"    {found}\n"
+        f"Update it to `{expected}`. Deterministic tooling does not rewrite "
+        f"prose it cannot fully parse (ADR-0046: frontmatter is "
+        f"authoritative, prose is a best-effort mirror).\n"
+    )
+
+
 def cmd_accept(adrs_dir: Path, number: str) -> Path:
-    """Flip the Status from Proposed → Accepted (today's date)."""
+    """Flip the Status from Proposed → Accepted (today's date).
+
+    ADR-0046 (supersedes ADR-0026 ruling 2): the flip is gated on the ADR's
+    *classified* state — frontmatter first, lenient prose classifier as the
+    legacy fallback — and never on prose formatting. Frontmatter
+    `status: Accepted` is stamped unconditionally; the prose `## Status`
+    line is rewritten only when it is canonical, and is otherwise left
+    exactly as authored with a touch-up note on stderr. Prose and
+    frontmatter may therefore be briefly out of step (a deliberate,
+    recorded trade — every reader here is frontmatter-first)."""
     adr_path = _find_adr_by_number(adrs_dir, number)
 
     # Slice 064-05: gate the flip on a passing frame-critique verdict BEFORE
@@ -957,41 +1029,55 @@ def cmd_accept(adrs_dir: Path, number: str) -> Path:
     _gate_frame_critique(adrs_dir, adr_path, number)
 
     text = adr_path.read_text()
+    status_end, section_end, section_body = _status_section_body(
+        text, adr_path.name,
+    )
 
-    # Scope the search to the `## Status` section only.
-    status_match = re.search(r"(?m)^##\s+Status\s*$", text)
-    if not status_match:
-        raise AdrError(f"ADR has no '## Status' section: {adr_path.name}")
-    rest = text[status_match.end():]
-    next_h2 = re.search(r"(?m)^##\s", rest)
-    section_end = status_match.end() + (next_h2.start() if next_h2 else len(rest))
-    section_body = text[status_match.end():section_end]
-
-    if not _STATUS_PROPOSED_RE.search(section_body):
-        # Distinguish already-Accepted / Superseded for a useful error message.
-        if re.search(r"(?m)^Accepted\s*\(", section_body):
+    state = _adr_status(text, section_body)
+    if state != "Proposed":
+        if state == "Accepted":
             raise AdrError(
-                f"ADR {adr_path.name} is already Accepted; refusing to re-accept "
-                "(ADRs are immutable — supersede instead)"
+                f"ADR {adr_path.name} is already Accepted; refusing to "
+                "re-accept (ADRs are immutable — supersede instead)"
+            )
+        if state == "Superseded":
+            raise AdrError(
+                f"ADR {adr_path.name} is Superseded; refusing to accept a "
+                "superseded decision — accept its superseder instead."
             )
         raise AdrError(
-            f"ADR {adr_path.name} Status is not 'Proposed (...)'. "
-            "Refusing to flip; only Proposed → Accepted is supported in this slice."
+            f"ADR {adr_path.name} is not Proposed (state: {state}); refusing "
+            "to flip — only Proposed → Accepted is supported. State is read "
+            "from the frontmatter `status:` field, falling back to the prose "
+            "`## Status` section for legacy ADRs."
         )
 
-    new_body = _STATUS_PROPOSED_RE.sub(
-        lambda _m: f"Accepted ({_today()})", section_body, count=1
-    )
-    new_text = text[:status_match.end()] + new_body + text[section_end:]
+    # Prose is best-effort (ADR-0046 ruling 2): rewrite the Status line ONLY
+    # when it is canonical. A decorated / hand-edited line is left byte-
+    # identical rather than truncated or mangled into `Accepted (today) —
+    # <stale clause>` (issue #123).
+    accepted_line = f"Accepted ({_today()})"
+    prose_is_canonical = _STATUS_PROPOSED_RE.search(section_body) is not None
+    if prose_is_canonical:
+        new_body = _STATUS_PROPOSED_RE.sub(
+            lambda _m: accepted_line, section_body, count=1
+        )
+        new_text = text[:status_end] + new_body + text[section_end:]
+    else:
+        new_text = text
+
     # Slice 014-01: stamp `last_verified: <today>` in the ADR frontmatter
     # at the single point where an ADR becomes decision-of-record. Adds
     # the frontmatter block if absent; updates the field if present.
     new_text = _set_frontmatter_field(new_text, "last_verified", _today())
-    # Slice 073-02 (ADR-0026): stamp the canonical `status: Accepted`
-    # frontmatter field in the SAME atomic write that flips the prose to
-    # `Accepted (date)`, so frontmatter and prose cannot diverge.
+    # Spec 073-02 / ADR-0046 ruling 2: the canonical `status: Accepted`
+    # stamp is unconditional, and still lands in the SAME single atomic
+    # write as any prose mutation — no second write pass.
     new_text = _set_frontmatter_field(new_text, "status", "Accepted")
     atomic_write_text(adr_path, new_text)
+
+    if not prose_is_canonical:
+        _note_stale_prose_status(adr_path, section_body, accepted_line)
     return adr_path
 
 
@@ -1074,8 +1160,11 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
         new_text, new_path.name,
     )
 
-    old_status = _classify_status(old_body)
-    new_status = _classify_status(new_body)
+    # ADR-0046 ruling 3: gate on the frontmatter-canonical state, with the
+    # prose classifier as the legacy fallback — a prose line that lags the
+    # frontmatter must not decide whether a supersession is allowed.
+    old_status = _adr_status(old_text, old_body)
+    new_status = _adr_status(new_text, new_body)
 
     if old_status != "Accepted":
         if old_status == "Proposed":
@@ -1126,30 +1215,32 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     # Accepted (date) line.
     new_old_body = _insert_after_accepted(old_body, superseded_by_line)
     if new_old_body == old_body:
-        # Defensive: should not happen because we already verified
-        # _STATUS_ACCEPTED_RE matches. Raise rather than write a no-op.
-        raise AdrError(
-            f"failed to locate the Accepted line in {old_path.name} "
-            f"Status block; refusing to mutate."
-        )
+        # ADR-0046 ruling 5: unlike `accept`, supersede does not rewrite a
+        # line — it INSERTS the `Superseded by …` link, which is load-bearing
+        # (both `_classify_status` and human navigation read it). With no
+        # canonical `Accepted (YYYY-MM-DD)` anchor there is nowhere to put
+        # it, and dropping it silently would lose information — so refuse,
+        # before either file is written.
+        raise AdrError(_no_anchor_message(old_path, "old"))
     new_old_text = (
         old_text[:old_status_end] + new_old_body + old_text[old_section_end:]
     )
-    # Slice 073-02 (ADR-0026): stamp the OLD ADR's canonical
-    # `status: Superseded` frontmatter field in the SAME atomic write that
-    # appends the prose `Superseded by …` line — sync-locked so prose and
-    # frontmatter cannot diverge. The NEW (superseding) ADR's status is NOT
-    # touched here: it retains `status: Accepted` (new-style ADRs carry it
-    # from `accept`; legacy ones grandfather via the reader's prose
-    # fallback). No backfill (ADR-0026 Open question).
+    # Slice 073-02: stamp the OLD ADR's canonical `status: Superseded`
+    # frontmatter field in the SAME atomic write that appends the prose
+    # `Superseded by …` line. Prose and frontmatter stay sync-locked *here*
+    # — but that is ADR-0046 ruling 5's doing, not ADR-0026's surviving
+    # invariant: supersede refuses without a canonical anchor (above), so by
+    # this line the prose is known-parseable and the pairing is reachable.
+    # `accept` has no such guarantee and may diverge (ruling 2).
+    # The NEW (superseding) ADR's status is NOT touched here: it retains
+    # `status: Accepted` (new-style ADRs carry it from `accept`; legacy ones
+    # grandfather via the reader's prose fallback). No backfill (carried
+    # forward as an ADR-0046 Open question).
     new_old_text = _set_frontmatter_field(new_old_text, "status", "Superseded")
 
     new_new_body = _insert_after_accepted(new_body, supersedes_line)
     if new_new_body == new_body:
-        raise AdrError(
-            f"failed to locate the Accepted line in {new_path.name} "
-            f"Status block; refusing to mutate."
-        )
+        raise AdrError(_no_anchor_message(new_path, "new"))
     new_new_text = (
         new_text[:new_status_end] + new_new_body + new_text[new_section_end:]
     )
@@ -1158,6 +1249,48 @@ def cmd_supersede(adrs_dir: Path, old_number: str, new_number: str) -> tuple:
     atomic_write_text(old_path, new_old_text)
     atomic_write_text(new_path, new_new_text)
     return old_path, new_path
+
+
+def _no_anchor_message(adr_path: Path, role: str) -> str:
+    """Refusal text for ADR-0046 ruling 5 — the ADR is Accepted per its
+    canonical state, but its prose `## Status` carries no canonical
+    `Accepted (YYYY-MM-DD)` line to anchor the supersession link to.
+
+    The message names where the acceptance date can be recovered, because
+    the record itself no longer holds it: the prose date belongs to the
+    stale state, and `last_verified` is a *freshness* field (ADR-0024's
+    `reaffirm` refreshes it), not an acceptance date. Pointing at the accept
+    commit is the only honest answer — suggesting `last_verified` would
+    invite a plausible wrong date into an immutable record.
+
+    The pathspec is `adr_path`, not its basename: git resolves pathspecs
+    relative to cwd, so a bare filename matches nothing from a repo root and
+    exits 0 — output indistinguishable from "there is no accept commit".
+    `--reverse` puts the oldest matching commit first, because `-S` matches
+    every commit that changed the string's occurrence count (a later prose
+    mention counts), and the acceptance is the earliest of them.
+
+    Reachable **only** when frontmatter supplied the Accepted state. A
+    prose-only ADR classifies Accepted through `_STATUS_ACCEPTED_RE`, which is
+    the same pattern `_insert_after_accepted` searches — so if it classified
+    Accepted, the anchor exists by construction and this refusal cannot
+    fire."""
+    return (
+        f"refusing to supersede: {role} ADR {adr_path.name} is Accepted, but "
+        f"its prose `## Status` section has no canonical "
+        f"`Accepted (YYYY-MM-DD)` line to anchor the supersession link to. "
+        f"Unlike `accept`, supersede cannot fall back to a frontmatter-only "
+        f"write — the `Superseded by …` / `Supersedes …` lines live in prose "
+        f"and are load-bearing (ADR-0046 ruling 5). Put the Status line in "
+        f"canonical form (move any trailing text to the paragraph below it) "
+        f"and re-run. The acceptance date is not in the record: the prose "
+        f"date belongs to the pre-acceptance state, and `last_verified` is a "
+        f"freshness field, not an acceptance date. Recover it from the "
+        f"accept commit — the first line is the one you want:\n"
+        f"    git log --reverse -S'status: Accepted' --format='%as %h' "
+        f"-- '{adr_path}'\n"
+        f"Neither ADR was modified."
+    )
 
 
 def _insert_after_accepted(section_body: str, new_line: str) -> str:
@@ -1191,6 +1324,35 @@ _SUPERSEDED_BY_RE = re.compile(
 
 
 def _extract_status_and_date(adr_text: str) -> tuple:
+    """Returns (status, date) for the README index and `resolve-todo`'s
+    Accepted check — **frontmatter-first** (ADR-0046 ruling 3).
+
+    Where frontmatter carries a `status:` field it decides the state; the
+    prose parse below supplies only the date. When the two disagree — the
+    divergence ADR-0046 ruling 2 permits — the prose date belongs to the
+    *stale* state, so pairing it with the frontmatter state would advertise
+    a combination that never existed. **No date is published for a diverged
+    ADR** (the renderer omits the date and shows the state alone).
+
+    There is deliberately no substitute date. `last_verified` is the obvious
+    candidate and the wrong one: it is a *freshness* field, not an
+    acceptance date — ADR-0024's `reaffirm` disposition refreshes it and
+    `workflow.py`'s staleness check reads it as "verified N days ago", so on
+    a reaffirmed ADR it is simply a later date that would read as a genuine
+    acceptance date. A plausible wrong date is worse than no date.
+
+    ADRs with no `status:` field resolve entirely from prose, as before.
+    """
+    prose_status, prose_date = _extract_prose_status_and_date(adr_text)
+    fm_status = _frontmatter_status(adr_text)
+    if not fm_status:
+        return (prose_status, prose_date)
+    if fm_status == prose_status:
+        return (fm_status, prose_date)
+    return (fm_status, "")
+
+
+def _extract_prose_status_and_date(adr_text: str) -> tuple:
     """Returns (status, date) extracted from the `## Status` section.
 
     - If the body contains a `Superseded by [ADR-NNNN](...) (date)` line,
@@ -1262,19 +1424,30 @@ def _is_abbreviation_ending_at(text: str, period_index: int) -> bool:
     return False
 
 
-def _extract_description(adr_text: str) -> str:
-    """First non-empty paragraph from `## Context`, truncated at first
-    sentence-ending punctuation if multi-line or > 120 chars.
+def _first_sentence_end(paragraph: str) -> Optional[int]:
+    """Index of the first sentence-ending `.` / `?` / `!` followed by a space
+    or EOL, skipping periods that belong to a known abbreviation. Returns
+    None when the paragraph carries no complete sentence."""
+    for i, ch in enumerate(paragraph):
+        if ch in ".?!":
+            after = paragraph[i + 1: i + 2]
+            if after == "" or after.isspace():
+                if ch == "." and _is_abbreviation_ending_at(paragraph, i):
+                    continue
+                return i
+    return None
 
-    Returns '' on miss (caller fills in)."""
+
+def _context_paragraph(adr_text: str) -> tuple:
+    """Return `(paragraph, line_count)` for the first non-empty paragraph of
+    `## Context` — contiguous lines joined with spaces. `('', 0)` on miss."""
     m = re.search(r"(?m)^##\s+Context\s*$", adr_text)
     if not m:
-        return ""
+        return ("", 0)
     rest = adr_text[m.end():]
     next_h2 = re.search(r"(?m)^##\s", rest)
     body = rest[: next_h2.start()] if next_h2 else rest
 
-    # First non-empty paragraph: contiguous lines separated by blank lines.
     paragraph_lines = []
     for raw_line in body.splitlines():
         line = raw_line.rstrip()
@@ -1283,38 +1456,112 @@ def _extract_description(adr_text: str) -> str:
                 break
             continue
         paragraph_lines.append(line.strip())
-    if not paragraph_lines:
+    return (" ".join(paragraph_lines), len(paragraph_lines))
+
+
+def _extract_description(adr_text: str) -> str:
+    """First non-empty paragraph from `## Context`, truncated to its first
+    complete sentence when the paragraph is multi-line, > 120 chars, or ends
+    in a colon.
+
+    Returns '' when the paragraph holds NO complete sentence — the shape of a
+    lead-in to a list or table, e.g. "jig has two scaffold topologies,
+    selected by one axis in scaffold.py:". Bug 020 / [issue #140]: that used
+    to be written verbatim, or hard-truncated with a trailing `…` when it ran
+    past the cap, producing an index line that read like a decision summary
+    and was not one. The index stays a pure function of the ADR files, so the
+    answer is not to let a human overwrite the bullet — it is to say plainly
+    that this record has no derivable summary, and name it, so its `## Context`
+    opening gets reworded at the source.
+
+    Also returns '' on miss (no `## Context`). Caller fills in."""
+    paragraph, line_count = _context_paragraph(adr_text)
+    if not paragraph:
         return ""
-    paragraph = " ".join(paragraph_lines)
 
-    multi_line = len(paragraph_lines) > 1
+    boundary = _first_sentence_end(paragraph)
+    if boundary is None:
+        # No sentence at all — a lead-in, not a summary.
+        return ""
+
+    multi_line = line_count > 1
     too_long = len(paragraph) > _DESCRIPTION_MAX
-
-    if multi_line or too_long:
-        # Truncate at first sentence-ending punctuation (`.` / `?` / `!`) when
-        # followed by space or EOL. Walk char-by-char and skip periods that
-        # belong to known abbreviations (`e.g.`, `i.e.`, `etc.` …).
-        for i, ch in enumerate(paragraph):
-            if ch in ".?!":
-                after = paragraph[i + 1: i + 2]
-                if after == "" or after.isspace():
-                    if ch == "." and _is_abbreviation_ending_at(paragraph, i):
-                        continue
-                    return paragraph[: i + 1]
-        # No sentence boundary found → hard-truncate.
-        return paragraph[: _DESCRIPTION_MAX].rstrip() + "…"
+    # The colon case covers a one-line lead-in that happens to open with a
+    # complete sentence: keep the sentence, drop the dangling lead-in.
+    if multi_line or too_long or paragraph.endswith(":"):
+        return paragraph[: boundary + 1]
     return paragraph
 
 
-def _render_index_entries(adr_paths: list) -> list:
-    """Return one bullet line per ADR, sorted ascending by NNNN."""
+_NO_DESCRIPTION = "(no description)"
+
+
+def _is_template_stub(text: str) -> bool:
+    """Is this the ADR template's unwritten-section placeholder? Single owner
+    for the definition — both the write guard and the warning's reason ask,
+    over different inputs (a derived description vs. the raw paragraph)."""
+    return text.startswith("_TODO") or text.startswith("_TBD")
+
+
+def _is_degenerate_description(description: str) -> bool:
+    """True for a derived summary that should not be written.
+
+    Deliberately narrow. `_extract_description` already returns '' for a
+    paragraph with no complete sentence, so the only shape left to catch is
+    the template's `_TODO` stub in a record whose Context has been *partly*
+    written — enough to carry a sentence boundary, not enough to be prose.
+
+    A trailing `…` is NOT caught here. It used to be jig's own truncation
+    mark, so it read as damage; this change stops emitting it, which means an
+    ellipsis in the output is now the author's own writing. Blanking it would
+    discard a real first sentence and then warn that the record has none —
+    the exact kind of false statement bug 020 exists to remove.
+    """
+    text = (description or "").strip()
+    return not text or _is_template_stub(text)
+
+
+def _no_summary_reason(adr_text: str) -> str:
+    """Name why no summary could be derived, so the warning is actionable."""
+    paragraph, _ = _context_paragraph(adr_text)
+    if not paragraph:
+        return "no `## Context` prose to summarize"
+    if _is_template_stub(paragraph):
+        return "its `## Context` is still the template stub"
+    # Everything reaching here failed `_first_sentence_end`. A lead-in to a
+    # list or table is the common shape; a paragraph that merely lacks a final
+    # period lands here too — so state the fact and hedge the cause.
+    return ("no complete first sentence in its `## Context` "
+            "(usually a lead-in to a list or table)")
+
+
+# Printed once per `index` run that warned, rather than per record — the
+# remedy is the same for every one of them (spec 055: prose costs on read).
+_NO_SUMMARY_REMEDY = (
+    "adr.py index: reword each record's `## Context` opening into a "
+    "standalone sentence and re-run. The index is derived from the ADR "
+    "files, so the fix belongs at the source, not in README.md."
+)
+
+
+def _render_index_entries(adr_paths: list, warnings: list) -> list:
+    """Return one bullet line per ADR, sorted ascending by NNNN.
+
+    Records with no derivable summary render as `(no description)` and append
+    a line to `warnings` naming the record and why."""
     rows = []
     for p in sorted(adr_paths, key=lambda x: _parse_adr_number(x.name)):
         text = p.read_text()
         number = f"{_parse_adr_number(p.name):04d}"
         title = _extract_title(text)
         status, date_str = _extract_status_and_date(text)
-        description = _extract_description(text) or "(no description)"
+        description = _extract_description(text)
+        if _is_degenerate_description(description):
+            description = _NO_DESCRIPTION
+            warnings.append(
+                f"adr.py index: ADR-{number} ({p.name}) — "
+                f"{_no_summary_reason(text)}; rendering {_NO_DESCRIPTION}."
+            )
         # Filename stem is `adr-NNNN-<slug>` (9-char prefix to strip).
         slug = p.stem[9:] if len(p.stem) > 9 else p.stem
         meta = f"({date_str}, {status})" if date_str else f"({status})"
@@ -1325,30 +1572,34 @@ def _render_index_entries(adr_paths: list) -> list:
     return rows
 
 
-def cmd_index(adrs_dir: Path) -> Path:
-    """Regenerate the `## Index` section of `<decisions-dir>/README.md`."""
-    if not adrs_dir.is_dir():
-        raise AdrError(f"decisions directory not found: {adrs_dir}")
-    readme = adrs_dir / "README.md"
-    if not readme.is_file():
-        raise AdrError(f"README.md not found in: {adrs_dir}")
-    text = readme.read_text()
+def _compose_index(adrs_dir: Path, existing: str) -> str:
+    """Return `existing` with its `## Index` section rebuilt from the ADR
+    files on disk. Everything outside that section is carried over untouched.
 
+    Pure — no writes. Shared by `cmd_index` (which writes the result) and
+    `check_index` (which compares against it), so the check can never drift
+    from what regeneration would produce.
+    """
     # Match the `## Index` heading line. Use `[ \t]*$` instead of `\s*$` so the
     # regex does NOT consume the trailing newline — preserving it keeps our
     # replacement boundary clean (and idempotent).
-    index_h2 = re.search(r"(?m)^##[ \t]+Index[ \t]*$", text)
+    index_h2 = re.search(r"(?m)^##[ \t]+Index[ \t]*$", existing)
     if not index_h2:
         raise AdrError(
-            f"README.md has no '## Index' heading: {readme}"
+            f"README.md has no '## Index' heading: {adrs_dir / 'README.md'}"
         )
     # Find the next `## ` heading (or EOF) to bound the section we replace.
-    rest = text[index_h2.end():]
+    rest = existing[index_h2.end():]
     next_h2 = re.search(r"(?m)^##\s", rest)
     section_end = index_h2.end() + (next_h2.start() if next_h2 else len(rest))
 
     adrs = _adr_files(adrs_dir)
-    bullets = _render_index_entries(adrs)
+    warnings = []
+    bullets = _render_index_entries(adrs, warnings)
+    for line in warnings:
+        sys.stderr.write(line + "\n")
+    if warnings:
+        sys.stderr.write(_NO_SUMMARY_REMEDY + "\n")
 
     # New body: two blank lines after the heading, then bullets (or empty if
     # none), then a trailing blank line before the next section (preserves
@@ -1357,7 +1608,70 @@ def cmd_index(adrs_dir: Path) -> Path:
         body = "\n\n" + "\n".join(bullets) + "\n\n"
     else:
         body = "\n\n"
-    new_text = text[: index_h2.end()] + body + text[section_end:]
+    return existing[: index_h2.end()] + body + existing[section_end:]
+
+
+def _duplicate_adr_numbers(adrs_dir: Path) -> dict:
+    """Map ADR number -> sorted filenames, for numbers claimed by more than
+    one ADR.
+
+    `_render_index_entries` renders two ADRs sharing a number as two bullets
+    without complaint, and a drift check can't see the problem either — both
+    bullets are faithfully derived. Today the only thing that surfaces it is
+    the merge conflict on the README, which is exactly what we want to stop
+    resolving by hand (issue #149). So it needs its own detector.
+    """
+    return derived_docs.duplicate_ids(
+        (derived_docs.id_from_numeric_prefix(p, prefix="adr-"), p.name)
+        for p in _adr_files(adrs_dir)
+    )
+
+
+def check_index(adrs_dir: Path) -> list:
+    """Read-only audit of the ADR index. Returns a list of human-readable
+    problems — empty means clean.
+
+    Never writes: CI runs this against a checkout, and a check that repairs
+    what it measures can't be trusted to report it.
+    """
+    problems = []
+    for number, names in _duplicate_adr_numbers(adrs_dir).items():
+        problems.append(
+            f"duplicate ADR number {number}: {', '.join(names)} — renumber "
+            "one before landing; parallel branches both allocated it"
+        )
+    readme = adrs_dir / "README.md"
+    if not readme.is_file():
+        problems.append(
+            f"missing ADR index: {readme} — every ADR is listed there; "
+            "restore it and run `adr.py index <decisions-dir>`"
+        )
+        return problems
+    existing = readme.read_text()
+    try:
+        composed = _compose_index(adrs_dir, existing)
+    except AdrError as exc:
+        problems.append(str(exc))
+        return problems
+    if existing != composed:
+        problems.append(
+            f"stale index: {readme} does not match the ADR files — run "
+            "`adr.py index <decisions-dir>` and commit the result. A summary "
+            "edited by hand here is overwritten on the next regen; edit the "
+            "ADR's own `## Context` opening instead"
+        )
+    return problems
+
+
+def cmd_index(adrs_dir: Path) -> Path:
+    """Regenerate the `## Index` section of `<decisions-dir>/README.md`."""
+    if not adrs_dir.is_dir():
+        raise AdrError(f"decisions directory not found: {adrs_dir}")
+    readme = adrs_dir / "README.md"
+    if not readme.is_file():
+        raise AdrError(f"README.md not found in: {adrs_dir}")
+    text = readme.read_text()
+    new_text = _compose_index(adrs_dir, text)
 
     if new_text == text:
         # Idempotent no-op.
@@ -1539,6 +1853,13 @@ def _build_parser() -> argparse.ArgumentParser:
     pi = sub.add_parser("index", help="regenerate the Index section of ADR README.md")
     pi.add_argument("adrs_dir", help="path to docs/decisions/")
 
+    pci = sub.add_parser(
+        "check-index",
+        help="read-only: verify the ADR README's Index matches the ADR files "
+             "and that no ADR number is claimed twice",
+    )
+    pci.add_argument("adrs_dir", help="path to docs/decisions/")
+
     pr = sub.add_parser("resolve-todo",
                         help="mark a refinement-todo section resolved by an ADR")
     pr.add_argument("number", help="4-digit ADR number")
@@ -1578,6 +1899,13 @@ def main(argv: list) -> int:
             adrs_dir = Path(ns.adrs_dir).resolve()
             target = cmd_index(adrs_dir)
             print(str(target))
+        elif ns.cmd == "check-index":
+            problems = check_index(Path(ns.adrs_dir).resolve())
+            for problem in problems:
+                sys.stderr.write(f"ADR index: {problem}\n")
+            if problems:
+                return 1
+            print("ADR index: clean")
         elif ns.cmd == "resolve-todo":
             project_dir = Path.cwd()
             target = cmd_resolve_todo(project_dir, ns.number, ns.fragment)

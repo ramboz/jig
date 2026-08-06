@@ -9,8 +9,10 @@ description: >
   fixing, or investigate this failure. Two modes: `diagnose` stops at
   ROOT_CAUSED; `diagnose_and_fix` runs through DONE. Uses a durable bug record,
   multiple hypotheses, a fresh-main recheck, and a witnessed red→green test.
-  Do not use for spec-shaped work (use `spec-workflow`) or trivial one-liners
-  (use `tdd-loop`).
+  Do not use for spec-shaped work (use `spec-workflow`) — including a pure
+  visual design-fidelity gap against an agreed mockup, which is spec-shaped, not
+  a bug (see "Design-fidelity triage" below) — or trivial one-liners (use
+  `tdd-loop`).
 user-invocable: true
 ---
 
@@ -68,10 +70,40 @@ workflow that **refuses** to build ceremony for a one-liner.
 |---|---|
 | **trivial** (typo, one-liner, mechanical) | `triage --tier trivial` **deletes the record** and tells you to write the failing test with `tdd-loop`, fix, and commit. The workflow bows out. |
 | **standard** | Single-file record + diagnose gate + red→green teeth + bug-review + craft. ≥2 hypotheses advisory. |
-| **gnarly** (cross-layer, security, regression that didn't stick, design-gap) | Full rigor: ≥2 hypotheses **mandatory**, keeps the `VERIFIED` step, conditional security pass, `new --push` reserves the number on `origin/main`. May escalate to a spec. |
+| **gnarly** (cross-layer, security, regression that didn't stick, design **malfunction** — *not* a pure visual fidelity gap, which is spec-shaped; see "Design-fidelity triage") | Full rigor: ≥2 hypotheses **mandatory**, keeps the `VERIFIED` step, conditional security pass, `new --push` reserves the number on `origin/main`. May escalate to a spec. |
 
 When in doubt about whether a bug is trivial, ask: would a regression test for
 it be worth keeping? If yes, it is at least standard.
+
+### Design-fidelity triage — malfunction vs. fidelity gap ([ADR-0049](../../docs/decisions/adr-0049-design-fidelity-routing-to-originating-spec.md))
+
+A design complaint is `bug-fix` **only when the UI malfunctions**: a control
+that looks active but isn't, or a layout that overlaps so content is
+unreadable. A pure visual gap against an agreed mockup — the screen works, it
+just hasn't reached the agreed look — is **fidelity work on the spec spine**,
+not `bug-fix`. Route it:
+
+- **An originating spec exists** (the gap surfaced under a spec whose slice
+  built the screen) → continue that slice if still open, or open a follow-up
+  slice **under the same spec**, carrying the mockup forward as design-value ACs.
+- **No originating spec exists** (a mockup-first / cross-platform rebuild that
+  never entered spec-workflow) → open a **new spec** via `spec-workflow`'s
+  greenfield path, with the mockup as design-value ACs. A mockup-first rebuild is
+  never dead-ended into `bug-fix` for lack of an owning spec.
+
+**Ambiguous-case tie-breaker:** an issue that "looks broken, but maybe just
+mis-styled" (a control that mis-signals its state, or overlap that only *might*
+block interaction) is decided by a quick behavioral check — does it actually
+*do* the wrong thing? An ambiguous-but-functional gap (it behaves correctly,
+only looks off) defaults to the **spine**, not `bug-fix`; reserve `bug-fix` for
+a confirmed behavioral malfunction.
+
+**Fidelity vs. refinement — does the visual target change?** If the mockup is
+still the agreed target and the build simply hasn't reached it yet, that is
+**fidelity**: carry the *existing* mockup forward as the AC, don't re-decide the
+target. If we now want a *different* look than the mockup, that is a genuine
+**refinement** (a new target), authored as such — not smuggled in as mere
+unfinished work.
 
 ## Lifecycle
 
@@ -151,7 +183,10 @@ If `triage` bows out, **stop here** — write the failing test with
 
 Claim/release reuses the spec 049 machinery: `bug.py pickup <id>` claims;
 `bug.py pickup <id> --release --reason "<why>"` force-releases a stale claim
-(logged to the record's `## Release log`).
+(logged to the record's `## Release log`). `pickup` also stamps the working-tree
+`.jig/spec-ref` marker naming this bug (slice 098-04) — the signal that tells
+jig's lifecycle entry gate a bug fix is in flight, so ad-hoc-edit nudges stay
+silent while you work. Release and terminal transitions clear it.
 
 ### 2. Diagnose (`→ DIAGNOSING → ROOT_CAUSED`)
 
@@ -163,7 +198,25 @@ explanation is rarely the right one). Write the hypotheses as a Markdown list
 under `## Hypotheses` — any marker works (`-`, `*`, `+`, or `1.`) and the gate
 counts **top-level** items only, so indented `- Confirm:` / `- Falsify:`
 sub-bullets read as notes, not as extra hypotheses. Mark the leading one with
-`[x]`, an inline `(leading)` tag, or a `Leading:` line. Then:
+`[x]`, an inline `(leading)` tag, or a `Leading:` line.
+
+**Ground a `## Root cause` claim; enumerate a universal one
+([ADR-0052](../../docs/decisions/adr-0052-grounding-enumeration-for-universal-claims.md)).**
+A root-cause claim of *universal or negative* shape — "**nothing else** calls
+this", "**only** this path writes the column", "this is the **one** place the
+value is set" — is established by an **enumeration** (a search you can show
+returns the *complete* set: `grep` every caller / writer / call-site), **not**
+by a single citation of one example. One true example says nothing about the
+rest of the set, and a false "only/nothing" here sends the fix to the wrong
+place. To claim it, **state why the search is exhaustive** — what closes the set
+so nothing escapes. Many sets only *look* `grep`-bounded: a column written
+through an ORM, a string-built query, reflection, config-wiring, codegen, or an
+external consumer is invisible to `grep` (illustrative, not a checklist), so an
+empty result is **absence of evidence, not proof nothing writes it**. When you
+cannot show the search closes the set, weaken the claim or record it under
+`## Already tried` / the record's assumptions rather than asserting it as the
+root cause — the bug-review pass treats an empty search as *un*grounded until you
+have shown what closes the set. Then:
 
 ```bash
 python3 "${PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> DIAGNOSING
@@ -246,7 +299,9 @@ is read-only — `bug.py` validates the durable verdict artifacts they produce
 There is **no arch pass** — bugs carry no design.
 
 Record each verdict with `review.py record-review --bug NNN --pass <name>
---verdict pass --reviewer <src>`. The `REVIEWED` gate requires `bug-review` +
+--verdict pass --reviewer <src> --summary-file <path>` (or `--summary-file -`
+to pipe the body in — the body is required, and stdin is never read
+implicitly, bug 017). The `REVIEWED` gate requires `bug-review` +
 `craft` (+ `security` when `security_surface: true`), each `verdict: pass`.
 
 ### 5. Verify (gnarly/security only) and close
@@ -264,6 +319,23 @@ python3 "${PLUGIN_ROOT}/skills/bug-fix/bug.py" status-board
 
 Run `/jig:memory-sync` to consolidate any new learnings. Land the change with
 `/jig:slice-land` if a formal landing checklist helps.
+
+**Before landing, audit the board.** `docs/bugs/README.md` is derived — every
+column is computed from the records — so it is regenerated, never hand-edited,
+and a merge conflict on it is resolved by re-running `status-board` rather than
+by picking a side:
+
+```bash
+python3 "${PLUGIN_ROOT}/skills/bug-fix/bug.py" check-board
+```
+
+Read-only; exits non-zero on either problem it can find. **Stale board** — the
+records changed and `status-board` wasn't re-run. **Duplicate id** — two records
+claim one number, which is what parallel branches produce when the number was
+never reserved on the trunk. The renderer emits both rows without complaint and
+a staleness check can't see it (both rows *are* faithfully derived), so this is
+the only thing that catches it. Wire it into CI if the project lands work from
+more than one branch at a time.
 
 ### Escalation (`→ ESCALATED`)
 
@@ -291,9 +363,11 @@ The single most important judgment in this workflow is **down-shifting**:
 - A standard bug does **not** need the `VERIFIED` step or a security pass —
   `REVIEWED → DONE` is the path.
 - Reach for gnarly only for genuinely cross-layer, security-surfaced,
-  regression-that-didn't-stick, or design-gap bugs. If a "gnarly" bug is
-  really a missing behaviour, **escalate** — don't grind it through the bug
-  gates.
+  regression-that-didn't-stick, or design-**malfunction** bugs (a control that
+  looks active but isn't; overlap that makes content unreadable — *not* a pure
+  visual fidelity gap, which is spec-shaped; see "Design-fidelity triage"). If a
+  "gnarly" bug is really a missing behaviour, **escalate** — don't grind it
+  through the bug gates.
 
 ## Routing — bug-shaped vs spec-shaped
 

@@ -104,3 +104,21 @@ arch_review: true
   `frontmatter_flag_truthy`. Acceptable per ADR-0002 (preserves arch symmetry);
   a *third* such flag would cross the rule-of-three for the wrapper shape and
   warrant a `field_name`-parameterized helper.
+
+## Amendments
+
+- **2026-07-30 — bug 017: the stdin fallback became an explicit
+  `--summary-file -`.** This slice's summary-injection mechanism was
+  "`--summary-file PATH`, else stdin", implemented by sharing `_read_summary`
+  with `record-review`. That shared fallback read stdin whenever it was not a
+  terminal, using `isatty()` as a stand-in for "input is waiting" — a property
+  it does not report — so a pipe whose write end nobody closed blocked
+  forever. See [bug 017](../../bugs/017-record-review-blocks-on-stdin.md).
+
+  Injection by pipe is unchanged in capability but now has to be asked for:
+  `review.py code-health … --summary-file -`. Omitting `--summary-file`
+  entirely keeps this slice's AC2 graceful degrade (empty summary → the
+  "(no health.py summary …)" note, exit 0); only the *implicit* stdin read is
+  gone. `record-review` diverges here: it now requires a body outright.
+  `test_summary_read_from_stdin_when_no_file` was renamed
+  `test_summary_read_from_stdin_when_requested` and passes the flag.

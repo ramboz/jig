@@ -498,16 +498,19 @@ class RealHooksJsonTests(unittest.TestCase):
         )
         self.assertEqual(problems, [], problems)
 
-    def test_real_hooks_json_references_fourteen_scripts(self):
+    def test_real_hooks_json_references_sixteen_scripts(self):
         data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
         names = install_contract.parse_hook_script_names(data)
-        # Registration source of truth currently lists 14 scripts.
-        self.assertEqual(len(names), 14, sorted(names))
+        # Registration source of truth currently lists 16 scripts
+        # (jig-git-freshness.sh added by spec 103-01).
+        self.assertEqual(len(names), 16, sorted(names))
         self.assertIn("jig-skill-trace.sh", names)
         self.assertIn("jig-semantic-index.sh", names)
         self.assertIn("jig-decision-capture.sh", names)
         self.assertIn("jig-decision-inflight.sh", names)
         self.assertIn("jig-claim-check.sh", names)
+        self.assertIn("jig-entry-gate.sh", names)
+        self.assertIn("jig-git-freshness.sh", names)
 
 
 # ---------------------------------------------------------------------------

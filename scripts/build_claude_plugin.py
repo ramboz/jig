@@ -35,12 +35,22 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_release_zip  # noqa: E402
+import install_contract  # noqa: E402
 
 # Reuse the release-zip runtime exclusion predicates verbatim (AC #1: reuse,
 # don't restate). The same `test_*.py` / `fixtures/` / cache / junk rules the
 # release zip applies govern the committed package.
 _is_excluded_dir = build_release_zip._is_excluded_dir
 _is_excluded_file = build_release_zip._is_excluded_file
+
+# Individual `scripts/*.py` runtime modules the Claude package must carry
+# (`scripts/` is otherwise excluded — it is not an `_INCLUDE_ROOTS` entry).
+# Single-sourced from install_contract so the shipping payload and the release
+# contract cannot drift. Bug 025 (#167): these were absent before because the
+# builder walked only directory roots, so `${CLAUDE_PLUGIN_ROOT}/scripts/…`
+# references (spec_lint's pre-implementation gate; scaffold-init's self-check
+# import of the verify_install trio) failed to resolve in installed plugins.
+_INCLUDE_SCRIPT_FILES: tuple[str, ...] = install_contract.RELEASE_INCLUDE_SCRIPT_FILES
 
 # Runtime directory roots the Claude package ships. This is the release-zip
 # `_INCLUDE_ROOTS` set minus `.codex-plugin` (the Claude package is
@@ -88,6 +98,13 @@ def _iter_package_files(source_root: Path):
     for file_name in _INCLUDE_FILES:
         if (source_root / file_name).is_file():
             seen.append(Path(file_name))
+
+    # Runtime `scripts/*.py` modules the plugin needs at
+    # `${CLAUDE_PLUGIN_ROOT}/scripts/…` (allowlisted individually so the rest of
+    # dev-only `scripts/` stays out). Bug 025 (#167).
+    for rel_name in _INCLUDE_SCRIPT_FILES:
+        if (source_root / rel_name).is_file():
+            seen.append(Path(rel_name))
 
     return sorted(seen, key=lambda p: p.as_posix())
 

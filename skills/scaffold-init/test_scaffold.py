@@ -144,9 +144,16 @@ class GreenfieldScaffoldTests(unittest.TestCase):
         # marker by design (the honesty pin in 048-05 AC #2 forbids dressing
         # the DONE worked example up as a draft).
         seed_dirs = {"001-adopt-jig", "002-first-spec"}
+        # docs/governance.md (slice 106-01 / ADR-0051) is authoritative
+        # scaffolded policy — the surface-and-stop routing rule + the
+        # branch-protection arming checklist — NOT a wizard-generated stub the
+        # user fills in, so it carries no draft marker by design (same honesty
+        # pin as the seed dirs above: don't dress non-draft content as a draft).
+        exempt_files = {"governance.md"}
         md_files = [self.target / "CLAUDE.md"] + sorted(
             p for p in (self.target / "docs").rglob("*.md")
             if not (seed_dirs & set(p.relative_to(self.target).parts))
+            and p.name not in exempt_files
         )
         self.assertGreaterEqual(len(md_files), 9, "expected at least 9 scaffolded .md files")
         for path in md_files:
@@ -1997,7 +2004,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
     # AC #1 — verification runs at scaffold end with a summary + verdict.
     def test_in_repo_scaffold_emits_completion_summary(self):
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertIn("Scaffold verification", result.stdout)
         self.assertIn("in-repo", result.stdout)
@@ -2017,7 +2024,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
     # AC #4 — removing a required artifact makes the verdict loud + non-zero.
     def test_missing_seed_file_makes_verification_fail_loudly(self):
-        first = run_scaffold(self.target)
+        first = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
         # Drop a seed file, then re-run verification via the headless surface
         # of the wizard helper (scaffold itself refuses re-scaffold). We assert
@@ -2043,7 +2050,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
         import verify_install  # noqa: E402
 
-        first = run_scaffold(self.target)
+        first = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
         # Remove a scaffolded agent file.
         agent = self.target / ".claude/agents/jig-reviewer.md"
@@ -2252,9 +2259,9 @@ class SecurityFloorTests(unittest.TestCase):
         mod = _load_scaffold_module()
         gi = self.target / ".gitignore"
         gi.write_text("existing-line\n")
-        mod._write_gitignore_secret_block(self.target)
+        mod._write_gitignore_managed_blocks(self.target)
         once = gi.read_text()
-        mod._write_gitignore_secret_block(self.target)
+        mod._write_gitignore_managed_blocks(self.target)
         twice = gi.read_text()
         self.assertEqual(once, twice, "second merge must be a no-op")
         self.assertIn("existing-line", twice)
@@ -2262,7 +2269,9 @@ class SecurityFloorTests(unittest.TestCase):
 
     # ---- AC #2: secret-scan hook copied + registered ----
     def test_secret_scan_hook_copied_to_project(self):
-        result = run_scaffold(self.target)
+        # The secret-scan hook is copied into the project only in in-repo mode;
+        # in plugin mode it runs from the installed plugin (099-01 / ADR-0041).
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
         self.assertTrue(hook.is_file(),
@@ -2271,7 +2280,9 @@ class SecurityFloorTests(unittest.TestCase):
         self.assertTrue(os.access(hook, os.X_OK), "hook must be executable")
 
     def test_secret_scan_hook_registered_in_settings(self):
-        result = run_scaffold(self.target)
+        # settings.json (with the hook registration) is written only in in-repo
+        # mode; plugin mode registers the hook via the installed plugin.
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         settings = json.loads(
             (self.target / ".claude/settings.json").read_text()
@@ -2302,7 +2313,7 @@ class SecurityFloorTests(unittest.TestCase):
     def test_secret_scan_hook_works_after_scaffold(self):
         """End-to-end: the copied hook blocks a real secret in the scaffolded
         project tree (AC #2 'observable end-to-end')."""
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         hook = self.target / ".claude/hooks/scripts/jig-secret-scan.sh"
         # Assemble the secret at runtime so this source file never holds one.
@@ -2390,6 +2401,119 @@ class SecurityFloorTests(unittest.TestCase):
         self.assertNotIn("Scout", workflow)
 
 
+class Bug028RuntimeStateGitignoreTests(unittest.TestCase):
+    """Bug 028 (#107) — runtime-state .gitignore block.
+
+    jig's hooks/helpers write per-checkout runtime state under `.claude/` and
+    `.jig/`. jig's own repo git-ignores these, but that list never reached
+    scaffolded projects (the scaffolder shipped only the secret block), so every
+    downstream project tracked jig's telemetry + per-checkout markers — churning
+    each session and colliding at merge. The fix adds a second managed block
+    carrying the runtime-state list, on every path that writes the secret block.
+    """
+
+    # The runtime-state paths that must reach a scaffolded project's .gitignore.
+    # NOTE: the semantic-index / servo-hint runtime files intentionally ride in
+    # the SECRET block (spec 080 / slice 072-02) and must NOT be duplicated here.
+    # NOTE: the review-queue.json runtime file is intentionally excluded — it is
+    # a removed feature (spec 039) that jig only self-ignores defensively; a
+    # guard test (test_review_queue_cleanup) forbids live-code references to that
+    # path literal, so it must not be propagated to scaffolded projects. (This
+    # file uses the bare filename, never the `.claude/`-prefixed literal.)
+    RUNTIME_PATHS = (
+        ".claude/skill-usage.jsonl",
+        ".claude/context-growth-read-events.jsonl",
+        ".claude/settings.local.json",
+        ".claude/scheduled_tasks.lock",
+        ".jig/spec-ref",
+        ".jig/decision-scratch/",
+        ".jig/decision-suppressions.log",
+    )
+
+    def test_review_queue_json_is_not_propagated(self):
+        """The review-queue.json runtime file is a removed feature jig only
+        self-ignores defensively; scaffolded projects must not carry it. (Uses
+        the bare filename so this file doesn't trip test_review_queue_cleanup's
+        live-reference guard.)"""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertNotIn("review-queue.json", text)
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-028-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_fresh_scaffold_ignores_runtime_state_paths(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        for pat in self.RUNTIME_PATHS:
+            self.assertIn(
+                pat, text, f".gitignore missing runtime-state path: {pat}"
+            )
+
+    def test_runtime_block_is_marker_delimited(self):
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig runtime state", text)
+        self.assertIn("<<< jig runtime state", text)
+
+    def test_runtime_block_written_in_plugin_only_mode(self):
+        """The runtime-state block must land on the `--plugin-only` path too
+        (parity with the secret floor, slice 052-04)."""
+        result = run_scaffold_with_args(self.target, "--plugin-only")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertIn(">>> jig runtime state", text)
+        self.assertIn(".claude/skill-usage.jsonl", text)
+
+    def test_runtime_block_does_not_duplicate_secret_block_entries(self):
+        """The semantic-index / servo-hint runtime files already ride in the
+        secret block; they must not be re-listed by the runtime block."""
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        for pat in (".jig/semantic-index-claude-hook.json",
+                    ".jig/servo-hint-shown"):
+            self.assertEqual(
+                text.count(pat), 1,
+                f"{pat} should appear exactly once (secret block only)",
+            )
+
+    def test_runtime_block_is_idempotent_across_reruns(self):
+        first = run_scaffold(self.target)
+        self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        second = subprocess.run(
+            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
+        text = (self.target / ".gitignore").read_text()
+        self.assertEqual(text.count(">>> jig runtime state (do not track) >>>"), 1,
+                         "re-scaffold duplicated the jig runtime-state block")
+        self.assertEqual(text.count("<<< jig runtime state <<<"), 1)
+
+    def test_runtime_block_preserves_preexisting_lines(self):
+        gi = self.target / ".gitignore"
+        gi.write_text("# my project\nnode_modules/\n")
+        result = run_scaffold(self.target)
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        text = gi.read_text()
+        self.assertIn("node_modules/", text)
+        self.assertIn("# my project", text)
+        self.assertIn(">>> jig runtime state", text)
+        self.assertIn(".jig/spec-ref", text)
+
+
 class PermissionsDenyTests(unittest.TestCase):
     """Slice 052-03 — destructive-command-guardrail.
 
@@ -2428,16 +2552,23 @@ class PermissionsDenyTests(unittest.TestCase):
         settings.write_text(json.dumps(payload, indent=2) + "\n")
 
     def _rescaffold_force(self) -> subprocess.CompletedProcess:
+        # This suite opts into in-repo explicitly because it exercises the
+        # MERGE path — the settings.json that also carries hook registrations.
+        # NB: `permissions.deny` itself is no longer in-repo-only; ADR-0041 OQ1
+        # made plugin mode seed it too (`_write_permissions_deny_floor`, pinned
+        # by `test_default_mode_seeds_permissions_deny_floor`). An earlier
+        # version of this comment said otherwise.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         return subprocess.run(
-            [sys.executable, str(SCAFFOLD), "--force", str(self.target)],
+            [sys.executable, str(SCAFFOLD), "--in-repo", "--force",
+             str(self.target)],
             capture_output=True, text=True, env=env,
         )
 
     # ---- AC #1: conservative deny defaults are scaffolded ----
     def test_fresh_scaffold_has_destructive_deny_globs(self):
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         deny = self._read_settings().get("permissions", {}).get("deny", [])
         for glob in (self.FORCE_PUSH_GLOB, self.HARD_RESET_GLOB, self.RM_RF_GLOB):
@@ -2450,7 +2581,7 @@ class PermissionsDenyTests(unittest.TestCase):
         """The scaffolded deny array is exactly jig's source-of-truth set
         (no manual count drift)."""
         mod = _load_scaffold_module()
-        result = run_scaffold(self.target)
+        result = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         deny = self._read_settings().get("permissions", {}).get("deny", [])
         self.assertEqual(
@@ -2508,7 +2639,7 @@ class PermissionsDenyTests(unittest.TestCase):
 
     # ---- AC #2: idempotent re-run ----
     def test_deny_globs_idempotent_across_reruns(self):
-        first = run_scaffold(self.target)
+        first = run_scaffold_with_args(self.target, "--in-repo")
         self.assertEqual(first.returncode, 0, f"stderr: {first.stderr}")
         second = self._rescaffold_force()
         self.assertEqual(second.returncode, 0, f"stderr: {second.stderr}")
@@ -2803,6 +2934,83 @@ class SelfDefiningConventionBlockTests(unittest.TestCase):
         result = run_scaffold_with_args(self.target, "--force")
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertEqual(wf.read_text().count(self.BLOCK_BEGIN), 1)
+
+
+class DecisionsConventionTemplateTests(unittest.TestCase):
+    """Spec 097-01 / issue #124 instance 1 — the scaffolded conventions
+    template ships a rule that accepted decision records are append-only
+    (strike-and-date, never erase), while proposed/draft ones stay editable.
+
+    Two downstream sessions independently erased superseded reasoning from a
+    decision record because nothing in the scaffold said not to. jig holds the
+    rule for itself (docs/conventions.md); this guards that it reaches every
+    scaffolded project too. Scoped to *accepted* records so it does not
+    contradict the maintainer's ruling that a Proposed ADR's body is a draft.
+    """
+
+    def _template(self) -> str:
+        return (REPO_ROOT / "templates" / "docs"
+                / "conventions.md.template").read_text(encoding="utf-8")
+
+    def _decisions_section(self, body: str) -> str:
+        # Body of the `## Decisions` section: from its heading to the next H2.
+        m = re.search(r"^## Decisions\b.*?(?=^## |\Z)", body,
+                      flags=re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(
+            m, "conventions template must carry a `## Decisions` section "
+               "stating the append-only rule (spec 097-01 AC #1)")
+        return m.group(0)
+
+    def test_template_states_accepted_decisions_are_append_only(self):
+        """AC #1 — the rule exists and names the immutable-after-acceptance
+        discipline: strike-and-date or supersede, never delete/overwrite."""
+        section = self._decisions_section(self._template()).lower()
+        self.assertIn("append-only", section,
+                      "the Decisions rule must state records are append-only")
+        self.assertIn("accepted", section,
+                      "the rule must scope immutability to *accepted* records")
+        # The honest correction mechanism, not deletion.
+        self.assertTrue(
+            "strike" in section or "supersede" in section,
+            "the rule must name strike-and-date / supersede as the way to "
+            "correct an accepted record (not deletion)")
+
+    def test_template_keeps_proposed_records_editable(self):
+        """AC #2 — the rule explicitly leaves Proposed/draft records editable,
+        so it does not contradict question 2's ruling (a draft ADR is not
+        frozen)."""
+        section = self._decisions_section(self._template()).lower()
+        self.assertIn("proposed", section,
+                      "the rule must carve out Proposed/draft records as still "
+                      "editable, per the maintainer's question-2 ruling")
+        # Assert the editable *sense*, not the bare token "edit": an inverted
+        # carve-out like "a Proposed record must never be edited" contains
+        # "edit" too, and would satisfy a bare-token check while contradicting
+        # AC #2. Dogfooding this spec's own vacuous-test discipline.
+        self.assertTrue(
+            "edit freely" in section or "edit its body inline" in section,
+            "the carve-out must affirmatively permit editing a draft record "
+            "(e.g. 'edit freely' / 'edit its body inline'), not merely mention "
+            "the word 'edit' — otherwise an inverted 'never edit' phrasing "
+            "would pass this test")
+
+    def test_fresh_scaffold_conventions_carry_the_rule(self):
+        """AC #1 end-to-end — a freshly scaffolded project's docs/conventions.md
+        (rendered from the template) carries the append-only rule."""
+        tmpdir = tempfile.mkdtemp(prefix="jig-097-01-")
+        try:
+            target = Path(tmpdir) / "demo-project"
+            target.mkdir()
+            result = run_scaffold(target)
+            self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+            conv = target / "docs" / "conventions.md"
+            self.assertTrue(conv.is_file(), "docs/conventions.md must scaffold")
+            section = self._decisions_section(conv.read_text()).lower()
+            self.assertIn("append-only", section)
+            self.assertIn("accepted", section)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":

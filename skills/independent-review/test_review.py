@@ -54,6 +54,24 @@ def write_synthetic_spec(path: Path, slice_name: str, status: str = "IN_PROGRESS
     )
 
 
+# Spec 097-02 / issue #124 instance 2, question 4 — the stable anchor of the
+# vacuous-test question both code-review prompts must pose. Asserting a phrase,
+# not a runtime gate: a reviewer subagent reads and applies it (see the
+# no-lexical-marker-gates note). Always matched against `normalize_ws()` output
+# so line-wrapping in the source prompt block can't make the assertion vacuous.
+#
+# In slice 101-01 four tests were found to pass with the feature removed, and
+# the reconciliation reviewer caught the last one essentially by asking this
+# question. Making it an explicit prompt line front-loads the catch onto the
+# always-on compliance and craft passes instead of a late round.
+VACUOUS_TEST_ANCHOR = "would it still pass if the feature under test were deleted"
+
+
+def normalize_ws(text: str) -> str:
+    """Collapse all runs of whitespace to single spaces."""
+    return " ".join(text.split())
+
+
 class ImplementationPromptTests(unittest.TestCase):
     """`review.py implementation <spec> <slice> <deliverable>...` shape."""
 
@@ -117,6 +135,15 @@ class ImplementationPromptTests(unittest.TestCase):
     def test_includes_verdict_options(self):
         prompt = self._prompt()
         self.assertRegex(prompt, r"pass\s*\|\s*fail\s*\|\s*needs-changes")
+
+    # Spec 097-02 AC #2 — the compliance prompt poses the vacuous-test question.
+    def test_asks_vacuous_test_question(self):
+        prompt = self._prompt()
+        self.assertIn(
+            VACUOUS_TEST_ANCHOR, normalize_ws(prompt),
+            "implementation prompt must ask whether each test would still pass "
+            "if the feature under test were deleted (spec 097-02 AC #2)",
+        )
 
 
 class InvestigationGuidanceTests(unittest.TestCase):
@@ -257,7 +284,10 @@ class ReconciliationPromptTests(unittest.TestCase):
         for disposition in ("updated", "no-op", "deferred"):
             self.assertIn(disposition, prompt)
         self.assertRegex(prompt, r"(?i)deferred.+(?:owner|trigger)")
-        self.assertRegex(prompt, r"(?i)no-op.+(?:touched files|landed behavior)")
+        # Issue #160: `no-op` is now checked against the supplied changed-file
+        # list (or landed behavior), not a bare "touched files" mention.
+        self.assertRegex(
+            prompt, r"(?is)no-op.+(?:Files this slice changed|landed behavior)")
 
     def test_keeps_reconciliation_scope_narrow(self):
         prompt = self._prompt()
@@ -369,6 +399,11 @@ class BugReviewEvidenceRecorderTests(unittest.TestCase):
         self.bug.write_text(
             "---\nstatus: FIXING\nsecurity_surface: false\n---\n\n# Bug\n"
         )
+        # Bug 017: this fixture is the one that hung the whole suite — it
+        # inherited the runner's stdin and record-review read it. Pass the
+        # body explicitly, so the fixture never depends on stdin at all.
+        self.summary = self.tmpdir / "summary.md"
+        self.summary.write_text("## VERDICT\npass\n")
 
     def tearDown(self):
         import shutil
@@ -381,6 +416,7 @@ class BugReviewEvidenceRecorderTests(unittest.TestCase):
             "--verdict", "pass",
             "--reviewer", "reviewer",
             "--prompt-source", "review.py bug-review docs/bugs/001-cache-race.md",
+            "--summary-file", str(self.summary),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         evidence = self.tmpdir / "docs" / "bugs" / "reviews" / "bug-001-bug-review.md"
@@ -554,17 +590,21 @@ class SkillRecipeIntegrationTests(unittest.TestCase):
 
 
 class ArchitectureNoteTests(unittest.TestCase):
-    """AC #8: a sentence under 'Three subagents, no more' notes spec 011 reachability."""
+    """AC #8: a sentence under 'Three subagents, no more' records that the three
+    subagents are reachable as real subagent types when jig is installed as a
+    plugin. Per ADR-0047 the evergreen doc states the reachability substance
+    rather than citing the spec that introduced it."""
 
-    def test_architecture_md_records_spec_011_reachability(self):
+    def test_architecture_md_records_subagent_reachability(self):
         arch = (REPO_ROOT / "docs" / "architecture.md").read_text()
-        # Look for any sentence under "Three subagents" that mentions
-        # spec 011 and reachable / installed / live
+        # Look for a sentence under "Three subagents" that records reachability
+        # as real subagent types when installed as a plugin.
         self.assertRegex(
             arch,
-            r"(?is)Three\s+subagents.*?(spec\s*011|011-0[12]|plugin-self-install)",
-            "docs/architecture.md must record that subagents are reachable "
-            "in jig's dev env as of spec 011",
+            r"(?is)Three\s+subagents.*?reachable.*?subagent_type.*?plugin",
+            "docs/architecture.md must record that the three subagents are "
+            "reachable as real subagent_type values when jig is installed as a "
+            "plugin",
         )
 
 
@@ -609,6 +649,206 @@ class MixedLayoutResolutionTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("018-02 — beta-via-section", result.stdout)
+
+
+# ---------------------------------------------------------------------------
+# Bug 019 (issue #134) — every prompt must name the file that HOLDS the slice
+# ---------------------------------------------------------------------------
+
+
+# The seven spec+slice prompt modes, with the extra CLI arguments each needs
+# beyond `<spec> <slice>`. `bug-review` is excluded on purpose: it takes a bug
+# record, not a spec, so it has no slice to resolve.
+_SPEC_SLICE_MODES = (
+    "implementation",
+    "pr-review",
+    "arch-review",
+    "code-health",
+    "frame-critique",
+    "design-review",
+    "reconciliation",
+)
+
+
+def extract_what_to_read(prompt: str) -> str:
+    """Return the `## What to read…` section of a reviewer prompt.
+
+    Bounded to that one section so the assertions below test the reading
+    LIST — the instruction that actually sends the reviewer to a file —
+    rather than an incidental path mention elsewhere in the prompt.
+    """
+    start = prompt.find("## What to read")
+    assert start >= 0, "prompt has no '## What to read' section"
+    nxt = prompt.find("\n## ", start + 1)
+    return prompt[start:] if nxt < 0 else prompt[start:nxt]
+
+
+class FilePerSliceReviewTargetTests(unittest.TestCase):
+    """Bug 019 / issue #134: the prompt builders resolved the slice through
+    the shared dual-layout loader for its LABEL, then emitted `spec.md` as the
+    path to read and dropped the resolved location.
+
+    In a file-per-slice project — the layout `workflow.py new` emits — the
+    slice's acceptance criteria, deviation log, and reconciliation sweep live
+    in a sibling `slice-NN-*.md`; `spec.md` is only the overview. The
+    read-only reviewer is told not to assume context beyond the files it is
+    pointed at, so an unattended pass returned a verdict about a file holding
+    none of the artifacts it was asked to verify.
+
+    Red without the fix: the slice file's path never appears in the prompt.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-fps-"))
+        # spec.md is the OVERVIEW only — no slice section, no deviation log.
+        self.spec = self.tmpdir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\nskill: spec-workflow\n---\n\n"
+            "# Spec 019 — file-per-slice\n\n## Overview\n\nOverview prose.\n"
+        )
+        # The slice — and everything a reviewer is asked to verify — is here.
+        self.slice_file = self.tmpdir / "slice-01-alpha.md"
+        self.slice_file.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 019-01 — alpha\n\n"
+            "**Goal:** placeholder.\n\n"
+            "**Acceptance Criteria:**\n"
+            "1. Thing one happens.\n\n"
+            "### Deviation log (after reconciliation)\n\n"
+            "Some claims about what changed.\n\n"
+            "### Reconciliation sweep\n\n"
+            "Swept the artifacts.\n"
+        )
+        self.summary = self.tmpdir / "health-summary.txt"
+        self.summary.write_text("duplication: none\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run(self, mode: str) -> str:
+        extra = ["x.py"] if mode != "reconciliation" else []
+        if mode == "code-health":
+            extra += ["--summary-file", str(self.summary)]
+        result = run_review(mode, str(self.spec), "019-01", *extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_every_mode_points_at_the_slice_file(self):
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                block = extract_what_to_read(self._run(mode))
+                self.assertIn(
+                    str(self.slice_file), block,
+                    f"{mode} sends the reviewer to a file that does not "
+                    "contain the slice",
+                )
+
+    def test_every_mode_names_the_slice_file_before_the_overview(self):
+        """The slice file is the reading target; `spec.md` is context. If the
+        overview is named first the reviewer still opens the wrong file
+        first — so ordering is part of the fix, not cosmetics."""
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                block = extract_what_to_read(self._run(mode))
+                slice_pos = block.find(str(self.slice_file))
+                spec_pos = block.find(str(self.spec))
+                self.assertGreaterEqual(
+                    slice_pos, 0, f"{mode} never names the slice file")
+                self.assertGreaterEqual(
+                    spec_pos, 0, f"{mode} drops the spec overview entirely")
+                self.assertLess(
+                    slice_pos, spec_pos,
+                    f"{mode} names spec.md before the slice file",
+                )
+
+    def test_reconciliation_anchors_the_deviation_log_on_the_slice_file(self):
+        """The reconciliation prompt names two subsections by title. Both live
+        in the slice file; `spec.md` contains neither."""
+        block = extract_what_to_read(self._run("reconciliation"))
+        slice_pos = block.find(str(self.slice_file))
+        self.assertGreaterEqual(slice_pos, 0, "slice file not named at all")
+        self.assertLess(
+            slice_pos, block.find("Deviation log"),
+            "the 'Deviation log' / 'Reconciliation sweep' instruction must "
+            "hang off the slice file, not spec.md",
+        )
+
+    def test_implementation_focus_instruction_hangs_off_the_slice_file(self):
+        """`Focus on Slice X only` is worthless if it attaches to a file with
+        no slice in it."""
+        block = extract_what_to_read(self._run("implementation"))
+        slice_pos = block.find(str(self.slice_file))
+        self.assertGreaterEqual(slice_pos, 0, "slice file not named at all")
+        self.assertLess(slice_pos, block.find("Focus on Slice"))
+
+
+class EmbeddedLayoutReviewTargetTests(unittest.TestCase):
+    """Bug 019 guard against overcorrection: when the slice IS a section of
+    `spec.md`, the prompt must keep naming `spec.md` and must NOT point at a
+    sibling slice file.
+
+    Two shapes, because they fail differently. The pure embedded dir has no
+    `slice-*.md` to mis-resolve, so it only pins that nothing invents one. The
+    MIXED dir is the shape that can actually go wrong: a sibling slice file
+    exists, but the requested fragment lives in `spec.md`, so a fix that
+    resolved "the spec dir has slice files → point at one" would send the
+    reviewer to the WRONG slice's file.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-emb-"))
+        self.spec = self.tmpdir / "spec.md"
+        write_synthetic_spec(self.spec, "019-02 — beta")
+        # Mixed layout: a sibling slice file for a DIFFERENT slice.
+        self.mixed = Path(tempfile.mkdtemp(prefix="jig-rev-mix-"))
+        self.mixed_spec = self.mixed / "spec.md"
+        write_synthetic_spec(self.mixed_spec, "019-02 — beta")
+        self.other_slice = self.mixed / "slice-01-alpha.md"
+        self.other_slice.write_text(
+            "---\nstatus: DONE\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 019-01 — alpha\n\n**Goal:** a different slice.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        shutil.rmtree(self.mixed, ignore_errors=True)
+
+    def _extra_args(self, mode: str, tmpdir: Path) -> list:
+        extra = ["x.py"] if mode != "reconciliation" else []
+        if mode == "code-health":
+            summary = tmpdir / "s.txt"
+            summary.write_text("ok\n")
+            extra += ["--summary-file", str(summary)]
+        return extra
+
+    def test_embedded_layout_still_reads_spec_md(self):
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                result = run_review(
+                    mode, str(self.spec), "019-02",
+                    *self._extra_args(mode, self.tmpdir))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                block = extract_what_to_read(result.stdout)
+                self.assertIn(str(self.spec), block)
+                self.assertNotIn("slice-", block)
+
+    def test_mixed_layout_reads_spec_md_not_the_other_slices_file(self):
+        """The sibling `slice-01-alpha.md` holds a DIFFERENT slice. Pointing
+        the reviewer at it would be worse than the original bug."""
+        for mode in _SPEC_SLICE_MODES:
+            with self.subTest(mode=mode):
+                result = run_review(
+                    mode, str(self.mixed_spec), "019-02",
+                    *self._extra_args(mode, self.mixed))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                block = extract_what_to_read(result.stdout)
+                self.assertIn(str(self.mixed_spec), block)
+                self.assertNotIn(
+                    str(self.other_slice), block,
+                    f"{mode} points at a slice file holding a different slice",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1223,6 +1463,15 @@ class PrReviewPromptTests(unittest.TestCase):
             prompt, r"(?i)do not\s+(?:write|modify|edit).+files?|read-only",
         )
 
+    # Spec 097-02 AC #2 — the craft prompt poses the vacuous-test question too.
+    def test_asks_vacuous_test_question(self):
+        prompt = self._prompt()
+        self.assertIn(
+            VACUOUS_TEST_ANCHOR, normalize_ws(prompt),
+            "pr-review prompt must ask whether each test would still pass if "
+            "the feature under test were deleted (spec 097-02 AC #2)",
+        )
+
     # Spec path appears for context
     def test_includes_spec_path(self):
         prompt = self._prompt()
@@ -1601,7 +1850,8 @@ class FrameCritiqueEvidenceRoundTripTests(unittest.TestCase):
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", "frame-critique",
              "--verdict", verdict, "--reviewer", "jig:reviewer",
-             "--prompt-source", "review.py frame-critique x"],
+             "--prompt-source", "review.py frame-critique x",
+             "--summary-file", "-"],
             input="## VERDICT\n" + verdict + "\n", capture_output=True,
             text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -1802,7 +2052,8 @@ class DesignReviewEvidenceRoundTripTests(unittest.TestCase):
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", pass_name,
              "--verdict", verdict, "--reviewer", "jig:reviewer",
-             "--prompt-source", "review.py design-review x"],
+             "--prompt-source", "review.py design-review x",
+             "--summary-file", "-"],
             input="## VERDICT\n" + verdict + "\n", capture_output=True,
             text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -1985,12 +2236,16 @@ class CodeHealthPromptTests(unittest.TestCase):
             "code-health prompt must not re-evaluate ACs",
         )
 
-    def test_summary_read_from_stdin_when_no_file(self):
+    def test_summary_read_from_stdin_when_requested(self):
+        # Bug 017 amendment to slice 060-05: stdin injection still works, but
+        # it must be asked for with `--summary-file -`. The old implicit
+        # fallback read stdin whenever it was not a terminal, which blocked
+        # forever on a pipe nobody closed.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         result = subprocess.run(
             [sys.executable, str(REVIEW), "code-health", str(self.spec),
-             "060-05", "skills/foo/foo.py",
+             "060-05", "skills/foo/foo.py", "--summary-file", "-",
              "--richer-skill", "none", "--non-interactive"],
             input="STDIN-SUMMARY-SENTINEL\n",
             capture_output=True, text=True, env=env,
@@ -2015,9 +2270,10 @@ class CodeHealthPromptTests(unittest.TestCase):
         self.assertIn("not found", result.stderr.lower())
 
     def test_empty_summary_degrades_gracefully(self):
-        # AC2 graceful-degrade: no summary provided (empty stdin) → the prompt
-        # still builds (exit 0) and tells the reviewer to judge on the
-        # deliverables, rather than emitting an empty/blank summary block.
+        # AC2 graceful-degrade: no summary provided (no --summary-file at all;
+        # stdin is not consulted since bug 017) → the prompt still builds
+        # (exit 0) and tells the reviewer to judge on the deliverables, rather
+        # than emitting an empty/blank summary block.
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         result = subprocess.run(
@@ -2481,6 +2737,102 @@ class TestQualitySnapshotPromptPlacementTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Issue #160 — the reconciliation sweep names "touched files" but never
+# supplied them. `_touched_files_block` derives the changed-file list so the
+# omission check runs on data, not the implementer's recollection.
+# ---------------------------------------------------------------------------
+
+
+TOUCHED_LABEL = "Files this slice changed"
+
+
+class ReconciliationTouchedFilesTests(unittest.TestCase):
+    """Issue #160: the reconciliation prompt must carry the deterministic
+    list of files the slice changed (merge-base against `main`), degrading
+    to a single-line fallback exactly like the test-quality snapshot."""
+
+    def setUp(self):
+        self._tmpdirs: list[Path] = []
+
+    def tearDown(self):
+        import shutil
+        for d in self._tmpdirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _import_review_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "review_module_160", REVIEW,
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _spec_in_repo_with_diff(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-touched-"))
+        self._tmpdirs.append(root)
+        _make_repo_with_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        return spec
+
+    def test_helper_lists_the_changed_files(self):
+        module = self._import_review_module()
+        spec = self._spec_in_repo_with_diff()
+        block = module._touched_files_block(spec)
+        self.assertIn(TOUCHED_LABEL, block)
+        # The committed diff on the feature branch is tests/test_alpha.py.
+        self.assertIn("tests/test_alpha.py", block)
+        # Guidance tying the list to the sweep's account-for-everything rule.
+        self.assertIn("sweep", block.lower())
+
+    def test_helper_fallback_when_empty_diff(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-touched-empty-"))
+        self._tmpdirs.append(root)
+        _make_repo_no_diff(root)
+        spec_dir = root / "docs" / "specs" / "myspec"
+        spec_dir.mkdir(parents=True)
+        spec = spec_dir / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._touched_files_block(spec)
+        self.assertIn(TOUCHED_LABEL, block)
+        self.assertIn("unavailable", block.lower())
+
+    def test_helper_fallback_when_no_git_repo(self):
+        module = self._import_review_module()
+        root = Path(tempfile.mkdtemp(prefix="jig-rev-touched-nogit-"))
+        self._tmpdirs.append(root)
+        spec = root / "spec.md"
+        write_synthetic_spec(spec, "099-01 alpha")
+        block = module._touched_files_block(spec)
+        self.assertIn("unavailable", block.lower())
+
+    def test_helper_never_raises(self):
+        module = self._import_review_module()
+        block = module._touched_files_block(Path("/no/such/path/spec.md"))
+        self.assertIsInstance(block, str)
+        self.assertIn("unavailable", block.lower())
+
+    def test_reconciliation_prompt_includes_touched_files(self):
+        module = self._import_review_module()
+        spec = self._spec_in_repo_with_diff()
+        prompt = module.build_reconciliation_prompt(spec, "099-01 alpha")
+        self.assertIn(TOUCHED_LABEL, prompt)
+
+    def test_sweep_block_points_at_the_changed_file_list(self):
+        """The sweep check must reference the supplied list, not bare
+        'touched files' — that reference is the whole point of issue #160."""
+        module = self._import_review_module()
+        spec = self._spec_in_repo_with_diff()
+        prompt = module.build_reconciliation_prompt(spec, "099-01 alpha")
+        self.assertIn("Files this slice changed** list above", prompt)
+
+
+# ---------------------------------------------------------------------------
 # Slice 043-04 AC #5 + AC #6: SKILL.md + workflow.md mentions
 # ---------------------------------------------------------------------------
 
@@ -2570,7 +2922,8 @@ class RecordReviewTests(unittest.TestCase):
 
     def _record(self, *args, summary="## VERDICT\npass\n\n## REASONING\nok.\n"):
         return subprocess.run(
-            [sys.executable, str(REVIEW), "record-review", *args],
+            [sys.executable, str(REVIEW), "record-review", *args,
+             "--summary-file", "-"],
             input=summary, capture_output=True, text=True,
             env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -2738,7 +3091,7 @@ class CheckReviewsTests(unittest.TestCase):
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", pass_name,
              "--verdict", verdict, "--reviewer", "jig:reviewer",
-             "--prompt-source", "x"],
+             "--prompt-source", "x", "--summary-file", "-"],
             input=summary, capture_output=True, text=True,
             env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -3052,7 +3405,8 @@ class RecordReviewAdrModeTests(unittest.TestCase):
 
     def _record(self, *args, summary="## VERDICT\npass\n"):
         return subprocess.run(
-            [sys.executable, str(REVIEW), "record-review", *args],
+            [sys.executable, str(REVIEW), "record-review", *args,
+             "--summary-file", "-"],
             input=summary, capture_output=True, text=True, cwd=str(self.tmp),
             env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
@@ -3397,6 +3751,7 @@ class RecordReviewSubstrateTests(unittest.TestCase):
     artifact still clears the ADR-0014 evidence gate (extra keys tolerated)."""
 
     def setUp(self):
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
         self.tmp = Path(tempfile.mkdtemp(prefix="jig-recsub-"))
         self.home = self.tmp / "home"
         (self.home / ".claude" / "skills" / "review-pr-deep").mkdir(parents=True)
@@ -3424,7 +3779,7 @@ class RecordReviewSubstrateTests(unittest.TestCase):
              str(self.spec), "0XX-01",
              "--pass", pass_name, "--verdict", "pass",
              "--reviewer", "jig:reviewer",
-             "--prompt-source", "review.py x"],
+             "--prompt-source", "review.py x", "--summary-file", "-"],
             input=summary, capture_output=True, text=True, env=env,
         )
 
@@ -3441,13 +3796,17 @@ class RecordReviewSubstrateTests(unittest.TestCase):
         self.assertEqual(fields.get("applied_skill"), "review-pr-deep")
         self.assertNotIn(str(self.home), fields.get("applied_skill", ""))
 
-    def test_unconfigured_craft_stamps_no_substrate(self):
+    def test_unconfigured_craft_stamps_not_shown(self):
+        # Spec 096-05 superseded 096-01's config-only stamp: an unconfigured
+        # extensible pass with no candidates sidecar and no --non-interactive
+        # records `not-shown` — the auditable "selection step did not run"
+        # defect signal (ADR-0040 D3), not an absent field.
         r = self._record("craft", review_block={})
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         from _common.parsing import parse_frontmatter
         fields, _ = parse_frontmatter(self._evidence("craft").read_text())
-        self.assertNotIn("substrate", fields)
-        self.assertNotIn("applied_skill", fields)
+        self.assertEqual(fields.get("substrate"), "not-shown")
+        self.assertEqual(fields.get("applied_skill"), "none")
 
     def test_compliance_pass_stamps_no_substrate(self):
         r = self._record("compliance", {"pr_review_skill": "review-pr-deep"})
@@ -3506,7 +3865,8 @@ class SubstrateRecordAndConsumerTests(unittest.TestCase):
     def _record(self, pass_name, *extra):
         return self._run("record-review", str(self.spec), "0XX-05",
                          "--pass", pass_name, "--verdict", "pass",
-                         "--reviewer", "x", "--prompt-source", "y", *extra)
+                         "--reviewer", "x", "--prompt-source", "y",
+                         "--summary-file", "-", *extra)
 
     def _fields(self, pass_name):
         from _common.parsing import parse_frontmatter
@@ -3573,7 +3933,7 @@ class SubstrateRecordAndConsumerTests(unittest.TestCase):
         bug.write_text("---\nstatus: FIXING\nsecurity_surface: false\n---\n# B\n")
         r = self._run("record-review", "--bug", str(bug), "--pass", "craft",
                       "--verdict", "pass", "--reviewer", "x",
-                      "--prompt-source", "y")
+                      "--prompt-source", "y", "--summary-file", "-")
         self.assertEqual(r.returncode, 0, r.stderr)
         from _common.parsing import parse_frontmatter
         ev = bug.parent / "reviews" / "bug-001-craft.md"
@@ -3615,6 +3975,121 @@ class SubstrateRecordAndConsumerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f"stdout={r.stdout} stderr={r.stderr}")
         self.assertIn("shown and NOT applied", r.stderr)
         self.assertIn("team-pr", r.stderr)
+
+
+class Bug017RecordReviewStdinTests(unittest.TestCase):
+    """Bug 017: `record-review` must never block waiting on stdin.
+
+    The old fallback guarded `sys.stdin.read()` with `not sys.stdin.isatty()`.
+    `isatty()` answers "is this a terminal", never "is there input waiting", so
+    a pipe whose write end is still open passes the guard and the read blocks
+    until an EOF that never arrives. A human at a prompt never hits it; an
+    agent harness or CI runner always does — which is why jig's whole suite
+    could hang while the bug never reproduced by hand.
+
+    The teeth are in the pipe shape. `subprocess.run(stdin=subprocess.PIPE)`
+    closes the write end immediately, the child sees EOF and exits, so a test
+    written that way passes against the unfixed helper and proves nothing.
+    Only a pipe whose write end the *test* holds open reproduces the hang.
+    """
+
+    # Generous: the assertion is termination-vs-hang, not latency. The
+    # unfixed helper never returns, so no bound is too short to catch it.
+    TIMEOUT = 15
+
+    ARGS = (
+        "record-review", "--adr", "0001", "--pass", "frame-critique",
+        "--verdict", "pass", "--reviewer", "r", "--prompt-source", "p",
+    )
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-bug017-"))
+        (self.tmp / "docs" / "decisions").mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _env(self):
+        return {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+
+    def _evidence_file(self):
+        return (self.tmp / "docs" / "decisions" / "reviews"
+                / "adr-0001-frame-critique.md")
+
+    def test_terminates_when_stdin_is_a_pipe_nobody_closes(self):
+        read_fd, write_fd = os.pipe()
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, str(REVIEW), *self.ARGS],
+                stdin=read_fd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, cwd=str(self.tmp), env=self._env(),
+            )
+            os.close(read_fd)
+            read_fd = -1
+            try:
+                proc.communicate(timeout=self.TIMEOUT)
+                # Terminating by crashing would also clear the timeout, so
+                # pin the exit code: this is the refusal, not a traceback.
+                self.assertEqual(proc.returncode, 2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                self.fail(
+                    "record-review did not terminate within "
+                    f"{self.TIMEOUT}s with stdin a pipe whose write end is "
+                    "still open — it is blocked on sys.stdin.read()"
+                )
+        finally:
+            if read_fd != -1:
+                os.close(read_fd)
+            os.close(write_fd)
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+
+    def test_missing_body_errors_and_names_the_option(self):
+        # Non-interactive with no body source at all: fail fast and say what
+        # to pass, rather than recording a verdict with an empty body.
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), *self.ARGS],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            cwd=str(self.tmp), env=self._env(),
+        )
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("--summary-file", result.stderr)
+        self.assertNotIn("traceback", result.stderr.lower())
+        self.assertFalse(
+            self._evidence_file().exists(),
+            "a refused record-review must not leave a verdict file behind",
+        )
+
+    def test_blank_body_is_refused_like_a_missing_one(self):
+        # The enforcement is on the *body*, not on having typed the option:
+        # a file (or a pipe) that resolves to whitespace is the verdict with
+        # no body that the rule exists to refuse.
+        blank = self.tmp / "blank.md"
+        blank.write_text("\n   \n")
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), *self.ARGS,
+             "--summary-file", str(blank)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            cwd=str(self.tmp), env=self._env(),
+        )
+        self.assertEqual(result.returncode, 2, f"stdout: {result.stdout}")
+        self.assertIn("empty verdict body", result.stderr)
+        self.assertFalse(self._evidence_file().exists())
+
+    def test_explicit_dash_reads_the_body_from_stdin(self):
+        # Piping a body stays supported — it just has to be asked for, so the
+        # read is the caller's choice and never an implicit gamble on stdin.
+        result = subprocess.run(
+            [sys.executable, str(REVIEW), *self.ARGS, "--summary-file", "-"],
+            input="PIPED-BODY-SENTINEL\n", capture_output=True, text=True,
+            cwd=str(self.tmp), env=self._env(),
+        )
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("PIPED-BODY-SENTINEL", self._evidence_file().read_text())
 
 
 if __name__ == "__main__":

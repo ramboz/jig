@@ -11,11 +11,23 @@ The report is split into two MEASURED dimensions plus their combined total
 
   * ORCHESTRATOR (slice 056-01) — the flat session files
     ``<encoded-cwd>/<session>.jsonl``.
-  * SUBAGENT (slice 056-02) — each delegated (``Agent``-tool) turn's full
-    transcript, nested at ``<encoded-cwd>/<session>/subagents/agent-*.jsonl``
+  * SUBAGENT (slice 056-02) — each *foreground* delegated (``Agent``-tool)
+    turn's full transcript, nested at
+    ``<encoded-cwd>/<session>/subagents/agent-*.jsonl``
     (``isSidechain: true``, per-turn ``message.usage``, subagent type in the
     top-level ``attributionAgent`` field). Summed directly — measured, NOT the
     lossy ``toolUseResult`` final-turn proxy. Broken down by subagent type.
+
+    Caveat (bug 030): only *foreground* ``Agent`` delegation nests here.
+    *Background/detached* delegation (``run_in_background: true`` — the
+    ``TaskCreate``/``Monitor`` task queue) does NOT nest next to its
+    orchestrator; its transcripts land under a different session UUID (or are
+    not discoverably associated at all), so those subagent tokens are NOT
+    attributed to the parent here. The report DETECTS this — it compares each
+    session's ``Agent`` tool_use count against the nested files it found — and
+    prints an explicit under-count warning rather than silently reporting a
+    trustworthy-looking ``turns: 0``. Recovering those tokens exactly would
+    need a new attribution model (see bug 030); this build only flags the gap.
 
   * COMBINED — orchestrator + subagent = the true per-spec cost shape.
 
@@ -190,6 +202,34 @@ def find_subagent_files(session_path: Path) -> list:
         return sorted(nested.glob("agent-*.jsonl"))
     except OSError:
         return []
+
+
+def count_agent_tool_calls(records: list) -> int:
+    """Count ``Agent``-tool delegation calls in a flat session's records.
+
+    Each ``Agent`` tool_use block in the orchestrator transcript spawns exactly
+    one delegated subagent. For *foreground* delegation that subagent's
+    transcript nests at ``<session>/subagents/agent-*.jsonl`` (1:1 with these
+    calls); for *background/detached* delegation it does not (bug 030). Comparing
+    this count against ``find_subagent_files`` therefore reveals subagents whose
+    tokens are NOT attributed to the parent session. Never raises.
+    """
+    count = 0
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        msg = record.get("message")
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") == "Agent"):
+                count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +643,13 @@ class Report:
     subagent_by_type: dict = field(default_factory=dict)
     subagent_cost_usd: float = None
     subagent_cost_note: str = None
+    # Under-count signal (bug 030): delegated `Agent`-tool subagents whose
+    # nested transcript was NOT found next to the orchestrator (background/
+    # detached delegation). `unattributed_subagent_calls` sums the shortfall
+    # (Agent calls minus nested files found) across `undercounted_session_count`
+    # sessions; when nonzero the subagent/combined totals are under-reported.
+    unattributed_subagent_calls: int = 0
+    undercounted_session_count: int = 0
     # Combined = orchestrator + subagent = the true per-spec cost.
     combined_cost_usd: float = None
     combined_cost_note: str = None
@@ -685,6 +732,9 @@ class TopReport:
     empty_session_count: int = 0
     marker_required: bool = False
     skipped_heuristic_session_count: int = 0
+    # Under-count signal (bug 030), aggregated across all attributed sessions.
+    unattributed_subagent_calls: int = 0
+    undercounted_session_count: int = 0
 
     @property
     def input_tokens(self) -> int:
@@ -923,7 +973,16 @@ def build_report(spec: str, projects_dir: Path, encoded_prefix: str,
         # Sum this session's nested subagent transcripts (if any). A session
         # that delegated nothing has no nested dir -> contributes zero,
         # silently. A malformed nested file is skipped by read_session.
-        for agent_path in find_subagent_files(session_path):
+        nested_paths = find_subagent_files(session_path)
+        # Under-count detection (bug 030): a session that made more `Agent`
+        # delegation calls than it has nested transcripts delegated the rest
+        # in the background/detached path, whose tokens do not nest here.
+        agent_calls = count_agent_tool_calls(records)
+        shortfall = agent_calls - len(nested_paths)
+        if shortfall > 0:
+            rep.unattributed_subagent_calls += shortfall
+            rep.undercounted_session_count += 1
+        for agent_path in nested_paths:
             agent_records = read_session(agent_path)
             if not agent_records:
                 continue
@@ -1050,7 +1109,13 @@ def build_top_report(projects_dir: Path, encoded_prefix: str,
         row.orchestrator_turns += turns
         row.peak_cache_read_tokens = max(row.peak_cache_read_tokens, peak)
 
-        for agent_path in find_subagent_files(session_path):
+        nested_paths = find_subagent_files(session_path)
+        # Under-count detection (bug 030) — see the report path for rationale.
+        shortfall = count_agent_tool_calls(records) - len(nested_paths)
+        if shortfall > 0:
+            summary.unattributed_subagent_calls += shortfall
+            summary.undercounted_session_count += 1
+        for agent_path in nested_paths:
             agent_records = read_session(agent_path)
             if not agent_records:
                 continue
@@ -1638,6 +1703,14 @@ def render(rep: Report) -> str:
     # --- Subagent (nested transcripts, 056-02) ----------------------------
     lines.append("SUBAGENT (nested transcripts, measured)")
     lines.append(f"  turns:                  {_fmt(rep.subagent_turns)}")
+    if rep.unattributed_subagent_calls:
+        lines.append(
+            f"  ⚠ under-counted: {rep.unattributed_subagent_calls} delegated "
+            f"Agent-tool subagent(s) across {rep.undercounted_session_count} "
+            f"session(s) were not found as nested transcripts (background/"
+            f"detached delegation, bug 030) — the subagent and combined totals "
+            f"below are under-reported; treat them as a floor, not the true cost."
+        )
     _token_block(lines, rep.subagent_input_tokens, rep.subagent_output_tokens,
                  rep.subagent_cache_read_tokens,
                  rep.subagent_cache_creation_tokens,
@@ -1682,6 +1755,14 @@ def render_top(rep: TopReport, limit: int = 10) -> str:
             f"{_fmt(rep.skipped_heuristic_session_count)}"
         )
     lines.append(f"  Specs attributed:       {_fmt(len(rep.rows))}")
+    if rep.unattributed_subagent_calls:
+        lines.append(
+            f"  ⚠ Subagent under-count: {_fmt(rep.unattributed_subagent_calls)} "
+            f"delegated Agent-tool subagent(s) across "
+            f"{_fmt(rep.undercounted_session_count)} session(s) had no nested "
+            f"transcript (background/detached delegation, bug 030) — subagent "
+            f"and combined totals are a floor, not the true cost."
+        )
     lines.append("")
 
     lines.append("CATEGORY TOTALS (attributed sessions)")

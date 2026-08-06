@@ -23,7 +23,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "skills" / "scaffold-init"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import install_contract  # noqa: E402
 import scaffold as scaffold_mod  # noqa: E402
 
 _CODEX_PLUGIN_HOOK_SCRIPT_PREFIX = "${PLUGIN_ROOT}/hooks/scripts/"
@@ -101,6 +103,15 @@ def render_codex_plugin_skill_body(body: str) -> str:
         r"${PLUGIN_ROOT}/skills/\1/",
         out,
     )
+    # NOTE: `test_migrate.host_specific_spellings()` walks THIS WHOLE FILE with
+    # `ast`, collects every two-string-literal `.replace("<from>", "<to>")`
+    # call, and bans both sides from migrate SKILL.md's stale-citation advisory
+    # section (bug 023) rather than keeping its own copy of the table. Two
+    # consequences worth knowing before you edit here: moving ALL these pairs
+    # into a loop or lookup makes the walk find nothing, which fails loudly by
+    # design, while moving only SOME shrinks the set silently; and any new
+    # two-constant `.replace()` anywhere in this file joins the forbidden set,
+    # so an unrelated one could ban legitimate prose in that section.
     out = out.replace("${CLAUDE_PLUGIN_ROOT}/templates/", "${PLUGIN_ROOT}/templates/")
     out = out.replace("${CLAUDE_PLUGIN_ROOT}", "${PLUGIN_ROOT}")
     out = out.replace("${CLAUDE_PROJECT_DIR}", "${CODEX_PROJECT_DIR:-$PWD}")
@@ -189,6 +200,26 @@ def _rewrite_codex_hook_scripts(output_dir: Path) -> None:
             )
 
 
+def _copy_runtime_scripts(source_root: Path, output_dir: Path) -> None:
+    """Copy the host-neutral runtime-scripts subset into the Codex package.
+
+    `install_contract.CODEX_INCLUDE_SCRIPT_FILES` (`spec_lint.py` only) ships
+    verbatim so `${PLUGIN_ROOT}/scripts/spec_lint.py` — the pre-implementation
+    structural gate the rendered Codex `migrate`/`analyze` skills invoke —
+    resolves in an installed Codex plugin (bug 025 / #167). The Claude-only
+    trio (`verify_install` / `scaffold_contract`) is excluded: it validates a
+    `.claude/` install tree and no Codex skill references it. These modules are
+    host-neutral Python and carry no `${CLAUDE_PLUGIN_ROOT}`/`.claude/` tokens,
+    so they are copied byte-for-byte with no host rewrite."""
+    for rel_name in install_contract.CODEX_INCLUDE_SCRIPT_FILES:
+        src = source_root / rel_name
+        if not src.is_file():
+            continue
+        dst = output_dir / rel_name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+
+
 def _copy_templates(source_root: Path, output_dir: Path) -> None:
     templates_src = source_root / "templates"
     templates_dst = output_dir / "templates"
@@ -202,6 +233,14 @@ def _copy_templates(source_root: Path, output_dir: Path) -> None:
             continue
         dst = templates_dst / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
+        # Templates ship Codex-NATIVE. Two consumer sets read them, and only
+        # one goes through `scaffold()`: `decisions.py` (lightweight-decisions
+        # seed), `adr.py`, `memory.py` and `workflow.py` read the packaged
+        # template at runtime and copy it verbatim, with no transform of their
+        # own. Shipping canonical here would hand a Codex project a
+        # `${CLAUDE_PLUGIN_ROOT}` it can never resolve. Slice 099-01 briefly did
+        # exactly that; the plugin-mode doc problem it was chasing is fixed in
+        # `_rewrite_host_paths` instead, which can tell the modes apart.
         if entry.name.endswith(".md.template"):
             dst.write_text(
                 scaffold_mod.CodexScaffoldRenderer.rewrite_skill_md_paths(
@@ -337,6 +376,7 @@ def build(source_root: Path, output_dir: Path) -> int:
     _rewrite_codex_hook_scripts(output_dir)
     _copy_templates(source_root, output_dir)
     _copy_skills(source_root, output_dir)
+    _copy_runtime_scripts(source_root, output_dir)
     _render_codex_agent_templates(source_root, output_dir)
 
     for file_name in _ROOT_FILES:

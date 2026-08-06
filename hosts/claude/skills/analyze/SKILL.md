@@ -332,6 +332,15 @@ _Scanned 2026-MM-DD; <N> findings._
   findings — the spec needs structural surgery, not a longer
   report.").
 
+**Surfaced, never auto-resolved (issue #125).** The report *reports drift and
+hands off* — it names each finding for the spec author to resolve. When two
+canon artifacts disagree, analyze does **not** adjudicate which one wins or
+write the resolution: picking a winner and amending a closed record is a
+separate, owner-authorised act (see the `spec-workflow` reconciliation
+checklist's closed-spec-drift gate). This posture is stronger than "no file
+writes", which only says the skill's own process is read-only; the point here
+is that a discovered conflict is *escalated, not decided*.
+
 ## Gotchas
 
 - **Non-destructive — the skill never writes to disk.** Even when the

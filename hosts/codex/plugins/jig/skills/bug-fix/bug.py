@@ -20,9 +20,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import project_layout
+from _common import project_layout, reservation
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
+from _common.derived_docs import duplicate_ids as _duplicate_ids_in
 from _common.parsing import (
     clear_frontmatter_field,
     frontmatter_flag_truthy,
@@ -65,6 +66,16 @@ OPEN_STATUSES = {
 # closure is legible (see `_render_board`). DONE is deliberately excluded: it
 # is terminal-*success* and stays in the active table.
 TERMINAL_NON_DONE_STATUSES = frozenset({"ESCALATED", "RESOLVED_ON_MAIN"})
+# Slice 098-04: the working statuses whose entry re-stamps the `.jig/spec-ref`
+# lifecycle marker (so a resumed session that skips `pickup` is still "inside").
+# Derived from OPEN_STATUSES so a status added to the lifecycle cannot silently
+# fall outside the entry gate's notion of "working". REPORTED is excluded: a bug
+# can sit reported for weeks with nobody on it — `pickup` (AC1) marks entry.
+_BUG_WORKING_STATUSES = OPEN_STATUSES - {"REPORTED"}
+# Statuses that END the work and clear the marker: DONE (terminal success) plus
+# the resolution paths RESOLVED_ON_MAIN / ESCALATED (set outside transition_bug,
+# so the clear is wired at each of those call sites too — AC6).
+_BUG_TERMINAL_STATUSES = frozenset({"DONE", "ESCALATED", "RESOLVED_ON_MAIN"})
 _ORDERED_TRANSITIONS = {
     "REPORTED": {"DIAGNOSING"},
     "DIAGNOSING": {"ROOT_CAUSED"},
@@ -74,18 +85,13 @@ _ORDERED_TRANSITIONS = {
     "VERIFIED": {"DONE", "DIAGNOSING"},
 }
 _DISABLE_VALUES = {"0", "false", "off", "no"}
-_PUSH_RACE_SIGNALS = (
-    "non-fast-forward",
-    "fetch first",
-    "stale info",
-    "rejected",
-)
-_PUSH_PROTECTION_SIGNALS = (
-    "protected branch",
-    "gh006",
-    "permission denied",
-    "pre-receive hook declined",
-)
+# Push-failure classification is shared across bug.py / adr.py / workflow.py
+# (spec 107 / ADR-0053). The signal tuples and the classifier live once in
+# `_common/reservation.py`; the re-exports below keep the historical
+# module-level names for existing call sites and tests.
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_classify_push_failure = reservation.classify_push_failure
 
 
 class BugError(RuntimeError):
@@ -258,17 +264,6 @@ def _record_text(number: int, slug: str, claimed_by: str) -> str:
     return "\n".join(fields)
 
 
-def _classify_push_failure(stderr: str) -> str:
-    low = stderr.lower()
-    for sig in _PUSH_RACE_SIGNALS:
-        if sig in low:
-            return "race"
-    for sig in _PUSH_PROTECTION_SIGNALS:
-        if sig in low:
-            return "protection"
-    return "other"
-
-
 def _check_gh_and_remote(project_dir: Path) -> None:
     if shutil.which("gh") is None:
         raise BugError(
@@ -328,11 +323,14 @@ def reserve_bug_on_origin(project_dir: Path, slug: str,
     """Reserve a bug number on origin/main from an ephemeral detached
     worktree. The caller's worktree and branch tip are not touched."""
     slug = _slugify(slug)
-    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    # Origin-wide fetch (not just main) so the in-flight-branch scan below
+    # runs `fetch=False` off fresh refs; a narrower `git fetch origin main`
+    # would leave in-flight branches stale (spec 107 / ADR-0053).
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
     if rc != 0:
         print(
-            f"warning: `git fetch origin main` failed: {err.strip()}; "
-            "proceeding with the local origin/main view",
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            "proceeding with the local origin view",
             file=sys.stderr,
         )
 
@@ -349,7 +347,15 @@ def reserve_bug_on_origin(project_dir: Path, slug: str,
             )
         bugs_dir = _bugs_dir(wt)
         bugs_dir.mkdir(parents=True, exist_ok=True)
-        number = _next_number(bugs_dir)
+        # Spec 107 / ADR-0053: the next number must account for claims sitting
+        # on any in-flight branch, not only files merged to origin/main. Scan
+        # every local + remote-tracking ref and never fall below the
+        # origin/main view the detached worktree already resolved.
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/bugs", reservation.BUG_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        number = max(_next_number(bugs_dir), scanned + 1)
         bug_name = f"{number:03d}-{slug}"
         path = bugs_dir / f"{bug_name}.md"
         if path.exists():
@@ -456,6 +462,70 @@ def _append_release_log(text: str, released_from: str, reason: str) -> str:
     return body + "\n\n## Release log\n\n" + entry
 
 
+# ---------- Slice 098-04: bug-lifecycle claim marker ----------
+#
+# The entry gate (spec 098-01) answers one question — "is this session inside
+# jig?" — from one working-tree marker: `.jig/spec-ref`, which `workflow.py`
+# stamps at IN_PROGRESS (slice 056-03). A bug fix opened the way
+# `bug-fix/SKILL.md` prescribes must leave the SAME marker, or the gate's bug
+# arm has no local signal at all (ADR-0044 resolved question #5(a)).
+#
+# The marker is EXTENDED, not repurposed (AC3): a bug-shaped marker is a single
+# `bug=NNN` line. All three existing spec-marker readers
+# (`read_attribution.read_spec_ref`, `_common.gate_telemetry.read_spec_ref`,
+# `scripts/usage.py`) key strictly on a `spec=` line, so a bug-shaped marker is
+# invisible to them — no cross-talk — while the entry gate branches on shape.
+# That is why no sibling marker file is needed. `bug.py` is the SECOND writer of
+# this marker (workflow.py is the first); per ADR-0002 the write stays inline
+# here rather than extracted to `_common` until a third caller appears.
+_BUG_MARKER_RE = re.compile(r"(?m)^\s*bug\s*=\s*(\d{1,3})\s*$")
+
+
+def _spec_ref_marker_path(project_dir: Path) -> Path:
+    # Anchor `.jig` on the SAME sentinel-resolved project root workflow.py uses
+    # (ADR-0033 `project_root_for`), so the spec-side writer, the bug-side writer,
+    # and the entry gate that reads them all agree on ONE marker location — even
+    # under track-local adoption (`docs_root="."`) or invocation from a subdir,
+    # where a bare `project_dir / .jig` could diverge. Falls back to project_dir
+    # for sentinel-less trees (jig's own repo, test fixtures).
+    root = project_layout.project_root_for(project_dir, fallback=lambda p: p)
+    return root / ".jig" / "spec-ref"
+
+
+def _marker_names_bug(text: str) -> str:
+    """Return the zero-padded bug number a bug-shaped marker names, or ""."""
+    m = _BUG_MARKER_RE.search(text)
+    return f"{int(m.group(1)):03d}" if m else ""
+
+
+def _write_bug_marker(project_dir: Path, bug_number: str) -> None:
+    """Best-effort: stamp `<project-root>/.jig/spec-ref` with a bug-shaped
+    marker naming `bug_number`. Side-effect-isolated (AC4): ANY failure
+    (unwritable `.jig`, a file occupying the path, a permission error) is
+    swallowed so a marker write can never fail `pickup` or `transition`."""
+    try:
+        marker = _spec_ref_marker_path(project_dir)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(marker, f"bug={bug_number}\n")
+    except Exception:  # noqa: BLE001 — best-effort; never block a lifecycle step
+        return
+
+
+def _clear_bug_marker(project_dir: Path, bug_number: str) -> None:
+    """Best-effort: remove the marker IFF it currently names this bug. A marker
+    naming a spec slice or a different bug is left untouched — the session may
+    still be inside that other work item (AC5/AC6)."""
+    try:
+        marker = _spec_ref_marker_path(project_dir)
+        if not marker.is_file():
+            return
+        text = marker.read_text(encoding="utf-8", errors="replace")
+        if _marker_names_bug(text) == bug_number:
+            marker.unlink()
+    except Exception:  # noqa: BLE001 — best-effort; never block a lifecycle step
+        return
+
+
 def pickup_bug(project_dir: Path, ident: str, release: bool = False,
                reason: str | None = None) -> Path:
     if release and not (reason and reason.strip()):
@@ -465,11 +535,15 @@ def pickup_bug(project_dir: Path, ident: str, release: bool = False,
     fields, _ = parse_frontmatter(text)
     existing = str(fields.get("claimed_by") or "").strip()
     status = str(fields.get("status") or "").strip()
+    bug_number, _ = _bug_id_and_slug(path)
     if release:
         released_from = existing or "(unclaimed)"
         text = clear_frontmatter_field(text, "claimed_by")
         text = _append_release_log(text, released_from, reason or "")
         atomic_write_text(path, text)
+        # AC5: releasing the claim means the session is no longer inside this
+        # work item — drop its marker (only if it names this bug).
+        _clear_bug_marker(project_dir, bug_number)
         return path
 
     owner = _claim_identifier(project_dir)
@@ -482,6 +556,9 @@ def pickup_bug(project_dir: Path, ident: str, release: bool = False,
         )
     text = set_frontmatter_field(text, "claimed_by", owner)
     atomic_write_text(path, text)
+    # AC1: stamp AFTER the claim write succeeds — pickup is the working-tree
+    # entry step, including in the --push flow (record originated on origin/main).
+    _write_bug_marker(project_dir, bug_number)
     return path
 
 
@@ -754,6 +831,16 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
 
     text = set_frontmatter_field(text, "status", new_status)
     atomic_write_text(path, text)
+    # Slice 098-04: stamp/clear the lifecycle marker AFTER the status write
+    # succeeds (AC2 ordering — a failed write above leaves no marker behind).
+    bug_number, _ = _bug_id_and_slug(path)
+    if new_status in _BUG_WORKING_STATUSES:
+        _write_bug_marker(project_dir, bug_number)
+    elif new_status in _BUG_TERMINAL_STATUSES:
+        # Only DONE is reachable here via `_validate_order`; ESCALATED /
+        # RESOLVED_ON_MAIN are set in escalate_bug / record_main_check and clear
+        # the marker there. The full set is kept for defensive symmetry.
+        _clear_bug_marker(project_dir, bug_number)
     return path
 
 
@@ -790,6 +877,10 @@ def record_main_check(
     if result == "resolved_on_main":
         text = set_frontmatter_field(text, "status", "RESOLVED_ON_MAIN")
     atomic_write_text(path, text)
+    # Slice 098-04 AC6: RESOLVED_ON_MAIN ends the work — clear the marker.
+    if result == "resolved_on_main":
+        bug_number, _ = _bug_id_and_slug(path)
+        _clear_bug_marker(project_dir, bug_number)
     return path
 
 
@@ -858,6 +949,9 @@ def escalate_bug(project_dir: Path, ident: str, slug: str | None = None) -> Path
     text = set_frontmatter_field(text, "escalated_to", spec_num)
     text = set_frontmatter_field(text, "status", "ESCALATED")
     atomic_write_text(path, text)
+    # Slice 098-04 AC6: ESCALATED reclassifies the work to a spec — clear the
+    # marker (the bug lifecycle is over; the spec lifecycle owns it now).
+    _clear_bug_marker(project_dir, bug_id)
     return path
 
 
@@ -959,25 +1053,81 @@ def _render_board(rows: list[dict[str, str]],
     return board
 
 
-def regenerate_status_board(project_dir: Path) -> Path:
-    bugs_dir = _bugs_dir(project_dir)
-    bugs_dir.mkdir(parents=True, exist_ok=True)
-    board = bugs_dir / "README.md"
-    default_preamble = (
-        "# Bug Status Board\n\n"
-        "> Related: [Spec Status Board](../specs/README.md). Check both "
-        "boards before folding reported defects into spec acceptance "
-        "criteria.\n\n"
-    )
-    existing = board.read_text() if board.exists() else default_preamble
+_DEFAULT_BOARD_PREAMBLE = (
+    "# Bug Status Board\n\n"
+    "> Related: [Spec Status Board](../specs/README.md). Check both "
+    "boards before folding reported defects into spec acceptance "
+    "criteria.\n\n"
+)
+
+
+def _compose_board(project_dir: Path, existing: str) -> str:
+    """Render the board text from the records on disk, carrying the curated
+    Notes column over from `existing`. Pure — shared by `regenerate_status_board`
+    (which writes it) and `check_board` (which compares against it), so the
+    check can never drift from what regeneration would produce."""
     notes = _parse_existing_notes(existing)
     table_start = existing.find("| ID |")
     preamble = existing[:table_start].rstrip() if table_start != -1 else existing.rstrip()
     if not preamble:
-        preamble = default_preamble.rstrip()
-    content = preamble + "\n\n" + _render_board(_bug_rows(project_dir), notes)
-    atomic_write_text(board, content)
+        preamble = _DEFAULT_BOARD_PREAMBLE.rstrip()
+    return preamble + "\n\n" + _render_board(_bug_rows(project_dir), notes)
+
+
+def regenerate_status_board(project_dir: Path) -> Path:
+    bugs_dir = _bugs_dir(project_dir)
+    bugs_dir.mkdir(parents=True, exist_ok=True)
+    board = bugs_dir / "README.md"
+    existing = board.read_text() if board.exists() else _DEFAULT_BOARD_PREAMBLE
+    atomic_write_text(board, _compose_board(project_dir, existing))
     return board
+
+
+def _duplicate_ids(project_dir: Path) -> dict:
+    """Map bug id -> sorted filenames, for ids claimed by more than one record.
+
+    `_render_board` renders two records sharing an id as two rows without
+    complaint, and a drift check can't see the problem either — both rows are
+    faithfully derived. Today the only thing that surfaces this is the merge
+    conflict on the board itself, which is precisely what we want to stop
+    resolving by hand (issue #149). So it needs its own detector.
+
+    Grouping lives in `_common.derived_docs`; the spec board and the ADR index
+    have the same collision, and only the id-off-a-path step differs. What
+    counts as a bug *record* stays here — `_is_bug_record` is bug-specific."""
+    bugs_dir = _bugs_dir(project_dir)
+    if not bugs_dir.is_dir():
+        return {}
+    return _duplicate_ids_in(
+        (_bug_id_and_slug(path)[0], path.name)
+        for path in sorted(bugs_dir.glob("*.md"))
+        if path.name != "README.md" and _is_bug_record(path)
+    )
+
+
+def check_board(project_dir: Path) -> list:
+    """Read-only board audit. Returns a list of human-readable problems —
+    empty means clean. Never writes: CI runs this against a checkout, and a
+    check that repairs what it measures can't be trusted to report it."""
+    problems = []
+    for bug_id, names in _duplicate_ids(project_dir).items():
+        problems.append(
+            f"duplicate bug id {bug_id}: {', '.join(names)} — renumber one "
+            "before landing; parallel branches both allocated it"
+        )
+    board = _bugs_dir(project_dir) / "README.md"
+    if not board.is_file():
+        problems.append(
+            f"missing board: {board} — run `bug.py status-board` to create it"
+        )
+        return problems
+    existing = board.read_text()
+    if existing != _compose_board(project_dir, existing):
+        problems.append(
+            f"stale board: {board} does not match the bug records — run "
+            "`bug.py status-board` and commit the result"
+        )
+    return problems
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1056,6 +1206,12 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[project_parent],
         help="regenerate docs/bugs/README.md",
     )
+    sub.add_parser(
+        "check-board",
+        parents=[project_parent],
+        help="read-only: verify docs/bugs/README.md matches the records and "
+             "that no bug id is claimed twice",
+    )
     return parser
 
 
@@ -1093,6 +1249,13 @@ def main(argv: list[str] | None = None) -> int:
         elif ns.command == "status-board":
             path = regenerate_status_board(project_dir)
             print(path.relative_to(project_dir))
+        elif ns.command == "check-board":
+            problems = check_board(project_dir)
+            for problem in problems:
+                print(f"bug board: {problem}", file=sys.stderr)
+            if problems:
+                return 1
+            print("bug board: clean")
         else:  # pragma: no cover - argparse enforces this.
             parser.error(f"unknown command: {ns.command}")
     except BugError as exc:

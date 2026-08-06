@@ -67,3 +67,13 @@ deliberate, not a placeholder.
 button-copy convention.
 
 **Commit:** _(example — no SHA)_
+
+### 2026-08-02 — jig repo activates its in-repo .claude/ adapter, plugin disabled in committed settings
+
+**Decision:** The jig repo ships enabledPlugins {"jig@jig": false} in the committed .claude/settings.json, so every session — cloud web sessions and local development — activates the in-repo .claude/ adapter that points at the root skills/, hooks/, and agents/.
+
+**Context:** Claude Code on the web has no interactive plugin install and no plugin runtime, so plugin-mode jig never loads there; the committed adapter makes jig active from a fresh clone. It also keeps the same hooks from being registered twice (the adapter plus a locally-installed plugin), which would fire every hook a second time. The setting is committed because using the in-repo machinery is a project-wide choice for the jig repo; it is a no-op where the plugin is absent (other contributors and cloud sessions), and a developer can re-enable the plugin for this repo through their own gitignored settings.local.json.
+
+**Scope:** .claude/settings.json (enabledPlugins) in the jig source repo; scaffolded projects receive their .claude/ from scaffold-init.
+
+**Commit:** 1e2cdb8

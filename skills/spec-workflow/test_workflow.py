@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -17,6 +18,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from skills._common.test_reservation import (  # noqa: E402
+    CAPTURED_GH006,
+    CAPTURED_GH013,
+)
+
 WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SCAFFOLD = REPO_ROOT / "skills" / "scaffold-init" / "scaffold.py"
 
@@ -1818,6 +1824,23 @@ class SliceTemplateTests(unittest.TestCase):
         self.assertIn("`no-op`", text)
         self.assertIn("`deferred`", text)
 
+    def test_slice_template_dod_asks_for_mutation_evidence(self):
+        """Spec 097-02 / issue #124 instance 2, question 3 — the DoD block
+        requires mutation evidence: each new test shown to fail when its
+        feature is removed. Guards against shipping the guardrail's own
+        prose untested (dogfooding the test-faithfulness discipline)."""
+        template = REPO_ROOT / "templates" / "docs" / "specs" / "slice-template.md"
+        text = template.read_text()
+        # Scope to the standard-slice DoD block so the assertion is anchored,
+        # not a whole-file token match (the failure mode this spec fights).
+        m = re.search(r"\*\*DoD:\*\*\n(.*?)(?=\n### |\n## |\Z)", text,
+                      flags=re.DOTALL)
+        self.assertIsNotNone(m, "slice template must carry a **DoD:** block")
+        dod = m.group(1).lower()
+        self.assertIn("shown to fail when its feature is removed", dod,
+                      "the DoD must require mutation evidence — each new test "
+                      "shown to fail when its feature is removed (spec 097-02)")
+
     def test_slice_template_is_file_per_slice_shape(self):
         """Slice 018-03: template's frontmatter must come BEFORE the
         `## Slice` heading (file-per-slice layout). Embedded layout
@@ -2462,7 +2485,7 @@ class ReserveSpecTests(unittest.TestCase):
         # reserve/ branch falls through to the recorder's rc=0 default.
         rec.stub(_matches("git", "push", "origin"),
                  returncode=1,
-                 stderr="remote: error: GH006: Protected branch update failed.\n")
+                 stderr=CAPTURED_GH006)
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
                  stdout="https://github.com/user/repo/pull/7\n")
         import shutil as _shutil
@@ -2593,7 +2616,7 @@ class ReserveSpecTests(unittest.TestCase):
         rec.stub(_matches("git", "commit"), returncode=0)
         # push origin main FAILS with protection signal
         rec.stub(_matches("git", "push", "origin", "main"),
-                 returncode=1, stderr="remote: error: GH006: Protected branch update failed.\n")
+                 returncode=1, stderr=CAPTURED_GH006)
         # Fallback sequence
         rec.stub(_matches("git", "branch"), returncode=0)
         rec.stub(_matches("git", "reset", "--hard", "origin/main"),
@@ -5295,10 +5318,12 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
     # ----------- AC #6: fetch failure preserves warn-and-proceed ------
 
     def test_fetch_failure_preserves_warn_and_proceed(self):
-        """AC #6 — `git fetch origin main` fails → existing warning to
+        """AC #6 — `git fetch origin` fails → existing warning to
         stderr (workflow.py:1278-1282) is emitted verbatim; the new
         diverged-main check is skipped (no origin/main to compare); the
-        scan falls back to working-tree per AC #3."""
+        scan falls back to working-tree per AC #3. The reservation path
+        fetches origin-wide (spec 107 / ADR-0053) so the in-flight scan
+        can reuse the refs without a second fetch."""
         import io
         from unittest.mock import patch
         self._mkspec("001-existing")
@@ -5325,7 +5350,7 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
         # AC #6: existing warn-and-proceed text preserved
         stderr_text = captured.getvalue()
         self.assertIn("warning:", stderr_text)
-        self.assertIn("git fetch origin main", stderr_text)
+        self.assertIn("git fetch origin", stderr_text)
         self.assertIn("proceeding with local view", stderr_text)
         # AC #6: scan fell back to working-tree (max=004 → 005)
         spec_dir = self.target / "docs" / "specs" / "005-warnslot"
@@ -5380,15 +5405,19 @@ class ReserveSpecAgainstOriginTests(unittest.TestCase):
             len(reset_calls), 1,
             f"race-recovery must reset HEAD~1; got: {fake._calls}",
         )
-        # AC #7: classifier helper still importable + behaves
+        # AC #7: classifier helper still importable + behaves, against the
+        # captured multi-line refusals (spec 107 / ADR-0053).
         self.assertEqual(
             _workflow._classify_push_failure(
                 "! [rejected] main -> main (non-fast-forward)"),
             "race",
         )
         self.assertEqual(
-            _workflow._classify_push_failure(
-                "remote: error: GH006: Protected branch update failed."),
+            _workflow._classify_push_failure(CAPTURED_GH006),
+            "protection",
+        )
+        self.assertEqual(
+            _workflow._classify_push_failure(CAPTURED_GH013),
             "protection",
         )
 
@@ -5438,8 +5467,10 @@ class SliceClaimTests(unittest.TestCase):
     `transition <slice> IN_PROGRESS` stamps a `claimed_by:` identifier
     and refuses a foreign on-disk claim; `push`/`pr_mode` additionally
     reserve the claim on origin/main (mocked here — no real push). The
-    claim is cleared on REVIEWED / back-transitions, and `--release`
-    force-clears with an audit reason. Off-network (default) behaviors
+    claim is cleared on the back-transitions to the pickup-queue states,
+    and `--release` force-clears with an audit reason. (ADR-0045 reversed
+    the REVIEWED clearing edge — see `test_claim_carried_into_reviewed`
+    and `Bug014WidenedClaimTests`.) Off-network (default) behaviors
     call `transition()` directly; the reserve paths use the
     `_SubprocessRecorder` git mock (same pattern as ReserveSpecTests)."""
 
@@ -5559,21 +5590,35 @@ class SliceClaimTests(unittest.TestCase):
             _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
         self.assertEqual(self._fm().get("claimed_by"), "wt-me")
 
-    # ---- AC4: claim cleared on forward / back transition --------------
+    # ---- AC4: claim clearing, as narrowed by ADR-0045 -----------------
+    #
+    # PARTIALLY AMENDED by ADR-0045 / bug 014. AC4 originally cleared the claim
+    # on all three of REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT. Only the
+    # REVIEWED edge is reversed: clearing there is what left reconciliation —
+    # the heaviest write phase — with no owner. The other two edges SURVIVE
+    # UNCHANGED, because `DRAFT` and `READY_FOR_IMPLEMENTATION` are the pickup-
+    # queue states jig tells readers to choose from; a residual claim there
+    # would read as "occupied" on a slice that is free. See
+    # `Bug014WidenedClaimTests` for the full contract.
 
-    def test_claim_cleared_on_reviewed(self):
+    def test_claim_carried_into_reviewed(self):
         self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
         from unittest.mock import patch
-        with patch.dict(os.environ, {"JIG_REVIEW_EVIDENCE_GATE": "0"}):
+        with patch.dict(os.environ, {"JIG_REVIEW_EVIDENCE_GATE": "0",
+                                     "JIG_CLAIM_ID": "wt-me"}):
             _workflow.transition(self.spec, "200-01", "REVIEWED")
-        self.assertNotIn("claimed_by", self._fm())
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
 
     def test_claim_cleared_on_back_to_ready(self):
+        """UNCHANGED from spec 049 AC4 — `READY_FOR_IMPLEMENTATION` means the
+        slice is available for pickup, so entering it releases the claim."""
         self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
         _workflow.transition(self.spec, "200-01", "READY_FOR_IMPLEMENTATION")
         self.assertNotIn("claimed_by", self._fm())
 
     def test_claim_cleared_on_back_to_draft(self):
+        """UNCHANGED from spec 049 AC4 — same reason: `DRAFT` is a pickup-queue
+        state (a slice sent back for rework is unowned)."""
         self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
         _workflow.transition(self.spec, "200-01", "DRAFT")
         self.assertNotIn("claimed_by", self._fm())
@@ -5710,7 +5755,7 @@ class SliceClaimTests(unittest.TestCase):
         origin = self.slice.read_text()
         rec = self._push_recorder(
             origin, push_rc=1,
-            push_stderr="remote: error: GH006: Protected branch update failed.\n")
+            push_stderr=CAPTURED_GH006)
         rec.stub(_matches("git", "config", "--get", "remote.origin.url"),
                  returncode=0, stdout="git@github.com:user/repo.git\n")
         rec.stub(_matches("gh", "pr", "create"), returncode=0,
@@ -6146,6 +6191,656 @@ class StartCollisionGuardE2E(unittest.TestCase):
         self.assertEqual(self._fm().get("claimed_by"), "wt-me")
 
 
+class Bug014WidenedClaimTests(unittest.TestCase):
+    """Bug 014 / issue #130: `claimed_by:` must mark presence across the whole
+    ACTIVE lifecycle, not only `IN_PROGRESS`.
+
+    Before this fix the claim was stamped only on `→ IN_PROGRESS` and actively
+    cleared on `→ REVIEWED` / `READY_FOR_IMPLEMENTATION` / `DRAFT`, so a slice
+    under spec-level work (drafting, frame-critique, spec review, and above all
+    RECONCILIATION — the heaviest write phase) carried no owner at all. Every
+    pickup surface then read "no claim" as "free", which is exactly how the
+    reported incident routed a second session onto a live slice.
+
+    See [ADR-0045](../../docs/decisions/adr-0045-slice-claim-covers-active-lifecycle.md),
+    which AMENDS spec 049's `IN_PROGRESS`-only scoping (amends, not supersedes —
+    ADR-0010 makes that distinction load-bearing in this repo)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-bug013-")
+        self.root = Path(self.tmpdir)
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.slice = self.spec_dir / "slice-01-demo.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, status="IN_PROGRESS", claimed_by=None):
+        fm = f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n"
+        if claimed_by:
+            fm += f"claimed_by: {claimed_by}\n"
+        fm += ("---\n\n## Slice 200-01 — demo\n\n"
+               "**Goal:** placeholder.\n\n**DoD:**\n- [ ] placeholder.\n")
+        self.slice.write_text(fm)
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def _transition(self, target, **kwargs):
+        """Transition as `wt-me` with the review-evidence gate out of the way —
+        this class is about claim bookkeeping, not the ADR-0014 gate."""
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_REVIEW_EVIDENCE_GATE": "0",
+                                     "JIG_START_COLLISION_GATE": "0"}):
+            _workflow.transition(self.spec, "200-01", target, **kwargs)
+
+    # ---- the headline regression: reconciliation is no longer invisible ----
+
+    def test_claim_survives_transition_to_reviewed(self):
+        """The reported failure, minimized. `REVIEWED → RECONCILED` is the
+        heaviest write phase in the lifecycle; the claim used to be erased on
+        the way in, leaving that phase with the least ownership signal."""
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        self._transition("REVIEWED")
+        self.assertEqual(
+            self._fm().get("claimed_by"), "wt-me",
+            "claim must survive into REVIEWED — reconciliation happens there")
+
+    def test_claim_stamped_on_every_working_state(self):
+        """A session that takes a slice to any WORKING state marks presence,
+        not just one that starts building."""
+        for target in ("READY_FOR_REVIEW", "IN_PROGRESS", "REVIEWED",
+                       "RECONCILED"):
+            with self.subTest(target=target):
+                self._write_slice(status="READY_FOR_REVIEW")
+                self._transition(target)
+                self.assertEqual(self._fm().get("claimed_by"), "wt-me",
+                                 f"{target} must carry a claim")
+
+    def test_claim_cleared_on_queue_and_terminal_states(self):
+        """The release points: the two PICKUP-QUEUE states plus the three
+        terminal ones. Entering a queue state means "I am done here; it is
+        available" — so it releases, exactly as spec 049 AC4 had it."""
+        for target in ("DRAFT", "READY_FOR_IMPLEMENTATION",
+                       "DONE", "DEFERRED", "ABANDONED"):
+            with self.subTest(target=target):
+                self._write_slice(status="RECONCILED", claimed_by="wt-me")
+                self._transition(target)
+                self.assertNotIn("claimed_by", self._fm(),
+                                 f"{target} is a release point")
+
+    def test_claim_states_partition_the_lifecycle(self):
+        """The stamp/clear split IS the semantic core of ADR-0045, so pin it:
+        every lifecycle status must be in exactly one set. Without this, a
+        tenth status added later would silently carry neither stamp nor
+        clear (craft pass)."""
+        active = set(_workflow._CLAIM_WORKING_STATUSES)
+        clearing = set(_workflow._CLAIM_RELEASE_STATUSES)
+        self.assertEqual(active & clearing, set(),
+                         "a status cannot both stamp and clear")
+        self.assertEqual(active | clearing, set(_workflow.VALID_STATUSES),
+                         "every lifecycle status must stamp or clear")
+
+    def test_pickup_queue_states_are_not_stamped(self):
+        """Regression on the frame-critique finding, at the exact surface that
+        broke: the spec author's `→ READY_FOR_IMPLEMENTATION` must NOT leave
+        their branch name on a slice that is now free to pick up. Stamping the
+        pickup queue inverts bug 014 — "blank reads as free" becomes "residue
+        reads as occupied"."""
+        import io
+        from unittest.mock import patch
+        for target in ("DRAFT", "READY_FOR_IMPLEMENTATION"):
+            with self.subTest(target=target):
+                self._write_slice(status="READY_FOR_REVIEW",
+                                  claimed_by="author-branch")
+                cap = io.StringIO()
+                with patch.object(_workflow.sys, "stderr", cap):
+                    self._transition(target)
+                self.assertNotIn(
+                    "claimed_by", self._fm(),
+                    f"{target} is a pickup-queue state — it must read as free")
+                # The documented exception to "a warning for every foreign claim
+                # the block does not cover": handing a slice BACK to the queue
+                # clears a foreign claim silently, because that is what a release
+                # means. Pinned so the exception cannot drift into a warning.
+                self.assertEqual(cap.getvalue(), "",
+                                 f"{target} is a release point — clearing a "
+                                 f"foreign claim there must be silent")
+
+    def test_author_to_implementer_handoff_is_silent(self):
+        """The false-positive guard for the whole design. A spec author making
+        a slice ready, then a DIFFERENT session building it, is the single most
+        routine path in jig — it must produce no warning at all. The six-state
+        version warned here every time."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_REVIEW", claimed_by="author-branch")
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "author-branch",
+                                     "JIG_START_COLLISION_GATE": "0"}):
+            _workflow.transition(self.spec, "200-01",
+                                 "READY_FOR_IMPLEMENTATION")
+        self.assertNotIn("claimed_by", self._fm())
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "implementer-branch",
+                                     "JIG_START_COLLISION_GATE": "0"}), \
+             patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(cap.getvalue(), "",
+                         "the routine author→implementer handoff must be silent")
+        self.assertEqual(self._fm().get("claimed_by"), "implementer-branch")
+
+    # ---- foreign claims: visible everywhere, blocking only where it matters --
+
+    def test_foreign_claim_outside_in_progress_warns_and_proceeds(self):
+        """Two sessions working one spec CAN be legitimate, so a foreign claim
+        outside IN_PROGRESS is surfaced loudly rather than hard-blocked — the
+        signal that was missing entirely, without a new class of refusal.
+
+        Target is a WORKING state: moving to a pickup-queue state RELEASES the
+        claim instead (see `test_pickup_queue_states_are_not_stamped`), so
+        there is nothing to warn about on that path."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_REVIEW", claimed_by="wt-other")
+        cap = io.StringIO()
+        with patch.object(_workflow.sys, "stderr", cap):
+            self._transition("REVIEWED")
+        warning = cap.getvalue()
+        self.assertIn("wt-other", warning)
+        self.assertIn("READY_FOR_REVIEW", warning)
+        self.assertIn("--release", warning)
+        # Fires BEFORE the evidence gate / start-collision guard, either of
+        # which can still refuse — so it must not assert a completed takeover.
+        self.assertIn("If this transition succeeds", warning)
+        self.assertNotIn("Proceeding, and taking the claim over", warning)
+        # Non-blocking: the transition completed and the claim moved over.
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    def test_no_warning_when_claim_is_own(self):
+        """A session walking its own slice forward must stay quiet."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-me")
+        cap = io.StringIO()
+        with patch.object(_workflow.sys, "stderr", cap):
+            self._transition("REVIEWED")
+        self.assertNotIn("claimed by", cap.getvalue())
+
+    def test_in_progress_collision_still_hard_blocks(self):
+        """Guard against over-relaxing: two sessions BUILDING the same slice
+        is still refused outright (spec 049 AC3 / 051-04 preserved)."""
+        self._write_slice(status="IN_PROGRESS", claimed_by="wt-other")
+        with self.assertRaises(_workflow.WorkflowError) as ctx:
+            self._transition("IN_PROGRESS")
+        self.assertIn("wt-other", str(ctx.exception))
+        self.assertEqual(self._fm().get("claimed_by"), "wt-other")
+
+    # ---- the reader surface that reported "unclaimed" ----------------------
+
+    def test_status_board_renders_claim_for_working_non_in_progress_states(self):
+        """`render_status_table` used to show the owner on IN_PROGRESS rows
+        only, so the board itself could not express spec-level presence."""
+        for status in ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED"):
+            with self.subTest(status=status):
+                rows = [("200-x", "200-01 — a", status, "", "", "wt-foo")]
+                table = _workflow.render_status_table(rows)
+                cell = [ln.split("|")[3].strip()
+                        for ln in table.splitlines()
+                        if "| 200-01 — a |" in ln][0]
+                self.assertEqual(cell, f"{status} (wt-foo)")
+
+    def test_status_board_never_labels_a_pickup_queue_row_with_an_owner(self):
+        """The board is what a reader consults to answer "what is free". A
+        residual owner on a queue row would answer it wrongly (frame-critique)."""
+        for status in ("DRAFT", "READY_FOR_IMPLEMENTATION"):
+            with self.subTest(status=status):
+                rows = [("200-x", "200-01 — a", status, "", "", "stale-branch")]
+                table = _workflow.render_status_table(rows)
+                cell = [ln.split("|")[3].strip()
+                        for ln in table.splitlines()
+                        if "| 200-01 — a |" in ln][0]
+                self.assertEqual(cell, status)
+
+    # ---- reservation on origin/main at a non-IN_PROGRESS state ------------
+    #
+    # The craft + bug-review passes both caught this as a blocker: widening the
+    # CALL SITE to every working state without touching `_reserve_claim_on_main`
+    # made `transition … RECONCILED --push` publish `status: IN_PROGRESS` to
+    # origin/main — corrupting the trunk copy AND fabricating exactly the
+    # foreign-IN_PROGRESS state that `_refuse_start_collision` hard-blocks on.
+    # These tests assert the CONTENT the reservation writes, not just its argv.
+
+    def _reservation_recorder(self, origin_content):
+        """Mock git so the reservation runs end-to-end, and capture the bytes
+        it writes into the ephemeral worktree."""
+        rec = _SubprocessRecorder()
+        rec.stub(_matches("git", "show"), returncode=0, stdout=origin_content)
+        rec.stub(_matches("git", "rev-parse", "HEAD"),
+                 returncode=0, stdout="abc123\n")
+        written = []
+        real = _workflow.atomic_write_text
+
+        def _capture(path, text, *a, **kw):
+            written.append((str(path), text))
+            return real(path, text, *a, **kw)
+
+        return rec, written, _capture
+
+    @staticmethod
+    def _trunk_write(written):
+        """The reservation writes into an ephemeral `jig-claim-*` worktree and
+        runs BEFORE the caller's own slice write — so filter by PATH, not by
+        content, or you assert against the local file instead of the trunk
+        copy (which is how the first cut of this test passed vacuously)."""
+        hits = [text for path, text in written if "jig-claim-" in path]
+        return hits[-1] if hits else None
+
+    def _origin_copy(self, status):
+        return (f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n"
+                f"---\n\n## Slice 200-01 — demo\n")
+
+    def test_push_at_non_in_progress_state_does_not_rewrite_trunk_status(self):
+        """A reservation outside IN_PROGRESS publishes the CLAIM only. Trunk
+        lifecycle state belongs to the landing flow, not to a feature branch's
+        in-flight transitions — and a fabricated trunk `IN_PROGRESS` would
+        hard-block every other worktree."""
+        from unittest.mock import patch
+        for target in ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED"):
+            with self.subTest(target=target):
+                self._write_slice(status="READY_FOR_REVIEW")
+                origin = self._origin_copy("READY_FOR_IMPLEMENTATION")
+                rec, written, capture = self._reservation_recorder(origin)
+                with patch.dict(os.environ,
+                                {"JIG_CLAIM_ID": "wt-me",
+                                 "JIG_REVIEW_EVIDENCE_GATE": "0",
+                                 "JIG_START_COLLISION_GATE": "0"}), \
+                     patch.object(_workflow, "subprocess") as sp, \
+                     patch.object(_workflow, "atomic_write_text", capture):
+                    sp.run = rec
+                    _workflow.transition(self.spec, "200-01", target,
+                                         push=True)
+                trunk = self._trunk_write(written)
+                self.assertIsNotNone(
+                    trunk, "nothing written to the claim worktree")
+                fields, _ = _workflow.parse_frontmatter(trunk)
+                self.assertEqual(
+                    fields.get("status"), "READY_FOR_IMPLEMENTATION",
+                    f"{target} --push must leave the trunk status alone")
+                self.assertEqual(fields.get("claimed_by"), "wt-me")
+
+    def test_push_at_in_progress_still_publishes_status_to_trunk(self):
+        """The one deliberate exception: `_refuse_start_collision` reads
+        `status: IN_PROGRESS` + a foreign claim off origin/main, so publishing
+        it is what makes the 051-04 start-time guard work."""
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_IMPLEMENTATION")
+        origin = self._origin_copy("READY_FOR_IMPLEMENTATION")
+        rec, written, capture = self._reservation_recorder(origin)
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_START_COLLISION_GATE": "0"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS", push=True)
+        trunk = self._trunk_write(written)
+        self.assertIsNotNone(trunk, "nothing written to the claim worktree")
+        fields, _ = _workflow.parse_frontmatter(trunk)
+        self.assertEqual(fields.get("status"), "IN_PROGRESS")
+        self.assertEqual(fields.get("claimed_by"), "wt-me")
+
+    def test_push_at_non_in_progress_is_idempotent_when_already_ours(self):
+        """Re-pushing a claim we already hold must not re-do the
+        fetch/worktree/commit/push cycle. The short-circuit used to key on
+        `origin_status == IN_PROGRESS`, which made it unreachable for the
+        three working states other than IN_PROGRESS."""
+        from unittest.mock import patch
+        self._write_slice(status="REVIEWED")
+        origin = ("---\nstatus: READY_FOR_IMPLEMENTATION\ndependencies: []\n"
+                  "last_verified:\nclaimed_by: wt-me\n---\n\n"
+                  "## Slice 200-01 — demo\n")
+        rec, _written, capture = self._reservation_recorder(origin)
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "RECONCILED", push=True)
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git worktree add", flat)
+        self.assertNotIn("git push", flat)
+
+    def test_push_on_prose_only_slice_refuses_at_any_active_state(self):
+        """The widened prose-only refusal (no frontmatter to carry a claim)."""
+        self.spec.write_text(
+            "# Spec 200\n\n## Slice 200-09 — legacy\n\n"
+            "**STATUS: DRAFT**\n")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}):
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-09",
+                                     "READY_FOR_REVIEW", push=True)
+        # (READY_FOR_REVIEW is a working state, so the claim path is reached.)
+        self.assertIn("frontmatter", str(ctx.exception).lower())
+
+    def test_reservation_warns_before_replacing_a_foreign_trunk_claim(self):
+        """A foreign claim on the TRUNK copy outside IN_PROGRESS is newly
+        reachable (pre-ADR-0045 a trunk claim could only coexist with
+        `status: IN_PROGRESS`). Overwriting it silently would break this
+        decision's headline promise, and the on-disk warning cannot cover it —
+        that one reads the CALLER's copy, which in the cross-branch case does
+        not carry the other session's claim at all."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="REVIEWED")
+        origin = ("---\nstatus: REVIEWED\ndependencies: []\n"
+                  "last_verified:\nclaimed_by: wt-other\n---\n\n"
+                  "## Slice 200-01 — demo\n")
+        rec, _written, capture = self._reservation_recorder(origin)
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture), \
+             patch.object(_workflow.sys, "stderr", cap):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "RECONCILED", push=True)
+        warning = cap.getvalue()
+        self.assertIn("wt-other", warning)
+        self.assertIn("origin/main", warning)
+        self.assertIn("--release", warning)
+        # Non-blocking: the reservation still happened.
+        self.assertIn("git push", " | ".join(rec.argv_log()))
+
+    def test_start_guard_warns_on_foreign_trunk_claim_at_a_working_state(self):
+        """The cross-worktree half of the widened claim. Without this, `--push`
+        publishes a trunk field nothing ever reads, so "so other worktrees see
+        it" would be true only after a merge. Warns, never blocks — this is not
+        the both-ends-IN_PROGRESS case."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_IMPLEMENTATION")
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("REVIEWED", "wt-other"))), \
+             patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        warning = cap.getvalue()
+        self.assertIn("wt-other", warning)
+        self.assertIn("REVIEWED", warning)
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    def test_start_guard_silent_when_trunk_claim_is_at_a_queue_state(self):
+        """A trunk copy sitting at a queue state carries no claim by
+        construction; if a stale one survives a merge, it must not warn — the
+        slice is free."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_IMPLEMENTATION")
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(
+                 _workflow, "_origin_slice_state",
+                 return_value=("present",
+                               ("READY_FOR_IMPLEMENTATION", "stale-branch"))), \
+             patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(cap.getvalue(), "")
+
+    # ---- the false-refusal guards -----------------------------------------
+    #
+    # These are the tests the record claimed existed and did not: an earlier
+    # edit script aborted before writing them, and the record was updated as if
+    # it had landed. Caught by the round-4 bug-review + craft passes. Both the
+    # trunk path and the LOCAL path were unguarded — dropping either
+    # `target_is_in_progress` / `new_status == IN_PROGRESS_STATUS` conjunct left
+    # the whole suite green.
+
+    def test_local_foreign_in_progress_claim_does_not_block_a_working_target(self):
+        """The case ADR-0045 names as the false block it avoids: a reviewer
+        worktree recording a verdict on a slice the implementer still holds.
+        Warns, never refuses. Guards the `new_status == IN_PROGRESS_STATUS`
+        conjunct on the local refusal."""
+        import io
+        from unittest.mock import patch
+        for target in ("REVIEWED", "RECONCILED", "READY_FOR_REVIEW"):
+            with self.subTest(target=target):
+                self._write_slice(status="IN_PROGRESS", claimed_by="wt-other")
+                cap = io.StringIO()
+                with patch.object(_workflow.sys, "stderr", cap):
+                    self._transition(target)
+                self.assertIn("wt-other", cap.getvalue())
+                self.assertEqual(self._fm()["status"], target)
+                self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+
+    def test_push_at_working_state_does_not_refuse_on_foreign_in_progress_trunk(self):
+        """Trunk sibling of the above. Guards the `target_is_in_progress`
+        conjunct on the trunk refusal: `REVIEWED --push` against a trunk copy
+        the implementer is still building must NOT exit 2."""
+        import io
+        from unittest.mock import patch
+        for target in ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED"):
+            with self.subTest(target=target):
+                self._write_slice(status="READY_FOR_REVIEW")
+                origin = ("---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                          "last_verified:\nclaimed_by: wt-other\n---\n\n"
+                          "## Slice 200-01 — demo\n")
+                rec, written, capture = self._reservation_recorder(origin)
+                cap = io.StringIO()
+                with patch.dict(os.environ,
+                                {"JIG_CLAIM_ID": "wt-me",
+                                 "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+                     patch.object(_workflow, "subprocess") as sp, \
+                     patch.object(_workflow, "atomic_write_text", capture), \
+                     patch.object(_workflow.sys, "stderr", cap):
+                    sp.run = rec
+                    # No WorkflowError.
+                    _workflow.transition(self.spec, "200-01", target, push=True)
+                self.assertIn("wt-other", cap.getvalue())
+                # ...and it must not TRANSFER the enforced lock: the trunk claim
+                # is left intact, because origin/main is IN_PROGRESS under it and
+                # `_refuse_start_collision` hard-blocks on exactly that pair.
+                self.assertIn("ENFORCED", cap.getvalue())
+                self.assertIsNone(self._trunk_write(written),
+                                  "must not rewrite the trunk copy")
+                self.assertNotIn("git push", " | ".join(rec.argv_log()))
+                # The local transition still went through.
+                self.assertEqual(self._fm()["status"], target)
+
+    def test_push_to_in_progress_still_refuses_on_foreign_in_progress_trunk(self):
+        """Anti-regression on that relaxation: both ends IN_PROGRESS is still an
+        outright refusal on the trunk path (spec 049 AC2/AC6, 051-04)."""
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_IMPLEMENTATION")
+        origin = ("---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                  "last_verified:\nclaimed_by: wt-other\n---\n\n"
+                  "## Slice 200-01 — demo\n")
+        rec, _written, capture = self._reservation_recorder(origin)
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture):
+            sp.run = rec
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                     push=True)
+        self.assertIn("wt-other", str(ctx.exception))
+        flat = " | ".join(rec.argv_log())
+        self.assertNotIn("git worktree add", flat)
+        self.assertNotIn("git push", flat)
+
+    def test_one_transition_never_warns_twice_about_the_same_holder(self):
+        """`already_warned` dedup: when the caller's copy and the trunk copy
+        carry the SAME foreign claim, the on-disk warning names it and the
+        start-guard stays quiet. Pinned so a later edit cannot widen this into
+        broader silence."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_REVIEW", claimed_by="wt-other")
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("REVIEWED", "wt-other"))), \
+             patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(cap.getvalue().count("wt-other"), 1,
+                         "the same holder must be named exactly once")
+
+    def test_dedup_does_not_hide_a_different_trunk_holder(self):
+        """The dedup keys on the identifier, so a DIFFERENT holder on the trunk
+        copy must still be reported alongside the on-disk one."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_REVIEW", claimed_by="wt-local")
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "_origin_slice_state",
+                          return_value=("present", ("REVIEWED", "wt-trunk"))), \
+             patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        out = cap.getvalue()
+        self.assertIn("wt-local", out)
+        self.assertIn("wt-trunk", out)
+
+    def test_push_skips_an_unclaimed_in_progress_trunk_copy(self):
+        """The enforced-lock guard must NOT key on who holds the trunk claim.
+        What makes the lock enforceable is `status: IN_PROGRESS` on the trunk
+        copy, so stamping our claim onto an UNCLAIMED IN_PROGRESS copy
+        manufactures the same enforced pair from the other direction — and that
+        copy is reachable via `transition … IN_PROGRESS --release`. Keying on a
+        non-empty claim left exactly that hole, silently."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_REVIEW")
+        origin = ("---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                  "last_verified:\n---\n\n## Slice 200-01 — demo\n")
+        rec, written, capture = self._reservation_recorder(origin)
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture), \
+             patch.object(_workflow.sys, "stderr", cap):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "REVIEWED", push=True)
+        self.assertIn("ENFORCED", cap.getvalue())
+        self.assertIsNone(self._trunk_write(written),
+                          "must not stamp a claim onto an IN_PROGRESS trunk copy")
+        self.assertNotIn("git push", " | ".join(rec.argv_log()))
+        # Honest about doing nothing: no success line.
+        self.assertIn("nothing was pushed", cap.getvalue())
+
+    def test_reservation_warning_is_deduped_against_the_on_disk_warning(self):
+        """`already_warned` is threaded into the reservation too, so a `--push`
+        transition whose local AND trunk copies carry the same foreign holder
+        names it once, not twice. Without this the record's general
+        no-double-warning claim would be false on the --push path."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_REVIEW", claimed_by="wt-other")
+        origin = ("---\nstatus: REVIEWED\ndependencies: []\n"
+                  "last_verified:\nclaimed_by: wt-other\n---\n\n"
+                  "## Slice 200-01 — demo\n")
+        rec, _written, capture = self._reservation_recorder(origin)
+        cap = io.StringIO()
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture), \
+             patch.object(_workflow.sys, "stderr", cap):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "RECONCILED", push=True)
+        self.assertEqual(cap.getvalue().count("wt-other"), 1,
+                         "the same holder must be named exactly once")
+        # Self-contained: prove the reservation actually ran (so the single
+        # mention is a DEDUPED trunk warning, not a missing one).
+        self.assertIn("git push", " | ".join(rec.argv_log()))
+
+    def test_push_at_working_state_is_silent_about_our_own_in_progress_trunk_claim(self):
+        """The flagship `--push` sequence: claim at `IN_PROGRESS --push`, then
+        `REVIEWED --push` from the same session. The trunk copy is still
+        IN_PROGRESS under OUR claim, so there is nothing to protect — the
+        reservation must report the benign idempotent no-op, NOT warn us about
+        our own lock and advise force-releasing it. A warning on this path is the
+        'trains readers to ignore warnings' failure the whole fix is about."""
+        import io
+        from unittest.mock import patch
+        for target in ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED"):
+            with self.subTest(target=target):
+                self._write_slice(status="READY_FOR_REVIEW")
+                origin = ("---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                          "last_verified:\nclaimed_by: wt-me\n---\n\n"
+                          "## Slice 200-01 — demo\n")
+                rec, written, capture = self._reservation_recorder(origin)
+                cap = io.StringIO()
+                with patch.dict(os.environ,
+                                {"JIG_CLAIM_ID": "wt-me",
+                                 "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+                     patch.object(_workflow, "subprocess") as sp, \
+                     patch.object(_workflow, "atomic_write_text", capture), \
+                     patch.object(_workflow.sys, "stderr", cap):
+                    sp.run = rec
+                    _workflow.transition(self.spec, "200-01", target, push=True)
+                self.assertNotIn("ENFORCED", cap.getvalue())
+                self.assertEqual(cap.getvalue(), "",
+                                 "our own trunk claim must be silent")
+                # Still a no-op on the wire (the idempotent short-circuit).
+                self.assertIsNone(self._trunk_write(written))
+                self.assertNotIn("git push", " | ".join(rec.argv_log()))
+
+    def test_push_to_in_progress_claims_an_unclaimed_in_progress_trunk_copy(self):
+        """Pins the `not target_is_in_progress` conjunct on the decline, which
+        the earlier mutation checks missed (craft pass): a START-of-build
+        reservation against an UNCLAIMED IN_PROGRESS trunk copy must still
+        publish. Reachable exactly as the decline's own comment argues —
+        `transition … IN_PROGRESS --release` leaves that shape behind. Without
+        the conjunct, this declines and a session can never re-claim a slice it
+        released."""
+        import io
+        from unittest.mock import patch
+        self._write_slice(status="READY_FOR_IMPLEMENTATION")
+        origin = ("---\nstatus: IN_PROGRESS\ndependencies: []\n"
+                  "last_verified:\n---\n\n## Slice 200-01 — demo\n")
+        rec, written, capture = self._reservation_recorder(origin)
+        cap = io.StringIO()
+        # No JIG_START_COLLISION_GATE here: `push=True` bypasses the
+        # start-guard call site entirely, so setting it would imply coverage of
+        # a guard that never runs.
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             patch.object(_workflow, "subprocess") as sp, \
+             patch.object(_workflow, "atomic_write_text", capture), \
+             patch.object(_workflow.sys, "stderr", cap):
+            sp.run = rec
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS", push=True)
+        self.assertNotIn("SKIPPED", cap.getvalue())
+        trunk = self._trunk_write(written)
+        self.assertIsNotNone(trunk, "the start claim must reach the trunk copy")
+        fields, _ = _workflow.parse_frontmatter(trunk)
+        self.assertEqual(fields.get("claimed_by"), "wt-me")
+        self.assertIn("git push", " | ".join(rec.argv_log()))
+
+    def test_prose_only_slice_is_still_a_no_op(self):
+        """Legacy prose-only slices have no frontmatter to carry a claim;
+        widening must not start synthesizing a `---` block there."""
+        self.spec.write_text(
+            "# Spec 200\n\n## Slice 200-09 — legacy\n\n"
+            "**STATUS: READY_FOR_IMPLEMENTATION**\n")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_START_COLLISION_GATE": "0"}):
+            _workflow.transition(self.spec, "200-09", "IN_PROGRESS")
+        self.assertNotIn("---", self.spec.read_text())
+        self.assertNotIn("claimed_by", self.spec.read_text())
+
+
 class StatusBoardClaimRenderTests(unittest.TestCase):
     """Slice 049-02: the status board renders `IN_PROGRESS (<claimed_by>)`
     for claimed in-progress slices; everything else is byte-identical to the
@@ -6176,17 +6871,42 @@ class StatusBoardClaimRenderTests(unittest.TestCase):
         table = _workflow.render_status_table(rows)
         self.assertEqual(self._status_cell(table, "200-01 — a"), "IN_PROGRESS")
 
-    # AC2 — other states unchanged; claimed_by ignored on non-IN_PROGRESS
-    def test_other_states_unchanged(self):
-        cases = [("DRAFT", "DRAFT"), ("READY_FOR_REVIEW", "READY_FOR_REVIEW"),
-                 ("READY_FOR_IMPLEMENTATION", "READY_FOR_IMPLEMENTATION"),
-                 ("REVIEWED", "REVIEWED"), ("RECONCILED", "RECONCILED"),
-                 ("DONE", "**DONE**")]
-        for status, expect in cases:
+    # AC2 — AMENDED by ADR-0045 / bug 014: active states now DO surface the
+    # claim (an IN_PROGRESS-only suffix is what made spec-level presence
+    # unrenderable). Terminal states still ignore `claimed_by` — they never
+    # carry one — and unclaimed active rows still render plain, so the
+    # "byte-identical when unclaimed" half of AC2 stands.
+    def test_active_states_surface_claim_terminal_states_do_not(self):
+        # ADR-0045 narrowed the claim-bearing set to the WORKING states; the
+        # two pickup-queue states (DRAFT / READY_FOR_IMPLEMENTATION) render
+        # plain, exactly as they did pre-049-02.
+        active = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED")
+        for status in active:
+            rows = [("200-x", "200-01 — a", status, "", "", "wt-foo")]
+            table = _workflow.render_status_table(rows)
+            self.assertEqual(self._status_cell(table, "200-01 — a"),
+                             f"{status} (wt-foo)",
+                             f"active status {status} must surface the claim")
+        # All three terminal states, not just DONE — the renderer now
+        # branches on `_CLAIM_WORKING_STATUSES`, so the fall-through matters.
+        for status, expect in (("DONE", "**DONE**"), ("DEFERRED", "DEFERRED"),
+                               ("ABANDONED", "ABANDONED"),
+                               ("DRAFT", "DRAFT"),
+                               ("READY_FOR_IMPLEMENTATION",
+                                "READY_FOR_IMPLEMENTATION")):
             rows = [("200-x", "200-01 — a", status, "", "", "wt-foo")]
             table = _workflow.render_status_table(rows)
             self.assertEqual(self._status_cell(table, "200-01 — a"), expect,
-                             f"status {status} should ignore claimed_by")
+                             f"release-point status {status} must ignore "
+                             f"claimed_by")
+
+    def test_unclaimed_active_states_render_plain(self):
+        """AC2's surviving half: no claim → byte-identical to the pre-049-02
+        render, for every state."""
+        for status in ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED"):
+            rows = [("200-x", "200-01 — a", status, "", "", "")]
+            table = _workflow.render_status_table(rows)
+            self.assertEqual(self._status_cell(table, "200-01 — a"), status)
 
     # AC6 — truncation above the bound
     def test_long_claim_truncated(self):
@@ -8352,6 +9072,701 @@ class ProjectOrientationTests(unittest.TestCase):
             for path in self.tmpdir.rglob("*") if path.is_file()
         }
         self.assertEqual(after, before)
+
+
+class OrientWorkInFlightTests(unittest.TestCase):
+    """Slice 101-01: the headline reports work that has not reached trunk.
+
+    A status board describes the default branch, so finished work sitting on
+    an unmerged branch is invisible to every artifact orient reads. These
+    tests pin the segment's text (AC1/AC4) and — at least as importantly —
+    its *silence* in every degraded case (AC2/AC3), because the SessionStart
+    hook treats a failing orient as no orientation at all.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-inflight-"))
+        (self.tmpdir / "docs" / "specs").mkdir(parents=True)
+        (self.tmpdir / "scaffold.json").write_text("{}\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # -- helpers -----------------------------------------------------------
+
+    def _git(self, *args):
+        env = os.environ.copy()
+        env.update({
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com",
+        })
+        return subprocess.run(
+            ["git", "-C", str(self.tmpdir), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _init_repo(self, trunk="main"):
+        self._git("init", "-q")
+        # `git init -b` needs git >= 2.28; symbolic-ref works everywhere and
+        # is valid before the first commit exists.
+        self._git("symbolic-ref", "HEAD", f"refs/heads/{trunk}")
+        self._commit("seed.txt")
+
+    def _commit(self, name):
+        (self.tmpdir / name).write_text(name)
+        self._git("add", name)
+        self._git("commit", "-q", "-m", name)
+
+    def _stub_git_path(self, body):
+        """Shadow `git` with a stub earlier on PATH; return the new PATH."""
+        bindir = self.tmpdir / "stubbin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "git"
+        stub.write_text(f"#!/bin/sh\n{body}\n")
+        stub.chmod(0o755)
+        return str(bindir) + os.pathsep + os.environ.get("PATH", "")
+
+    # -- AC1 / AC4: the segment ------------------------------------------
+
+    def test_reports_commits_ahead_of_trunk(self):
+        self._init_repo()
+        self._git("checkout", "-q", "-b", "claude/night-prep")
+        for name in ("a.txt", "b.txt", "c.txt"):
+            self._commit(name)
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn(
+            "· in flight: 3 commits ahead of main on claude/night-prep",
+            headline,
+        )
+
+    def test_single_commit_is_singular(self):
+        self._init_repo()
+        self._git("checkout", "-q", "-b", "solo")
+        self._commit("only.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("· in flight: 1 commit ahead of main on solo", headline)
+        self.assertNotIn("1 commits", headline)
+
+    def test_trunk_named_master_is_resolved_not_assumed(self):
+        self._init_repo(trunk="master")
+        self._git("checkout", "-q", "-b", "feature")
+        self._commit("x.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("ahead of master on feature", headline)
+
+    def test_unpushed_commits_on_trunk_itself_are_reported(self):
+        """Being *on* trunk is not the same as having nothing in flight —
+        a remote-tracking trunk that is behind local main is still work the
+        boards cannot see."""
+        self._init_repo()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._commit("later.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("· in flight: 1 commit ahead of origin/main on main",
+                      headline)
+
+    # -- AC2: silence is the default -------------------------------------
+
+    def test_clean_trunk_checkout_is_silent(self):
+        self._init_repo()
+
+        self.assertNotIn("in flight", _workflow.orient(self.tmpdir))
+
+    def test_behind_trunk_is_silent(self):
+        self._init_repo()
+        self._commit("ahead.txt")
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._git("checkout", "-q", "-B", "main", "HEAD~1")
+
+        self.assertNotIn("in flight", _workflow.orient(self.tmpdir))
+
+    def test_non_git_project_is_silent(self):
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+        self.assertTrue(headline.startswith("jig hint: Scaffolded jig project"))
+        self.assertTrue(headline.endswith("\n"))
+
+    def test_detached_head_is_silent(self):
+        self._init_repo()
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self._commit("tip.txt")
+        self._git("checkout", "-q", sha)
+
+        self.assertNotIn("in flight", _workflow.orient(self.tmpdir))
+
+    # -- AC3: orientation never fails because git did ---------------------
+
+    def test_failing_git_is_silent_and_does_not_raise(self):
+        self._init_repo()
+        path = self._stub_git_path("exit 1")
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+        self.assertTrue(headline.startswith("jig hint:"))
+
+    def test_missing_git_binary_is_silent(self):
+        self._init_repo()
+        empty = self.tmpdir / "emptybin"
+        empty.mkdir()
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": str(empty)}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+
+    def test_hanging_git_is_bounded_and_silent(self):
+        """The bound must be *proved*, not merely survived.
+
+        An earlier version of this test asserted only silence — which a
+        `sleep 5` stub satisfies even with no timeout at all, because the
+        empty stdout is already != "true". Assert the elapsed time so
+        deleting the timeout makes the test fail.
+        """
+        self._init_repo()
+        path = self._stub_git_path("exec sleep 5")
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}), \
+                unittest.mock.patch.object(
+                    _workflow, "_ORIENT_IN_FLIGHT_GIT_TIMEOUT", 0.5):
+            started = time.monotonic()
+            headline = _workflow.orient(self.tmpdir)
+            elapsed = time.monotonic() - started
+
+        self.assertNotIn("in flight", headline)
+        self.assertLess(
+            elapsed, 3.0,
+            "a hanging git must be cut off, not waited out "
+            f"(took {elapsed:.2f}s against a 5s stub)",
+        )
+
+    def test_total_git_budget_is_bounded_across_many_calls(self):
+        """AC3's real risk: a per-call timeout is not an aggregate bound.
+
+        This stub answers the two cheap probes instantly and then hangs on
+        every ref read, which is the realistic slow-`.git` shape. Without a
+        shared deadline the calls compound (up to 9 × per-call) and blow the
+        SessionStart hook's 4 s ceiling — which would leave the session with
+        *no* orientation line, strictly worse than before this slice.
+        """
+        self._init_repo()
+        path = self._stub_git_path(
+            'case "$*" in\n'
+            '  *is-inside-work-tree*) echo true ;;\n'
+            '  *abbrev-ref*) echo feature ;;\n'
+            '  *) exec sleep 5 ;;\n'
+            'esac'
+        )
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}), \
+                unittest.mock.patch.object(
+                    _workflow, "_ORIENT_IN_FLIGHT_GIT_TIMEOUT", 0.5), \
+                unittest.mock.patch.object(
+                    _workflow, "_ORIENT_IN_FLIGHT_TOTAL_BUDGET", 0.8):
+            started = time.monotonic()
+            headline = _workflow.orient(self.tmpdir)
+            elapsed = time.monotonic() - started
+
+        self.assertNotIn("in flight", headline)
+        self.assertLess(
+            elapsed, 2.0,
+            "git calls must share one deadline; without it the ref probes "
+            f"compound past the hook budget (took {elapsed:.2f}s)",
+        )
+
+    def test_stale_origin_head_falls_through_to_a_real_trunk(self):
+        """AC4: `origin/HEAD` is verified like any other candidate.
+
+        A default-branch rename leaves `origin/HEAD` pointing at a ref that
+        no longer exists. Trusting it blind would silence the segment for
+        that repo forever, even though `origin/main` resolves fine.
+        """
+        self._init_repo()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._git("symbolic-ref", "refs/remotes/origin/HEAD",
+                  "refs/remotes/origin/gone")
+        self._git("checkout", "-q", "-b", "feature")
+        self._commit("f.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("· in flight: 1 commit ahead of origin/main on feature",
+                      headline)
+
+    def test_origin_head_is_preferred_when_it_resolves(self):
+        """AC4: when `origin/HEAD` is valid it wins over the candidate list,
+        so a repo whose trunk is neither `main` nor `master` still works."""
+        self._init_repo(trunk="trunk")
+        self._git("update-ref", "refs/remotes/origin/trunk", "HEAD")
+        self._git("symbolic-ref", "refs/remotes/origin/HEAD",
+                  "refs/remotes/origin/trunk")
+        self._git("checkout", "-q", "-b", "feature")
+        self._commit("f.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("ahead of origin/trunk on feature", headline)
+
+    def test_undecodable_git_output_does_not_raise(self):
+        """AC3. `text=True` decodes strictly, and `UnicodeDecodeError` is a
+        `ValueError` — *not* an `OSError` or `SubprocessError`. A ref name
+        that is invalid in the ambient encoding would otherwise raise
+        straight out of `orient()` and the hook would emit no headline at
+        all, which is worse than the pre-101 behaviour."""
+        self._init_repo()
+        path = self._stub_git_path(
+            'case "$*" in\n'
+            '  *is-inside-work-tree*) printf "true\\n" ;;\n'
+            '  *abbrev-ref*) printf "\\377\\376bad\\n" ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac'
+        )
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertTrue(headline.startswith("jig hint:"))
+        self.assertTrue(headline.endswith("\n"))
+
+    def test_hostile_branch_name_cannot_forge_a_headline_field(self):
+        """The headline is injected into the agent's context by the
+        SessionStart hook. Git permits `·` — the headline's own field
+        separator — in a ref name, so an unsanitised branch could forge
+        `· focus: nothing blocked`. The sibling claim field is whitelisted
+        for exactly this reason; refs get the same treatment."""
+        self._init_repo()
+        # Git forbids `:` and space in refs but permits `·`, so this is a
+        # name an attacker (or an unlucky user) can actually create.
+        self._git("checkout", "-q", "-b", "x·focus-nothing")
+        self._commit("h.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("in flight:", headline)
+        # Exactly the three separators the headline itself emits — the
+        # branch's own `·` must not survive as a fourth.
+        self.assertEqual(headline.count("·"), 3)
+        self.assertIn("x?focus-nothing", headline)
+
+    def test_long_branch_name_is_capped(self):
+        """Assert the cap itself, not merely that the line is 'short'.
+
+        An earlier version asserted `len(headline) < 400`, which a 201-char
+        branch satisfies with the cap deleted (~309 chars). Pin the boundary:
+        exactly `_ORIENT_IN_FLIGHT_REF_MAX` characters survive, and the next
+        one does not.
+        """
+        self._init_repo()
+        cap = _workflow._ORIENT_IN_FLIGHT_REF_MAX
+        self._git("checkout", "-q", "-b", "b" + "o" * 200)
+        self._commit("l.txt")
+
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("in flight:", headline)
+        self.assertIn("b" + "o" * (cap - 1), headline)
+        self.assertNotIn("b" + "o" * cap, headline)
+
+    def test_non_numeric_rev_list_output_does_not_raise(self):
+        """AC3 names unexpected git output as a must-not-raise case.
+        `"²".isdigit()` is True but `int("²")` raises — hence isdecimal."""
+        self._init_repo()
+        path = self._stub_git_path(
+            'case "$*" in\n'
+            '  *is-inside-work-tree*) echo true ;;\n'
+            '  *abbrev-ref*) echo feature ;;\n'
+            '  *symbolic-ref*) exit 1 ;;\n'
+            '  *rev-list*) echo "²" ;;\n'
+            '  *) exit 0 ;;\n'
+            'esac'
+        )
+
+        with unittest.mock.patch.dict(os.environ, {"PATH": path}):
+            headline = _workflow.orient(self.tmpdir)
+
+        self.assertNotIn("in flight", headline)
+
+    def test_cli_exit_code_is_zero_when_git_fails(self):
+        self._init_repo()
+        path = self._stub_git_path("exit 1")
+        env = os.environ.copy()
+        env["PATH"] = path
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+
+        result = subprocess.run(
+            [sys.executable, str(WORKFLOW), "orient",
+             "--project-dir", str(self.tmpdir)],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("in flight", result.stdout)
+
+
+class OrientOriginFreshnessTests(unittest.TestCase):
+    """Bug 031 — orient must check origin freshness on the interactive path.
+
+    Orient's whole picture is built from local artifacts (boards, slice
+    STATUS, ADRs) that are only as current as the last fetch. A checkout whose
+    base drifted behind trunk otherwise renders stale state as current. The
+    `--fetch` path (the `/jig:orient` skill, never the 4s SessionStart hook)
+    does a bounded, fail-soft `git fetch` and appends a `freshness:` segment
+    when the checkout is behind or origin could not be reached. The default
+    (hot) path stays byte-identical so the SessionStart hook is untouched.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-fresh-"))
+        (self.tmpdir / "docs" / "specs").mkdir(parents=True)
+        (self.tmpdir / "scaffold.json").write_text("{}\n")
+        self.origin = Path(tempfile.mkdtemp(prefix="jig-wf-fresh-origin-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        shutil.rmtree(self.origin, ignore_errors=True)
+
+    def _git(self, *args, cwd=None):
+        env = os.environ.copy()
+        env.update({
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com",
+        })
+        return subprocess.run(
+            ["git", "-C", str(cwd or self.tmpdir), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit(self, name):
+        (self.tmpdir / name).write_text(name)
+        self._git("add", name)
+        self._git("commit", "-q", "-m", name)
+
+    def _init_with_origin(self):
+        """Local repo on `main`, tracking a bare origin, initially in sync."""
+        # A bare origin (the mkdtemp dir already exists) so `git push`/`fetch`
+        # work fully offline.
+        self._git("init", "-q", "--bare", cwd=self.origin)
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+        self._git("remote", "add", "origin", str(self.origin))
+        self._git("push", "-q", "origin", "main")
+        self._git("fetch", "-q", "origin")
+
+    def _advance_origin(self, n=1):
+        """Push `n` extra commits to origin, then rewind local `main` behind
+        them — leaving the local checkout `n` commits behind origin/main
+        WITHOUT the local remote-tracking ref knowing yet (only a fetch will
+        reveal it, which is the point of the --fetch path)."""
+        base = self._git("rev-parse", "HEAD").stdout.strip()
+        for i in range(n):
+            self._commit(f"trunk-{i}.txt")
+        self._git("push", "-q", "origin", "main")
+        # Rewind local main + its stale remote-tracking ref back to `base` so
+        # the drift is only discoverable by fetching origin afresh.
+        self._git("reset", "-q", "--hard", base)
+        self._git("update-ref", "refs/remotes/origin/main", base)
+
+    # -- the segment: behind origin is surfaced on --fetch ----------------
+
+    def test_fetch_reports_commits_behind_origin(self):
+        self._init_with_origin()
+        self._advance_origin(2)
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("· freshness: 2 commits behind origin/main", headline)
+
+    def test_single_commit_behind_is_singular(self):
+        self._init_with_origin()
+        self._advance_origin(1)
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("· freshness: 1 commit behind origin/main", headline)
+        self.assertNotIn("1 commits behind", headline)
+
+    # -- silence when there is nothing to say -----------------------------
+
+    def test_up_to_date_with_fetch_is_silent(self):
+        self._init_with_origin()
+
+        self.assertNotIn("freshness:", _workflow.orient(self.tmpdir, fetch=True))
+
+    def test_default_path_never_fetches_or_reports_freshness(self):
+        """The SessionStart hot path must stay byte-identical: no freshness
+        segment even when the checkout is behind origin."""
+        self._init_with_origin()
+        self._advance_origin(2)
+
+        self.assertNotIn("freshness:", _workflow.orient(self.tmpdir))
+
+    def test_local_only_repo_is_silent(self):
+        """No origin remote → nothing to be stale against → silence."""
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+
+        self.assertNotIn("freshness:", _workflow.orient(self.tmpdir, fetch=True))
+
+    # -- a configured-but-unreachable origin is surfaced, not silenced ----
+
+    def test_unreachable_origin_is_flagged_not_silently_fresh(self):
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+        self._git("remote", "add", "origin",
+                  str(self.tmpdir / "does-not-exist.git"))
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("· freshness: could not reach origin", headline)
+
+    # -- orientation never fails because git/fetch did (fail-soft) --------
+
+    def test_non_git_project_with_fetch_is_silent_and_wellformed(self):
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertNotIn("freshness:", headline)
+        self.assertTrue(headline.startswith("jig hint:"))
+        self.assertTrue(headline.endswith("\n"))
+
+    # -- the CLI flag wires through ---------------------------------------
+
+    def test_cli_fetch_flag_reports_behind(self):
+        self._init_with_origin()
+        self._advance_origin(1)
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+
+        result = subprocess.run(
+            [sys.executable, str(WORKFLOW), "orient",
+             "--project-dir", str(self.tmpdir), "--fetch"],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("· freshness: 1 commit behind origin/main", result.stdout)
+
+
+class ReconciliationGroundingRequirementTests(unittest.TestCase):
+    """Bug 024 / issue #131 — the reconciliation checklist's "Architecture
+    impact" item must carry ADR-0020 §1's grounding requirement (a load-bearing
+    factual claim about a runnable surface needs an executed probe or a
+    ``file:line`` citation, and anything unverifiable is marked as an
+    assumption). The requirement must be present, and in sync, across all three
+    generated copies of spec-workflow/SKILL.md — the drift guard keeps the two
+    host mirrors byte-identical to source, and this test pins the load-bearing
+    prose so a future edit cannot silently drop it.
+
+    The assertion is scoped to the ``## Reconciliation checklist`` section so a
+    match against the identically-themed spec-authoring step 6 (which also says
+    "executed probe", earlier in the file) cannot satisfy it.
+    """
+
+    SKILL_COPIES = (
+        REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md",
+        REPO_ROOT / "hosts" / "claude" / "skills" / "spec-workflow" / "SKILL.md",
+        REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "skills"
+        / "spec-workflow" / "SKILL.md",
+    )
+
+    # Distinctive of the reconciliation item — this exact clause does not appear
+    # in spec-authoring step 6's phrasing, so a match can only come from the
+    # reconciliation "Architecture impact" item. The phrase is load-bearing and
+    # pinned verbatim: this is a canonical-wording drift guard, so a benign
+    # reorder ("a `file:line` citation or an executed probe") is intended to turn
+    # it red — update this constant deliberately when the wording changes.
+    GROUNDING_CLAUSE = "executed probe or a `file:line` citation"
+    ASSUMPTION_CLAUSE = "marked as an assumption"
+
+    def _reconciliation_section(self, text, path):
+        match = re.search(
+            r"^## Reconciliation checklist\b.*?(?=^## )",
+            text, re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            match, "no bounded '## Reconciliation checklist' section in %s" % path)
+        return match.group(0)
+
+    def test_grounding_requirement_present_in_all_skill_copies(self):
+        for path in self.SKILL_COPIES:
+            self.assertTrue(path.exists(), "missing SKILL.md copy: %s" % path)
+            section = self._reconciliation_section(
+                path.read_text(encoding="utf-8"), path)
+            self.assertIn(
+                "Architecture impact", section,
+                "reconciliation checklist is missing the 'Architecture impact' "
+                "item in %s" % path)
+            self.assertIn(
+                self.GROUNDING_CLAUSE, section,
+                "reconciliation 'Architecture impact' item lacks the ADR-0020 "
+                "grounding requirement (%r) in %s" % (self.GROUNDING_CLAUSE, path))
+            self.assertIn(
+                self.ASSUMPTION_CLAUSE, section,
+                "reconciliation grounding rule must mark unverifiable claims as "
+                "assumptions rather than assert them in %s" % path)
+
+
+class CheckBoardTests(unittest.TestCase):
+    """workflow.py check-board — read-only audit of docs/specs/README.md.
+
+    The spec board is the most contended file in the repo (265 commits in six
+    months, against 18 for the bug board), and it is derived: every column is
+    computed from the spec records, with the curated Notes column carried
+    across regens. Two things can go wrong and neither shows up as a test
+    failure today — the committed board drifting from the records, and two
+    branches allocating the same spec number (routine while reserve-on-main is
+    unreachable for contributors, issue #147).
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-check-board-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+        spec1 = self.target / "docs/specs/100-alpha"
+        spec1.mkdir(parents=True)
+        write_synthetic_spec(spec1 / "spec.md", [
+            ("100-01 first", "DONE"),
+            ("100-02 second", "IN_PROGRESS"),
+        ])
+        run_workflow("status-board", str(self.target))
+        self.board = self.target / "docs/specs/README.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _add_spec(self, dirname: str, label: str):
+        spec_dir = self.target / "docs/specs" / dirname
+        spec_dir.mkdir(parents=True)
+        write_synthetic_spec(spec_dir / "spec.md", [(label, "DRAFT")])
+        return spec_dir
+
+    def test_clean_board_reports_no_problems(self):
+        self.assertEqual(_workflow.check_board(self.target), [])
+
+    def test_detects_a_board_that_was_not_regenerated(self):
+        self._add_spec("102-gamma", "102-01 added")
+        problems = _workflow.check_board(self.target)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("stale board", problems[0])
+        self.assertIn("status-board", problems[0])
+
+    def test_detects_two_specs_claiming_one_number(self):
+        self._add_spec("103-first", "103-01 a")
+        self._add_spec("103-second", "103-01 b")
+        run_workflow("status-board", str(self.target))
+        problems = _workflow.check_board(self.target)
+        self.assertTrue(
+            any("duplicate spec id 103" in p for p in problems), problems
+        )
+
+    def test_duplicate_message_names_both_directories(self):
+        """A number alone doesn't tell the contributor which branch to
+        renumber; the message has to name both claimants."""
+        self._add_spec("103-first", "103-01 a")
+        self._add_spec("103-second", "103-01 b")
+        run_workflow("status-board", str(self.target))
+        dupe = next(p for p in _workflow.check_board(self.target)
+                    if "duplicate spec id" in p)
+        self.assertIn("103-first", dupe)
+        self.assertIn("103-second", dupe)
+
+    def test_a_regenerated_board_passes_its_own_check(self):
+        """The check compares against what regeneration would write, so
+        regen-then-check must always be clean. If this fails, the two have
+        drifted apart and the check is measuring the wrong thing."""
+        self._add_spec("104-delta", "104-01 x")
+        run_workflow("status-board", str(self.target))
+        self.assertEqual(_workflow.check_board(self.target), [])
+
+    def _annotate(self, slice_label: str, note: str) -> None:
+        """Put `note` in the Notes cell of `slice_label`'s row, then let
+        `status-board` normalize it — the same route a human takes."""
+        lines = self.board.read_text().splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            if slice_label in line and line.rstrip().endswith("|"):
+                lines[i] = line.rstrip()[:-1] + note + " |\n"
+                break
+        else:  # pragma: no cover - guards against a silent no-op test
+            self.fail(f"no board row for {slice_label}")
+        self.board.write_text("".join(lines))
+        run_workflow("status-board", str(self.target))
+
+    def test_curated_notes_are_not_reported_as_drift(self):
+        """Notes are hand-written and survive regen by design — they are the
+        one part of the board with no source file. A check that flagged them
+        would fire on every board that has any, which is 48% of jig's rows."""
+        self._annotate("100-01", "blocked on ADR-0044")
+        self.assertIn("blocked on ADR-0044", self.board.read_text())
+        self.assertEqual(_workflow.check_board(self.target), [])
+
+    def test_a_note_survives_an_unrelated_spec_being_added(self):
+        """The failure that matters: a note lost during someone else's regen
+        would be silent. Check stays clean and the note stays put."""
+        self._annotate("100-01", "blocked on ADR-0044")
+        self._add_spec("107-eta", "107-01 unrelated")
+        run_workflow("status-board", str(self.target))
+        self.assertIn("blocked on ADR-0044", self.board.read_text())
+        self.assertEqual(_workflow.check_board(self.target), [])
+
+    def test_hand_edited_board_reads_as_drift(self):
+        """The committed board must equal what regeneration produces. A row
+        edited by hand and not regenerated is exactly the state this check
+        exists to catch — including the whitespace."""
+        text = self.board.read_text().replace("DONE", "DONE  ", 1)
+        self.board.write_text(text)
+        problems = _workflow.check_board(self.target)
+        self.assertTrue(any("stale board" in p for p in problems), problems)
+
+    def test_missing_board_is_reported_not_raised(self):
+        self.board.unlink()
+        problems = _workflow.check_board(self.target)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("missing board", problems[0])
+
+    def test_is_read_only(self):
+        """CI runs this against a checkout. A check that repairs what it
+        measures can't be trusted to report it — and `status-board` also
+        writes a `status:` rollup into every spec.md, which this must not do.
+        """
+        self._add_spec("105-epsilon", "105-01 y")
+        board_before = self.board.read_text()
+        specs_before = {
+            p: p.read_text()
+            for p in (self.target / "docs/specs").glob("*/spec.md")
+        }
+
+        self.assertNotEqual(_workflow.check_board(self.target), [])
+
+        self.assertEqual(self.board.read_text(), board_before)
+        for path, text in specs_before.items():
+            self.assertEqual(path.read_text(), text, f"check wrote to {path}")
+
+    def test_cli_exits_zero_and_says_clean(self):
+        result = run_workflow("check-board", str(self.target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("clean", result.stdout)
+
+    def test_cli_exits_nonzero_and_names_the_problem_on_stderr(self):
+        self._add_spec("106-zeta", "106-01 z")
+        result = run_workflow("check-board", str(self.target))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("stale board", result.stderr)
 
 
 if __name__ == "__main__":

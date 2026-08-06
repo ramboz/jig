@@ -177,3 +177,23 @@ None. The lifecycle is fixed, the cosmetic-edit carve-out is
 scoped to the Context section's prose explicitly, and the
 abbreviation allowlist that handles the common truncation case
 landed in parallel.
+
+## Amendments
+
+- **2026-07-30 — the preview pass now has a signal to read
+  ([bug 020](../bugs/020-adr-index-summary-degradation.md) /
+  [issue #140](https://github.com/ramboz/jig/issues/140)).** This ADR's
+  Context notes that the abbreviation allowlist "reduces the frequency at
+  which the conflict bites" but is "heuristic, not exhaustive". One case was
+  worse than heuristic: a `## Context` opening that is a lead-in to a list or
+  table has *no* complete sentence, so the generator emitted the lead-in
+  verbatim — colon and all — or cut it at 120 characters with a trailing `…`.
+  Both read like a summary, so the preview pass this ADR prescribes had
+  nothing to catch: the line looked fine. `index` now writes
+  `(no description)` for that case and warns on stderr naming the record and
+  the reason, which makes the preview actionable rather than decorative.
+  Every decision here stands unchanged — the `new → edit → index (preview) →
+  accept → index (final)` order, and the narrow carve-out that Context-prose
+  edits made for index-rendering are not decision-content. The remedy is
+  still to reword the ADR's own opening; four records needed it (ADR-0022,
+  ADR-0023, ADR-0041, ADR-0046) and were reworded under that carve-out.

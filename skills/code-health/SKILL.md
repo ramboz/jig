@@ -172,7 +172,8 @@ worth blocking on?
 - **The reviewer never runs `health.py`.** It is read-only
   (Read/Glob/Grep, no Bash). The orchestrator / CI runs `health.py`,
   captures the tight summary, and feeds it into the prompt via
-  `review.py code-health … --summary-file <path>` (or stdin). The reviewer
+  `review.py code-health … --summary-file <path>` (or `--summary-file -`
+  to pipe it in — stdin is never read implicitly, bug 017). The reviewer
   judges the summary, never raw logs.
 - **The pass is GATED, not always-on.** It runs only when a slice's
   frontmatter declares `code_health_review: true` — exactly mirroring how

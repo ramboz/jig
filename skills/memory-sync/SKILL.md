@@ -3,16 +3,17 @@ name: memory-sync
 description: >
   Persist new context, terms, learnings, and settled lightweight decisions. Use when
   the user says remember this, save this for later, add to glossary, note this down,
-  or at the end of a session to consolidate what was learned — that goes to the
-  memory layer (CLAUDE.md hot cache, docs/memory/, docs/inbox.md). Also use to
-  record a decision, remember this decision, or write this decision down when the
-  call is a lightweight one shipped outside a spec slice: UI strings, visual and CSS
-  choices, sizes, copy, or translation fixes. Those go to
-  docs/decisions/lightweight-decisions.md via decisions.py. Also auto-fires at
-  session end to surface capture-worthy items. Do not use for updating specs or code
-  comments — those have their own workflows. For a load-bearing or architectural
-  decision, one with rejected alternatives worth recording, or any decision the user
-  wants written up as an ADR, use `/jig:adr-workflow` instead.
+  or at session end to consolidate what was learned — that goes to the memory layer
+  (CLAUDE.md hot cache, docs/memory/, docs/inbox.md). Also use to record a decision
+  or remember this decision when the call is a lightweight one shipped outside a
+  spec slice: UI strings, visual and CSS choices, copy, or translation fixes. Those
+  go to docs/decisions/lightweight-decisions.md via decisions.py. Also use when
+  revising, updating, or re-pricing an already-recorded decision: judge whether it
+  now warrants an ADR and promote it if so, rather than editing it in place. Also
+  auto-fires at session end. Do not use for updating specs or code comments. For a
+  NEW load-bearing decision, one with rejected alternatives, or any the user wants
+  written up as an ADR, use `/jig:adr-workflow`; an already-recorded entry that
+  outgrew this home is promoted from here.
 user-invocable: true
 ---
 
@@ -132,6 +133,51 @@ time, then persist now.
    Confirm with the user before writing — it's their decision to record, not
    yours to infer. If the decision clears the ADR trigger above, route it to an
    ADR (`adr.py new`) instead of here.
+
+   **Revising an already-recorded entry — re-ask the routing question first**
+   (spec 100-01 / [ADR-0042](../../docs/decisions/adr-0042-decision-routing-gate.md)).
+   A decision's weight can change *after* it was filed: [#121](https://github.com/ramboz/jig/issues/121)
+   reports one recorded as bounded, later re-priced by review into a
+   module-boundary change with rejected alternatives, edited in place, and never
+   re-routed. Routing is asked once at first write and never again — so **you**
+   ask it again here. Before revising, judge the entry **as it will read after
+   the change** against the canonical ADR trigger quoted above:
+
+   - **Clears the trigger** → promote it; do not revise it in place:
+     ```bash
+     python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" promote \
+       --title "<existing title>" --no-push [--slug "<adr-slug>"]
+     ```
+     This creates the ADR via `adr.py new`, seeds it from the entry's own
+     fields, and leaves a forward-linking stub so old references still land on
+     a record.
+
+     **`--no-push` is shown because you are almost always on a feature
+     branch.** Push mode reserves the ADR number on `origin/main` from an
+     ephemeral worktree, so the file never lands in your working copy and
+     there is nothing to seed — `promote` refuses up-front rather than
+     stranding a reserved ADR on the trunk. Drop `--no-push` (or use `--pr`)
+     only when promoting from `main` itself; the local ADR lands with the rest
+     of your branch's work.
+   - **Still settled, local, and bounded** (one screen / component / string /
+     asset, no *real* rejected alternatives) → revise it in place. Omitted
+     fields keep their recorded values:
+     ```bash
+     python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" update \
+       --title "<existing title>" [--decision "<what>"] [--context "<why>"] \
+       [--scope "<where>"] [--commit "<SHA/PR>"]
+     ```
+
+   Judge meaning, not vocabulary. A UI-copy or translation decision saying "X
+   instead of Y" is naming a *wording* preference, not a rejected architectural
+   alternative — it belongs here. The trigger is about a **load-bearing** choice
+   a future agent could undo by accident. As with recording, confirm a promotion
+   with the user before running it.
+
+   To sweep records written before this guidance existed, `decisions.py lint`
+   reports entries whose text reads as ADR-worthy. It is **advisory** — it
+   matches wording, not meaning, so treat a finding as a prompt to judge, never
+   as a verdict.
 4. **Report a summary** at the end:
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" summary <target>

@@ -7,6 +7,7 @@ Or from the skill dir:
     python3 -m unittest test_migrate
 """
 
+import ast
 import os
 import re
 import subprocess
@@ -18,7 +19,100 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATE_PY = REPO_ROOT / "skills" / "migrate" / "migrate.py"
 WORKFLOW_PY = REPO_ROOT / "skills" / "spec-workflow" / "workflow.py"
 SKILL_MD = REPO_ROOT / "skills" / "migrate" / "SKILL.md"
+
 FIXTURES = REPO_ROOT / "skills" / "migrate" / "fixtures"
+
+ADVISORY_HEADING = "#### Stale plugin-root citations after conversion"
+_CODEX_BUILDER = REPO_ROOT / "scripts" / "build_codex_plugin.py"
+
+
+def advisory_section(path: Path) -> str:
+    """The stale-citation advisory section of a migrate SKILL.md: its heading
+    down to the next heading of the same or higher level.
+
+    Line-oriented and fence-aware on purpose. A regex for "the next
+    `#`-prefixed line" stops early on a `# comment` inside a fenced bash
+    block — silently shrinking the region, so anything after the fence
+    escapes whatever the caller is checking. The terminator's level is
+    derived from `ADVISORY_HEADING` rather than hard-coded, so promoting the
+    section to `###` cannot make the helper truncate at its own children.
+    Neither hazard is reachable in today's file; both are one-liners in a
+    helper meant to outlive it. (Only ``` fences are recognised — `~~~` is
+    valid Markdown but unused in this repo.)
+
+    Raises `AssertionError` rather than returning something empty: a missing
+    heading would make every caller's assertion vacuous, and one caller reads
+    the *rendered* package, where "the build dropped the section" is a real
+    outcome worth naming."""
+    level = len(ADVISORY_HEADING) - len(ADVISORY_HEADING.lstrip("#"))
+    terminator = re.compile(r"#{1,%d} " % level)
+    lines = path.read_text().splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith(ADVISORY_HEADING):
+            start = i
+            break
+    else:
+        raise AssertionError(f"advisory section heading missing from {path}")
+    out, fenced = [lines[start]], False
+    for line in lines[start + 1:]:
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and terminator.match(line):
+            break
+        out.append(line)
+    return "".join(out)
+
+
+def host_specific_spellings() -> set:
+    """The host-specific spellings `build_codex_plugin.py` names as string
+    literals, read FROM the builder rather than restated here.
+
+    Not the whole pipeline: the builder also delegates to `SKILL_PATH_RE`,
+    `finalize_codex_migrate_skill` and `rewrite_skill_override_guidance`,
+    whose literals live in `scaffold.py` and are not parsed. Section identity
+    covers a delegate only where its rewrite actually fires on this section;
+    a prefix-gated one that does not fire leaves both halves silent. That
+    residual is recorded in the bug 023 record's scope paragraph.
+
+    Both sides of each `out.replace("<from>", "<to>")` pair qualify: the
+    left-hand side is a Claude spelling the build rewrites, and the
+    right-hand side is the Codex spelling it produces — which the build will
+    NOT rewrite if someone types it into the source directly. A hand-written
+    ban list gets the first group and misses the second; that is how
+    `${PLUGIN_ROOT}` and `AGENTS.md` escaped this guard's THIRD version,
+    which hand-wrote its list (bug 023 `## Proof`, attempt 3).
+
+    Restating the builder's table is the defect bug 018 was filed for, so it
+    is parsed out of the builder instead: an AST walk over string-literal
+    `.replace()` calls. If the builder is ever restructured so no pairs are
+    found, callers assert on the empty result and fail loudly rather than
+    silently checking nothing."""
+    tree = ast.parse(_CODEX_BUILDER.read_text())
+    out = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "replace"
+            and len(node.args) == 2
+            and all(isinstance(a, ast.Constant) and isinstance(a.value, str)
+                    for a in node.args)
+        ):
+            for arg in node.args:
+                token = arg.value.strip()
+                # Drop only the empty right-hand side of a deletion, and any
+                # literal with an interior newline (document surgery, not a
+                # spelling, and it could never match a substring check). Note
+                # `.strip()` runs first, so a whole-line deletion whose only
+                # newline is trailing survives into the set — stricter than
+                # needed, never weaker.
+                # Deliberately NO length cap: an earlier version capped at 32
+                # characters, which `${CLAUDE_PLUGIN_ROOT}/templates/` hits
+                # exactly — a silent-drop path one character away, which is
+                # the failure class this whole guard exists to close.
+                if token and "\n" not in token:
+                    out.add(token)
+    return out
 
 
 def run_migrate(*args: str) -> subprocess.CompletedProcess:
@@ -2671,7 +2765,11 @@ class TierUpgradeTests(unittest.TestCase):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-038-04-"))
         self.target = self.tmpdir / "proj"
         self.target.mkdir()
-        r = run_scaffold("--no-tests", str(self.target))  # real tier-0 base
+        # Real tier-0 base with machinery ON DISK: the tier-upgrade contract is
+        # "manifest installed_skills == on-disk jig-* skill set", so this needs
+        # in-repo mode (slice 099-01 / ADR-0041 flipped the default to plugin
+        # mode, which copies no skills at all).
+        r = run_scaffold("--in-repo", "--no-tests", str(self.target))
         self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
 
     def tearDown(self):
@@ -2759,6 +2857,711 @@ class TierUpgradeTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
 
 
+class PluginModeConversionTests(unittest.TestCase):
+    """Bug 018 — `copy-machinery` converts a plugin-mode project to in-repo,
+    so the project's own records must stop describing plugin mode.
+
+    A project's mode lives in three places: the files on disk, the
+    `scaffold_mode` manifest field, and the helper paths its rendered docs
+    cite. Before this fix only the first was updated.
+
+    The split follows the maintainer's ruling on PR #145:
+      - the manifest is mechanical and user-data-free -> flip it silently;
+      - the rendered docs may carry real user content -> **name them, never
+        rewrite them**, and let the session ask the user what to do.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug018-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold("--no-tests", "--plugin-only", str(self.target))
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mode(self):
+        return _json.loads((self.target / "scaffold.json").read_text()).get(
+            "scaffold_mode"
+        )
+
+    # ----- the manifest half -------------------------------------------------
+    def test_baseline_manifest_says_plugin_only(self):
+        """Guard the premise: without this the conversion test proves nothing."""
+        self.assertEqual(self._mode(), "plugin-only")
+
+    def test_successful_copy_flips_scaffold_mode_to_in_repo(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertEqual(
+            self._mode(), "in-repo",
+            "copy-machinery left scaffold_mode claiming plugin mode",
+        )
+
+    def test_summary_reports_the_mode_flip(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        # The whole line, not the two words separately: the negative cases at
+        # `test_flip_is_idempotent` / `test_already_in_repo_project_is_not_
+        # reflipped` assert exactly this string, so the positive case must too
+        # or the pair is not testing the same thing.
+        self.assertIn("scaffold_mode: plugin-only -> in-repo", r.stdout)
+
+    def test_manifest_flip_preserves_other_fields(self):
+        before = _json.loads((self.target / "scaffold.json").read_text())
+        run_migrate("copy-machinery", str(self.target))
+        after = _json.loads((self.target / "scaffold.json").read_text())
+        for key, value in before.items():
+            if key == "scaffold_mode":
+                continue
+            self.assertEqual(after.get(key), value, f"manifest field {key} changed")
+        # Both directions: "preserves other fields" is not just "kept what was
+        # there" but also "invented nothing".
+        self.assertEqual(
+            set(after) - set(before), set(),
+            "the mode flip added manifest fields that were not there before",
+        )
+
+    def test_flip_is_idempotent(self):
+        run_migrate("copy-machinery", str(self.target))
+        first = (self.target / "scaffold.json").read_text()
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(first, (self.target / "scaffold.json").read_text())
+        # Nothing to convert on the second run, so no conversion line.
+        self.assertNotIn("plugin-only -> in-repo", r.stdout)
+
+    def test_already_in_repo_project_is_not_reflipped(self):
+        other = self.tmpdir / "inrepo"
+        other.mkdir()
+        # `--in-repo` explicitly: since spec 099-01 / ADR-0041 plugin mode is
+        # the DEFAULT, so a bare scaffold would build the wrong fixture here
+        # and this test would pass by accident.
+        r = run_scaffold("--no-tests", "--in-repo", str(other))
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+        r = run_migrate("copy-machinery", str(other))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        mode = _json.loads((other / "scaffold.json").read_text())["scaffold_mode"]
+        self.assertEqual(mode, "in-repo")
+        self.assertNotIn("plugin-only -> in-repo", r.stdout)
+
+    def test_project_without_a_manifest_is_unaffected(self):
+        """The spec-021 migrate-into-jig case: no scaffold.json, so there is no
+        mode claim to contradict and none must be invented."""
+        bare = self.tmpdir / "bare"
+        bare.mkdir()
+        _seed_spec_driven_project(bare)
+        r = run_migrate("copy-machinery", str(bare))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertFalse(
+            (bare / "scaffold.json").exists(),
+            "copy-machinery must not invent a manifest for an unscaffolded project",
+        )
+
+    # ----- the docs half — warn, never rewrite -------------------------------
+    def test_stale_doc_citations_are_named_in_the_summary(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("docs/workflow.md", r.stdout)
+        self.assertIn("CLAUDE_PLUGIN_ROOT", r.stdout)
+
+    def test_summary_states_the_replacement_path(self):
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/skills/jig-", r.stdout)
+
+    def test_stale_docs_are_not_rewritten(self):
+        """The whole reason this half is a warning: docs/workflow.md is a file
+        the user is invited to edit, and by conversion time it may hold real
+        project content. Hand-written prose must survive byte-for-byte."""
+        wf = self.target / "docs" / "workflow.md"
+        wf.write_text(
+            "# Our workflow\n\nHouse rule: run\n"
+            "`python3 ${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py run` first.\n"
+        )
+        before = wf.read_bytes()
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        after = wf.read_text()
+        self.assertIn("House rule: run", after)
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/", after,
+                      "the stale citation was rewritten — it must only be reported")
+        # The managed convention blocks still append (spec 065-04 / 067-03), so
+        # the file grows; what must not happen is the user's prose being edited.
+        self.assertTrue(after.startswith(before.decode()),
+                        "user prose was modified rather than appended to")
+
+    def test_warning_reaches_stdout_without_failing_the_run(self):
+        """Advisory, not a gate: the copy succeeded, so the exit code stays 0."""
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0)
+
+    def test_clean_docs_produce_no_warning(self):
+        for md in (self.target / "docs").rglob("*.md"):
+            md.write_text(md.read_text().replace("${CLAUDE_PLUGIN_ROOT}", "PLUGIN"))
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertNotIn("still cite", r.stdout)
+
+    # NOTE: the "copied machinery is not reported as a user doc" case lives in
+    # `CopyMachineryStaleScanScopeTests`, not here. On this default-`docs_root`
+    # fixture the scan root is `docs/`, so `.claude/` is out of scope
+    # structurally and the assertion held even with the skip-set deleted — it
+    # proved nothing. It needs a `docs_root="."` project to have teeth.
+
+    def test_skill_documents_the_ask_before_editing_step(self):
+        """The helper only reports. The decision belongs to the session, which
+        must warn the user and let them choose — not silently pick for them."""
+        # Scoped to the real section boundary, not a fixed character count.
+        # This read `body.split(marker)[1][:2000]`, which silently coupled the
+        # assertions to the section's *length*: adding ~450 characters near
+        # the top pushed the last phrase past the window and failed the test
+        # for a reason unrelated to what it checks. Whitespace-normalized
+        # because the source is hard-wrapped prose.
+        section = " ".join(advisory_section(SKILL_MD).split()).lower()
+        self.assertIn("ask the user", section)
+        self.assertIn("does not touch these files", section)
+        self.assertIn("do not pick for them", section)
+
+    def test_codex_render_keeps_the_ask_before_editing_step(self):
+        """The Codex builder replaces whole named sections of this SKILL.md
+        wholesale. A section written between two of its anchor points is
+        deleted from the Codex package with no error and no diff — which is
+        how the first draft of this advisory vanished. Guard the rendered
+        artifact, not just the source."""
+        rendered = (
+            REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "skills"
+            / "migrate" / "SKILL.md"
+        )
+        if not rendered.is_file():          # package not built in this tree
+            self.skipTest(f"no committed Codex package at {rendered}")
+        body = " ".join(rendered.read_text().split())
+        self.assertIn(
+            "Stale plugin-root citations after conversion", body,
+            "the Codex render dropped the conversion advisory",
+        )
+        self.assertIn("ask the user", body.lower())
+
+
+def _load_scaffold_module_for_test():
+    """Load scaffold.py by path, the same way migrate.py does at runtime.
+
+    `skills/scaffold-init/` has a hyphen, so it is not importable as a
+    package; this mirrors `_load_migrate()` above."""
+    spec = _ilu.spec_from_file_location("_scaffold_module_for_test", _SCAFFOLD_PY)
+    mod = _ilu.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class CodexPluginModeConversionTests(unittest.TestCase):
+    """Bug 018, second pass — the docs half must fire on **both** hosts.
+
+    The first fix detected the single literal `${CLAUDE_PLUGIN_ROOT}`. Codex
+    plugin-mode docs never contain it: `CodexScaffoldRenderer` renders them
+    against `${PLUGIN_ROOT}` instead (the symmetry table in scaffold.py). So
+    the advisory silently found nothing for every Codex project, while the
+    shipped Codex SKILL.md promised those users a warning.
+
+    That is the same failure the bug's own `## Learning` names — a caller
+    widened a contract the callee was never told about — recurring one layer
+    down, at the host boundary. Hence `test_detection_token_tracks_the_renderer`
+    below: the token is sourced FROM the renderer, so a renderer change
+    propagates instead of drifting.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug018-codex-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold(
+            "--no-tests", "--host", "codex", "--plugin-only", str(self.target),
+        )
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mode(self):
+        return _json.loads((self.target / "scaffold.json").read_text()).get(
+            "scaffold_mode"
+        )
+
+    # ----- premise guards ----------------------------------------------------
+    def test_baseline_codex_docs_cite_the_codex_plugin_root(self):
+        """Pin the premise. Without this, the detection tests below could pass
+        for the wrong reason (e.g. if the Codex renderer ever started emitting
+        the Claude token, detection would 'work' by accident)."""
+        wf = (self.target / "docs" / "workflow.md").read_text()
+        self.assertIn("${PLUGIN_ROOT}", wf)
+        self.assertNotIn(
+            "${CLAUDE_PLUGIN_ROOT}", wf,
+            "Codex docs must not carry the Claude token — if they do, this "
+            "whole test class is testing nothing",
+        )
+
+    def test_baseline_manifest_says_plugin_only(self):
+        self.assertEqual(self._mode(), "plugin-only")
+
+    # ----- the blocker: the advisory must fire on Codex ----------------------
+    def test_stale_codex_doc_citations_are_named_in_the_summary(self):
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("still cite", r.stdout,
+                      "the docs advisory never fired for a Codex project")
+        self.assertIn("docs/workflow.md", r.stdout)
+
+    def test_codex_warning_names_the_codex_token(self):
+        """Naming the Claude variable to a Codex user is worse than useless —
+        it sends them grepping for a string their docs do not contain."""
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertIn("${PLUGIN_ROOT}", r.stdout)
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", r.stdout)
+
+    def test_codex_summary_states_the_codex_replacement_path(self):
+        """`_IN_REPO_SKILL_PATH['codex']` was unreachable while detection was
+        Claude-only. Now that the advisory fires, pin the path it offers."""
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-", r.stdout)
+        self.assertNotIn(
+            "${CLAUDE_PROJECT_DIR}/.claude/skills/jig-", r.stdout,
+            "a Codex project was handed the Claude in-repo path",
+        )
+
+    def test_codex_stale_docs_are_not_rewritten(self):
+        """Same ruling as the Claude half: name them, never rewrite them."""
+        wf = self.target / "docs" / "workflow.md"
+        wf.write_text(
+            "# Our workflow\n\nHouse rule: run\n"
+            "`${PLUGIN_ROOT}/skills/spec-workflow/workflow.py` nightly.\n"
+        )
+        before = wf.read_text()
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertTrue(
+            wf.read_text().startswith(before),
+            "hand-written Codex prose was modified by a command that only warns",
+        )
+
+    def test_codex_clean_docs_produce_no_warning(self):
+        for md in (self.target / "docs").rglob("*.md"):
+            md.write_text(md.read_text().replace("${PLUGIN_ROOT}", "PLUGIN"))
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("still cite", r.stdout)
+
+    def test_codex_warning_does_not_fail_the_run(self):
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertIn("still cite", r.stdout)
+        self.assertEqual(r.returncode, 0, "the advisory is not a gate")
+
+    # ----- half one still works on Codex (regression guard) ------------------
+    def test_codex_copy_flips_scaffold_mode_to_in_repo(self):
+        r = run_migrate("copy-machinery", str(self.target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(self._mode(), "in-repo")
+        self.assertIn("plugin-only -> in-repo", r.stdout)
+
+    # ----- the anti-drift guard ---------------------------------------------
+    def test_detection_token_tracks_the_renderer(self):
+        """The structural point of this fix. migrate.py must not carry its own
+        copy of each host's plugin-root spelling — it reads them from the
+        scaffold renderers, so changing a renderer cannot silently switch the
+        advisory off again."""
+        scaffold = _load_scaffold_module_for_test()
+        for host, renderer in (
+            ("claude", scaffold.ClaudeScaffoldRenderer),
+            ("codex", scaffold.CodexScaffoldRenderer),
+        ):
+            self.assertEqual(
+                _migrate._plugin_root_token(scaffold, host),
+                renderer.PLUGIN_ROOT_PREFIX,
+                f"{host}: detection token drifted from the renderer",
+            )
+
+    def test_in_repo_replacement_path_tracks_the_renderer(self):
+        """Same argument for the path the warning offers as the fix."""
+        scaffold = _load_scaffold_module_for_test()
+        for host, renderer in (
+            ("claude", scaffold.ClaudeScaffoldRenderer),
+            ("codex", scaffold.CodexScaffoldRenderer),
+        ):
+            self.assertEqual(
+                _migrate._in_repo_skill_path(scaffold, host),
+                renderer.SKILL_PATH_REPLACEMENT.replace("\\1", "<name>"),
+                f"{host}: replacement path drifted from the renderer",
+            )
+
+
+class CrossHostAdvisoryTests(unittest.TestCase):
+    """Bug 023 — the advisory's host comes from the PROJECT, not the invocation.
+
+    `copy_machinery` answers two different questions, and bug 018's fix fed
+    both from the same variable:
+
+      1. *Where does the machinery go?* — a property of THIS INVOCATION
+         (`--host`, or inferred from where the copied helper lives).
+      2. *What variable do this project's docs cite?* — a property of THE
+         PROJECT, fixed when its docs were rendered. `scaffold.json` records
+         it as `host_renderer`.
+
+    When the two agree — every fixture in `PluginModeConversionTests` and
+    `CodexPluginModeConversionTests` — the wrong source returns the right
+    answer and the defect is invisible. It shows only when they disagree, and
+    then it fails SILENTLY: "no stale citations" and "I searched for a string
+    these docs could never contain" print the same thing (nothing).
+
+    The split is deliberate and asserted below: the token follows the project,
+    the offered replacement path follows the invocation, because after
+    `--host codex` the skills really are under `.codex/skills/`.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug021-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _scaffold(self, name: str, host: str) -> Path:
+        target = self.tmpdir / name
+        target.mkdir()
+        r = run_scaffold(
+            "--no-tests", "--host", host, "--plugin-only", str(target),
+        )
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+        return target
+
+    @staticmethod
+    def _manifest(target: Path) -> dict:
+        return _json.loads((target / "scaffold.json").read_text())
+
+    # ----- premise guards ----------------------------------------------------
+    def test_baseline_the_manifest_records_the_scaffolding_host(self):
+        """The whole fix rests on this field existing and being right. If
+        `host_renderer` were absent or wrong, every test below would be
+        asserting against a source that does not carry the answer."""
+        self.assertEqual(
+            self._manifest(self._scaffold("claude-proj", "claude"))
+            .get("host_renderer"),
+            "claude",
+        )
+        self.assertEqual(
+            self._manifest(self._scaffold("codex-proj", "codex"))
+            .get("host_renderer"),
+            "codex",
+        )
+
+    def test_baseline_a_cross_host_copy_leaves_the_recorded_host_alone(self):
+        """`copy-machinery` moves files; it does not re-render the docs, so it
+        must not claim the project's renderer changed. If it ever did, reading
+        `host_renderer` after the copy would answer the wrong question."""
+        target = self._scaffold("proj", "claude")
+        r = run_migrate("copy-machinery", str(target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(self._manifest(target).get("host_renderer"), "claude")
+
+    # ----- the blocker: detection follows the project ------------------------
+    def test_claude_project_is_scanned_with_the_claude_token_under_codex(self):
+        """A Codex-installed helper run against a Claude-scaffolded project.
+        The docs cite `${CLAUDE_PLUGIN_ROOT}`; scanning for `${PLUGIN_ROOT}`
+        finds nothing and says nothing — the exact silence bug 018 was about."""
+        target = self._scaffold("proj", "claude")
+        r = run_migrate("copy-machinery", str(target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn(
+            "still cite", r.stdout,
+            "the advisory went silent because it searched for the invoking "
+            "host's token instead of the project's",
+        )
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}", r.stdout)
+        self.assertIn("docs/workflow.md", r.stdout)
+
+    def test_codex_project_is_scanned_with_the_codex_token_under_claude(self):
+        """The mirror direction, so neither host is privileged by the fix."""
+        target = self._scaffold("proj", "codex")
+        r = run_migrate("copy-machinery", str(target), "--host", "claude")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("still cite", r.stdout)
+        self.assertIn("${PLUGIN_ROOT}", r.stdout)
+        self.assertNotIn(
+            "${CLAUDE_PLUGIN_ROOT}", r.stdout,
+            "a Codex-rendered project was reported against the Claude token",
+        )
+        self.assertIn("docs/workflow.md", r.stdout)
+        # ...and the replacement half must follow the INVOCATION in this
+        # direction too, not just the one `test_replacement_path_follows_the_
+        # invocation_host` covers. Without this the split is only pinned one
+        # way round, and a fix that moved both halves to the project host
+        # would still show green here.
+        self.assertIn("${CLAUDE_PROJECT_DIR}/.claude/skills/jig-", r.stdout)
+        self.assertTrue((target / ".claude" / "skills").is_dir())
+
+    def test_stale_docs_are_still_not_rewritten_across_hosts(self):
+        """Detecting more must not start editing. The maintainer's ruling on
+        PR #145 (warn, never rewrite) is host-independent."""
+        target = self._scaffold("proj", "claude")
+        wf = target / "docs" / "workflow.md"
+        wf.write_text(
+            "# Our workflow\n\nHouse rule: run\n"
+            "`python3 ${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py run` first.\n"
+        )
+        before = wf.read_text()
+        r = run_migrate("copy-machinery", str(target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        # Assert the advisory FIRED first. Without this the "not rewritten"
+        # check below passes on the buggy build for the wrong reason: nothing
+        # was detected, so of course nothing was touched.
+        self.assertIn("docs/workflow.md", r.stdout)
+        self.assertTrue(
+            wf.read_text().startswith(before),
+            "hand-written prose was modified by a command that only warns",
+        )
+
+    # ----- the other half stays on the invocation ----------------------------
+    def test_replacement_path_follows_the_invocation_host(self):
+        """Deliberately NOT the project's host. `--host codex` put the skills
+        under `.codex/skills/`; there is no `.claude/skills/` to point a Claude
+        project at, so offering the Claude form would name a directory that is
+        not on disk — trading one false statement for another."""
+        target = self._scaffold("proj", "claude")
+        r = run_migrate("copy-machinery", str(target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("${CODEX_PROJECT_DIR:-$PWD}/.codex/skills/jig-", r.stdout)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}/.claude/skills/jig-", r.stdout)
+        # The claim the assertion above rests on: the copy really did land
+        # under `.codex/`, and `.claude/skills/` really does not exist.
+        self.assertTrue((target / ".codex" / "skills").is_dir())
+        self.assertFalse((target / ".claude" / "skills").exists())
+
+    # ----- degrade paths: a manifest that cannot answer ----------------------
+    def test_project_without_a_manifest_uses_the_invocation_host(self):
+        """The spec-021 migrate-into-jig case. Nothing recorded means nothing
+        to prefer, so the invocation host is all the information there is."""
+        bare = self.tmpdir / "bare"
+        bare.mkdir()
+        _seed_spec_driven_project(bare)
+        (bare / "docs" / "house.md").write_text(
+            "run `${PLUGIN_ROOT}/skills/tdd-loop/tdd.py`\n"
+        )
+        r = run_migrate("copy-machinery", str(bare), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("docs/house.md", r.stdout)
+        self.assertIn("${PLUGIN_ROOT}", r.stdout)
+
+    def test_unreadable_manifest_falls_back_instead_of_failing_the_copy(self):
+        """The copy already succeeded by the time the advisory runs. A
+        corrupt manifest must degrade the warning, never turn a completed
+        copy into an error — same contract as `read_scaffold_mode`."""
+        target = self._scaffold("proj", "codex")
+        (target / "scaffold.json").write_text("{ not json at all")
+        r = run_migrate("copy-machinery", str(target), "--host", "codex")
+        self.assertEqual(
+            r.returncode, 0,
+            f"a broken manifest failed a copy that had already succeeded: "
+            f"{r.stderr}",
+        )
+        self.assertIn("${PLUGIN_ROOT}", r.stdout)
+
+    def test_unknown_recorded_host_falls_back_to_the_invocation(self):
+        """A manifest naming a host jig has no renderer for carries no usable
+        answer. Falling through to the invocation is right; silently mapping
+        it to Claude would re-introduce this bug for that project."""
+        target = self._scaffold("proj", "codex")
+        manifest = target / "scaffold.json"
+        data = _json.loads(manifest.read_text())
+        data["host_renderer"] = "some-future-host"
+        manifest.write_text(_json.dumps(data, indent=2) + "\n")
+        r = run_migrate("copy-machinery", str(target), "--host", "codex")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("${PLUGIN_ROOT}", r.stdout)
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", r.stdout)
+
+    # ----- the shipped docs, not just the source -----------------------------
+    def test_codex_render_of_the_split_does_not_invert(self):
+        """The advisory's two-source split is documented in SKILL.md, and
+        `build_codex_plugin.py` rewrites every `Claude` to `Codex` wholesale.
+        A host named inside a cross-host contrast therefore **inverts**: "a
+        Codex-installed helper against a Claude-scaffolded project" ships as
+        "...against a Codex-scaffolded project" — the same-host case the
+        sentence just called uninteresting, contradicting the clause before it
+        and erasing the only scenario this fix exists for, for the audience it
+        was written for. Same failure as `test_scaffold_mode.py::
+        test_skill_md_output_survives_the_codex_translation`.
+
+        Two assertions, because the translation runs ONE WAY.
+        `build_codex_plugin.py` rewrites Claude spellings to Codex ones and
+        never the reverse, so:
+
+        - a Claude spelling **the builder rewrites** is caught by SECTION
+          IDENTITY — the section renders differently the moment the build
+          touches anything in it;
+        - everything the builder does **not** rewrite is invisible to
+          identity (both renders match) and needs its own check. That covers
+          the Codex spellings the build *produces* — `${PLUGIN_ROOT}`,
+          `AGENTS.md`, `.codex/` — which are just as wrong typed into the
+          source: they ship verbatim to the other host's readers.
+
+        Pinned against the SHIPPED package, because the source always reads
+        fine — which is why a source-only assertion cannot catch this.
+
+        Full history of why the guard has this shape, and what each of the
+        three weaker versions let through, is in the bug 023 record's
+        `## Proof`.
+        """
+        rendered = (
+            REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "skills"
+            / "migrate" / "SKILL.md"
+        )
+        if not rendered.is_file():          # package not built in this tree
+            self.skipTest(f"no committed Codex package at {rendered}")
+        source = advisory_section(SKILL_MD)
+        # Premise: an empty or renamed section would make both assertions
+        # below vacuously true. Whitespace-normalized because the source is
+        # hard-wrapped prose and a raw search breaks on an innocuous re-wrap.
+        self.assertIn("host_renderer", " ".join(source.split()))
+
+        # No host name, host runtime directory, or host variable — in either
+        # direction. That is the EDITORS rule in SKILL.md, and the set is the
+        # builder's own, so it tracks the builder instead of drifting. It is
+        # NOT "nothing host-specific": a host-specific *filename* the builder
+        # never rewrites (`settings.json`) passes both assertions.
+        forbidden = host_specific_spellings()
+        self.assertTrue(
+            forbidden,
+            "no substitution pairs parsed out of build_codex_plugin.py — the "
+            "builder was restructured and this guard is now checking nothing",
+        )
+        # Case-insensitivity comes from the `.lower()` on both sides, not from
+        # the appended host names — the builder's own `Claude`/`Codex` pairs
+        # are already in `forbidden`. The append is a floor for the *partial*
+        # restructure `assertTrue(forbidden)` cannot see: if those two pairs
+        # alone moved into a table, the set would shrink silently and the bare
+        # host names would stop being banned.
+        lowered = source.lower()
+        for literal in sorted(forbidden) + ["claude", "codex"]:
+            self.assertNotIn(
+                literal.lower(), lowered,
+                f"the advisory section names {literal!r}. Either the build "
+                "rewrites it (and the sentence inverts for the other host's "
+                "readers) or it does not (and the sentence ships verbatim to "
+                "readers on a host they are not using). Phrase it as 'one "
+                "host' / 'the other'.",
+            )
+        # Identity on top: it covers whatever the builder rewrites that the
+        # set above did not resolve to a bare literal — a regex substitution,
+        # a sentence-level deletion, a future rule.
+        self.assertEqual(
+            source, advisory_section(rendered),
+            "the Codex render of the advisory section differs from the "
+            "source, so the host translation rewrote something in it — a "
+            "host literal inside this section inverts into nonsense for "
+            "Codex readers. Phrase it host-neutrally.",
+        )
+
+    # ----- the accessor itself ----------------------------------------------
+    def test_read_host_renderer_reports_what_the_manifest_records(self):
+        scaffold = _load_scaffold_module_for_test()
+        for host in ("claude", "codex"):
+            self.assertEqual(
+                scaffold.read_host_renderer(self._scaffold(f"p-{host}", host)),
+                host,
+            )
+
+    def test_read_host_renderer_returns_none_when_it_cannot_answer(self):
+        """Every unusable shape collapses to one signal — `None`, "this
+        project makes no renderer claim" — so callers need exactly one
+        fallback branch."""
+        scaffold = _load_scaffold_module_for_test()
+        target = self._scaffold("proj", "claude")
+        manifest = target / "scaffold.json"
+
+        # Manifest shapes a hand-edited or foreign scaffold.json actually
+        # produces. "field absent" and "wrong type" share the isinstance
+        # guard, and "unknown host" and "empty string" share the registry
+        # membership test — they are listed by input shape rather than by
+        # branch, because the contract being pinned is "any of these means
+        # no answer", not "each of these hits a different line".
+        cases = {
+            "unparseable": "{ not json at all",
+            "field absent": _json.dumps({"scaffold_mode": "plugin-only"}),
+            "wrong type": _json.dumps({"host_renderer": ["claude"]}),
+            "unknown host": _json.dumps({"host_renderer": "some-future-host"}),
+            "empty string": _json.dumps({"host_renderer": ""}),
+        }
+        for label, body in cases.items():
+            with self.subTest(label):
+                manifest.write_text(body)
+                self.assertIsNone(scaffold.read_host_renderer(target))
+
+        manifest.unlink()
+        self.assertIsNone(
+            scaffold.read_host_renderer(target), "no manifest at all",
+        )
+
+
+class CopyMachineryStaleScanScopeTests(unittest.TestCase):
+    """The stale-citation scan's scope, on a `docs_root="."` project.
+
+    Split out from `PluginModeConversionTests` because the default-`docs_root`
+    fixture cannot exercise it: there the scan roots are `docs/` plus the root
+    primer, so `.claude/` is out of scope *structurally* and the skip-set is
+    never consulted. Deleting the skip-set entirely left those assertions
+    green. Track-local adoption (spec 084) is the case where the skip-set and
+    `_project_docs_root` actually do work.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug018-scope-"))
+        self.target = self.tmpdir / "proj"
+        self.target.mkdir()
+        r = run_scaffold(
+            "--no-tests", "--plugin-only", "--docs-root", ".", str(self.target),
+        )
+        self.assertEqual(r.returncode, 0, f"scaffold setup failed: {r.stderr}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _listed(self, stdout: str) -> list:
+        return [
+            line.strip()[2:].split(" (")[0]
+            for line in stdout.splitlines()
+            if line.startswith("  - ")
+        ]
+
+    def test_docs_root_dot_project_is_scanned(self):
+        """`_project_docs_root` must resolve the configured root; a hard-coded
+        `docs/` would find nothing here."""
+        r = run_migrate("copy-machinery", str(self.target))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        self.assertIn("still cite", r.stdout,
+                      "a docs_root='.' project was never scanned")
+
+    def test_copied_machinery_is_not_reported_as_stale_user_docs(self):
+        """With `docs_root="."` the scan root IS the project root, so
+        `.claude/` is inside it and only `_STALE_SCAN_SKIP_DIRS` keeps the
+        freshly-copied machinery out of the user-facing list."""
+        r = run_migrate("copy-machinery", str(self.target))
+        listed = self._listed(r.stdout)
+        self.assertTrue(listed, f"expected stale files to be listed: {r.stdout}")
+        for path in listed:
+            self.assertFalse(
+                path.startswith(".claude/") or path.startswith(".codex/"),
+                f"host runtime machinery reported as a user doc: {path}",
+            )
+
+    def test_noise_directories_are_skipped(self):
+        noise = self.target / "node_modules" / "pkg"
+        noise.mkdir(parents=True)
+        (noise / "README2.md").write_text("cites ${CLAUDE_PLUGIN_ROOT}/skills/x/\n")
+        r = run_migrate("copy-machinery", str(self.target))
+        for path in self._listed(r.stdout):
+            self.assertFalse(
+                path.startswith("node_modules/"),
+                f"dependency tree scanned: {path}",
+            )
+
+
 class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
     """Spec 065-04 AC3 — `migrate copy-machinery` refreshes the self-defining-
     vocabulary convention block into an EXISTING project's docs/workflow.md
@@ -2796,6 +3599,141 @@ class CopyMachinerySelfDefiningConventionTests(unittest.TestCase):
         twice = self.wf.read_text()
         self.assertEqual(once, twice, "second copy-machinery run must be a no-op")
         self.assertEqual(twice.count(self.BLOCK_BEGIN), 1, "no duplicate block")
+
+
+_UNSET = object()  # "caller passed nothing", distinct from a falsy layout
+
+
+class CopyMachineryTrackLocalDocsRootTests(unittest.TestCase):
+    """Bug 022 — `copy-machinery` must write its two managed `workflow.md`
+    blocks under the project's CONFIGURED `layout.docs_root` (spec 084 /
+    ADR-0033), not a hardcoded `docs/`.
+
+    `migrate.copy_machinery` forwarded `force` / `installed_tiers` / `host` to
+    `scaffold.copy_machinery` but not `docs_root`, so the façade's
+    `docs_root="docs"` default applied. On a track-local project
+    (`docs_root: "."`) that put the blocks in a `docs/workflow.md` the project
+    never asked for, and left the real root `workflow.md` untouched."""
+
+    SELF_DEFINING_BEGIN = "<!-- >>> jig self-defining-vocabulary >>> -->"
+    REFRAME_BEGIN = "<!-- >>> jig reframe-practice >>> -->"
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-022-docs-root-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _seed(self, docs_root: str, *, raw_layout=_UNSET):
+        """Seed a spec-driven project whose docs live under `docs_root`, with a
+        scaffold.json recording that layout.
+
+        Returns `(project_dir, workflow_path)` — both explicitly, so no test
+        has to re-derive one from the other by `.parents[N]` index arithmetic
+        (the depth coupling ADR-0033 removed elsewhere).
+
+        `raw_layout` overrides what is written to scaffold.json's `layout`
+        key, so a test can seed a MALFORMED config while still knowing where
+        the correctly-configured workflow.md would be."""
+        project = self.tmpdir / docs_root.replace("/", "-").replace(".", "root")
+        base = project if docs_root == "." else project / docs_root
+        (base / "specs" / "001-demo").mkdir(parents=True)
+        (base / "specs" / "001-demo" / "spec.md").write_text(
+            "# Spec 001\n\n## Overview\n\nDemo.\n"
+        )
+        (base / "decisions").mkdir(parents=True)
+        (base / "decisions" / "adr-0001-demo.md").write_text("# ADR-0001 demo\n")
+        (base / "architecture.md").write_text("# Architecture\n")
+        workflow = base / "workflow.md"
+        workflow.write_text("# Workflow\n\nOur own house rules.\n")
+        layout = {"docs_root": docs_root} if raw_layout is _UNSET else raw_layout
+        (project / "scaffold.json").write_text(_json.dumps(
+            {"layout": layout, "installed_tiers": ["tier-0"]}
+        ) + "\n")
+        return project, workflow
+
+    def test_convention_block_lands_at_configured_root(self):
+        project, workflow = self._seed(".")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout: {r.stdout}")
+        text = workflow.read_text()
+        self.assertIn(
+            self.SELF_DEFINING_BEGIN, text,
+            f"convention block missing from {workflow} — copy-machinery wrote it "
+            "to a hardcoded docs/ instead of the configured docs_root",
+        )
+        self.assertIn("Our own house rules.", text,
+                      "pre-existing workflow content must survive the append")
+
+    def test_no_spurious_docs_dir_is_created(self):
+        project, _workflow = self._seed(".")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertFalse(
+            (project / "docs").exists(),
+            "copy-machinery created a docs/ dir in a docs_root='.' project — "
+            "collapsing that layer is the entire point of track-local adoption",
+        )
+
+    def test_reframe_block_lands_at_configured_root(self):
+        project, workflow = self._seed(".")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn(
+            self.REFRAME_BEGIN, workflow.read_text(),
+            f"reframe practice block missing from {workflow} — the second "
+            "managed block must follow the same configured root",
+        )
+
+    def test_nested_docs_root_is_honoured(self):
+        """Not `.`-special-cased: any non-default root must be honoured."""
+        project, workflow = self._seed("docs/internal")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn(
+            self.SELF_DEFINING_BEGIN, workflow.read_text(),
+            f"block missing from {workflow}",
+        )
+        # The invariant stated directly: nothing is written to the default
+        # root at all. Unconditional, so it cannot degrade into a trivial
+        # pass if the marker constant ever drifts.
+        self.assertFalse(
+            (project / "docs" / "workflow.md").exists(),
+            "block leaked into docs/workflow.md instead of docs/internal/",
+        )
+
+    def test_default_docs_root_still_lands_in_docs(self):
+        """Regression guard on the ordinary path — the fix must not move the
+        blocks for a project that uses the default root."""
+        project, workflow = self._seed("docs")
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn(self.SELF_DEFINING_BEGIN, workflow.read_text())
+
+    def test_malformed_layout_degrades_instead_of_failing_the_copy(self):
+        """The resolver choice this fix rests on, pinned.
+
+        `_project_docs_root` swallows a bad config and returns `"docs"` rather
+        than raising, so a malformed `scaffold.json` cannot fail a machinery
+        copy that would otherwise succeed. That is the whole reason it is used
+        here instead of the raising `_validated_docs_root`. Without this test
+        someone could swap in a raising resolver and every other test in this
+        class would stay green."""
+        project, _workflow = self._seed(".", raw_layout={"docs_root": ["not", "a", "string"]})
+        r = run_migrate("copy-machinery", str(project))
+        self.assertEqual(
+            r.returncode, 0,
+            "a malformed layout.docs_root must not fail the copy — "
+            f"stderr: {r.stderr}",
+        )
+        # Pin the degrade OUTCOME, not just the exit code: the fallback is
+        # the literal "docs", so the blocks land there. Without this a copy
+        # that exited 0 while writing no blocks at all would pass.
+        self.assertTrue(
+            (project / "docs" / "workflow.md").is_file(),
+            "the degrade must fall back to the documented `docs` root, "
+            "not skip the managed blocks entirely",
+        )
 
 
 # -------------------- SeedDecisionsTests --------------------

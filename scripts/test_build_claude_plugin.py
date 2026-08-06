@@ -21,6 +21,7 @@ Covers:
 
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -66,9 +67,12 @@ class ClaudePackageContentsTests(unittest.TestCase):
         # The README logo asset ships so `![jig](./jig.jpg)` resolves on install.
         self.assertTrue((self.out_dir / "jig.jpg").is_file())
 
-    # AC #2 — runtime-only excludes
+    # AC #2 — runtime-only excludes. `scripts/` is NOT wholesale-excluded: the
+    # allowlisted runtime modules (RELEASE_INCLUDE_SCRIPT_FILES) ship under it
+    # (bug 025/#167). That `scripts/` carries ONLY the allowlist — no dev-only
+    # tooling or tests — is asserted by RuntimeScriptsShippedTests below.
     def test_excludes_source_only_top_level_dirs(self):
-        for root in ("scripts", "docs", ".github"):
+        for root in ("docs", ".github"):
             self.assertFalse((self.out_dir / root).exists(), root)
 
     def test_excludes_codex_plugin_content(self):
@@ -235,8 +239,116 @@ class CommittedClaudePackageTests(unittest.TestCase):
         )
         self.assertFalse((pkg / ".codex-plugin").exists())
         self.assertFalse((pkg / ".claude-plugin" / "marketplace.json").exists())
-        self.assertFalse((pkg / "scripts").exists())
+        # `scripts/` carries the allowlisted runtime modules (bug 025/#167) and
+        # nothing else — the committed tree must match exactly.
+        scripts_dir = pkg / "scripts"
+        shipped_scripts = (
+            {
+                p.relative_to(pkg).as_posix()
+                for p in scripts_dir.rglob("*")
+                if p.is_file()
+            }
+            if scripts_dir.is_dir()
+            else set()
+        )
+        self.assertEqual(
+            shipped_scripts,
+            set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES),
+        )
         self.assertEqual(install_contract.validate_claude_package(pkg), [])
+
+
+class RuntimeScriptsShippedTests(unittest.TestCase):
+    """Bug 025 (#167): the runtime-scripts allowlist must ship in the built
+    Claude package so `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py` references
+    resolve in a real install. `spec_lint.py` is the pre-implementation
+    structural gate several shipped skills invoke; the verify_install trio is
+    imported by scaffold-init's completion self-check from
+    `<plugin-root>/scripts/`. `install_contract.RELEASE_INCLUDE_SCRIPT_FILES`
+    is the single source of truth for the set, and the builder must honour it
+    (before this fix it walked only directory roots, so nothing under
+    `scripts/` shipped)."""
+
+    # A `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py` invocation as shipped skill /
+    # template text hands to the user. Requires `/scripts/` immediately after
+    # the brace so `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/...` does NOT match.
+    _SCRIPT_REF_RE = re.compile(
+        r"\$\{CLAUDE_PLUGIN_ROOT\}/(scripts/[A-Za-z0-9_./-]+\.py)"
+    )
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-claude-scripts-"))
+        self.out_dir = self.tmp / "claude"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_allowlisted_runtime_scripts_ship(self):
+        for rel in install_contract.RELEASE_INCLUDE_SCRIPT_FILES:
+            self.assertTrue(
+                (self.out_dir / rel).is_file(),
+                f"{rel} missing from the built Claude package (bug 025/#167)",
+            )
+
+    def test_spec_lint_is_shipped(self):
+        # The exact #167 symptom: the pre-impl structural gate must resolve.
+        self.assertTrue(
+            (self.out_dir / "scripts" / "spec_lint.py").is_file(),
+            "scripts/spec_lint.py must ship so "
+            "${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py resolves (#167)",
+        )
+
+    def test_referenced_scripts_resolve_in_package(self):
+        # Drift-proof guard: every ${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py that
+        # shipped skill/template text hands the user must exist in the package.
+        referenced: set[str] = set()
+        for base in ("skills", "templates"):
+            root = self.out_dir / base
+            if not root.is_dir():
+                continue
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix not in (".md", ".template"):
+                    continue
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                referenced.update(self._SCRIPT_REF_RE.findall(text))
+        missing = sorted(
+            rel for rel in referenced if not (self.out_dir / rel).is_file()
+        )
+        self.assertEqual(
+            missing, [],
+            f"shipped text references scripts absent from the package: {missing}",
+        )
+        # Guard must be exercised, not vacuously green: spec_lint.py IS
+        # referenced by shipped skill text, so it must appear here.
+        self.assertIn("scripts/spec_lint.py", referenced)
+
+    def test_only_the_allowlist_ships_no_dev_tooling_leaks(self):
+        scripts_dir = self.out_dir / "scripts"
+        shipped = (
+            {
+                p.relative_to(self.out_dir).as_posix()
+                for p in scripts_dir.rglob("*")
+                if p.is_file()
+            }
+            if scripts_dir.is_dir()
+            else set()
+        )
+        # Dev-only tooling and tests must never ship.
+        self.assertNotIn("scripts/run_tests.py", shipped)
+        self.assertNotIn("scripts/build_claude_plugin.py", shipped)
+        self.assertFalse(
+            [s for s in shipped if Path(s).name.startswith("test_")],
+            f"test_*.py leaked into the package: {sorted(shipped)}",
+        )
+        # Exactly the allowlist — nothing more, nothing less.
+        self.assertEqual(
+            shipped, set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES),
+            "shipped scripts must equal RELEASE_INCLUDE_SCRIPT_FILES; extra="
+            f"{sorted(shipped - set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES))} "
+            f"missing={sorted(set(install_contract.RELEASE_INCLUDE_SCRIPT_FILES) - shipped)}",
+        )
 
 
 if __name__ == "__main__":

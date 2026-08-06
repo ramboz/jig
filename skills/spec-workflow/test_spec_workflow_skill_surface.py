@@ -188,5 +188,123 @@ class GrowOnDiscoveryContractTests(unittest.TestCase):
         )
 
 
+class SliceAuthoringReferenceAnchorTests(unittest.TestCase):
+    """Bug 027 (GitHub issue 173) — the slice-authoring guidance must point at
+    the in-project scaffolded worked example, not an unanchored template path.
+
+    `templates/docs/specs/slice-template.md` is a bare, unanchored relative path
+    that (a) names no root and (b) is mislocated post-ship: scaffold copies
+    `templates/` to `<project>/.claude/templates/`, so the project-root path
+    the wording implies does not exist inside a scaffolded repo. The authoritative
+    structural reference is the scaffolded first spec `docs/specs/001-adopt-jig/`,
+    which lands at project root (host-agnostic) and is named "the worked example
+    to imitate" by the scaffolded `CLAUDE.md`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+
+    def test_no_unanchored_slice_template_path(self):
+        # The bare, unanchored, post-ship-mislocated path must not appear as an
+        # authoring instruction. Authors get a well-formed starter slice via
+        # `workflow.py new`; the raw template location is host-dependent and
+        # must not be cited by hand.
+        self.assertNotIn(
+            "templates/docs/specs/slice-template.md", self.body,
+            "SKILL.md must not send slice authors to the unanchored / "
+            "post-ship-mislocated `templates/docs/specs/slice-template.md` "
+            "path (bug 027 / issue 173)",
+        )
+
+    def test_cites_in_project_worked_example(self):
+        # The in-project, host-agnostic worked example is the structural
+        # reference authors should mirror.
+        self.assertIn(
+            "001-adopt-jig", self.body,
+            "SKILL.md slice-authoring guidance must cite the in-project "
+            "scaffolded worked example `docs/specs/001-adopt-jig/` as the "
+            "structural reference (bug 027 / issue 173)",
+        )
+
+
+class FailedReviewRetractionSweepTests(unittest.TestCase):
+    """Bug 032 / issue #133 — the "Recovering from a failed review" path must
+    direct a corpus-wide sweep for a retracted claim before re-recording, so a
+    content-shaped finding surviving in a sibling artifact is caught in one
+    pass instead of round-by-round.
+
+    Scoped to the recovery section (not the whole body) so the wiring is
+    asserted to land *in that path*, where the author actually is when a
+    review fails."""
+
+    @classmethod
+    def setUpClass(cls):
+        body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+        # Isolate the recovery *prose*: from its bold lead to the
+        # review-sequence bash block (```bash) or the next `##`/`###` heading,
+        # whichever comes first. Anchoring on the ```bash fence specifically —
+        # not any fence — keeps the assertions on the paragraphs (not the
+        # ~95-line bash block below) while staying robust if a future edit adds
+        # an inline example fence to the recovery prose above the review block.
+        start = body.find("Recovering from a failed review")
+        tail = body[start:] if start != -1 else ""
+        end = re.search(r"\n```bash|\n#{2,3} ", tail)
+        cls.section = (tail[: end.start()] if end else tail)
+        cls.lower = cls.section.lower()
+
+    def test_recovery_section_exists(self):
+        self.assertTrue(
+            self.section, "SKILL.md must retain the 'Recovering from a failed "
+            "review' section (bug 032)",
+        )
+
+    def test_wires_in_analyze_for_the_corpus_sweep(self):
+        # Maintainer direction on #133: leverage the existing /jig:analyze.
+        self.assertIn(
+            "jig:analyze", self.lower,
+            "the recovery path must wire in `/jig:analyze` for the "
+            "cross-artifact sweep (bug 032 / issue #133)",
+        )
+
+    def test_names_the_retracted_claim_as_content_that_propagates(self):
+        # The gap is treating a finding as living in exactly one file. The fix
+        # must name the retracted claim and that it propagates beyond the
+        # reviewed artifact.
+        self.assertIn(
+            "retract", self.lower,
+            "the recovery path must name the retracted claim (bug 032)",
+        )
+        self.assertTrue(
+            "propagat" in self.lower or "sibling" in self.lower
+            or "corpus" in self.lower or "other artifact" in self.lower,
+            "the recovery path must state a retracted claim propagates beyond "
+            "the reviewed deliverable (bug 032)",
+        )
+
+    def test_directs_a_sweep_before_re_recording(self):
+        # A corpus-wide sweep (grep / analyze) for the retracted phrasing,
+        # positioned *before* re-recording the verdict.
+        self.assertTrue(
+            "sweep" in self.lower or "grep" in self.lower
+            or "search" in self.lower,
+            "the recovery path must direct a corpus-wide sweep for the "
+            "retracted phrasing (bug 032)",
+        )
+        self.assertIn(
+            "before", self.lower,
+            "the sweep must be positioned before re-recording the verdict "
+            "(bug 032)",
+        )
+
+    def test_distinguishes_surviving_assertions_from_explicit_retractions(self):
+        # A surviving copy must be fixed; an explicit, labelled retraction in a
+        # changelog/history is fine — the sweep must not treat them alike.
+        self.assertIn(
+            "surviving", self.lower,
+            "the recovery path must distinguish surviving assertions (must "
+            "fix) from explicit retractions (fine) (bug 032)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

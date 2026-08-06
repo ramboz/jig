@@ -3,6 +3,17 @@
 .claude/review-queue.json
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+# Per-checkout runtime state a hook may drop into a NESTED `.claude/` dir when
+# project_dir resolves below the repo root (e.g.
+# hooks/scripts/.claude/context-growth-read-events.jsonl). The rules above are
+# anchored to the root, so this un-anchored block catches the same telemetry
+# logs/queues/locks at any depth. Scoped to runtime suffixes so tracked fixture
+# files under a `.claude/` dir (e.g. the migrate tiny-validator fixture) survive.
+**/.claude/*.jsonl
+**/.claude/*.log
+**/.claude/*.lock
+**/.claude/review-queue.json
+**/.claude/settings.local.json
 
 # Working-tree-local spec-attribution marker (slice 056-03), stamped by
 # `workflow.py transition ... IN_PROGRESS` and read by scripts/usage.py to map
