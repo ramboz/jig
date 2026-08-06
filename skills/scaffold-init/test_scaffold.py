@@ -144,9 +144,16 @@ class GreenfieldScaffoldTests(unittest.TestCase):
         # marker by design (the honesty pin in 048-05 AC #2 forbids dressing
         # the DONE worked example up as a draft).
         seed_dirs = {"001-adopt-jig", "002-first-spec"}
+        # docs/governance.md (slice 106-01 / ADR-0051) is authoritative
+        # scaffolded policy — the surface-and-stop routing rule + the
+        # branch-protection arming checklist — NOT a wizard-generated stub the
+        # user fills in, so it carries no draft marker by design (same honesty
+        # pin as the seed dirs above: don't dress non-draft content as a draft).
+        exempt_files = {"governance.md"}
         md_files = [self.target / "CLAUDE.md"] + sorted(
             p for p in (self.target / "docs").rglob("*.md")
             if not (seed_dirs & set(p.relative_to(self.target).parts))
+            and p.name not in exempt_files
         )
         self.assertGreaterEqual(len(md_files), 9, "expected at least 9 scaffolded .md files")
         for path in md_files:

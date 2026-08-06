@@ -295,6 +295,38 @@ boundary to an external eval, and the scaffolded security floor. The
 [ADR index](decisions/) is the canonical, current record of these; they are not
 re-derived here.
 
+### Autonomy governance plane (spec 106 / ADR-0051)
+
+`scaffold-init` scaffolds the *scaffoldable half* of an out-of-band governance
+firewall and a checkable autonomy precondition. New surfaces:
+
+- **Scaffold output** (written by `_write_governance_plane`, dual-wired into
+  `scaffold()` and `copy_machinery` like `_write_gitignore_managed_blocks`): a
+  root `CODEOWNERS`, `.github/workflows/jig-governance.yml` (a `pull_request` job
+  that *flags* any diff touching a protected path so owner review is required),
+  and `<docs>/governance.md` (the branch-protection arming checklist). The
+  scaffolded material states plainly that these files are **inert until branch
+  protection is armed** — scaffold-init writes files, not the server-side
+  branch-protection settings that make them enforce.
+- **`governance.PROTECTED_PATHS`** is the single source of truth for the
+  protected-glob set (it includes `.github/workflows/**` and `CODEOWNERS` itself,
+  so the self-reference holds by construction). It is mirrored into
+  `scaffold.json.protected_paths` by `_scaffold_manifest` (a computed key, like
+  `installed_tiers`).
+- **Hook read contract:** `hooks/scripts/lib/protected_paths.py` reads
+  `scaffold.json.protected_paths` and, via `jig-boundary-change-warn.sh` (its
+  single owner — one hook, one merged JSON object per invocation), soft-nudges an
+  in-boundary edit (`JIG_PROTECTED_PATHS` opt-out, independent of the contract
+  nudge's `JIG_BOUNDARY_CHECK`). CI + branch protection enforce out-of-boundary;
+  the hook only nudges in-boundary (ADR-0011 posture).
+- **Identity/capability separation:** `governance.check_identity_separation`
+  keys on merge *capability* (not identity name), is deterministic over
+  supplied/attested inputs (jig does not observe GitHub merge permissions
+  in-process), and fails safe (not-ready) when the capability signal is absent.
+  The `governance.py identity-check` CLI is the cross-repo boundary the servo
+  readiness gate (servo 023 / ADR-0029) subprocess-invokes: stdout `IdentityVerdict`
+  JSON (`ready` authoritative), exit `0` ready / `3` not-ready / `2` usage.
+
 ## Module boundaries
 
 Six top-level concerns, named in [product-vision.md § Core features](product-vision.md#core-features-prioritized) at the vision layer:
@@ -303,7 +335,7 @@ Six top-level concerns, named in [product-vision.md § Core features](product-vi
 - `agents/` — three subagent definitions (`implementer` / `reviewer` / `architect`)
 - `hooks/` — deterministic spine (`hooks.json` + shell/Python hook helpers under `hooks/scripts/`)
 - `templates/` — source templates that `scaffold-init` copies into new projects (`AGENTS.md`, `CLAUDE.md`, docs/, brief)
-- skill helpers — Python helpers live **next to the skill that owns them** (`skills/<name>/*.py`), one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py` (+ `quality.py`), `land.py`, `migrate.py`, `scaffold.py` (+ `stocktake.py`), `health.py` (code-health), `bug.py` (bug-fix), and `memory.py`. Shared stdlib-only helpers live in `skills/_common/` (`parsing.py`, `review_evidence.py`, `lexicon.py`, `team_signal.py`, `use_cases.py`, `scaffold_state.py`, `atomic_io.py`)
+- skill helpers — Python helpers live **next to the skill that owns them** (`skills/<name>/*.py`), one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py` (+ `quality.py`), `land.py`, `migrate.py`, `scaffold.py` (+ `stocktake.py`), `health.py` (code-health), `bug.py` (bug-fix), and `memory.py`. `scaffold-init` also owns `governance.py` (spec 106 / ADR-0051 — the autonomy governance plane: protected-path renderers + the identity/capability-separation check). Shared stdlib-only helpers live in `skills/_common/` (`parsing.py`, `review_evidence.py`, `lexicon.py`, `team_signal.py`, `use_cases.py`, `scaffold_state.py`, `atomic_io.py`)
 - `scripts/` — top-level repo tooling, not skill helpers: `usage.py` (per-spec token/cost reporting), `verify_install.py`, `spec_lint.py`, `validate_manifests.py`, `skill_routing.py` (skill-routing eval), `build_release_zip.py`, `build_codex_plugin.py`, the `*_contract.py` builders, and `run_tests.py`
 - `.claude-plugin/` — Claude plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
 - `.codex-plugin/` — Codex plugin manifest (`plugin.json`)
