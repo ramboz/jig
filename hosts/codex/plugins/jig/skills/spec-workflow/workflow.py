@@ -33,6 +33,7 @@ from _common import (
     subtree,
     team_signal,  # noqa: F401  (re-exported for test monkeypatching)
 )
+from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
 from _common.parsing import (
@@ -1959,6 +1960,53 @@ def render_abandoned_table(rows: list) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _substrate_audit_section(project_dir: Path) -> str:
+    """Render the richer-skill selection audit (spec 096-05 AC5) — the
+    kill-criterion-1 aggregator (ADR-0040). Scans every recorded slice-evidence
+    verdict file's `substrate:` and counts the two aggregated signals
+    (`not-shown` = the defect signal; `non-interactive` = declared
+    no-orchestrator) plus the calibrated `shown`-and-declined anomalies. Emits a
+    small regen-managed section only when there is something to report — a clean
+    corpus (all `config` / `shown`-with-a-pick / pre-096 field-absent) yields
+    `""` so quiet projects see no noise. Defensive: unreadable files are
+    skipped, never raised."""
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return ""
+    not_shown = 0
+    non_interactive = 0
+    anomalies: list = []  # (slice-file, applied, [declined])
+    for vf in sorted(specs_dir.glob("*/reviews/slice-*.md")):
+        try:
+            rec = _evidence.parse_verdict_file(vf)
+        except (OSError, ValueError):
+            continue
+        substrate = (rec.fields or {}).get("substrate")
+        if substrate == "not-shown":
+            not_shown += 1
+        elif substrate == "non-interactive":
+            non_interactive += 1
+        declined = _evidence.substrate_anomaly(rec.fields)
+        if declined:
+            anomalies.append((vf.parent.parent.name + "/" + vf.name,
+                              rec.fields.get("applied_skill", "none"), declined))
+    if not (not_shown or non_interactive or anomalies):
+        return ""
+    lines = ["\n## Richer-skill selection audit (spec 096-05)\n",
+             "Advisory (ADR-0040 auditability — never blocks). Regenerated from "
+             "`reviews/slice-*.md` `substrate:` fields.\n",
+             f"- **{not_shown}** pass(es) recorded `not-shown` "
+             "(selection step did not run — the kill-criterion-1 defect signal).",
+             f"- **{non_interactive}** pass(es) recorded `non-interactive` "
+             "(declared no-orchestrator / CI).",
+             f"- **{len(anomalies)}** shown-and-declined anomaly(ies) "
+             "(a high-confidence richer skill was shown and not applied):"]
+    for name, applied, declined in anomalies:
+        lines.append(f"  - `{name}` — applied `{applied}`; "
+                     f"declined: {', '.join(declined)}")
+    return "\n".join(lines) + "\n"
+
+
 def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
     """Regenerate docs/specs/README.md table from spec.md files.
     Preserves preamble before the first `| Spec` line AND Notes column
@@ -2017,7 +2065,8 @@ def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
         if not preamble.endswith("\n"):
             preamble += "\n"
 
-    new_content = preamble + new_table + deferred_section + abandoned_section
+    new_content = (preamble + new_table + deferred_section + abandoned_section
+                   + _substrate_audit_section(project_dir))
     if new_content == existing:
         return "status board already current; no changes"
     # Slice 028-03 AC #2: re-checksum right before the write. If the file

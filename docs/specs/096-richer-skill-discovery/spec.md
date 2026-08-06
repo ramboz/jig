@@ -71,7 +71,14 @@ gates, and all process/orchestration skills.
    `non-interactive` / `not-shown` / `n/a`) from observable state (config
    presence + sidecar presence), and records the applied skill (or `none`) plus
    the shown-and-declined set. `record-review` is the honest-actor chokepoint;
-   `substrate:` is recorded, never gated on (ADR-0014 §3 unchanged).
+   `substrate:` is recorded, never gated on (ADR-0014 §3 unchanged). Consumers:
+   `check-reviews` (non-blocking advisory) + `status-board` (aggregate audit).
+   **Two accepted blind spots** (recorded, not solved — mitigation is config
+   precedence, Goal 1): `config` is anomaly-blind (records presence, not proof of
+   application — the guaranteed layer is not audited), and a **recall failure is
+   invisible** (if enumeration nominates nothing, `none` is picked and no anomaly
+   fires — a real miss looks like "nothing installed"). Detailed in
+   [docs/skill-routing-verification.md](../../skill-routing-verification.md).
 4. **Codex parity for the read-only review passes.** The printed candidate list
    is the same mechanism on both hosts, so no router dependency — and ADR-0039's
    OQ6 (host-injected skill metadata) stops gating anything (ADR-0040 D3).

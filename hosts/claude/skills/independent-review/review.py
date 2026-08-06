@@ -632,47 +632,62 @@ def _resolve_richer_for_pass(spec_path: Path, slice_label: str, category: str,
     return None
 
 
-def _config_substrate_lines(spec_path: Path, pass_name: str) -> str:
-    """Derive the `substrate: config` frontmatter lines for a recorded verdict
-    (spec 096-01 / ADR-0040 D3), or `""` when no config substrate applies.
+def _substrate_lines(spec_path: Path, slice_label: str, pass_name: str,
+                     non_interactive: bool) -> str:
+    """Derive the closed `substrate:` frontmatter block for a recorded verdict
+    (spec 096-05 / ADR-0040 D3), or `""` when the pass is out of scope.
 
-    Returns `"substrate: config\\napplied_skill: <path>\\n"` iff `pass_name`
-    maps to one of the three extensible categories AND the project (resolved
-    from `spec_path`) configures a resolvable richer skill for it. Otherwise
-    `""` — so the field stays absent for compliance / reconciliation /
-    frame-critique / unconfigured passes and every pre-096 artifact.
+    **Scope (AC2):** only slice-keyed evidence for one of the three extensible
+    categories gets a substrate. `record_review`'s bug (`--bug`) and ADR
+    (`--adr`) paths call separate recorders that never invoke this, and the
+    never-defer passes (compliance / reconciliation / frame-critique /
+    design-review) don't map to a category — all of those get `""` (field
+    absent = `n/a`, anomaly-ineligible).
 
-    The recorded `applied_skill` is the PORTABLE configured identifier (the bare
-    name or path as written in scaffold.json — `configured_value`), NOT the
-    machine-specific resolved absolute path: these lines land in a committed,
-    team-shared evidence artifact (ADR-0014), so a local `$HOME` path must never
-    be baked in. The stamp is derived from observable config state — it records
-    what the project CONFIGURED to be applied, not a confirmation the reviewer
-    read it (the derive-from-observable-state posture, ADR-0040 D3).
+    **Closed vocabulary, DERIVED from observable state** — never orchestrator
+    -typed (the one exception is `non-interactive`, a caller declaration):
+      - `config`  — `review.<category>_skill` present + resolvable. `applied_skill`
+        is the PORTABLE configured identifier (never a `$HOME`-bearing path).
+      - `non-interactive` — the caller declared no orchestrator (CI).
+      - `shown`   — a `candidates` sidecar exists; records the shown set +
+        `applied_skill` (the recorded pick, `none`, or `unknown` when no pick was
+        recorded — the cheapest-defection state, anomaly-eligible). The sidecar
+        is CONSUMED here (read + delete) so it never survives the cycle (AC9 /
+        096-03), making a subsequent absence unambiguously `not-shown`.
+      - `not-shown` — no config, no `--non-interactive`, no sidecar: the
+        selection step did not run this cycle (the defect signal).
 
-    Stamped only when the configured skill also RESOLVES on this machine; a
-    config key that is present but unresolvable produces no stamp here (that
-    audit case — config declared, not installed — is 096-05's to record).
-
-    Conservative: a malformed config (`ReviewConfigError`) or an unresolvable
-    project root yields `""` — deriving the substrate must never be the thing
-    that fails a recording (the malformed config already surfaced at
-    prompt-build time via `_resolve_richer_for_pass`)."""
+    Conservative: a malformed config (`ReviewConfigError`) or any error never
+    fails the recording — it degrades toward the sidecar / not-shown branches."""
     category = _review_config.PASS_TO_CATEGORY.get(pass_name)
     if category is None:
-        return ""
+        return ""  # n/a — never-defer / uncategorized pass
     project_root = _find_project_root(spec_path)
-    if project_root is None:
-        return ""
-    try:
-        if _review_config.configured_skill(project_root, category) is None:
-            return ""
-        identifier = _review_config.configured_value(project_root, category)
-    except _review_config.ReviewConfigError:
-        return ""
-    if identifier is None:
-        return ""
-    return f"substrate: config\napplied_skill: {identifier}\n"
+    # 1. config wins.
+    if project_root is not None:
+        try:
+            if _review_config.configured_skill(project_root, category) is not None:
+                identifier = _review_config.configured_value(
+                    project_root, category)
+                return f"substrate: config\napplied_skill: {identifier}\n"
+        except _review_config.ReviewConfigError:
+            pass  # malformed config already surfaced at prompt-build time
+    # 2. non-interactive (caller-declared; anomaly-ineligible).
+    if non_interactive:
+        return "substrate: non-interactive\n"
+    # 3. shown — a candidates sidecar exists; consume it into the record.
+    sidecar = _candidate_sidecar.consume(spec_path, slice_label, pass_name)
+    if sidecar is not None:
+        cands = sidecar.get("candidates") or []
+        shown = [f"{c.get('name')}:{c.get('tier')}" for c in cands
+                 if c.get("name")]
+        pick = sidecar.get("pick")
+        applied = pick if pick else "unknown"  # no pick recorded → cheapest defection
+        shown_line = ("shown_candidates: [" + ", ".join(shown) + "]\n"
+                      if shown else "shown_candidates: []\n")
+        return f"substrate: shown\napplied_skill: {applied}\n{shown_line}"
+    # 4. not-shown — the defect signal.
+    return "substrate: not-shown\napplied_skill: none\n"
 
 
 # -------- pr-review prompt (slice 031-01) --------
@@ -1612,18 +1627,16 @@ def record_review(args) -> int:
         sys.stderr.write(f"{exc}\n")
         return 2
 
-    # Config-substrate DERIVATION (spec 096-01 / ADR-0040 D3). `record-review`
-    # is the honest-actor chokepoint: it DERIVES the substrate from observable
-    # state (here, config presence), never accepting an orchestrator-typed
-    # value. For 096-01 only the `config` case is derived — when this pass maps
-    # to one of the three extensible categories AND the project configures a
-    # richer skill that resolves, stamp `substrate: config` + the PORTABLE
-    # configured `applied_skill` identifier (the raw scaffold.json value, not the
-    # machine-specific resolved path — committed evidence must stay portable).
-    # The full shown/not-shown/non-interactive/n/a vocabulary (which needs the
-    # 096-03 sidecar) lands in 096-05. No stamp otherwise, so the field stays
-    # absent — backward-compatible with pre-096 artifacts.
-    substrate_lines = _config_substrate_lines(spec, args.pass_name)
+    # Substrate DERIVATION (spec 096-05 / ADR-0040 D3). `record-review` is the
+    # honest-actor chokepoint: it DERIVES the closed `substrate:` vocabulary
+    # (config / non-interactive / shown / not-shown) from observable state —
+    # config presence + the 096-03 candidates sidecar, which it CONSUMES here so
+    # staleness can't survive the cycle. Scoped to slice-keyed evidence for the
+    # three extensible categories; everything else gets no stamp (field absent =
+    # n/a), backward-compatible with pre-096 artifacts.
+    substrate_lines = _substrate_lines(
+        spec, slice_label, args.pass_name,
+        getattr(args, "non_interactive", False))
     frontmatter = (
         "---\n"
         f"slice: {slice_label}\n"
@@ -1645,6 +1658,32 @@ def record_review(args) -> int:
     return 0
 
 
+def _emit_substrate_anomaly_warnings(spec: Path, slice_fragment: str) -> None:
+    """Spec 096-05 AC5 consumer: emit a NON-BLOCKING stderr warning for any of
+    this slice's recorded verdict files whose `substrate:` shows a richer skill
+    was shown and not applied (the calibrated high-confidence anomaly). Purely
+    advisory — it NEVER changes `check-reviews`' exit code (ADR-0014 §3 / the
+    gate stays a `verdict:` predicate). Defensive: any error is swallowed so the
+    advisory can't break the gate."""
+    try:
+        reviews_dir = spec.parent / "reviews"
+        num = _evidence.evidence_path(spec, slice_fragment, "compliance").stem
+        # evidence files for this slice share the `slice-NN-` prefix.
+        prefix = num.rsplit("-", 1)[0] + "-"  # "slice-NN-"
+        for vf in sorted(reviews_dir.glob(f"{prefix}*.md")):
+            rec = _evidence.parse_verdict_file(vf)
+            declined = _evidence.substrate_anomaly(rec.fields)
+            if declined:
+                applied = rec.fields.get("applied_skill", "none")
+                sys.stderr.write(
+                    f"note: {vf.name} — a richer skill was shown and NOT "
+                    f"applied (applied={applied}); declined high-confidence "
+                    f"candidate(s): {', '.join(declined)}. Advisory only "
+                    f"(ADR-0040 auditability); does not block.\n")
+    except (OSError, ValueError, AttributeError):
+        return
+
+
 def check_reviews(args) -> int:
     """Validate the evidence set for a slice at a transition stage. Exits 2
     with actionable diagnostics when the set does not clear (AC2); exits 0
@@ -1655,6 +1694,9 @@ def check_reviews(args) -> int:
         return 2
 
     diagnostics = _evidence.validate_evidence(spec, args.slice, args.stage)
+    # Advisory anomaly warning (096-05) — emitted regardless of gate outcome,
+    # and never affects the exit code.
+    _emit_substrate_anomaly_warnings(spec, args.slice)
     if diagnostics:
         sys.stderr.write(
             f"review evidence does not clear {args.stage} for slice "
@@ -1996,6 +2038,12 @@ def _build_parser() -> argparse.ArgumentParser:
     prec.add_argument(
         "--summary-file", dest="summary_file", default=None,
         help="path to the freeform verdict body (default: read stdin)",
+    )
+    prec.add_argument(
+        "--non-interactive", dest="non_interactive", action="store_true",
+        help="declare no orchestrator (CI) — records substrate: non-interactive "
+             "for a slice-keyed extensible pass (spec 096-05), so a legitimate "
+             "no-selection run is not counted as the not-shown defect signal.",
     )
 
     # Slice 045-02: validate the evidence set for a slice at a stage.

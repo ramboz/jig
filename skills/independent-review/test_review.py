@@ -3197,10 +3197,10 @@ class RicherSkillConfigTests(unittest.TestCase):
         self.assertNotIn("not-installed-here", prompt)
         self.assertIn("bundled `pr-review` SKILL.md baseline", prompt)
 
-    # -- _config_substrate_lines derivation ------------------------------
+    # -- _substrate_lines derivation (096-05 signature) ------------------
     def test_substrate_lines_for_configured_craft(self):
         self._scaffold({"pr_review_skill": "review-pr-deep"})
-        lines = self.review._config_substrate_lines(self.spec, "craft")
+        lines = self.review._substrate_lines(self.spec, "096-01", "craft", False)
         self.assertIn("substrate: config", lines)
         # Records the PORTABLE configured identifier, not the machine-specific
         # resolved absolute path (committed evidence must not bake in $HOME).
@@ -3210,16 +3210,22 @@ class RicherSkillConfigTests(unittest.TestCase):
 
     def test_substrate_lines_empty_for_compliance_pass(self):
         self._scaffold({"pr_review_skill": "review-pr-deep"})
-        # compliance is not one of the three extensible categories → no stamp.
+        # compliance is not one of the three extensible categories → no stamp
+        # (n/a = field absent).
         self.assertEqual(
-            self.review._config_substrate_lines(self.spec, "compliance"), ""
+            self.review._substrate_lines(self.spec, "096-01", "compliance",
+                                         False), ""
         )
 
-    def test_substrate_lines_empty_when_unconfigured(self):
-        # No scaffold.json → no config → no substrate stamp.
-        self.assertEqual(
-            self.review._config_substrate_lines(self.spec, "craft"), ""
-        )
+    def test_substrate_lines_not_shown_when_unconfigured(self):
+        # No scaffold.json, no sidecar, not --non-interactive → not-shown (the
+        # 096-05 defect signal; 096-01 returned "" here before the vocabulary).
+        lines = self.review._substrate_lines(self.spec, "096-01", "craft", False)
+        self.assertIn("substrate: not-shown", lines)
+
+    def test_substrate_lines_non_interactive(self):
+        lines = self.review._substrate_lines(self.spec, "096-01", "craft", True)
+        self.assertIn("substrate: non-interactive", lines)
 
 
 class CandidateChannelTests(unittest.TestCase):
@@ -3463,6 +3469,152 @@ class RecordReviewSubstrateTests(unittest.TestCase):
         for key in ("slice", "pass", "verdict", "reviewer",
                     "reviewed_at", "prompt_source"):
             self.assertIn(key, fields)
+
+
+class SubstrateRecordAndConsumerTests(unittest.TestCase):
+    """Spec 096-05: record-review derives the full substrate vocabulary from
+    observable state (config/shown/not-shown/non-interactive), consumes the
+    sidecar, keeps the ADR-0014 gate unchanged, and the two consumers
+    (check-reviews advisory + status-board audit) surface the anomaly."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-sub05-"))
+        self.home = self.tmp / "home"
+        self.user = self.home / ".claude" / "skills"
+        self.user.mkdir(parents=True)
+        self.proj = self.tmp / "proj"
+        self.specdir = self.proj / "docs" / "specs" / "099-x"
+        self.spec = _make_spec_with_slice(self.specdir, "05", "sub")
+        for n, d in [("review-pr-deep", "Deep PR review with security"),
+                     ("team-pr", "Team PR review standard")]:
+            sk = self.user / n
+            sk.mkdir()
+            (sk / "SKILL.md").write_text(
+                f"---\nname: {n}\ndescription: {d}\n---\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, *args, stdin="b\n"):
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+               "HOME": str(self.home)}
+        return subprocess.run([sys.executable, str(REVIEW), *args],
+                              input=stdin, capture_output=True, text=True,
+                              env=env)
+
+    def _record(self, pass_name, *extra):
+        return self._run("record-review", str(self.spec), "0XX-05",
+                         "--pass", pass_name, "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "y", *extra)
+
+    def _fields(self, pass_name):
+        from _common.parsing import parse_frontmatter
+        ev = self.specdir / "reviews" / f"slice-05-{pass_name}.md"
+        fields, _ = parse_frontmatter(ev.read_text())
+        return fields
+
+    def _sidecar(self, pass_name):
+        return self.specdir / "reviews" / ".candidates" / f"slice-05-{pass_name}.json"
+
+    # -- AC1: shown, with a pick + shown-and-declined set ----------------
+    def test_shown_records_pick_and_shown_set_and_consumes_sidecar(self):
+        self._run("candidates", "pr_review", str(self.spec), "0XX-05",
+                  "--pass", "craft")
+        self._run("pr-review", str(self.spec), "0XX-05", "a.py",
+                  "--richer-skill", "review-pr-deep")
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self._fields("craft")
+        self.assertEqual(f["substrate"], "shown")
+        self.assertEqual(f["applied_skill"], "review-pr-deep")
+        self.assertIn("review-pr-deep:high-confidence", f["shown_candidates"])
+        # sidecar consumed (staleness impossible next cycle — AC9)
+        self.assertFalse(self._sidecar("craft").exists())
+
+    def test_shown_but_no_pick_is_unknown_and_anomaly_eligible(self):
+        # candidates ran but no pass recorded a pick (cheapest defection)
+        self._run("candidates", "pr_review", str(self.spec), "0XX-05",
+                  "--pass", "craft")
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self._fields("craft")
+        self.assertEqual(f["substrate"], "shown")
+        self.assertEqual(f["applied_skill"], "unknown")
+        from _common import review_evidence as ev
+        self.assertTrue(ev.substrate_anomaly(f))  # all high-confidence declined
+
+    # -- AC1: not-shown --------------------------------------------------
+    def test_no_sidecar_no_config_is_not_shown(self):
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fields("craft")["substrate"], "not-shown")
+
+    # -- AC1: non-interactive (caller-declared) --------------------------
+    def test_non_interactive_recorded(self):
+        r = self._record("craft", "--non-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fields("craft")["substrate"], "non-interactive")
+
+    # -- AC1: config wins ------------------------------------------------
+    def test_config_wins_records_config(self):
+        (self.proj / "scaffold.json").write_text(
+            json.dumps({"review": {"pr_review_skill": "team-pr"}}))
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self._fields("craft")
+        self.assertEqual(f["substrate"], "config")
+        self.assertEqual(f["applied_skill"], "team-pr")
+
+    # -- AC2: scoped by keying mode (bug-keyed craft is n/a) -------------
+    def test_bug_keyed_craft_has_no_substrate(self):
+        bug = self.tmp / "docs" / "bugs" / "001-x.md"
+        bug.parent.mkdir(parents=True)
+        bug.write_text("---\nstatus: FIXING\nsecurity_surface: false\n---\n# B\n")
+        r = self._run("record-review", "--bug", str(bug), "--pass", "craft",
+                      "--verdict", "pass", "--reviewer", "x",
+                      "--prompt-source", "y")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        from _common.parsing import parse_frontmatter
+        ev = bug.parent / "reviews" / "bug-001-craft.md"
+        fields, _ = parse_frontmatter(ev.read_text())
+        self.assertNotIn("substrate", fields)  # n/a — never the defect signal
+
+    # -- AC2: never-defer pass is n/a (no substrate) ---------------------
+    def test_compliance_pass_has_no_substrate(self):
+        r = self._record("compliance")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("substrate", self._fields("compliance"))
+
+    # -- AC4: the ADR-0014 gate predicate is unchanged -------------------
+    def test_not_shown_artifact_still_clears_gate(self):
+        # substrate is recorded but NEVER gated on: a not-shown craft + a
+        # compliance pass both `verdict: pass` → REVIEWED evidence clears.
+        self._record("craft")            # not-shown
+        self._record("compliance")
+        from _common import review_evidence as ev
+        diags = ev.validate_evidence(self.spec, "0XX-05", "REVIEWED")
+        # No diagnostic should mention substrate/not-shown/anomaly.
+        self.assertFalse(any("substrate" in str(d).lower()
+                             or "not-shown" in str(d).lower()
+                             or "anomaly" in str(d).lower() for d in diags),
+                         f"gate must not consult substrate: {diags}")
+
+    # -- AC5: check-reviews advisory is non-blocking ---------------------
+    def test_check_reviews_advisory_does_not_change_exit(self):
+        # a shown-and-declined anomaly present; the FULL evidence set clears →
+        # check-reviews must still exit 0, with the advisory on stderr.
+        self._run("candidates", "pr_review", str(self.spec), "0XX-05",
+                  "--pass", "craft")
+        self._run("pr-review", str(self.spec), "0XX-05", "a.py",
+                  "--richer-skill", "review-pr-deep")  # declines team-pr
+        for p in ("compliance", "craft"):
+            self._record(p) if p == "compliance" else self._record("craft")
+        r = self._run("check-reviews", str(self.spec), "0XX-05",
+                      "--stage", "REVIEWED")
+        self.assertEqual(r.returncode, 0, f"stdout={r.stdout} stderr={r.stderr}")
+        self.assertIn("shown and NOT applied", r.stderr)
+        self.assertIn("team-pr", r.stderr)
 
 
 if __name__ == "__main__":

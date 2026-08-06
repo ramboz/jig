@@ -1,9 +1,10 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: [096-03]
 last_verified:
 frame_review: true
 kind: feature
+claimed_by: claude/spec-096-jig-ceremony-3ee390
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -97,19 +98,90 @@ enforcement — is what ADR-0040 can honestly offer, so it must actually be buil
   crash in `check-reviews` or `status-board`.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one fixture.
-      Edge cases listed above are covered explicitly.
-- [ ] An explicit test asserts the ADR-0014 gate predicate is **unchanged**
-      (no silent amendment).
-- [ ] An explicit test asserts the keying-mode scope (AC2): a bug-keyed `craft`
-      artifact is `n/a`.
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Implementer test coverage exercises each AC with at least one fixture
+      (SubstrateRecordAndConsumerTests, SubstrateAnomalyTest, StatusBoardTests
+      audit cases). Edge cases covered.
+- [x] An explicit test asserts the ADR-0014 gate predicate is **unchanged**
+      (`test_not_shown_artifact_still_clears_gate`).
+- [x] An explicit test asserts the keying-mode scope (AC2): a bug-keyed `craft`
+      artifact is `n/a` (`test_bug_keyed_craft_has_no_substrate`).
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
 - [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred — no new
+      deferrals.
+
+### Deviation log (after reconciliation)
+
+Original ACs preserved. Implementation notes:
+
+- **`record-review` is the substrate chokepoint (AC1).** `_substrate_lines`
+  derives the closed vocabulary from observable state: config (096-01) →
+  `--non-interactive` (caller-declared, the one sanctioned declaration) →
+  `shown` (a 096-03 candidates sidecar exists — read + CONSUMED here, completing
+  AC9's "staleness impossible by construction") → `not-shown` (the defect
+  signal). Records `applied_skill` + `shown_candidates` (name:tier).
+- **Scope = keying-mode + category (AC2).** Only `record_review`'s slice-keyed
+  path calls the deriver; `--bug` / `--adr` use separate recorders that never
+  stamp a substrate (so a bug-keyed `craft` is `n/a`, NOT `not-shown` — the exact
+  keying-mode fix ADR-0040 D3 required). Never-defer / uncategorized passes get
+  no stamp (field absent = `n/a`).
+- **The anomaly is calibrated (AC3).** `review_evidence.substrate_anomaly` fires
+  only on `substrate: shown`, against the **high-confidence** tier of the shown
+  set; `shown`-but-`applied: unknown` (no pick recorded — cheapest defection)
+  counts all high-confidence as declined. Never fires on speculative / config /
+  not-shown / non-interactive / absent.
+- **Gate untouched (AC4).** `verdict_clears` is unchanged (a `verdict:`-only
+  predicate) with an explicit comment that `substrate:` is never consulted; a
+  test asserts a `not-shown` + anomaly artifact with `verdict: pass` still clears
+  REVIEWED.
+- **Two consumers (AC5).** `check-reviews` emits a **non-blocking** stderr
+  advisory (exit-code contract unchanged); `status-board` renders a regen-managed
+  **"Richer-skill selection audit"** section aggregating `not-shown` +
+  `non-interactive` counts + the shown-and-declined anomalies (the
+  kill-criterion-1 aggregator). The section is omitted entirely on a clean corpus
+  (no noise for quiet projects).
+- **Backward compatibility (AC6).** Pre-096-05 / hand-written artifacts have no
+  `substrate` field → `substrate_anomaly` returns `[]`, `status-board` skips
+  them, and the gate is unaffected — absence of data is never an anomaly.
+- **Blind spots documented, not solved (AC7).** `config` is anomaly-blind (the
+  guaranteed layer isn't audited); a recall failure is invisible (nothing shown →
+  no anomaly). Recorded in `spec.md` Goal 3 + `docs/skill-routing-verification.md`
+  as accepted gaps whose mitigation is config precedence (096-01).
+- **AC1 wording vs implementation (compliance-review note):** AC1 phrases the
+  `config` trigger as "config key present"; `_substrate_lines` stamps `config`
+  only when the key is present AND **resolvable** on this machine (mirroring
+  `_resolve_richer_for_pass`'s "config wins iff resolvable" precedence). A
+  present-but-unresolvable key falls through to `shown`/`not-shown`. Intentional
+  and consistent with the resolver; a present-but-unresolvable config is the
+  096-01 "recorded, not errored" runtime-absence case.
+- **`n/a` is never written (compliance-review note):** the vocabulary member
+  `n/a` is represented as the substrate field being *absent* (out-of-scope pass
+  or pre-096 artifact), not a literal `substrate: n/a`. Commented at
+  `review_evidence.SUBSTRATE_VALUES`.
+
+### Reconciliation sweep
+
+- **Deviation log** — updated (above).
+- **`skills/independent-review/review.py`** — `_substrate_lines` deriver +
+  consume; `record-review --non-interactive`; `check-reviews` advisory. `updated`.
+- **`skills/_common/review_evidence.py`** — `substrate_anomaly` +
+  `SUBSTRATE_VALUES`; `verdict_clears` comment (gate unchanged). `updated`.
+- **`skills/spec-workflow/workflow.py`** — `_substrate_audit_section` wired into
+  `regenerate_status_board`. `updated`.
+- **`docs/skill-routing-verification.md`** — the substrate record + the two
+  blind spots added. `updated`.
+- **`docs/specs/.../spec.md`** — Goal 3 blind-spots note. `updated`.
+- **Host packages** — regenerated (review.py + review_evidence.py + workflow.py
+  propagated); drift `--check` green. `updated`.
+- **`docs/architecture.md` / `docs/conventions.md` / `docs/inbox.md`** — no-op.
+- **Lightweight decisions** — none.
+- **Memory** — the "substrate DERIVED at the record chokepoint + consume-on-read
+  closes staleness; config is deliberately anomaly-blind" lesson; folded into
+  `/jig:memory-sync` at session close.
 
 ### Close-out (post-DONE)
 

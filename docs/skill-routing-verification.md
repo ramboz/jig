@@ -75,9 +75,30 @@ python3 skills/independent-review/review.py pr-review <spec.md> <slice> <file> -
 # Missing --richer-skill, or no sidecar + no config + no --non-interactive → fails fast (exit 2).
 ```
 
-The verifiable answer to "did deferral actually work?" moves from prompt
-inspection to the recorded evidence in spec 096-05 (the `substrate:` +
-shown-and-declined record); this doc will point there once 096-05 lands.
+**How to verify deferral actually worked (spec 096-05).** `record-review`
+derives a closed `substrate:` into each slice-keyed extensible-pass evidence file
+(`config` / `shown` / `not-shown` / `non-interactive` / `n/a`), plus the
+`applied_skill` and the `shown_candidates` set. Two committed consumers surface
+it: `review.py check-reviews` emits a **non-blocking** stderr advisory naming any
+high-confidence richer skill that was *shown and not applied* (never changes the
+exit code — the ADR-0014 gate stays a `verdict:` predicate), and
+`workflow.py status-board` renders a **"Richer-skill selection audit"** section
+aggregating the `not-shown` + `non-interactive` counts and the shown-and-declined
+anomalies (the ADR-0040 kill-criterion-1 aggregator).
+
+**Two accepted blind spots (documented, not solved — mitigation is config
+precedence, 096-01):**
+- **`config` is anomaly-blind.** A `substrate: config` run records the configured
+  skill from *presence*, not proof the reviewer applied it, and never fires the
+  anomaly (the user chose deliberately). So the audit is silent exactly where the
+  *guaranteed* layer lives — by design; config is the deterministic floor, not a
+  thing to audit.
+- **A recall failure is invisible.** If enumeration nominates *nothing* (or misses
+  a genuine richer skill), the orchestrator picks `none`, no candidate was shown,
+  and no anomaly fires — a real miss looks identical to "nothing installed". The
+  matcher is recall-oriented to shrink this, but it cannot see what it never
+  enumerated. The mitigation is to name the skill in `scaffold.json` (config
+  precedence), which needs no enumeration at all.
 
 ## Summary
 

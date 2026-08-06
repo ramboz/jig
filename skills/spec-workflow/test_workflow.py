@@ -400,6 +400,46 @@ class StatusBoardTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def _write_evidence(self, spec_slug, slice_no, pass_name, substrate,
+                        *, applied=None, shown=None):
+        """Write a minimal recorded verdict file with a `substrate:` field for
+        the status-board audit (spec 096-05)."""
+        d = self.target / "docs/specs" / spec_slug / "reviews"
+        d.mkdir(parents=True, exist_ok=True)
+        fm = ["---", f"slice: {slice_no}", f"pass: {pass_name}",
+              "verdict: pass", f"substrate: {substrate}"]
+        if applied is not None:
+            fm.append(f"applied_skill: {applied}")
+        if shown is not None:
+            fm.append("shown_candidates: [" + ", ".join(shown) + "]")
+        fm.append("---")
+        (d / f"slice-{slice_no}-{pass_name}.md").write_text(
+            "\n".join(fm) + "\n\nbody\n")
+
+    def test_status_board_substrate_audit_section(self):
+        # spec 096-05 AC5: status-board aggregates not-shown + non-interactive
+        # + shown-and-declined anomalies from reviews/slice-*.md substrate fields.
+        self._write_evidence("100-alpha", "100-01", "arch", "not-shown")
+        self._write_evidence("100-alpha", "100-02", "craft", "non-interactive")
+        self._write_evidence(
+            "101-beta", "101-01", "craft", "shown", applied="review-pr-deep",
+            shown=["review-pr-deep:high-confidence", "team-pr:high-confidence"])
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertIn("Richer-skill selection audit", board)
+        self.assertRegex(board, r"\*\*1\*\* pass\(es\) recorded `not-shown`")
+        self.assertRegex(board, r"\*\*1\*\* pass\(es\) recorded `non-interactive`")
+        self.assertIn("declined: team-pr", board)
+
+    def test_status_board_omits_audit_section_when_clean(self):
+        # No substrate-bearing evidence (or all config/shown-with-pick) → no
+        # audit section (quiet projects see no noise).
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        board = (self.target / "docs/specs/README.md").read_text()
+        self.assertNotIn("Richer-skill selection audit", board)
+
     def test_status_board_regenerates_table(self):
         result = run_workflow("status-board", str(self.target))
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
