@@ -56,15 +56,15 @@ def match_pattern(basename):
             return tool, surface
     return None, None
 
-try:
-    # Opt-out disable token. Mirrors _common/parsing.ENV_FALSEY
-    # ({0,false,off,no}) — kept inline (not imported) so this hook gains no
-    # _common-import failure mode; a source-inspection test pins the two token
-    # sets in sync. Widened from a bare '0' for cross-gate consistency; '0'
-    # still works (backward-compatible).
-    if (os.environ.get('JIG_BOUNDARY_CHECK') or '').strip().lower() in ('0', 'false', 'off', 'no'):
-        sys.exit(0)
+FALSEY = ('0', 'false', 'off', 'no')  # mirrors _common/parsing.ENV_FALSEY
 
+try:
+    # NOTE: the two nudges this hook emits have INDEPENDENT opt-outs. The
+    # contract-artifact nudge (block b) is gated by JIG_BOUNDARY_CHECK; the
+    # governance protected-path nudge (block a, slice 106-01) is gated only by
+    # JIG_PROTECTED_PATHS (checked inside protected_paths.evaluate). The
+    # JIG_BOUNDARY_CHECK opt-out therefore gates block (b) ONLY — it does not
+    # silence the governance nudge (arch/craft re-review nit).
     data = json.load(sys.stdin)
     tool_name = data.get('tool_name', '')
     if tool_name not in ('Edit', 'Write', 'MultiEdit'):
@@ -75,33 +75,60 @@ try:
     if not file_path:
         sys.exit(0)
 
-    basename = os.path.basename(file_path)
-    if not basename:
-        sys.exit(0)
+    # Collect every applicable nudge, then emit EXACTLY ONE JSON object — the
+    # single-object stdout contract every jig hook obeys (a hook that prints two
+    # concatenated objects risks the host's json.loads dropping both). Slice
+    # 106-01 (ADR-0051) made boundary-warn the SINGLE owner of the governance
+    # protected-path nudge; jig-entry-gate no longer emits it, so a protected-
+    # path edit nudges exactly once even though both hooks share this matcher.
+    project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
+    session_id = data.get('session_id') or 'default'
+    event_name = data.get('hook_event_name') or 'PostToolUse'
 
-    tool, surface = match_pattern(basename)
-    if tool is None:
-        sys.exit(0)
+    def _attribute(source_tag, nudge):
+        try:
+            from lib.read_attribution import append_additional_context_event
+            append_additional_context_event(
+                project_dir, session_id, event_name,
+                'jig-boundary-change-warn', source_tag, nudge)
+        except Exception:
+            pass
 
-    # Nudge text — AC #3 four parts: basename, ADR pointer, surface tool,
-    # informational reminder.
-    msg = (
-        f'{basename} ({surface}) was just edited. '
-        f'If this is a breaking change, consider capturing the rationale '
-        f'with /jig:adr-workflow new <slug>, and confirm with the '
-        f'surface-appropriate breaking-change tool: {tool}. '
-        f'This nudge is informational, not a gate.'
-    )
+    nudges = []
+
+    # (a) Governance protected-path nudge — reads scaffold.json.protected_paths
+    # (slice 106-01 / ADR-0051; fail-open to silence).
     try:
-        from lib.read_attribution import append_additional_context_event
-        append_additional_context_event(
-            os.environ.get('CLAUDE_PROJECT_DIR', '.'),
-            data.get('session_id') or 'default',
-            data.get('hook_event_name') or 'PostToolUse',
-            'jig-boundary-change-warn', 'boundary_change', msg)
+        from lib.protected_paths import evaluate as _pp_evaluate
+        _pp_nudge = _pp_evaluate(data, project_dir)
+        if _pp_nudge:
+            _attribute('protected_path_edit', _pp_nudge)
+            nudges.append(_pp_nudge)
     except Exception:
         pass
-    print(json.dumps({'continue': True, 'additionalContext': msg}))
+
+    # (b) Contract-artifact breaking-change nudge (basename pattern match) —
+    # AC #3 four parts: basename, ADR pointer, surface tool, reminder. Gated by
+    # JIG_BOUNDARY_CHECK (independent of the block-a governance opt-out above).
+    boundary_off = (os.environ.get('JIG_BOUNDARY_CHECK') or '').strip().lower() in FALSEY
+    basename = os.path.basename(file_path)
+    if not boundary_off and basename:
+        tool, surface = match_pattern(basename)
+        if tool is not None:
+            msg = (
+                f'{basename} ({surface}) was just edited. '
+                f'If this is a breaking change, consider capturing the rationale '
+                f'with /jig:adr-workflow new <slug>, and confirm with the '
+                f'surface-appropriate breaking-change tool: {tool}. '
+                f'This nudge is informational, not a gate.'
+            )
+            _attribute('boundary_change', msg)
+            nudges.append(msg)
+
+    if not nudges:
+        sys.exit(0)
+    print(json.dumps({'continue': True,
+                      'additionalContext': '\n\n'.join(nudges)}))
 except SystemExit:
     raise
 except Exception:
