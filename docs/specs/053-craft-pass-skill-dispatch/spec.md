@@ -104,3 +104,19 @@ arch pass applies the richer user skill).
   the `jig-skill-trace.sh` hook co-landed in `734e424` is reconciled there.
 - **Landing commit:** `734e424` (`fix(review): route craft/arch pass to richer
   user skill via file-read dispatch`).
+
+## Amendments
+
+- **2026-07-28 (spec 096-01 / [ADR-0040](../../decisions/adr-0040-richer-skill-discovery-explicit-candidate-channel.md) D1).**
+  This spec's dispatch resolved a richer skill by **exact folder name at user
+  scope only** (`detect_richer_skill` → `~/.claude/skills/<name>/SKILL.md`),
+  which silently ignored a richer skill installed under any other name — the
+  reported failure that motivated spec 096. Spec 096-01 supersedes that
+  resolution with a **config-first** layer: an explicit `review.<category>_skill`
+  in `scaffold.json` (resolved by `_common/review_config.py`) now takes
+  precedence for the three extensible categories (`pr_review`, `arch_review`,
+  `code_health`), on both hosts, with `detect_richer_skill` retained only as the
+  legacy fallback. The zero-config enumeration layer that fully **removes**
+  `detect_richer_skill` lands in spec 096-03. The original design above is
+  preserved; this note records the supersession per ADR-0010 (records get
+  amendments; live prose — the `review.py` docstrings — was corrected inline).

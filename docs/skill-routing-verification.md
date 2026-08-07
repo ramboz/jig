@@ -49,29 +49,60 @@ skill router is **not reachable** on this path. Earlier prose ("apply the
 most-specific SKILL.md the router resolves to") was therefore inert — the
 reviewer just followed jig's inlined baseline buckets.
 
-**Fix (file-read dispatch — spec 031 option (b)):** `review.py` now
-*deterministically detects* a user-installed skill on disk
-(`detect_richer_skill()` → `~/.claude/skills/<name>/SKILL.md`) and, when found,
-points the reviewer at that concrete path to **read and apply**, falling back to
-jig's baseline buckets only when none is installed.
+**Fix — the explicit candidate channel (spec 096-03 / ADR-0040 D3;
+supersedes spec 031's user-scope `detect_richer_skill`, now removed).**
+Resolution is a precedence chain, not a user-scope name lookup:
+1. **Config wins** — an explicit `review.<category>_skill` in `scaffold.json`
+   (spec 096-01). Deterministic, reproducible, both hosts.
+2. **Zero-config pick** — absent config, `review.py candidates <category> <spec>
+   <slice> --pass <pass>` enumerates non-baseline skills across scopes, prints
+   them **tiered** (`[high-confidence]` with descriptions, `[speculative]` names
+   only), and writes the shown set to a sidecar; the orchestrator picks the best
+   and passes it as the **required** `--richer-skill <name|none>`; the pass
+   validates the pick against the shown tiers (off-list / unresolvable → baseline,
+   recorded).
+3. **Baseline** otherwise. jig's own baselines are excluded from discovery by the
+   `jig-` path prefix / plugins-`jig` segment (spec 096-02), not a marker.
 
 **How to verify (deterministic):**
 
 ```bash
 export CLAUDE_PLUGIN_ROOT="$(pwd)"
-# With your richer skill installed → prompt names its path + "read that SKILL.md":
-python3 skills/independent-review/review.py pr-review <spec.md> <slice> <file> | grep -i "read that SKILL.md\|/.claude/skills/"
-# Simulate a machine without it → baseline branch:
-HOME="$(mktemp -d)" python3 skills/independent-review/review.py pr-review <spec.md> <slice> <file> | grep -i "jig's bundled .*baseline"
+# Config path: name a richer skill in scaffold.json → the craft prompt names it.
+# Zero-config path: show candidates, then pick.
+python3 skills/independent-review/review.py candidates pr_review <spec.md> <slice> --pass craft
+python3 skills/independent-review/review.py pr-review <spec.md> <slice> <file> --richer-skill <name-or-none> | grep -i "read that SKILL.md\|bundled .*baseline"
+# Missing --richer-skill, or no sidecar + no config + no --non-interactive → fails fast (exit 2).
 ```
 
-Detection is **user-scope only** by design: a *project*-scope `.claude/skills/`
-copy may be jig's own `scaffold-init` baseline, indistinguishable by path from a
-genuinely richer project skill (see `docs/refinement-todo.md`).
+**How to verify deferral actually worked (spec 096-05).** `record-review`
+derives a closed `substrate:` into each slice-keyed extensible-pass evidence file
+(`config` / `shown` / `not-shown` / `non-interactive` / `n/a`), plus the
+`applied_skill` and the `shown_candidates` set. Two committed consumers surface
+it: `review.py check-reviews` emits a **non-blocking** stderr advisory naming any
+high-confidence richer skill that was *shown and not applied* (never changes the
+exit code — the ADR-0014 gate stays a `verdict:` predicate), and
+`workflow.py status-board` renders a **"Richer-skill selection audit"** section
+aggregating the `not-shown` + `non-interactive` counts and the shown-and-declined
+anomalies (the ADR-0040 kill-criterion-1 aggregator).
+
+**Two accepted blind spots (documented, not solved — mitigation is config
+precedence, 096-01):**
+- **`config` is anomaly-blind.** A `substrate: config` run records the configured
+  skill from *presence*, not proof the reviewer applied it, and never fires the
+  anomaly (the user chose deliberately). So the audit is silent exactly where the
+  *guaranteed* layer lives — by design; config is the deterministic floor, not a
+  thing to audit.
+- **A recall failure is invisible.** If enumeration nominates *nothing* (or misses
+  a genuine richer skill), the orchestrator picks `none`, no candidate was shown,
+  and no anomaly fires — a real miss looks identical to "nothing installed". The
+  matcher is recall-oriented to shrink this, but it cannot see what it never
+  enumerated. The mitigation is to name the skill in `scaffold.json` (config
+  precedence), which needs no enumeration at all.
 
 ## Summary
 
 | Path | Mechanism | Determinism | How to verify |
 |---|---|---|---|
 | A — interactive | skill router (description match) | model-mediated | `.claude/skill-usage.jsonl` trace |
-| B — workflow craft/arch | `review.py` file-read detection | deterministic detection + graceful fallback | inspect the built prompt |
+| B — workflow craft/arch/code-health | config (096-01) → tiered `candidates` + required `--richer-skill` pick (096-03) → baseline; jig baselines excluded by path (096-02) | deterministic config + validated pick + graceful fallback | run `candidates`, inspect the built prompt |

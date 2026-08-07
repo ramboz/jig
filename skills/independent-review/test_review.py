@@ -7,6 +7,7 @@ Run from the repo root:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -23,8 +24,16 @@ SKILL_MD = REPO_ROOT / "skills" / "independent-review" / "SKILL.md"
 def run_review(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    argv = list(args)
+    # Spec 096-03 AC3: `--richer-skill` is required on the three extensible
+    # passes. Pre-096 tests exercise baseline / prompt-structure behavior, so
+    # default them to the CI-reproducible baseline path (`--richer-skill none
+    # --non-interactive`) unless the test supplies its own selection args.
+    if (argv and argv[0] in ("pr-review", "arch-review", "code-health")
+            and "--richer-skill" not in argv):
+        argv += ["--richer-skill", "none", "--non-interactive"]
     return subprocess.run(
-        [sys.executable, str(REVIEW), *args],
+        [sys.executable, str(REVIEW), *argv],
         capture_output=True, text=True, env=env,
         cwd=str(cwd) if cwd else None,
     )
@@ -2236,7 +2245,8 @@ class CodeHealthPromptTests(unittest.TestCase):
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         result = subprocess.run(
             [sys.executable, str(REVIEW), "code-health", str(self.spec),
-             "060-05", "skills/foo/foo.py", "--summary-file", "-"],
+             "060-05", "skills/foo/foo.py", "--summary-file", "-",
+             "--richer-skill", "none", "--non-interactive"],
             input="STDIN-SUMMARY-SENTINEL\n",
             capture_output=True, text=True, env=env,
         )
@@ -2268,7 +2278,8 @@ class CodeHealthPromptTests(unittest.TestCase):
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
         result = subprocess.run(
             [sys.executable, str(REVIEW), "code-health", str(self.spec),
-             "060-05", "skills/foo/foo.py"],
+             "060-05", "skills/foo/foo.py",
+             "--richer-skill", "none", "--non-interactive"],
             input="", capture_output=True, text=True, env=env,
         )
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
@@ -3279,18 +3290,16 @@ class ReviewEvidenceScaffoldParityTests(unittest.TestCase):
 
 
 class RicherSkillFileReadDispatchTests(unittest.TestCase):
-    """Richer-skill file-read dispatch (craft + arch passes).
+    """Richer-skill dispatch AFTER spec 096-03 (ADR-0040 D3, AC7).
 
-    The craft/arch reviewer subagent has read-only tools (Read/Glob/Grep) and
-    NO `Skill` tool — a live probe confirmed it cannot route to a user skill
-    via Claude's skill router, but CAN `Read` files under `~/.claude/`. So
-    `review.py` detects a USER-scope installed skill on disk and hands the
-    reviewer its concrete path to read-and-apply; otherwise it inlines jig's
-    baseline buckets.
-
-    User-scope only by design: a project-scope `.claude/skills/<name>/` may be
-    jig's own `scaffold-init` baseline copy, indistinguishable by path from a
-    richer project skill — so it must NOT trigger the richer branch.
+    The legacy `detect_richer_skill` user-scope exact-name lookup is REMOVED.
+    A bare user-scope skill named `pr-review` / `arch-review` is NO LONGER
+    auto-detected — the richer branch is reached ONLY via the precedence chain:
+    config (`review.<category>_skill`, 096-01) → a validated `--richer-skill`
+    pick over the printed `candidates` tiers (096-03) → baseline. These tests
+    pin the *removal* (no auto-detection) + the baseline branch; the config path
+    is covered by `RicherSkillConfigTests` and the pick path by the 096-03
+    channel tests.
     """
 
     def setUp(self):
@@ -3321,22 +3330,23 @@ class RicherSkillFileReadDispatchTests(unittest.TestCase):
             env.update(extra_env)
         result = subprocess.run(
             [sys.executable, str(REVIEW), mode, str(self.spec), "031-01",
-             "skills/foo/foo.py"],
+             "skills/foo/foo.py",
+             "--richer-skill", "none", "--non-interactive"],
             capture_output=True, text=True, env=env, cwd=cwd,
         )
         self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
         return result.stdout
 
-    # ---- pr-review ----
-    def test_pr_review_richer_detected_points_at_user_path(self):
+    # ---- AC7: user-scope auto-detection is REMOVED ----
+    def test_pr_review_user_scope_skill_no_longer_auto_detected(self):
         skill = self._make_user_skill("pr-review")
         prompt = self._prompt("pr-review", home=self.home)
-        self.assertIn(str(skill), prompt,
-                      "richer branch must name the concrete user-skill path")
-        self.assertRegex(prompt, r"(?i)read that SKILL\.md in full")
-        self.assertRegex(prompt, r"(?i)supersedes the baseline")
-        # Still tells the reviewer to normalize into the workflow envelope.
-        self.assertRegex(prompt, r"(?i)normalize your findings into the required")
+        self.assertNotIn(
+            str(skill), prompt,
+            "AC7: a bare user-scope skill is NO LONGER auto-detected — the "
+            "richer branch is reached via config or a validated pick, not a "
+            "user-scope exact-name lookup")
+        self.assertRegex(prompt, r"(?i)jig's bundled `pr-review` SKILL\.md baseline")
 
     def test_pr_review_baseline_when_no_user_skill(self):
         prompt = self._prompt("pr-review", home=self.home)  # empty home
@@ -3344,20 +3354,20 @@ class RicherSkillFileReadDispatchTests(unittest.TestCase):
         self.assertNotRegex(prompt, r"(?i)read that SKILL\.md in full")
         self.assertRegex(prompt, r"(?i)jig's bundled `pr-review` SKILL\.md baseline")
 
-    def test_pr_review_envelope_preserved_in_richer_branch(self):
-        self._make_user_skill("pr-review")
+    def test_envelope_preserved_in_baseline_branch(self):
         prompt = self._prompt("pr-review", home=self.home)
         for marker in ("VERDICT", "REASONING", "SPECIFIC ISSUES",
                        "[blocker]", "[nit]", "[strength]"):
             self.assertIn(marker, prompt,
-                          f"workflow envelope must survive richer branch: {marker}")
+                          f"workflow envelope must survive: {marker}")
 
     # ---- arch-review ----
-    def test_arch_review_richer_detected_points_at_user_path(self):
+    def test_arch_review_user_scope_skill_no_longer_auto_detected(self):
         skill = self._make_user_skill("arch-review")
         prompt = self._prompt("arch-review", home=self.home)
-        self.assertIn(str(skill), prompt)
-        self.assertRegex(prompt, r"(?i)read that SKILL\.md in full")
+        self.assertNotIn(str(skill), prompt)
+        self.assertRegex(prompt,
+                         r"(?i)jig's bundled `arch-review` SKILL\.md baseline")
 
     def test_arch_review_baseline_when_no_user_skill(self):
         prompt = self._prompt("arch-review", home=self.home)
@@ -3365,22 +3375,18 @@ class RicherSkillFileReadDispatchTests(unittest.TestCase):
         self.assertRegex(prompt,
                          r"(?i)jig's bundled `arch-review` SKILL\.md baseline")
 
-    # ---- user-scope only: project-scope copy must NOT trigger richer branch ----
+    # ---- project-scope copy must NOT trigger richer branch (unchanged) ----
     def test_project_scope_skill_does_not_trigger_richer_branch(self):
         proj = Path(self.tmp) / "proj"
         d = proj / ".claude" / "skills" / "pr-review"
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text("---\nname: pr-review\n---\n# scaffolded copy\n")
-        # Empty HOME (no user skill). Guard BOTH likely project-detection
-        # vectors a future change might wrongly add: cwd-relative AND
-        # CLAUDE_PROJECT_DIR-relative. Detection is user-scope only, so the
-        # baseline branch must hold despite the project-scope copy being present.
         prompt = self._prompt("pr-review", home=self.home, cwd=str(proj),
                               extra_env={"CLAUDE_PROJECT_DIR": str(proj)})
         self.assertNotRegex(
             prompt, r"(?i)read that SKILL\.md in full",
-            "a project-scope `.claude/skills` copy (possibly jig's own "
-            "scaffolded baseline) must NOT be treated as a richer skill",
+            "a project-scope `.claude/skills` copy must NOT be treated as a "
+            "richer skill",
         )
 
 
@@ -3441,6 +3447,534 @@ class RecordReviewAdrModeTests(unittest.TestCase):
         r = self._record("--pass", "frame-critique", "--verdict", "pass",
                          "--reviewer", "x", "--prompt-source", "x")
         self.assertEqual(r.returncode, 2, f"stdout: {r.stdout}")
+
+
+# ---------------------------------------------------------------------------
+# Slice 096-01 (ADR-0040 D1/D3): config-first richer-skill resolution in the
+# three extensible builders + the derived `substrate: config` record.
+# ---------------------------------------------------------------------------
+
+
+class RicherSkillConfigTests(unittest.TestCase):
+    """Config (`review.<category>_skill` in scaffold.json) WINS over the legacy
+    exact-name lookup for the three extensible builders, and `record-review`
+    derives `substrate: config` from config presence. Hermetic — injects $HOME
+    and a tmp project with scaffold.json; never reads the real ~/.claude."""
+
+    def setUp(self):
+        # Import review in-process (builders are pure functions).
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
+        sys.path.insert(0, str(REPO_ROOT / "skills" / "independent-review"))
+        import review  # noqa: E402
+        self.review = review
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-cfg-"))
+        self.home = self.tmp / "home"
+        (self.home / ".claude" / "skills").mkdir(parents=True)
+        self._old_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(self.home)
+        # A configured richer skill installed at user scope.
+        self.richer = self.home / ".claude" / "skills" / "review-pr-deep"
+        self.richer.mkdir(parents=True)
+        (self.richer / "SKILL.md").write_text(
+            "---\nname: review-pr-deep\n---\n# richer\n"
+        )
+        # A project with scaffold.json at its root and a spec under docs/specs.
+        self.proj = self.tmp / "proj"
+        self.specdir = self.proj / "docs" / "specs" / "099-x"
+        self.spec = _make_spec_with_slice(self.specdir, "01", "cfg")
+
+    def tearDown(self):
+        import shutil
+        if self._old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self._old_home
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _scaffold(self, review_block: dict) -> None:
+        (self.proj / "scaffold.json").write_text(
+            json.dumps({"review": review_block})
+        )
+
+    # -- AC4: config wins over the legacy exact-name lookup ---------------
+    def test_pr_builder_config_wins(self):
+        # Install a legacy `pr-review` at user scope AND configure a different
+        # richer skill; the configured one must win.
+        legacy = self.home / ".claude" / "skills" / "pr-review"
+        legacy.mkdir(parents=True)
+        (legacy / "SKILL.md").write_text("---\nname: pr-review\n---\n")
+        self._scaffold({"pr_review_skill": "review-pr-deep"})
+        prompt = self.review.build_pr_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"]
+        )
+        self.assertIn("review-pr-deep/SKILL.md", prompt)
+        self.assertNotIn(str(legacy / "SKILL.md"), prompt)
+
+    def test_arch_builder_config_wins(self):
+        self._scaffold({"arch_review_skill": "review-pr-deep"})
+        prompt = self.review.build_arch_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"]
+        )
+        self.assertIn("review-pr-deep/SKILL.md", prompt)
+
+    # -- AC3: code-health builder now honors config (net-new dispatch) ----
+    def test_code_health_builder_emits_richer_para_when_configured(self):
+        self._scaffold({"code_health_skill": "review-pr-deep"})
+        prompt = self.review.build_code_health_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"], "clean"
+        )
+        self.assertIn("review-pr-deep/SKILL.md", prompt)
+        self.assertIn("richer `code-health` reviewer is configured", prompt)
+
+    def test_code_health_builder_no_richer_para_when_unconfigured(self):
+        # No scaffold.json at all → baseline, no richer paragraph.
+        prompt = self.review.build_code_health_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"], "clean"
+        )
+        self.assertNotIn("reviewer is configured", prompt)
+
+    # -- AC2: a mistyped config surfaces (does not silently fall back) -----
+    def test_structural_malformed_config_propagates_from_builder(self):
+        self._scaffold({"pr_review_skill": 123})
+        with self.assertRaises(self.review._review_config.ReviewConfigError):
+            self.review.build_pr_review_prompt(
+                self.spec, "099-01 — cfg", ["a.py"]
+            )
+
+    # -- AC2: runtime absence falls back to baseline, no raise ------------
+    def test_uninstalled_config_falls_back_to_baseline(self):
+        self._scaffold({"pr_review_skill": "not-installed-here"})
+        prompt = self.review.build_pr_review_prompt(
+            self.spec, "099-01 — cfg", ["a.py"]
+        )
+        # No richer path named; baseline routing paragraph present.
+        self.assertNotIn("not-installed-here", prompt)
+        self.assertIn("bundled `pr-review` SKILL.md baseline", prompt)
+
+    # -- _substrate_lines derivation (096-05 signature) ------------------
+    def test_substrate_lines_for_configured_craft(self):
+        self._scaffold({"pr_review_skill": "review-pr-deep"})
+        lines = self.review._substrate_lines(self.spec, "096-01", "craft", False)
+        self.assertIn("substrate: config", lines)
+        # Records the PORTABLE configured identifier, not the machine-specific
+        # resolved absolute path (committed evidence must not bake in $HOME).
+        self.assertIn("applied_skill: review-pr-deep", lines)
+        self.assertNotIn("/SKILL.md", lines)
+        self.assertNotIn(str(self.home), lines)
+
+    def test_substrate_lines_empty_for_compliance_pass(self):
+        self._scaffold({"pr_review_skill": "review-pr-deep"})
+        # compliance is not one of the three extensible categories → no stamp
+        # (n/a = field absent).
+        self.assertEqual(
+            self.review._substrate_lines(self.spec, "096-01", "compliance",
+                                         False), ""
+        )
+
+    def test_substrate_lines_not_shown_when_unconfigured(self):
+        # No scaffold.json, no sidecar, not --non-interactive → not-shown (the
+        # 096-05 defect signal; 096-01 returned "" here before the vocabulary).
+        lines = self.review._substrate_lines(self.spec, "096-01", "craft", False)
+        self.assertIn("substrate: not-shown", lines)
+
+    def test_substrate_lines_non_interactive(self):
+        lines = self.review._substrate_lines(self.spec, "096-01", "craft", True)
+        self.assertIn("substrate: non-interactive", lines)
+
+
+class CandidateChannelTests(unittest.TestCase):
+    """Spec 096-03: the explicit candidate channel end-to-end via the CLI —
+    `candidates` (tiered print + sidecar) + `--richer-skill` selection on the
+    three passes (requiredness, validation, off-list, none, fail-fast,
+    precedence)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-cand-"))
+        self.home = self.tmp / "home"
+        self.user = self.home / ".claude" / "skills"
+        self.user.mkdir(parents=True)
+        self.proj = self.tmp / "proj"
+        self.specdir = self.proj / "docs" / "specs" / "099-x"
+        self.spec = _make_spec_with_slice(self.specdir, "03", "enum")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _mk_user_skill(self, name, desc):
+        d = self.user / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n")
+
+    def _run(self, *args):
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+               "HOME": str(self.home)}
+        return subprocess.run([sys.executable, str(REVIEW), *args],
+                              capture_output=True, text=True, env=env)
+
+    def _scaffold(self, review_block):
+        (self.proj / "scaffold.json").write_text(json.dumps(review_block))
+
+    def _sidecar(self, pass_name="craft"):
+        return (self.specdir / "reviews" / ".candidates"
+                / f"slice-03-{pass_name}.json")
+
+    def _candidates(self, category="pr_review", pass_name="craft"):
+        return self._run("candidates", category, str(self.spec), "0XX-03",
+                         "--pass", pass_name)
+
+    # -- AC1/AC2: tiered print + sidecar write --------------------------
+    def test_candidates_prints_tiered_and_writes_sidecar(self):
+        self._mk_user_skill("review-pr-deep", "Deep PR review with security")
+        self._mk_user_skill("morning-github", "Briefing that stages draft PR reviews")
+        r = self._candidates()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("[high-confidence]", r.stdout)
+        self.assertIn("review-pr-deep :: Deep PR review", r.stdout)
+        self.assertIn("[speculative]", r.stdout)
+        self.assertTrue(self._sidecar().is_file())
+        data = json.loads(self._sidecar().read_text())
+        tiers = {c["name"]: c["tier"] for c in data["candidates"]}
+        self.assertEqual(tiers["review-pr-deep"], "high-confidence")
+        self.assertEqual(tiers["morning-github"], "speculative")
+
+    def test_speculative_printed_as_names_only(self):
+        self._mk_user_skill("morning-github", "Briefing that stages draft PR reviews")
+        out = self._candidates().stdout
+        # speculative line is the bare name, no `::` description
+        spec_block = out.split("[speculative]")[1]
+        self.assertIn("- morning-github", spec_block)
+        self.assertNotIn("morning-github ::", spec_block)
+
+    # -- AC3: --richer-skill required -----------------------------------
+    def test_richer_skill_required(self):
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--richer-skill", r.stderr)
+
+    # -- AC4: pick validated against tiers; off-list → baseline ---------
+    def test_in_tier_pick_names_resolved_path(self):
+        self._mk_user_skill("review-pr-deep", "Deep PR review with security")
+        self._candidates()
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "review-pr-deep")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("review-pr-deep/SKILL.md", r.stdout)
+        # pick recorded into the sidecar
+        self.assertEqual(json.loads(self._sidecar().read_text())["pick"],
+                         "review-pr-deep")
+
+    def test_pick_resolves_via_stored_path_when_name_diverges_from_dir(self):
+        # A skill whose frontmatter `name` differs from its directory name: the
+        # orchestrator picks by the printed (frontmatter) name; the pass must
+        # resolve via the sidecar's stored path, NOT re-resolve by dir name
+        # (else a valid in-tier pick silently falls to baseline).
+        d = self.user / "pr-deep-dir"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            "---\nname: review-pr-deep\ndescription: Deep PR review\n---\n")
+        self._candidates()
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "review-pr-deep")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("pr-deep-dir/SKILL.md", r.stdout)
+
+    def test_off_list_pick_falls_back_to_baseline_not_error(self):
+        self._mk_user_skill("review-pr-deep", "Deep PR review with security")
+        self._candidates()
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "not-a-candidate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("bundled `pr-review`", r.stdout)
+        self.assertNotIn("not-a-candidate", r.stdout)
+
+    # -- AC5: none → baseline -------------------------------------------
+    def test_none_yields_baseline(self):
+        self._candidates()
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("bundled `pr-review`", r.stdout)
+
+    # -- AC6: fail-fast + --non-interactive escape ----------------------
+    def test_fail_fast_no_sidecar_no_config(self):
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "none")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no candidate sidecar", r.stderr)
+
+    def test_non_interactive_escapes_fail_fast(self):
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "none", "--non-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("bundled `pr-review`", r.stdout)
+
+    # -- AC7: config wins over the supplied pick ------------------------
+    def test_config_wins_over_pick(self):
+        self._mk_user_skill("review-pr-deep", "Deep PR review with security")
+        self._mk_user_skill("team-pr", "Team PR review standard")
+        self._scaffold({"review": {"pr_review_skill": "team-pr"}})
+        self._candidates()
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "review-pr-deep")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("team-pr/SKILL.md", r.stdout)
+        self.assertNotIn("review-pr-deep/SKILL.md", r.stdout)
+
+    def test_config_needs_no_sidecar_no_fail_fast(self):
+        self._mk_user_skill("team-pr", "Team PR review standard")
+        self._scaffold({"review": {"pr_review_skill": "team-pr"}})
+        # no candidates run, no --non-interactive, but config present → no fail
+        r = self._run("pr-review", str(self.spec), "0XX-03", "a.py",
+                      "--richer-skill", "none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("team-pr/SKILL.md", r.stdout)
+
+    def test_candidates_category_pass_mismatch_refused(self):
+        # arch --pass with a pr_review category → refused (would key the sidecar
+        # wrong). Coherence check (arch reviewer nit).
+        r = self._run("candidates", "pr_review", str(self.spec), "0XX-03",
+                      "--pass", "arch")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("does not match", r.stderr)
+
+    # -- zero candidates -------------------------------------------------
+    def test_zero_candidates_empty_sidecar(self):
+        r = self._candidates()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self._sidecar().read_text())["candidates"], [])
+
+
+class RecordReviewSubstrateTests(unittest.TestCase):
+    """`record-review` writes `substrate: config` + `applied_skill` into the
+    evidence frontmatter for a configured extensible pass, and the resulting
+    artifact still clears the ADR-0014 evidence gate (extra keys tolerated)."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO_ROOT / "skills"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-recsub-"))
+        self.home = self.tmp / "home"
+        (self.home / ".claude" / "skills" / "review-pr-deep").mkdir(parents=True)
+        (self.home / ".claude" / "skills" / "review-pr-deep"
+         / "SKILL.md").write_text("---\nname: review-pr-deep\n---\n")
+        self.proj = self.tmp / "proj"
+        self.spec = _make_spec_with_slice(
+            self.proj / "docs" / "specs" / "099-x", "01", "cfg"
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, pass_name, review_block=None,
+                summary="## VERDICT\npass\n\n## REASONING\nok.\n"):
+        if review_block is not None:
+            (self.proj / "scaffold.json").write_text(
+                json.dumps({"review": review_block})
+            )
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+               "HOME": str(self.home)}
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review",
+             str(self.spec), "0XX-01",
+             "--pass", pass_name, "--verdict", "pass",
+             "--reviewer", "jig:reviewer",
+             "--prompt-source", "review.py x", "--summary-file", "-"],
+            input=summary, capture_output=True, text=True, env=env,
+        )
+
+    def _evidence(self, pass_name):
+        return self.spec.parent / "reviews" / f"slice-01-{pass_name}.md"
+
+    def test_configured_craft_stamps_substrate_config(self):
+        r = self._record("craft", {"pr_review_skill": "review-pr-deep"})
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("craft").read_text())
+        self.assertEqual(fields.get("substrate"), "config")
+        # Portable configured identifier, not an absolute $HOME path.
+        self.assertEqual(fields.get("applied_skill"), "review-pr-deep")
+        self.assertNotIn(str(self.home), fields.get("applied_skill", ""))
+
+    def test_unconfigured_craft_stamps_not_shown(self):
+        # Spec 096-05 superseded 096-01's config-only stamp: an unconfigured
+        # extensible pass with no candidates sidecar and no --non-interactive
+        # records `not-shown` — the auditable "selection step did not run"
+        # defect signal (ADR-0040 D3), not an absent field.
+        r = self._record("craft", review_block={})
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("craft").read_text())
+        self.assertEqual(fields.get("substrate"), "not-shown")
+        self.assertEqual(fields.get("applied_skill"), "none")
+
+    def test_compliance_pass_stamps_no_substrate(self):
+        r = self._record("compliance", {"pr_review_skill": "review-pr-deep"})
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("compliance").read_text())
+        self.assertNotIn("substrate", fields)
+
+    def test_substrate_artifact_still_parses_with_verdict_intact(self):
+        # ADR-0014 gate predicate reads `verdict:` only. A substrate-bearing
+        # artifact must parse cleanly with the gate's input untouched — extra
+        # frontmatter keys are tolerated, the gate is not amended.
+        self._record("craft", {"pr_review_skill": "review-pr-deep"})
+        from _common.parsing import parse_frontmatter
+        fields, _ = parse_frontmatter(self._evidence("craft").read_text())
+        self.assertEqual(fields.get("verdict"), "pass")
+        self.assertEqual(fields.get("substrate"), "config")
+        # canonical fields still present + well-formed alongside the new keys
+        for key in ("slice", "pass", "verdict", "reviewer",
+                    "reviewed_at", "prompt_source"):
+            self.assertIn(key, fields)
+
+
+class SubstrateRecordAndConsumerTests(unittest.TestCase):
+    """Spec 096-05: record-review derives the full substrate vocabulary from
+    observable state (config/shown/not-shown/non-interactive), consumes the
+    sidecar, keeps the ADR-0014 gate unchanged, and the two consumers
+    (check-reviews advisory + status-board audit) surface the anomaly."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-sub05-"))
+        self.home = self.tmp / "home"
+        self.user = self.home / ".claude" / "skills"
+        self.user.mkdir(parents=True)
+        self.proj = self.tmp / "proj"
+        self.specdir = self.proj / "docs" / "specs" / "099-x"
+        self.spec = _make_spec_with_slice(self.specdir, "05", "sub")
+        for n, d in [("review-pr-deep", "Deep PR review with security"),
+                     ("team-pr", "Team PR review standard")]:
+            sk = self.user / n
+            sk.mkdir()
+            (sk / "SKILL.md").write_text(
+                f"---\nname: {n}\ndescription: {d}\n---\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, *args, stdin="b\n"):
+        env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+               "HOME": str(self.home)}
+        return subprocess.run([sys.executable, str(REVIEW), *args],
+                              input=stdin, capture_output=True, text=True,
+                              env=env)
+
+    def _record(self, pass_name, *extra):
+        return self._run("record-review", str(self.spec), "0XX-05",
+                         "--pass", pass_name, "--verdict", "pass",
+                         "--reviewer", "x", "--prompt-source", "y",
+                         "--summary-file", "-", *extra)
+
+    def _fields(self, pass_name):
+        from _common.parsing import parse_frontmatter
+        ev = self.specdir / "reviews" / f"slice-05-{pass_name}.md"
+        fields, _ = parse_frontmatter(ev.read_text())
+        return fields
+
+    def _sidecar(self, pass_name):
+        return self.specdir / "reviews" / ".candidates" / f"slice-05-{pass_name}.json"
+
+    # -- AC1: shown, with a pick + shown-and-declined set ----------------
+    def test_shown_records_pick_and_shown_set_and_consumes_sidecar(self):
+        self._run("candidates", "pr_review", str(self.spec), "0XX-05",
+                  "--pass", "craft")
+        self._run("pr-review", str(self.spec), "0XX-05", "a.py",
+                  "--richer-skill", "review-pr-deep")
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self._fields("craft")
+        self.assertEqual(f["substrate"], "shown")
+        self.assertEqual(f["applied_skill"], "review-pr-deep")
+        self.assertIn("review-pr-deep:high-confidence", f["shown_candidates"])
+        # sidecar consumed (staleness impossible next cycle — AC9)
+        self.assertFalse(self._sidecar("craft").exists())
+
+    def test_shown_but_no_pick_is_unknown_and_anomaly_eligible(self):
+        # candidates ran but no pass recorded a pick (cheapest defection)
+        self._run("candidates", "pr_review", str(self.spec), "0XX-05",
+                  "--pass", "craft")
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self._fields("craft")
+        self.assertEqual(f["substrate"], "shown")
+        self.assertEqual(f["applied_skill"], "unknown")
+        from _common import review_evidence as ev
+        self.assertTrue(ev.substrate_anomaly(f))  # all high-confidence declined
+
+    # -- AC1: not-shown --------------------------------------------------
+    def test_no_sidecar_no_config_is_not_shown(self):
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fields("craft")["substrate"], "not-shown")
+
+    # -- AC1: non-interactive (caller-declared) --------------------------
+    def test_non_interactive_recorded(self):
+        r = self._record("craft", "--non-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fields("craft")["substrate"], "non-interactive")
+
+    # -- AC1: config wins ------------------------------------------------
+    def test_config_wins_records_config(self):
+        (self.proj / "scaffold.json").write_text(
+            json.dumps({"review": {"pr_review_skill": "team-pr"}}))
+        r = self._record("craft")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self._fields("craft")
+        self.assertEqual(f["substrate"], "config")
+        self.assertEqual(f["applied_skill"], "team-pr")
+
+    # -- AC2: scoped by keying mode (bug-keyed craft is n/a) -------------
+    def test_bug_keyed_craft_has_no_substrate(self):
+        bug = self.tmp / "docs" / "bugs" / "001-x.md"
+        bug.parent.mkdir(parents=True)
+        bug.write_text("---\nstatus: FIXING\nsecurity_surface: false\n---\n# B\n")
+        r = self._run("record-review", "--bug", str(bug), "--pass", "craft",
+                      "--verdict", "pass", "--reviewer", "x",
+                      "--prompt-source", "y", "--summary-file", "-")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        from _common.parsing import parse_frontmatter
+        ev = bug.parent / "reviews" / "bug-001-craft.md"
+        fields, _ = parse_frontmatter(ev.read_text())
+        self.assertNotIn("substrate", fields)  # n/a — never the defect signal
+
+    # -- AC2: never-defer pass is n/a (no substrate) ---------------------
+    def test_compliance_pass_has_no_substrate(self):
+        r = self._record("compliance")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("substrate", self._fields("compliance"))
+
+    # -- AC4: the ADR-0014 gate predicate is unchanged -------------------
+    def test_not_shown_artifact_still_clears_gate(self):
+        # substrate is recorded but NEVER gated on: a not-shown craft + a
+        # compliance pass both `verdict: pass` → REVIEWED evidence clears.
+        self._record("craft")            # not-shown
+        self._record("compliance")
+        from _common import review_evidence as ev
+        diags = ev.validate_evidence(self.spec, "0XX-05", "REVIEWED")
+        # No diagnostic should mention substrate/not-shown/anomaly.
+        self.assertFalse(any("substrate" in str(d).lower()
+                             or "not-shown" in str(d).lower()
+                             or "anomaly" in str(d).lower() for d in diags),
+                         f"gate must not consult substrate: {diags}")
+
+    # -- AC5: check-reviews advisory is non-blocking ---------------------
+    def test_check_reviews_advisory_does_not_change_exit(self):
+        # a shown-and-declined anomaly present; the FULL evidence set clears →
+        # check-reviews must still exit 0, with the advisory on stderr.
+        self._run("candidates", "pr_review", str(self.spec), "0XX-05",
+                  "--pass", "craft")
+        self._run("pr-review", str(self.spec), "0XX-05", "a.py",
+                  "--richer-skill", "review-pr-deep")  # declines team-pr
+        for p in ("compliance", "craft"):
+            self._record(p) if p == "compliance" else self._record("craft")
+        r = self._run("check-reviews", str(self.spec), "0XX-05",
+                      "--stage", "REVIEWED")
+        self.assertEqual(r.returncode, 0, f"stdout={r.stdout} stderr={r.stderr}")
+        self.assertIn("shown and NOT applied", r.stderr)
+        self.assertIn("team-pr", r.stderr)
 
 
 class Bug017RecordReviewStdinTests(unittest.TestCase):

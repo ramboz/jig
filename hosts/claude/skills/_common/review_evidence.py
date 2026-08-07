@@ -269,8 +269,55 @@ def verdict_clears(verdict: str) -> bool:
     verdict is exactly ``pass``. Any other in-vocabulary value
     (``fail``/``needs-changes``) — including a superseded-only verdict not
     yet overwritten by a later pass — does NOT clear, and neither does an
-    out-of-vocabulary value."""
+    out-of-vocabulary value.
+
+    NOTE: `substrate:` (spec 096-05) is NOT consulted here — the gate stays a
+    one-line predicate on `verdict:` alone (ADR-0014 §3 unchanged); the substrate
+    is recorded + surfaced, never gated on."""
     return verdict == "pass"
+
+
+# The closed `substrate:` vocabulary (spec 096-05 / ADR-0040 D3). Only `shown`
+# is anomaly-eligible; the two *aggregated* signals for kill-criterion-1 are
+# `not-shown` (the defect) and `non-interactive` (declared no-orchestrator).
+# NOTE: `n/a` is a documented *conceptual* member — it is NEVER written to an
+# artifact; it is represented as the substrate field being ABSENT (an out-of-
+# scope pass, or a pre-096 artifact). Listed for vocabulary completeness.
+SUBSTRATE_VALUES = ("config", "shown", "not-shown", "non-interactive", "n/a")
+
+
+def substrate_anomaly(fields: dict) -> list:
+    """Return the DECLINED high-confidence candidate names for a verdict record
+    (spec 096-05 AC3) — the calibrated anomaly. Non-empty ⇒ "a richer skill was
+    shown and not applied". Empty ⇒ no anomaly.
+
+    Fires ONLY on `substrate: shown` (config / non-interactive / not-shown / n/a
+    / absent → never). Calibrated to the **high-confidence** tier of the shown
+    set (never the speculative tier or the raw nomination list, so a legitimate
+    `none` while a briefing skill sat in speculative does not trip it). The
+    `shown`-but-`applied_skill: unknown` state (no pick recorded — the cheapest
+    defection) makes every high-confidence candidate count as declined.
+
+    Backward-compatible + defensive: a record with no `substrate` / no
+    `shown_candidates` (pre-096-05, hand-written, or malformed) yields `[]`.
+    Never raises."""
+    try:
+        if (fields or {}).get("substrate") != "shown":
+            return []
+        shown = fields.get("shown_candidates") or []
+        if isinstance(shown, str):  # tolerate a scalar / flow-parse miss
+            shown = [shown] if shown else []
+        high = []
+        for entry in shown:
+            name, _, tier = str(entry).partition(":")
+            if tier == "high-confidence" and name:
+                high.append(name)
+        applied = fields.get("applied_skill")
+        if applied == "unknown":
+            return high  # shown, no pick recorded → all high-confidence declined
+        return [n for n in high if n != applied]
+    except (AttributeError, TypeError, ValueError):
+        return []
 
 
 def parse_verdict_file(path, required_fields=REQUIRED_FIELDS) -> VerdictRecord:

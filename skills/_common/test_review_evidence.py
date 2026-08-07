@@ -915,5 +915,65 @@ class ValidateAdrEvidenceTests(unittest.TestCase):
         self.assertTrue(diags)
 
 
+class SubstrateAnomalyTest(unittest.TestCase):
+    """Spec 096-05 AC3/AC6: `substrate_anomaly` fires ONLY on `shown` against the
+    high-confidence tier; config / non-interactive / not-shown / n/a / absent
+    never fire; backward-compatible + defensive."""
+
+    def test_shown_with_declined_high_confidence_fires(self):
+        f = {"substrate": "shown", "applied_skill": "review-pr-deep",
+             "shown_candidates": ["review-pr-deep:high-confidence",
+                                   "team-pr:high-confidence"]}
+        self.assertEqual(ev.substrate_anomaly(f), ["team-pr"])
+
+    def test_shown_all_applied_no_anomaly(self):
+        f = {"substrate": "shown", "applied_skill": "review-pr-deep",
+             "shown_candidates": ["review-pr-deep:high-confidence"]}
+        self.assertEqual(ev.substrate_anomaly(f), [])
+
+    def test_speculative_tier_never_fires(self):
+        # a legitimate `none` while a briefing sat in speculative must NOT trip
+        f = {"substrate": "shown", "applied_skill": "none",
+             "shown_candidates": ["morning-github:speculative"]}
+        self.assertEqual(ev.substrate_anomaly(f), [])
+
+    def test_shown_but_no_pick_fires_on_all_high_confidence(self):
+        f = {"substrate": "shown", "applied_skill": "unknown",
+             "shown_candidates": ["review-pr-deep:high-confidence",
+                                   "morning-github:speculative"]}
+        self.assertEqual(ev.substrate_anomaly(f), ["review-pr-deep"])
+
+    def test_none_pick_declines_all_high_confidence(self):
+        f = {"substrate": "shown", "applied_skill": "none",
+             "shown_candidates": ["review-pr-deep:high-confidence"]}
+        self.assertEqual(ev.substrate_anomaly(f), ["review-pr-deep"])
+
+    def test_config_never_fires(self):
+        self.assertEqual(ev.substrate_anomaly(
+            {"substrate": "config", "applied_skill": "team-pr"}), [])
+
+    def test_not_shown_never_fires(self):
+        self.assertEqual(ev.substrate_anomaly({"substrate": "not-shown"}), [])
+
+    def test_non_interactive_never_fires(self):
+        self.assertEqual(ev.substrate_anomaly(
+            {"substrate": "non-interactive"}), [])
+
+    def test_absent_substrate_no_anomaly_backcompat(self):
+        # pre-096-05 / hand-written artifact: no substrate field → no anomaly
+        self.assertEqual(ev.substrate_anomaly(
+            {"slice": "x", "pass": "craft", "verdict": "pass"}), [])
+        self.assertEqual(ev.substrate_anomaly({}), [])
+
+    def test_malformed_shown_candidates_defensive(self):
+        self.assertEqual(ev.substrate_anomaly(
+            {"substrate": "shown", "applied_skill": "x",
+             "shown_candidates": "not-a-list"}), [])
+        # a scalar shown value that happens to be a high-confidence entry
+        self.assertEqual(ev.substrate_anomaly(
+            {"substrate": "shown", "applied_skill": "none",
+             "shown_candidates": "solo:high-confidence"}), ["solo"])
+
+
 if __name__ == "__main__":
     unittest.main()

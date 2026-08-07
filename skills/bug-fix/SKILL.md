@@ -285,6 +285,11 @@ is read-only — `bug.py` validates the durable verdict artifacts they produce
    diff-shaped, not spec-shaped, so there is **no** `review.py pr-review` call
    for a bug (that builder requires a spec + slice). Record the verdict with
    `prompt_source: pr-review skill craft pass` (as bugs 001–003 did).
+   **A configured `review.pr_review_skill` (scaffold.json) is NOT read here.**
+   Spec 096-01 / ADR-0040 D1 wired config honoring into `review.py`'s craft-pass
+   builder, but this pass makes no such call, so the config key does not reach
+   it — deferral here stays disk/router-based. Making bug-fix's craft (and
+   security) passes config-honoring is a tracked follow-up (ADR-0040 OQ1).
 
 3. **security** (`security-review`, conditional on `security_surface: true` in
    the record — mirrors how `arch_review: true` gates the arch pass) —

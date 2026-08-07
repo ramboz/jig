@@ -198,6 +198,15 @@ four-pass orchestration recipe.
 
 ## Gotchas
 
+- **A configured `review.code_health_skill` (scaffold.json) is honored only in
+  the orchestrated code-health pass, not on interactive `/jig:code-health`.**
+  Spec 096-01 / ADR-0040 D1 makes `code_health` one of the three extensible
+  categories, so a project can name a richer code-health reviewer in
+  `scaffold.json`; that key is read by `review.py` when it builds the
+  **code-health pass** prompt for the spec-workflow reviewer subagent (before
+  096-01 that builder had no richer dispatch at all). It is **not** consulted on
+  this interactive invocation. Config honoring on orchestrator-invoked surfaces
+  is a tracked follow-up (ADR-0040 OQ1).
 - **Scope is Python (ruff, + advisory complexity and pyright) and Node
   (eslint, + advisory prettier --check), plus a cross-ecosystem advisory
   duplication signal (`npx jscpd`).** The dedicated code-health reviewer pass (slice

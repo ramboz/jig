@@ -433,16 +433,33 @@ The orchestrator runs the passes in this order:
    returns, build the craft-pass prompt with `review.py pr-review` and
    spawn a second `reviewer`-shaped subagent. The reviewer is read-only
    (Read/Glob/Grep, **no `Skill` tool**), so it cannot route to a skill
-   via Claude's skill router; instead `review.py` detects a user-installed
-   `pr-review` skill on disk (`~/.claude/skills/pr-review/`) and the prompt
-   points the reviewer at that concrete path to read-and-apply, falling
-   back to jig's inlined baseline buckets (scope / blockers / nits /
-   strengths) when none is installed. (File-read dispatch — spec 031
-   Open-question-#1 option (b); a live probe showed the original
-   prose-router dispatch was inert on the no-Skill-tool subagent path.)
-   The pass returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
+   via Claude's skill router; instead `review.py` hands it a concrete
+   richer-skill path to read-and-apply, falling back to jig's inlined
+   baseline buckets (scope / blockers / nits / strengths). The pass
+   returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
    RECONCILIATION NOTES` envelope as the compliance pass, with
    SPECIFIC ISSUES entries tagged `[blocker]` / `[nit]` / `[strength]`.
+
+   **Select the richer skill first (spec 096-03 / ADR-0040 D3).**
+   `--richer-skill` is a **required** argument on `pr-review` (and `arch-review`
+   / `code-health`). Before building the craft prompt:
+   - **Run the candidate step:** `review.py candidates pr_review
+     "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" --pass craft`. It
+     prints a **tiered** list — `[high-confidence]` (with descriptions) and
+     `[speculative]` (names only) — and writes the shown set to a sidecar.
+   - **Pick the single best HIGH-CONFIDENCE candidate** for the category and
+     pass it as `--richer-skill <name>`. If several are genuine, **pick one —
+     do not refuse**; the alternatives are recorded as the shown-and-declined
+     set. If none fits, pass `--richer-skill none` for jig's baseline.
+   - **The pick is a heuristic, not a guarantee** — an explicit
+     `review.<category>_skill` in `scaffold.json` (096-01) **overrides** it, and
+     `candidates` never picks for you (a `[speculative]` false positive like a
+     briefing skill must not be selected on lexical grounds alone).
+   - **CI / no orchestrator:** pass `--richer-skill none --non-interactive`;
+     config remains the reproducible path. Omitting `--richer-skill` entirely,
+     or invoking a pass with no sidecar + no config + no `--non-interactive`,
+     **fails fast** (naming the missing `candidates` step) rather than silently
+     using the baseline.
 
 3. **Arch pass — `arch-review`** (on-demand). Before running this pass,
    query the slice's `arch_review:` frontmatter flag via
@@ -451,8 +468,10 @@ The orchestrator runs the passes in this order:
    third `reviewer`-shaped subagent. The pass produces the four
    canonical arch buckets (summary / strengths / concerns / open
    questions) wrapped in the same verdict envelope, using the same
-   file-read dispatch (`review.py` detects `~/.claude/skills/arch-review/`,
-   else inlines jig's baseline buckets). When the helper prints `false`, skip this
+   candidate-channel resolution as the craft pass (096-03): run
+   `review.py candidates arch_review …`, pick the best, pass `--richer-skill`;
+   config (`review.arch_review_skill`) overrides, else jig's baseline buckets
+   are inlined. When the helper prints `false`, skip this
    pass entirely. Slice authors flip the flag by uncommenting the
    `arch_review: true` line in the slice template's frontmatter — set
    it when the slice changes module boundaries, public contracts, or
@@ -586,14 +605,21 @@ SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
 # … feed "[jig:phase=compliance] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
 # … to Task with subagent_type: $SUBAGENT, wait for pass …
 
-# Craft pass (always)
+# Craft pass (always) — spec 096-03: select the richer skill first.
+# 1. Show the tiered candidates + write the sidecar:
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+  candidates pr_review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+  --pass craft
+# 2. Read the [high-confidence] tier, pick the single best (or `none`), then
+#    build the prompt with the REQUIRED --richer-skill (config overrides it):
 PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   pr-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
-  "<deliverable-path-1>" ...)
+  "<deliverable-path-1>" ... --richer-skill "<name-or-none>")
 SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
   subagent-type pr-review)
 # … feed "[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
 # … to Task with subagent_type: $SUBAGENT, wait for pass …
+# (CI / no orchestrator: --richer-skill none --non-interactive.)
 
 # Arch pass (only when slice frontmatter has `arch_review: true`)
 # IMPORTANT: capture the helper exit code — a non-zero exit means the
@@ -606,9 +632,13 @@ if ! NEED_ARCH=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py
   exit 2
 fi
 if [ "$NEED_ARCH" = "true" ]; then
+  # 096-03: show candidates for arch_review, then pick (config overrides).
+  python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    candidates arch_review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+    --pass arch
   PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
     arch-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
-    "<deliverable-path-1>" ...)
+    "<deliverable-path-1>" ... --richer-skill "<name-or-none>")
   SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
     subagent-type arch-review)
   # … feed "[jig:phase=arch] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
@@ -629,9 +659,14 @@ if [ "$NEED_CH" = "true" ]; then
   # MUST NOT run it. (The runner ships with the Tier-1 jig:code-health skill;
   # if it isn't installed, note "summary unavailable" and judge on the
   # deliverables.)
+  # 096-03: show candidates for code_health, then pick (config overrides).
+  python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+    candidates code_health "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+    --pass code-health
   PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
     code-health "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
-    "<deliverable-path-1>" ... --summary-file /tmp/health-summary.txt)
+    "<deliverable-path-1>" ... --summary-file /tmp/health-summary.txt \
+    --richer-skill "<name-or-none>")
   SUBAGENT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
     subagent-type code-health)
   # … feed "[jig:phase=code-health] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
