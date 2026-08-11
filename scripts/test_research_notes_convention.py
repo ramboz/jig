@@ -259,5 +259,105 @@ class NoTemplateLeakIntoScaffoldSource(unittest.TestCase):
         )
 
 
+# --- Slice 108-02: codification + deferred-machinery registration ---------
+
+CONVENTIONS = ROOT / "docs" / "conventions.md"
+REFINEMENT_TODO = ROOT / "docs" / "refinement-todo.md"
+
+
+class ConventionsCodifiesResearchNotes(unittest.TestCase):
+    """108-02 AC#1: docs/conventions.md codifies the research-notes convention."""
+
+    def test_conventions_has_research_notes_rule(self) -> None:
+        text = _read(CONVENTIONS)
+        self.assertRegex(
+            text, r"research note",
+            "conventions.md must carry a research-notes rule (108-02 AC#1)",
+        )
+        self.assertIn(
+            "R-NNN", text,
+            "conventions.md research-notes rule must name the R-NNN home "
+            "(108-02 AC#1)",
+        )
+
+    def test_conventions_states_phase_distinction(self) -> None:
+        # Assert the rule-SPECIFIC phrasing, not the bare word "refinement-todo"
+        # (which pre-exists elsewhere in conventions.md and would make this
+        # vacuous). Deleting the research-notes rule must turn this red.
+        text = _read(CONVENTIONS).lower()
+        self.assertIn(
+            "sequential with, not a competitor to", text,
+            "conventions.md research-notes rule must state the phase "
+            "distinction vs refinement-todo — 'sequential with, not a "
+            "competitor to' (108-02 AC#1)",
+        )
+
+    def test_conventions_links_adr_0054(self) -> None:
+        self.assertIn(
+            "adr-0054", _read(CONVENTIONS).lower(),
+            "conventions.md research-notes rule must link ADR-0054 "
+            "(108-02 AC#1)",
+        )
+
+
+class RefinementTodoRegistersDeferredMachinery(unittest.TestCase):
+    """108-02 AC#2: the five deferred-machinery items are registered as
+    distinct `### Decision:` entries, each carrying its own resolution
+    trigger."""
+
+    # DISTINCTIVE heading phrases — each unique to a new research-note entry,
+    # NOT a bare word (`link` / `collision` / `scaffold-init`) that already
+    # occurs elsewhere in refinement-todo.md and would make the check vacuous.
+    DEFERRAL_HEADINGS = (
+        "creation helper for research notes",
+        "research-note index regeneration",
+        "research-note link-resolution linter",
+        "research-note numbering-collision handling",
+        "adopter-facing surface for research notes",
+    )
+
+    @staticmethod
+    def _decision_blocks():
+        """Yield (heading, body) for every `### ...` block in refinement-todo.md
+        (body = text up to the next `###`/`##` heading)."""
+        text = _read(REFINEMENT_TODO)
+        parts = re.split(r"(?m)^(### .*)$", text)
+        # parts = [preamble, head1, body1, head2, body2, ...]
+        for i in range(1, len(parts), 2):
+            body = parts[i + 1] if i + 1 < len(parts) else ""
+            yield parts[i], body
+
+    def test_five_deferrals_present(self) -> None:
+        text = _read(REFINEMENT_TODO)
+        for phrase in self.DEFERRAL_HEADINGS:
+            with self.subTest(deferral=phrase):
+                self.assertIn(
+                    phrase, text,
+                    f"refinement-todo.md must register the research-note "
+                    f"deferral whose heading contains {phrase!r} (108-02 AC#2)",
+                )
+
+    def test_each_research_note_deferral_carries_a_trigger(self) -> None:
+        # Scope to the NEW entries by distinctive heading, then assert each
+        # carries a Resolution trigger IN ITS OWN body — not a global
+        # "Resolution trigger" match (every deferral in the file has one, so a
+        # global check proves nothing about the new entries).
+        matched = 0
+        for head, body in self._decision_blocks():
+            if any(phrase in head for phrase in self.DEFERRAL_HEADINGS):
+                matched += 1
+                with self.subTest(heading=head.strip()):
+                    self.assertIn(
+                        "Resolution trigger", body,
+                        f"research-note deferral {head.strip()!r} must state "
+                        "its own Resolution trigger (108-02 AC#2)",
+                    )
+        self.assertEqual(
+            matched, len(self.DEFERRAL_HEADINGS),
+            f"expected all {len(self.DEFERRAL_HEADINGS)} research-note deferral "
+            f"headings in refinement-todo.md, matched {matched} (108-02 AC#2)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
