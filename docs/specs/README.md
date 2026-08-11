@@ -320,6 +320,8 @@
 | [106-autonomy-governance-plane](106-autonomy-governance-plane/spec.md) | 106-01 — scaffold the protected plane and the identity-separation gate | **DONE** |  |
 | [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-01 — protection refusals reach the pull-request fallback | IN_PROGRESS (claude/github-issue-147-c6ab0d) |  |
 | [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-02 — numbering counts every in-flight branch | IN_PROGRESS (claude/github-issue-147-c6ab0d) |  |
+| [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-01 — living research-note home: template, index, hand-offs | **DONE** |  |
+| [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-02 — codify in conventions.md + register deferred machinery | **DONE** |  |
 
 ## Deferred slices
 
@@ -354,3 +356,11 @@
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | (a) slice 02's trace links exist and are populated across a real spec corpus, AND (b) a genuine mid-flight use-case addition that intersects existing specs has been observed (a real conflict/reframe event), so the triage classifier can be validated against an actual case rather than an imagined one. Mirrors [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md) Option C's revisit trigger. |
 | [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | 079-01's passive `docs/workflow.md` guidance is shown |
 | [098-lifecycle-entry-gate](098-lifecycle-entry-gate/spec.md) | 098-03 — edit-anchored capture stub (DEFERRED) |  |
+
+## Richer-skill selection audit (spec 096-05)
+
+Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
+
+- **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
+- **2** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **0** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
