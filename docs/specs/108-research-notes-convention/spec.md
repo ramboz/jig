@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill:
 use_cases: []
 ---
@@ -40,21 +40,19 @@ research** and kept in place, unrenamed (ADR-0010 ethos).
 
 ## Assumptions
 
-<!-- Risk-gated (ADR-0020 §1–§2): runnable-surface claims only. -->
+None.
 
-Load-bearing runnable-surface claims: **None** beyond ADR-0054's, which were
-probe-verified — `docs/research/` currently holds exactly `00-starter-prompt.md`
-+ `01`–`09` (10 frozen prose files, no status frontmatter), confirmed by
-directory listing this session. This spec adds documentation and template files;
-it introduces no code path.
+_No unverified load-bearing runnable-surface claims beyond ADR-0054's, which were probe-verified (`docs/research/` holds exactly `00-starter-prompt.md` + `01`–`09`, frozen prose, no status frontmatter, confirmed this session); this spec adds documentation + one template file and introduces no code path. Risk-gated per ADR-0020 §1–§2; kept parser-clean so frame-review-needed derives false — the frame was already critiqued at ADR-0054._
 
-**Carry into the deviation log at reconciliation (verbatim, from the ADR-0054
-frame-critique pass):** the decision to build this convention *now* is justified
-by the external ask (#196) + the existing frozen seed corpus + near-zero
-reversible cost, and explicitly **not** by demonstrated recurring internal
-open-phase demand (which is ≈ n=0–1 and unproven). ADR-0054's distinctness kill
-criterion is the tripwire; this spec must not silently manufacture the demand it
-was meant to test.
+## Reconciliation carry-forward
+
+**Carry into 108-01's deviation log verbatim (from the ADR-0054 frame-critique
+pass):** the decision to build this convention *now* is justified by the
+external ask (#196) + the existing frozen seed corpus + near-zero reversible
+cost, and explicitly **not** by demonstrated recurring internal open-phase
+demand (which is ≈ n=0–1 and unproven). ADR-0054's distinctness kill criterion
+is the tripwire; this spec must not silently manufacture the demand it was meant
+to test.
 
 ## Decomposition
 
