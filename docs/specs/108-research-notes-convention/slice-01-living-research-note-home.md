@@ -1,0 +1,130 @@
+---
+status: DRAFT
+dependencies: [adr-0054]
+last_verified:
+---
+
+<!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
+     first use and link the term to docs/memory/glossary.md (or jig's lexicon).
+     See docs/workflow.md "Self-defining vocabulary". -->
+
+<!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
+     runnable surfaces by probe first (run it / read source) or a citation,
+     else mark them as assumptions in the spec's `## Assumptions` section —
+     never assert an unverified claim as fact. -->
+
+## Slice 108-01 — living research-note home: template, index, hand-offs
+
+**Goal:** Give the open-investigation phase a real home — a contributor can
+create a research note from a template, register it in a hand-maintained index,
+and promote it out to an ADR / spec / refinement-todo entry — with the existing
+`docs/research/00`–`09` corpus formally declared frozen seed research.
+
+**DoR:**
+- ✅ [ADR-0054](../../decisions/adr-0054-research-notes-artifact-convention.md)
+  Accepted (frame-critique passed, 2026-08-11).
+- ✅ `docs/research/` verified to hold exactly `00-starter-prompt.md` + `01`–`09`
+  (frozen prose, no status frontmatter) — the seed corpus this slice labels.
+- ✅ No `research.py` / index-regen exists (this is a convention, not a helper) —
+  deferred machinery is 108-02's concern, not a blocker here.
+
+**Acceptance Criteria:**
+
+1. **A research-note template exists at a canonical, discoverable path** (e.g.
+   `templates/docs/research/research-note.md.template`) carrying the ADR-0054
+   frontmatter keys — `status` (one of `OPEN` / `CONCLUDED` / `PARKED` /
+   `ABANDONED`), `topic`, `created`, `related:` — and a body skeleton for the
+   evolving investigation: question → sources/findings → pros/cons → open
+   questions → conclusion, plus a `Promoted to:` line for the hand-off.
+2. **`docs/research/README.md` exists and declares the seed boundary.** A top
+   section formally labels `00-starter-prompt.md` … `09-addition-memory-layer.md`
+   as **frozen seed research** (jig's founding corpus, not living notes),
+   explicitly kept in place and unrenamed.
+3. **The index lists living notes.** `docs/research/README.md` carries a
+   living-notes table (id, topic, status, related / promoted-to) that starts
+   empty (no synthetic seed note is fabricated — organic creation is what
+   ADR-0054's kill criterion watches). The table is documented as
+   **hand-maintained** (no regen helper).
+4. **The naming + numbering convention is documented.** Living notes are
+   `docs/research/R-NNN-<slug>.md`, numbered from `R-001`; the `R-` prefix is
+   the boundary from the `00`–`09` seed corpus. Numbering is stated as
+   **local-and-cheap** — collisions are a tolerated nuisance, *not*
+   reservation-coordinated on origin/main (contrast specs/ADRs).
+5. **Both hand-offs are documented in the README.** (a) *Inbox → note*: a thick
+   investigation is captured as a one-line `docs/inbox.md` pointer to `R-NNN`,
+   not swallowed inline. (b) *Note → decision/work*: on crystallization the note
+   promotes into the right existing artifact (refinement-todo entry / ADR /
+   spec) which cites `R-NNN` in its Context; the note flips to `CONCLUDED` with a
+   `Promoted to:` line. The README states the **sequential** relationship to
+   `refinement-todo` (open phase → named deferred decision) so the two are not
+   read as competitors.
+6. **The seed corpus is byte-unchanged.** `docs/research/00`–`09` are not
+   renamed or edited by this slice (verified: their content/paths are identical
+   to before).
+
+**DoD:**
+- [ ] All ACs pass; full test suite green (no regressions).
+- [ ] Implementer test coverage exercises each AC with at least one fixture
+      (e.g. a `test_research_notes_convention.py` asserting: the template file
+      exists with the required frontmatter keys + body sections; the README
+      declares the `00`–`09` seed boundary; the README documents both hand-offs
+      and the `R-NNN` local-numbering rule; the `00`–`09` filenames are intact).
+- [ ] Each new test has been shown to fail when its feature is removed — mutate
+      the deliverable (drop a frontmatter key / the seed declaration), watch the
+      test go red, restore.
+- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [ ] Implementation review passed.
+- [ ] Deviation log produced under this slice heading (carry the ADR-0054
+      frame-critique demand-framing note verbatim — see spec `## Assumptions`).
+- [ ] Reconciliation sweep produced under this slice heading.
+- [ ] Reconciliation review passed.
+- [ ] `docs/refinement-todo.md` updated if any decisions were deferred during
+      implementation (the planned deferrals are 108-02's deliverable; note any
+      *new* ones here).
+
+### Close-out (post-DONE)
+
+These items can only be ticked AFTER the final `RECONCILED → DONE` transition.
+Slice-land's `check_dod` (slice 009-01) excludes them from the count.
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`. Notes
+      column receives any load-bearing per-slice invariant (preserved across
+      regen).
+- [ ] Primer hygiene per spec 025-01 rule: **if this slice closes the spec** (it
+      does not — 108-02 follows), leave the Active-specs entry. Add a glossary
+      entry for the **research note** term during reconciliation memory-sync so
+      `/jig:explain research note` resolves.
+
+**Anti-horizontal-phasing check:** After this slice lands, a jig contributor can
+file an open investigation as `docs/research/R-001-<slug>.md` from the template,
+register it in the index, and knows exactly how to promote it out — a complete,
+usable convention on its own, independent of 108-02's codification.
+
+### Deviation log (after reconciliation)
+
+The original spec is preserved above. Implementation notes:
+
+_TODO (at reconciliation): numbered sections covering deviations, reviewer
+findings folded back in, doc updates, plan adherence. Include verbatim: "act
+now" is justified by external ask (#196) + frozen seed corpus + near-zero
+reversible cost, NOT by demonstrated recurring internal open-phase demand
+(ADR-0054 frame-critique carry-forward)._
+
+### Reconciliation sweep
+
+Record the drift-prone surfaces checked during reconciliation. The transition
+gate only requires this subsection to exist; the reconciliation reviewer judges
+whether coverage and rationales are honest.
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | _TODO: front door likely unaffected; confirm._ |
+| `docs/specs/README.md` | `updated` | _TODO: regenerated by `workflow.py status-board`._ |
+| `docs/product-vision.md` | `no-op` | _TODO: no behavior/scope drift (internal convention)._ |
+| `docs/architecture.md` | `no-op` | _TODO: no module-boundary / public-contract change (docs + template only)._ |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO: spec still in flight (108-02 pending); no compression yet._ |
+| `docs/inbox.md` | `no-op` | _TODO: no retro-migration (ADR-0054 non-goal); confirm no items resolved._ |
+| `docs/refinement-todo.md` | `deferred` | _TODO: the deferred-machinery entries are 108-02's deliverable, not this slice's._ |
+| `docs/memory/**` | `updated` | _TODO: add the **research note** glossary term via memory-sync._ |
+| `docs/decisions/README.md` / ADR index | `no-op` | _TODO: ADR-0054 already accepted + indexed._ |
+| `docs/research/00`–`09` (seed corpus) | `no-op` | _TODO: confirm byte-unchanged (AC6)._ |
