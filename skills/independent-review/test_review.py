@@ -251,6 +251,30 @@ class ReconciliationPromptTests(unittest.TestCase):
         prompt = self._prompt()
         self.assertRegex(prompt, r"(?i)reconciliation\s+review")
 
+    # Spec 109-02 — the reconciliation review sweeps for over-build:
+    # abstraction / indirection / generality added beyond what the ACs need.
+    def test_sweeps_for_over_build(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt,
+            r"(?i)over-build",
+            "reconciliation prompt must sweep for over-build (spec 109-02)",
+        )
+        self.assertRegex(
+            prompt,
+            r"(?i)over-engineering|premature abstraction|speculative generality",
+            "reconciliation prompt must name the over-build failure modes "
+            "(spec 109-02)",
+        )
+        # Anchored to spec needs: "beyond what the ACs require", not "remove
+        # required behavior". Discriminating co-occurrence.
+        self.assertRegex(
+            prompt,
+            r"(?is)beyond what the\s+acceptance criteria",
+            "the over-build sweep must be anchored to the ACs "
+            "(added-beyond-need), not license to strip behavior (109-02)",
+        )
+
     def test_explicitly_excludes_ac_re_review(self):
         prompt = self._prompt()
         # Must tell the reviewer not to re-evaluate against original ACs

@@ -1,8 +1,7 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: []
 last_verified: 2026-08-11
-claimed_by: claude/vertical-slice-architecture-3c4bce
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about

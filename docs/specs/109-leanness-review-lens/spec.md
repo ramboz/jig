@@ -17,8 +17,8 @@ never propagated into jig's review surfaces. A maintainer audit found jig has
 case by case inside individual ADRs (e.g. ADR-0002's deliberate stub, ADR-0023's
 extract-at-third-transition), never applied as a standing review lens.
 
-Concretely, the two review passes where over-engineering would surface carry no
-leanness evaluation today:
+Concretely, the two **spec-workflow** review passes where over-engineering would
+surface carry no leanness evaluation today:
 
 - The **arch pass** prompt (`build_arch_review_prompt`,
   [review.py:996](../../../skills/independent-review/review.py)) evaluates module
@@ -40,6 +40,12 @@ minimal-viable-architecture — to those two existing passes. It is the
 (shaping new work lean, before specs exist) is owned by the sibling `shaper`
 project (its ADR-0005 / spec 008). This spec deliberately does **not** build a
 new gate.
+
+**Scope boundary.** Coverage is spec-workflow-only. The bug-fix lifecycle (no
+arch pass, no reconciliation — `skills/bug-fix/SKILL.md:299`) gets no leanness
+coverage from this spec; extending it there is a demand-gated follow-up
+([docs/refinement-todo.md](../../refinement-todo.md)). See
+[ADR-0055](../../decisions/adr-0055-leanness-lens-folds-into-existing-passes.md).
 
 ## Assumptions
 

@@ -1527,7 +1527,15 @@ For each deviation-log claim:
 - Does the code/doc match what's described?
 - Is anything important silently changed but not logged?
 - Is anything overstated or invented post-hoc?
-- Is the scope appropriate (no scope creep in doc updates)?{extra_check}
+- Is the scope appropriate (no scope creep in doc updates)?
+
+**Leanness / over-build sweep.** Did the implementation add abstraction,
+indirection, or generality *beyond what the acceptance criteria required* —
+over-engineering, premature abstraction, or speculative generality
+(indirection, config knobs, or extension points with no current caller)? Report
+any such over-build as a reconciliation finding, anchored to the ACs
+(added-beyond-need) — this is not license to strip behavior the spec
+required.{extra_check}
 
 {_OUTPUT_FORMAT}
 """

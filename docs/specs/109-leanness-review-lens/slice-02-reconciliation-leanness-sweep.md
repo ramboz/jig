@@ -1,7 +1,8 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [109-01]
-last_verified:
+last_verified: 2026-08-11
+claimed_by: claude/vertical-slice-architecture-3c4bce
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
@@ -43,17 +44,17 @@ the leanness lens closes the loop at reconciliation as well as at arch review.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
-- [ ] A unit test asserts the reconciliation prompt string contains the
+- [x] A unit test asserts the reconciliation prompt string contains the
       over-build sweep directive, shown to fail when removed.
-- [ ] A test (or spec_lint/manifest check as applicable) covers the checklist
+- [x] A test (or spec_lint/manifest check as applicable) covers the checklist
       addition in `spec-workflow/SKILL.md`.
-- [ ] Each new test shown to fail when its feature is removed.
-- [ ] Reviewed by `reviewer` subagent (prompt built by `review.py`).
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Each new test shown to fail when its feature is removed.
+- [x] Reviewed by `reviewer` subagent (prompt built by `review.py`).
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 ### Close-out (post-DONE)
 
@@ -68,8 +69,63 @@ reconciliation reports, closing the retrospective half of the leanness lens.
 
 ### Deviation log (after reconciliation)
 
-_TODO._
+1. **Implementation matched the planned shape.** Over-build directive added to
+   `build_reconciliation_prompt`'s `## Evaluate` block; a **Leanness sweep** item
+   added to the Reconciliation checklist in `spec-workflow/SKILL.md`. No new
+   gate, flag, or evidence file (AC3) — the checklist item is a non-blocking
+   nudge, like the sibling Lightweight-decisions item.
+2. **Reviewer findings folded in.** Compliance passed. Craft passed with two
+   nits, both addressed and mutation-proven:
+   - AC1 wording consistency — the reconciliation/checklist parenthetical
+     ("config knobs, extension points, or layers") diverged from the 109-01
+     arch-pass wording. Aligned both to "indirection, config knobs, or extension
+     points with no current caller" (edited only 109-02's new text; the DONE
+     109-01 lines were left untouched).
+   - `test_leanness_sweep_anchored_to_spec_needs` was scoped to the whole
+     checklist section; narrowed it to the Leanness-sweep bullet specifically.
+3. **Structural choice (noted per compliance).** The reconciliation directive is
+   a standalone bold paragraph, not a bullet in the per-deviation-claim list —
+   intentional: the over-build sweep is a whole-implementation check, not a
+   per-claim one.
+4. **Host packages** regenerated; canonical `--check` drift-clean.
+5. **Load-bearing decision recorded.** The fold-in-not-a-new-gate choice
+   (deferred from 109-01) is now filed as
+   [ADR-0055](../../decisions/adr-0055-leanness-lens-folds-into-existing-passes.md),
+   with `code_health_review` as the explicitly-rejected Option B (a gated pass).
+6. **Spec close-out (dispositions honest at RECONCILED).** 109-02 is the last
+   non-deferred slice. There is **nothing to compress** in `CLAUDE.md`/`AGENTS.md`:
+   spec 109 was built in a single pass and never added to Active-specs. The one
+   load-bearing invariant — *leanness lens folded into the arch + reconciliation
+   passes, not a new gate (ADR-0055)* — goes to the **status-board Notes column**
+   (its designated home per the primer-hygiene rule), added when the board is
+   regenerated at the post-RECONCILED commit/DONE step (SKILL.md "Closing the
+   slice" order; mirrors how 109-01 deferred the same items to 109-02). No
+   separate `docs/memory/` entry is warranted — the learning is captured in
+   ADR-0055 + this spec.
+7. **Scope-honesty correction (from ADR-0055's frame-critique).** The
+   frame-critique surfaced that the ADR + spec overstated reach: the lens rides
+   the arch + reconciliation passes, which exist only in the **spec-workflow**
+   lifecycle. The **bug-fix** lifecycle has no arch pass ("bugs carry no
+   design," `skills/bug-fix/SKILL.md:299`) and no reconciliation pass, so it
+   gets **zero** leanness coverage. Corrected inline: spec Overview + ADR Context
+   now scope the claim to spec-workflow and name the bug-fix gap; a demand-gated
+   follow-up ("extend the leanness lens to the bug-fix lifecycle") is filed in
+   `docs/refinement-todo.md`. No code change — a deliberate scope boundary of
+   spec 109 (extending would be scope creep without demand).
 
 ### Reconciliation sweep
 
-_TODO._
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `skills/independent-review/review.py` | `updated` | Over-build sweep added to `build_reconciliation_prompt`. |
+| `skills/spec-workflow/SKILL.md` | `updated` | Leanness-sweep checklist item added (non-blocking). |
+| `hosts/**` (generated) | `updated` | Regenerated; `--check` drift-clean. |
+| `docs/decisions/adr-0055-*.md` + ADR index | `updated` | ADR-0055 filed (fold-in-not-a-gate); index regenerated, `check-index` clean. |
+| `docs/architecture.md` | `no-op` | No module boundary/public contract changed (prompt + checklist text; `build_reconciliation_prompt` signature unchanged). |
+| `docs/specs/README.md` | `deferred` | Regenerated at the post-RECONCILED commit/DONE step (SKILL.md Closing-the-slice order); board Notes gets the fold-in-not-a-gate invariant then. Mirrors 109-01. |
+| Primer surfaces (`CLAUDE.md` / `AGENTS.md`) | `no-op` | Nothing to compress — 109 was never added to Active-specs (single-pass build). Invariant → board Notes at DONE, not the hot cache (spec 076 leanness). |
+| `docs/memory/**` | `no-op` | Learning captured in ADR-0055 + spec 109; no new domain term or dead-end warrants a glossary/learnings entry. |
+| `docs/product-vision.md` / `docs/conventions.md` | `no-op` | No vision/convention rule changed; the lens rides existing review passes. |
+| `docs/decisions/adr-0055-*.md` + `docs/specs/109.../spec.md` | `updated` | Scope-honesty correction from the ADR frame-critique: reach scoped to spec-workflow; bug-fix coverage gap named (see deviation-log item 7). |
+| `docs/refinement-todo.md` | `updated` | New demand-gated follow-up: extend the leanness lens to the bug-fix lifecycle. |
+| `docs/inbox.md` | `no-op` | No parked items resolved by this slice. |

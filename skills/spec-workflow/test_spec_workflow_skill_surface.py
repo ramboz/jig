@@ -306,5 +306,54 @@ class FailedReviewRetractionSweepTests(unittest.TestCase):
         )
 
 
+class ReconciliationChecklistLeannessSweepTests(unittest.TestCase):
+    """Spec 109-02 — the Reconciliation checklist must carry a leanness sweep
+    item directing the reconciler to confirm nothing was over-built relative to
+    the spec's needs. Scoped to the checklist section so the item is asserted to
+    land there, where the reconciler actually is."""
+
+    @classmethod
+    def setUpClass(cls):
+        body = _body(SKILL_MD.read_text() if SKILL_MD.is_file() else "")
+        start = body.find("## Reconciliation checklist")
+        tail = body[start:] if start != -1 else ""
+        end = re.search(r"\n## ", tail[3:])
+        cls.section = tail[: end.start() + 3] if end else tail
+        cls.lower = re.sub(r"\s+", " ", cls.section.lower())
+
+    def test_checklist_section_exists(self):
+        self.assertTrue(self.section,
+                        "SKILL.md must retain the Reconciliation checklist")
+
+    def test_has_leanness_sweep_item(self):
+        self.assertIn(
+            "leanness", self.lower,
+            "the Reconciliation checklist must carry a leanness sweep item "
+            "(spec 109-02)",
+        )
+        self.assertRegex(
+            self.lower,
+            r"over-build|over-engineer",
+            "the leanness sweep must name over-build / over-engineering "
+            "(spec 109-02)",
+        )
+
+    def test_leanness_sweep_anchored_to_spec_needs(self):
+        # Added-beyond-need, not "remove behavior the spec required". Scope the
+        # assertion to the Leanness-sweep bullet itself (not the whole
+        # checklist), so the anchor phrase can't drift onto an unrelated item.
+        m = re.search(r"leanness sweep\b(.*?)(?:\n\s*- \[ \]|\Z)",
+                      self.section.lower(), re.DOTALL)
+        self.assertTrue(m, "Leanness sweep bullet not found in the checklist")
+        # Collapse whitespace within the bullet so line-wrapped phrases match.
+        bullet = re.sub(r"\s+", " ", m.group(1))
+        self.assertRegex(
+            bullet,
+            r"beyond what.{0,40}(need|require|acceptance criteria|ac)",
+            "the leanness sweep must be anchored to the spec's needs "
+            "(added-beyond-need), not stripping required behavior (109-02)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
