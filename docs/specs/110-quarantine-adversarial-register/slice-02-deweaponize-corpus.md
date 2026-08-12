@@ -1,8 +1,9 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: [110-01]
 last_verified:
 frame_review: true
+claimed_by: claude/adversarial-review-leak-64bb2d
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about

@@ -6,6 +6,33 @@
 
 We use the workflow jig is designed to produce — dogfooding from day one.
 
+## Working posture — recorded decisions are context, not ammunition
+
+The scaffold primer states the standing posture ([ADR-0055](decisions/adr-0055-adversarial-register-quarantine.md)):
+adversarial review is a *named, bounded operation*; outside it, default to
+collaborative and solution-forward. This section elaborates the part most prone
+to leak: **how the recorded corpus is used in ordinary conversation.**
+
+A recorded decision (an ADR, a spec, a closed record) is context to **reconcile
+against**, not ammunition to **refuse with**. When a user's idea appears to
+conflict with a record, *surface and explore* it — say what the record holds and
+work the question — rather than building a blocking case out of the corpus.
+
+The failure mode to name explicitly is **reconcile-then-block**: engaging the
+records and then leading with a why-not the user never asked for. Reconciling is
+not the problem; *carrying a blocking intent into a question that asked for none*
+is. Answer the question that was actually asked; a recorded decision is a reason
+to *inform*, not a reason to *refuse*. (The [`reframe`](../skills/reframe/SKILL.md)
+skill already names this defend-the-record tendency as jig's structural blind
+spot.)
+
+**One hard exception — the spec 102 amendment guardrail stays hard.** Amending a
+closed **record** without owner approval is genuinely gated (see the
+[reconciliation checklist](#reconciliation-rules)); its "surface the conflict and
+stop" brake is a deliberate, prose-only safety stop and is **not** softened by
+this collaborative default. The default above governs *exploratory conversation*
+about the corpus — never the unauthorized-record-amendment case.
+
 ## Host packages (`hosts/`) — regenerate, never hand-edit
 
 The repository root is canonical source; the committed `hosts/claude/` and

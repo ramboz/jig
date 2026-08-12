@@ -1,8 +1,9 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: [110-01]
 last_verified:
 frame_review: true
+claimed_by: claude/adversarial-review-leak-64bb2d
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
@@ -87,7 +88,39 @@ regardless.
 
 ### Deviation log (after reconciliation)
 
-_TODO at reconciliation._
+1. **A2 classification (AC1) — the complete enumeration, and its result.**
+   Swept the three orchestrator-read SKILL bodies (`independent-review`,
+   `spec-workflow`, `bug-fix`) for prose that narrates a refusal. Result: the
+   refusal narration is **already tool-attributed** in every case — "the `→
+   FIXING` gate refuses", "`workflow.py transition` *refuses* the REVIEWED /
+   RECONCILED / DONE moves", "the helper … refused", "a refused transition names
+   the missing artifact". **No prose casts the *agent* as the refuser** (the one
+   `you`-framed hit, independent-review "What you must NOT do", describes the
+   *reviewer prompt's* content, not the orchestrator). Deliberateness/prose-only
+   gates (`jig-spec-gate.sh`, `contracts`, `clarify`) are described as advisory
+   nudges, keeping agent-owned enforcement — none is dressed as a hard tool
+   refusal. jig's "teeth" / "teeth-gated" metaphor is **tool**-directed (the
+   *gates* have teeth), not agent-adversarial register, and is kept as
+   established vocabulary.
+2. **AC2 relocation is therefore a no-op — and honestly so.** Because AC1 found
+   zero agent-owned refusal narrations, there is nothing to relocate onto the
+   tooling, and nothing was fictionalized. The frame-critique of this slice
+   reached the same conclusion from the other side: the sharp strings live in
+   `review.py`'s prompt builder (outside the orchestrator's read path), so the
+   bodies were already register-quarantined.
+3. **AC3 tone pass — minimal by finding.** The orchestrator-read bodies carry no
+   agent-adversarial register to soften (the classification above), and slice
+   110-01 already placed a collaborative posture pointer at the top of each. So
+   the honest tone-pass outcome is "already lean; verified, not reworded."
+4. **AC4/AC5 — invoke-obligation preserved.** The bodies are dense with explicit
+   "run `workflow.py transition …`" / "run `bug.py …`" imperatives; none was
+   removed (nothing was reworded). The guard test asserts an invoke imperative
+   survives in each body.
+5. **Deliverable = a regression guard, not a rewrite.** `ToolOwnedRefusalTests`
+   in `scripts/test_working_posture.py` locks the finding in: no agent-owned
+   refusal framing may creep in, the invoke imperative must survive, and the
+   110-01 posture pointer must stay. This is the durable value of the slice given
+   the bodies were already compliant.
 
 ### Reconciliation sweep
 
