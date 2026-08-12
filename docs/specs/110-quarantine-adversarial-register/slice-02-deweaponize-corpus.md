@@ -10,11 +10,19 @@ frame_review: true
 
 ## Slice 110-02 — de-weaponize the corpus premise
 
-**Goal:** Reframe, in the orchestrator-facing guidance, how recorded decisions
-are used in ordinary conversation: a recorded decision is context to **reconcile
-against**, not ammunition to **refuse with** — so when a user's idea conflicts
-with a record, the orchestrator surfaces and explores it rather than building a
-blocking case out of the corpus.
+**Goal:** Reframe, in the orchestrator-facing guidance, the *disposition* with
+which recorded decisions are used in ordinary conversation: a recorded decision
+is context to **reconcile against**, not ammunition to **refuse with**. The
+target is the blocking *intent*, not engagement — the reported instance already
+reconciled ("cited three recorded decisions") and then weaponized the result, so
+"add reconcile prose" is not enough: the guidance must say *don't carry a
+blocking intent into a question that asked for none — surface and explore.*
+
+**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+**counter-anchor — necessary but not sufficient**, paired with the
+source-reduction slices (110-03/04). And the **hard stops stay hard**: the
+collaborative default is for ordinary exploratory conversation; it does **not**
+touch the spec 102 unauthorized-record-amendment brake.
 
 **DoR:**
 - ✅ 110-01 landed (the posture boundary this reframing specializes).
@@ -26,16 +34,20 @@ blocking case out of the corpus.
 **Acceptance Criteria:**
 
 1. **Reconcile-not-refuse guidance exists** in a general orchestrator-facing
-   surface (primer and/or `workflow.md`): recorded decisions are context to
-   reconcile against; on a conflict with a user's idea, surface and explore,
-   don't block. Cross-links the `reframe` skill, which already names this as
-   jig's structural blind spot.
-2. **Amendment-authorization wording pass drafted** for `spec-workflow/SKILL.md`
-   (the amend-lead) and its hot-cache `CLAUDE.md` twin: lead with *reconcile
-   first* (read the whole criteria block; a sibling criterion or linked accepted
-   ADR may resolve the apparent conflict) and reframe "surface the conflict and
-   **stop**" as "surface it **to the owner**" (collaborative escalation). Every
-   load-bearing guardrail element is preserved verbatim: owner approval, no
+   surface (primer and/or `workflow.md`), targeting the *disposition*: recorded
+   decisions are context to reconcile against; on a conflict with a user's idea,
+   surface and explore, don't carry a blocking intent — reconciling-then-blocking
+   is the failure mode, so the guidance names it explicitly. Cross-links the
+   `reframe` skill, which already names this as jig's structural blind spot.
+2. **Amendment-authorization wording pass drafted (narrowed)** for
+   `spec-workflow/SKILL.md` (the amend-lead) and its hot-cache `CLAUDE.md` twin:
+   lead with *reconcile first* (read the whole criteria block; a sibling
+   criterion or linked accepted ADR may resolve the apparent conflict — this
+   reduces *false*-conflict blocking, a safe improvement). **Keep the hard
+   "surface the conflict and stop"** for a genuine unauthorized-record-amendment
+   conflict — do **not** reframe it to "escalate", because "stop" is the load-
+   bearing brake at exactly the point the record *should* block (frame-critique
+   secondary finding). Every guardrail element preserved: owner approval, no
    same-turn write, records-only scope (spec 102).
 3. **Owner-approval-gated surfaces are not applied without sign-off.** The
    drafts in AC2 (and any `docs/conventions.md` touch) are presented for
@@ -53,9 +65,12 @@ blocking case out of the corpus.
 - [ ] Deviation log + reconciliation sweep produced.
 - [ ] Reconciliation review passed.
 
-**Anti-horizontal-phasing check:** after this slice, the orchestrator treats the
-recorded corpus as ground-to-reconcile-against in ordinary conversation — an
-observable stance change on exploratory questions, end-to-end.
+**Anti-horizontal-phasing check:** end-to-end value is that the orchestrator-
+facing guidance now frames the corpus as ground-to-reconcile-against (not
+ammunition) and names the reconcile-then-block failure mode — a standing,
+user-visible reframe on the surfaces sessions load. As a counter-anchor its
+behavioural sufficiency is paired with 110-03/04 (see Role & scope); it is not
+claimed to move the stance alone.
 
 ### Deviation log (after reconciliation)
 

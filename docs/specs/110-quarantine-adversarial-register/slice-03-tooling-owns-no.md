@@ -21,22 +21,33 @@ subagent prompts as sharp as the review needs.
 - ✅ Enumeration of the gate helpers available (A2 probe): each refusal is a
   code exit, so re-narrating it as the tool's job changes no behaviour.
 
-**Assumptions:** rests on **A2** (softening prose weakens no gate — gates are
-exit codes) and **A1**; `frame_review: true`.
+**Assumptions:** rests on **A2** (qualified — *most* refusals are exit-code
+gates, but jig also uses deliberateness/prose-only gates where the prose *is* the
+enforcement) and **A1**; `frame_review: true`.
 
 **Acceptance Criteria:**
 
-1. **Refusal narration relocated to the tooling.** Orchestrator-facing SKILL
-   prose that casts the *agent* as the one who "refuses/blocks" is rewritten so
-   the helper's exit code is the gatekeeper and the agent's role is to relay and
-   route. Scope enumerated (A2 probe) so the sweep is complete, not sampled.
-2. **Tone pass on the orchestrator-read parts** of `independent-review`,
+1. **Each narrated refusal is classified before rewording.** The A2 probe
+   enumerates orchestrator-facing SKILL prose that casts the *agent* as the one
+   who "refuses/blocks" AND classifies each as **hard-gate** (a backing `.py`
+   exit code) vs **deliberateness/prose-only** (the agent's compliance is the
+   enforcement — e.g. `jig-spec-gate.sh`, `contracts`, `clarify`). The sweep is
+   complete, not sampled.
+2. **Relocate only where a backing exit code exists.** For hard-gate refusals,
+   rewrite so the helper's exit code is the gatekeeper and the agent relays and
+   routes. For **deliberateness/prose-only** refusals, **keep the agent-owned
+   refusal** (or file a gate-gap note) — never re-narrate a nudge as "the tool
+   refuses". No enforcement is dropped and none is fictionalized.
+3. **Tone pass on the orchestrator-read parts** of `independent-review`,
    `spec-workflow`, and `bug-fix` SKILL.md: the register the orchestrator reads
    is collaborative; the *generated subagent prompt strings* are untouched and
    remain sharp (verified by diff — no change inside the prompt builders).
-3. **No gate behaviour changes.** The full suite (including the gate/teeth
-   tests) stays green; every refusal still fires from its exit code, proven by
-   the enumeration in AC1.
+   (Frame-critique confirmed this separability: the sharp strings live in
+   `review.py`'s prompt builder, outside the orchestrator's read path.)
+4. **No gate behaviour changes.** The full suite (including the gate/teeth tests)
+   stays green; every *hard-gate* refusal still fires from its exit code, and
+   every *deliberateness/prose-only* refusal keeps its agent-owned enforcement —
+   proven by the AC1 classification.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green.

@@ -11,27 +11,44 @@ frame_review: true
 ## Slice 110-04 — delegate-as-quarantine
 
 **Goal:** Give thin-orchestrator / context-cost-discipline a *second reason* to
-delegate file-heavy reading: a subagent that reads adversarial material and
-returns only the conclusion keeps that register out of the orchestrator's
-carried context — not only its token bill. Name the honest grounding trade-off
-so the guidance doesn't over-rotate into "delegate everything."
+delegate file-heavy reading: delegating the sharp review *bodies* and bulk
+corpus reads keeps that register out of the orchestrator's carried context — not
+only its token bill. Handle *verdicts* carefully (their conclusion is itself the
+adversarial payload — see the relay caveat), and name the honest grounding
+trade-off so the guidance doesn't over-rotate into "delegate everything."
+
+**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+source reduction (load-bearing), but the *register* reason is **contingent on
+A1(ii)** (the bleed mechanism). Its **token-cost** rationale (specs 055/057)
+holds regardless — so even if the mechanism test (A1 kill criterion) falsifies
+(ii), this slice keeps its cost rationale and only drops the register reason. No
+work stranded.
 
 **DoR:**
 - ✅ 110-01 (boundary) and 110-02 (reconcile framing) landed — 110-04 references
   the reconcile framing for the reading that must stay first-hand.
 
-**Assumptions:** rests on **A1**; `frame_review: true`.
+**Assumptions:** rests on **A1** — specifically the contingent mechanism A1(ii)
+for its register rationale; `frame_review: true`.
 
 **Acceptance Criteria:**
 
-1. **Second reason named** in the thin-orchestrator (spec 057) /
-   context-cost-discipline (spec 055) guidance surfaces: delegation isn't only
-   about tokens — reading review/verdict material in a subagent keeps its
-   register out of the orchestrator's conversational context.
+1. **Second reason named — with the relay caveat.** The thin-orchestrator (spec
+   057) / context-cost-discipline (spec 055) guidance states that delegating the
+   sharp review *bodies* and bulk corpus reads keeps their register out of the
+   orchestrator's context (a clean win — the orchestrator never reads the "attack
+   the frame" prose). **But** a *verdict's* conclusion ("X is wrong, here is what
+   breaks") is itself the adversarial payload, and the spec's own leak taxonomy
+   names "reviewer output surfaced back up" — so the guidance requires the
+   subagent to return a **neutral, decision-focused** summary (the actionable
+   outcome + what to change, not the argumentation). Delegation quarantines tone
+   and the unread body, **not** a relayed blocking conclusion; that residual is
+   handled by 110-02/03 (de-tone + collaborative default), stated as such.
 2. **Highest-register files prioritized** for delegate-and-summarize:
    `docs/**/reviews/*-frame-critique.md` verdicts and the adversarial skill
    bodies are called out as both the costliest to hold and the most leak-prone —
-   read by a subagent, summarized, never pulled in wholesale.
+   read by a subagent and returned as a neutral decision-summary, never pulled in
+   wholesale.
 3. **Grounding tension named, not hand-waved.** The guidance states that
    delegating *all* reading weakens grounding (jig's core value), so the rule is
    "delegate the bulk + the adversarial-register files; keep the minimum

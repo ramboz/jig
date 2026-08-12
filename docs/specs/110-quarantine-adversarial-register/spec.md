@@ -55,6 +55,19 @@ stays exactly where it belongs, inside the bounded, isolated review operation,
 and the real gates are `.py` exit codes, not prose. It only stops the register
 from bleeding into ordinary work.
 
+**What "the register" actually is — disposition, not just tone.** The reported
+instance is telling: the orchestrator *already reconciled* against the records
+("cited three recorded decisions") and *then* weaponized the result into a
+blocking case. So the pathology is the **blocking disposition** — carrying
+"hunt the objection / lead with why-not" into a question that asked for none —
+not merely sharp wording or a failure to engage the corpus. The fixes target the
+disposition; adding "reconcile" prose alone would not move it (a primed
+orchestrator satisfies it and still blocks). This distinction, and the resulting
+split of the four levers into *source-reduction* (load-bearing) vs
+*counter-anchor* (necessary but not sufficient), is the frame this spec was
+re-grounded onto after its own frame-critique — see the Decomposition and
+[ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md).
+
 **Keystone decision → candidate ADR.** The quarantine principle is a
 load-bearing, cross-cutting *authoring* rule for how jig writes its own
 surfaces, chosen over the rejected alternative of *softening the review prompts
@@ -66,71 +79,105 @@ context."* Flagged for the owner at DRAFT review.
 
 ## Assumptions
 
-- **A1 (load-bearing, contested).** The conversational-gatekeeping symptom is
-  caused by **operational context-bleed** of the adversarial register (reading
-  review bodies / corpus / verdicts), *not* by the always-loaded priming.
-  *Grounding:* two independent register audits found the always-on surfaces lean
-  (this session's scaffold-wide sweep; the reporter's comment 2), and two
-  observed instances (issue body + comment 1) show the stance in plain
-  conversation with no reviewer involved. *Not experimentally proven:* the
-  within-project before/after (jig scaffolded in as the single changed variable)
-  is still being read; the early baseline lacked an active review gate, so
-  causality is not yet conclusive. **Kill criterion:** if the before/after shows
-  no stance shift at the scaffolding line even in register-heavy sessions, the
-  premise is wrong and softening the surfaces will not move the symptom — stop
-  and re-frame.
-- **A2 (grounded).** Softening orchestrator-facing *prose* does not weaken any
-  actual gate, because the gates are enforced by `.py` helpers via exit codes
-  (e.g. `jig-spec-gate.sh`, the review-evidence gate in `workflow.py
-  transition`, `bug.py`'s teeth), out-of-band from the prose the orchestrator
-  reads. *Probe at implementation:* enumerate the gate helpers and confirm each
-  refusal is a code exit, not a prose instruction, before rewording any "you
-  refuse…" narration (slice 110-03).
+See [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md) for
+the full statement; mirrored here as the spec's load-bearing premises.
+
+- **A1 (load-bearing, contested — mechanism-scoped).** Three candidate
+  mechanisms, not two: (i) always-on priming — **ruled out** by two independent
+  register audits (surfaces lean); (ii) operational context-bleed of the
+  adversarial register read mid-session; (iii) base-rate model cautiousness
+  *intrinsic* to the model, present with or without jig content. The evidence
+  does **not** yet discriminate (ii) from (iii): the two observed instances show
+  the symptom occurs in jig sessions with no reviewer present, but neither traces
+  a leak back to a prior adversarial read. **The decision survives this
+  uncertainty:** the posture/tone levers (110-01/02/03) reduce the symptom under
+  either (ii) or (iii); only 110-04's *register* rationale depends on (ii), and
+  even 110-04 keeps its token-cost rationale regardless — no work is stranded.
+  **Kill criterion (mechanism test):** vary adversarial-read volume *within* jig
+  sessions (register-heavy vs register-light, same scaffold/model); if both leak
+  equally, (ii) is false and 110-04's register rationale is dropped (token
+  rationale stands). The jig-vs-no-jig before/after tests *attribution* only, not
+  the mechanism.
+- **A2 (partially grounded — with a disconfirming branch).** *Most*
+  orchestrator-facing refusals are backed by `.py` exit codes (`bug.py`'s teeth;
+  the review-evidence gate in `workflow.py transition`) — softening their
+  narration changes posture, not enforcement. **But jig also uses deliberateness
+  gates and prose-only nudges** where the prose *is* the enforcement
+  (`jig-spec-gate.sh`; `contracts` / `clarify` nudge without refusing). So
+  110-03 relocates the "no" onto the tooling **only where a backing exit code
+  exists**; where enforcement is prose-only it keeps the agent-owned refusal (or
+  files a gate gap) and never dresses a nudge as a hard gate. *Probe (110-03):*
+  enumerate each narrated refusal **and classify** hard-gate vs
+  deliberateness/nudge before rewording.
 
 ## Decomposition
 
 **SPIDR — Rules axis, keystone-first.** Each slice changes an
-orchestrator-facing surface and delivers standalone behavioural value (the
-agent's standing posture is the "user-facing layer" here); none is horizontal
-phasing. Sharp language inside the *generated subagent prompts* is out of scope
-to change — it is already quarantined and must stay sharp.
+orchestrator-facing surface (the agent's standing posture is the "user-facing
+layer" here); none is horizontal phasing. Sharp language inside the *generated
+subagent prompts* is out of scope to change — it is already quarantined and must
+stay sharp.
 
-- **110-01 — Posture boundary (keystone).** The single explicit statement:
-  adversarial review is a *named, bounded operation*; outside it the default
-  posture is collaborative and solution-forward — answer what's asked, propose
-  routes, don't manufacture blockers. Placed where the orchestrator reads it:
-  the scaffolded primer (`templates/CLAUDE.md.template` + `AGENTS.md.template`)
-  and a short pointer at the top of the review-heavy SKILL bodies. Records the
-  keystone ADR. [lever 2a]
-- **110-02 — De-weaponize the corpus premise.** General guidance: recorded
-  decisions are context to **reconcile against**, not ammunition to **refuse
-  with**; when a user's idea conflicts with a record, surface and explore, don't
-  block. Includes the amendment-authorization wording pass
-  (`spec-workflow/SKILL.md` amend-lead + its hot-cache `CLAUDE.md` twin: lead
-  with reconcile, reframe "surface and stop" as "escalate to owner").
-  **Owner-approval-gated** surfaces (conventions-adjacent hot cache, the spec
-  102 guardrail) are drafted but not applied without sign-off. [lever 2b]
+**Two lever roles (per ADR-0055, from the frame-critique of this spec).** A1
+locates the dominant channel in material *read mid-session*, not the lean
+always-on surfaces — so the levers are **not** equal, and 01/02 do **not** claim
+a standalone turn-one behavioural cure:
+
+- **Source reduction (load-bearing): 110-03 + 110-04** — de-tone the review
+  bodies at the source and delegate the highest-register reads so they never
+  enter the orchestrator's context.
+- **Counter-anchor (necessary but not sufficient): 110-01 + 110-02** — set the
+  collaborative default and de-weaponize the premise. Real value, but **paired**
+  with source reduction, not standalone (a lean primer line is dwarfed by
+  accumulated register).
+
+The pathology targeted throughout is the **blocking disposition** (the reported
+instance *reconciled then weaponized*), not sharp tone alone — see ADR-0055
+"register-as-tone vs register-as-disposition."
+
+- **110-01 — Posture boundary (keystone).** The explicit statement: adversarial
+  review is a *named, bounded operation*; outside it the default posture is
+  collaborative and solution-forward — answer what's asked, propose routes,
+  don't manufacture blockers. Placed in the primer
+  (`templates/CLAUDE.md.template` + `AGENTS.md.template`) + a pointer at the top
+  of the review-heavy SKILL bodies. Records the keystone ADR. **Role:**
+  principle- and default-setting counter-anchor, paired with 110-03/04 — not a
+  turn-one cure. [lever 2a]
+- **110-02 — De-weaponize the corpus premise.** Guidance targeting the
+  *disposition*: recorded decisions are context to **reconcile against**, not
+  ammunition to **refuse with** — and since a primed orchestrator already
+  reconciles ("I reconciled; it conflicts; here is the blocker"), the rule is to
+  not carry a *blocking intent* into exploratory questions, surface-and-explore
+  instead. Includes the amendment-authorization wording pass, **narrowed**:
+  lead the amend-guardrail with *reconcile-first* (safe), but **keep its hard
+  "stop"** for a genuine unauthorized-record-amendment conflict — the collaborative
+  default is for ordinary exploratory conversation, **never** the spec 102 brake.
+  **Owner-approval-gated** surfaces drafted, not applied without sign-off.
+  **Role:** counter-anchor, paired. [lever 2b]
 - **110-03 — Put the "no" on the tooling; tone-pass the review bodies.** Rewrite
-  orchestrator-facing SKILL prose that narrates refusal as the *agent's* job
-  ("you refuse to advance…") so the helper/exit-code is the gatekeeper and the
-  agent stays collaborative; soften only the orchestrator-read parts of the
-  review-heavy bodies (`independent-review`, `spec-workflow`, `bug-fix`) —
-  the generated subagent prompts stay as sharp as wanted. [levers 2c + 2d]
+  orchestrator-facing SKILL prose that narrates refusal as the *agent's* job so
+  the helper/exit-code is the gatekeeper — **but only where a backing exit code
+  exists** (A2): for deliberateness/prose-only gates, keep the agent-owned
+  refusal or file a gate gap, never fictionalize tool enforcement. Soften only
+  the orchestrator-read parts of the review-heavy bodies; the generated subagent
+  prompts stay sharp. **Role:** source reduction (load-bearing). [levers 2c + 2d]
 - **110-04 — Delegate-as-quarantine.** Extend thin-orchestrator
   ([spec 057](../057-thin-orchestrator/spec.md)) / context-cost-discipline
-  ([spec 055](../055-context-cost-discipline/spec.md)) guidance to **name the
-  second reason** for delegation: delegating file-heavy reading to a subagent
-  keeps the review/verdict register out of the orchestrator's context, not only
-  tokens. Prioritize the highest-register files (`reviews/*-frame-critique.md`,
-  adversarial skill bodies) for delegate-and-summarize. Name the honest tension:
-  delegating *all* reading weakens grounding (jig's core value), so "delegate
-  the bulk + the adversarial-register files; keep the minimum first-hand reading
-  grounding genuinely needs" — and de-toning the source (110-02) is the real fix
-  for the reading that must stay first-hand. [lever 3]
+  ([spec 055](../055-context-cost-discipline/spec.md)) to **name a second
+  reason** for delegation. Clean win: delegate the sharp review *bodies* and
+  bulk corpus reads (the orchestrator never reads the "attack the frame" prose).
+  For *verdicts*, the relay caveat: a verdict's conclusion is itself the
+  adversarial payload ("reviewer output surfaced back up" is a named leak
+  vector), so the subagent must return a **neutral, decision-focused** summary
+  (outcome + what to change, not the argumentation); the residual disposition a
+  relayed conclusion carries is handled by 110-02/03, not delegation. Token-cost
+  rationale (055/057) always holds; register rationale is contingent on A1(ii).
+  Name the grounding tension: "delegate the bulk + the adversarial-register
+  files; keep the minimum first-hand reading grounding genuinely needs." **Role:**
+  source reduction (load-bearing), register-reason contingent. [lever 3]
 
-**Ordering.** 110-01 is the keystone (states the principle + ADR). 110-02–04 can
-proceed in parallel after it; 110-04 references the reconcile framing 110-02
-establishes.
+**Ordering.** 110-01 is the keystone (states the principle + ADR). 110-02–04
+follow; 110-04 references the reconcile framing 110-02 establishes.
 
 ## Slices
 

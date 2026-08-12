@@ -16,6 +16,14 @@ collaborative and solution-forward — so a jig-scaffolded session answers what'
 asked and proposes routes instead of manufacturing blockers. Record the
 quarantine principle as the keystone ADR.
 
+**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+this slice is a **counter-anchor — necessary but not sufficient.** A1 says the
+dominant leak is register accumulated from *mid-session reads*, which a lean
+standing line cannot outweigh on its own; the behavioural cure is **paired** with
+the source-reduction slices (110-03 de-tone at source, 110-04 delegate away).
+This slice delivers the *recorded principle* (ADR) and the *collaborative
+default* — it does not claim a standalone turn-one behavioural fix.
+
 **DoR:**
 - ✅ Issue #199 comments 2–3 read; scaffold-wide register audit available.
 - ✅ Owner has confirmed the quarantine principle is the intended direction
@@ -55,10 +63,12 @@ grounding-aware) frame-critique pass.
 - [ ] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
 
-**Anti-horizontal-phasing check:** after this slice, every jig-scaffolded
-session's standing posture is collaborative-by-default with adversarial review
-explicitly bounded — an observable behavioural change on turn one, not
-intermediate state for a later slice.
+**Anti-horizontal-phasing check:** end-to-end value is that the quarantine
+principle is *recorded* (an accepted ADR future agents can cite) and the
+collaborative default is *stated on the surfaces the orchestrator loads* — a
+standing, user-visible default, not intermediate state for a later slice. Its
+behavioural *sufficiency* is explicitly paired with 110-03/04 (see Role & scope);
+this slice is not claimed to cure the symptom alone.
 
 ### Deviation log (after reconciliation)
 
