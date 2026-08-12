@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.12.0](https://github.com/ramboz/jig/compare/v2.11.0...v2.12.0) (2026-08-12)
+
+
+### Features
+
+* **research:** research-notes convention (ADR-0054, spec 108) ([#197](https://github.com/ramboz/jig/issues/197)) ([4571856](https://github.com/ramboz/jig/commit/457185632e01b2c8199ca60994de6c384aba0131))
+* **review:** contain-at-review + quarantine the adversarial register (spec 110, adr-0056) ([#201](https://github.com/ramboz/jig/issues/201)) ([1dc616b](https://github.com/ramboz/jig/commit/1dc616bc4c0da3d16b223918125ba11a03da36b4))
+* **review:** leanness review lens — spec 109 (arch + reconciliation, ADR-0055) ([#200](https://github.com/ramboz/jig/issues/200)) ([96c2091](https://github.com/ramboz/jig/commit/96c2091914e972f1b29d4bcc215c939446842dea))
+* **review:** richer-skill discovery reshape onto ADR-0040 (spec 096) ([#194](https://github.com/ramboz/jig/issues/194)) ([8663225](https://github.com/ramboz/jig/commit/86632257ab65ed124b40afca6a63aff0c650b57e))
+* **scaffold-init:** autonomy governance plane + identity separation (spec 106, ADR-0051) ([#191](https://github.com/ramboz/jig/issues/191)) ([9219773](https://github.com/ramboz/jig/commit/9219773fc9a943393cfa1a4a89a53b75cf83b4e7))
+
+
+### Documentation
+
+* **decisions:** reserve adr-0055-leanness-lens-folds-into-existing-passes ([a642b66](https://github.com/ramboz/jig/commit/a642b665ade4f75156b22436d51d022142d64f4c))
+* **specs:** reserve 109-leanness-review-lens ([317a196](https://github.com/ramboz/jig/commit/317a19629793f2fdcadad6e349d88badf523f60c))
+
 ## [2.11.0](https://github.com/ramboz/jig/compare/v2.10.0...v2.11.0) (2026-08-05)
 
 
