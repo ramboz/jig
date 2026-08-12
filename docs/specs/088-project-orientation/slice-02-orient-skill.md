@@ -1,10 +1,9 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: []
 last_verified: 2026-08-11
 arch_review: true
 code_health_review: false
-claimed_by: claude/orient-8fd8d9
 ---
 
 ## Slice 088-02 — the `/jig:orient` judgment skill
