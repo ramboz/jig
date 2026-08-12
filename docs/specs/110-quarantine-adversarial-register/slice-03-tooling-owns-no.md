@@ -118,9 +118,11 @@ regardless.
    survives in each body.
 5. **Deliverable = a regression guard, not a rewrite.** `ToolOwnedRefusalTests`
    in `scripts/test_working_posture.py` locks the finding in: no agent-owned
-   refusal framing may creep in, the invoke imperative must survive, and the
-   110-01 posture pointer must stay. This is the durable value of the slice given
-   the bodies were already compliant.
+   refusal framing may creep in, and each body keeps at least one runnable helper
+   invocation example (a coarse invoke-obligation guard). (The 110-01 posture
+   pointer is guarded separately by `WorkingPostureSkillPointerTests`, to avoid
+   duplicate coverage.) This is the durable value of the slice given the bodies
+   were already compliant.
 
 ### Reconciliation sweep
 

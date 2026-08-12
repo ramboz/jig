@@ -118,12 +118,14 @@ class ToolOwnedRefusalTests(unittest.TestCase):
                 self.assertNotRegex(norm, agent_refusal)
 
     def test_invoke_the_gate_imperative_preserved(self):
-        """AC4: the run-the-helper obligation survives. Gates are
-        invocation-conditional (an un-invoked gate never fires), so each body
-        must keep at least one concrete helper INVOCATION example — the
-        `${CLAUDE_PLUGIN_ROOT}/skills/.../X.py` form appears only in runnable
-        command examples, never in refusal *narration* ("the gate refuses"), so
-        deleting the invoke imperatives turns this red."""
+        """AC4 (coarse guard). Gates are invocation-conditional (an un-invoked
+        gate never fires), so each review-heavy body must keep at least one
+        concrete helper INVOCATION example — the `${CLAUDE_PLUGIN_ROOT}/skills/.../X.py`
+        form appears only in runnable command examples, never in refusal
+        *narration* ("the gate refuses"). This guards that the bodies keep their
+        runnable-command register at all; it does NOT single out the
+        gate-specific `transition`/`bug.py` imperative (AC4 itself concedes the
+        suite can't verify invocation — that stays an inspection check)."""
         invocation = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/\S+?\.py")
         for skill in REVIEW_HEAVY_SKILLS:
             text = skill.read_text(encoding="utf-8")

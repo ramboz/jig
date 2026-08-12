@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
+status: RECONCILED
 dependencies: [110-01]
-last_verified:
+last_verified: 2026-08-11
 frame_review: true
 claimed_by: claude/adversarial-review-leak-64bb2d
 ---
@@ -66,7 +66,7 @@ touch the spec 102 unauthorized-record-amendment brake.
       drift-test still passes (load-bearing clauses present).
 - [ ] Reviewed by `reviewer` subagent (compliance + craft; frame-critique fires).
 - [ ] Deviation log + reconciliation sweep produced.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 
 **Anti-horizontal-phasing check:** end-to-end value is that the orchestrator-
 facing guidance now frames the corpus as ground-to-reconcile-against (not
