@@ -555,6 +555,38 @@ adding a jig agent would only duplicate a capable built-in. Revisit only if
 their return contract proves insufficient for jig's summary needs. (No ADR —
 the choice is low-stakes and reversible; no `agents/*.md` file is added.)
 
+**A second reason — quarantine the adversarial register
+([ADR-0055](decisions/adr-0055-adversarial-register-quarantine.md)).** Delegation
+isn't only about tokens. The costliest reads to hold in context are also the most
+**leak-prone**: the `docs/**/reviews/*-frame-critique.md` verdicts and the
+adversarial review-skill bodies are written in a "hunt the flaw / attack the
+frame" register, and because a session's context carries across turns, reading
+them first-hand colours the orchestrator's *plain-conversation* stance later.
+Delegating them to a subagent — which reads them in its own disposable context
+and returns only the conclusion — keeps that register out of the main session.
+Prioritise these highest-register files for delegate-and-summarize; never pull
+them in wholesale.
+
+- **The relay caveat.** Delegation quarantines the *tone* and the unread body,
+  but a verdict's **conclusion** ("assumption X is wrong, here is what breaks")
+  is itself the adversarial payload — so a subagent that returns it faithfully
+  relays the block. Have the subagent return a **neutral, decision-focused**
+  summary (the actionable outcome and what to change, not the argumentation).
+  The residual disposition a relayed conclusion still carries is handled by the
+  collaborative default and the de-toned source, not by delegation alone.
+- **The grounding tension — don't over-rotate.** jig's core value is an
+  orchestrator *grounded* in the recorded corpus, and reading it first-hand is
+  how that grounding forms. So the rule is **"delegate the bulk and the
+  adversarial-register files; keep the minimum first-hand reading grounding
+  genuinely needs"** — not "delegate everything." For the reading that must stay
+  first-hand, the fix is de-toning the source (the
+  [reconcile-not-refuse posture](#working-posture--recorded-decisions-are-context-not-ammunition)),
+  so an ADR grounds the orchestrator without arming it.
+- **Register-reason is contingent, token-reason is not.** The token-cost case for
+  delegation (above) holds unconditionally; this register-quarantine case rests
+  on the still-open bleed mechanism (ADR-0055 A1(ii)). If that mechanism is
+  falsified, delegation keeps its cost rationale and simply drops this one.
+
 ### Read once, read lean
 
 Read is the single biggest one-time context source (~26% of orchestrator

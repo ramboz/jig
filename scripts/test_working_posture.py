@@ -133,5 +133,29 @@ class ToolOwnedRefusalTests(unittest.TestCase):
                 self.assertRegex(text, invocation)
 
 
+class DelegateAsQuarantineTests(unittest.TestCase):
+    """Spec 110-04 — thin-orchestrator / context-cost guidance names the second
+    (register-quarantine) reason to delegate, with the relay caveat, the
+    grounding tension, and the token-reason-vs-register-reason contingency."""
+
+    WORKFLOW = REPO_ROOT / "docs" / "workflow.md"
+
+    def test_delegate_as_quarantine_guidance_present(self):
+        norm = _norm(self.WORKFLOW.read_text(encoding="utf-8"))
+        # AC1: the second reason is named
+        self.assertRegex(norm, r"(?i)second reason")
+        self.assertRegex(norm, r"(?i)quarantine the adversarial register")
+        # AC1: the relay caveat — neutral decision-focused summary
+        self.assertRegex(norm, r"(?i)relay caveat")
+        self.assertRegex(norm, r"(?i)neutral, decision-focused")
+        # AC2: the highest-register files are called out
+        self.assertIn("*-frame-critique.md", norm)
+        # AC3: the grounding tension — don't over-rotate
+        self.assertRegex(norm, r"(?i)delegate the bulk")
+        self.assertRegex(norm, r"(?i)minimum first-hand reading")
+        # contingency: register reason contingent, token reason not
+        self.assertRegex(norm, r"(?i)token[- ]cost case .*holds unconditionally|token-reason is not")
+
+
 if __name__ == "__main__":
     unittest.main()

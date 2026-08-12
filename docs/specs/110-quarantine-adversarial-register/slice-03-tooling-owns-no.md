@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
+status: RECONCILED
 dependencies: [110-01]
-last_verified:
+last_verified: 2026-08-11
 frame_review: true
 claimed_by: claude/adversarial-review-leak-64bb2d
 ---
@@ -76,7 +76,7 @@ de-toning is counter-priming of unproven strength, not source removal. Its
       invoke-the-gate imperative (AC4).
 - [ ] Reviewed by `reviewer` subagent (compliance + craft; frame-critique fires).
 - [ ] Deviation log + reconciliation sweep produced.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 
 **Anti-horizontal-phasing check:** after this slice, the orchestrator-read parts
 of the review-heavy skills are collaborative and their refusals are honestly
