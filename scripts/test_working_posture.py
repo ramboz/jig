@@ -154,7 +154,10 @@ class DelegateAsQuarantineTests(unittest.TestCase):
         self.assertRegex(norm, r"(?i)delegate the bulk")
         self.assertRegex(norm, r"(?i)minimum first-hand reading")
         # contingency: register reason contingent, token reason not
-        self.assertRegex(norm, r"(?i)token[- ]cost case .*holds unconditionally|token-reason is not")
+        self.assertRegex(
+            norm,
+            r"(?i)token[- ]cost case .*holds unconditionally|token-reason is not",
+        )
 
 
 if __name__ == "__main__":
