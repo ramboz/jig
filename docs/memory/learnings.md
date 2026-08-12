@@ -1206,6 +1206,35 @@ records' *current* status before the REVIEWED transition — the green-check run
 before the status flips, so the board must show the pre-transition state. Warm
 `uvx pyright` first, and budget ~7 min per gated full-suite run.
 
+## Spec 110 / ADR-0056: the grounding-aware frame-critique earns its keep, and don't soften a prose-only safety brake
+
+Two lessons from quarantining the adversarial-register leak (issue #199).
+
+**The frame-critique (now grounding-aware, bug 033) caught real frame defects the
+author missed** — reviewing spec 110 it found: (a) a *theory-of-change
+contradiction* (the spec placed its fix on the always-loaded primer, the very
+surface its own diagnosis A1 had **exonerated** as lean — the leak enters via
+mid-session reads), forcing a source-reduction-vs-counter-anchor lever split; (b)
+a **dangerous prose-only-brake softening** (see below); (c) a **gate-bypass risk**
+(jig gates are invocation-conditional, so relocating the "no" onto the tool must
+keep the invoke-the-gate imperative). None were false positives on grounded
+assumptions — exactly the bug-033 fix working. Lesson: run the adversarial pass
+on your own frames; it pays for itself when it's grounding-aware.
+
+**Never soften a *prose-only* safety brake.** The instinct to make the spec-102
+amendment guardrail's "surface the conflict and stop" lead more collaborative was
+**wrong**: spec 102 is a prose-only *deliberateness* gate with no coded backstop,
+so the prose **is** the enforcement (the same rule that says "put the no on the
+tooling" *only where a backing exit code exists*). Softening a prose-only brake
+removes the only enforcement. Classify each refusal hard-gate vs
+deliberateness/prose-only before rewording; carve the prose-only ones out.
+
+**Also:** `adr.py new --no-push` numbers off the local tree, so a concurrently
+merged ADR (PR 200's ADR-0055) collided — had to renumber to 0056 across the ADR
+file + evidence + all refs + hosts + index before integrating. Same hazard as
+[[workflow-local-reservation-collisions]]: fetch/check origin before a provisional
+reservation, and expect to renumber at integration.
+
 And the ADR is **refined by a new ADR, never amended in place.** [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
 scopes the `## Amendments` mechanism to *closed specs/slices*; ADRs are governed
 by Nygard immutability ([ADR-0006](../decisions/adr-0006-adr-accept-then-index-ordering.md))
