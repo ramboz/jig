@@ -1094,6 +1094,12 @@ boundaries, public contracts, and design coherence?
   updated in the same change-set?
 - Are there architectural concerns the implementation doesn't
   address (failure modes, coupling, layering violations)?
+- **Leanness / minimal viable architecture.** Would a *simpler
+  architecture* satisfy the same acceptance criteria? Flag
+  over-engineering, premature abstraction, and speculative generality —
+  indirection, config knobs, or extension points with no current caller.
+  Anchor "simpler" to still meeting the acceptance criteria
+  (leaner-that-still-passes) — never stripping behavior the ACs require.
 - What architectural decisions does the change get right?
 
 {_PR_REVIEW_OUTPUT_FORMAT}

@@ -1613,6 +1613,38 @@ class ArchReviewPromptTests(unittest.TestCase):
                 f"(031-02 AC #2: summary / strengths / concerns / open questions)",
             )
 
+    # Spec 109-01 — the arch pass evaluates for leanness / minimal-viable
+    # architecture (over-engineering, premature abstraction, speculative
+    # generality), anchored to still satisfying the ACs.
+    def test_evaluates_for_leanness(self):
+        prompt = self._prompt()
+        self.assertRegex(
+            prompt,
+            r"(?i)simpler\s+architecture",
+            "arch-review prompt must ask whether a simpler architecture "
+            "satisfies the ACs (spec 109-01)",
+        )
+        self.assertRegex(
+            prompt,
+            r"(?i)over-engineer|premature abstraction|speculative generality",
+            "arch-review prompt must direct the reviewer to flag "
+            "over-engineering / premature abstraction / speculative "
+            "generality (spec 109-01)",
+        )
+        # Anchored to the ACs — leaner-that-still-passes, not lean-at-any-cost.
+        # Discriminating: the anchor phrase must CO-OCCUR with the leanness
+        # directive, not merely appear somewhere in the prompt ("acceptance
+        # criteria" also occurs at the unrelated "do NOT re-evaluate the
+        # acceptance criteria" line). Requiring "simpler architecture" and
+        # "acceptance criteria" within one window fails if the anchor is
+        # stripped from the leanness bullet specifically.
+        self.assertRegex(
+            prompt,
+            r"(?is)simpler\s+architecture.{0,300}acceptance criteria",
+            "the leanness directive must be anchored to satisfying the "
+            "acceptance criteria, not stripping required behavior (109-01)",
+        )
+
     # AC #2 — instructs reviewer to apply arch-review skill's concerns
     def test_instructs_reviewer_to_apply_arch_review_skill(self):
         prompt = self._prompt()
