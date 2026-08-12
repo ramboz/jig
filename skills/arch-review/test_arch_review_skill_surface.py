@@ -268,6 +268,27 @@ class BodyTests(unittest.TestCase):
             "missing 'Review structure' H2",
         )
 
+    def test_concerns_bucket_carries_leanness_lens(self):
+        """Spec 109-01 AC #2 — the Concerns bucket must direct the reviewer
+        to raise over-engineering / premature abstraction / a simpler
+        architecture, anchored to still satisfying the acceptance criteria.
+        Guards the SKILL.md baseline against silently regressing the lens."""
+        # Collapse whitespace so line-wrapped multi-word terms still match.
+        body_norm = re.sub(r"\s+", " ", _strip_fenced_blocks(self.body).lower())
+        for term in ("simpler architecture", "over-engineering",
+                     "premature abstraction", "speculative generality"):
+            self.assertIn(
+                term, body_norm,
+                f"Concerns bucket must name '{term}' as a leanness concern "
+                f"(spec 109-01 AC #2)",
+            )
+        self.assertRegex(
+            body_norm,
+            r"simpler architecture.{0,300}acceptance criteria",
+            "the leanness lens must be anchored to satisfying the acceptance "
+            "criteria, not stripping required behavior (109-01 AC #2)",
+        )
+
     def test_has_gotchas(self):
         positions = self._h2_positions(self.body)
         self.assertTrue(any("gotchas" in h for h, _ in positions),

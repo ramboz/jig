@@ -842,6 +842,13 @@ status flip is allowed. Each item is a gate.
       using `updated` / `no-op` / `deferred` dispositions. The transition gate
       checks the subsection exists; the reconciliation reviewer judges coverage
       and rationale quality.
+- [ ] **Leanness sweep** — did the implementation over-build? Confirm nothing
+      was added beyond what the acceptance criteria required — no
+      over-engineering, premature abstraction, or speculative generality
+      (indirection, config knobs, or extension points with no current caller).
+      Anchored to the spec's needs (added-beyond-need), never a push to strip
+      behavior the spec required. Complements the arch-pass leanness lens (spec 109). Non-blocking
+      nudge; not a gate.
 - [ ] **Lightweight decisions** — did this session's review or implementation
       settle any non-spec decisions (UI strings, visual choices, translation
       corrections, scoped brand/icon calls)? If yes, record them in

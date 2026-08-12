@@ -5,6 +5,9 @@
 
 ## Architecture
 
+### Decision: Extend the leanness lens to the bug-fix lifecycle
+**Deferred:** [ADR-0055](decisions/adr-0055-leanness-lens-folds-into-existing-passes.md) (spec 109) folds the leanness / minimal-viable-architecture lens into the **spec-workflow** arch + reconciliation passes only. The bug-fix lifecycle has no arch pass ("bugs carry no design," `skills/bug-fix/SKILL.md:299`) and no reconciliation pass — its `→ REVIEWED` gate runs `bug-review` + `craft` (+ optional `security`) — so bug fixes get **no** leanness coverage, despite being a real over-engineering site ("add a configurable abstraction while I'm in here" instead of the smallest fix the diagnosis supports). Extending the lens — e.g. folding the counterfactual "would a simpler change satisfy the fix?" into bug-fix's `craft`/`bug-review` prompt — is deferred (demand-gated per grow-by-signal): pick it up if over-engineered bug fixes are observed shipping through green bug reviews. Surfaced by ADR-0055's frame-critique.
+
 ### ~~Decision: Hook strictness profiles~~ — OBSOLETE 2026-07-04
 **Deferred:** Shipping an unread `SCAFFOLD_HOOK_PROFILE` env var creates false expectations. Need to define values AND implement profile-switching logic before exposing.
 **Resolution trigger:** First spec that touches hook enforcement behavior (likely 001-03 or a dedicated Tier 1 spec).

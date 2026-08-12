@@ -322,7 +322,8 @@
 | [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-02 — numbering counts every in-flight branch | IN_PROGRESS (claude/github-issue-147-c6ab0d) |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-01 — living research-note home: template, index, hand-offs | **DONE** |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-02 — codify in conventions.md + register deferred machinery | **DONE** |  |
-| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — tbd | DRAFT |  |
+| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — arch-pass-leanness-lens | **DONE** |  |
+| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-02 — reconciliation-leanness-sweep | **DONE** | Leanness/over-engineering lens folds into the arch + reconciliation passes, NOT a new gate ([ADR-0055](../decisions/adr-0055-leanness-lens-folds-into-existing-passes.md)). Spec-workflow-only — bug-fix lifecycle uncovered (demand-gated follow-up in refinement-todo). |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-01 — posture boundary + keystone ADR | **DONE** |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-02 — de-weaponize the corpus premise | **DONE** |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-03 — put the "no" on the tooling; tone-pass the review bodies | **DONE** |  |
@@ -367,5 +368,5 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **6** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **8** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **0** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):

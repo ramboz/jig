@@ -1094,6 +1094,12 @@ boundaries, public contracts, and design coherence?
   updated in the same change-set?
 - Are there architectural concerns the implementation doesn't
   address (failure modes, coupling, layering violations)?
+- **Leanness / minimal viable architecture.** Would a *simpler
+  architecture* satisfy the same acceptance criteria? Flag
+  over-engineering, premature abstraction, and speculative generality —
+  indirection, config knobs, or extension points with no current caller.
+  Anchor "simpler" to still meeting the acceptance criteria
+  (leaner-that-still-passes) — never stripping behavior the ACs require.
 - What architectural decisions does the change get right?
 
 {_PR_REVIEW_OUTPUT_FORMAT}
@@ -1548,7 +1554,15 @@ For each deviation-log claim:
 - Does the code/doc match what's described?
 - Is anything important silently changed but not logged?
 - Is anything overstated or invented post-hoc?
-- Is the scope appropriate (no scope creep in doc updates)?{extra_check}
+- Is the scope appropriate (no scope creep in doc updates)?
+
+**Leanness / over-build sweep.** Did the implementation add abstraction,
+indirection, or generality *beyond what the acceptance criteria required* —
+over-engineering, premature abstraction, or speculative generality
+(indirection, config knobs, or extension points with no current caller)? Report
+any such over-build as a reconciliation finding, anchored to the ACs
+(added-beyond-need) — this is not license to strip behavior the spec
+required.{extra_check}
 
 {_OUTPUT_FORMAT}
 """

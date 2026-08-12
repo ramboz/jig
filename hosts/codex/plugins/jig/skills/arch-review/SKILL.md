@@ -47,7 +47,12 @@ design document, an RFC, or an ADR draft:
    what to keep when iterating.
 3. **Concerns** — risks, gaps, missing rationale, and unaddressed
    failure modes. This is the "poke holes" surface. Each concern
-   should be specific to this proposal, not generic advice.
+   should be specific to this proposal, not generic advice. Leanness is
+   a first-class concern here: raise over-engineering, premature
+   abstraction, and speculative generality (indirection, config knobs,
+   or extension points with no current caller) when a **simpler
+   architecture** would satisfy the same acceptance criteria — anchored
+   to still meeting them, never stripping required behavior.
 4. **Open questions** — things you can't decide from the proposal
    alone. Ask the author to clarify rather than asserting a gap. Phrase
    as "help me understand X" not "didn't you consider X".
