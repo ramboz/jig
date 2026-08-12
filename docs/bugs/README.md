@@ -36,6 +36,7 @@
 | 030 | usage-report-misses-agent-subagents | high | standard | DONE | yes | scripts/test_usage.py::Bug030UndercountDetectionTests::test_report_flags_undercounted_background_delegation | claude/pr-186-review-fix-1bc497 |  |  |
 | 031 | orient-skips-origin-freshness | medium | standard | DONE | yes | skills/spec-workflow/test_workflow.py::OrientOriginFreshnessTests::test_fetch_reports_commits_behind_origin | claude/jig-orient-origin-check-1ccf06 |  |  |
 | 032 | review-recovery-no-retraction-sweep | low | standard | DONE | yes | skills/spec-workflow/test_spec_workflow_skill_surface.py::FailedReviewRetractionSweepTests | claude/issue-133-0edb78 |  |  |
+| 033 | frame-critique-false-positive-grounded | medium | standard | DONE | yes | skills/independent-review/test_review.py::Bug033FrameCritiqueGroundingAwareTests | claude/adversarial-review-leak-64bb2d |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 

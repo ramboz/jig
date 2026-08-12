@@ -1177,6 +1177,35 @@ bug-shaped:** the honest route is a new refining ADR + inline edits to the live
 operational prose (the SKILLs) + the frame-critique and craft passes that
 actually apply to a rule, no red→green theatre.
 
+## Bug 033: an always-attack reviewer needs a grounding-aware off-ramp, and the green-check is coupled to board freshness
+
+Two lessons from fixing the frame-critique false-positive (issue #199).
+
+**Substance.** An adversarial pass built to *always* produce an attack ("be the
+strongest skeptic they will face", "concede a `pass` only if the frame survives
+your strongest attack") cannot tell "this assumption is wrong" from "this
+assumption is fine, I just can't see its grounding from here" — so it blocks on
+assumptions grounded in a linked accepted ADR or out-of-band context, and the
+author re-litigates decided work. The fix is **not** to soften the pass (ADR-0020
+forbids weakening it) but to make the depth *grounding-aware*: reconcile against
+linked accepted ADRs before blocking (a settled decision → a note, not a
+`needs-changes`), separate *wrong* from *under-documented* (the latter asks for a
+citation), and forbid claiming a capability is absent without naming where you
+looked. The deeper principle — *recorded decisions are context to reconcile
+against, not ammunition to refuse with* — generalises past the review gate into
+plain conversation (the orchestrator-leak strand), carried to a follow-up spec.
+
+**Process gotcha.** In this repo `.jig/test-command` is `python3
+scripts/run_tests.py`, which ignores the tdd selector and runs the **whole
+suite** (incl. `test_board_integrity` + a `uvx pyright` gate). So the bug-fix
+`→ REVIEWED` green-check is really a full-suite green-check: a **stale status
+board** (creating a bug record without re-running `bug.py status-board`, or a
+pre-existing stale `docs/specs/README.md`) makes the green-check fail and
+**back-edges the bug to DIAGNOSING**. Regenerate *both* boards to match the
+records' *current* status before the REVIEWED transition — the green-check runs
+before the status flips, so the board must show the pre-transition state. Warm
+`uvx pyright` first, and budget ~7 min per gated full-suite run.
+
 And the ADR is **refined by a new ADR, never amended in place.** [ADR-0010](../decisions/adr-0010-amendment-scope-records-vs-live-prose.md)
 scopes the `## Amendments` mechanism to *closed specs/slices*; ADRs are governed
 by Nygard immutability ([ADR-0006](../decisions/adr-0006-adr-accept-then-index-ordering.md))

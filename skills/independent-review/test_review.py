@@ -226,6 +226,66 @@ class ReviewerAgentInvestigationTests(unittest.TestCase):
         self.assertRegex(text, r"(?i)focused ranges|locate before you read")
 
 
+class Bug033FrameCritiqueGroundingAwareTests(unittest.TestCase):
+    """Bug 033 (issue #199): the frame-critique pass false-positives a blocking
+    `needs-changes` on assumptions that ARE grounded — just grounded in a linked
+    accepted ADR or out-of-band context the pre-implementation reviewer can't see
+    from the artifact. The fix makes the adversarial depth *grounding-aware*
+    (reconcile before block; separate wrong from under-documented; no
+    absence-claim without a citation) WITHOUT weakening the attack (ADR-0020),
+    and de-person-ifies the affect (issue #199's orchestrator-leak strand).
+
+    Assertions run against `normalize_ws()` so source line-wrapping cannot make
+    them vacuous, and each fails if the grounding-aware guidance is reverted.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-rev-b033-"))
+        self.spec = self.tmpdir / "spec.md"
+        write_synthetic_spec(self.spec, "001-01 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _prompt(self) -> str:
+        result = run_review("frame-critique", str(self.spec), "001-01",
+                            "skills/foo/foo.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return normalize_ws(result.stdout)
+
+    # --- AC1: reconcile against linked accepted ADRs BEFORE blocking
+    def test_reconcile_before_block_step_present(self):
+        prompt = self._prompt()
+        self.assertRegex(prompt, r"(?i)reconcile before you block")
+        self.assertRegex(prompt, r"(?i)linked accepted ADR")
+        self.assertRegex(prompt, r"(?i)known residual")
+
+    # --- AC2: separate "the assumption is false" from "grounded, I just can't
+    #          see it here" — the latter asks for a citation, not a block
+    def test_wrong_vs_underdocumented_distinction_present(self):
+        prompt = self._prompt()
+        self.assertRegex(prompt, r"(?i)under-documented")
+        self.assertRegex(prompt, r"(?i)cite the grounding")
+
+    # --- AC3: no claim of absence without naming where the reviewer looked
+    def test_no_absence_claim_without_citation(self):
+        self.assertRegex(self._prompt(), r"(?i)without naming where you looked")
+
+    # --- AC4: adversarial DEPTH retained (ADR-0020 — never weaken this pass)
+    def test_adversarial_depth_retained(self):
+        prompt = self._prompt()
+        self.assertRegex(prompt, r"(?i)strongest attack")
+        # still hunts the single load-bearing assumption most likely wrong
+        self.assertRegex(prompt, r"(?i)load-bearing assumption")
+
+    # --- AC5: affect de-person-ified — no person-directed disposition words
+    def test_affect_is_deperson_ified(self):
+        prompt = self._prompt()
+        self.assertNotIn(normalize_ws("save the author"), prompt)
+        self.assertNotIn(normalize_ws("strongest skeptic they will face"), prompt)
+
+
 class ReconciliationPromptTests(unittest.TestCase):
     """`review.py reconciliation <spec> <slice>` shape."""
 

@@ -1305,8 +1305,9 @@ reality the author did not consider, and what breaks downstream if the
 assumption fails. A load-bearing assumption is one the whole approach rests
 on: if it falls, the work is misdirected, not merely imperfect.
 
-Attack the frame, not the wording. You are trying to save the author from
-building the wrong thing — be the strongest skeptic they will face.
+Attack the frame, not the wording — subject the single load-bearing
+assumption to the strongest attack it will face, so a wrong premise dies
+here, at authoring time, rather than after implementation.
 
 ## What to read (in this order)
 
@@ -1328,6 +1329,32 @@ building the wrong thing — be the strongest skeptic they will face.
 - If the assumption is wrong, what downstream work is misdirected — and how
   expensive is it to discover that AFTER implementation rather than now?
 - Did the author consider, and honestly rule out, the alternative framing?
+
+## Before you block — reconcile first
+
+Adversarial depth means aiming the attack at *real* gaps, not settled ones. An
+assumption you cannot immediately verify from the artifact is not yet a flaw.
+**Reconcile before you block:**
+
+- **Check the grounding you can reach.** If the attacked assumption is settled
+  in a **linked accepted ADR** (or another artifact the spec links), treat it as
+  a **known residual** — a note, not a `needs-changes`. A decision recorded and
+  accepted elsewhere is context to reconcile against, not a fresh flaw to
+  re-litigate.
+- **Separate *wrong* from *under-documented*.** "The assumption is false, and
+  here is the concrete way reality differs" is a blocking finding. "The
+  assumption may be grounded in context I cannot see from here" is not — say so
+  and ask the author to **cite the grounding**; that is a note, not a fatal
+  verdict.
+- **No claim of absence without a citation.** Do not assert that a capability,
+  protocol, or fact "does not exist" **without naming where you looked**. An
+  out-of-band mechanism — a protocol, a prior decision, an external tool's
+  behaviour — is invisible from the artifact, so its absence *there* is not
+  proof it is absent everywhere.
+
+This does not soften the pass: a genuinely ungrounded load-bearing assumption
+still blocks. It points the strongest attack at the assumptions that are
+actually exposed.
 
 Concede a `pass` only if the frame survives your strongest attack.
 
