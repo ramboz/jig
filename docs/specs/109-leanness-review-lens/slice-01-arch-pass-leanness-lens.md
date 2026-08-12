@@ -45,7 +45,7 @@ standing review lens instead of a value re-derived ad hoc.
    behavior.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
+- [x] All ACs pass; full test suite green (no regressions).
 - [ ] A unit test asserts the arch prompt string contains the leanness
       evaluation directive (and the anchor to satisfying ACs), and is shown to
       fail when the directive is removed.

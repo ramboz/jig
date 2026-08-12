@@ -42,7 +42,7 @@ the leanness lens closes the loop at reconciliation as well as at arch review.
    spec required.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
+- [x] All ACs pass; full test suite green (no regressions).
 - [x] A unit test asserts the reconciliation prompt string contains the
       over-build sweep directive, shown to fail when removed.
 - [x] A test (or spec_lint/manifest check as applicable) covers the checklist
