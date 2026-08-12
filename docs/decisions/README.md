@@ -58,6 +58,7 @@
 - [ADR-0052: Grounding rule: universal/negative claims require enumeration](adr-0052-grounding-enumeration-for-universal-claims.md) — jig's grounding requirement accepts a single citation as sufficient evidence for any factual claim, but a citation of one positive example cannot establish a universal or negative claim. (2026-07-31, Accepted)
 - [ADR-0053: Reservation numbering reads every in-flight branch, not just origin/main](adr-0053-reservation-numbering-sees-in-flight-branches.md) — Reservation exists to stop two sessions claiming the same `NNN`. (2026-08-05, Accepted)
 - [ADR-0054: Research notes as a lightweight standalone-investigation artifact](adr-0054-research-notes-artifact-convention.md) — jig has homes for parked thoughts (`docs/inbox.md`), deferred *decisions* keyed on resolution triggers (`docs/refinement-todo.md`), committed decisions (ADRs), and committed work (specs + slices). (2026-08-11, Accepted)
+- [ADR-0055: Leanness lens folds into existing review passes, not a new gate](adr-0055-leanness-lens-folds-into-existing-passes.md) — Spec 109 adds a leanness / minimal-viable-architecture lens (over-engineering, premature abstraction, speculative generality) to the **spec-workflow lifecycle's** review surfaces — the retrospective half of a value SPIDR already carries at the slice-splitting altitude but that never propagated into review. (2026-08-11, Accepted)
 
 ## Lightweight decisions
 
