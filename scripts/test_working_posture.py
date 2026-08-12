@@ -1,10 +1,14 @@
-"""Spec 110-01 — the collaborative Working-posture boundary is present on the
-orchestrator-facing surfaces (scaffold primer templates + the review-heavy SKILL
-bodies). Lexical-presence guard: removing the statement turns these red.
+"""Spec 110 (ADR-0055, adversarial-register quarantine) — lexical-presence guards
+for the orchestrator-facing collaborative-posture surfaces. Removing a guarded
+statement turns these red; none asserts behaviour.
 
-ADR-0055 (adversarial-register quarantine): adversarial review is a named,
-bounded operation; outside it the default posture is collaborative. This test
-guards the *counter-anchor* surfaces (110-01); it does not assert behaviour."""
+- 110-01: the Working-posture boundary on the scaffold primer templates + the
+  review-heavy SKILL bodies (adversarial review is a named, bounded operation;
+  default collaborative).
+- 110-02: the corpus-reconcile disposition guidance in docs/workflow.md, and the
+  spec-102 amendment brake left provably unchanged.
+- 110-03: refusals in the review-heavy SKILL bodies stay tool-attributed (no
+  agent-owned refusal narration) and the invoke-the-gate imperative survives."""
 
 from __future__ import annotations
 
@@ -99,35 +103,32 @@ class ToolOwnedRefusalTests(unittest.TestCase):
     refusal as the *agent's* job or drops the run-the-helper imperative."""
 
     def test_no_agent_owned_refusal_narration(self):
-        """AC1/AC2: no orchestrator-read prose casts the AGENT as the refuser."""
+        """AC1/AC2: no orchestrator-read prose casts the AGENT (or, third-person,
+        the reviewer/orchestrator) as the one who refuses to advance work — that
+        register belongs on the tooling."""
+        # "you refuse", "you must refuse", "the reviewer refuses to advance", …
+        agent_refusal = re.compile(
+            r"(?i)\b(you|the (agent|orchestrator|reviewer))\b[^.]{0,40}?"
+            r"\b(refuses?|rejects?|blocks?)\b[^.]{0,20}?"
+            r"\b(advance|advancing|proceed|transition|the move)\b"
+        )
         for skill in REVIEW_HEAVY_SKILLS:
             norm = _norm(skill.read_text(encoding="utf-8"))
             with self.subTest(skill=skill.parent.name):
-                # the agent must not be told it personally refuses/blocks advances
-                self.assertNotRegex(
-                    norm,
-                    r"(?i)you (refuse|must not advance|block the|reject the)"
-                    r"\s+(to )?(advance|transition|proceed)",
-                )
+                self.assertNotRegex(norm, agent_refusal)
 
     def test_invoke_the_gate_imperative_preserved(self):
-        """AC4: the run-the-helper obligation survives (gates are
-        invocation-conditional — an un-invoked gate never fires)."""
+        """AC4: the run-the-helper obligation survives. Gates are
+        invocation-conditional (an un-invoked gate never fires), so each body
+        must keep at least one concrete helper INVOCATION example — the
+        `${CLAUDE_PLUGIN_ROOT}/skills/.../X.py` form appears only in runnable
+        command examples, never in refusal *narration* ("the gate refuses"), so
+        deleting the invoke imperatives turns this red."""
+        invocation = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/\S+?\.py")
         for skill in REVIEW_HEAVY_SKILLS:
             text = skill.read_text(encoding="utf-8")
             with self.subTest(skill=skill.parent.name):
-                # each review-heavy body still tells the agent to run a helper
-                self.assertRegex(
-                    text, r"(?i)(workflow|bug|review)\.py|run[- ]tests|status-board"
-                )
-
-    def test_posture_pointer_present(self):
-        """110-01 consistency: the collaborative posture pointer stays at the top
-        of each review-heavy body (110-03's tone rests on it)."""
-        for skill in REVIEW_HEAVY_SKILLS:
-            norm = _norm(skill.read_text(encoding="utf-8"))
-            with self.subTest(skill=skill.parent.name):
-                self.assertRegex(norm, r"(?i)working posture")
+                self.assertRegex(text, invocation)
 
 
 if __name__ == "__main__":
