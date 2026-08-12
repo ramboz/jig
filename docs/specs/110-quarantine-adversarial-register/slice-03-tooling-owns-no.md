@@ -18,12 +18,19 @@ subagent prompts as sharp as the review needs.
 
 **DoR:**
 - ✅ 110-01 landed (the boundary this pass enforces in-prose).
-- ✅ Enumeration of the gate helpers available (A2 probe): each refusal is a
-  code exit, so re-narrating it as the tool's job changes no behaviour.
+- ✅ Enumeration + classification of the gate helpers (A2 probe): each narrated
+  refusal is classified hard-gate vs deliberateness/prose-only before rewording.
 
 **Assumptions:** rests on **A2** (qualified — *most* refusals are exit-code
 gates, but jig also uses deliberateness/prose-only gates where the prose *is* the
 enforcement) and **A1**; `frame_review: true`.
+
+**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+source reduction — but its value is **(ii)-contingent**, like 110-04's: de-toning
+the review bodies only reduces a leak *source* if the register actually enters by
+*reading* those bodies (mechanism (ii)). Under (iii) (intrinsic cautiousness),
+de-toning is counter-priming of unproven strength, not source removal. Its
+**honesty fix** (tool-owned refusals not fictionalized; AC1/AC2) holds regardless.
 
 **Acceptance Criteria:**
 
@@ -44,22 +51,39 @@ enforcement) and **A1**; `frame_review: true`.
    remain sharp (verified by diff — no change inside the prompt builders).
    (Frame-critique confirmed this separability: the sharp strings live in
    `review.py`'s prompt builder, outside the orchestrator's read path.)
-4. **No gate behaviour changes.** The full suite (including the gate/teeth tests)
-   stays green; every *hard-gate* refusal still fires from its exit code, and
-   every *deliberateness/prose-only* refusal keeps its agent-owned enforcement —
-   proven by the AC1 classification.
+4. **Preserve the invoke-the-gate obligation.** jig gates are **in-helper-only
+   and invocation-conditional** — a `workflow.py transition` / `bug.py` refusal
+   fires *only when the orchestrator runs the helper* (the off-path-bypass
+   invariant). So relocating the *refusal decision* onto the tool must **not**
+   drop the agent's obligation to *invoke* it: each reworded site still carries an
+   explicit "run/invoke `<helper>`" imperative. Softening "you refuse to advance"
+   into a bare "relay and route" that no longer compels invocation would let an
+   ungated advance slip through — a bypass CI cannot see. Verified by
+   **inspection** of the reworded prose, not by the suite.
+5. **No gate behaviour changes.** Hard-gate exit codes still fire *when invoked*
+   (suite green); deliberateness/prose-only refusals keep agent-owned
+   enforcement (AC2); and the invoke-obligation is preserved (AC4). The suite
+   proves exit-code behaviour *given invocation* — it **cannot** observe whether a
+   re-toned orchestrator still invokes, which is why AC4 is an inspection check,
+   not a suite claim.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green.
-- [ ] The A2 enumeration (gate helpers ↔ exit-code refusals) is recorded in the
-      deviation log so the "changed prose, not behaviour" claim is grounded.
+- [ ] The A2 classification (each narrated refusal → hard-gate vs
+      deliberateness/prose-only) is recorded in the deviation log.
+- [ ] Each relocated refusal site is shown, by inspection, to retain an explicit
+      invoke-the-gate imperative (AC4).
 - [ ] Reviewed by `reviewer` subagent (compliance + craft; frame-critique fires).
 - [ ] Deviation log + reconciliation sweep produced.
 - [ ] Reconciliation review passed.
 
-**Anti-horizontal-phasing check:** after this slice, an orchestrator reading the
-review-heavy skills meets collaborative framing and tool-owned refusals — a
-directly observable change in the register it carries into conversation.
+**Anti-horizontal-phasing check:** after this slice, the orchestrator-read parts
+of the review-heavy skills are collaborative and their refusals are honestly
+attributed (tool-owned where a gate exists, agent-owned where enforcement is
+prose-only, invoke-obligation intact) — an observable change in what the
+orchestrator reads. Its source-reduction *efficacy* is (ii)-contingent (see Role
+& scope); the honesty fix and the preserved invocation obligation hold
+regardless.
 
 ### Deviation log (after reconciliation)
 

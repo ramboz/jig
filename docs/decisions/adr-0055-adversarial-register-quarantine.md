@@ -145,15 +145,26 @@ conversation defaults collaborative (see Consequences).
   discriminate: the two observed instances establish only that the symptom
   occurs *in jig sessions with no reviewer present*; neither traces the leak
   back to a prior adversarial read, which is the exact causal link (ii)
-  requires. **This uncertainty is deliberately survivable by the decision.** The
-  posture/tone edits (levers 2a–2d: collaborative default, de-weaponized corpus
-  premise, tool-owned refusals) reduce the symptom **regardless of whether (ii)
-  or (iii) dominates** — they make the orchestrator-facing surfaces collaborative
-  either way. Only the *second reason* named in **110-04**
-  (delegate-as-quarantine) depends specifically on (ii); and even 110-04's
-  **primary** justification (token cost, specs 055/057) is unaffected by A1, so
-  the worst case for a false (ii) is that 110-04 keeps its cost rationale and
-  loses only its register rationale — no work is stranded.
+  requires. **This uncertainty is bounded, but not erased.** Two things hold
+  regardless of which of (ii)/(iii) dominates: (a) **no work is stranded** —
+  every lever has independent value (the recorded principle; 110-03's honesty
+  fix on tool-owned refusals; 110-04's token-cost rationale from specs 055/057;
+  the stated collaborative default); and (b) the orchestrator-facing surfaces
+  become collaborative in **tone/default** either way. What is **not** guaranteed
+  under (iii) is the harder target — the blocking *disposition* itself
+  (distinction 1). Source reduction (110-03/04) only bites when adversarial
+  register is actually in context driving the leak, i.e. under (ii); if (iii)
+  dominates there is no register to reduce, and the remaining counter-anchor
+  prose is an **explicit collaborative directive of unproven strength** — a
+  standing instruction can shift model behaviour, but whether a lean line
+  overrides intrinsic base-rate cautiousness (and resists the same "I
+  reconciled; here is the blocker" gaming that defeats *any* prose, distinction
+  1) is not grounded. **Honest scope:** under (ii) spec 110 attacks the
+  disposition at its source; under (iii) it reliably improves tone/default and
+  offers an unproven directive against the disposition, which would then need an
+  intervention **beyond these four levers**. The mechanism kill-test tells us
+  which world we are in — until it runs, "collaborative surfaces" must not be
+  read as "disposition fixed."
 - **A2 (partially grounded — with a disconfirming branch).** *Most*
   orchestrator-facing refusals are backed by `.py` exit codes (`bug.py`'s teeth;
   the review-evidence gate in `workflow.py transition`), out-of-band from the
@@ -191,3 +202,10 @@ conversation defaults collaborative (see Consequences).
 - Whether the delegate-as-quarantine guidance (110-04) needs any enforcement, or
   stays advisory like specs 055/057 (current lean: advisory — consistent with
   those specs being disciplines, not gates).
+- **If the mechanism kill-test shows (iii) dominates**, what intervention shifts
+  the intrinsic blocking *disposition* beyond spec 110's four surface levers?
+  (Spec 110's counter-anchor prose is an unproven directive under (iii); a real
+  fix might need a stronger standing directive, a different framing of the whole
+  corpus premise, or an eval that scores conversational stance directly.) Out of
+  scope here; recorded so a false (ii) doesn't leave the disposition unaddressed
+  by default.

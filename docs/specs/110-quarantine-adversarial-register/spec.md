@@ -89,15 +89,23 @@ the full statement; mirrored here as the spec's load-bearing premises.
   *intrinsic* to the model, present with or without jig content. The evidence
   does **not** yet discriminate (ii) from (iii): the two observed instances show
   the symptom occurs in jig sessions with no reviewer present, but neither traces
-  a leak back to a prior adversarial read. **The decision survives this
-  uncertainty:** the posture/tone levers (110-01/02/03) reduce the symptom under
-  either (ii) or (iii); only 110-04's *register* rationale depends on (ii), and
-  even 110-04 keeps its token-cost rationale regardless — no work is stranded.
-  **Kill criterion (mechanism test):** vary adversarial-read volume *within* jig
-  sessions (register-heavy vs register-light, same scaffold/model); if both leak
-  equally, (ii) is false and 110-04's register rationale is dropped (token
-  rationale stands). The jig-vs-no-jig before/after tests *attribution* only, not
-  the mechanism.
+  a leak back to a prior adversarial read. **The uncertainty is bounded, not
+  erased.** Regardless of (ii) vs (iii): (a) **no work is stranded** (every lever
+  has independent value), and (b) the surfaces become collaborative in
+  **tone/default** either way. But the harder target — the blocking *disposition*
+  — is attacked *at its source* only by the source-reduction levers (110-03/04),
+  and source reduction bites **only under (ii)** (no register in context ⇒ nothing
+  to reduce). Under (iii) the remaining counter-anchor prose is an explicit
+  collaborative directive of **unproven strength**, defeatable by the same "I
+  reconciled; here is the blocker" gaming. So both **110-03 and 110-04's**
+  source/register value is (ii)-contingent; under (iii) they collapse to
+  counter-priming, and the disposition would need an intervention **beyond these
+  four levers**. "Collaborative surfaces" ≠ "disposition fixed" until the
+  mechanism test runs. **Kill criterion (mechanism test):** vary adversarial-read
+  volume *within* jig sessions (register-heavy vs register-light, same
+  scaffold/model); if both leak equally, (ii) is false and the source/register
+  rationale is dropped (110-04's token rationale stands). The jig-vs-no-jig
+  before/after tests *attribution* only, not the mechanism.
 - **A2 (partially grounded — with a disconfirming branch).** *Most*
   orchestrator-facing refusals are backed by `.py` exit codes (`bug.py`'s teeth;
   the review-evidence gate in `workflow.py transition`) — softening their
@@ -148,12 +156,14 @@ instance *reconciled then weaponized*), not sharp tone alone — see ADR-0055
   ammunition to **refuse with** — and since a primed orchestrator already
   reconciles ("I reconciled; it conflicts; here is the blocker"), the rule is to
   not carry a *blocking intent* into exploratory questions, surface-and-explore
-  instead. Includes the amendment-authorization wording pass, **narrowed**:
-  lead the amend-guardrail with *reconcile-first* (safe), but **keep its hard
-  "stop"** for a genuine unauthorized-record-amendment conflict — the collaborative
-  default is for ordinary exploratory conversation, **never** the spec 102 brake.
-  **Owner-approval-gated** surfaces drafted, not applied without sign-off.
-  **Role:** counter-anchor, paired. [lever 2b]
+  instead. The spec 102 amendment guardrail is **explicitly carved out** and its
+  "surface the conflict and stop" lead **left unchanged**: it is a prose-only
+  advisory brake (its prose *is* the enforcement), so by A2 it must not be
+  softened — the collaborative default is for ordinary exploratory conversation,
+  **never** the spec 102 brake. (The frame-critique surfaced that the earlier
+  "amendment wording pass" would have softened a prose-only safety brake — it is
+  dropped as unsafe.) **Owner-approval-gated** surfaces drafted, not applied
+  without sign-off. **Role:** counter-anchor, paired. [lever 2b]
 - **110-03 — Put the "no" on the tooling; tone-pass the review bodies.** Rewrite
   orchestrator-facing SKILL prose that narrates refusal as the *agent's* job so
   the helper/exit-code is the gatekeeper — **but only where a backing exit code
