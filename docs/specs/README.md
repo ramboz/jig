@@ -322,6 +322,8 @@
 | [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-02 — numbering counts every in-flight branch | IN_PROGRESS (claude/github-issue-147-c6ab0d) |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-01 — living research-note home: template, index, hand-offs | **DONE** |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-02 — codify in conventions.md + register deferred machinery | **DONE** |  |
+| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — arch-pass-leanness-lens | DRAFT |  |
+| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-02 — reconciliation-leanness-sweep | DRAFT |  |
 
 ## Deferred slices
 
