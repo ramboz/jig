@@ -555,17 +555,18 @@ adding a jig agent would only duplicate a capable built-in. Revisit only if
 their return contract proves insufficient for jig's summary needs. (No ADR —
 the choice is low-stakes and reversible; no `agents/*.md` file is added.)
 
-**A second reason — quarantine the adversarial register
-([ADR-0055](decisions/adr-0055-adversarial-register-quarantine.md)).** Delegation
-isn't only about tokens. The costliest reads to hold in context are also the most
-**leak-prone**: the `docs/**/reviews/*-frame-critique.md` verdicts and the
-adversarial review-skill bodies are written in a "hunt the flaw / attack the
-frame" register, and because a session's context carries across turns, reading
-them first-hand colours the orchestrator's *plain-conversation* stance later.
-Delegating them to a subagent — which reads them in its own disposable context
-and returns only the conclusion — keeps that register out of the main session.
-Prioritise these highest-register files for delegate-and-summarize; never pull
-them in wholesale.
+#### A second reason — quarantine the adversarial register
+
+Delegation isn't only about tokens
+([ADR-0055](decisions/adr-0055-adversarial-register-quarantine.md)). The costliest
+reads to hold in context are also the most **leak-prone**: the
+`docs/**/reviews/*-frame-critique.md` verdicts and the adversarial review-skill
+bodies are written in a "hunt the flaw / attack the frame" register, and because
+a session's context carries across turns, reading them first-hand colors the
+orchestrator's *plain-conversation* stance later. Delegating them to a subagent —
+which reads them in its own disposable context and returns only the conclusion —
+keeps that register out of the main session. Prioritize these highest-register
+files for delegate-and-summarize; never pull them in wholesale.
 
 - **The relay caveat.** Delegation quarantines the *tone* and the unread body,
   but a verdict's **conclusion** ("assumption X is wrong, here is what breaks")
