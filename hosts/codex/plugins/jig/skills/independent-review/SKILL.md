@@ -11,6 +11,13 @@ description: >
 user-invocable: true
 ---
 
+> **Working posture ([ADR-0055](../../docs/decisions/adr-0055-adversarial-register-quarantine.md)).**
+> Adversarial review is a *named, bounded operation.* The skeptical,
+> flaw-hunting register this skill builds belongs *inside* the review passes —
+> they run in isolated reviewer subagents whose context is discarded. Outside a
+> review, default to collaborative and solution-forward; don't carry the
+> adversarial stance into ordinary conversation.
+
 > Spec 004 promoted this skill from stub to active. The prompt is constructed
 > by `review.py`; Codex owns the Task invocation.
 

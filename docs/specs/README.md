@@ -323,7 +323,7 @@
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-01 — living research-note home: template, index, hand-offs | **DONE** |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-02 — codify in conventions.md + register deferred machinery | **DONE** |  |
 | [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — tbd | DRAFT |  |
-| [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-01 — posture boundary + keystone ADR | DRAFT |  |
+| [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-01 — posture boundary + keystone ADR | REVIEWED (claude/adversarial-review-l…) |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-02 — de-weaponize the corpus premise | DRAFT |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-03 — put the "no" on the tooling; tone-pass the review bodies | DRAFT |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-04 — delegate-as-quarantine | DRAFT |  |
@@ -367,5 +367,5 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **2** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **3** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **0** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):

@@ -14,6 +14,13 @@ description: >
 user-invocable: true
 ---
 
+> **Working posture ([ADR-0055](../../docs/decisions/adr-0055-adversarial-register-quarantine.md)).**
+> Adversarial review is a *named, bounded operation.* This workflow invokes
+> review passes (frame-critique / craft), whose skeptical register belongs
+> *inside* those isolated reviewer subagents. Outside a review, default to
+> collaborative and solution-forward; don't carry the adversarial stance into
+> ordinary conversation.
+
 > Spec 003 promoted this skill from stub to active. The deterministic state
 > mutations live in `workflow.py`; this SKILL.md drives the judgment layer.
 
