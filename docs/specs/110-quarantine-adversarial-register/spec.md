@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill:
 use_cases: []
 ---
@@ -66,7 +66,7 @@ orchestrator satisfies it and still blocks). This distinction, and the resulting
 split of the four levers into *source-reduction* (load-bearing) vs
 *counter-anchor* (necessary but not sufficient), is the frame this spec was
 re-grounded onto after its own frame-critique — see the Decomposition and
-[ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md).
+[ADR-0056](../../decisions/adr-0056-adversarial-register-quarantine.md).
 
 **Keystone decision → candidate ADR.** The quarantine principle is a
 load-bearing, cross-cutting *authoring* rule for how jig writes its own
@@ -79,7 +79,7 @@ context."* Flagged for the owner at DRAFT review.
 
 ## Assumptions
 
-See [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md) for
+See [ADR-0056](../../decisions/adr-0056-adversarial-register-quarantine.md) for
 the full statement; mirrored here as the spec's load-bearing premises.
 
 - **A1 (load-bearing, contested — mechanism-scoped).** Three candidate
@@ -126,7 +126,7 @@ layer" here); none is horizontal phasing. Sharp language inside the *generated
 subagent prompts* is out of scope to change — it is already quarantined and must
 stay sharp.
 
-**Two lever roles (per ADR-0055, from the frame-critique of this spec).** A1
+**Two lever roles (per ADR-0056, from the frame-critique of this spec).** A1
 locates the dominant channel in material *read mid-session*, not the lean
 always-on surfaces — so the levers are **not** equal, and 01/02 do **not** claim
 a standalone turn-one behavioural cure:
@@ -140,7 +140,7 @@ a standalone turn-one behavioural cure:
   accumulated register).
 
 The pathology targeted throughout is the **blocking disposition** (the reported
-instance *reconciled then weaponized*), not sharp tone alone — see ADR-0055
+instance *reconciled then weaponized*), not sharp tone alone — see ADR-0056
 "register-as-tone vs register-as-disposition."
 
 - **110-01 — Posture boundary (keystone).** The explicit statement: adversarial

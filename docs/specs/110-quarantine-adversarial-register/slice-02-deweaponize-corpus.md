@@ -18,7 +18,7 @@ reconciled ("cited three recorded decisions") and then weaponized the result, so
 "add reconcile prose" is not enough: the guidance must say *don't carry a
 blocking intent into a question that asked for none — surface and explore.*
 
-**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+**Role & scope (per [ADR-0056](../../decisions/adr-0056-adversarial-register-quarantine.md)):**
 **counter-anchor — necessary but not sufficient**, paired with the
 source-reduction slices (110-03/04). And the **hard stops stay hard**: the
 collaborative default is for ordinary exploratory conversation; it does **not**

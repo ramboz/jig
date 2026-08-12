@@ -1,5 +1,5 @@
 ---
-adr: 0055
+adr: 0056
 pass: frame-critique
 verdict: pass
 reviewer: reviewer subagent (read-only, fresh context)

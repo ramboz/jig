@@ -5,7 +5,7 @@ last_verified: 2026-08-11
 frame_review: true
 ---
 
-# ADR-0055: Adversarial-register quarantine: orchestrator-facing surfaces are collaborative
+# ADR-0056: Adversarial-register quarantine: orchestrator-facing surfaces are collaborative
 
 ## Status
 

@@ -1,9 +1,8 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [110-01, 110-02]
 last_verified: 2026-08-11
 frame_review: true
-claimed_by: claude/adversarial-review-leak-64bb2d
 ---
 
 <!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
@@ -18,7 +17,7 @@ only its token bill. Handle *verdicts* carefully (their conclusion is itself the
 adversarial payload — see the relay caveat), and name the honest grounding
 trade-off so the guidance doesn't over-rotate into "delegate everything."
 
-**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+**Role & scope (per [ADR-0056](../../decisions/adr-0056-adversarial-register-quarantine.md)):**
 source reduction (load-bearing), but the *register* reason is **contingent on
 A1(ii)** (the bleed mechanism). Its **token-cost** rationale (specs 055/057)
 holds regardless — so even if the mechanism test (A1 kill criterion) falsifies

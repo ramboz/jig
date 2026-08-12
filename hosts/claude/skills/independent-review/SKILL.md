@@ -11,7 +11,7 @@ description: >
 user-invocable: true
 ---
 
-> **Working posture ([ADR-0055](../../docs/decisions/adr-0055-adversarial-register-quarantine.md)).**
+> **Working posture ([ADR-0056](../../docs/decisions/adr-0056-adversarial-register-quarantine.md)).**
 > Adversarial review is a *named, bounded operation.* The skeptical,
 > flaw-hunting register this skill builds belongs *inside* the review passes —
 > they run in isolated reviewer subagents whose context is discarded. Outside a

@@ -25,7 +25,7 @@ subagent prompts as sharp as the review needs.
 gates, but jig also uses deliberateness/prose-only gates where the prose *is* the
 enforcement) and **A1**; `frame_review: true`.
 
-**Role & scope (per [ADR-0055](../../decisions/adr-0055-adversarial-register-quarantine.md)):**
+**Role & scope (per [ADR-0056](../../decisions/adr-0056-adversarial-register-quarantine.md)):**
 source reduction — but its value is **(ii)-contingent**, like 110-04's: de-toning
 the review bodies only reduces a leak *source* if the register actually enters by
 *reading* those bodies (mechanism (ii)). Under (iii) (intrinsic cautiousness),

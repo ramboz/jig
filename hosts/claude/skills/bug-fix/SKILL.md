@@ -16,7 +16,7 @@ description: >
 user-invocable: true
 ---
 
-> **Working posture ([ADR-0055](../../docs/decisions/adr-0055-adversarial-register-quarantine.md)).**
+> **Working posture ([ADR-0056](../../docs/decisions/adr-0056-adversarial-register-quarantine.md)).**
 > Adversarial review is a *named, bounded operation.* This workflow invokes
 > review passes (bug-review / craft), whose skeptical register belongs *inside*
 > those isolated reviewer subagents. Outside a review, default to collaborative

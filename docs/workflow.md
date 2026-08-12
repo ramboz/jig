@@ -8,7 +8,7 @@ We use the workflow jig is designed to produce — dogfooding from day one.
 
 ## Working posture — recorded decisions are context, not ammunition
 
-The scaffold primer states the standing posture ([ADR-0055](decisions/adr-0055-adversarial-register-quarantine.md)):
+The scaffold primer states the standing posture ([ADR-0056](decisions/adr-0056-adversarial-register-quarantine.md)):
 adversarial review is a *named, bounded operation*; outside it, default to
 collaborative and solution-forward. This section elaborates the part most prone
 to leak: **how the recorded corpus is used in ordinary conversation.**
@@ -558,7 +558,7 @@ the choice is low-stakes and reversible; no `agents/*.md` file is added.)
 #### A second reason — quarantine the adversarial register
 
 Delegation isn't only about tokens
-([ADR-0055](decisions/adr-0055-adversarial-register-quarantine.md)). The costliest
+([ADR-0056](decisions/adr-0056-adversarial-register-quarantine.md)). The costliest
 reads to hold in context are also the most **leak-prone**: the
 `docs/**/reviews/*-frame-critique.md` verdicts and the adversarial review-skill
 bodies are written in a "hunt the flaw / attack the frame" register, and because
@@ -585,7 +585,7 @@ files for delegate-and-summarize; never pull them in wholesale.
   so an ADR grounds the orchestrator without arming it.
 - **Register-reason is contingent, token-reason is not.** The token-cost case for
   delegation (above) holds unconditionally; this register-quarantine case rests
-  on the still-open bleed mechanism (ADR-0055 A1(ii)). If that mechanism is
+  on the still-open bleed mechanism (ADR-0056 A1(ii)). If that mechanism is
   falsified, delegation keeps its cost rationale and simply drops this one.
 
 ### Read once, read lean

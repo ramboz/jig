@@ -1,4 +1,4 @@
-"""Spec 110 (ADR-0055, adversarial-register quarantine) — lexical-presence guards
+"""Spec 110 (ADR-0056, adversarial-register quarantine) — lexical-presence guards
 for the orchestrator-facing collaborative-posture surfaces. Removing a guarded
 statement turns these red; none asserts behaviour.
 
@@ -58,7 +58,7 @@ class WorkingPostureSkillPointerTests(unittest.TestCase):
             with self.subTest(skill=skill.parent.name):
                 self.assertRegex(norm, r"(?i)working posture")
                 self.assertIn(
-                    "](../../docs/decisions/adr-0055-", norm.lower()
+                    "](../../docs/decisions/adr-0056-", norm.lower()
                 )
                 self.assertIn("named, bounded operation", norm)
                 self.assertIn(
