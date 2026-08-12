@@ -325,8 +325,8 @@
 | [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — tbd | DRAFT |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-01 — posture boundary + keystone ADR | **DONE** |  |
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-02 — de-weaponize the corpus premise | **DONE** |  |
-| [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-03 — put the "no" on the tooling; tone-pass the review bodies | REVIEWED (claude/adversarial-review-l…) |  |
-| [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-04 — delegate-as-quarantine | DRAFT |  |
+| [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-03 — put the "no" on the tooling; tone-pass the review bodies | **DONE** |  |
+| [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-04 — delegate-as-quarantine | IN_PROGRESS (claude/adversarial-review-l…) |  |
 
 ## Deferred slices
 
