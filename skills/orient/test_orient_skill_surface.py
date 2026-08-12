@@ -1,10 +1,18 @@
-"""Surface tests for skills/orient/SKILL.md (slice 101-01, AC5–AC8).
+"""Surface tests for skills/orient/SKILL.md.
 
-Half of this slice ships prose, not code. These tests pin the *load-bearing
-phrases* — the ones whose absence reproduces the reported failure — rather
-than re-reviewing wording. The failure they guard against: orientation
-surveys only local files, never the collaboration layer, and so reports a
-project as unblocked while an open PR sits asking the owner direct questions.
+Half of this skill ships prose, not code. These tests pin the *load-bearing
+phrases* — the ones whose absence would reproduce a reported failure or drop
+a core acceptance criterion — rather than re-reviewing wording.
+
+Two provenances live here:
+  - Slice 101-01 (AC5–AC8): the collaboration-survey + freshness additions.
+    The failure they guard against — orientation surveys only local files,
+    never the collaboration layer, and so reports a project as unblocked
+    while an open PR sits asking the owner direct questions.
+  - Slice 088-02 (AC4–AC5): the skill's own core prose contract — zero-write
+    (writes no file) and the correct `jig:spec-workflow` handoff. Added at
+    088-02 close-out to pin the two ACs the compliance pass found unguarded
+    (a future edit deleting either would otherwise fail no test).
 
 Run from the repo root:
     python3 skills/orient/test_orient_skill_surface.py
@@ -192,6 +200,52 @@ class OrientOriginFreshnessSurfaceTests(unittest.TestCase):
 
     def test_unreachable_origin_is_reported_not_assumed_fresh(self):
         self.assertRegex(self.text.lower(), r"could not reach origin")
+
+
+class Orient088CoreContractTests(unittest.TestCase):
+    """Slice 088-02 AC4/AC5: the skill's own core prose contract.
+
+    These pin the two 088-02 ACs the compliance pass found unguarded —
+    zero-write and the correct handoff. Both are scoped to a section *body*
+    so a whole-file match can't satisfy them with the load-bearing prose
+    deleted (the words 'writes'/'spec-workflow' recur elsewhere).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SKILL.read_text()
+
+    def _section(self, start_marker: str) -> str:
+        start = self.text.index(start_marker)
+        rest = self.text.find("\n## ", start + 1)
+        return (self.text[start:] if rest == -1 else self.text[start:rest]).lower()
+
+    def test_zero_write_contract_is_stated(self):
+        """AC4: a dedicated section must state the skill writes no file.
+
+        Anchored to the '## Orient writes nothing' section body; asserting a
+        bare 'read-only' file-wide would pass with the whole contract gone
+        (the Judgment section also says 'read-only')."""
+        body = self._section("## Orient writes nothing")
+        self.assertIn("read-only", body)
+        self.assertRegex(
+            body, r"no file|writes\s+\*\*no file|nothing under `docs/`|zero-write",
+            "the zero-write section body must say it writes no file",
+        )
+
+    def test_handoff_routes_implement_through_spec_workflow_not_implementer(self):
+        """AC5: 'implement a ready slice' routes through jig:spec-workflow, and
+        the section names that there is no directly invocable jig:implementer.
+
+        Scoped to the '## Handoff' section body — 'spec-workflow' appears in
+        other bullets/prose, so a file-wide search would be tautological."""
+        body = self._section("## Handoff")
+        self.assertIn("implement a ready slice", body)
+        self.assertIn("jig:spec-workflow", body)
+        self.assertRegex(
+            body, r"no directly invocable\s+`?jig:implementer",
+            "the handoff must warn there is no invocable jig:implementer skill",
+        )
 
 
 if __name__ == "__main__":

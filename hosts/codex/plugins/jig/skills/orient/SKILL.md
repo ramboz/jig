@@ -200,8 +200,8 @@ Flag these three explicitly when true, because each one misleads differently:
 - **Superseded** — the PR's branch is an ancestor of newer local work, so it can be
   fast-forwarded rather than redone.
 
-> *__PR #1 — night: ground the spec-002 timer drafts__ — asks you 5 questions; 4 were
-> answered today but the PR still shows them open. Clean fast-forward.*
+> _**PR #1 — night: ground the spec-002 timer drafts** — asks you 5 questions; 4 were
+> answered today but the PR still shows them open. Clean fast-forward._
 
 ### 4. The one decision blocking the most (when one exists)
 
