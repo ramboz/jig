@@ -1,7 +1,7 @@
 ---
-status: REVIEWED
+status: RECONCILED
 dependencies: [110-01, 110-02]
-last_verified:
+last_verified: 2026-08-11
 frame_review: true
 claimed_by: claude/adversarial-review-leak-64bb2d
 ---
@@ -63,7 +63,7 @@ for its register rationale; `frame_review: true`.
 - [ ] All ACs pass; full test suite green.
 - [ ] Reviewed by `reviewer` subagent (compliance + craft; frame-critique fires).
 - [ ] Deviation log + reconciliation sweep produced.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 
 **Anti-horizontal-phasing check:** after this slice, an orchestrator following
 thin-orchestrator guidance delegates the register-heavy reads for a stated
