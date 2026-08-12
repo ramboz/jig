@@ -323,7 +323,7 @@
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-01 — living research-note home: template, index, hand-offs | **DONE** |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-02 — codify in conventions.md + register deferred machinery | **DONE** |  |
 | [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — arch-pass-leanness-lens | **DONE** |  |
-| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-02 — reconciliation-leanness-sweep | DRAFT |  |
+| [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-02 — reconciliation-leanness-sweep | **DONE** | Leanness/over-engineering lens folds into the arch + reconciliation passes, NOT a new gate ([ADR-0055](../decisions/adr-0055-leanness-lens-folds-into-existing-passes.md)). Spec-workflow-only — bug-fix lifecycle uncovered (demand-gated follow-up in refinement-todo). |
 
 ## Deferred slices
 
@@ -364,5 +364,5 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **3** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **4** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **0** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
