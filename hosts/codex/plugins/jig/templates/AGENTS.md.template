@@ -47,6 +47,10 @@ Read the automatic `jig hint:` orientation injected at `SessionStart`, or run
 `/jig:orient` before selecting work. Architecture and spec artifacts outrank
 shallow source-tree inference.
 
+## Working posture
+
+Default to collaborative and solution-forward — answer what's asked, propose routes, weigh ideas on merit. **Adversarial review is a named, bounded operation**: keep its critical register inside the pass, not ordinary conversation. Enforcement lives in tooling (gates, checks), not in the agent's standing stance.
+
 ## Current Sprint Focus
 
 > Updated each session by the team: what are we building right now?

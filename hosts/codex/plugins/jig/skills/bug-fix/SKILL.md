@@ -16,6 +16,13 @@ description: >
 user-invocable: true
 ---
 
+> **Working posture ([ADR-0056](../../docs/decisions/adr-0056-adversarial-register-quarantine.md)).**
+> Adversarial review is a *named, bounded operation.* This workflow invokes
+> review passes (bug-review / craft), whose skeptical register belongs *inside*
+> those isolated reviewer subagents. Outside a review, default to collaborative
+> and solution-forward; don't carry the adversarial stance into ordinary
+> conversation.
+
 > Spec 058 / [ADR-0016](../../docs/decisions/adr-0016-bug-fix-lifecycle.md)
 > built this workflow. The deterministic state mutations and teeth gates live
 > in `bug.py`; this SKILL.md drives the judgment layer. It is a **peer of

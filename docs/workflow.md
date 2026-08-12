@@ -6,6 +6,33 @@
 
 We use the workflow jig is designed to produce — dogfooding from day one.
 
+## Working posture — recorded decisions are context, not ammunition
+
+The scaffold primer states the standing posture ([ADR-0056](decisions/adr-0056-adversarial-register-quarantine.md)):
+adversarial review is a *named, bounded operation*; outside it, default to
+collaborative and solution-forward. This section elaborates the part most prone
+to leak: **how the recorded corpus is used in ordinary conversation.**
+
+A recorded decision (an ADR, a spec, a closed record) is context to **reconcile
+against**, not ammunition to **refuse with**. When a user's idea appears to
+conflict with a record, *surface and explore* it — say what the record holds and
+work the question — rather than building a blocking case out of the corpus.
+
+The failure mode to name explicitly is **reconcile-then-block**: engaging the
+records and then leading with a why-not the user never asked for. Reconciling is
+not the problem; *carrying a blocking intent into a question that asked for none*
+is. Answer the question that was actually asked; a recorded decision is a reason
+to *inform*, not a reason to *refuse*. (The [`reframe`](../skills/reframe/SKILL.md)
+skill already names this defend-the-record tendency as jig's structural blind
+spot.)
+
+**One hard exception — the spec 102 amendment guardrail stays hard.** Amending a
+closed **record** without owner approval is genuinely gated (see the
+[reconciliation checklist](#reconciliation-rules)); its "surface the conflict and
+stop" brake is a deliberate, prose-only safety stop and is **not** softened by
+this collaborative default. The default above governs *exploratory conversation*
+about the corpus — never the unauthorized-record-amendment case.
+
 ## Host packages (`hosts/`) — regenerate, never hand-edit
 
 The repository root is canonical source; the committed `hosts/claude/` and
@@ -527,6 +554,39 @@ explorer/analyst agent. Rationale: the built-ins are read-only and capable;
 adding a jig agent would only duplicate a capable built-in. Revisit only if
 their return contract proves insufficient for jig's summary needs. (No ADR —
 the choice is low-stakes and reversible; no `agents/*.md` file is added.)
+
+#### A second reason — quarantine the adversarial register
+
+Delegation isn't only about tokens
+([ADR-0056](decisions/adr-0056-adversarial-register-quarantine.md)). The costliest
+reads to hold in context are also the most **leak-prone**: the
+`docs/**/reviews/*-frame-critique.md` verdicts and the adversarial review-skill
+bodies are written in a "hunt the flaw / attack the frame" register, and because
+a session's context carries across turns, reading them first-hand colors the
+orchestrator's *plain-conversation* stance later. Delegating them to a subagent —
+which reads them in its own disposable context and returns only the conclusion —
+keeps that register out of the main session. Prioritize these highest-register
+files for delegate-and-summarize; never pull them in wholesale.
+
+- **The relay caveat.** Delegation quarantines the *tone* and the unread body,
+  but a verdict's **conclusion** ("assumption X is wrong, here is what breaks")
+  is itself the adversarial payload — so a subagent that returns it faithfully
+  relays the block. Have the subagent return a **neutral, decision-focused**
+  summary (the actionable outcome and what to change, not the argumentation).
+  The residual disposition a relayed conclusion still carries is handled by the
+  collaborative default and the de-toned source, not by delegation alone.
+- **The grounding tension — don't over-rotate.** jig's core value is an
+  orchestrator *grounded* in the recorded corpus, and reading it first-hand is
+  how that grounding forms. So the rule is **"delegate the bulk and the
+  adversarial-register files; keep the minimum first-hand reading grounding
+  genuinely needs"** — not "delegate everything." For the reading that must stay
+  first-hand, the fix is de-toning the source (the
+  [reconcile-not-refuse posture](#working-posture--recorded-decisions-are-context-not-ammunition)),
+  so an ADR grounds the orchestrator without arming it.
+- **Register-reason is contingent, token-reason is not.** The token-cost case for
+  delegation (above) holds unconditionally; this register-quarantine case rests
+  on the still-open bleed mechanism (ADR-0056 A1(ii)). If that mechanism is
+  falsified, delegation keeps its cost rationale and simply drops this one.
 
 ### Read once, read lean
 
