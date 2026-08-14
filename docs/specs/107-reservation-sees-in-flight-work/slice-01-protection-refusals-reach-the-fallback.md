@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: []
-last_verified: 2026-07-31
-claimed_by: claude/github-issue-147-c6ab0d
+last_verified: 2026-08-14
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -97,7 +96,13 @@ fixtures are captured, not recalled.
 **Non-goals:** the numbering scan (slice 107-02); fork branches; the atomic claim
 ref (ADR-0053 Option D).
 
-## Deviations
+### Deviation log
+
+> Recorded post-hoc for lifecycle close-out. This slice shipped and was
+> reconciled in-band on [PR #165](https://github.com/ramboz/jig/pull/165)
+> (merged to `main` as `409ba19`); the subsections below capture that trail so
+> the RECONCILED → DONE transition passes ADR-0014 §5 on real evidence rather
+> than a gate bypass.
 
 - **Extraction, not in-place edit (AC5).** The slice fixes the classifier by
   extracting it to `_common/reservation.py` and re-exporting, rather than
@@ -111,3 +116,15 @@ ref (ADR-0053 Option D).
   proves the full reserve path routes it. The three helpers share the extracted
   classifier, so one end-to-end GH013 proof suffices; adr/workflow keep their
   GH006 end-to-end tests.
+
+### Reconciliation sweep
+
+Recorded post-hoc (see the note above); dispositions reflect what #165 landed.
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `skills/_common/reservation.py` + host mirrors | `updated` | Classifier extracted here and re-exported by the three helpers; mirrors regenerated at merge. |
+| `docs/specs/README.md` | `deferred` | Status-board row still showed IN_PROGRESS post-merge; regenerated during this close-out pass. |
+| `docs/architecture.md` | `no-op` | No module-boundary change beyond the intended `_common` extraction, already covered by ADR-0002. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / templates | `no-op` | Spec 107 still in flight at merge; no primer compression due. |
+| `docs/refinement-todo.md` | `no-op` | The ADR-0053 Option D deferral is recorded under slice 107-02 (the numbering scan), not here. |

@@ -318,8 +318,8 @@
 | [104-design-fidelity-routing](104-design-fidelity-routing/spec.md) | 104-02 — authoring-nudge | **DONE** |  |
 | [105-durable-failure-quarantine](105-durable-failure-quarantine/spec.md) | 105-01 — quarantine state, attempts counter, and attest-only ingest | DRAFT |  |
 | [106-autonomy-governance-plane](106-autonomy-governance-plane/spec.md) | 106-01 — scaffold the protected plane and the identity-separation gate | **DONE** |  |
-| [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-01 — protection refusals reach the pull-request fallback | IN_PROGRESS (claude/github-issue-147-c6ab0d) |  |
-| [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-02 — numbering counts every in-flight branch | IN_PROGRESS (claude/github-issue-147-c6ab0d) |  |
+| [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-01 — protection refusals reach the pull-request fallback | **DONE** |  |
+| [107-reservation-sees-in-flight-work](107-reservation-sees-in-flight-work/spec.md) | 107-02 — numbering counts every in-flight branch | **DONE** |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-01 — living research-note home: template, index, hand-offs | **DONE** |  |
 | [108-research-notes-convention](108-research-notes-convention/spec.md) | 108-02 — codify in conventions.md + register deferred machinery | **DONE** |  |
 | [109-leanness-review-lens](109-leanness-review-lens/spec.md) | 109-01 — arch-pass-leanness-lens | **DONE** |  |
@@ -368,7 +368,7 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **8** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **10** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **2** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review

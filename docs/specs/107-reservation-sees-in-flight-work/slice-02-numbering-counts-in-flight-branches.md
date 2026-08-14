@@ -1,8 +1,7 @@
 ---
-status: IN_PROGRESS
+status: DONE
 dependencies: [107-01]
-last_verified: 2026-07-31
-claimed_by: claude/github-issue-147-c6ab0d
+last_verified: 2026-08-14
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -92,7 +91,13 @@ prevent, stops being reachable through an unmerged reservation.
 claim ref (Option D, deferred); capping the scan for repos with hundreds of
 branches (noted in ADR-0053 kill criteria, not built).
 
-## Deviations
+### Deviation log
+
+> Recorded post-hoc for lifecycle close-out. This slice shipped and was
+> reconciled in-band on [PR #165](https://github.com/ramboz/jig/pull/165)
+> (merged to `main` as `409ba19`); the subsections below capture that trail so
+> the RECONCILED → DONE transition passes ADR-0014 §5 on real evidence rather
+> than a gate bypass.
 
 - **Scan folded in additively at the call sites, not inside `_next_spec_number`.**
   Rather than rewrite the well-tested `_next_spec_number(use_origin=…)` internals
@@ -106,3 +111,15 @@ branches (noted in ADR-0053 kill criteria, not built).
   best-effort full `git fetch --quiet` to see sibling reservation branches. The
   redundant targeted fetch is left in place (cheap, and removing it would touch
   the tested preflight flow).
+
+### Reconciliation sweep
+
+Recorded post-hoc (see the note above); dispositions reflect what #165 landed.
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `skills/_common/reservation.py` + host mirrors | `updated` | `scan_max_reserved_number` added and wired into the `bug.py` / `adr.py` / `workflow.py` push/PR paths; mirrors regenerated at merge. |
+| `docs/specs/README.md` | `deferred` | Status-board row still showed IN_PROGRESS post-merge; regenerated during this close-out pass. |
+| `docs/refinement-todo.md` | `updated` | ADR-0053 Option D (atomic claim ref) recorded as deferred, with a resolution trigger: a duplicate number observed after this ships. |
+| `docs/decisions/` (ADR-0053) | `no-op` | Decision recorded before implementation; the deferred option is tracked in refinement-todo, not a new ADR. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / templates | `no-op` | Spec 107 still in flight at merge; no primer compression due. |
