@@ -22,7 +22,7 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 108-01 — tbd
+## Slice 111-01 — tbd
 
 **Goal:** _TODO: one-sentence statement of what this slice delivers.
 End-to-end value in a single vertical slice (anti-horizontal-phasing

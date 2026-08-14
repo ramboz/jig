@@ -4,7 +4,7 @@ skill:
 use_cases: []
 ---
 
-# Spec 108: First-class blockers
+# Spec 111: First-class blockers
 
 > Reserved 2026-08-07. DRAFT — origin is a downstream consumer (the Gauge
 > portfolio dashboard) that wants a clean "blocked" count; jig has no first-class
@@ -62,4 +62,4 @@ the status board (the consumer-visible value)._
 
 ## Slices
 
-- [108-01 — tbd](slice-01-tbd.md)
+- [111-01 — tbd](slice-01-tbd.md)
