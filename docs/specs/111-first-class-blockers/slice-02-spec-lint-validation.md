@@ -1,9 +1,9 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [111-01]
-last_verified:
-frame_review: true
+last_verified: 2026-08-15
 kind: feature
+claimed_by: claude/spec-first-class-blockers
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -23,9 +23,14 @@ stale/over-count failure mode ADR-0057 names, without ever hard-blocking.
 
 **DoR:**
 - ✅ 111-01 DONE — the `blocked_by:` convention + the actionable-state set exist.
-- ✅ `spec_lint.py` is a repo CI script under `scripts/` (NOT shipped in the
-  plugin tree), so this slice touches `scripts/spec_lint.py` + its test only, no
-  host mirror. (Grounded: `docs/` memory + the file lives at `scripts/spec_lint.py`.)
+- ✅ `spec_lint.py` lives at `scripts/spec_lint.py` and **is shipped verbatim**
+  into both host packages (slice 075-01 / bug 025 — listed in
+  `install_contract.RELEASE_INCLUDE_SCRIPT_FILES` + `CODEX_INCLUDE_SCRIPT_FILES`,
+  copied by `build_codex_plugin._copy_runtime_scripts`). So editing it **does**
+  require regenerating `hosts/claude/scripts/spec_lint.py` +
+  `hosts/codex/plugins/jig/scripts/spec_lint.py` via `build_host_packages.py`, or
+  the CI host-drift gate fails. (Corrected during reconciliation — an earlier
+  draft wrongly claimed it was not shipped.)
 - ✅ The actionable-state set is grounded (`_CLAIM_WORKING_STATUSES` +
   `READY_FOR_IMPLEMENTATION`, `workflow.py:4204`).
 
@@ -59,19 +64,68 @@ stale/over-count failure mode ADR-0057 names, without ever hard-blocking.
 - Whitespace-only `blocked_by:` on any status → silent.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Test coverage exercises each AC + edge case; each new test shown to fail
+- [x] All ACs pass; full test suite green (no regressions).
+- [x] Test coverage exercises each AC + edge case; each new test shown to fail
       when the rule is removed.
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 **Non-goals:** validating the `**Blocked:**` body line's presence/format
 (optional per ADR-0057); a typed-vocabulary check (deferred); making the warning
 a hard error (ADR-0057: nudge, not gate).
+
+### Deviation log
+
+Original ACs preserved above. Notes:
+
+- **`_extract_kind` generalized (ADR-0002 third-caller).** With `kind`, `status`,
+  and `blocked_by` all reading a frontmatter scalar, `_extract_kind`'s body was
+  lifted into `_extract_slice_frontmatter_scalar(section, field)` and `_extract_kind`
+  kept as a thin wrapper — behaviour-preserving (the 74-test spec_lint suite stays
+  green). This is the extract-on-third-caller trigger firing.
+- **`_BLOCKER_ACTIONABLE_STATUSES` is an inline mirror of workflow.py's set.**
+  spec_lint is a standalone repo CI script that deliberately imports only
+  `_common/parsing`, not `workflow.py`, so the actionable-state set is duplicated
+  as a `frozenset` literal with an explicit drift-warning comment (ADR-0002
+  two-caller inline mirror). **Manual-sync contract:** if workflow.py's
+  `_BLOCKER_ACTIONABLE_STATUSES` changes, update spec_lint's copy to match. Shape
+  differs (frozenset vs. workflow's tuple concatenation) but content is identical.
+- **AC1 attribution is contextual, and that is correct.** The warning string
+  names neither spec nor slice; attribution comes from `render_report`'s
+  `## Spec lint: <path>` + `### Slice <label>` headers — identical to how every
+  other spec_lint warning (contradictions, `kind`/spike shape) is attributed. The
+  `label` param on `check_blocked_annotation` is accepted for signature parallelism
+  with `check_slice` / `check_kind_and_body_shape` (both also ignore it).
+- **Craft/compliance nit addressed.** Strengthened `test_blocked_by_on_draft_warns`
+  to assert the warning is *actionable* (mentions "actionable" + "ADR-0057"), not
+  just that it contains the `blocked_by` substring.
+- **Reconciliation review caught a real host-package error (NEEDS-CHANGES → fixed).**
+  An earlier draft of this slice (DoR + sweep) claimed `spec_lint.py` is not
+  shipped in the plugin tree, so it marked host packages `no-op`. That was
+  **wrong**: `spec_lint.py` ships verbatim into both host packages (slice 075-01 /
+  bug 025), and the committed copies were stale — the CI host-drift gate would
+  have failed. Regenerated the host packages (`--check` now clean) and corrected
+  the DoR + sweep. (The stale premise came from an out-of-date assumption that
+  the reconciliation gate is designed to catch.)
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `scripts/spec_lint.py` | `updated` | `_extract_slice_frontmatter_scalar` generalization + `_extract_kind` wrapper; `_BLOCKER_ACTIONABLE_STATUSES` inline mirror; `check_blocked_annotation`; wired into `lint()`. |
+| `scripts/test_spec_lint.py` | `updated` | New `BlockedAnnotationValidationTests` (11 tests: warn/silent per status, whitespace, soft-exit-0, strict-exit-1, actionable-message). |
+| `hosts/claude/scripts/spec_lint.py` + `hosts/codex/plugins/jig/scripts/spec_lint.py` | `updated` | **Correction (reconciliation review NEEDS-CHANGES):** `spec_lint.py` IS shipped verbatim into both host packages (slice 075-01 / bug 025). An earlier sweep draft wrongly marked this `no-op`; regenerated via `build_host_packages.py`, `--check` now clean. |
+| `docs/specs/README.md` | `deferred` | Regenerated at spec close-out (this slice closes spec 111). |
+| `docs/architecture.md` / `docs/conventions.md` | `no-op` | No module-boundary or authoring-rule change (the rule is a lint nudge; the convention lives in ADR-0057 + the spec). |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / templates | `deferred` | Spec 111 closes with this slice — handled in the close-out below (glossary entry). |
+| `docs/refinement-todo.md` | `no-op` | No new deferral (the NamedTuple one was logged under 111-01). |
+| `docs/memory/**` + glossary | `deferred` | The **first-class blocker** term + the "annotation-not-state" lesson — folded into `/jig:memory-sync` at close-out. |
+| `docs/decisions/` (ADR-0057) | `no-op` | Already Accepted + indexed. |
+| `docs/inbox.md` | `no-op` | Nothing resolved or added. |
 
 ### Close-out (post-DONE)
 
