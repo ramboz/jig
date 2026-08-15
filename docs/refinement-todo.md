@@ -336,3 +336,17 @@ Resolved by [spec 041](specs/041-routing-observability/spec.md) — routing is o
 ### Decision: `scaffold-init` adopter-facing surface for research notes
 **Deferred:** Research notes are a **jig-internal** convention first (ADR-0054 non-goal): the template lives at `docs/research/TEMPLATE.md`, deliberately NOT under `templates/` (the scaffold source), so `scaffold-init` does not seed a `docs/research/` home or the convention into adopter projects. This resolves ADR-0054's adopter-default open question as *deferred*.
 **Resolution trigger:** An adopter (or a dogfooding jig maintainer on behalf of adopters) explicitly asks for research notes in scaffolded projects. Then seed `docs/research/README.md` + `TEMPLATE.md` via the scaffold renderer, mirroring how `templates/docs/**` seeds the other doc homes.
+
+### Decision: `collect_slices` row → `NamedTuple`/dataclass refactor
+**Deferred:** As of slice 111-01 the `collect_slices` row is a **9-positional
+tuple** (`spec_dir, slice_label, status, resolution_trigger, kind, claimed_by,
+abandonment_reason, blocked_by, blocked_line`) accessed by index across four
+`render_*_table` helpers. Each addition (3→4→5→6→7→9 across slices 014-02 /
+029-02 / 049-02 / 085-01 / 111-01) has stayed consistent with the positional
+pattern and is index-guarded, but the width is now a latent maintainability
+smell (flagged by the 111-01 craft review). A `NamedTuple`/dataclass would make
+the field access self-documenting. Deferred to avoid a cross-cutting refactor
+riding on a feature slice.
+**Resolution trigger:** The next slice that adds a **10th** `collect_slices`
+field, OR a render helper bug traced to a positional-index mistake — do the
+`NamedTuple` conversion then, in its own slice, rather than growing the tuple again.
