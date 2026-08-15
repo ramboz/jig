@@ -893,5 +893,91 @@ class KindEmbeddedSliceLayoutTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=report)
 
 
+def _blocked_slice(status: str, blocked_by=None, extra_body: str = "") -> str:
+    """Build a file-per-slice section with a given status and optional
+    `blocked_by:` frontmatter field. Slice 111-02 fixture."""
+    lines = ["---", f"status: {status}", "dependencies: []", "last_verified:"]
+    if blocked_by is not None:
+        lines.append(f"blocked_by: {blocked_by}")
+    lines += ["---", "", "## Slice 111-02 — fixture", "",
+              "**Acceptance Criteria:**", "", "1. Trivial AC.", ""]
+    if extra_body:
+        lines += [extra_body, ""]
+    return "\n".join(lines) + "\n"
+
+
+class BlockedAnnotationValidationTests(unittest.TestCase):
+    """Slice 111-02 (ADR-0057): spec_lint soft-warns when `blocked_by:` sits on
+    a non-actionable slice (DRAFT / DONE / DEFERRED / ABANDONED) — almost
+    certainly a misfiled dependency/deferral. Silent on the valid actionable
+    case, silent when absent/empty, and never flips the exit code (soft)."""
+
+    def test_blocked_by_on_draft_warns(self):
+        warns = sl.check_blocked_annotation("111-02 — fixture",
+                                            _blocked_slice("DRAFT", "owner-decision"))
+        self.assertTrue(any("blocked_by" in w for w in warns), warns)
+        # The warning must be actionable: name the misfile + point at the fix.
+        joined = " ".join(warns).lower()
+        self.assertIn("actionable", joined)
+        self.assertIn("adr-0057", joined)
+
+    def test_blocked_by_on_done_warns(self):
+        warns = sl.check_blocked_annotation("x", _blocked_slice("DONE", "spec-110"))
+        self.assertTrue(any("blocked_by" in w for w in warns), warns)
+
+    def test_blocked_by_on_deferred_warns(self):
+        # DEFERRED also carries a Resolution trigger; the blocker is still a misfile.
+        warns = sl.check_blocked_annotation(
+            "x", _blocked_slice("DEFERRED", "owner-decision",
+                                extra_body="**Resolution trigger:** later"))
+        self.assertTrue(any("blocked_by" in w for w in warns), warns)
+
+    def test_blocked_by_on_abandoned_warns(self):
+        warns = sl.check_blocked_annotation("x", _blocked_slice("ABANDONED", "dropped"))
+        self.assertTrue(any("blocked_by" in w for w in warns), warns)
+
+    def test_blocked_by_on_in_progress_silent(self):
+        warns = sl.check_blocked_annotation("x", _blocked_slice("IN_PROGRESS", "owner-decision"))
+        self.assertEqual(warns, [])
+
+    def test_blocked_by_on_ready_for_implementation_silent(self):
+        warns = sl.check_blocked_annotation(
+            "x", _blocked_slice("READY_FOR_IMPLEMENTATION", "external:vendor"))
+        self.assertEqual(warns, [])
+
+    def test_blocked_by_on_reviewed_silent(self):
+        warns = sl.check_blocked_annotation("x", _blocked_slice("REVIEWED", "owner"))
+        self.assertEqual(warns, [])
+
+    def test_no_blocked_by_silent(self):
+        warns = sl.check_blocked_annotation("x", _blocked_slice("DRAFT"))
+        self.assertEqual(warns, [])
+
+    def test_whitespace_only_blocked_by_silent(self):
+        warns = sl.check_blocked_annotation("x", _blocked_slice("DRAFT", "   "))
+        self.assertEqual(warns, [])
+
+    def test_warning_is_soft_end_to_end_exit_zero(self):
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="jig-lint-blocked-"))
+        specdir = tmp / "docs" / "specs" / "111-x"
+        specdir.mkdir(parents=True)
+        (specdir / "spec.md").write_text("---\nstatus: DRAFT\n---\n\n# Spec 111\n")
+        (specdir / "slice-01-x.md").write_text(_blocked_slice("DRAFT", "owner-decision"))
+        report, code = sl.lint(specdir / "spec.md")
+        self.assertEqual(code, 0, msg=report)          # soft: no exit flip
+        self.assertIn("blocked_by", report)            # but the warning is shown
+
+    def test_warning_becomes_error_under_strict(self):
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="jig-lint-blocked-strict-"))
+        specdir = tmp / "docs" / "specs" / "111-y"
+        specdir.mkdir(parents=True)
+        (specdir / "spec.md").write_text("---\nstatus: DRAFT\n---\n\n# Spec 111\n")
+        (specdir / "slice-01-y.md").write_text(_blocked_slice("DRAFT", "owner-decision"))
+        _report, code = sl.lint(specdir / "spec.md", strict=True)
+        self.assertEqual(code, 1)                       # --strict escalates the warning
+
+
 if __name__ == "__main__":
     unittest.main()

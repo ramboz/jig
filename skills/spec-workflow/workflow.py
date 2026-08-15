@@ -1568,6 +1568,25 @@ def _extract_abandonment_reason(section: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+_BLOCKED_RE = re.compile(
+    r"(?im)^\*\*Blocked:\*\*\s*([^\n]+)"
+)
+
+
+def _extract_blocked(section: str) -> str:
+    """Slice 111-01 (AC2): pull the `**Blocked:** ...` line out of a
+    slice's body — same convention shape as `_extract_resolution_trigger`
+    / `_extract_abandonment_reason`, different label. Returns "" when
+    absent. ADR-0057: the frontmatter `blocked_by:` is the machine-readable
+    signal; this body line is the optional human-detail half of the
+    convention (the unblock condition), and — unlike the other two
+    extractors — is not gated on a specific status here: `collect_slices`
+    always extracts it, and `render_blocked_table` is what applies the
+    actionable-state filter (AC4)."""
+    m = _BLOCKED_RE.search(section)
+    return m.group(1).strip() if m else ""
+
+
 def compute_spec_status(spec_path: Path) -> str:
     """Slice 030-01: derive the spec-level rollup from slice states.
     Widened by slice 085-01 (AC4) to a 4th return value, `"ABANDONED"`.
@@ -1753,8 +1772,11 @@ def _active_spec_summary(project_dir: Path, rows: list[tuple]) -> str:
 
 def _focus_summary(rows: list[tuple]) -> str:
     best = None
+    # `*_rest` tolerates rows longer than the 7-tuple this unpack names
+    # (e.g. slice 111-01's blocked_by/blocked_line additions) as well as
+    # the exact 7-tuple shape — never a strict-arity break on row growth.
     for order, (_spec_dir, label, status, _trigger, _kind, claimed_by,
-                _abandonment_reason) in enumerate(rows):
+                _abandonment_reason, *_rest) in enumerate(rows):
         rank = _ORIENT_FOCUS_RANK.get(status)
         if rank is None:
             continue
@@ -2062,24 +2084,33 @@ def _write_spec_rollup(spec_path: Path) -> bool:
 
 def collect_slices(project_dir: Path) -> list:
     """Walk docs/specs/*/spec.md and collect (spec_dir, slice_label, status,
-    resolution_trigger, kind, claimed_by, abandonment_reason) tuples in
-    file order. resolution_trigger is the empty string when the slice is
-    not DEFERRED (or simply has no `**Resolution trigger:**` line).
-    abandonment_reason (slice 085-01) is the empty string when the slice
-    is not ABANDONED (or has no `**Abandonment reason:**` line). `kind` is
-    the slice's frontmatter `kind:` value (slice 029-01: `"spike"` /
-    `"feature"` / `""` for unset). Slice 029-02 reads this to drive the
-    marker in `render_status_table` — recomputed every regen from the
-    slice's frontmatter, so the marker is never stored separately.
-    `claimed_by` (slice 049-02) is the slice's frontmatter `claimed_by:`
-    value — the session working the slice, stamped by `transition` on entry
-    to a WORKING state (ADR-0045) and rendered as a suffix on those Status
-    cells.
+    resolution_trigger, kind, claimed_by, abandonment_reason, blocked_by,
+    blocked_line) tuples in file order. resolution_trigger is the empty
+    string when the slice is not DEFERRED (or simply has no `**Resolution
+    trigger:**` line). abandonment_reason (slice 085-01) is the empty
+    string when the slice is not ABANDONED (or has no `**Abandonment
+    reason:**` line). `kind` is the slice's frontmatter `kind:` value
+    (slice 029-01: `"spike"` / `"feature"` / `""` for unset). Slice 029-02
+    reads this to drive the marker in `render_status_table` — recomputed
+    every regen from the slice's frontmatter, so the marker is never
+    stored separately. `claimed_by` (slice 049-02) is the slice's
+    frontmatter `claimed_by:` value — the session working the slice,
+    stamped by `transition` on entry to a WORKING state (ADR-0045) and
+    rendered as a suffix on those Status cells.
 
     An empty `claimed_by` means NO CLAIM IS RECORDED — it is not proof the
     slice is free. Claims are local by default (`--push`/`--pr` opt into
     origin/main), so a parallel worktree's unpushed claim is invisible here,
-    and a plain `Edit`-tool write to a slice never takes a claim at all."""
+    and a plain `Edit`-tool write to a slice never takes a claim at all.
+
+    `blocked_by` (slice 111-01 / ADR-0057) is the slice's frontmatter
+    `blocked_by:` value, read the same way `claimed_by` is — a whitespace-
+    only value is normalized to "" (treated as unset). `blocked_line` is
+    the extracted `**Blocked:**` body line (via `_extract_blocked`),
+    carried alongside so `render_blocked_table` has both the
+    machine-readable annotation and the optional human prose without
+    re-reading the file. Neither is gated on `status` here — the
+    actionable-state filter is `render_blocked_table`'s concern (AC4)."""
     specs_dir = project_layout.specs_dir(project_dir)
     if not specs_dir.is_dir():
         return []
@@ -2110,9 +2141,13 @@ def collect_slices(project_dir: Path) -> list:
             kind = str(fm_fields.get("kind", "")).strip()
             # Slice 049-02: read `claimed_by:` (spec 049-01). "" when unset.
             claimed_by = str(fm_fields.get(CLAIM_FIELD, "")).strip()
+            # Slice 111-01: read `blocked_by:` (ADR-0057) the same way.
+            # "" when unset, whitespace-only normalized to "".
+            blocked_by = str(fm_fields.get(BLOCKED_FIELD, "")).strip()
+            blocked_line = _extract_blocked(section)
             rows.append(
                 (spec_dir, loc.label, status or "UNKNOWN", trigger, kind,
-                 claimed_by, abandonment_reason),
+                 claimed_by, abandonment_reason, blocked_by, blocked_line),
             )
     return rows
 
@@ -2187,8 +2222,11 @@ def render_status_table(rows: list, notes_map: dict | None = None) -> str:
     """Build the Markdown table for the status board. `notes_map` carries
     Notes from the prior version of the board, looked up by (spec_dir, label).
     Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), 5-tuple
-    (slice 029-02, with `kind`), and 6-tuple (slice 049-02, with
-    `claimed_by`) row shapes.
+    (slice 029-02, with `kind`), 6-tuple (slice 049-02, with
+    `claimed_by`), 7-tuple (slice 085-01, with `abandonment_reason`),
+    and 9-tuple (slice 111-01, with `blocked_by` + blocked body line)
+    row shapes — index-guarded, so it reads only the leading columns it
+    needs.
 
     Slice 029-02: when a row's `kind == "spike"`, the slice cell is
     prepended with the `SPIKE_MARKER` glyph + a space. The marker is a
@@ -2270,9 +2308,11 @@ def render_abandoned_table(rows: list) -> str:
     Abandonment reason as the per-row context. Mirrors
     `render_deferred_table`: returns the empty string when no rows are
     abandoned (section fully omitted, not rendered with an empty table).
-    Tolerates the 7-tuple row shape (`collect_slices`'s
-    `abandonment_reason` element) and prepends the `SPIKE_MARKER` glyph for
-    `kind == "spike"` rows, matching the Deferred table's rendering."""
+    Reads the `abandonment_reason` element (index 6) from `collect_slices`'s
+    row (now a 9-tuple as of slice 111-01; access is index-guarded, so the
+    added trailing `blocked_by` columns are ignored here) and prepends the
+    `SPIKE_MARKER` glyph for `kind == "spike"` rows, matching the Deferred
+    table's rendering."""
     abandoned = [r for r in rows if len(r) >= 3 and r[2] == "ABANDONED"]
     if not abandoned:
         return ""
@@ -2294,6 +2334,61 @@ def render_abandoned_table(rows: list) -> str:
         spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
         slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
         lines.append(f"| {spec_link} | {slice_cell} | {reason} |")
+    return "\n".join(lines) + "\n"
+
+
+_BLOCKED_HEADING = "## Blocked slices"
+
+
+def render_blocked_table(rows: list) -> str:
+    """Slice 111-01 (AC3-AC6) / ADR-0057: separate table for
+    **actionable-state** slices carrying a non-empty `blocked_by:` — a
+    blocker is an annotation on an actionable slice, not a lifecycle
+    state. Mirrors `render_deferred_table` / `render_abandoned_table`:
+    returns the empty string when nothing qualifies (AC5 — the section is
+    fully omitted, not rendered as a heading with an empty table, so a
+    clean project's board is unaffected).
+
+    "Actionable" is `_BLOCKER_ACTIONABLE_STATUSES`
+    (`READY_FOR_IMPLEMENTATION` + the WORKING states) — a `blocked_by:` on
+    a DRAFT / DONE / DEFERRED / ABANDONED slice does not count (AC4; that
+    misfile is 111-02's `spec_lint` concern, not a board entry).
+
+    The "Blocked on" cell prefers the extracted `**Blocked:**` body line
+    (row[8]) over the raw `blocked_by:` frontmatter value (row[7]) when
+    both are present, falling back to the frontmatter value alone.
+
+    Unlike the Deferred/Abandoned tables — which rely on an author-side
+    `&#124;` convention rather than escaping — a raw `|` in the rendered
+    cell is **actively escaped** here (AC6): `blocked_by:` is free text
+    and far more likely to contain a literal `|`, so this render path
+    escapes it itself rather than trusting authors, and adjacent rows
+    can never be glued by it."""
+    blocked = [
+        r for r in rows
+        if len(r) >= 8 and r[2] in _BLOCKER_ACTIONABLE_STATUSES and r[7]
+    ]
+    if not blocked:
+        return ""
+    lines = [
+        "",
+        _BLOCKED_HEADING,
+        "",
+        "> Actionable slices stuck on a named thing. Clear by removing "
+        "the `blocked_by:` annotation.",
+        "",
+        "| Spec | Slice | Blocked on |",
+        "|------|-------|------------|",
+    ]
+    for row in blocked:
+        spec_dir, label = row[0], row[1]
+        kind = row[4] if len(row) >= 5 else ""
+        blocked_by = row[7]
+        blocked_line = row[8] if len(row) >= 9 else ""
+        blocked_on = (blocked_line or blocked_by).replace("|", "&#124;")
+        spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
+        slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
+        lines.append(f"| {spec_link} | {slice_cell} | {blocked_on} |")
     return "\n".join(lines) + "\n"
 
 
@@ -2359,6 +2454,7 @@ def _compose_board(project_dir: Path, existing: str, rows: list | None = None) -
         render_status_table(rows, notes_map)
         + render_deferred_table(rows)
         + render_abandoned_table(rows)
+        + render_blocked_table(rows)
         + _substrate_audit_section(project_dir)
     )
     m = re.search(r"(?m)^\|\s*Spec\b", existing)
@@ -4172,6 +4268,13 @@ def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
 
 CLAIM_FIELD = "claimed_by"
 
+# Slice 111-01 / ADR-0057: the frontmatter field naming what an actionable
+# slice is blocked on — read by `collect_slices` the same way `claimed_by`
+# is. A blocker is an annotation on an actionable slice, not a lifecycle
+# state (see `_BLOCKER_ACTIONABLE_STATUSES` below for the actionable-state
+# boundary that gates rendering).
+BLOCKED_FIELD = "blocked_by"
+
 # ADR-0045 / bug 014 (issue #130): a claim marks "a session is working this
 # slice right now" across the WORKING states — not just "who is
 # implementing". Spec 049 scoped the stamp to IN_PROGRESS and cleared it on
@@ -4213,6 +4316,17 @@ _CLAIM_RELEASE_STATUSES = (
     "DONE",
     "DEFERRED",
     "ABANDONED",
+)
+
+# Slice 111-01 / ADR-0057: the "actionable" boundary for a first-class
+# blocker — its next step is real work that is now prevented. Widens
+# `_CLAIM_WORKING_STATUSES` (started work) with `READY_FOR_IMPLEMENTATION`
+# (ready to start but not yet claimed) to cover the "ready-but-stuck" case
+# (ADR-0057 A2). Deliberately excludes DRAFT (next step is shaping, always
+# available), DONE (finished), and DEFERRED/ABANDONED (parked/dropped by
+# choice, not prevented).
+_BLOCKER_ACTIONABLE_STATUSES = _CLAIM_WORKING_STATUSES + (
+    "READY_FOR_IMPLEMENTATION",
 )
 
 

@@ -1210,6 +1210,268 @@ class AbandonedLifecycleTests(unittest.TestCase):
             _workflow.compute_spec_status(spec_md), "DRAFT")
 
 
+class BlockedSlicesBoardTests(unittest.TestCase):
+    """Slice 111-01: `blocked_by:` frontmatter (+ optional `**Blocked:**`
+    body line) on an actionable-state slice renders a `## Blocked slices`
+    section on the status board (ADR-0057 — a blocker is an annotation on
+    an actionable slice, not a lifecycle state)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-blocked-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_slice(self, spec_dir: str, slice_id: str, status: str, *,
+                      blocked_by=None, blocked_line=None,
+                      slug: str = "work") -> Path:
+        """File-per-slice fixture (mirrors Bug014WidenedClaimTests):
+        `blocked_by` is a frontmatter value (None = field omitted; a
+        literal string, incl. `"   "`, is written as-is so whitespace-only
+        normalization is exercised at the reader, not the fixture);
+        `blocked_line` is an optional `**Blocked:**` body line."""
+        root = self.target / "docs" / "specs" / spec_dir
+        root.mkdir(parents=True, exist_ok=True)
+        spec_md = root / "spec.md"
+        if not spec_md.is_file():
+            spec_md.write_text(
+                "---\nstatus: DRAFT\n---\n\n"
+                f"# Spec {spec_dir.split('-', 1)[0]}\n\n## Overview\n\nx\n"
+            )
+        fm = f"---\nstatus: {status}\ndependencies: []\n"
+        if blocked_by is not None:
+            fm += f'blocked_by: "{blocked_by}"\n'
+        fm += "---\n\n"
+        # `slice_id` already carries the full display label (mirrors
+        # DeferredLifecycleTests's `_write_spec` convention — e.g.
+        # "310-01 stuck"); `slug` is filename-only disambiguation.
+        body = f"## Slice {slice_id}\n\n**Goal:** placeholder.\n\n"
+        if blocked_line is not None:
+            body += f"**Blocked:** {blocked_line}\n\n"
+        body += "**DoD:**\n- [ ] placeholder.\n"
+        fragment = slice_id.split()[0]
+        (root / f"slice-{fragment.split('-')[1]}-{slug}.md").write_text(fm + body)
+        return spec_md
+
+    def _board(self) -> str:
+        result = run_workflow("status-board", str(self.target))
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        return (self.target / "docs/specs/README.md").read_text()
+
+    # ---- AC1: blocked_by read from frontmatter ----
+
+    def _row_for(self, rows, spec_dir):
+        """Filter `collect_slices` rows to the given spec_dir — scaffold
+        seeds baseline demo specs (001-adopt-jig, 002-first-spec), so an
+        exact-length assertion on the raw list is not portable."""
+        matches = [r for r in rows if r[0] == spec_dir]
+        self.assertEqual(len(matches), 1, f"expected exactly 1 row for "
+                          f"{spec_dir}, got {matches!r}")
+        return matches[0]
+
+    def test_collect_slices_reads_blocked_by_frontmatter(self):
+        self._write_slice("300-alpha", "300-01 first", "IN_PROGRESS",
+                          blocked_by="owner decision pending")
+        rows = _workflow.collect_slices(self.target)
+        row = self._row_for(rows, "300-alpha")
+        self.assertEqual(len(row), 9, f"expected a 9-tuple row, got {row!r}")
+        self.assertEqual(row[7], "owner decision pending")
+        self.assertEqual(row[8], "", "no **Blocked:** body line was written")
+
+    def test_blocked_field_constant(self):
+        self.assertEqual(_workflow.BLOCKED_FIELD, "blocked_by")
+
+    def test_collect_slices_unset_blocked_by_is_empty(self):
+        self._write_slice("301-alpha", "301-01 first", "IN_PROGRESS")
+        rows = _workflow.collect_slices(self.target)
+        self.assertEqual(self._row_for(rows, "301-alpha")[7], "")
+
+    def test_collect_slices_whitespace_only_blocked_by_normalized_to_empty(self):
+        """Edge case: `blocked_by:` present but whitespace-only is treated
+        as unset."""
+        self._write_slice("302-alpha", "302-01 first", "IN_PROGRESS",
+                          blocked_by="   ")
+        rows = _workflow.collect_slices(self.target)
+        self.assertEqual(self._row_for(rows, "302-alpha")[7], "")
+
+    # ---- AC2: `_extract_blocked` body-line extractor ----
+
+    def test_extract_blocked_returns_body_line(self):
+        section = (
+            "## Slice 303-01\n\n**Blocked:** waiting on the owner's call.\n"
+            "\nmore prose\n"
+        )
+        self.assertEqual(
+            _workflow._extract_blocked(section),
+            "waiting on the owner's call.",
+        )
+
+    def test_extract_blocked_absent_returns_empty(self):
+        section = "## Slice 303-01\n\nno blocked line here.\n"
+        self.assertEqual(_workflow._extract_blocked(section), "")
+
+    def test_collect_slices_carries_blocked_body_line(self):
+        self._write_slice("304-alpha", "304-01 first", "IN_PROGRESS",
+                          blocked_by="dep-x", blocked_line="Waiting on dep-x to ship.")
+        rows = _workflow.collect_slices(self.target)
+        row = self._row_for(rows, "304-alpha")
+        self.assertEqual(row[7], "dep-x")
+        self.assertEqual(row[8], "Waiting on dep-x to ship.")
+
+    # ---- AC3: board renders a `## Blocked slices` section ----
+
+    def test_board_renders_blocked_section_with_frontmatter_value(self):
+        """No `**Blocked:**` line → the cell falls back to the raw
+        `blocked_by:` frontmatter value."""
+        self._write_slice("310-alpha", "310-01 stuck", "IN_PROGRESS",
+                          blocked_by="owner decision pending")
+        board = self._board()
+        self.assertIn("## Blocked slices", board)
+        self.assertIn("310-01 stuck", board)
+        self.assertIn("owner decision pending", board)
+        # Intro line present (mirrors the Deferred table's).
+        blocked_section = board.split("## Blocked slices", 1)[1]
+        self.assertTrue(blocked_section.lstrip().startswith(">"),
+                        "expected a short intro line under the heading")
+
+    def test_board_blocked_on_cell_prefers_body_line_over_frontmatter(self):
+        self._write_slice(
+            "311-alpha", "311-01 stuck", "IN_PROGRESS",
+            blocked_by="dep-x", blocked_line="Waiting on dep-x to ship.",
+        )
+        board = self._board()
+        self.assertIn("Waiting on dep-x to ship.", board)
+        # The raw frontmatter value alone (without the body-line prose)
+        # must not appear as the cell's content.
+        self.assertNotIn("| dep-x |", board)
+
+    # ---- AC4: only actionable-state slices count ----
+
+    def test_blocked_by_on_ready_for_implementation_is_counted(self):
+        self._write_slice("312-alpha", "312-01 ready", "READY_FOR_IMPLEMENTATION",
+                          blocked_by="external gate")
+        board = self._board()
+        self.assertIn("## Blocked slices", board)
+        self.assertIn("312-01 ready", board)
+
+    def test_blocked_by_on_done_is_not_rendered(self):
+        self._write_slice("313-alpha", "313-01 done", "DONE",
+                          blocked_by="stale annotation")
+        board = self._board()
+        self.assertNotIn("## Blocked slices", board)
+
+    def test_blocked_by_on_draft_deferred_abandoned_is_not_rendered(self):
+        self._write_slice("314-alpha", "314-01 draft", "DRAFT",
+                          blocked_by="stale-a")
+        self._write_slice("314-alpha", "314-02 deferred", "DEFERRED",
+                          blocked_by="stale-b")
+        self._write_slice("314-alpha", "314-03 abandoned", "ABANDONED",
+                          blocked_by="stale-c")
+        board = self._board()
+        self.assertNotIn("## Blocked slices", board)
+
+    # ---- AC5: omitted when empty ----
+
+    def test_board_omits_blocked_section_when_nothing_blocked(self):
+        self._write_slice("315-alpha", "315-01 active", "IN_PROGRESS")
+        board = self._board()
+        self.assertNotIn("## Blocked slices", board)
+
+    def test_composed_board_byte_identical_to_pre_slice_formula_when_unblocked(self):
+        """AC5: `render_blocked_table` contributes nothing when nothing is
+        blocked, so the composed board is byte-identical to what the
+        pre-111-01 composition (status + deferred + abandoned + audit, no
+        Blocked call at all) would have produced."""
+        self._write_slice("316-alpha", "316-01 active", "IN_PROGRESS")
+        self._write_slice("316-alpha", "316-02 parked", "DEFERRED")
+        run_workflow("status-board", str(self.target))
+        board_path = self.target / "docs/specs/README.md"
+        existing = board_path.read_text()
+        rows = _workflow.collect_slices(self.target)
+        notes_map = _workflow.parse_existing_notes(existing)
+        pre_slice_body = (
+            _workflow.render_status_table(rows, notes_map)
+            + _workflow.render_deferred_table(rows)
+            + _workflow.render_abandoned_table(rows)
+            + _workflow._substrate_audit_section(self.target)
+        )
+        m = re.search(r"(?m)^\|\s*Spec\b", existing)
+        preamble = existing[: m.start()] if m else existing
+        expected = preamble + pre_slice_body
+        actual = _workflow._compose_board(self.target, existing, rows)
+        self.assertEqual(actual, expected)
+
+    def test_render_blocked_table_empty_string_when_no_actionable_blocked(self):
+        self._write_slice("317-alpha", "317-01 done", "DONE",
+                          blocked_by="stale")
+        rows = _workflow.collect_slices(self.target)
+        self.assertEqual(_workflow.render_blocked_table(rows), "")
+
+    # ---- AC6: regen integrity + active `|` escaping ----
+
+    def test_blocked_pipe_actively_escaped_not_glued(self):
+        """A raw `|` in the blocked value is escaped to `&#124;` by the
+        render path itself (not left to an author-side convention, unlike
+        Deferred/Abandoned) so adjacent rows are never glued."""
+        self._write_slice("318-alpha", "318-01 stuck", "IN_PROGRESS",
+                          blocked_by="waiting on A | B decision")
+        board = self._board()
+        self.assertIn("&#124;", board)
+        self.assertNotIn("waiting on A | B decision", board)
+        blocked_section = board.split("## Blocked slices", 1)[1]
+        for line in blocked_section.splitlines():
+            if not line.startswith("|") or set(line.strip()) == {"|", "-"}:
+                continue
+            self.assertEqual(
+                line.count("|"), 4,
+                f"glued row in Blocked table: {line!r}",
+            )
+
+    def test_board_with_deferred_abandoned_and_blocked_coexist_and_idempotent(self):
+        self._write_slice("319-alpha", "319-01 active", "IN_PROGRESS")
+        self._write_slice("319-alpha", "319-02 parked", "DEFERRED")
+        self._write_slice("319-alpha", "319-03 stuck", "IN_PROGRESS",
+                          blocked_by="owner decision")
+        first = self._board()
+        self.assertIn("## Deferred slices", first)
+        self.assertIn("## Blocked slices", first)
+        second = self._board()
+        self.assertEqual(first, second, "regen must be idempotent")
+
+    def test_board_preserves_curated_notes_with_blocked_section_present(self):
+        self._write_slice("320-alpha", "320-01 active", "IN_PROGRESS")
+        self._write_slice("320-alpha", "320-02 stuck", "IN_PROGRESS",
+                          blocked_by="owner decision")
+        self._board()
+        board_path = self.target / "docs/specs/README.md"
+        content = board_path.read_text()
+        marker = "| 320-01 active | IN_PROGRESS |  |"
+        replacement = "| 320-01 active | IN_PROGRESS | curated note |"
+        self.assertIn(marker, content, "active row not found before curation")
+        board_path.write_text(content.replace(marker, replacement))
+        second = self._board()
+        self.assertIn("curated note", second)
+
+    # ---- Multiple blocked slices across specs, file order ----
+
+    def test_multiple_blocked_slices_across_specs_listed_in_file_order(self):
+        self._write_slice("321-alpha", "321-01 first", "IN_PROGRESS",
+                          blocked_by="thing-a")
+        self._write_slice("322-beta", "322-01 second", "IN_PROGRESS",
+                          blocked_by="thing-b")
+        board = self._board()
+        blocked_section = board.split("## Blocked slices", 1)[1]
+        pos_a = blocked_section.find("321-01 first")
+        pos_b = blocked_section.find("322-01 second")
+        self.assertNotEqual(pos_a, -1)
+        self.assertNotEqual(pos_b, -1)
+        self.assertLess(pos_a, pos_b, "expected file order (321 before 322)")
+
+
 class StaleCheckTests(unittest.TestCase):
     """Slice 014-03: `workflow.py stale` lists items whose last_verified
     is more than N days old AND whose dep file was modified since."""

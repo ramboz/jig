@@ -194,9 +194,9 @@ SPIKE_BODY_LABELS = (
 )
 
 
-def _extract_kind(section: str) -> str:
-    """Return the `kind:` scalar from a slice section's frontmatter, or
-    empty string when no `kind:` field is present.
+def _extract_slice_frontmatter_scalar(section: str, field: str) -> str:
+    """Return a scalar `field:` value from a slice section's frontmatter, or
+    empty string when the field is absent.
 
     Handles both layouts (mirrors workflow.py's `_split_slice_section`):
       - File-per-slice: frontmatter at column 0 of `section`.
@@ -205,6 +205,10 @@ def _extract_kind(section: str) -> str:
 
     Falls back to a regex-based scan when `_parse_frontmatter` isn't
     importable (bare-script invocation outside a jig tree).
+
+    Slice 111-02 generalized this out of `_extract_kind` (ADR-0002
+    extract-on-third-caller: `kind`, `status`, and `blocked_by` all read
+    frontmatter scalars now).
     """
     if section.startswith("##"):
         nl = section.find("\n")
@@ -214,9 +218,9 @@ def _extract_kind(section: str) -> str:
 
     if _parse_frontmatter is not None:
         fields, _ = _parse_frontmatter(body)
-        return str(fields.get("kind", "")).strip()
+        return str(fields.get(field, "")).strip()
 
-    # Bare-script fallback: pull `kind:` out of any leading `---` block.
+    # Bare-script fallback: pull `field:` out of any leading `---` block.
     # Mirrors `_common.parsing._parse_scalar`: strip inline `# comment`
     # tail when value is unquoted, then strip matched surrounding quotes.
     m = re.match(r"\A(\s*\n)?---\n(.*?)\n---\n", body, re.DOTALL)
@@ -224,7 +228,7 @@ def _extract_kind(section: str) -> str:
         return ""
     for line in m.group(2).splitlines():
         line = line.strip()
-        if line.startswith("kind:"):
+        if line.startswith(f"{field}:"):
             value = line.partition(":")[2].strip()
             if "#" in value and not (value.startswith('"') or value.startswith("'")):
                 value = value.split("#", 1)[0].rstrip()
@@ -234,6 +238,50 @@ def _extract_kind(section: str) -> str:
                 value = value[1:-1]
             return value
     return ""
+
+
+def _extract_kind(section: str) -> str:
+    """Return the `kind:` scalar from a slice section's frontmatter, or
+    empty string when no `kind:` field is present. Thin wrapper over
+    `_extract_slice_frontmatter_scalar`."""
+    return _extract_slice_frontmatter_scalar(section, "kind")
+
+
+# Slice 111-02 (ADR-0057): a `blocked_by:` annotation is only meaningful on an
+# ACTIONABLE slice — one whose next step is real work that is currently
+# prevented. Mirror of workflow.py's `_BLOCKER_ACTIONABLE_STATUSES`
+# (`_CLAIM_WORKING_STATUSES` + `READY_FOR_IMPLEMENTATION`); kept as a small
+# inline mirror per ADR-0002 (two callers). If the actionable set changes in
+# workflow.py, update this to match.
+_BLOCKER_ACTIONABLE_STATUSES = frozenset({
+    "READY_FOR_IMPLEMENTATION",
+    "READY_FOR_REVIEW",
+    "IN_PROGRESS",
+    "REVIEWED",
+    "RECONCILED",
+})
+
+
+def check_blocked_annotation(label: str, section: str) -> list:
+    """Slice 111-02 (ADR-0057): return a soft-warning list when a slice carries
+    a non-empty `blocked_by:` on a NON-actionable status
+    (`DRAFT` / `DONE` / `DEFERRED` / `ABANDONED`) — where the annotation is
+    almost certainly a misfiled `dependencies:` or `DEFERRED`. Returns [] for
+    the valid actionable case and when `blocked_by:` is absent/whitespace-only.
+    Warn-only: never contributes an error, so it cannot flip the exit code
+    (soft unless the caller passes `--strict`)."""
+    blocked_by = _extract_slice_frontmatter_scalar(section, "blocked_by")
+    if not blocked_by.strip():
+        return []
+    status = _extract_slice_frontmatter_scalar(section, "status")
+    if status in _BLOCKER_ACTIONABLE_STATUSES:
+        return []
+    return [
+        f"`blocked_by:` is set on a non-actionable slice (status "
+        f"{status or 'unset'}); a first-class blocker belongs on an actionable "
+        f"slice (READY_FOR_IMPLEMENTATION or a working state). This looks like a "
+        f"misfiled `dependencies:` or a `DEFERRED` parking — see ADR-0057."
+    ]
 
 
 def check_kind_and_body_shape(label: str, section: str) -> tuple:
@@ -499,8 +547,10 @@ def lint(spec_path: Path, slice_fragment: str = None, strict: bool = False) -> t
         contradictions, warnings = check_slice(label, section)
         # Slice 029-01: also check `kind:` enum + spike body shape.
         kind_errors, kind_warnings = check_kind_and_body_shape(label, section)
-        # Merge the kind warnings into the per-slice warnings channel.
-        all_warnings = warnings + kind_warnings
+        # Slice 111-02: soft-warn a `blocked_by:` on a non-actionable slice.
+        blocked_warnings = check_blocked_annotation(label, section)
+        # Merge the kind + blocked warnings into the per-slice warnings channel.
+        all_warnings = warnings + kind_warnings + blocked_warnings
         results.append((label, contradictions, kind_errors, all_warnings))
 
     report, code = render_report(results, spec_path)
