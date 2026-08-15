@@ -111,6 +111,21 @@ decision describing the concrete signal that would justify re-opening it. The
 status board's `## Deferred slices` section renders this as the per-row context
 (slice 015-02). The same convention is reused from `docs/refinement-todo.md`.
 
+## First-class blocker
+
+A slice-level **annotation** (not a lifecycle state) recording that an *actionable*
+slice is stuck on a named thing — [ADR-0057](../decisions/adr-0057-first-class-blockers-are-annotations.md) / [spec 111](../specs/111-first-class-blockers/spec.md). A `blocked_by:`
+frontmatter field names the blocker (free text in v1); an optional `**Blocked:**`
+body line carries the human prose. Valid only on an **actionable** slice —
+`READY_FOR_IMPLEMENTATION` or a working state (`READY_FOR_REVIEW` / `IN_PROGRESS` /
+`REVIEWED` / `RECONCILED`); the status board's `## Blocked slices` section renders
+these (the countable signal a portfolio dashboard reads), and `spec_lint` soft-warns
+a `blocked_by:` on a non-actionable slice (a likely misfile). Distinct from
+[[Resolution trigger|DEFERRED]] (parked *by choice*, not started) and from
+`dependencies:` (not-yet-started ordering): a blocker is *actionable-but-prevented,
+waiting on a named thing we would act on now*. Clearing = remove the annotation.
+The typed-reason vocabulary (owner / dependency / external / review) is deferred.
+
 ## Research note
 A lightweight, convention-level artifact (`docs/research/R-NNN-<slug>.md`) that homes the **open investigation phase** — a standalone exploration of a generic idea, with sources, pros/cons, and open questions, *before* a decision is even named. Governed by [ADR-0054](../decisions/adr-0054-research-notes-artifact-convention.md) / [spec 108](../specs/108-research-notes-convention/spec.md). A research note is **not** a decision (→ ADR) and **not** committed work (→ spec); it is **sequential with, not a competitor to**, [[Resolution trigger|refinement-todo]] — refinement-todo holds a *named deferred decision + trigger*, and a note *promotes into* one (or an ADR / spec) once it crystallizes, citing `R-NNN` in the downstream artifact's Context and flipping its own `status` to `CONCLUDED` with a `Promoted to:` line. Statuses: `OPEN` / `CONCLUDED` / `PARKED` / `ABANDONED`. Numbering is **local-and-cheap** (not reserved on origin/main like specs/ADRs — a collision is a harmless nuisance). The index (`docs/research/README.md`) is **hand-maintained**; there is deliberately no `research.py` helper, index-regen, or link-linter (all deferred pending a real trigger). The existing `docs/research/00`–`09` files are jig's **frozen seed research** (its founding bootstrap corpus), not living notes. Create one by copying `docs/research/TEMPLATE.md`; the convention is documented in `docs/research/README.md` and codified in `docs/conventions.md`.
 
