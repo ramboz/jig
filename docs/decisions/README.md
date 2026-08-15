@@ -60,6 +60,7 @@
 - [ADR-0054: Research notes as a lightweight standalone-investigation artifact](adr-0054-research-notes-artifact-convention.md) — jig has homes for parked thoughts (`docs/inbox.md`), deferred *decisions* keyed on resolution triggers (`docs/refinement-todo.md`), committed decisions (ADRs), and committed work (specs + slices). (2026-08-11, Accepted)
 - [ADR-0055: Leanness lens folds into existing review passes, not a new gate](adr-0055-leanness-lens-folds-into-existing-passes.md) — Spec 109 adds a leanness / minimal-viable-architecture lens (over-engineering, premature abstraction, speculative generality) to the **spec-workflow lifecycle's** review surfaces — the retrospective half of a value SPIDR already carries at the slice-splitting altitude but that never propagated into review. (2026-08-11, Accepted)
 - [ADR-0056: Adversarial-register quarantine: orchestrator-facing surfaces are collaborative](adr-0056-adversarial-register-quarantine.md) — jig runs adversarial reviews (frame-critique, the craft/arch passes). (2026-08-11, Accepted)
+- [ADR-0057: First-class blockers are an annotation on in-flight slices, not a lifecycle state](adr-0057-first-class-blockers-are-annotations.md) — jig has no first-class way to record that a slice is actionable but stuck, so a project's live blocker count can only be approximated from unrelated proxies. (2026-08-15, Accepted)
 
 ## Lightweight decisions
 
