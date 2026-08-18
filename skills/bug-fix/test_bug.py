@@ -1700,6 +1700,22 @@ class Spec091ClosureGateHelperTests(unittest.TestCase):
                     f"{bare!r} should fail the protocol floor: {gaps}",
                 )
 
+    def test_decorated_bare_verdict_still_fails(self):
+        for bare in ("none!", "None found…", "nothing.", "N/A?"):
+            with self.subTest(bare=bare):
+                gaps = self.mod._closure_inventory_gaps(
+                    self._inventory(equivalent=bare)
+                )
+                self.assertTrue(any("bare verdict" in g for g in gaps))
+
+    def test_inner_bold_label_does_not_false_gap(self):
+        # An author who writes an inner `**Note:**` inside a real answer must
+        # not trip a false "missing prompt" gap — the required label still owns
+        # non-empty content before the inner label.
+        answer = "searched `foo`; git log -S clean **Note:** see PR 12"
+        gaps = self.mod._closure_inventory_gaps(self._inventory(reuse=answer))
+        self.assertEqual(gaps, [])
+
     def test_call_site_closure_gaps(self):
         self.assertTrue(self.mod._call_site_closure_gaps("## Fix\n\nx\n"))
         ok = (

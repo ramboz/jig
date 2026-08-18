@@ -658,7 +658,11 @@ def _labeled_blocks(section: str) -> dict:
 
 
 def _is_bare_negative(block: str) -> bool:
-    normalized = _HTML_COMMENT_RE.sub("", block).strip().lower().rstrip(".")
+    normalized = _HTML_COMMENT_RE.sub("", block).strip().lower()
+    # Strip trailing punctuation so "none!", "none…", "none." all normalize —
+    # a decorated bare verdict is still a bare verdict. The floor stays a
+    # conservative parser check; `bug-review` judges anything with real content.
+    normalized = normalized.rstrip(".!?…").strip()
     normalized = " ".join(normalized.split())
     return normalized in _BARE_NEGATIVE
 
@@ -934,7 +938,10 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
         # Spec 091 / ADR-0037: post-fix call-site closure. New (marker-bearing)
         # records must account for every affected site before REVIEWED; legacy
         # records are exempt. Checked before the tdd green-run so a missing
-        # disposition fails cheaply.
+        # disposition fails cheaply. Unlike the FIXING inventory gate, this is
+        # not tier-scoped — trivial-tier records are deleted at triage
+        # (`triage_bug`) and never persist to reach REVIEWED, so a tier guard
+        # here would be dead code.
         if _gate_enabled("JIG_BUG_CLOSURE_GATE") and _is_closure_schema_record(fields):
             gaps = _call_site_closure_gaps(text)
             if gaps:
