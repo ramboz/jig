@@ -228,6 +228,13 @@ def _record_text(number: int, slug: str, claimed_by: str) -> str:
         "fix_class:",
         "security_surface: false",
         "escalated_to:",
+        # Spec 091 / ADR-0037: creation-time repository-closure schema marker.
+        # Its PRESENCE (not the closure sections' presence) is what tells the
+        # gate a record is "new schema" vs a legacy pre-091 record. A legacy
+        # record omits it and follows the exempt compatibility path; a new
+        # record that deletes the closure sections still carries this marker,
+        # so evasion-by-omission is not mistaken for legacy-by-omission.
+        "closure_schema: 1",
         "---",
         "",
         f"# Bug {number:03d}: {slug}",
@@ -248,9 +255,36 @@ def _record_text(number: int, slug: str, claimed_by: str) -> str:
         "",
         "## Root cause",
         "",
+        "## Repository closure inventory",
+        "",
+        "<!-- Spec 091 / ADR-0037: pre-fix repository closure. Standard & gnarly",
+        "     bugs gate ROOT_CAUSED -> FIXING on substantive answers below. This",
+        "     is an effort-and-protocol standard, NOT a completeness proof: show",
+        "     the search you actually ran. A bare \"none found\" fails; record",
+        "     residual uncertainty as an assumption WITH the protocol behind it,",
+        "     applying the same enumeration standard as `## Root cause` (ADR-0052).",
+        "     Prefer a configured semantic index; the portable floor is targeted",
+        "     search + `git log`/`git blame`. -->",
+        "",
+        "**Equivalent / convergent logic searched:**",
+        "",
+        "**Relevant history inspected:**",
+        "",
+        "**Affected call sites:**",
+        "",
+        "**Reuse decision:**",
+        "",
         "## Fix class",
         "",
         "## Fix",
+        "",
+        "## Call-site closure",
+        "",
+        "<!-- Spec 091 / ADR-0037: before REVIEWED, account for every site named",
+        "     in the inventory above as changed, tested, or intentionally left",
+        "     alone. Accounting, not mandatory widening. -->",
+        "",
+        "**Disposition per affected site:**",
         "",
         "## Already tried",
         "",
@@ -570,6 +604,108 @@ def _section(text: str, heading: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+# ---------- spec 091 / ADR-0037: repository-closure evidence ----------
+#
+# Compatibility is keyed to the PRESENCE of the `closure_schema` frontmatter
+# field (stamped at creation by `new_bug`), never to the presence/absence of
+# the closure body sections — so a new record that omits the sections still
+# gates (evasion-by-omission), while a legacy record with no marker is exempt
+# (legacy-by-omission). See spec 091-01 AC2.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_BOLD_LABEL_RE = re.compile(r"\*\*(.+?):\*\*")
+
+# The four pre-fix inventory prompts (ROOT_CAUSED -> FIXING) and the one
+# post-fix prompt (-> REVIEWED). Order is the message order, not significant.
+_INVENTORY_LABELS = (
+    "Equivalent / convergent logic searched",
+    "Relevant history inspected",
+    "Affected call sites",
+    "Reuse decision",
+)
+_CLOSURE_LABEL = "Disposition per affected site"
+
+# A "bare verdict" for the equivalent-logic prompt: a negative answer with no
+# recorded search protocol behind it. The gate is a deliberateness floor — it
+# rejects only an answer that is ENTIRELY one of these tokens; anything with
+# real content passes the parser and is judged for quality by `bug-review`
+# (ADR-0037: the parser enforces presence/shape, the reviewer judges quality).
+_BARE_NEGATIVE = frozenset({
+    "", "none", "none found", "no", "nope", "nothing", "nothing found",
+    "n/a", "na", "-", "—", "no equivalent logic", "no equivalent logic found",
+    "no convergent logic", "not applicable",
+})
+
+
+def _is_closure_schema_record(fields: dict) -> bool:
+    """True iff this record carries the creation-time closure-schema marker.
+
+    Absence = legacy pre-091 record (exempt); presence = new record (gated),
+    regardless of whether the body sections survive."""
+    return bool(str(fields.get("closure_schema") or "").strip())
+
+
+def _labeled_blocks(section: str) -> dict:
+    """Map each `**Label:**` in a section to the text that follows it (up to
+    the next bold label or the section end), with HTML comments stripped."""
+    body = _HTML_COMMENT_RE.sub("", section)
+    matches = list(_BOLD_LABEL_RE.finditer(body))
+    blocks = {}
+    for i, match in enumerate(matches):
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        blocks[match.group(1).strip()] = body[start:end].strip()
+    return blocks
+
+
+def _is_bare_negative(block: str) -> bool:
+    normalized = _HTML_COMMENT_RE.sub("", block).strip().lower().rstrip(".")
+    normalized = " ".join(normalized.split())
+    return normalized in _BARE_NEGATIVE
+
+
+def _closure_inventory_gaps(text: str) -> list[str]:
+    """Pre-fix repository-closure inventory gaps (ROOT_CAUSED -> FIXING).
+
+    Deliberateness gate: each prompt must carry substantive text, and the
+    equivalent-logic prompt must not be a bare negative verdict. It does NOT
+    judge whether the search was complete — that is `bug-review`'s job."""
+    section = _section(text, "Repository closure inventory")
+    if not _HTML_COMMENT_RE.sub("", section).strip():
+        return [
+            "the ## Repository closure inventory section with equivalent "
+            "logic, history, affected call sites, and a reuse decision "
+            "(ADR-0037)"
+        ]
+    blocks = _labeled_blocks(section)
+    gaps = []
+    for label in _INVENTORY_LABELS:
+        if not blocks.get(label, "").strip():
+            gaps.append(f"a substantive '{label}' answer")
+    equivalent = blocks.get(_INVENTORY_LABELS[0], "")
+    if equivalent.strip() and _is_bare_negative(equivalent):
+        gaps.append(
+            "the equivalent-logic answer is a bare verdict — record the "
+            "search protocol behind it (terms tried, `git log`/`git blame`), "
+            "or an assumption WITH that protocol (ADR-0052); a bare 'none "
+            "found' does not satisfy the gate"
+        )
+    return gaps
+
+
+def _call_site_closure_gaps(text: str) -> list[str]:
+    """Post-fix call-site closure gaps (-> REVIEWED)."""
+    section = _section(text, "Call-site closure")
+    if not _HTML_COMMENT_RE.sub("", section).strip():
+        return [
+            "the ## Call-site closure section accounting for each affected "
+            "site as changed, tested, or intentionally unchanged (ADR-0037)"
+        ]
+    blocks = _labeled_blocks(section)
+    if not blocks.get(_CLOSURE_LABEL, "").strip():
+        return [f"a substantive '{_CLOSURE_LABEL}' answer"]
+    return []
+
+
 def _proof_attests_original_repro(text: str) -> bool:
     proof = _section(text, "Proof").lower()
     return bool(proof and "original reported repro" in proof)
@@ -760,6 +896,19 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
         selector = str(fields.get("regression_test") or "").strip()
         if not selector:
             raise BugError("regression_test is required before FIXING")
+        # Spec 091 / ADR-0037: pre-fix repository-closure inventory. New
+        # (marker-bearing) standard/gnarly records must record the inventory
+        # before coding; legacy (unmarked) records are exempt. Checked before
+        # the tdd red-run so a missing inventory fails cheaply.
+        if _gate_enabled("JIG_BUG_CLOSURE_GATE") and _is_closure_schema_record(fields):
+            tier = str(fields.get("tier") or "standard").strip().lower()
+            if tier in ("standard", "gnarly"):
+                gaps = _closure_inventory_gaps(text)
+                if gaps:
+                    raise BugError(
+                        "repository-closure inventory required before FIXING "
+                        "(ADR-0037): " + "; ".join(gaps)
+                    )
         if _gate_enabled("JIG_BUG_TEST_GATE"):
             result = _run_tdd(project_dir, selector)
             if result.returncode == 0:
@@ -782,6 +931,17 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
         selector = str(fields.get("regression_test") or "").strip()
         if not selector:
             raise BugError("regression_test is required before REVIEWED")
+        # Spec 091 / ADR-0037: post-fix call-site closure. New (marker-bearing)
+        # records must account for every affected site before REVIEWED; legacy
+        # records are exempt. Checked before the tdd green-run so a missing
+        # disposition fails cheaply.
+        if _gate_enabled("JIG_BUG_CLOSURE_GATE") and _is_closure_schema_record(fields):
+            gaps = _call_site_closure_gaps(text)
+            if gaps:
+                raise BugError(
+                    "call-site closure required before REVIEWED (ADR-0037): "
+                    + "; ".join(gaps)
+                )
         if _gate_enabled("JIG_BUG_TEST_GATE"):
             result = _run_tdd(project_dir, selector)
             if result.returncode != 0:
