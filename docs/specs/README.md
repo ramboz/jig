@@ -288,7 +288,7 @@
 | [088-project-orientation](088-project-orientation/spec.md) | 088-02 — the `/jig:orient` judgment skill | **DONE** |  |
 | [089-contributing-bundled-skills](089-contributing-bundled-skills/spec.md) | 089-01 — bundled-skill contributor runbook | **DONE** |  |
 | [090-immutable-release-bytes](090-immutable-release-bytes/spec.md) | 090-01 — immutable stable-release contract | DRAFT |  |
-| [091-bug-fix-repository-closure](091-bug-fix-repository-closure/spec.md) | 091-01 — repository-closure evidence and gates | DRAFT |  |
+| [091-bug-fix-repository-closure](091-bug-fix-repository-closure/spec.md) | 091-01 — repository-closure evidence and gates | **DONE** | [ADR-0037](../decisions/adr-0037-bug-fix-repository-closure-evidence.md). `bug.py new` stamps a creation-time `closure_schema:` marker + `## Repository closure inventory` (gates `ROOT_CAUSED→FIXING`) and `## Call-site closure` (gates `→REVIEWED`); `JIG_BUG_CLOSURE_GATE=0`. **Marker-keyed, not section-keyed**: legacy unmarked records exempt, a marked record that deletes the sections still gates (evasion≠legacy). Effort-and-protocol floor rejects a bare "none found"; `bug-review` judges completeness via ADR-0052. standard/gnarly only (trivial exempt). |
 | [092-existing-subtree-layout-adoption](092-existing-subtree-layout-adoption/spec.md) | 092-01 — adopt an existing custom-root corpus | **DONE** |  |
 | [093-semantic-index-provider-discovery](093-semantic-index-provider-discovery/spec.md) | 093-01 — discover installed providers and explain absence | **DONE** |  |
 | [094-capture-hygiene](094-capture-hygiene/spec.md) | 094-01 — machine text is never attributed to the owner | **DONE** | `who: "user"` is earned by the text, never assumed from the event: harness wrappers reach `UserPromptSubmit` too. One home — `decision_scan.strip_machine_text` (re-exported `typed_by_owner`); empty output *is* the machine-text verdict. Whether the Stop scan's `role == "user"` branch needs the same rule is asked on [#108](https://github.com/ramboz/jig/issues/108), not decided. |
@@ -370,7 +370,7 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **13** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **14** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **2** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review

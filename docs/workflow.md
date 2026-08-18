@@ -258,7 +258,7 @@ for a one-liner. Triage is the de-escalation gate, not an escalation ramp:
 | **standard** | A durable `docs/bugs/NNN-slug.md` record, the diagnose gate, the red→green teeth, and bug-review + craft passes. Closes `REVIEWED → DONE`. |
 | **gnarly** (cross-layer, security, regression-that-didn't-stick, design-gap) | Full rigor: mandatory ≥2 hypotheses, the extra `VERIFIED` step, a conditional security pass, and a trunk-reserved number. May escalate to a spec. |
 
-Three gates give the lifecycle its teeth. Each checks presence and shape, never
+Five gates give the lifecycle its teeth. Each checks presence and shape, never
 quality — quality stays the reviewer's job:
 
 - **Diagnose gate** (`→ ROOT_CAUSED`) — at least two candidate hypotheses with a
@@ -268,6 +268,13 @@ quality — quality stays the reviewer's job:
   against fresh `origin/main` before any fix is written. If it is already clean
   there, the bug closes as `RESOLVED_ON_MAIN` instead of duplicating a landed
   fix.
+- **Repository-closure inventory** (`ROOT_CAUSED → FIXING`, new standard/gnarly
+  records — [ADR-0037](decisions/adr-0037-bug-fix-repository-closure-evidence.md))
+  — before coding, the record inventories equivalent/convergent logic, history,
+  affected call sites, and a reuse decision, so a narrow patch cannot duplicate
+  an existing helper unchallenged. `JIG_BUG_CLOSURE_GATE=0`.
+- **Call-site closure** (`→ REVIEWED`, new records) — every affected site is
+  accounted for as changed, tested, or intentionally left alone.
 - **Red→green teeth** (`→ FIXING`, then `→ REVIEWED`) — the helper witnesses the
   regression test fail before the fix and pass after, so "there is a regression
   test" is machine-attested rather than claimed.

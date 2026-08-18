@@ -143,19 +143,22 @@ silently relaxing the others.
 | Transition | Gate | Bypass |
 |---|---|---|
 | `→ ROOT_CAUSED` | ≥2 candidate hypotheses + a leading one + an evidence pointer | `JIG_BUG_DIAGNOSE_GATE=0` |
-| `ROOT_CAUSED → FIXING` | fresh-main recheck recorded as `main_repro_result: reproduces`; `fix_class` declared; `regression_test` runs **red** (shells to `tdd.py`, expects exit 1; stamps `red_confirmed_at`) | `JIG_BUG_MAIN_CHECK_GATE=0` (main recheck), `JIG_BUG_TEST_GATE=0` (test) |
-| `→ REVIEWED` | the same `regression_test` now runs **green** (shells to `tdd.py`, expects exit 0; stamps `green_confirmed_at`) **and** the required review verdicts pass | `JIG_BUG_TEST_GATE=0` (test), `JIG_REVIEW_EVIDENCE_GATE=0` (verdicts) |
+| `ROOT_CAUSED → FIXING` | fresh-main recheck recorded as `main_repro_result: reproduces`; `fix_class` declared; `regression_test` runs **red** (shells to `tdd.py`, expects exit 1; stamps `red_confirmed_at`); **repository-closure inventory** present for new standard/gnarly records | `JIG_BUG_MAIN_CHECK_GATE=0` (main recheck), `JIG_BUG_TEST_GATE=0` (test), `JIG_BUG_CLOSURE_GATE=0` (closure) |
+| `→ REVIEWED` | the same `regression_test` now runs **green** (shells to `tdd.py`, expects exit 0; stamps `green_confirmed_at`); **call-site closure** recorded for new records; **and** the required review verdicts pass | `JIG_BUG_TEST_GATE=0` (test), `JIG_BUG_CLOSURE_GATE=0` (closure), `JIG_REVIEW_EVIDENCE_GATE=0` (verdicts) |
 | `→ VERIFIED` | original reported repro re-run clean (gnarly/security only), attested in the record | — |
 | `→ DONE` | required review verdicts pass + a learning recorded in `docs/memory/learnings.md` | `JIG_REVIEW_EVIDENCE_GATE=0` |
 
-**The three distinctive gates** are the diagnose gate (the ≥2-hypotheses
-anti-anchoring rule), the fresh-main recheck after root cause, and the
-**red→green teeth**: the helper itself witnesses the test fail before the fix
-and pass after, so "there is a regression test" is machine-attested, not
-claimed. A bug already clean on fresh main becomes `RESOLVED_ON_MAIN`; a test
-already green without the fix does not capture the bug — the `→ FIXING` gate
-refuses it. A `tdd.py` env error (exit 2) **fails closed** (gate not
-satisfied), distinct from red.
+**The distinctive gates** are the diagnose gate (the ≥2-hypotheses
+anti-anchoring rule), the fresh-main recheck after root cause, the
+**red→green teeth**, and the **repository-closure gates** (ADR-0037). The
+red→green teeth: the helper itself witnesses the test fail before the fix and
+pass after, so "there is a regression test" is machine-attested, not claimed. A
+bug already clean on fresh main becomes `RESOLVED_ON_MAIN`; a test already green
+without the fix does not capture the bug — the `→ FIXING` gate refuses it. A
+`tdd.py` env error (exit 2) **fails closed** (gate not satisfied), distinct from
+red. The repository-closure gates make reuse/history discovery and call-site
+closure durable evidence (see the **Repository-closure inventory** subsection
+under step 2 below).
 
 `fix_class` (declared at `→ FIXING`) is one of `workaround` / `local_patch` /
 `structural_fix` / `guardrail` / `observability`.
@@ -232,9 +235,48 @@ python3 "${PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> ROOT_CAUSED
 
 In **`diagnose` mode, stop here** and present the root cause.
 
+#### Repository-closure inventory (before `→ FIXING`) — [ADR-0037](../../docs/decisions/adr-0037-bug-fix-repository-closure-evidence.md)
+
+Before you write the fix, fill the `## Repository closure inventory` section
+(new standard/gnarly records gate `ROOT_CAUSED → FIXING` on it — a fresh
+`bug.py new` record carries the section and the `closure_schema:` marker; a
+legacy pre-091 record has neither and is exempt). This exists because a narrow
+patch that duplicates an existing helper passes TDD while leaving a
+convergent path unfixed — the closure question has to be asked *before* the
+code shapes the change, not at review.
+
+- **Equivalent / convergent logic searched** — look for an existing
+  implementation of the same contract, possibly under a different name.
+  **Tool-neutral:** prefer a configured semantic index when one is available;
+  the portable floor every project has is targeted text search plus
+  `git log -S` / `git grep`. Record the *terms you tried*, not just a verdict.
+- **Relevant history inspected** — `git log`/`git blame` on the touched
+  surface: when and why did this logic arrive, and did the same change land
+  elsewhere?
+- **Affected call sites** — enumerate the sites that share this contract.
+- **Reuse decision** — reuse the existing implementation, or duplicate with an
+  explicit reason.
+
+This is an **effort-and-protocol standard, not a completeness standard**. You
+cannot prove a differently-named helper does *not* exist, and the gate does not
+ask you to. What it refuses is a **bare verdict** — "none found" with no
+recorded search behind it. When the set genuinely cannot be closed by a name
+search, apply the **same enumeration standard as the `## Root cause` grounding
+above** ([ADR-0052](../../docs/decisions/adr-0052-grounding-enumeration-for-universal-claims.md)):
+state what you searched and why it does not close the set, and record the
+residual as an assumption *with that protocol*. Do not restate the enumeration
+rule here — it has one home, in the diagnose grounding block above. `bug-review`
+judges whether the search was real; the transition gate only checks the
+prompts are answered and not vacuous.
+
 ### 3. Fix (`→ FIXING → REVIEWED`), `diagnose_and_fix` mode
 
 1. Declare `fix_class:` and name the `regression_test:` in the record.
+   Before `→ REVIEWED`, fill `## Call-site closure`: account for every site the
+   inventory named as **changed, tested, or intentionally left alone** (with a
+   reason). This is *accounting*, not a mandate to widen the fix — a site can be
+   correctly left untouched. New records gate `→ REVIEWED` on it; legacy records
+   are exempt.
 2. Recheck fresh main before writing the fix. Fetch/inspect `origin/main`
    (usually from a detached worktree) and re-run the original reported repro.
    Then record the outcome:

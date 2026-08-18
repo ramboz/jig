@@ -981,8 +981,23 @@ Evaluate whether the fix resolves the recorded bug honestly and narrowly.
   regression test would be red before the fix and green after it?
 - blast radius: are nearby call paths, persisted data, public contracts,
   and edge cases considered for this bug's tier?
+- repository closure (ADR-0037): read the `## Repository closure inventory`
+  and `## Call-site closure` sections. Was equivalent/convergent logic
+  actually searched — with a recorded protocol (terms tried, `git log`/`git
+  blame`), not a bare "none found"? For a negative "no equivalent logic"
+  claim, apply the ADR-0052 enumeration standard: an empty search is
+  ungrounded until the record shows what closes the set, or honestly records
+  the residual as an assumption *with* that protocol. Was relevant history
+  inspected, and is the reuse-vs-duplicate decision explicit? Does the
+  disposition account for every affected call site as changed, tested, or
+  intentionally left alone — and did the fix miss a differently-named
+  convergent path the inventory should have surfaced? The parser gate only
+  checked these sections are present and non-vacuous; you judge whether the
+  search was real and the closure honest.
 - scope creep: does the change stay within the bug's fix class and avoid
-  unrelated refactors or behavior changes?
+  unrelated refactors or behavior changes? (Call-site closure is *accounting*
+  for affected sites, not a mandate to widen the change — a site can be
+  correctly left alone with a recorded reason.)
 - workaround honesty: if `fix_class: workaround`, does the record state the
   remaining risk, owner/trigger for follow-up, and user-visible limits?
 

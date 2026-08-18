@@ -1593,5 +1593,357 @@ class CheckBoardTests(unittest.TestCase):
         self.assertIn("017", r.stdout + r.stderr)
 
 
+class Spec091ClosureTemplateTests(unittest.TestCase):
+    """AC1: new records carry the closure sections + creation-time marker."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _fields_and_body(self):
+        path = self.root / "docs" / "bugs" / "001-auth-crash.md"
+        text = path.read_text()
+        fields, _ = parse_frontmatter(text)
+        return fields, text
+
+    def test_new_stamps_closure_schema_marker(self):
+        r = run_bug("new", "auth-crash", "--project-dir", str(self.root),
+                    env={"JIG_CLAIM_ID": "wt-alpha"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields, _ = self._fields_and_body()
+        self.assertEqual(str(fields["closure_schema"]).strip(), "1")
+
+    def test_new_emits_all_five_closure_prompts(self):
+        r = run_bug("new", "auth-crash", "--project-dir", str(self.root),
+                    env={"JIG_CLAIM_ID": "wt-alpha"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        _, body = self._fields_and_body()
+        for marker in (
+            "## Repository closure inventory",
+            "**Equivalent / convergent logic searched:**",
+            "**Relevant history inspected:**",
+            "**Affected call sites:**",
+            "**Reuse decision:**",
+            "## Call-site closure",
+            "**Disposition per affected site:**",
+        ):
+            self.assertIn(marker, body)
+
+
+class Spec091ClosureGateHelperTests(unittest.TestCase):
+    """Unit-level coverage of the closure gate parsing (AC2/AC3/AC6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = load_bug_module()
+
+    def _inventory(self, equivalent="grep foo/bar; git log -S; searched `urlId`",
+                   history="git blame shows helper added in a1b2c3",
+                   sites="callers: a(), b()", reuse="reuse existing helper"):
+        return (
+            "## Repository closure inventory\n\n"
+            f"**Equivalent / convergent logic searched:** {equivalent}\n\n"
+            f"**Relevant history inspected:** {history}\n\n"
+            f"**Affected call sites:** {sites}\n\n"
+            f"**Reuse decision:** {reuse}\n\n"
+            "## Fix class\n"
+        )
+
+    def test_fully_answered_inventory_has_no_gaps(self):
+        self.assertEqual(self.mod._closure_inventory_gaps(self._inventory()), [])
+
+    def test_missing_inventory_section_is_a_gap(self):
+        gaps = self.mod._closure_inventory_gaps("## Root cause\n\nx\n")
+        self.assertTrue(gaps)
+        self.assertIn("Repository closure inventory", gaps[0])
+
+    def test_empty_prompt_is_a_gap(self):
+        gaps = self.mod._closure_inventory_gaps(self._inventory(reuse=""))
+        self.assertTrue(any("Reuse decision" in g for g in gaps))
+
+    def test_comment_only_section_is_not_substantive(self):
+        # A record that carries only the shipped HTML comment (unedited) must
+        # still gate — the comment is not an answer.
+        section = (
+            "## Repository closure inventory\n\n"
+            "<!-- Spec 091 / ADR-0037: pre-fix repository closure. -->\n\n"
+            "**Equivalent / convergent logic searched:**\n\n"
+            "**Relevant history inspected:**\n\n"
+            "**Affected call sites:**\n\n"
+            "**Reuse decision:**\n\n"
+            "## Fix class\n"
+        )
+        self.assertTrue(self.mod._closure_inventory_gaps(section))
+
+    def test_protocol_bearing_assumption_answer_passes(self):
+        # AC6: an honest "not closable by name search" WITH protocol passes.
+        answer = (
+            "searched `urlId`, `canonicalUrl`, `identity`; `git log -S` and "
+            "`git blame` on the touched surface returned only this path; the "
+            "set is not closable by name search — recorded as an assumption."
+        )
+        gaps = self.mod._closure_inventory_gaps(self._inventory(equivalent=answer))
+        self.assertEqual(gaps, [])
+
+    def test_bare_none_found_fails(self):
+        # AC6: a bare negative verdict with no protocol does not satisfy it.
+        for bare in ("none", "None found.", "n/a", "nothing found", "no"):
+            with self.subTest(bare=bare):
+                gaps = self.mod._closure_inventory_gaps(
+                    self._inventory(equivalent=bare)
+                )
+                self.assertTrue(
+                    any("bare verdict" in g for g in gaps),
+                    f"{bare!r} should fail the protocol floor: {gaps}",
+                )
+
+    def test_decorated_bare_verdict_still_fails(self):
+        for bare in ("none!", "None found…", "nothing.", "N/A?"):
+            with self.subTest(bare=bare):
+                gaps = self.mod._closure_inventory_gaps(
+                    self._inventory(equivalent=bare)
+                )
+                self.assertTrue(any("bare verdict" in g for g in gaps))
+
+    def test_inner_bold_label_does_not_false_gap(self):
+        # An author who writes an inner `**Note:**` inside a real answer must
+        # not trip a false "missing prompt" gap — the required label still owns
+        # non-empty content before the inner label.
+        answer = "searched `foo`; git log -S clean **Note:** see PR 12"
+        gaps = self.mod._closure_inventory_gaps(self._inventory(reuse=answer))
+        self.assertEqual(gaps, [])
+
+    def test_call_site_closure_gaps(self):
+        self.assertTrue(self.mod._call_site_closure_gaps("## Fix\n\nx\n"))
+        ok = (
+            "## Call-site closure\n\n"
+            "**Disposition per affected site:** a() changed; b() left as-is "
+            "(different contract)\n\n"
+            "## Already tried\n"
+        )
+        self.assertEqual(self.mod._call_site_closure_gaps(ok), [])
+
+    def test_marker_presence_detects_new_vs_legacy(self):
+        self.assertTrue(self.mod._is_closure_schema_record({"closure_schema": "1"}))
+        self.assertFalse(self.mod._is_closure_schema_record({}))
+        self.assertFalse(self.mod._is_closure_schema_record({"closure_schema": ""}))
+
+
+class Spec091ClosureTransitionGateTests(unittest.TestCase):
+    """AC2/AC3 end-to-end via the CLI, with the marker driving new-vs-legacy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self):
+        return self.root / "docs" / "bugs" / "001-alpha.md"
+
+    def _fake_tdd(self, code: int) -> Path:
+        script = self.root / f"fake_tdd_{code}.py"
+        script.write_text(
+            "import sys\nprint('fake tdd')\nraise SystemExit("
+            f"{code})\n"
+        )
+        return script
+
+    def _write(self, *, status="ROOT_CAUSED", tier="standard", marked=True,
+               inventory=True, closure=False, fix_class="local_patch"):
+        inv = (
+            "## Repository closure inventory\n\n"
+            "**Equivalent / convergent logic searched:** grep `foo`; git log -S\n\n"
+            "**Relevant history inspected:** git blame -> a1b2c3\n\n"
+            "**Affected call sites:** a(), b()\n\n"
+            "**Reuse decision:** reuse existing helper\n\n"
+        ) if inventory else "## Repository closure inventory\n\n"
+        cls = (
+            "## Call-site closure\n\n"
+            "**Disposition per affected site:** a() changed; b() left as-is\n\n"
+        ) if closure else "## Call-site closure\n\n"
+        marker = "closure_schema: 1\n" if marked else ""
+        return write(self._bug(), (
+            "---\n"
+            f"status: {status}\n"
+            "severity: high\n"
+            f"tier: {tier}\n"
+            "claimed_by: wt-alpha\n"
+            "regression_test: tests/test_alpha.py::test_bug\n"
+            "main_repro_checked_at: 2026-08-18\n"
+            "main_repro_ref: origin/main@abc123\n"
+            "main_repro_result: reproduces\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            f"fix_class: {fix_class}\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            f"{marker}"
+            "---\n\n"
+            "## Symptom\n\n## Repro\n\n## Evidence\n\ntrace\n\n"
+            "## Hypotheses\n\n- [ ] a\n- [x] b (leading)\n\n"
+            "## Root cause\n\nrc\n\n"
+            f"{inv}"
+            "## Fix class\n\n## Fix\n\n"
+            f"{cls}"
+            "## Already tried\n\n## Regression test\n\n## Proof\n\n## Learning\n"
+        ))
+
+    def _fm(self):
+        fields, _ = parse_frontmatter(self._bug().read_text())
+        return fields
+
+    def test_marked_record_blocks_fixing_without_inventory(self):
+        self._write(marked=True, inventory=False)
+        r = run_bug("transition", "001", "FIXING", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(1))})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("repository-closure inventory", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_marked_record_with_inventory_reaches_fixing(self):
+        self._write(marked=True, inventory=True)
+        r = run_bug("transition", "001", "FIXING", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(1))})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_legacy_unmarked_record_is_exempt(self):
+        # A pre-091 record has no marker and no inventory — it must still
+        # transition (compatibility path), never blocked by the closure gate.
+        self._write(marked=False, inventory=False)
+        r = run_bug("transition", "001", "FIXING", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(1))})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_trivial_tier_marked_record_is_exempt(self):
+        self._write(marked=True, inventory=False, tier="trivial")
+        r = run_bug("transition", "001", "FIXING", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(1))})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_closure_gate_bypass_env_disables_it(self):
+        self._write(marked=True, inventory=False)
+        r = run_bug("transition", "001", "FIXING", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(1)),
+                         "JIG_BUG_CLOSURE_GATE": "0"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_marked_record_blocks_reviewed_without_call_site_closure(self):
+        self._write(status="FIXING", marked=True, inventory=True, closure=False)
+        r = run_bug("transition", "001", "REVIEWED", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(0)),
+                         "JIG_REVIEW_EVIDENCE_GATE": "0"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("call-site closure", r.stderr)
+
+    def test_legacy_record_reviewed_exempt_from_call_site_closure(self):
+        self._write(status="FIXING", marked=False, inventory=False, closure=False)
+        r = run_bug("transition", "001", "REVIEWED", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(0)),
+                         "JIG_REVIEW_EVIDENCE_GATE": "0"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+
+class Spec091VacuitySamplingTests(unittest.TestCase):
+    """AC7: the recorded inventory is machine-samplable — a leading kill
+    indicator (vacuity) can be computed from records, keyed on the marker so a
+    legacy record is never mistaken for a vacuous new one."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = load_bug_module()
+
+    def _record(self, *, marked, equivalent):
+        marker = "closure_schema: 1\n" if marked else ""
+        return (
+            "---\n"
+            "status: FIXING\n"
+            f"{marker}"
+            "---\n\n"
+            "## Repository closure inventory\n\n"
+            f"**Equivalent / convergent logic searched:** {equivalent}\n\n"
+            "**Relevant history inspected:** x\n\n"
+            "**Affected call sites:** y\n\n"
+            "**Reuse decision:** z\n\n"
+            "## Fix class\n"
+        )
+
+    def test_marker_keyed_vacuity_classification(self):
+        mod = self.mod
+        corpus = {
+            "legacy": self._record(marked=False, equivalent="none"),
+            "vacuous_new": self._record(marked=True, equivalent="none found"),
+            "protocol_new": self._record(
+                marked=True,
+                equivalent="grep `foo`; git log -S; not closable — assumption",
+            ),
+        }
+        # A sampler built only from exposed helpers.
+        def classify(text):
+            fields, _ = parse_frontmatter(text)
+            if not mod._is_closure_schema_record(fields):
+                return "legacy-exempt"
+            section = mod._section(text, "Repository closure inventory")
+            eq = mod._labeled_blocks(section).get(
+                "Equivalent / convergent logic searched", ""
+            )
+            return "vacuous" if mod._is_bare_negative(eq) else "protocol"
+
+        self.assertEqual(classify(corpus["legacy"]), "legacy-exempt")
+        self.assertEqual(classify(corpus["vacuous_new"]), "vacuous")
+        self.assertEqual(classify(corpus["protocol_new"]), "protocol")
+
+
+class Spec091SingleSourceEnumerationTests(unittest.TestCase):
+    """AC6: the ADR-0052 enumeration rule has one home; the closure guidance
+    cross-references it rather than restating a weaker variant."""
+
+    SKILL = REPO_ROOT / "skills" / "bug-fix" / "SKILL.md"
+
+    def test_enumeration_rule_lives_in_exactly_one_place(self):
+        text = self.SKILL.read_text()
+        # Distinctive phrases from the diagnose grounding block (ADR-0052).
+        self.assertEqual(text.count("returns the *complete* set"), 1)
+        self.assertEqual(text.count("One true example says nothing"), 1)
+
+    def test_closure_guidance_cross_references_rather_than_restates(self):
+        text = self.SKILL.read_text()
+        self.assertIn("same enumeration standard as", text)
+        self.assertIn("adr-0052", text.lower())
+
+
+class Spec091BugReviewPromptTests(unittest.TestCase):
+    """AC4: the bug-review prompt judges repository closure, not just the
+    local regression test."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        review_py = REPO_ROOT / "skills" / "independent-review" / "review.py"
+        spec = importlib.util.spec_from_file_location("review_091", review_py)
+        cls.review = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.review)
+
+    def test_prompt_checks_closure_reuse_history_and_disposition(self):
+        prompt = self.review.build_bug_review_prompt(
+            Path("docs/bugs/001-x.md"), ["skills/bug-fix/bug.py"]
+        )
+        lowered = prompt.lower()
+        self.assertIn("repository closure", lowered)
+        self.assertIn("convergent", lowered)
+        self.assertIn("adr-0052", lowered)
+        self.assertIn("call site", lowered)
+        self.assertIn("none found", lowered)
+
+
 if __name__ == "__main__":
     unittest.main()
