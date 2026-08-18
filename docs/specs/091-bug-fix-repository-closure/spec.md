@@ -22,9 +22,13 @@ semantic indexing a prerequisite.
 
 ## Assumptions
 
-- The existing bug parser can add versioned sections without invalidating bugs
-  001-010. This must be proved with compatibility fixtures before the gate is
-  enabled.
+- The existing bug parser can add versioned sections without invalidating any
+  record created before this schema. Compatibility is keyed to a schema marker
+  (a record without the closure sections is "legacy"), **not** to an enumerated
+  record range — the legacy corpus keeps growing while this spec sits DRAFT
+  (001–033 at time of writing). This must be proved with compatibility fixtures
+  covering both a marker-bearing new record and a legacy record before the gate
+  is enabled.
 
 ## Decomposition
 

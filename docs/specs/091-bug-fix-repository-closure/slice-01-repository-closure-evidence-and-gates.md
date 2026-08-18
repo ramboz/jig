@@ -25,7 +25,8 @@ durable, reviewable part of every newly created standard or gnarly bug fix.
 
 **DoR:**
 - ✅ ADR-0037 is accepted.
-- ✅ Existing bug 001-010 compatibility behavior is covered by fixtures.
+- ✅ Legacy (pre-schema) bug-record compatibility behavior is covered by
+  fixtures — keyed to the schema marker, not an enumerated record range.
 
 **Acceptance Criteria:**
 
@@ -43,6 +44,26 @@ durable, reviewable part of every newly created standard or gnarly bug fix.
    the local regression test.
 5. **The skill is tool-neutral.** Guidance prefers a configured semantic index
    but provides targeted search and git-history commands as the portable floor.
+6. **The equivalent-logic prompt is an effort-and-protocol standard, not a
+   completeness standard.** A record satisfies it by showing the search actually
+   run — which behavioural/contract terms were tried (more than one spelling),
+   what `git log`/`git blame` on the touched surface returned, which sibling
+   paths were inspected — and *may then* record the residual as an assumption
+   when the set is not closable by name search. Consistent with
+   [ADR-0052](../../decisions/adr-0052-grounding-enumeration-for-universal-claims.md),
+   that assumption disposition **is accepted** for the claim; what fails the
+   gate is a bare "none found" or an "assumption" with no executed protocol
+   behind it. Where the inventory makes a *closable* negative claim (call sites
+   of a known symbol), ADR-0052's enumeration rule governs unchanged and the
+   guidance **reuses** its existing wording
+   ([`SKILL.md` grounding section](../../../skills/bug-fix/SKILL.md)) rather
+   than restating a weaker variant — a drift test pins them to one source.
+   Tests must cover both: a protocol-bearing assumption answer **passes**, a
+   bare "none found" **fails**.
+7. **Vacuity is observable.** The recorded inventory is machine-samplable well
+   enough to classify an equivalent-logic answer as protocol-bearing versus
+   bare/boilerplate, so ADR-0037's leading kill indicator can be evaluated from
+   the records without waiting for a missed-defect signal.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
