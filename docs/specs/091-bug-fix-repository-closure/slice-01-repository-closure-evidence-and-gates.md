@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: []
 last_verified:
 # arch_review: true  # set to true when this slice changes module
@@ -7,6 +7,7 @@ last_verified:
 #                    # shaped concerns (triggers arch-review pass).
 # design_review: true  # set true when this slice ships UI gated by an external
 #                      # design-fidelity eval (attest-only; ADR-0014/0022).
+claimed_by: claude/spec-091-repository-closure
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -26,7 +27,8 @@ durable, reviewable part of every newly created standard or gnarly bug fix.
 **DoR:**
 - ✅ ADR-0037 is accepted.
 - ✅ Legacy (pre-schema) bug-record compatibility behavior is covered by
-  fixtures — keyed to the schema marker, not an enumerated record range.
+  fixtures — keyed to an explicit creation-time `closure_schema:` frontmatter
+  marker, not to section presence/absence and not to an enumerated record range.
 
 **Acceptance Criteria:**
 
@@ -35,8 +37,12 @@ durable, reviewable part of every newly created standard or gnarly bug fix.
    post-fix call-site disposition.
 2. **The fixing gate requires the pre-fix inventory.** New standard/gnarly
    records cannot transition from `ROOT_CAUSED` to `FIXING` until each prompt
-   has substantive evidence; legacy records follow an explicit compatibility
-   path.
+   has substantive evidence. "New" vs "legacy" is decided by an explicit
+   creation-time frontmatter marker (a `closure_schema:` field stamped by
+   `bug.py new`), **never** by section presence/absence — so a new record that
+   omits the closure headings still fires the gate (evasion-by-omission is not
+   exempt), while an unmarked pre-schema record follows the legacy compatibility
+   path and remains transitionable.
 3. **The reviewed gate requires closure.** Each affected call site is accounted
    for as changed, tested, or intentionally unchanged before `REVIEWED`.
 4. **Review judges repository closure.** The bug-review prompt checks reuse,
@@ -63,7 +69,9 @@ durable, reviewable part of every newly created standard or gnarly bug fix.
 7. **Vacuity is observable.** The recorded inventory is machine-samplable well
    enough to classify an equivalent-logic answer as protocol-bearing versus
    bare/boilerplate, so ADR-0037's leading kill indicator can be evaluated from
-   the records without waiting for a missed-defect signal.
+   the records without waiting for a missed-defect signal. The sampler keys on
+   the `closure_schema:` marker (AC2), not section presence, so it never
+   mistakes an unmarked legacy record for a vacuous new one.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
