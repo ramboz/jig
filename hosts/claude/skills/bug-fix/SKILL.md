@@ -148,14 +148,17 @@ silently relaxing the others.
 | `→ VERIFIED` | original reported repro re-run clean (gnarly/security only), attested in the record | — |
 | `→ DONE` | required review verdicts pass + a learning recorded in `docs/memory/learnings.md` | `JIG_REVIEW_EVIDENCE_GATE=0` |
 
-**The three distinctive gates** are the diagnose gate (the ≥2-hypotheses
-anti-anchoring rule), the fresh-main recheck after root cause, and the
-**red→green teeth**: the helper itself witnesses the test fail before the fix
-and pass after, so "there is a regression test" is machine-attested, not
-claimed. A bug already clean on fresh main becomes `RESOLVED_ON_MAIN`; a test
-already green without the fix does not capture the bug — the `→ FIXING` gate
-refuses it. A `tdd.py` env error (exit 2) **fails closed** (gate not
-satisfied), distinct from red.
+**The distinctive gates** are the diagnose gate (the ≥2-hypotheses
+anti-anchoring rule), the fresh-main recheck after root cause, the
+**red→green teeth**, and the **repository-closure gates** (ADR-0037). The
+red→green teeth: the helper itself witnesses the test fail before the fix and
+pass after, so "there is a regression test" is machine-attested, not claimed. A
+bug already clean on fresh main becomes `RESOLVED_ON_MAIN`; a test already green
+without the fix does not capture the bug — the `→ FIXING` gate refuses it. A
+`tdd.py` env error (exit 2) **fails closed** (gate not satisfied), distinct from
+red. The repository-closure gates make reuse/history discovery and call-site
+closure durable evidence (see the **Repository-closure inventory** subsection
+under step 2 below).
 
 `fix_class` (declared at `→ FIXING`) is one of `workaround` / `local_patch` /
 `structural_fix` / `guardrail` / `observability`.
