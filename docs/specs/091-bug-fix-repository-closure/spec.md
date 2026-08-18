@@ -8,9 +8,11 @@ use_cases: []
 
 # Spec 091: Bug-fix repository closure
 
-> **Status: recorded, not yet built.** [ADR-0037](../../decisions/adr-0037-bug-fix-repository-closure-evidence.md)
-> is Proposed and this spec is reserved; the bug-fix lifecycle changes below are
-> not implemented in the PR that introduced this record. Left DRAFT deliberately.
+> **Status: built.** [ADR-0037](../../decisions/adr-0037-bug-fix-repository-closure-evidence.md)
+> is Accepted (2026-08-18, after four frame-critique passes) and slice 091-01
+> shipped the lifecycle changes below: the `closure_schema:` marker, the
+> pre-fix inventory gate, the post-fix call-site closure gate, the bug-review
+> closure lens, and the tool-neutral skill guidance.
 
 ## Overview
 
