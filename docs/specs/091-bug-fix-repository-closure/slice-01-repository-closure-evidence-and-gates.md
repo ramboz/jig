@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified:
 # arch_review: true  # set to true when this slice changes module
@@ -79,7 +79,7 @@ durable, reviewable part of every newly created standard or gnarly bug fix.
       fixture. Edge cases listed in the slice are covered explicitly.
 - [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
+- [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
 - [ ] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
@@ -144,8 +144,63 @@ identified call site were considered.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+1. **Frame-critique reshaped the ADR and spec before any code.** ADR-0037 went
+   through four independent frame-critique passes (three `needs-changes`, then
+   `pass`); the spec slice through two (one `needs-changes`, then `pass`). The
+   substance of the decision (Option B) was preserved, but the *frame* was
+   materially strengthened: the parser gate was reframed as a deliberateness
+   gate (ADR-0011 lineage) with `bug-review` as the discovery-quality backstop
+   grounded in ADR-0052's burden shift; the compatibility marker was moved from
+   "section-absence = legacy" (self-defeating) to an explicit creation-time
+   `closure_schema:` frontmatter field; and paired leading kill indicators
+   (vacuity + effect) were added. The recorded verdicts live in
+   `docs/decisions/reviews/adr-0037-frame-critique.md` and
+   `reviews/slice-01-frame-critique.md`. This is the intended pre-implementation
+   value of the frame pass, not a deviation from plan — but it did enlarge the
+   spec's ACs (6 and 7 were added mid-critique).
+
+2. **Compatibility keyed to a stamped marker, not the enumerated range.** The
+   original spec said "bugs 001-010"; the corpus had already grown to 001-033.
+   Rekeyed to `closure_schema:` presence (additive — verified no record 001-033
+   carries any schema field and `bug.py`'s template emitted none), so
+   legacy-by-omission is distinguishable from evasion-by-omission.
+
+3. **AC6 realised as an effort-and-protocol floor.** The parser rejects only a
+   *bare* negative verdict (`_is_bare_negative`); an honest "not closable —
+   assumption" WITH a recorded protocol passes. The completeness judgment lives
+   in `build_bug_review_prompt`, not the parser — honouring ADR-0037's explicit
+   "parser enforces presence, reviewer judges quality" split and avoiding the
+   bug-005 shape-gate trap.
+
+4. **AC7 satisfied via public helpers, not a new CLI.** "Machine-samplable"
+   was met by exposing `_is_closure_schema_record` / `_labeled_blocks` /
+   `_is_bare_negative` and demonstrating a marker-keyed vacuity/effect sampler
+   in `Spec091VacuitySamplingTests`. No `usage.py`-style sampler command was
+   shipped — the kill indicator can be computed from records with these helpers.
+
+5. **Reviewer findings folded back.** Compliance + craft both returned `pass`.
+   Their converged non-blocking nits were applied post-review: a comment noting
+   the REVIEWED gate is deliberately not tier-scoped (trivial records don't
+   persist past triage); the bare-negative floor widened to strip trailing
+   punctuation; and two robustness tests (decorated-verdict, inner-bold-label).
+
+6. **Reconciliation review corrected two sweep dispositions.** The first sweep
+   draft claimed `docs/specs/README.md` was already `updated` ("regenerated to
+   091-01 → DONE") — structurally impossible, since board regen is a post-DONE
+   close-out step and the board still read DRAFT at sweep time; corrected to
+   `deferred (close-out)`. It also marked `docs/refinement-todo.md` a blanket
+   `no-op` after checking only the leanness item, missing a now-stale
+   "ADR-0037 … Proposed, not built" cross-reference in the unlanded-work-defect
+   entry; corrected inline per the ADR-0010 live-prose norm and the row changed
+   to `updated`. Recording this because the failure mode generalises: a sweep
+   must not mark a not-yet-run close-out action as done, and a blanket `no-op`
+   on a doc means *the whole doc* was checked, not one item in it.
+
+7. **Plan adherence.** No drift from the single-vertical-slice shape. Host
+   packages regenerated (`bug.py` / `SKILL.md` / `review.py` ship to both Claude
+   and Codex hosts); drift check clean. The pre-existing flaky `plugin.json`
+   host-drift (bug 008 / issue #95) surfaced once during a suite run and is
+   unrelated to this change.
 
 ### Reconciliation sweep
 
@@ -155,13 +210,14 @@ whether coverage and rationales are honest.
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO: why this slice did not affect the project front door, or summarize the update._ |
-| `docs/specs/README.md` | `updated` | _TODO: regenerated by `workflow.py status-board`, or explain why deferred._ |
-| `docs/product-vision.md` | `no-op` | _TODO: checked for behavior / scope drift._ |
-| `docs/architecture.md` | `no-op` | _TODO: checked for module-boundary / public-contract drift._ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO: primer hygiene checked; note compression or template updates if any._ |
-| `docs/inbox.md` | `no-op` | _TODO: checked for items resolved by this slice._ |
-| `docs/refinement-todo.md` | `no-op` | _TODO: checked for resolved items or new deferred decisions._ |
-| `docs/memory/**` | `no-op` | _TODO: note memory-sync result or why nothing was worth capturing._ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO: use `updated` when the slice touched ADRs; otherwise mark checked._ |
-| Additional live prose / generated templates touched by this slice | `deferred` | _TODO: name owner or trigger when real cleanup remains; otherwise replace with `no-op`._ |
+| `README.md` | `no-op` | Root README is product-facing; the bug-fix closure gate is internal lifecycle behavior — no front-door change. |
+| `docs/specs/README.md` | `deferred (close-out)` | Status-board regen is a post-DONE close-out step; at sweep time the slice is REVIEWED and the board still reads DRAFT. Regenerated by `workflow.py status-board` after the final `RECONCILED → DONE` transition, not before. |
+| `docs/product-vision.md` | `no-op` | No scope/positioning change; this deepens an existing lifecycle gate, does not add a product surface. |
+| `docs/architecture.md` | `no-op` | No module-boundary or public-contract change; new helpers are private to `bug.py`, the gate reuses the existing `transition_bug` env-gate pattern. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `updated` | `CLAUDE.md` Active-specs line updated: 091 moved from "recorded, not built" to shipped, and the primer's stale "Active specs: none in-flight" corrected. `templates/CLAUDE.md.template` unaffected (scaffold source, not project state). |
+| `docs/inbox.md` | `no-op` | No parked item resolved by this slice. |
+| `docs/refinement-todo.md` | `updated` | The "leanness lens" item is a distinct concern, not resolved here. But the "how to encode a defect introduced by unlanded work" item cross-referenced ADR-0037 as "Proposed, not built" — now stale live prose since this slice built it; corrected inline to "Accepted; shipped via spec 091-01" (ADR-0010 live-prose norm). No new deferral introduced. |
+| `docs/memory/**` | `no-op` | `learnings.md` gets no new dead-end; the frame-critique reshape is captured in the deviation log + ADR, not a learning. `/jig:memory-sync` run at session close. |
+| `docs/decisions/README.md` / ADR index | `updated` | ADR-0037 flipped Proposed → Accepted and re-indexed (`adr.py index`); dependencies widened to include ADR-0011 and ADR-0052. |
+| `docs/bugs/**` (records + board) | `no-op` | No existing bug record edited; existing records 001-033 are legacy (unmarked) and remain transitionable by construction. The template change only affects records created after this lands. |
+| Additional live prose / generated templates touched by this slice | `updated` | `hosts/claude/**` and `hosts/codex/**` regenerated for `bug.py` / `SKILL.md` / `review.py`; drift check clean. |
