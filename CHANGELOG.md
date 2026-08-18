@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.13.0](https://github.com/ramboz/jig/compare/v2.12.0...v2.13.0) (2026-08-15)
+
+
+### Features
+
+* **spec-workflow:** first-class blockers — blocked_by annotation + board + lint (spec 111, ADR-0057) ([#195](https://github.com/ramboz/jig/issues/195)) ([88f7af7](https://github.com/ramboz/jig/commit/88f7af7eab013e07a84ae7db0db7bc2fa4dfd0ea))
+
+
+### Documentation
+
+* **specs:** close out spec 096-05 with genuine post-hoc review (closes spec 096) ([#206](https://github.com/ramboz/jig/issues/206)) ([0b3e15c](https://github.com/ramboz/jig/commit/0b3e15cd812b3422b01c1364518d1324474ed0a7))
+* **specs:** close out spec 107 lifecycle bookkeeping (merged via [#165](https://github.com/ramboz/jig/issues/165)) ([#204](https://github.com/ramboz/jig/issues/204)) ([0b3a0ab](https://github.com/ramboz/jig/commit/0b3a0ab55381757a58fa40c8c283cb2e4d859c98))
+
 ## [2.12.0](https://github.com/ramboz/jig/compare/v2.11.0...v2.12.0) (2026-08-12)
 
 
