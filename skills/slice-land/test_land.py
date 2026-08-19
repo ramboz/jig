@@ -1152,6 +1152,47 @@ class LocalMainSyncTests(unittest.TestCase):
         self.assertNotIn((["merge", "--ff-only", "origin/main"], self.main_root),
                          calls)
 
+    def test_untracked_files_do_not_block_local_main_sync(self):
+        # Regression: a main worktree carrying only UNTRACKED files (a stray
+        # `.codex/`, a generated `AGENTS.md`) must still fast-forward — untracked
+        # files never conflict with `git merge --ff-only`. The status check must
+        # therefore pass `--untracked-files=no`; without it the sync skips as
+        # "dirty" and local main is left behind origin/main forever.
+        from unittest.mock import patch
+
+        calls = []
+        caller_root = Path(self.tmpdir) / "feature"
+
+        def fake_git(args, cwd, dry_run=False):
+            calls.append((list(args), Path(cwd)))
+            if args[:2] == ["status", "--porcelain"]:
+                # Model real git: `-uno` hides untracked files, so a tree with
+                # ONLY untracked files reads clean; without the flag it reports
+                # them (`?? …`) and the buggy code treats the tree as dirty.
+                if "--untracked-files=no" in args:
+                    return True, ""
+                return True, "?? .codex/\n?? AGENTS.md"
+            if args[:3] == ["rev-parse", "--short", "HEAD"]:
+                return True, "abc1234"
+            return True, "ok"
+
+        with patch.object(_land, "_detect_branch", return_value="feat/081"), \
+             patch.object(_land, "_check_ff_viable", return_value=(True, "")), \
+             patch.object(_land, "_detect_main_worktree_root",
+                          return_value=self.main_root), \
+             patch.object(_land, "_detect_worktree_path",
+                          return_value=caller_root), \
+             patch.object(_land.Path, "cwd", return_value=caller_root), \
+             patch.object(_land, "_run_git_cmd", side_effect=fake_git):
+            report, code = _land.execute(self.spec, "081-01",
+                                         target=Path(self.tmpdir))
+
+        self.assertEqual(code, 0, report)
+        self.assertIn("local main synced", report)  # NOT "skipped: dirty"
+        self.assertNotIn("dirty worktree", report)
+        self.assertIn((["merge", "--ff-only", "origin/main"], self.main_root),
+                      calls)
+
     def test_missing_local_main_reports_skipped_without_mutation(self):
         from unittest.mock import patch
 

@@ -1147,7 +1147,15 @@ def _sync_local_main_worktree(root: Path | None,
         )
         return f"local main sync skipped: {reason}"
 
-    ok, output = _run_git_cmd(["status", "--porcelain"], root, dry_run=False)
+    # Only *tracked*-tree changes block a fast-forward — `--untracked-files=no`
+    # excludes untracked files (`?? …`), which a `git merge --ff-only` does not
+    # conflict with. Without this flag a main worktree carrying stray untracked
+    # files (a `.codex/`, an editor scratch file, a generated `AGENTS.md`) reads
+    # as "dirty" and the local sync is skipped forever even though the ff is
+    # perfectly safe — the exact "local main left behind origin/main" symptom.
+    ok, output = _run_git_cmd(
+        ["status", "--porcelain", "--untracked-files=no"], root, dry_run=False,
+    )
     if not ok:
         reason = output or "status check failed"
         return f"local main sync skipped: {reason}"
