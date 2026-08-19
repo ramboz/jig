@@ -88,40 +88,47 @@ for, what your repo needs, and your first 30 minutes.
 
 ### Install
 
-**Claude plugin**
+There are two ways to add jig, and **installing it as a plugin is the
+recommended default.** As a plugin, jig's machinery stays in the plugin and out
+of your repo, so your project stays lean and every project you install it into
+tracks the same jig version automatically.
+
+Reach for the **scaffold** instead only when you want jig to live *inside* your
+project — copied in as editable files you own and can customize, with no plugin
+dependency. It's the self-contained option for teams that want to pin, fork, or
+tailor jig's machinery to their repo.
+
+Pick the recipe for your host (Claude Code or Codex) below.
+See [ADR-0041](docs/decisions/adr-0041-scaffold-defaults-to-plugin-mode.md) for
+the full rationale.
+
+**Claude plugin** *(recommended)*
 
 ```text
 /plugin marketplace add ramboz/jig
 /plugin install jig@jig
 ```
 
-**Claude scaffold**
-
-```bash
-git clone https://github.com/ramboz/jig.git
-python3 jig/hosts/claude/skills/scaffold-init/scaffold.py --in-repo <your-project>
-```
-
-**Codex plugin**
+**Codex plugin** *(recommended)*
 
 ```bash
 codex plugin marketplace add ramboz/jig
 codex plugin add jig@jig
 ```
 
-**Codex scaffold**
+**Claude scaffold** — copy jig into your project
+
+```bash
+git clone https://github.com/ramboz/jig.git
+python3 jig/hosts/claude/skills/scaffold-init/scaffold.py --in-repo <your-project>
+```
+
+**Codex scaffold** — copy jig into your project
 
 ```bash
 git clone https://github.com/ramboz/jig.git
 python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex --in-repo <your-project>
 ```
-
-> **Which pair do I want?** The two **scaffold** recipes are self-contained —
-> they copy jig's machinery into your project, so it works with no plugin
-> installed. The two **plugin** recipes leave the machinery
-> in the plugin and keep your repo lean — that's the default when jig runs as an
-> installed plugin. See
-> [ADR-0041](docs/decisions/adr-0041-scaffold-defaults-to-plugin-mode.md).
 
 ### Project setup
 
