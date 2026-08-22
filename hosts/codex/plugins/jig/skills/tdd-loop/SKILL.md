@@ -46,6 +46,23 @@ The skill:
 Stay in this loop one AC at a time. Do not write three tests and then three
 implementations — the loop's value is the tight feedback cycle.
 
+### When a test you did NOT just write goes red
+
+The Green step above is about the *new* failing test you wrote for this AC —
+making it pass is the work. A **pre-existing** test going red is the opposite
+signal: it is a guard reporting that your change touched something load-bearing.
+The reflex to "make it green" is wrong here, and an agent is very good at
+satisfying it — deleting the assertion, loosening the expectation, or marking
+the test skipped all turn the light green while removing the protection.
+
+So: **when a test you did not just write fails, do not fix the test — first
+suspect that your change broke what the test guards.** Only after you have ruled
+that out (the test encodes an intent that has genuinely, deliberately changed)
+may you touch the test, and then update its assertion *and its rationale*
+together so the next reader sees why. Never weaken, skip, `xfail`, or quarantine
+a pre-existing test to reach green. (This mirrors the standing rule for driving
+a PR to green — a red guard is work now, not an obstacle to route around.)
+
 ## Helper invocations
 
 Two subcommands cover the loop: `tdd.py detect` figures out which runner the
