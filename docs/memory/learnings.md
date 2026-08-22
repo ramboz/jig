@@ -1284,3 +1284,39 @@ survived the author's own read and was caught only because the reviewer opened
 the tool's Inputs section instead of trusting its tagline — a tool's
 self-description ("cross-artifact consistency") is marketing, not a scope
 contract.
+
+## External "context rot / agentic reviewer" articles (2026-08) — jig was already ahead; check the board before adopting
+
+Reviewed four widely-shared pieces for adoptable ideas (context-rot,
+six-agent reviewer war-story, luismori's "good agentic code reviewer",
+"stop agents improving away features"). Net: **jig already embodies their
+load-bearing principles**, and two candidate "gaps" turned out to be already
+shipped — so the real lesson is about diligence, not the articles.
+
+- **"Delegate investigation to subagents" (context-rot piece) = jig's
+  thin-orchestrator** (specs 055/057), which jig backs with measurement the
+  article only asserts. **"Separate deterministic actions from reasoning / let
+  code own the process" (six-agent piece) = jig's whole gated-lifecycle spine.**
+  Neither yielded a change.
+- **Independent cross-validation worth keeping:** SWE-PRBench (2026-03) found
+  frontier models get *worse* at review when given more context ("attention
+  dilution"). That is a *quality* argument for lean context that independently
+  confirms jig's *cost* argument for the thin orchestrator (spec 055). Two
+  different premises, same conclusion — cite it when the thin-orchestrator
+  discipline is questioned.
+- **The trap: the CLAUDE.md hot cache was stale and nearly caused a duplicate
+  spec.** The primer's Active-work line claimed "no specs in-flight" at 088/091,
+  but `docs/specs/` was at **111**. A candidate idea ("add an over-engineering /
+  simplicity review lens") was *already shipped* as **spec 109** (leanness lens,
+  folded into arch + reconciliation passes), and "evidence-grounded findings"
+  was ~80% already in `review.py` (`_OUTPUT_FORMAT` file:line citation;
+  confidence-tag in `_practices_check_block`; cite-or-stay-silent in the
+  test-quality block). Both were caught only by enumerating `docs/specs/` and
+  grepping `review.py` **before** authoring, not by trusting the primer.
+  **Gotcha:** treat the hot-cache Active-work/spec-range claims as a lagging
+  index — verify current spec state against `docs/specs/` (or `/jig:orient`)
+  before proposing new work, especially when the primer looks under-maintained.
+  Residuals that survived diligence were parked in `docs/inbox.md`
+  (`review/evidence-grounding/universalize`, `spec-workflow/preservation-anchors`)
+  and one confirmed gap was fixed inline (the tdd-loop "do not fix a pre-existing
+  red test" guidance).
