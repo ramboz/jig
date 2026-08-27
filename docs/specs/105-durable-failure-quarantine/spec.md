@@ -30,6 +30,25 @@ sections and releases the claim, a **release-requires-new-evidence** rule, and t
 jig bug to `QUARANTINED` without jig ever re-deriving an oracle score (ADR-0022
 boundary).
 
+### Framing: this is recovery, not prevention
+
+Quarantine is not another *prevention* gate trying to drive thrash to zero — it
+is a **recovery** mechanism that makes the failure (a fix that won't converge)
+*cheap and bounded* instead of trying to make it impossible (EngTip #31,
+"Optimizing for Recovery, Not Prevention"). The bad outcome is expected to happen;
+the design goal is that when it does, the loop stops, the claim releases, and a
+durable, greppable record explains why — so a human (or new evidence) can recover
+cheaply rather than the system burning budget avoiding the outcome.
+
+That framing carries a caveat worth capturing before implementation: **a recovery
+path that is never exercised atrophies.** A quarantine queue and a release-on-new-
+evidence path that no run ever hits are as untrustworthy as an unused runbook.
+Slice 105-01 should therefore treat "exercise the recovery path" as first-class —
+the red→green tests must cover not just *entering* `QUARANTINED` but *releasing*
+from it (new-evidence accepted / stale-evidence refused), and the kill criterion
+"never read by any consumer → shelve it" (ADR-0050) is the standing check that the
+mechanism is actually used, not just present.
+
 ## Assumptions
 
 - `skills/bug-fix/bug.py` exposes `VALID_BUG_STATUSES`,
