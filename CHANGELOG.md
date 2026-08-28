@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.14.0](https://github.com/ramboz/jig/compare/v2.13.0...v2.14.0) (2026-08-28)
+
+
+### Features
+
+* **112:** ref-aware lifecycle checks + claim-based work reservation (ADR-0058) ([#213](https://github.com/ramboz/jig/issues/213)) ([b740aac](https://github.com/ramboz/jig/commit/b740aacab439271c4bf6e511f22dd698441e389d))
+* **bug-fix:** repository-closure evidence and gates (spec 091, ADR-0037) ([#207](https://github.com/ramboz/jig/issues/207)) ([c75e197](https://github.com/ramboz/jig/commit/c75e197db6432475e82a89a793fd4eb98a7ccb22))
+
+
+### Bug Fixes
+
+* **slice-land:** untracked files no longer block local-main ff sync ([87fd3f7](https://github.com/ramboz/jig/commit/87fd3f7d003f1701b35dfe86a4618bc4666b05f5))
+
+
+### Documentation
+
+* **memory:** reconcile hot cache + adopt agentic-review article findings ([#210](https://github.com/ramboz/jig/issues/210)) ([ac39df4](https://github.com/ramboz/jig/commit/ac39df4d91383c387810c1426667348c54b18824))
+* **readme:** clarify plugin-vs-scaffold install choice ([#209](https://github.com/ramboz/jig/issues/209)) ([07107cc](https://github.com/ramboz/jig/commit/07107cc6ab90fb504274159674fb9738235c311a))
+
 ## [2.13.0](https://github.com/ramboz/jig/compare/v2.12.0...v2.13.0) (2026-08-15)
 
 
