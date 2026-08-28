@@ -153,19 +153,31 @@ def _find_adr_file(git, repo_root: Path, ref: str,
     return ""
 
 
-def _slice_state(git, repo_root: Path, ref: str,
-                  spec_num: str, slice_num: str) -> Optional[str]:
+def _slice_content(git, repo_root: Path, ref: str,
+                   spec_num: str, slice_num: str) -> tuple:
+    """Locate and read the raw section/file text for a slice identifier ON
+    `ref` — the shared read `_slice_state` (status only) and `_slice_claim`
+    (status + `claimed_by`, spec 112-05 / ADR-0058 Class B) both derive
+    from, so the two readers can never disagree about WHICH bytes they are
+    looking at.
+
+    Returns `(kind, content)`:
+      - `("unknown", None)`  — `ref`/git unreadable.
+      - `("absent", None)`   — `ref` readable, identifier not present on it.
+      - `("ok", content)`    — the slice file's, or the embedded `## Slice
+                               ...` section's, text as committed on `ref`.
+    """
     specs_rel = _specs_relpath(repo_root)
     spec_dir = _find_spec_dir(git, repo_root, ref, spec_num)
     if spec_dir is None:
-        return None  # ref/repo unreadable — unknown, not absent
+        return "unknown", None  # ref/repo unreadable — unknown, not absent
     if not spec_dir:
-        return ABSENT
+        return "absent", None
 
     spec_dir_rel = f"{specs_rel}/{spec_dir}"
     rc, files = _ls_tree(git, repo_root, ref, spec_dir_rel)
     if rc != 0:
-        return None
+        return "unknown", None
 
     slice_file = None
     for name in files:
@@ -177,20 +189,64 @@ def _slice_state(git, repo_root: Path, ref: str,
     if slice_file is not None:
         rc, content = _show(git, repo_root, ref, f"{spec_dir_rel}/{slice_file}")
         if rc != 0:
-            return None
-        status = status_marker_from_section(content)
-        return status or ABSENT
+            return "unknown", None
+        return "ok", content
 
     # Fall back to an embedded `## Slice NNN-MM ...` section in spec.md.
     rc, content = _show(git, repo_root, ref, f"{spec_dir_rel}/spec.md")
     if rc != 0:
-        return ABSENT  # no per-slice file AND no spec.md on this ref
+        return "absent", None  # no per-slice file AND no spec.md on this ref
     try:
         start, end, _label = find_slice_section(content, f"{spec_num}-{slice_num}")
     except SliceLookupError:
+        return "absent", None
+    return "ok", content[start:end]
+
+
+def _slice_state(git, repo_root: Path, ref: str,
+                  spec_num: str, slice_num: str) -> Optional[str]:
+    kind, content = _slice_content(git, repo_root, ref, spec_num, slice_num)
+    if kind == "unknown":
+        return None
+    if kind == "absent":
         return ABSENT
-    status = status_marker_from_section(content[start:end])
+    status = status_marker_from_section(content)
     return status or ABSENT
+
+
+def _frontmatter_fields_from_section(section: str) -> dict:
+    """Layout-aware frontmatter extraction — mirrors
+    `status_marker_from_section`'s dual-layout handling (a whole slice file
+    carries frontmatter at offset 0; an embedded `## Slice ...` section
+    carries it after the header line), but returns every field rather than
+    only `status` (needed for `claimed_by` — spec 112-05)."""
+    fm_fields, _ = parse_frontmatter(section)
+    if not fm_fields:
+        nl = section.find("\n")
+        if nl >= 0 and section.startswith("##"):
+            fm_fields, _ = parse_frontmatter(section[nl + 1:].lstrip("\n"))
+    return fm_fields
+
+
+def _slice_claim(git, repo_root: Path, ref: str,
+                 spec_num: str, slice_num: str) -> Optional[tuple]:
+    """Like `_slice_state`, but also reads the `claimed_by:` frontmatter
+    field (ADR-0058 Class B / spec 112-05) — `_slice_state` alone can only
+    answer "what state is it in", not "who holds it".
+
+    Returns `(status, claimed_by)` (`claimed_by` is `""` when absent),
+    `(ABSENT, "")` when `ref` is readable but the identifier is not present
+    on it, or `None` when `ref`/git could not be read."""
+    kind, content = _slice_content(git, repo_root, ref, spec_num, slice_num)
+    if kind == "unknown":
+        return None
+    if kind == "absent":
+        return ABSENT, ""
+    status = status_marker_from_section(content) or ABSENT
+    claimed_by = str(
+        _frontmatter_fields_from_section(content).get("claimed_by", "")
+    ).strip()
+    return status, claimed_by
 
 
 def _adr_state(git, repo_root: Path, ref: str, adr_num: str) -> Optional[str]:
@@ -519,4 +575,116 @@ def find_sibling_done(identifier: str, project_dir: Optional[Path] = None, *,
                 "not present on that ref — not treated as evidence-complete, "
                 "so not blocking"
             )
+    return None, warnings
+
+
+# ---------------------------------------------------------------------------
+# ADR-0058 Class B — sibling foreign-`IN_PROGRESS`-claim read (spec 112-05)
+# ---------------------------------------------------------------------------
+#
+# `_refuse_start_collision` (workflow.py, slice 051-04) already hard-blocks a
+# `→ IN_PROGRESS` transition when BOTH ends are `IN_PROGRESS` — but it only
+# ever reads `origin/main`. Class B (ADR-0058, item 3) *extends the read
+# scope* of that SAME block to every OTHER sibling/remote-tracking ref (a
+# same-machine worktree on a different branch, or a peer's pushed feature
+# branch never merged to `origin/main`) — it does NOT change *when* the halt
+# fires (still exactly `status == IN_PROGRESS` + a foreign `claimed_by`).
+#
+# This is a SECOND per-ref scan reusing the SAME enumeration/exclusion/
+# timeout-budget shape as `find_sibling_done` (Class C, above) — for a
+# DIFFERENT hit condition (a foreign `IN_PROGRESS` claim, not an
+# evidence-complete `DONE`), which is why it is a sibling function rather
+# than a parameterization of `find_sibling_done` itself: the two conditions
+# read different fields (`claimed_by` vs review-evidence files) and have
+# different "what counts as a hit" semantics. Per the refinement-todo
+# "unify the cross-ref guard family" trigger (now touched by THIS slice),
+# converging the READ here onto this shared module — rather than adding a
+# bespoke sibling scan inline in `workflow.py` — is the deliberate choice
+# that keeps the guard family at four divergent SITES (unchanged) without
+# adding a fifth divergent READ implementation; the full guard-preamble
+# unification itself remains the documented, deferred residual.
+
+SiblingClaim = namedtuple("SiblingClaim", ["ref", "claimed_by"])
+
+_IN_PROGRESS_STATE = "IN_PROGRESS"
+
+
+def find_sibling_in_progress_claim(identifier: str,
+                                   project_dir: Optional[Path] = None, *,
+                                   current_branch: Optional[str] = None,
+                                   exclude_refs=(), run=None) -> tuple:
+    """ADR-0058 Class B (spec 112-05): scan local + remote-tracking sibling
+    refs for `identifier` (a slice `NNN-MM` id — ADRs carry no claim) already
+    `IN_PROGRESS` under a foreign `claimed_by`.
+
+    EXCLUDES the same three things `find_sibling_done` does: the current
+    branch, its own remote-tracking ref on any remote, and every ref/short
+    name in `exclude_refs` (callers pass `{"origin/main"}` — that ref is
+    Class A/`_refuse_start_collision`'s own territory, already checked).
+
+    Returns `(hit, warnings)`:
+      - `hit` — `None`, or the FIRST `SiblingClaim(ref, claimed_by)` found
+        (scan order: local branches before remote-tracking, then
+        lexicographic short name — same determinism as `find_sibling_done`).
+      - `warnings` — human-readable strings for any ref whose read failed
+        (unreachable/timed out) or a scan-truncation notice. Ref-
+        ENUMERATION failure is SILENT (`(None, [])`) — the same "not a git
+        repo yet" convention `find_sibling_done` uses.
+
+    Never raises. Same `run` injection seam / default timeout-guarded
+    runner (`_timeout_git`) as `find_sibling_done`, and the SAME
+    `_SIBLING_SCAN_PER_CALL_TIMEOUT` / `_SIBLING_SCAN_TOTAL_BUDGET` budgets
+    (AC6 — a large/slow sibling-ref set must not hang the transition)."""
+    project_dir = Path(project_dir) if project_dir is not None else Path.cwd()
+    git = run if run is not None else _timeout_git
+
+    m = _SLICE_ID_RE.match(identifier.strip())
+    if not m:
+        return None, []  # not a slice id (e.g. an ADR) — no claim concept
+    spec_num, slice_num = m.group(1), m.group(2)
+
+    rc, refs = list_branch_refs(project_dir, run=git)
+    if rc != 0:
+        return None, []
+
+    exclude = {str(r) for r in exclude_refs}
+    candidates = []
+    for refname in refs:
+        short = _short_ref_name(refname)
+        if short == "HEAD" or short.endswith("/HEAD"):
+            continue
+        if current_branch and (
+            short == current_branch
+            or short.endswith("/" + current_branch)
+        ):
+            continue
+        if short in exclude or refname in exclude:
+            continue
+        candidates.append((short, refname))
+    candidates.sort(
+        key=lambda pair: (0 if pair[1].startswith("refs/heads/") else 1, pair[0])
+    )
+
+    warnings = []
+    checked = 0
+    started = time.monotonic()
+    for short, refname in candidates:
+        if time.monotonic() - started > _SIBLING_SCAN_TOTAL_BUDGET:
+            warnings.append(
+                "warning: sibling claim-scan stopped early (time budget "
+                f"exceeded) after checking {checked} ref(s) — some sibling "
+                "branches were not checked"
+            )
+            break
+        checked += 1
+        result = _slice_claim(git, project_dir, refname, spec_num, slice_num)
+        if result is None:
+            warnings.append(
+                f"warning: could not read sibling ref {short!r} "
+                "(unreachable or timed out) — skipped"
+            )
+            continue
+        status, claimed_by = result
+        if status == _IN_PROGRESS_STATE and claimed_by:
+            return SiblingClaim(short, claimed_by), warnings
     return None, warnings

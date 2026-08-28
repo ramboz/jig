@@ -38,9 +38,16 @@ from _common import (
 )
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
+from _common.claim_ref import (
+    create_local_claim,
+    push_claim,
+    release_local_claim,
+    release_remote_claim,
+)
 from _common.cross_ref_state import (
     ABSENT,  # noqa: F401 (re-export for callers/tests)
     find_sibling_done,
+    find_sibling_in_progress_claim,
     identifier_state_on_ref,
 )
 from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
@@ -1397,33 +1404,71 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # dedicated slice file (`loc.path` == spec.md ⇒ embedded slice, whose
         # origin copy is the spec, not this slice — skip, as before 051-04).
         #
-        # Only on the DEFAULT (local) path: with `--push`/`--pr`,
-        # `_reserve_claim_on_main` already fetches + reads the origin/main copy
-        # and refuses the same DONE / foreign-IN_PROGRESS collisions, so
-        # running this guard too would double-fetch for no gain.
+        # This ORIGIN/MAIN-reading call (`_refuse_start_collision`) runs on
+        # the DEFAULT (local) path ONLY: with `--push`/`--pr`,
+        # `_reserve_claim_on_main` already fetches + reads the origin/main
+        # copy and refuses the same DONE / foreign-IN_PROGRESS collisions
+        # there, so re-running that half too would double-fetch for no gain.
+        #
+        # NOT covered by that skip: the ADR-0058 Class B SIBLING/REMOTE scan
+        # `_refuse_start_collision` also carries (`find_sibling_in_progress_
+        # claim`, spec 112-05). `_reserve_claim_on_main` reads `origin/main`
+        # ONLY, so a foreign `IN_PROGRESS` claim visible solely on a sibling
+        # or remote-tracking ref would otherwise be silently uncovered on
+        # the `--push`/`--pr` path — making the flag that PUBLISHES a claim
+        # more widely (ADR-0045's encouraged usage) enforce it WEAKER than
+        # the default path, for the same-machine sibling case. So that half
+        # is wired SEPARATELY on `--push`/`--pr` below, via a direct call to
+        # `_refuse_sibling_in_progress_claim` — at THIS SAME POINT in the
+        # function (not down by `_reserve_claim_on_main`), so a confirmed
+        # collision aborts BEFORE the CAS-ref reservation below ever
+        # attempts a network write (compliance-review finding, spec 112-05).
         #
         # ADR-0045 widened the enclosing claim block to every working state, but
         # this guard stays IN_PROGRESS-only: it is a START-of-building check,
         # and running it on every transition would put a `git fetch` on the hot
         # path of routine lifecycle moves.
+        if new_status == IN_PROGRESS_STATUS and loc.path.name != "spec.md":
+            if not (push or pr_mode):
+                try:
+                    start_rel_path = loc.path.resolve().relative_to(
+                        claim_project_dir).as_posix()
+                except ValueError:
+                    # Unexpected layout (slice outside the resolved project
+                    # root): degrade to a loud warning rather than a silent
+                    # skip, per AC5 ("read failures degrade to a warning,
+                    # never a false block").
+                    start_rel_path = None
+                    sys.stderr.write(
+                        "warning: start-collision check skipped: could not "
+                        f"locate {loc.path} under project root "
+                        f"{claim_project_dir}\n")
+                if start_rel_path is not None:
+                    _refuse_start_collision(
+                        claim_project_dir, start_rel_path, claim_identifier,
+                        loc.label,
+                        already_warned=existing_claim if foreign else "")
+            else:
+                _refuse_sibling_in_progress_claim(
+                    claim_project_dir, claim_identifier, loc.label)
+
+        # ADR-0058 Class B (spec 112-05): reserve the refs/claims/<N> CAS
+        # ref on entering IN_PROGRESS as a NEW claim. UNCONDITIONAL on
+        # `push`/`pr_mode` (unlike `_refuse_start_collision` above, which
+        # only runs on the default local path): the local ref-CAS is a pure
+        # local git call (no network — spike 112-04 A2: linked worktrees
+        # share the ref store), so it always fires; the cross-machine push
+        # happens only under --push/--pr, matching `_reserve_claim_on_main`'s
+        # convention. Excludes the idempotent re-entry case (already our own
+        # IN_PROGRESS claim) — re-running the same transition must not read
+        # its own ref as a collision.
         if (new_status == IN_PROGRESS_STATUS
-                and loc.path.name != "spec.md" and not (push or pr_mode)):
-            try:
-                start_rel_path = loc.path.resolve().relative_to(
-                    claim_project_dir).as_posix()
-            except ValueError:
-                # Unexpected layout (slice outside the resolved project root):
-                # degrade to a loud warning rather than a silent skip, per AC5
-                # ("read failures degrade to a warning, never a false block").
-                start_rel_path = None
-                sys.stderr.write(
-                    "warning: start-collision check skipped: could not locate "
-                    f"{loc.path} under project root {claim_project_dir}\n")
-            if start_rel_path is not None:
-                _refuse_start_collision(
-                    claim_project_dir, start_rel_path, claim_identifier,
-                    loc.label,
-                    already_warned=existing_claim if foreign else "")
+                and not (current_status == IN_PROGRESS_STATUS
+                        and existing_claim == claim_identifier)):
+            m_cas = re.match(r"^(\d{3}-\d{2})", loc.label.strip())
+            if m_cas:
+                _reserve_claim_ref(claim_project_dir, m_cas.group(1),
+                                   loc.label, push=push, pr_mode=pr_mode)
 
     # Pre-flight: DONE transition validates `dependencies:` from frontmatter.
     if new_status == "DONE" and fm_fields.get("dependencies"):
@@ -1515,11 +1560,36 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
             claim_project_dir = _project_root_for_spec(spec_md)
             rel_path = loc.path.resolve().relative_to(
                 claim_project_dir).as_posix()
+            # ADR-0058 Class B (spec 112-05, compliance-review fix): the
+            # sibling/remote IN_PROGRESS halt for --push/--pr is already run
+            # ABOVE (alongside `_refuse_start_collision`'s local-path call,
+            # at the same point in the function, before the CAS-ref reserve
+            # step) — NOT re-run here, so a single transition never scans
+            # sibling refs twice. `_reserve_claim_on_main` below still only
+            # ever reads `origin/main`; the sibling/remote coverage for this
+            # path comes entirely from that earlier call.
             _reserve_claim_on_main(
                 claim_project_dir, rel_path, claim_identifier, loc.label,
                 pr_mode=pr_mode, new_status=new_status,
                 already_warned=existing_claim if foreign else "",
             )
+
+        # ADR-0058 Class B (spec 112-05): release the refs/claims/<N> CAS
+        # ref whenever the BUILD boundary closes — leaving IN_PROGRESS
+        # (forward to another working state, or a release point) or an
+        # explicit --release. Mirrors `claimed_by`'s own release semantics
+        # above. This is the ONLY liveness mechanism for the CAS ref (AC4 /
+        # ADR-0058 Assumption A3, resolved this slice): manual `--release`
+        # only, no TTL/heartbeat — kept lean, since a CAS ref alone cannot
+        # cheaply distinguish a live claim from a stale one anyway (see
+        # `_common.claim_ref`'s module docstring).
+        if release or (current_status == IN_PROGRESS_STATUS
+                      and new_status != IN_PROGRESS_STATUS):
+            m_release = re.match(r"^(\d{3}-\d{2})", loc.label.strip())
+            if m_release:
+                _release_claim_ref(_project_root_for_spec(spec_md),
+                                   m_release.group(1), push=push,
+                                   pr_mode=pr_mode)
     elif release or (new_status in _CLAIM_WORKING_STATUSES
                      and (push or pr_mode)):
         # Claims require a frontmatter slice; surface rather than silently
@@ -4742,6 +4812,75 @@ def _reserve_claim_on_main(project_dir: Path, rel_path: str,
         _run(["git", "worktree", "prune"], cwd=project_dir)
 
 
+# ---- ADR-0058 Class B: refs/claims/<N> CAS-ref reservation (spec 112-05) ---
+#
+# `claimed_by:` (ADR-0045) is the human-readable OWNER; these two helpers
+# manage the CAS ref that is the atomic MECHANISM behind it (spike 112-04's
+# resolved primitive — see `_common.claim_ref`). Best-effort by construction:
+# every outcome is a stdout/stderr signal, never a raise — the identity-based
+# hard block lives in `_refuse_start_collision` /
+# `find_sibling_in_progress_claim`, not here (see `_common.claim_ref`'s
+# module docstring for why a CAS-ref collision alone cannot safely block).
+
+def _reserve_claim_ref(project_dir: Path, slice_id: str, slice_label: str, *,
+                       push: bool = False, pr_mode: bool = False) -> None:
+    """Create the local refs/claims/<slice_id> CAS ref (spike 112-04's local
+    CAS — AC1), and, under --push/--pr, best-effort push it for
+    cross-machine visibility (AC1's cross-machine half, AC5's remote race,
+    AC6's offline degrade). Never raises."""
+    won, _detail = create_local_claim(slice_id, project_dir)
+    if won is False:
+        sys.stderr.write(
+            f"warning: a local claim-reservation ref for {slice_label} "
+            f"(refs/claims/{slice_id}) already exists — another session on "
+            f"this machine may be claiming it right now (a simultaneous-"
+            f"create race), or it is a stale ref left by a crashed session "
+            f"(this module tracks no liveness — see AC4/A3). This does not "
+            f"block the transition; if the ref is stale, clear it with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+        )
+    # `won is True` (created) or `None` (git unusable here — the same
+    # best-effort degrade every other "not a git repo" path in this module
+    # takes) both proceed silently.
+
+    if not (push or pr_mode):
+        return
+
+    status, detail = push_claim(slice_id, project_dir)
+    if status == "pushed":
+        print(f"reserved refs/claims/{slice_id} on origin for {slice_label!r}")
+    elif status == "race":
+        sys.stderr.write(
+            f"warning: refs/claims/{slice_id} already exists on origin — "
+            f"another machine may be claiming {slice_label} right now "
+            f"(a simultaneous-create race). This does not block the "
+            f"transition; the local claim still applies.\n"
+        )
+    elif status == "fallback-pushed":
+        print(
+            f"refs/claims/{slice_id} was rejected by origin (the custom ref "
+            f"namespace is not permitted there); reserved via the "
+            f"{detail} branch fallback instead."
+        )
+    else:  # "fallback-failed" / "offline"
+        sys.stderr.write(
+            f"warning: could not reserve a cross-machine claim for "
+            f"{slice_label} on origin ({detail.strip() or 'unreachable'}) — "
+            f"this is best-effort; the local claim still applies.\n"
+        )
+
+
+def _release_claim_ref(project_dir: Path, slice_id: str, *,
+                       push: bool = False, pr_mode: bool = False) -> None:
+    """Best-effort release of the refs/claims/<slice_id> CAS ref, local and
+    (under --push/--pr) remote (AC4's liveness policy — manual release
+    only). Never raises."""
+    release_local_claim(slice_id, project_dir)
+    if push or pr_mode:
+        release_remote_claim(slice_id, project_dir)
+
+
 # ---- Slice 051-04: start-time claim-collision guard (→ IN_PROGRESS) --------
 #
 # Issue 81 (twice observed): a parallel worktree built an entire slice already
@@ -4799,6 +4938,74 @@ def _origin_slice_state(project_dir: Path, rel_path: str) -> tuple:
     return ("present", (status, claimed_by))
 
 
+def _refuse_sibling_in_progress_claim(project_dir: Path, identifier: str,
+                                      slice_label: str) -> None:
+    """ADR-0058 Class B (spec 112-05): hard-block a → IN_PROGRESS transition
+    when the slice's identifier is already `IN_PROGRESS` under a FOREIGN
+    claim on a sibling or remote-tracking ref — any branch other than
+    `origin/main` (which `_refuse_start_collision`'s own read covers on the
+    default path, and `_reserve_claim_on_main` covers under --push/--pr).
+
+    Extracted as a STANDALONE function (compliance-review finding, spec
+    112-05) so this SAME identity-based halt runs on BOTH the default path
+    (via `_refuse_start_collision`, which delegates here) and the
+    `--push`/`--pr` path (see `transition`'s claim-reservation dispatch,
+    which calls this directly alongside `_reserve_claim_on_main`).
+    `_reserve_claim_on_main` reads `origin/main` ONLY — without this
+    separate call, opting into `--push`/`--pr` (the ADR-0045-encouraged way
+    to make a claim visible to parallel worktrees) would silently DROP the
+    sibling/remote hard block down to a non-blocking CAS-ref warning, which
+    is backwards: publishing a claim more widely must never make the guard
+    weaker.
+
+    Shares `_refuse_start_collision`'s bypass surface
+    (`JIG_START_COLLISION_GATE`) — one gate for the whole start-collision
+    guard family, not a second name to remember. Emits its own
+    `emit_gate_bypass` audit event when the gate is off, so the `--push`
+    call site (which has no other gate check of its own) still leaves a
+    trail.
+
+    Deliberately does NOT change WHEN the halt fires — still exactly
+    `status == IN_PROGRESS` plus a foreign `claimed_by`
+    (`_common.cross_ref_state.find_sibling_in_progress_claim`'s hit
+    condition). A foreign claim on a sibling in any OTHER working state
+    (REVIEWED / RECONCILED / READY_FOR_REVIEW) is never a hit here —
+    ADR-0045's warn-and-transfer for those states is unchanged, preserved
+    by construction rather than by a second check.
+
+    Raises `WorkflowError` (CLI exit 2) on a confirmed sibling collision.
+    Best-effort otherwise: an unreachable/timed-out sibling ref degrades to
+    a non-blocking stderr warning (AC5/AC6), never a false block. No-op
+    when the gate is bypassed.
+    """
+    if not env_gate_enabled(START_COLLISION_GATE_ENV):
+        emit_gate_bypass(project_dir, "start-collision", START_COLLISION_GATE_ENV,
+                         spec_ref=read_spec_ref(project_dir))
+        return
+
+    m = re.match(r"^(\d{3}-\d{2})", slice_label.strip())
+    if not m:
+        return  # not a `NNN-MM`-shaped label (e.g. a legacy free-form title)
+    slice_id = m.group(1)
+    sibling_hit, sibling_warnings = find_sibling_in_progress_claim(
+        slice_id, project_dir, current_branch=_current_branch(project_dir),
+        exclude_refs={"origin/main"},
+    )
+    for warning in sibling_warnings:
+        sys.stderr.write(warning.rstrip() + "\n")
+    if sibling_hit is not None and sibling_hit.claimed_by != identifier:
+        raise WorkflowError(
+            f"slice {slice_label} is claimed by "
+            f"{sibling_hit.claimed_by!r} on sibling ref "
+            f"{sibling_hit.ref!r} (status IN_PROGRESS) — another "
+            f"session may be building it right now. Have the owner "
+            f"release it, or force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+            f"To override this guard, set {START_COLLISION_GATE_ENV}=0."
+        )
+
+
 def _refuse_start_collision(project_dir: Path, rel_path: str,
                             identifier: str, slice_label: str,
                             already_warned: str = "") -> None:
@@ -4815,6 +5022,17 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
     slice). `already_warned` carries the identifier the caller's on-disk warning
     has just named, so a single transition never prints two near-identical
     warnings about the same holder.
+
+    ADR-0058 Class B (spec 112-05): ALSO hard-blocks on a foreign
+    `IN_PROGRESS` claim visible on a SIBLING or remote-tracking ref (any
+    branch other than `origin/main`, which the check above already covers)
+    — extending this SAME block's READ SCOPE, not its firing condition
+    (still exactly both-ends-`IN_PROGRESS`). See
+    `_refuse_sibling_in_progress_claim` — that check is a SEPARATE function
+    (not inlined here) so the SAME sibling/remote halt can also run on the
+    `--push`/`--pr` path, which this function is not called on (see
+    `transition`'s dispatch; `_reserve_claim_on_main` covers only
+    `origin/main` there, never the sibling/remote case).
     """
     if not env_gate_enabled(START_COLLISION_GATE_ENV):
         # Deliberateness override honored — leave a content-free audit trail
@@ -4822,6 +5040,12 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
         emit_gate_bypass(project_dir, "start-collision", START_COLLISION_GATE_ENV,
                          spec_ref=read_spec_ref(project_dir))
         return
+
+    # ADR-0058 Class B (spec 112-05): the gate above already confirmed
+    # enabled, so this delegates straight to the sibling/remote scan — see
+    # `_refuse_sibling_in_progress_claim`'s docstring for why it is a
+    # standalone function rather than inlined here.
+    _refuse_sibling_in_progress_claim(project_dir, identifier, slice_label)
 
     kind, payload = _origin_slice_state(project_dir, rel_path)
     if kind in ("no-origin", "absent"):

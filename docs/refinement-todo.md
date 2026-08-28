@@ -393,3 +393,14 @@ user-visible drift between their refusal messages/bypass surfaces — extract a 
 guard-preamble + converge the origin/sibling read onto `cross_ref_state`, converge the
 re-open bypass, and tighten the branch-exclusion + ADR-evidence keying then, with tests
 pinning every guard's behavior first.
+**Status — trigger FIRED (spec 112-05), read-half done, preamble-half re-deferred.**
+112-05 added Class B: it touched `_refuse_start_collision` (extending its read scope to
+sibling/remote refs, then extracting `_refuse_sibling_in_progress_claim` so the halt fires
+on both the default and `--push`/`--pr` paths). Per the trigger it converged the sibling
+*read* onto `cross_ref_state`, but the shared-guard-preamble / bypass extraction across all
+sites was consciously re-deferred (bundling it into a slice already extending the claim
+boundary would be scope creep). The obligation stands for the next guard-touching slice.
+**Related residual (rule-of-three, ADR-0002):** `cross_ref_state.py` now has TWO
+near-duplicate sibling-scan loops (`find_sibling_done`, `find_sibling_in_progress_claim`)
+differing only in the per-ref hit predicate — extract a `_scan_sibling_refs(...)` skeleton
+taking a predicate at the THIRD scan consumer.

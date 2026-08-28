@@ -10352,5 +10352,453 @@ class SiblingDoneGuardTests(unittest.TestCase):
         self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
 
 
+from _common.cross_ref_state import SiblingClaim  # noqa: E402
+
+
+class ClassBSiblingClaimHaltTests(unittest.TestCase):
+    """AC2/AC3 (spec 112-05): `_refuse_start_collision`'s READ SCOPE is
+    extended to sibling/remote refs — WITHOUT changing when the both-ends-
+    `IN_PROGRESS` halt fires. Mocks `find_sibling_in_progress_claim` at the
+    `workflow` module boundary (mirrors `SiblingDoneGuardTests`' treatment
+    of `find_sibling_done`) — the primitive itself gets real git-fixture
+    coverage in `test_cross_ref_state.py`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-classb-sibling-")
+        self.root = Path(self.tmpdir)
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.slice = self.spec_dir / "slice-01-demo.md"
+        self.slice.write_text(
+            "---\nstatus: READY_FOR_IMPLEMENTATION\ndependencies: []\n"
+            "last_verified:\n---\n\n## Slice 200-01 — demo\n\n"
+            "**Goal:** placeholder.\n\n**DoD:**\n- [ ] placeholder.\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop("JIG_START_COLLISION_GATE", None)
+        os.environ.pop("JIG_CLAIM_ID", None)
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def _transition(self, **kw):
+        return _workflow.transition(self.spec, "200-01", "IN_PROGRESS", **kw)
+
+    def test_sibling_foreign_in_progress_claim_halts(self):
+        # AC2 — a foreign IN_PROGRESS claim visible ONLY on a sibling ref
+        # (never on origin/main) hard-blocks BEFORE the status flip.
+        hit = SiblingClaim("sibling-building", "peer-machine")
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "_origin_slice_state",
+                 return_value=("absent", "")), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])) as mocked:
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition()
+        mocked.assert_called_once()
+        args, kwargs = mocked.call_args
+        self.assertEqual(args[0], "200-01")
+        self.assertEqual(kwargs.get("exclude_refs"), {"origin/main"})
+        msg = str(ctx.exception)
+        self.assertIn("peer-machine", msg)
+        self.assertIn("sibling-building", msg)
+        self.assertIn("--release", msg)
+        self.assertEqual(self._fm()["status"], "READY_FOR_IMPLEMENTATION")
+
+    def test_no_sibling_hit_passes(self):
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "_origin_slice_state",
+                 return_value=("absent", "")), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(None, [])) as mocked:
+            self._transition()
+        mocked.assert_called_once()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_own_sibling_claim_is_not_a_collision(self):
+        # Idempotent: a sibling hit naming OUR OWN identifier is not foreign.
+        hit = SiblingClaim("sibling-building", "wt-me")
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "_origin_slice_state",
+                 return_value=("absent", "")), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_sibling_scan_warnings_are_surfaced(self):
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "_origin_slice_state",
+                 return_value=("absent", "")), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(None, ["warning: could not read sibling ref "
+                                      "'spike' (unreachable or timed out) — "
+                                      "skipped"])), \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertIn("unreachable or timed out", cap.getvalue())
+
+    def test_gate_bypass_skips_sibling_scan_entirely(self):
+        os.environ["JIG_START_COLLISION_GATE"] = "0"
+        hit = SiblingClaim("sibling-building", "peer-machine")
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])) as mocked:
+            self._transition()
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_reviewed_target_never_reaches_the_sibling_scan(self):
+        # AC3, the CRITICAL regression guard: `_refuse_start_collision` (and
+        # therefore the sibling scan) is IN_PROGRESS-only — a foreign claim
+        # in a non-build working state must stay warn-and-transfer, never a
+        # new halt, and must not even consult this primitive.
+        self.slice.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n"
+            "claimed_by: wt-other\n---\n\n## Slice 200-01 — demo\n\n"
+            "**Goal:** placeholder.\n\n**DoD:**\n- [ ] placeholder.\n")
+        hit = SiblingClaim("sibling-reviewing", "peer-reviewer")
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.dict(
+                os.environ, {"JIG_CLAIM_ID": "wt-me",
+                            "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])) as mocked, \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "REVIEWED")
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+        self.assertEqual(self._fm().get("claimed_by"), "wt-me")
+        self.assertIn("wt-other", cap.getvalue())
+
+    # ---- compliance-review fix: the sibling halt must ALSO fire under
+    # --push/--pr, not just the default path (`_reserve_claim_on_main`
+    # reads origin/main only — it never covers the sibling/remote case). ----
+
+    def test_sibling_foreign_in_progress_claim_halts_under_push(self):
+        # Before the fix, this silently degraded to a non-blocking CAS-ref
+        # warning under --push (the ADR-0045-encouraged way to publish a
+        # claim) — backwards, since --push must never make the guard
+        # WEAKER than the default local path.
+        hit = SiblingClaim("sibling-building", "peer-machine")
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])) as mocked, \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main") as reserve_mock:
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition(push=True)
+        mocked.assert_called_once()
+        args, kwargs = mocked.call_args
+        self.assertEqual(args[0], "200-01")
+        self.assertEqual(kwargs.get("exclude_refs"), {"origin/main"})
+        msg = str(ctx.exception)
+        self.assertIn("peer-machine", msg)
+        self.assertIn("sibling-building", msg)
+        # The collision must abort BEFORE any trunk reservation is attempted.
+        reserve_mock.assert_not_called()
+        self.assertEqual(self._fm()["status"], "READY_FOR_IMPLEMENTATION")
+
+    def test_sibling_foreign_in_progress_claim_halts_under_pr_mode(self):
+        hit = SiblingClaim("sibling-building", "peer-machine")
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])) as mocked, \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main") as reserve_mock:
+            with self.assertRaises(_workflow.WorkflowError):
+                self._transition(pr_mode=True)
+        mocked.assert_called_once()
+        reserve_mock.assert_not_called()
+        self.assertEqual(self._fm()["status"], "READY_FOR_IMPLEMENTATION")
+
+    def test_no_sibling_hit_proceeds_under_push(self):
+        # Converse of the halt case — push still reserves normally.
+        with unittest.mock.patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me"}), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(None, [])) as mocked, \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main") as reserve_mock:
+            self._transition(push=True)
+        mocked.assert_called_once()
+        reserve_mock.assert_called_once()
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_reviewed_target_under_push_never_reaches_the_sibling_scan(self):
+        # AC3 on the push path: a non-build working-state target must stay
+        # warn-and-transfer, never consult the sibling-halt at all — even
+        # under --push, mirroring the default-path regression guard above.
+        self.slice.write_text(
+            "---\nstatus: IN_PROGRESS\ndependencies: []\nlast_verified:\n"
+            "claimed_by: wt-other\n---\n\n## Slice 200-01 — demo\n\n"
+            "**Goal:** placeholder.\n\n**DoD:**\n- [ ] placeholder.\n")
+        hit = SiblingClaim("sibling-reviewing", "peer-reviewer")
+        with unittest.mock.patch.dict(
+                os.environ, {"JIG_CLAIM_ID": "wt-me",
+                            "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             unittest.mock.patch.object(
+                 _workflow, "find_sibling_in_progress_claim",
+                 return_value=(hit, [])) as mocked, \
+             unittest.mock.patch.object(_workflow, "_reserve_claim_on_main"):
+            _workflow.transition(self.spec, "200-01", "REVIEWED", push=True)
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+
+class ClassBClaimRefLifecycleTests(unittest.TestCase):
+    """AC1 (reserve) / AC4 (release) / AC5 (remote race) / AC6 (offline) —
+    the refs/claims/<N> CAS-ref reserve/release wiring, mocked at the
+    `workflow` module boundary (the CAS mechanics themselves get real
+    git-fixture coverage in `test_claim_ref.py`)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-classb-lifecycle-")
+        self.root = Path(self.tmpdir)
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.slice = self.spec_dir / "slice-01-demo.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop("JIG_START_COLLISION_GATE", None)
+        os.environ.pop("JIG_CROSSREF_GATE", None)
+        os.environ.pop("JIG_REVIEW_EVIDENCE_GATE", None)
+        os.environ.pop("JIG_CLAIM_ID", None)
+
+    def _write_slice(self, status, claimed_by=None):
+        fm = f"---\nstatus: {status}\ndependencies: []\nlast_verified:\n"
+        if claimed_by:
+            fm += f"claimed_by: {claimed_by}\n"
+        fm += ("---\n\n## Slice 200-01 — demo\n\n**Goal:** placeholder.\n\n"
+               "**DoD:**\n- [ ] placeholder.\n")
+        self.slice.write_text(fm)
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def _env(self, **extra):
+        env = {"JIG_CLAIM_ID": "wt-me",
+              "JIG_START_COLLISION_GATE": "0",
+              "JIG_CROSSREF_GATE": "0"}
+        env.update(extra)
+        return env
+
+    # ---- AC1: reserve on entering IN_PROGRESS ------------------------------
+
+    def test_entering_in_progress_creates_the_local_claim_ref(self):
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim",
+                 return_value=(True, "")) as mocked:
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        mocked.assert_called_once_with(
+            "200-01", _workflow._project_root_for_spec(self.spec))
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_lost_local_race_warns_and_still_proceeds(self):
+        # AC5 — a lost local CAS create (a live simultaneous racer, or a
+        # stale ref — this module cannot tell which) is a non-blocking
+        # signal, never a hard block.
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim",
+                 return_value=(False, "fatal: cannot lock ref: "
+                              "reference already exists")), \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertIn("already exists", cap.getvalue())
+        self.assertIn("--release", cap.getvalue())
+
+    def test_idempotent_reentry_does_not_attempt_a_new_local_claim(self):
+        # A repeat `→ IN_PROGRESS` by the SAME owner must not read its own
+        # ref as a collision.
+        self._write_slice("IN_PROGRESS", claimed_by="wt-me")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim") as mocked:
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        mocked.assert_not_called()
+
+    def test_unrelated_target_does_not_touch_the_claim_ref(self):
+        self._write_slice("DRAFT")
+        with unittest.mock.patch.dict(
+                os.environ, self._env(JIG_REVIEW_EVIDENCE_GATE="0")), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim") as mocked:
+            _workflow.transition(self.spec, "200-01", "READY_FOR_REVIEW")
+        mocked.assert_not_called()
+
+    # ---- AC1/AC5/AC6: --push reserves + degrades the REMOTE claim ---------
+
+    def test_push_reserves_the_remote_claim_ref(self):
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim", return_value=(True, "")), \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main"), \
+             unittest.mock.patch.object(
+                 _workflow, "push_claim",
+                 return_value=("pushed", "")) as mocked:
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                 push=True)
+        mocked.assert_called_once_with(
+            "200-01", _workflow._project_root_for_spec(self.spec))
+
+    def test_push_local_only_does_not_reserve_the_remote_claim_ref(self):
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim", return_value=(True, "")), \
+             unittest.mock.patch.object(_workflow, "push_claim") as mocked:
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        mocked.assert_not_called()
+
+    def test_push_remote_race_warns_and_proceeds(self):
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim", return_value=(True, "")), \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main"), \
+             unittest.mock.patch.object(
+                 _workflow, "push_claim",
+                 return_value=("race", "! [rejected] (stale info)")), \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                 push=True)
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertIn("already exists on origin", cap.getvalue())
+
+    def test_push_offline_degrades_without_blocking(self):
+        # AC6 — an unreachable origin for the CAS push never fails the
+        # transition; it is purely best-effort.
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim", return_value=(True, "")), \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main"), \
+             unittest.mock.patch.object(
+                 _workflow, "push_claim",
+                 return_value=("offline", "unable to access")), \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                 push=True)
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+        self.assertIn("best-effort", cap.getvalue())
+
+    def test_push_fallback_pushed_is_reported(self):
+        self._write_slice("READY_FOR_IMPLEMENTATION")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim", return_value=(True, "")), \
+             unittest.mock.patch.object(
+                 _workflow, "_reserve_claim_on_main"), \
+             unittest.mock.patch.object(
+                 _workflow, "push_claim",
+                 return_value=("fallback-pushed", "reserve/claim-200-01")):
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS",
+                                 push=True)
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    # ---- AC4: stale-claim release -------------------------------------------
+
+    def test_release_clears_the_local_claim_ref(self):
+        self._write_slice("IN_PROGRESS", claimed_by="wt-other")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "release_local_claim") as mocked:
+            _workflow.transition(self.spec, "200-01",
+                                 "READY_FOR_IMPLEMENTATION",
+                                 release=True, reason="crashed session")
+        mocked.assert_called_once_with(
+            "200-01", _workflow._project_root_for_spec(self.spec))
+
+    def test_release_with_push_also_clears_the_remote_claim_ref(self):
+        self._write_slice("IN_PROGRESS", claimed_by="wt-other")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(_workflow, "release_local_claim"), \
+             unittest.mock.patch.object(
+                 _workflow, "release_remote_claim") as mocked:
+            _workflow.transition(self.spec, "200-01",
+                                 "READY_FOR_IMPLEMENTATION",
+                                 release=True, reason="crashed session",
+                                 push=True)
+        mocked.assert_called_once_with(
+            "200-01", _workflow._project_root_for_spec(self.spec))
+
+    def test_release_without_push_does_not_touch_the_remote_claim_ref(self):
+        self._write_slice("IN_PROGRESS", claimed_by="wt-other")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(_workflow, "release_local_claim"), \
+             unittest.mock.patch.object(
+                 _workflow, "release_remote_claim") as mocked:
+            _workflow.transition(self.spec, "200-01",
+                                 "READY_FOR_IMPLEMENTATION",
+                                 release=True, reason="crashed session")
+        mocked.assert_not_called()
+
+    def test_leaving_in_progress_releases_the_claim_ref_without_release_flag(self):
+        # Build boundary closes on a forward move out of IN_PROGRESS too,
+        # not only on an explicit --release.
+        self._write_slice("IN_PROGRESS", claimed_by="wt-me")
+        with unittest.mock.patch.dict(
+                os.environ, self._env(JIG_REVIEW_EVIDENCE_GATE="0")), \
+             unittest.mock.patch.object(
+                 _workflow, "release_local_claim") as mocked:
+            _workflow.transition(self.spec, "200-01", "REVIEWED")
+        mocked.assert_called_once_with(
+            "200-01", _workflow._project_root_for_spec(self.spec))
+
+    def test_staying_in_progress_does_not_release_the_claim_ref(self):
+        self._write_slice("IN_PROGRESS", claimed_by="wt-me")
+        with unittest.mock.patch.dict(os.environ, self._env()), \
+             unittest.mock.patch.object(
+                 _workflow, "create_local_claim") as create_mock, \
+             unittest.mock.patch.object(
+                 _workflow, "release_local_claim") as release_mock:
+            create_mock.return_value = (True, "")
+            _workflow.transition(self.spec, "200-01", "IN_PROGRESS")
+        release_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

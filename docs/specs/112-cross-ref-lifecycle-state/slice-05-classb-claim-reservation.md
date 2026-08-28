@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [112-04, adr-0045, adr-0058]
-last_verified:
+last_verified: 2026-08-28
 arch_review: true
 frame_review: true
 ---
@@ -47,17 +47,17 @@ ADR-0045's sanctioned implementer→reviewer handoff.
 7. **Host-package parity** regenerated.
 
 **DoD:**
-- [ ] All ACs pass; full suite green.
-- [ ] Tests: both-ends-`IN_PROGRESS` cross-ref → halt; foreign `REVIEWED` claim →
+- [x] All ACs pass; full suite green.
+- [x] Tests: both-ends-`IN_PROGRESS` cross-ref → halt; foreign `REVIEWED` claim →
       warn-and-transfer (NOT halt); simultaneous create → one winner; stale claim
       → releasable; offline → local-only, no hang.
-- [ ] Each new test shown to fail when its feature is removed.
-- [ ] Reviewed by `reviewer` (compliance + craft; arch — touches ADR-0045's
+- [x] Each new test shown to fail when its feature is removed.
+- [x] Reviewed by `reviewer` (compliance + craft; arch — touches ADR-0045's
       claim boundary + adds a reservation lifecycle).
-- [ ] Implementation review passed.
-- [ ] Deviation log + Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were deferred.
+- [x] Implementation review passed.
+- [x] Deviation log + Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] `docs/refinement-todo.md` updated if any decisions were deferred.
 
 **Assumptions:**
 
@@ -71,8 +71,66 @@ transition command, without disturbing legitimate review handoffs.
 
 ### Deviation log (after reconciliation)
 
-_TBD at implementation._
+1. **Mechanism.** New `skills/_common/claim_ref.py`: `refs/claims/<N>` CAS — local
+   (`git update-ref <ref> HEAD ""` create-if-absent), remote
+   (`git push --force-with-lease=<ref>:` create), with `reservation.classify_push_failure`
+   routing a custom-namespace refusal to the ADR-0053 `reserve/<N>` branch fallback and
+   everything else to best-effort/offline. All network paths timeout-guarded (AC6). Local
+   reserve runs unconditionally on `→ IN_PROGRESS` entry; remote push only under
+   `--push`/`--pr`; release fires on any forward move out of `IN_PROGRESS`.
+2. **Cross-ref build-boundary halt (AC2) + the review-caught push-path gap.** The
+   Class-B halt extends ADR-0045's both-ends-`IN_PROGRESS` block to consult sibling/remote
+   refs via `find_sibling_in_progress_claim` (`cross_ref_state.py`). The *initial* wiring
+   put it inside `_refuse_start_collision`, which is skipped under `--push`/`--pr` — so the
+   compliance review caught that `--push` (the ADR-0045-encouraged publish flow) degraded
+   the hard halt to an advisory warning. **Fixed:** extracted `_refuse_sibling_in_progress_claim`
+   and called it at the same `transition()` point on BOTH the default and `--push`/`--pr`
+   paths (before any CAS/trunk write), keeping the origin/main check push-gated (no double
+   fetch). Craft + arch passed the default path; compliance caught the push gap — the
+   layered gate working.
+3. **AC3 / ADR-0045 preserved EXACTLY.** Hit condition is `status == IN_PROGRESS and
+   foreign claimed_by`; the whole block is gated on `new_status == IN_PROGRESS`, so a
+   foreign `REVIEWED`/`RECONCILED`/`READY_FOR_REVIEW` sibling claim is never a halt on
+   either path (warn-and-transfer). Pinned by `test_reviewed_target_never_reaches_the_sibling_scan`
+   + its `--push` sibling.
+4. **A3 (claim liveness) RESOLVED — manual `--release` only** (no TTL/heartbeat). A CAS
+   collision cannot distinguish a live racer from a stale ref (the ref carries no
+   owner/timestamp), so the CAS ref is kept **advisory** and the identity read
+   (`claimed_by`+`IN_PROGRESS` cross-ref) is the **sole hard block** — inheriting ADR-0045's
+   already-accepted `claimed_by`+`--release` stale-claim posture. This is ADR-0058's
+   Kill-criteria "demote the mutex to a nudge" path, taken deliberately; it resolves
+   ADR-0058's claim-liveness Open-question.
+5. **Guard-family unification trigger fired-partial** (05 touched `_refuse_start_collision`):
+   the sibling *read* converged onto `cross_ref_state`; the shared-preamble/bypass extraction
+   across all four sites was re-deferred (scope creep on a boundary-extending slice). Recorded
+   in `docs/refinement-todo.md`, along with the related rule-of-three residual (two
+   near-duplicate sibling-scan loops in `cross_ref_state.py`).
+6. **Accepted residuals (craft/arch nits, non-blocking).** `push_claim` same-SHA no-op
+   (two machines at the same HEAD both report a win — AC5 remote race not fully closed for
+   same-SHA racers; local CAS + identity read carry the load-bearing halt). Benign redundant
+   gate check on the default path (outer function returns early when disabled → no double
+   bypass-emit). Hot-path cost: a sibling scan on every `→ IN_PROGRESS` (bounded by the
+   scan budget; ADR-0058 sanctioned).
+7. **Primer hygiene (spec closes).** 112-05 closes spec 112 (all non-deferred slices DONE).
+   Added a compressed Key-terms bullet for ADR-0058 / spec 112 to `CLAUDE.md` and bumped the
+   "shipped through" marker to 112.
+8. **Pre-existing/environmental non-issues.** The known scout flake
+   (`test_codex_semantic_index_internal_overlay_fixture_activates_scout`); and `run_tests.py`'s
+   internal temp-dir drift probe transiently flags `plugin.json` — a standalone
+   `build_host_packages.py --check` is clean, so committed state is in sync.
 
 ### Reconciliation sweep
 
-_TBD at reconciliation._
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | Project front door untouched. |
+| `docs/specs/README.md` | `updated` | Regenerated by `workflow.py status-board`. |
+| `docs/product-vision.md` | `no-op` | No behavior/scope/principle drift. |
+| `docs/architecture.md` | `no-op` | `claim_ref.py` is a new `_common` file; roster is illustrative, not exhaustive, and the module/read split needs no boundary re-statement (added a Key-terms primer bullet instead). |
+| `CLAUDE.md` (primer) | `updated` | Spec 112 closes → added the ref-aware-lifecycle + claim-reservation Key-terms bullet; bumped "shipped through" to 112 (spec 025 compress-on-close). Not a shipped template, so no host regen. |
+| `AGENTS.md` / scaffold templates | `no-op` | Not present / not affected (the scaffold source is `templates/CLAUDE.md.template`, untouched — this mechanism is jig-internal). |
+| `docs/inbox.md` | `no-op` | Nothing resolved. |
+| `docs/refinement-todo.md` | `updated` | Recorded the guard-unification trigger fired-partial + the scan-loop rule-of-three residual + the A3 resolution context. |
+| `docs/memory/**` | `no-op` | Captured in the deviation log + refinement-todo + the CLAUDE.md primer. |
+| `docs/decisions/README.md` / ADR index | `no-op` | No ADR added/changed (ADR-0058 already Accepted + indexed). |
+| `hosts/**` (vendored copies) | `updated` | `claim_ref.py`, `cross_ref_state.py`, `workflow.py` regenerated; `--check` in sync. |

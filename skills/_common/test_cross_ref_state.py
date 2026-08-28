@@ -529,6 +529,169 @@ class FindSiblingDoneTests(unittest.TestCase):
         self.assertTrue(any("time budget" in w for w in warnings), warnings)
 
 
+class FindSiblingInProgressClaimTests(unittest.TestCase):
+    """`find_sibling_in_progress_claim` — ADR-0058 Class B (spec 112-05):
+    extends `_refuse_start_collision`'s READ SCOPE to sibling/remote refs
+    WITHOUT changing when the both-ends-`IN_PROGRESS` halt fires. Real git
+    fixtures, mirroring `FindSiblingDoneTests`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _run(["git", "init", "-q", "-b", "main", str(self.root)], self.root)
+        _run(["git", "config", "user.email", "t@t.t"], self.root)
+        _run(["git", "config", "user.name", "t"], self.root)
+        (self.root / "README.md").write_text("x\n")
+        _commit_all(self.root, "init")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write_slice_file(self, spec_dir_name, slice_num, status,
+                          claimed_by=None):
+        d = self.root / "docs" / "specs" / spec_dir_name
+        d.mkdir(parents=True, exist_ok=True)
+        claim_line = f"claimed_by: {claimed_by}\n" if claimed_by else ""
+        (d / f"slice-{slice_num}-thing.md").write_text(
+            f"---\nstatus: {status}\n{claim_line}---\n\n"
+            f"## Slice 112-{slice_num} — thing\n"
+        )
+
+    def test_sibling_foreign_in_progress_claim_is_the_hit(self):
+        # AC1/AC2 — a sibling branch (not the current one) with 112-01
+        # IN_PROGRESS under a foreign claim is returned as the hit.
+        _run(["git", "checkout", "-q", "-b", "sibling-building"], self.root)
+        self._write_slice_file("112-classb-claim-reservation", "01",
+                               "IN_PROGRESS", claimed_by="peer-machine")
+        _commit_all(self.root, "claim 112-01 on sibling-building")
+        _run(["git", "checkout", "-q", "main"], self.root)
+
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "112-01", self.root, current_branch="main")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.ref, "sibling-building")
+        self.assertEqual(hit.claimed_by, "peer-machine")
+        self.assertEqual(warnings, [])
+
+    def test_no_sibling_passes_silently(self):
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "112-01", self.root, current_branch="main")
+        self.assertIsNone(hit)
+        self.assertEqual(warnings, [])
+
+    def test_sibling_in_a_non_in_progress_working_state_is_not_a_hit(self):
+        # AC3 — ADR-0045 preserved EXACTLY: a foreign claim on a sibling in
+        # REVIEWED (a non-build working state) must NEVER be reported as a
+        # Class-B hit — only both-ends-IN_PROGRESS halts. This is the
+        # regression guard for the "do not re-block the sanctioned
+        # implementer -> reviewer handoff" constraint.
+        _run(["git", "checkout", "-q", "-b", "sibling-reviewing"], self.root)
+        self._write_slice_file("112-classb-claim-reservation", "01",
+                               "REVIEWED", claimed_by="reviewer-peer")
+        _commit_all(self.root, "reviewer holds 112-01 on sibling-reviewing")
+        _run(["git", "checkout", "-q", "main"], self.root)
+
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "112-01", self.root, current_branch="main")
+        self.assertIsNone(hit)
+
+    def test_current_branch_excluded(self):
+        # The identifier being IN_PROGRESS + claimed on the CURRENT branch
+        # itself must never self-match as a "sibling".
+        self._write_slice_file("112-classb-claim-reservation", "01",
+                               "IN_PROGRESS", claimed_by="wt-me")
+        _commit_all(self.root, "claim 112-01 on main (current branch)")
+
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "112-01", self.root, current_branch="main")
+        self.assertIsNone(hit)
+
+    def test_exclude_refs_skips_the_named_ref(self):
+        # `_refuse_start_collision` excludes `origin/main` — that's its OWN
+        # territory, already checked separately.
+        bare = self.root / "remote.git"
+        _run(["git", "init", "--bare", "-q", str(bare)], self.root)
+        work = self.root / "work"
+        _run(["git", "clone", "-q", str(bare), str(work)], self.root)
+        _run(["git", "config", "user.email", "t@t.t"], work)
+        _run(["git", "config", "user.name", "t"], work)
+        (work / "README.md").write_text("x\n")
+        d = work / "docs" / "specs" / "112-classb-claim-reservation"
+        d.mkdir(parents=True)
+        (d / "slice-01-thing.md").write_text(
+            "---\nstatus: IN_PROGRESS\nclaimed_by: peer\n---\n\n"
+            "## Slice 112-01 — thing\n"
+        )
+        _commit_all(work, "claim 112-01 on main")
+        _run(["git", "push", "-q", "origin", "main:main"], work)
+        _run(["git", "checkout", "-q", "-b", "feature"], work)
+        _run(["git", "branch", "-D", "main"], work)
+        _run(["git", "fetch", "-q", "origin"], work)
+
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "112-01", work, current_branch="feature",
+            exclude_refs={"origin/main"})
+        self.assertIsNone(hit)
+
+    def test_ref_enumeration_failure_is_silent(self):
+        with tempfile.TemporaryDirectory() as not_a_repo:
+            hit, warnings = C.find_sibling_in_progress_claim(
+                "112-01", Path(not_a_repo), current_branch="main")
+        self.assertIsNone(hit)
+        self.assertEqual(warnings, [])
+
+    def test_unreachable_ref_warns_and_scan_continues(self):
+        # AC5/AC6 — one unreadable sibling ref does not hide a LATER
+        # genuine hit, and degrades to a warning rather than raising.
+        def fake_run(argv, cwd):
+            if argv[:2] == ["git", "for-each-ref"]:
+                return (0,
+                        "refs/heads/sibling-timeout\n"
+                        "refs/heads/zzz-sibling-claimed\n", "")
+            if "sibling-timeout" in " ".join(argv):
+                return 1, "", "simulated timeout"
+            if argv[:2] == ["git", "ls-tree"] and argv[-1] == "docs/specs/":
+                return 0, "112-fake-slug\n", ""
+            if (argv[:2] == ["git", "ls-tree"]
+                    and argv[-1] == "docs/specs/112-fake-slug/"):
+                return 0, "slice-01-fake.md\n", ""
+            if argv[:2] == ["git", "show"]:
+                return (0,
+                       "---\nstatus: IN_PROGRESS\nclaimed_by: peer\n---\n",
+                       "")
+            return 1, "", "unexpected call: " + " ".join(argv)
+
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "112-01", Path("/nonexistent"), current_branch=None,
+            run=fake_run)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.ref, "zzz-sibling-claimed")
+        self.assertEqual(hit.claimed_by, "peer")
+        self.assertTrue(
+            any("sibling-timeout" in w for w in warnings), warnings)
+
+    def test_non_slice_identifier_returns_no_hit(self):
+        # ADRs carry no claim concept.
+        hit, warnings = C.find_sibling_in_progress_claim(
+            "0058", self.root, current_branch="main")
+        self.assertIsNone(hit)
+        self.assertEqual(warnings, [])
+
+    def test_total_time_budget_truncates_scan(self):
+        from unittest.mock import patch
+        _run(["git", "checkout", "-q", "-b", "sibling-a"], self.root)
+        self._write_slice_file("112-classb-claim-reservation", "01",
+                               "IN_PROGRESS", claimed_by="peer")
+        _commit_all(self.root, "claim on sibling-a")
+        _run(["git", "checkout", "-q", "main"], self.root)
+
+        with patch.object(C.time, "monotonic", side_effect=[0, 999999]):
+            hit, warnings = C.find_sibling_in_progress_claim(
+                "112-01", self.root, current_branch="main")
+        self.assertIsNone(hit)
+        self.assertTrue(any("time budget" in w for w in warnings), warnings)
+
+
 class CrossRefStateInjectedRunTests(unittest.TestCase):
     """Fast, non-git tests for the `run=` injection seam (mirrors
     `scan_max_reserved_number`'s pattern)."""

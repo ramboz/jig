@@ -334,7 +334,7 @@
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-02 — classa-create-advance | **DONE** |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-03 — classc-sibling-done-read | **DONE** |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 🔬 112-04 — refclaims-cas-spike | **DONE** |  |
-| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-05 — classb-claim-reservation | DRAFT |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-05 — classb-claim-reservation | **DONE** |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-06 — classd-advisory-fallback | DEFERRED |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-07 — durable-landed-anchor | DEFERRED |  |
 
@@ -379,7 +379,7 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **19** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **21** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **2** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
