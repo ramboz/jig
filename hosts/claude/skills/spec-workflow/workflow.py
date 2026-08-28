@@ -40,6 +40,7 @@ from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
 from _common.cross_ref_state import (
     ABSENT,  # noqa: F401 (re-export for callers/tests)
+    find_sibling_done,
     identifier_state_on_ref,
 )
 from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
@@ -1235,7 +1236,22 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     warning. Bypass with `JIG_CROSSREF_GATE=0`, or a deliberate
     `reopen=True` (sanctioned re-open/supersession — ADR-0058 Open-
     question 4), which skips the check entirely and is distinct from the
-    blanket env escape. Returns a summary string."""
+    blanket env escape.
+
+    Slice 112-03 / ADR-0058 Class C: a transition into ANY working state
+    (this one DOES include `IN_PROGRESS` — the reported incident's exact
+    entry point) additionally refuses when a SIBLING ref (any local or
+    remote-tracking branch other than the current one, its own
+    remote-tracking ref, and `origin/main` — Class A's territory, already
+    checked above/by 051-04) holds the identifier at an evidence-complete
+    `DONE`: finished work never integrated to `origin/main`, whose live
+    claim was already released at DONE, so neither Class A nor the claim
+    machinery sees it. Reuses `_common.cross_ref_state.find_sibling_done`
+    (112-01's per-ref read + ADR-0053's ref enumeration). Same bypass
+    surface as Class A (`JIG_CROSSREF_GATE=0` / `reopen=True`) — one
+    escape name for the whole cross-ref family. Best-effort per AC5: an
+    unreachable/timed-out sibling ref degrades to a non-blocking warning,
+    never a false block. Returns a summary string."""
     if new_status not in VALID_STATUSES:
         raise WorkflowError(
             f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
@@ -1296,6 +1312,19 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     # exclusion (051-04 already covers it) and the reopen/bypass surface.
     if new_status in _CROSSREF_ADVANCE_STATUSES and not release:
         _refuse_integrated_advance(
+            _project_root_for_spec(spec_md), loc.label, new_status,
+            reopen=reopen,
+        )
+
+    # Slice 112-03 / ADR-0058 Class C: refuse advancing into ANY working
+    # state (unlike the Class-A block above, this DOES include
+    # `IN_PROGRESS` — the reported incident's entry point) when a SIBLING
+    # ref holds the identifier at an evidence-complete `DONE`. Composed at
+    # the SAME dispatch point as Class A rather than a new site — see
+    # `_refuse_sibling_done`'s docstring for the class boundary and bypass
+    # surface (shared with Class A).
+    if new_status in _CLAIM_WORKING_STATUSES and not release:
+        _refuse_sibling_done(
             _project_root_for_spec(spec_md), loc.label, new_status,
             reopen=reopen,
         )
@@ -4925,6 +4954,78 @@ def _refuse_integrated_advance(project_dir: Path, slice_label: str,
         )
 
 
+# ----- cross-ref lifecycle-state Class-C sibling-DONE guard (ADR-0058 / spec 112-03) -----
+#
+# Class A (above) reads exactly ONE ref — `origin/main` — and only for
+# NON-`IN_PROGRESS` targets (051-04's `_refuse_start_collision` covers
+# `IN_PROGRESS` against that same single ref). Class C is the DIFFERENT,
+# reported-incident case: identifier N is `DONE` on a SIBLING branch that
+# was never integrated to `origin/main` at all, so neither of those reads
+# ever sees it — and ADR-0045's claim mutex already cleared at that
+# branch's DONE, so no live claim exists either. `_common.cross_ref_state.
+# find_sibling_done` scans every OTHER local/remote-tracking ref
+# (excluding the current branch, its own remote, and `origin/main` — Class
+# A's territory) for an EVIDENCE-COMPLETE `DONE`/`Accepted`.
+#
+# Composed at the SAME `transition` dispatch point as Class A (per the
+# slice 112-03 spec's explicit "reuse, don't reimplement" instruction) —
+# but the condition is wider (`_CLAIM_WORKING_STATUSES`, which includes
+# `IN_PROGRESS`) since Class C's un-integrated-sibling read is genuinely
+# NEW information for the IN_PROGRESS target too (051-04 never scans
+# siblings, only origin/main). For a non-IN_PROGRESS target this guard runs
+# strictly AFTER Class A above, so an origin/main-DONE case is already
+# refused before reaching here — Class C only ever contributes new
+# coverage for a sibling OTHER than origin/main, or for IN_PROGRESS.
+#
+# Bypass: the SAME env var / `--reopen` flag as Class A — one escape
+# surface for the whole cross-ref family, not a second name to remember.
+
+def _refuse_sibling_done(project_dir: Path, slice_label: str,
+                         new_status: str, *, reopen: bool = False) -> None:
+    """Class-C hard gate (spec 112-03): refuse a transition into any WORKING
+    state when `slice_label`'s identifier is already evidence-complete
+    `DONE` on a SIBLING ref — a finished-but-un-integrated branch, the
+    reported incident's exact shape. No-op (returns) for every other
+    outcome: no sibling hit, a marker-only (not evidence-complete) sibling
+    `DONE` (downgraded to a warning — AC2's chosen posture), `reopen=True`,
+    or `JIG_CROSSREF_GATE=0`. Best-effort: an unreachable/timed-out sibling
+    ref degrades to a non-blocking stderr warning (AC5) — never a false
+    block, and the scan is timeout-guarded so it never hangs the command.
+    """
+    if reopen:
+        emit_gate_bypass(project_dir, "cross-ref-sibling-done", "--reopen",
+                         spec_ref=read_spec_ref(project_dir))
+        return
+    if not env_gate_enabled(CROSSREF_GATE_ENV):
+        emit_gate_bypass(project_dir, "cross-ref-sibling-done",
+                         CROSSREF_GATE_ENV, spec_ref=read_spec_ref(project_dir))
+        return
+
+    m = re.match(r"^(\d{3}-\d{2})", slice_label.strip())
+    if not m:
+        return  # not a `NNN-MM`-shaped label (e.g. a legacy free-form title)
+    slice_id = m.group(1)
+
+    current_branch = _current_branch(project_dir)
+    hit, warnings = find_sibling_done(
+        slice_id, project_dir, current_branch=current_branch,
+        exclude_refs={_CROSSREF_TRANSITION_BASE_REF},
+    )
+    for warning in warnings:
+        sys.stderr.write(warning.rstrip() + "\n")
+    if hit is None:
+        return
+    raise WorkflowError(
+        f"slice {slice_label} is already `DONE` on sibling branch "
+        f"{hit.ref!r} — that work is finished (recorded review evidence is "
+        f"committed there) but not yet integrated to `origin/main`. "
+        f"Advancing it here (→ {new_status}) would duplicate finished "
+        f"work. Build on / integrate {hit.ref!r} instead of starting a "
+        "duplicate. If this is a sanctioned re-open/supersession, re-run "
+        f"with --reopen, or bypass with {CROSSREF_GATE_ENV}=0."
+    )
+
+
 def _append_release_log(section: str, released_from: str, reason: str) -> str:
     """Append a dated release entry to the slice's `## Release log`
     section (created if absent). Audit trail for `--release` (AC5)."""
@@ -4973,9 +5074,10 @@ def _build_parser() -> argparse.ArgumentParser:
                          "(required with --release)")
     pt.add_argument("--reopen", action="store_true",
                     help="sanctioned re-open/supersession of already-"
-                         "integrated work (ADR-0058 Class A): skips the "
-                         "cross-ref already-DONE-on-origin/main check for "
-                         "this transition. Distinct from the blanket "
+                         "finished work (ADR-0058): skips BOTH the Class-A "
+                         "already-DONE-on-origin/main check AND the Class-C "
+                         "evidence-complete-DONE-on-a-sibling-branch check "
+                         "for this transition. Distinct from the blanket "
                          "JIG_CROSSREF_GATE=0 escape.")
 
     pb = sub.add_parser("status-board",

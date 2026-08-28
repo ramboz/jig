@@ -367,19 +367,29 @@ that disagree, OR a third caller needs a shared status-reader — unify onto the
 frontmatter-first convention (015-01) then, in its own slice, with tests pinning
 both precedences beforehand.
 
-### Decision: unify the two workflow.py Class-A cross-ref guards onto the 112-01 primitive
-**Deferred:** `workflow.py transition` now has TWO Class-A "already integrated on
-origin/main" refusals with divergent origin-read helpers and bypass surfaces:
+### Decision: unify the cross-ref guard family (now FOUR sites) onto the 112-01 primitive
+**Deferred:** The cross-ref "already-DONE" guard family is now **four same-shaped
+sites** sharing a reopen/`emit_gate_bypass`/`env_gate_enabled`/`NNN-MM`-regex preamble:
 `_refuse_start_collision` (slice 051-04, `→ IN_PROGRESS`, its own `_origin_slice_state`
-reader + `JIG_START_COLLISION_GATE=0`, and it also does Class-B foreign-claim work)
-and `_refuse_integrated_advance` (slice 112-02, the other working states, the
-`cross_ref_state.identifier_state_on_ref` primitive + `--reopen`/`JIG_CROSSREF_GATE=0`).
-With `land.py::check_cross_ref_state` that is the **third** cross-ref-DONE site
-(rule-of-three, ADR-0002). 112-02 deliberately did NOT unify: migrating 051-04 onto the
-112-01 primitive risks its mature Class-B logic and would double-read origin for the
-IN_PROGRESS path. Also note the UX asymmetry — `--reopen` covers the advance guard but
-not the start-collision guard.
-**Resolution trigger:** The next slice that touches either workflow guard, OR a
-user-visible drift between the two Class-A refusal messages/bypass surfaces — unify the
-origin-DONE read onto `identifier_state_on_ref` and converge the re-open bypass then,
-with tests pinning both guards' behavior first.
+reader + `JIG_START_COLLISION_GATE=0`, also does Class-B foreign-claim work),
+`_refuse_integrated_advance` (slice 112-02, Class A on the other working states, the
+`cross_ref_state.identifier_state_on_ref` primitive + `--reopen`/`JIG_CROSSREF_GATE=0`),
+`_refuse_sibling_done` (slice 112-03, Class C, all working states, `find_sibling_done`,
+shares the 112-02 bypass surface), and `land.py::check_cross_ref_state`. Rule-of-three
+(ADR-0002) is now well past its threshold. Prior slices deliberately did NOT unify:
+migrating 051-04 onto the 112-01 primitive risks its mature Class-B logic and would
+double-read origin for the IN_PROGRESS path, and each guard was composed cleanly at the
+shared dispatch point rather than copy-pasted. Note the UX asymmetry — `--reopen` covers
+the 112-02/112-03 guards but not `_refuse_start_collision` (still
+`JIG_START_COLLISION_GATE=0`). **Related residual:** `_adr_evidence_complete`
+(cross_ref_state.py) keys the ADR Class-C block on a `frame-critique` evidence file, but
+frame-critique is only *required* when the ADR declared `frame_review: true` — so an
+Accepted sibling ADR that never needed it is always downgraded to a warning (the ADR arm
+of Class C under-fires; safe direction). And the current-branch exclusion in
+`find_sibling_done` uses `endswith("/" + name)`, which could over-exclude a genuinely
+different local branch whose name ends in the segment (unlikely false-negative).
+**Resolution trigger:** The next slice that touches ANY of the four guards, OR a
+user-visible drift between their refusal messages/bypass surfaces — extract a shared
+guard-preamble + converge the origin/sibling read onto `cross_ref_state`, converge the
+re-open bypass, and tighten the branch-exclusion + ADR-evidence keying then, with tests
+pinning every guard's behavior first.

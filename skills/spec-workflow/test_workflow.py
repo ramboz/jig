@@ -10184,5 +10184,173 @@ class CrossRefAdvanceGuardTests(unittest.TestCase):
         self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
 
 
+from _common.cross_ref_state import SiblingDone  # noqa: E402
+
+
+class SiblingDoneGuardTests(unittest.TestCase):
+    """AC1-AC5 (spec 112-03) — `transition` into ANY working state
+    (including `IN_PROGRESS`, unlike the Class-A guard above) refuses when
+    a SIBLING ref holds the slice at an evidence-complete `DONE`, reusing
+    `_common.cross_ref_state.find_sibling_done`. Mocks `find_sibling_done`
+    at the `workflow` module boundary (mirrors `CrossRefAdvanceGuardTests`'
+    treatment of `identifier_state_on_ref`) — the primitive itself gets
+    real git-fixture coverage in `test_cross_ref_state.py`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-sibling-done-")
+        self.root = Path(self.tmpdir).resolve()
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.slice = self.spec_dir / "slice-01-demo.md"
+        self.slice.write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 200-01 — demo\n\n**Goal:** placeholder.\n\n"
+            "**DoD:**\n- [ ] placeholder.\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop("JIG_CROSSREF_GATE", None)
+        os.environ.pop("JIG_START_COLLISION_GATE", None)
+        os.environ.pop("JIG_CLAIM_ID", None)
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def _transition(self, new_status="READY_FOR_REVIEW", **kw):
+        return _workflow.transition(self.spec, "200-01", new_status, **kw)
+
+    def test_sibling_evidence_complete_done_refuses(self):
+        """AC1/AC2/AC3 — a sibling ref's evidence-complete DONE hard-blocks
+        BEFORE the status flip, and names the sibling ref + reconcile
+        guidance."""
+        hit = SiblingDone("sibling-feature", True)
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(hit, [])) as mocked:
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition()
+        mocked.assert_called_once()
+        args, kwargs = mocked.call_args
+        self.assertEqual(args[0], "200-01")
+        self.assertEqual(kwargs.get("exclude_refs"), {"origin/main"})
+        msg = str(ctx.exception)
+        self.assertIn("sibling-feature", msg)
+        self.assertIn("DONE", msg)
+        self.assertIn("Build on / integrate", msg)
+        self.assertIn("--reopen", msg)
+        self.assertIn("JIG_CROSSREF_GATE=0", msg)
+        self.assertEqual(self._fm()["status"], "DRAFT")
+
+    def test_no_sibling_hit_passes(self):
+        """AC1 (converse) — no sibling hit → no block, transition
+        proceeds."""
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(None, [])) as mocked:
+            self._transition()
+        mocked.assert_called_once()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_marker_only_warning_does_not_block(self):
+        """AC2 — a marker-only (not evidence-complete) sibling DONE
+        surfaces only as a stderr warning, never blocks."""
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(None, ["warning: sibling ref 'spike' has "
+                                     "identifier 200-01 at 'DONE', but its "
+                                     "recorded review-evidence files are "
+                                     "not present"])), \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+        self.assertIn("not present", cap.getvalue())
+
+    def test_reopen_flag_bypasses_without_consulting_siblings(self):
+        """AC4 — `--reopen` skips the Class-C check (and the scan) entirely,
+        even when a sibling IS evidence-complete DONE."""
+        hit = SiblingDone("sibling-feature", True)
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(hit, [])) as mocked:
+            self._transition(reopen=True)
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_bypass_env_var_skips_check_entirely(self):
+        """AC4 — JIG_CROSSREF_GATE=0 skips the Class-C check even when a
+        sibling IS evidence-complete DONE."""
+        hit = SiblingDone("sibling-feature", True)
+        os.environ["JIG_CROSSREF_GATE"] = "0"
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(hit, [])) as mocked:
+            self._transition()
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_unreachable_sibling_warns_not_fails(self):
+        """AC5 — an unreachable/timed-out sibling ref degrades to a
+        non-blocking warning; the transition proceeds."""
+        import io
+        cap = io.StringIO()
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(None, ["warning: could not read sibling ref "
+                                     "'spike' (unreachable or timed out) — "
+                                     "skipped"])), \
+             unittest.mock.patch.object(_workflow.sys, "stderr", cap):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+        self.assertIn("unreachable or timed out", cap.getvalue())
+
+    def test_in_progress_target_is_covered_unlike_class_a(self):
+        """AC1 — deliberately DIFFERENT scope from the Class-A guard: →
+        IN_PROGRESS DOES reach this guard (051-04 only ever checked
+        origin/main, never siblings)."""
+        os.environ["JIG_CLAIM_ID"] = "wt-me"
+        os.environ["JIG_START_COLLISION_GATE"] = "0"
+        hit = SiblingDone("sibling-feature", True)
+        with unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(hit, [])) as mocked:
+            with self.assertRaises(_workflow.WorkflowError):
+                self._transition(new_status="IN_PROGRESS")
+        mocked.assert_called_once()
+
+    def test_reconciled_target_also_covered(self):
+        """AC1 — applies to every `_CLAIM_WORKING_STATUSES` target, not
+        just READY_FOR_REVIEW (RECONCILED needs the review-evidence gate
+        bypassed to isolate this guard)."""
+        hit = SiblingDone("sibling-feature", True)
+        with unittest.mock.patch.dict(
+                os.environ, {"JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             unittest.mock.patch.object(
+                _workflow, "find_sibling_done",
+                return_value=(hit, [])) as mocked:
+            with self.assertRaises(_workflow.WorkflowError):
+                self._transition(new_status="RECONCILED")
+        mocked.assert_called_once()
+
+    def test_cli_reopen_flag_bypasses(self):
+        """AC4 — `--reopen` is wired through the CLI for the Class-C guard
+        too, not just Class A."""
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        r = subprocess.run(
+            [sys.executable, str(WORKFLOW), "transition", str(self.spec),
+             "200-01", "READY_FOR_REVIEW", "--reopen"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+
 if __name__ == "__main__":
     unittest.main()
