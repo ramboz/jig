@@ -65,12 +65,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common.atomic_io import atomic_write_text
+from _common.cross_ref_state import (
+    ABSENT,  # noqa: F401 (re-export for callers/tests)
+    identifier_state_on_ref,
+)
+from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
 from _common.parsing import (
     SliceLookupError,
     check_deviation_log,  # noqa: F401 (re-export)
 )
+from _common.parsing import env_gate_enabled as _env_gate_enabled
 from _common.parsing import load_slice as _load_slice_common
-from _common.parsing import parse_frontmatter as _parse_frontmatter
+from _common.parsing import status_marker_from_section as _status_marker_from_section
+from _common.project_layout import LayoutError as _LayoutError
+from _common.project_layout import decisions_dir as _decisions_dir
 
 
 class LandError(RuntimeError):
@@ -106,23 +114,158 @@ def check_status(section: str) -> tuple:
     marker first (legacy + embedded), then falls back to the
     frontmatter `status:` field — slice files (file-per-slice layout
     from 018-01) carry status in frontmatter rather than as a marker.
+
+    Slice 112-01: the parsing itself now lives in
+    `_common.parsing.status_marker_from_section` (a third caller —
+    `_common.cross_ref_state` — needed the same read without importing
+    this module, which would be circular). Behavior here is unchanged.
     """
-    m = re.search(r"\*\*STATUS:\s*([A-Z_]+)\*\*", section)
-    if m:
-        return m.group(1) == "DONE", m.group(1)
-    # Try frontmatter — slice files (018-01) start with `---\n...---\n`.
-    # `parse_frontmatter` requires the block at column 0, so feed the
-    # section as-is for slice files. For embedded sections that have
-    # frontmatter AFTER the heading, also try skipping the heading line.
-    fm_fields, _ = _parse_frontmatter(section)
-    if not fm_fields:
-        nl = section.find("\n")
-        if nl >= 0 and section.startswith("##"):
-            fm_fields, _ = _parse_frontmatter(section[nl + 1:].lstrip("\n"))
-    status = fm_fields.get("status", "").strip()
+    status = _status_marker_from_section(section)
     if status:
         return status == "DONE", status
     return False, "MISSING"
+
+
+# ---------- cross-ref lifecycle-state Class-A backstop (ADR-0058 / spec 112-01) ----------
+#
+# `identifier_state_on_ref` (`_common.cross_ref_state`) reads a slice/ADR's
+# lifecycle marker as committed on a given git ref. This wires it as `prepare`'s
+# fifth blocker: refuse GO when EITHER (a) the slice under land is already
+# `DONE` on `origin/main`, OR (b) this branch INTRODUCES a new ADR file whose
+# number already exists as `Accepted` on `origin/main` — the false-positive-
+# free "re-doing already-integrated work" case (ADR-0058's Class A). The ADR
+# arm is deliberately scoped to ADRs this branch *adds* (a
+# `--diff-filter=A` name-only diff against `origin/main`), NOT ADRs the slice
+# merely *depends on* — depending on an already-Accepted governing ADR is the
+# normal precondition (the DoR) and must never block; only introducing a
+# *new* ADR file that collides in number with an already-Accepted one on main
+# is the duplicate-ADR incident this arm targets. Best-effort throughout: an
+# unreadable/unresolvable `origin/main` (or an uncomputable diff) degrades to
+# a non-blocking warning, mirroring `_branch_freshness_warning`'s posture.
+# Bypass: `JIG_CROSSREF_GATE=0` (ADR-0011 deliberateness gate; bypass events
+# are logged via `emit_gate_bypass`, same as the review-evidence gate).
+
+_CROSSREF_INTEGRATED_STATE = {"slice": "DONE", "adr": "Accepted"}
+_CROSSREF_KIND_LABEL = {"slice": "slice", "adr": "ADR"}
+_CROSSREF_BASE_REF = "origin/main"
+
+
+def _slice_label_identifier(label: str) -> str:
+    """Extract the leading `NNN-MM` slice identifier from a slice label like
+    `112-01 — classa-land-backstop`. Returns "" if the label doesn't start
+    with that shape (shouldn't happen for a real slice, but best-effort)."""
+    m = re.match(r"^(\d{3}-\d{2})", label.strip())
+    return m.group(1) if m else ""
+
+
+def _introduced_adr_identifiers(target: Path) -> tuple:
+    """ADR identifiers (`NNNN`) whose file this branch ADDS relative to
+    `origin/main` — i.e. a NEW `docs/decisions/adr-NNNN-*.md` that did not
+    exist on `origin/main`. Deliberately excludes ADRs the branch merely
+    references (`dependencies:`) or modifies (an amendment to an existing
+    ADR is not a duplicate-number collision).
+
+    Returns `(adr_ids, unknown)`. `unknown=True` when the diff could not be
+    computed (no `origin/main`, not a git repo, git missing) — best-effort,
+    the caller degrades this to a warning rather than a block.
+    """
+    try:
+        decisions_rel = _decisions_dir(target).relative_to(target).as_posix()
+    except (_LayoutError, ValueError):
+        decisions_rel = "docs/decisions"
+
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=A",
+             f"{_CROSSREF_BASE_REF}...HEAD", "--", decisions_rel + "/"],
+            capture_output=True, text=True, cwd=str(target),
+        )
+    except FileNotFoundError:
+        return [], True
+    if result.returncode != 0:
+        return [], True
+
+    ids = []
+    for line in result.stdout.splitlines():
+        name = Path(line.strip()).name
+        m = re.match(r"^adr-(\d{4})-.*\.md$", name)
+        if m:
+            ids.append(m.group(1))
+    return ids, False
+
+
+def check_cross_ref_state(label: str, target: Path) -> dict:
+    """Class-A land-gate check. Returns a dict with:
+      - `blocked` (bool) — True iff the slice is already `DONE` on
+        `origin/main`, OR this branch introduces a new ADR file whose
+        number is already `Accepted` on `origin/main`.
+      - `detail` (str) — human-readable reason (blocker message, or the
+        bypass note when `JIG_CROSSREF_GATE=0`); "" when nothing to report.
+      - `warning` (str) — a `## Cross-ref lifecycle state` markdown section
+        when `origin/main` (or the introduced-ADR diff) could not be
+        resolved; "" otherwise.
+
+    Never raises — every git read behind `identifier_state_on_ref` and
+    `_introduced_adr_identifiers` is already best-effort.
+    """
+    result = {"blocked": False, "detail": "", "warning": ""}
+
+    if not _env_gate_enabled("JIG_CROSSREF_GATE"):
+        emit_gate_bypass(target, "cross-ref", "JIG_CROSSREF_GATE",
+                          spec_ref=read_spec_ref(target))
+        result["detail"] = "skipped (JIG_CROSSREF_GATE=0)"
+        return result
+
+    saw_unknown = False
+
+    # -- Slice arm: is THIS slice already DONE on origin/main? --------------
+    slice_id = _slice_label_identifier(label)
+    if slice_id:
+        state = identifier_state_on_ref(slice_id, _CROSSREF_BASE_REF,
+                                        repo_root=target)
+        if state is None:
+            saw_unknown = True
+        elif state == _CROSSREF_INTEGRATED_STATE["slice"]:
+            result["blocked"] = True
+            result["detail"] = (
+                f"{_CROSSREF_KIND_LABEL['slice']} {slice_id} is already "
+                f"`{state}` on `{_CROSSREF_BASE_REF}` — this work may "
+                "already be integrated. If this is a sanctioned "
+                "re-open/supersession, bypass with `JIG_CROSSREF_GATE=0`."
+            )
+            return result
+
+    # -- ADR arm: does THIS BRANCH introduce a duplicate ADR number? --------
+    introduced_adr_ids, adr_unknown = _introduced_adr_identifiers(target)
+    if adr_unknown:
+        saw_unknown = True
+    else:
+        for adr_id in introduced_adr_ids:
+            state = identifier_state_on_ref(adr_id, _CROSSREF_BASE_REF,
+                                            repo_root=target)
+            if state is None:
+                saw_unknown = True
+                continue
+            if state == _CROSSREF_INTEGRATED_STATE["adr"]:
+                result["blocked"] = True
+                result["detail"] = (
+                    f"this branch introduces {_CROSSREF_KIND_LABEL['adr']} "
+                    f"{adr_id}, which is already `{state}` on "
+                    f"`{_CROSSREF_BASE_REF}` — likely a duplicate. If this "
+                    "is a sanctioned re-open/supersession, bypass with "
+                    "`JIG_CROSSREF_GATE=0`."
+                )
+                return result
+
+    if saw_unknown:
+        result["warning"] = (
+            "## Cross-ref lifecycle state\n\n"
+            f"warning: could not resolve `{_CROSSREF_BASE_REF}` to check "
+            "whether this work is already integrated (offline, no remote, "
+            "or the ref/diff is unreachable) — proceeding without the "
+            "Class-A already-integrated check."
+        )
+    return result
 
 
 def _resolve_tdd_py() -> Path | None:
@@ -408,6 +551,17 @@ def render_readiness_section(checks: dict) -> str:
         lines.append(f"- [ ] DoD: {checks['dod_ticked']}/{checks['dod_total']} "
                      "boxes ticked (all must be ticked)")
 
+    # Cross-ref lifecycle state (Class A, ADR-0058 / spec 112-01)
+    cross_ref_detail = checks.get("cross_ref_detail", "")
+    if checks.get("cross_ref_blocked"):
+        lines.append(f"- [ ] Cross-ref state: {cross_ref_detail}")
+    elif cross_ref_detail:
+        # Non-blocking note (e.g. the bypass fired) — [?], not a pass.
+        lines.append(f"- [?] Cross-ref state: {cross_ref_detail}")
+    else:
+        lines.append("- [x] Cross-ref state: not already integrated on "
+                     f"`{_CROSSREF_BASE_REF}`")
+
     return "\n".join(lines)
 
 
@@ -435,6 +589,8 @@ def render_blockers(checks: dict) -> str:
             f"- DoD: {checks['dod_total'] - checks['dod_ticked']} unchecked box(es) "
             f"({checks['dod_ticked']}/{checks['dod_total']} ticked). Finish DoD first."
         )
+    if checks.get("cross_ref_blocked"):
+        blockers.append(f"- {checks['cross_ref_detail']}")
     if not blockers:
         return ""
     return "## Blockers\n\n" + "\n".join(blockers)
@@ -819,11 +975,12 @@ def prepare(spec_path: Path, slice_fragment: str,
     section = loc.text[loc.start:loc.end]
     label = loc.label
 
-    # Run the four checks
+    # Run the four self-consistency checks + the cross-ref Class-A backstop.
     status_ok, status_actual = check_status(section)
     test_status, test_exit = check_tests(target or Path.cwd())
     deviation_log_ok = check_deviation_log(section)
     dod_ok, dod_ticked, dod_total = check_dod(section)
+    cross_ref = check_cross_ref_state(label, target or Path.cwd())
 
     checks = {
         "status_ok": status_ok,
@@ -835,6 +992,8 @@ def prepare(spec_path: Path, slice_fragment: str,
         "dod_ticked": dod_ticked,
         "dod_total": dod_total,
         "skip_deviation_log": skip_deviation_log,
+        "cross_ref_blocked": cross_ref["blocked"],
+        "cross_ref_detail": cross_ref["detail"],
     }
 
     # Render the readiness section + optional blockers
@@ -852,14 +1011,23 @@ def prepare(spec_path: Path, slice_fragment: str,
         parts.append("")
         parts.append(freshness_warning)
 
+    if cross_ref["warning"]:
+        parts.append("")
+        parts.append(cross_ref["warning"])
+
     # Determine pass/fail. Warnings (`warn`) don't block.
     # Slice 019-01: --no-deviation-log demotes the deviation-log
     # blocker to a warning. STATUS, tests, and DoD all still gate.
+    # Slice 112-01: the Class-A cross-ref backstop is a fifth blocker
+    # (ADR-0058) — refuses GO when the slice/ADR is already integrated on
+    # `origin/main`. Best-effort: an unresolved base ref degrades to the
+    # warning above, never to a blocker.
     has_blocker = (
         not status_ok
         or test_status == "red"
         or (not deviation_log_ok and not skip_deviation_log)
         or not dod_ok
+        or checks["cross_ref_blocked"]
     )
 
     # Next-steps section (only on --mode, regardless of blocker state —

@@ -1,8 +1,9 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: [112-01, adr-0058]
 last_verified:
 frame_review: true
+claimed_by: claude/jig-conflict-cleanup-3c1218
 ---
 
 ## Slice 112-02 — classa-create-advance

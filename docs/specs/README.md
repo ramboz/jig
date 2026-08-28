@@ -330,8 +330,8 @@
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-04 — delegate-as-quarantine | **DONE** |  |
 | [111-first-class-blockers](111-first-class-blockers/spec.md) | 111-01 — blocked-annotation-and-board | **DONE** |  |
 | [111-first-class-blockers](111-first-class-blockers/spec.md) | 111-02 — spec-lint-validation | **DONE** |  |
-| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-01 — classa-land-backstop | DRAFT |  |
-| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-02 — classa-create-advance | DRAFT |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-01 — classa-land-backstop | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-02 — classa-create-advance | IN_PROGRESS (claude/jig-conflict-cleanup…) |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-03 — classc-sibling-done-read | DRAFT |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 🔬 112-04 — refclaims-cas-spike | DRAFT |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-05 — classb-claim-reservation | DRAFT |  |
@@ -379,7 +379,7 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **14** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **16** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **2** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review

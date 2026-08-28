@@ -350,3 +350,19 @@ riding on a feature slice.
 **Resolution trigger:** The next slice that adds a **10th** `collect_slices`
 field, OR a render helper bug traced to a positional-index mistake — do the
 `NamedTuple` conversion then, in its own slice, rather than growing the tuple again.
+
+### Decision: unify the two slice-status readers (opposite marker precedence)
+**Deferred:** Two status-marker readers now coexist with *opposite* precedence:
+`_common/parsing.py::status_marker_from_section` (spec 112-01 extraction from
+`land.py`) is **prose-first-then-frontmatter**, while
+`skills/spec-workflow/workflow.py::_slice_status_from_section` is
+**frontmatter-first-then-prose** (slice 015-01 convention). `cross_ref_state.py`
+reuses the former (preserving `land.py`'s historical behavior byte-for-byte).
+The divergence pre-existed spec 112 (land vs workflow); unifying risks changing
+`workflow.py` behavior on a section that carries *both* markers, so 112-01 left
+it out of scope. Flagged by the 112-01 arch review.
+**Resolution trigger:** A slice/ADR is observed read with the wrong status
+because it carries both a prose `**STATUS:**` marker and a frontmatter `status:`
+that disagree, OR a third caller needs a shared status-reader — unify onto the
+frontmatter-first convention (015-01) then, in its own slice, with tests pinning
+both precedences beforehand.

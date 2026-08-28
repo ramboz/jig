@@ -25,6 +25,7 @@ from parsing import (
     load_slice,
     parse_frontmatter,
     set_frontmatter_field,
+    status_marker_from_section,
 )
 
 SPEC_TWO_SLICES = """\
@@ -786,6 +787,31 @@ class HookGateVocabularyPinTests(unittest.TestCase):
                 f"jig-spec-gate.sh is missing truthy token {tok!r} — it has "
                 f"drifted from _common.parsing.FRONTMATTER_TRUTHY",
             )
+
+
+class StatusMarkerFromSectionTests(unittest.TestCase):
+    """Slice 112-01: extracted from land.py's `check_status` so
+    `_common.cross_ref_state` can reuse it. Pins the exact precedence and
+    shape land.py's original inline version had (prose marker first,
+    frontmatter fallback second)."""
+
+    def test_prose_marker_preferred(self):
+        section = "## Slice 001-01 x\n\n**STATUS: DONE**\n\nbody\n"
+        self.assertEqual(status_marker_from_section(section), "DONE")
+
+    def test_frontmatter_fallback_when_no_prose_marker(self):
+        section = "---\nstatus: IN_PROGRESS\n---\n\n## Slice 001-01 x\n\nbody\n"
+        self.assertEqual(status_marker_from_section(section), "IN_PROGRESS")
+
+    def test_frontmatter_after_heading_line(self):
+        section = (
+            "## Slice 001-01 x\n\n---\nstatus: READY_FOR_IMPLEMENTATION\n---\n\nbody\n"
+        )
+        self.assertEqual(
+            status_marker_from_section(section), "READY_FOR_IMPLEMENTATION")
+
+    def test_neither_present_returns_empty_string(self):
+        self.assertEqual(status_marker_from_section("no markers here\n"), "")
 
 
 if __name__ == "__main__":

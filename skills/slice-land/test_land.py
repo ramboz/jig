@@ -2951,5 +2951,218 @@ class CheckTestsHelperResolutionTests(unittest.TestCase):
             f"vendored green suite must report green, got {status} ({code})")
 
 
+# ==================== Cross-ref Class-A backstop (slice 112-01 / ADR-0058) ====================
+
+
+class CrossRefLandGateTests(unittest.TestCase):
+    """AC1-AC5 — the `prepare` fifth blocker: refuse GO when the slice (or
+    a linked ADR) is already `DONE`/`Accepted` on `origin/main`."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-land-crossref-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        self.spec.write_text(
+            _spec_with_slice("112-01 — classa-land-backstop", "DONE"))
+        self._env_patch = None
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop("JIG_CROSSREF_GATE", None)
+
+    def test_integrated_done_on_ref_refuses(self):
+        """AC2 — slice already DONE on origin/main → hard blocker, exit 1."""
+        from unittest.mock import patch
+        with patch.object(_land, "identifier_state_on_ref",
+                          return_value="DONE") as mocked:
+            report, code = _land.prepare(self.spec, "112-01",
+                                         target=Path(self.tmpdir))
+        mocked.assert_called_with("112-01", "origin/main",
+                                  repo_root=Path(self.tmpdir))
+        self.assertEqual(code, 1, report)
+        self.assertIn("already `DONE`", report)
+        self.assertIn("origin/main", report)
+        self.assertRegex(report, r"(?m)^- \[ \] Cross-ref state")
+
+    def test_absent_on_ref_passes(self):
+        """AC3 — normal not-yet-landed case: absent on origin/main → no block."""
+        from unittest.mock import patch
+        with patch.object(_land, "identifier_state_on_ref",
+                          return_value=_land.ABSENT):
+            report, code = _land.prepare(self.spec, "112-01",
+                                         target=Path(self.tmpdir))
+        self.assertEqual(code, 0, report)
+        self.assertRegex(report, r"(?m)^- \[x\] Cross-ref state")
+
+    def test_equal_or_earlier_state_on_ref_passes(self):
+        """AC3 — present but NOT at the integrated marker (e.g. still
+        IN_PROGRESS on origin/main) → no block."""
+        from unittest.mock import patch
+        with patch.object(_land, "identifier_state_on_ref",
+                          return_value="IN_PROGRESS"):
+            report, code = _land.prepare(self.spec, "112-01",
+                                         target=Path(self.tmpdir))
+        self.assertEqual(code, 0, report)
+        self.assertRegex(report, r"(?m)^- \[x\] Cross-ref state")
+
+    def test_unreachable_base_warns_not_fails(self):
+        """AC4 — origin/main unresolvable (None = unknown) degrades to a
+        non-blocking warning, mirroring `_branch_freshness_warning`."""
+        from unittest.mock import patch
+        with patch.object(_land, "identifier_state_on_ref",
+                          return_value=None):
+            report, code = _land.prepare(self.spec, "112-01",
+                                         target=Path(self.tmpdir))
+        self.assertEqual(code, 0, report)
+        self.assertIn("## Cross-ref lifecycle state", report)
+        self.assertIn("could not resolve", report)
+
+    def test_bypass_env_var_skips_check_entirely(self):
+        """AC5 — JIG_CROSSREF_GATE=0 skips the Class-A check even when the
+        underlying state IS integrated; `identifier_state_on_ref` is never
+        called."""
+        from unittest.mock import patch
+        os.environ["JIG_CROSSREF_GATE"] = "0"
+        with patch.object(_land, "identifier_state_on_ref",
+                          return_value="DONE") as mocked:
+            report, code = _land.prepare(self.spec, "112-01",
+                                         target=Path(self.tmpdir))
+        mocked.assert_not_called()
+        self.assertEqual(code, 0, report)
+        self.assertIn("JIG_CROSSREF_GATE=0", report)
+
+    def test_bypass_falsey_tokens_all_skip(self):
+        """AC5 — the shared ENV_FALSEY vocabulary (0/false/off/no)."""
+        from unittest.mock import patch
+        for token in ("false", "off", "no", "0"):
+            with self.subTest(token=token):
+                os.environ["JIG_CROSSREF_GATE"] = token
+                with patch.object(_land, "identifier_state_on_ref",
+                                  return_value="DONE"):
+                    report, code = _land.prepare(self.spec, "112-01",
+                                                 target=Path(self.tmpdir))
+                self.assertEqual(code, 0, report)
+
+    def test_no_warning_or_blocker_when_ref_never_consulted_is_not_the_case(self):
+        """Guard against a false-negative test setup: with no mocking, a
+        real (non-git) tmpdir target degrades to the unknown/warn path —
+        never silently 'passes clean' by skipping the check outright."""
+        report, code = _land.prepare(self.spec, "112-01",
+                                     target=Path(self.tmpdir))
+        # tmpdir is not a git repo -> identifier_state_on_ref returns None
+        # for both identifiers -> warning, not a blocker.
+        self.assertEqual(code, 0, report)
+        self.assertIn("## Cross-ref lifecycle state", report)
+
+
+class CrossRefAdrArmTests(unittest.TestCase):
+    """The ADR arm's introduced-vs-depended-on scoping (post-review fix,
+    112-01): the arm must key on ADRs THIS BRANCH ADDS (a `--diff-filter=A`
+    diff against `origin/main`), never on ADRs the slice merely *depends
+    on* — depending on an already-Accepted governing ADR is the normal
+    precondition (the DoR) and must NOT block. Real git repos (bare +
+    clone, mirroring `test_reservation.py`'s fixtures / `origin/main` must
+    be a genuine remote-tracking ref for the `origin/main...HEAD` diff to
+    resolve)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.remote = self.root / "remote.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(self.remote)],
+                       cwd=str(self.root), check=True, capture_output=True)
+        self.work = self.root / "work"
+        subprocess.run(["git", "clone", "-q", str(self.remote), str(self.work)],
+                       cwd=str(self.root), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.t"],
+                       cwd=str(self.work), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"],
+                       cwd=str(self.work), check=True, capture_output=True)
+
+        decisions = self.work / "docs" / "decisions"
+        decisions.mkdir(parents=True)
+        (decisions / "adr-0058-cross-ref-lifecycle-state-check.md").write_text(
+            "---\nstatus: Accepted\n---\n\n# ADR-0058\n")
+        (self.work / "README.md").write_text("x\n")
+        self._commit("init: adr-0058 already Accepted on main")
+        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"],
+                       cwd=str(self.work), check=True, capture_output=True)
+        subprocess.run(["git", "fetch", "-q", "origin"],
+                       cwd=str(self.work), check=True, capture_output=True)
+        # A feature branch diverges from here for each test's own commit(s).
+        subprocess.run(["git", "checkout", "-q", "-b", "feature"],
+                       cwd=str(self.work), check=True, capture_output=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _commit(self, message):
+        subprocess.run(["git", "add", "-A"], cwd=str(self.work), check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-q", "-m", message],
+                       cwd=str(self.work), check=True, capture_output=True)
+
+    def test_introduced_duplicate_adr_number_refuses(self):
+        """A NEW adr-0058-*.md added on this branch collides in number with
+        the already-Accepted adr-0058 on origin/main -> hard blocker."""
+        (self.work / "docs" / "decisions" / "adr-0058-second-copy.md").write_text(
+            "---\nstatus: Proposed\n---\n\n# duplicate\n")
+        self._commit("branch introduces a duplicate adr-0058")
+
+        result = _land.check_cross_ref_state("999-01 — whatever", self.work)
+        self.assertTrue(result["blocked"], result)
+        self.assertIn("introduces", result["detail"])
+        self.assertIn("ADR 0058", result["detail"])
+        self.assertIn("already `Accepted`", result["detail"])
+
+    def test_dependency_only_adr_accepted_on_main_passes(self):
+        """False-positive guard (the review fix): this branch does NOT add
+        any new ADR file — it only *depends on* the already-Accepted
+        adr-0058 (the normal DoR precondition) -> the ADR arm must NOT
+        block."""
+        (self.work / "some-file.md").write_text("unrelated change\n")
+        self._commit("branch change unrelated to docs/decisions/")
+
+        result = _land.check_cross_ref_state("999-01 — whatever", self.work)
+        self.assertFalse(result["blocked"], result)
+
+    def test_introduced_brand_new_adr_number_passes(self):
+        """The normal case (e.g. this very slice, which introduces
+        adr-0058 while it did NOT yet exist on origin/main): a NEW ADR
+        number absent from origin/main is not a duplicate -> no block."""
+        (self.work / "docs" / "decisions" / "adr-0099-brand-new.md").write_text(
+            "---\nstatus: Proposed\n---\n\n# new\n")
+        self._commit("branch introduces a brand-new adr-0099")
+
+        result = _land.check_cross_ref_state("999-01 — whatever", self.work)
+        self.assertFalse(result["blocked"], result)
+
+    def test_unresolvable_diff_warns_not_blocks(self):
+        """AC4 posture — no `origin` remote at all (diff against
+        `origin/main` cannot be computed) -> unknown, not a block; the
+        overall check degrades to a warning."""
+        with tempfile.TemporaryDirectory() as solo:
+            solo_path = Path(solo)
+            subprocess.run(["git", "init", "-q", "-b", "main", str(solo_path)],
+                           cwd=str(solo_path), check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@t.t"],
+                           cwd=str(solo_path), check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "t"],
+                           cwd=str(solo_path), check=True, capture_output=True)
+            (solo_path / "README.md").write_text("x\n")
+            subprocess.run(["git", "add", "-A"], cwd=str(solo_path),
+                           check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-q", "-m", "init"],
+                           cwd=str(solo_path), check=True, capture_output=True)
+
+            ids, unknown = _land._introduced_adr_identifiers(solo_path)
+            self.assertTrue(unknown)
+            self.assertEqual(ids, [])
+
+            result = _land.check_cross_ref_state("999-01 — whatever", solo_path)
+            self.assertFalse(result["blocked"], result)
+            self.assertIn("## Cross-ref lifecycle state", result["warning"])
+
+
 if __name__ == "__main__":
     unittest.main()

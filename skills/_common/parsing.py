@@ -141,6 +141,36 @@ def check_reconciliation_sweep(section: str) -> bool:
     return bool(_RECONCILIATION_SWEEP_RE.search(section))
 
 
+# Slice 112-01 (ADR-0058): the prose `**STATUS: X**` marker, matched exactly
+# as `land.py`'s original `check_status` did (no `^` anchor, no MULTILINE —
+# deliberately distinct from workflow.py's anchored `_STATUS_MARKER_RE`,
+# which is a separate, independently-drifted copy this slice does not touch).
+_PROSE_STATUS_MARKER_RE = re.compile(r"\*\*STATUS:\s*([A-Z_]+)\*\*")
+
+
+def status_marker_from_section(section: str) -> str:
+    """Layout-aware status read for a slice section/file: the prose
+    `**STATUS: X**` marker first, else the frontmatter `status:` field.
+    Returns "" when neither is present.
+
+    Extracted from `land.py`'s `check_status` (slice 112-01 / ADR-0058) so
+    the cross-ref lifecycle-state primitive (`_common.cross_ref_state`) can
+    read a slice's status without importing `land.py` — which would create
+    a circular dependency, since `land.py` is itself a consumer of that
+    primitive. `land.py.check_status` now delegates here; behavior is
+    unchanged (same regex, same precedence, byte-for-byte).
+    """
+    m = _PROSE_STATUS_MARKER_RE.search(section)
+    if m:
+        return m.group(1)
+    fm_fields, _ = parse_frontmatter(section)
+    if not fm_fields:
+        nl = section.find("\n")
+        if nl >= 0 and section.startswith("##"):
+            fm_fields, _ = parse_frontmatter(section[nl + 1:].lstrip("\n"))
+    return fm_fields.get("status", "").strip()
+
+
 class SliceLookupError(RuntimeError):
     """Raised when a slice fragment can't be uniquely resolved in a spec."""
 
