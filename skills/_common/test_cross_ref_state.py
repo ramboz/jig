@@ -368,7 +368,7 @@ class FindSiblingDoneTests(unittest.TestCase):
         # AC1 — a pushed copy of the CURRENT branch (its own remote-tracking
         # ref) is not a sibling either, real bare+clone fixture.
         bare = self.root / "remote.git"
-        _run(["git", "init", "--bare", "-q", str(bare)], self.root)
+        _run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], self.root)
         work = self.root / "work"
         _run(["git", "clone", "-q", str(bare), str(work)], self.root)
         _run(["git", "config", "user.email", "t@t.t"], work)
@@ -398,7 +398,7 @@ class FindSiblingDoneTests(unittest.TestCase):
         # `origin/main`: that's Class A's territory, already checked
         # elsewhere; Class C must not re-match it as a "sibling".
         bare = self.root / "remote.git"
-        _run(["git", "init", "--bare", "-q", str(bare)], self.root)
+        _run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], self.root)
         work = self.root / "work"
         _run(["git", "clone", "-q", str(bare), str(work)], self.root)
         _run(["git", "config", "user.email", "t@t.t"], work)
@@ -610,7 +610,7 @@ class FindSiblingInProgressClaimTests(unittest.TestCase):
         # `_refuse_start_collision` excludes `origin/main` — that's its OWN
         # territory, already checked separately.
         bare = self.root / "remote.git"
-        _run(["git", "init", "--bare", "-q", str(bare)], self.root)
+        _run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], self.root)
         work = self.root / "work"
         _run(["git", "clone", "-q", str(bare), str(work)], self.root)
         _run(["git", "config", "user.email", "t@t.t"], work)
