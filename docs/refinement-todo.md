@@ -350,3 +350,57 @@ riding on a feature slice.
 **Resolution trigger:** The next slice that adds a **10th** `collect_slices`
 field, OR a render helper bug traced to a positional-index mistake — do the
 `NamedTuple` conversion then, in its own slice, rather than growing the tuple again.
+
+### Decision: unify the two slice-status readers (opposite marker precedence)
+**Deferred:** Two status-marker readers now coexist with *opposite* precedence:
+`_common/parsing.py::status_marker_from_section` (spec 112-01 extraction from
+`land.py`) is **prose-first-then-frontmatter**, while
+`skills/spec-workflow/workflow.py::_slice_status_from_section` is
+**frontmatter-first-then-prose** (slice 015-01 convention). `cross_ref_state.py`
+reuses the former (preserving `land.py`'s historical behavior byte-for-byte).
+The divergence pre-existed spec 112 (land vs workflow); unifying risks changing
+`workflow.py` behavior on a section that carries *both* markers, so 112-01 left
+it out of scope. Flagged by the 112-01 arch review.
+**Resolution trigger:** A slice/ADR is observed read with the wrong status
+because it carries both a prose `**STATUS:**` marker and a frontmatter `status:`
+that disagree, OR a third caller needs a shared status-reader — unify onto the
+frontmatter-first convention (015-01) then, in its own slice, with tests pinning
+both precedences beforehand.
+
+### Decision: unify the cross-ref guard family (now FOUR sites) onto the 112-01 primitive
+**Deferred:** The cross-ref "already-DONE" guard family is now **four same-shaped
+sites** sharing a reopen/`emit_gate_bypass`/`env_gate_enabled`/`NNN-MM`-regex preamble:
+`_refuse_start_collision` (slice 051-04, `→ IN_PROGRESS`, its own `_origin_slice_state`
+reader + `JIG_START_COLLISION_GATE=0`, also does Class-B foreign-claim work),
+`_refuse_integrated_advance` (slice 112-02, Class A on the other working states, the
+`cross_ref_state.identifier_state_on_ref` primitive + `--reopen`/`JIG_CROSSREF_GATE=0`),
+`_refuse_sibling_done` (slice 112-03, Class C, all working states, `find_sibling_done`,
+shares the 112-02 bypass surface), and `land.py::check_cross_ref_state`. Rule-of-three
+(ADR-0002) is now well past its threshold. Prior slices deliberately did NOT unify:
+migrating 051-04 onto the 112-01 primitive risks its mature Class-B logic and would
+double-read origin for the IN_PROGRESS path, and each guard was composed cleanly at the
+shared dispatch point rather than copy-pasted. Note the UX asymmetry — `--reopen` covers
+the 112-02/112-03 guards but not `_refuse_start_collision` (still
+`JIG_START_COLLISION_GATE=0`). **Related residual:** `_adr_evidence_complete`
+(cross_ref_state.py) keys the ADR Class-C block on a `frame-critique` evidence file, but
+frame-critique is only *required* when the ADR declared `frame_review: true` — so an
+Accepted sibling ADR that never needed it is always downgraded to a warning (the ADR arm
+of Class C under-fires; safe direction). And the current-branch exclusion in
+`find_sibling_done` uses `endswith("/" + name)`, which could over-exclude a genuinely
+different local branch whose name ends in the segment (unlikely false-negative).
+**Resolution trigger:** The next slice that touches ANY of the four guards, OR a
+user-visible drift between their refusal messages/bypass surfaces — extract a shared
+guard-preamble + converge the origin/sibling read onto `cross_ref_state`, converge the
+re-open bypass, and tighten the branch-exclusion + ADR-evidence keying then, with tests
+pinning every guard's behavior first.
+**Status — trigger FIRED (spec 112-05), read-half done, preamble-half re-deferred.**
+112-05 added Class B: it touched `_refuse_start_collision` (extending its read scope to
+sibling/remote refs, then extracting `_refuse_sibling_in_progress_claim` so the halt fires
+on both the default and `--push`/`--pr` paths). Per the trigger it converged the sibling
+*read* onto `cross_ref_state`, but the shared-guard-preamble / bypass extraction across all
+sites was consciously re-deferred (bundling it into a slice already extending the claim
+boundary would be scope creep). The obligation stands for the next guard-touching slice.
+**Related residual (rule-of-three, ADR-0002):** `cross_ref_state.py` now has TWO
+near-duplicate sibling-scan loops (`find_sibling_done`, `find_sibling_in_progress_claim`)
+differing only in the per-ref hit predicate — extract a `_scan_sibling_refs(...)` skeleton
+taking a predicate at the THIRD scan consumer.

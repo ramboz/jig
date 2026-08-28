@@ -330,6 +330,13 @@
 | [110-quarantine-adversarial-register](110-quarantine-adversarial-register/spec.md) | 110-04 — delegate-as-quarantine | **DONE** |  |
 | [111-first-class-blockers](111-first-class-blockers/spec.md) | 111-01 — blocked-annotation-and-board | **DONE** |  |
 | [111-first-class-blockers](111-first-class-blockers/spec.md) | 111-02 — spec-lint-validation | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-01 — classa-land-backstop | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-02 — classa-create-advance | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-03 — classc-sibling-done-read | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 🔬 112-04 — refclaims-cas-spike | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-05 — classb-claim-reservation | **DONE** |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-06 — classd-advisory-fallback | DEFERRED |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-07 — durable-landed-anchor | DEFERRED |  |
 
 ## Deferred slices
 
@@ -364,13 +371,15 @@
 | [068-use-cases-breadth-layer](068-use-cases-breadth-layer/spec.md) | 068-04 — mid-flight-triage | (a) slice 02's trace links exist and are populated across a real spec corpus, AND (b) a genuine mid-flight use-case addition that intersects existing specs has been observed (a real conflict/reframe event), so the triage classifier can be validated against an actual case rather than an imagined one. Mirrors [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md) Option C's revisit trigger. |
 | [079-semantic-index-guidance](079-semantic-index-guidance/spec.md) | 079-02 — scaffold index hint (conditional) | 079-01's passive `docs/workflow.md` guidance is shown |
 | [098-lifecycle-entry-gate](098-lifecycle-entry-gate/spec.md) | 098-03 — edit-anchored capture stub (DEFERRED) |  |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-06 — classd-advisory-fallback | Pick up once the incident-minimum (112-01..03) and Class-B |
+| [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-07 — durable-landed-anchor | Pick up when (a) Class C (112-03) is demoted to advisory |
 
 ## Richer-skill selection audit (spec 096-05)
 
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **14** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **21** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **2** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
