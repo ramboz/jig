@@ -38,6 +38,10 @@ from _common import (
 )
 from _common import review_evidence as _evidence
 from _common.atomic_io import atomic_write_text
+from _common.cross_ref_state import (
+    ABSENT,  # noqa: F401 (re-export for callers/tests)
+    identifier_state_on_ref,
+)
 from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
@@ -1171,7 +1175,8 @@ def _canonical_transition_spec_path(path: Path) -> Path:
 
 def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
                push: bool = False, pr_mode: bool = False,
-               release: bool = False, reason: str | None = None) -> str:
+               release: bool = False, reason: str | None = None,
+               reopen: bool = False) -> str:
     """Transition the named slice's STATUS to `new_status`. Auto-ticks
     "Implementation review passed" on REVIEWED, and "Reconciliation
     review passed" on RECONCILED (slice 003-04). When the slice has a
@@ -1218,7 +1223,19 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     slice already DONE on origin/main (duplicate landed work) or
     IN_PROGRESS under a foreign `claimed_by`. Soft on reachability
     (offline/local-only degrades to proceed). Bypass with
-    `JIG_START_COLLISION_GATE=0`. Returns a summary string."""
+    `JIG_START_COLLISION_GATE=0`.
+
+    Slice 112-02 / ADR-0058 Class A: a transition into any OTHER working
+    state (`READY_FOR_REVIEW` / `REVIEWED` / `RECONCILED` — 051-04 already
+    covers `IN_PROGRESS`) refuses when the slice's identifier is already
+    `DONE` on `origin/main`, reusing the 112-01 `identifier_state_on_ref`
+    primitive — the stale-branch re-advance case, caught at `transition`'s
+    earliest boundary (earlier than 112-01's `land.py` backstop). Best-
+    effort: an unreachable `origin/main` degrades to a non-blocking
+    warning. Bypass with `JIG_CROSSREF_GATE=0`, or a deliberate
+    `reopen=True` (sanctioned re-open/supersession — ADR-0058 Open-
+    question 4), which skips the check entirely and is distinct from the
+    blanket env escape. Returns a summary string."""
     if new_status not in VALID_STATUSES:
         raise WorkflowError(
             f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
@@ -1271,6 +1288,16 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         raise WorkflowError(
             "cannot transition DONE → ABANDONED: marking already-shipped "
             "work as abandoned is out of scope (see spec 085 Non-goals)."
+        )
+
+    # Slice 112-02 / ADR-0058 Class A: refuse advancing a slice already
+    # `DONE` on `origin/main` — before ANY status flip or claim bookkeeping.
+    # See `_refuse_integrated_advance` for the deliberate `IN_PROGRESS`
+    # exclusion (051-04 already covers it) and the reopen/bypass surface.
+    if new_status in _CROSSREF_ADVANCE_STATUSES and not release:
+        _refuse_integrated_advance(
+            _project_root_for_spec(spec_md), loc.label, new_status,
+            reopen=reopen,
         )
 
     if new_status in {"REVIEWED", "RECONCILED"}:
@@ -4815,6 +4842,89 @@ def _refuse_start_collision(project_dir: Path, rel_path: str,
         )
 
 
+# ---------- cross-ref lifecycle-state Class-A advance guard (ADR-0058 / spec 112-02) ----------
+#
+# `identifier_state_on_ref` (`_common.cross_ref_state`, built by slice 112-01)
+# reads a slice/ADR's lifecycle marker as committed on a given git ref.
+# 112-01 wired it as `land.py prepare`'s Class-A backstop — the LATEST
+# boundary, right before a landing push. This wires the SAME primitive at
+# `transition`'s EARLIEST boundary: advancing into a working state on a
+# slice already `DONE` on `origin/main` is refused before the local status
+# flip — a stale branch cannot re-advance work that already landed.
+#
+# Deliberately excludes → IN_PROGRESS: slice 051-04's `_refuse_start_collision`
+# already hard-blocks that exact case (DONE-on-origin at build start), reading
+# origin/main via its own `_origin_slice_state` helper (predates the 112-01
+# primitive, and additionally covers the foreign-IN_PROGRESS-claim case this
+# guard does not attempt). Duplicating the DONE check here for IN_PROGRESS
+# would run two origin reads for one answer and risk diverging wording —
+# left to 051-04 rather than reimplemented, per "reuse, don't reimplement."
+#
+# Bypass: `JIG_CROSSREF_GATE=0` — the SAME env var / vocabulary as 112-01's
+# land-gate bypass (one bypass name for the whole cross-ref Class-A family) —
+# OR the explicit `reopen=True` / `--reopen` CLI flag for a SANCTIONED
+# re-open/supersession (ADR-0058 Open-question 4). `--reopen` is deliberately
+# distinct from the blanket env escape: a re-open is a first-class, audited
+# action (its own `emit_gate_bypass` event), not routed through the same
+# "something's wrong, disable the gate" vocabulary as the error-case escape.
+
+_CROSSREF_ADVANCE_STATUSES = tuple(
+    s for s in _CLAIM_WORKING_STATUSES if s != IN_PROGRESS_STATUS
+)
+CROSSREF_GATE_ENV = "JIG_CROSSREF_GATE"
+_CROSSREF_TRANSITION_BASE_REF = "origin/main"
+
+
+def _refuse_integrated_advance(project_dir: Path, slice_label: str,
+                               new_status: str, *, reopen: bool = False) -> None:
+    """Class-A hard gate at `transition`'s earliest boundary (spec 112-02).
+
+    Raises `WorkflowError` when `slice_label`'s identifier is already
+    `DONE` on `origin/main` — a stale branch trying to advance work that is
+    already integrated. No-op (returns) for every other outcome: absent,
+    present-but-not-`DONE`, `reopen=True`, or `JIG_CROSSREF_GATE=0`.
+    Best-effort: an unresolvable `origin/main` (offline, no remote,
+    unreachable ref) degrades to a non-blocking stderr warning, mirroring
+    `_branch_freshness_warning` / 112-01's land-gate posture — never a
+    false block. Never raises for any OTHER reason (every git read behind
+    `identifier_state_on_ref` is already best-effort).
+    """
+    if reopen:
+        emit_gate_bypass(project_dir, "cross-ref-advance", "--reopen",
+                         spec_ref=read_spec_ref(project_dir))
+        return
+    if not env_gate_enabled(CROSSREF_GATE_ENV):
+        emit_gate_bypass(project_dir, "cross-ref-advance", CROSSREF_GATE_ENV,
+                         spec_ref=read_spec_ref(project_dir))
+        return
+
+    m = re.match(r"^(\d{3}-\d{2})", slice_label.strip())
+    if not m:
+        return  # not a `NNN-MM`-shaped label (e.g. a legacy free-form title)
+    slice_id = m.group(1)
+
+    state = identifier_state_on_ref(slice_id, _CROSSREF_TRANSITION_BASE_REF,
+                                    repo_root=project_dir)
+    if state is None:
+        sys.stderr.write(
+            "warning: cross-ref state check skipped: could not resolve "
+            f"`{_CROSSREF_TRANSITION_BASE_REF}` to check whether slice "
+            f"{slice_label} is already integrated (offline, no remote, or "
+            "the ref is unreachable) — proceeding without the Class-A "
+            "already-integrated check.\n"
+        )
+        return
+    if state == "DONE":
+        raise WorkflowError(
+            f"slice {slice_label} is already `DONE` on "
+            f"`{_CROSSREF_TRANSITION_BASE_REF}` — this work may already be "
+            f"integrated; advancing it here (→ {new_status}) on a stale "
+            "branch would duplicate landed work. If this is a sanctioned "
+            "re-open/supersession, re-run with --reopen, or bypass with "
+            f"{CROSSREF_GATE_ENV}=0."
+        )
+
+
 def _append_release_log(section: str, released_from: str, reason: str) -> str:
     """Append a dated release entry to the slice's `## Release log`
     section (created if absent). Audit trail for `--release` (AC5)."""
@@ -4861,6 +4971,12 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--reason", default=None,
                     help="audit reason recorded in the slice's ## Release log "
                          "(required with --release)")
+    pt.add_argument("--reopen", action="store_true",
+                    help="sanctioned re-open/supersession of already-"
+                         "integrated work (ADR-0058 Class A): skips the "
+                         "cross-ref already-DONE-on-origin/main check for "
+                         "this transition. Distinct from the blanket "
+                         "JIG_CROSSREF_GATE=0 escape.")
 
     pb = sub.add_parser("status-board",
                         help="regenerate docs/specs/README.md from spec.md files")
@@ -5040,6 +5156,7 @@ def main(argv: list) -> int:
                 Path(ns.spec), ns.slice, ns.status,
                 push=ns.push, pr_mode=ns.pr_mode,
                 release=ns.release, reason=ns.reason,
+                reopen=ns.reopen,
             )
             print(summary)
         elif ns.command == "status-board":

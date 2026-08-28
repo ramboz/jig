@@ -407,6 +407,19 @@ SKILL.md hand-off is the documented gate.
    <spec> <slice> <state> --release --reason "<why>"` (clears `claimed_by:`,
    logs to `## Release log`).
 
+   **Class-A cross-ref guard (spec 112 / ADR-0058).** A transition into a
+   working state is *refused* when the slice is already `DONE` on `origin/main`
+   — a stale branch re-advancing already-integrated work. The `→ IN_PROGRESS`
+   case is caught by the start-collision guard (spec 051-04); the other working
+   states (`READY_FOR_REVIEW` / `REVIEWED` / `RECONCILED`) by
+   `_refuse_integrated_advance`, which reads the shared
+   `cross_ref_state.identifier_state_on_ref` primitive. For a sanctioned re-open
+   / supersession of integrated work, pass **`--reopen`** (a first-class,
+   audited bypass distinct from the blanket `JIG_CROSSREF_GATE=0`); the
+   `→ IN_PROGRESS` path's own escape remains `JIG_START_COLLISION_GATE=0`
+   (convergence tracked in `docs/refinement-todo.md`). Unreachable `origin/main`
+   → non-blocking warning, transition proceeds.
+
    **Do not read a blank `claimed_by:` as "free".** It means *no claim is
    recorded*: claims are local unless pushed, so another worktree's unpushed
    claim is invisible, and a plain `Edit`-tool write to a slice takes no claim

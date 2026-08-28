@@ -7048,6 +7048,8 @@ class Bug014WidenedClaimTests(unittest.TestCase):
                                  "JIG_REVIEW_EVIDENCE_GATE": "0"}), \
                      patch.object(_workflow, "subprocess") as sp, \
                      patch.object(_workflow, "atomic_write_text", capture), \
+                     patch.object(_workflow, "identifier_state_on_ref",
+                                  return_value=_workflow.ABSENT), \
                      patch.object(_workflow.sys, "stderr", cap):
                     sp.run = rec
                     _workflow.transition(self.spec, "200-01", target, push=True)
@@ -10029,6 +10031,157 @@ class CheckBoardTests(unittest.TestCase):
         result = run_workflow("check-board", str(self.target))
         self.assertEqual(result.returncode, 1)
         self.assertIn("stale board", result.stderr)
+
+
+# ============== Cross-ref Class-A advance guard (slice 112-02 / ADR-0058) ==============
+
+
+class CrossRefAdvanceGuardTests(unittest.TestCase):
+    """AC1-AC4 — `transition` into a working state OTHER than IN_PROGRESS
+    (051-04 already covers that one) refuses when the slice is already
+    `DONE` on `origin/main`, reusing the 112-01 `identifier_state_on_ref`
+    primitive. Targets `READY_FOR_REVIEW` (ungated by the review-evidence
+    gate, unlike REVIEWED/RECONCILED/DONE) to isolate this guard."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-crossref-advance-")
+        self.root = Path(self.tmpdir).resolve()
+        self.spec_dir = self.root / "docs" / "specs" / "200-demo"
+        self.spec_dir.mkdir(parents=True)
+        self.spec = self.spec_dir / "spec.md"
+        self.spec.write_text(
+            "---\nstatus: DRAFT\n---\n\n# Spec 200\n\n## Overview\n\nx\n")
+        self.slice = self.spec_dir / "slice-01-demo.md"
+        self.slice.write_text(
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n\n"
+            "## Slice 200-01 — demo\n\n**Goal:** placeholder.\n\n"
+            "**DoD:**\n- [ ] placeholder.\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop("JIG_CROSSREF_GATE", None)
+
+    def _fm(self):
+        fields, _ = _workflow.parse_frontmatter(self.slice.read_text())
+        return fields
+
+    def _transition(self, new_status="READY_FOR_REVIEW", **kw):
+        return _workflow.transition(self.spec, "200-01", new_status, **kw)
+
+    def test_integrated_done_on_ref_refuses(self):
+        """AC1/AC2 — already DONE on origin/main hard-blocks BEFORE the
+        status flip, and consults the identifier by its NNN-MM number."""
+        from unittest.mock import patch
+        with patch.object(_workflow, "identifier_state_on_ref",
+                          return_value="DONE") as mocked:
+            with self.assertRaises(_workflow.WorkflowError) as ctx:
+                self._transition()
+        mocked.assert_called_with("200-01", "origin/main",
+                                  repo_root=self.root)
+        msg = str(ctx.exception)
+        self.assertIn("already `DONE`", msg)
+        self.assertIn("origin/main", msg)
+        self.assertIn("--reopen", msg)
+        self.assertIn("JIG_CROSSREF_GATE=0", msg)
+        # A refusal leaves the local file untouched (no status flip).
+        self.assertEqual(self._fm()["status"], "DRAFT")
+
+    def test_absent_on_ref_passes(self):
+        """AC2 — normal not-yet-landed case: absent on origin/main → no
+        block, transition proceeds."""
+        from unittest.mock import patch
+        with patch.object(_workflow, "identifier_state_on_ref",
+                          return_value=_workflow.ABSENT) as mocked:
+            self._transition()
+        mocked.assert_called_with("200-01", "origin/main",
+                                  repo_root=self.root)
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_earlier_state_on_ref_passes(self):
+        """AC2 — present but not at the integrated marker (still
+        IN_PROGRESS on origin/main) → no block."""
+        from unittest.mock import patch
+        with patch.object(_workflow, "identifier_state_on_ref",
+                          return_value="IN_PROGRESS") as mocked:
+            self._transition()
+        mocked.assert_called_with("200-01", "origin/main",
+                                  repo_root=self.root)
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_reopen_flag_bypasses_block_without_consulting_ref(self):
+        """AC3 — the `reopen` bypass is distinct from the blanket env
+        escape: it skips the check (and the git read) entirely, even when
+        the underlying state IS integrated."""
+        from unittest.mock import patch
+        with patch.object(_workflow, "identifier_state_on_ref",
+                          return_value="DONE") as mocked:
+            self._transition(reopen=True)
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_bypass_env_var_skips_check_entirely(self):
+        """AC4 — JIG_CROSSREF_GATE=0 skips the check even when the
+        underlying state IS integrated; identifier_state_on_ref is never
+        called."""
+        from unittest.mock import patch
+        os.environ["JIG_CROSSREF_GATE"] = "0"
+        with patch.object(_workflow, "identifier_state_on_ref",
+                          return_value="DONE") as mocked:
+            self._transition()
+        mocked.assert_not_called()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+
+    def test_unreachable_base_warns_not_fails(self):
+        """AC4 — origin/main unresolvable (None = unknown) degrades to a
+        non-blocking warning; the transition proceeds."""
+        import io
+        from unittest.mock import patch
+        cap = io.StringIO()
+        with patch.object(_workflow, "identifier_state_on_ref",
+                          return_value=None), \
+             patch.object(_workflow.sys, "stderr", cap):
+            self._transition()
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
+        self.assertIn("cross-ref state check skipped", cap.getvalue())
+        self.assertIn("could not resolve", cap.getvalue())
+
+    def test_reconciled_target_also_covered(self):
+        """AC1 — the guard applies to every _CROSSREF_ADVANCE_STATUSES
+        target, not just READY_FOR_REVIEW (RECONCILED needs the review-
+        evidence gate bypassed to isolate this guard)."""
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_REVIEW_EVIDENCE_GATE": "0"}), \
+             patch.object(_workflow, "identifier_state_on_ref",
+                          return_value="DONE") as mocked:
+            with self.assertRaises(_workflow.WorkflowError):
+                self._transition(new_status="RECONCILED")
+        mocked.assert_called_with("200-01", "origin/main",
+                                  repo_root=self.root)
+
+    def test_in_progress_target_not_covered_by_this_guard(self):
+        """Deliberate scope guard: → IN_PROGRESS is 051-04's guard
+        (`_refuse_start_collision`), not this one — this guard's
+        `identifier_state_on_ref` must not be consulted for it."""
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"JIG_CLAIM_ID": "wt-me",
+                                     "JIG_START_COLLISION_GATE": "0"}), \
+             patch.object(_workflow, "identifier_state_on_ref") as mocked:
+            self._transition(new_status="IN_PROGRESS")
+        mocked.assert_not_called()
+
+    def test_cli_reopen_flag_bypasses(self):
+        """AC3 — `--reopen` is wired through the CLI, not just the Python
+        API."""
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        r = subprocess.run(
+            [sys.executable, str(WORKFLOW), "transition", str(self.spec),
+             "200-01", "READY_FOR_REVIEW", "--reopen"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertEqual(self._fm()["status"], "READY_FOR_REVIEW")
 
 
 if __name__ == "__main__":

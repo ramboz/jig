@@ -366,3 +366,20 @@ because it carries both a prose `**STATUS:**` marker and a frontmatter `status:`
 that disagree, OR a third caller needs a shared status-reader — unify onto the
 frontmatter-first convention (015-01) then, in its own slice, with tests pinning
 both precedences beforehand.
+
+### Decision: unify the two workflow.py Class-A cross-ref guards onto the 112-01 primitive
+**Deferred:** `workflow.py transition` now has TWO Class-A "already integrated on
+origin/main" refusals with divergent origin-read helpers and bypass surfaces:
+`_refuse_start_collision` (slice 051-04, `→ IN_PROGRESS`, its own `_origin_slice_state`
+reader + `JIG_START_COLLISION_GATE=0`, and it also does Class-B foreign-claim work)
+and `_refuse_integrated_advance` (slice 112-02, the other working states, the
+`cross_ref_state.identifier_state_on_ref` primitive + `--reopen`/`JIG_CROSSREF_GATE=0`).
+With `land.py::check_cross_ref_state` that is the **third** cross-ref-DONE site
+(rule-of-three, ADR-0002). 112-02 deliberately did NOT unify: migrating 051-04 onto the
+112-01 primitive risks its mature Class-B logic and would double-read origin for the
+IN_PROGRESS path. Also note the UX asymmetry — `--reopen` covers the advance guard but
+not the start-collision guard.
+**Resolution trigger:** The next slice that touches either workflow guard, OR a
+user-visible drift between the two Class-A refusal messages/bypass surfaces — unify the
+origin-DONE read onto `identifier_state_on_ref` and converge the re-open bypass then,
+with tests pinning both guards' behavior first.
