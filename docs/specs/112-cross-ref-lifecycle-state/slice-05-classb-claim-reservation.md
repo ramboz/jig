@@ -15,7 +15,12 @@ checkout — closing the *concurrent-race* duplication class without re-blocking
 ADR-0045's sanctioned implementer→reviewer handoff.
 
 **DoR:**
-- ✅ 112-04 spike closed with A1 resolved (ref-CAS viable, or fallback chosen).
+- ✅ 112-04 spike closed — **A1 + A2 + local CAS all hold** (spike findings): the
+  primary claim surface is a `refs/claims/<N>` ref used as a compare-and-swap lock
+  (local `git update-ref … ""` create-if-absent; cross-machine `git push
+  --force-with-lease=refs/claims/<N>:`), with the ADR-0053 `reserve/<N>` branch as
+  the fallback for hosts that restrict custom ref namespaces (untested EMU/org
+  policy). Treat the remote CAS as best-effort.
 - ✅ ADR-0045's boundary semantics re-read (block both-ends-`IN_PROGRESS`;
   warn-and-transfer for other foreign-claim states).
 
