@@ -53,6 +53,39 @@ This spec adds **`jig:refactor`** — a first-class workflow (peer to
   (`security-review`), and **conditional arch** (`arch-review`) — the
   arch pass returns here vs bug-fix because a refactor *can* carry design.
 
+### Why this matters more under AI-assisted development
+
+Left to themselves, coding agents **add; they rarely subtract**. Asked to
+add a feature they add it where the code allows; asked to fix a bug they
+patch the affected path — neither instinct asks whether the code should
+first be *restructured* to accept the change cleanly. At scale this is
+**agentic entropy**: each change is locally correct against its own diff
+while the system's architecture quietly erodes — a divergence a diff-based
+review cannot see (Casserini et al., "Beyond the 'Diff'", arXiv 2604.16323;
+surfaced via EngTip #30, "Make the Change Easy"). `jig:refactor` is the
+counter-discipline: Beck's "make the change easy, *then* make the easy
+change" given a first-class, teeth-gated home so the refactor step agents
+skip by default becomes an explicit, witnessed phase.
+
+This sharpens the baseline-before-edit gate above for the common case where
+the target code is **undertested**. There, the baseline step is not "run the
+existing suite" but **add characterization tests that pin current behaviour
+first**, scoped to exactly what the change puts at risk — blanket coverage
+is not the goal, and behaviour no test captures is a blind spot a refactor
+can silently break. Adding tests to existing code *before* modifying it is
+the specific practice agents omit by default, and the one 062-02's
+deterministic oracle must make non-optional (not merely "characterize the
+diff" after the fact). Slice 062-02's DoR should treat "target code is
+undertested → author pinning tests as part of BASELINED" as an explicit
+path, not an edge case.
+
+> **Related but out of scope (captured so it isn't lost):** the agentic-
+> entropy point also motivates a *whole-repo, non-diff* architectural-drift
+> review lens — jig's leanness lens (spec 109) is deliberately per-slice /
+> diff-local, so it does not catch cross-module drift. That is a sibling
+> idea, not part of this behaviour-preserving workflow; see the recovery/
+> arch-review discussion in the inbox if pursued.
+
 See [ADR-0019](../../decisions/adr-0019-refactor-workflow.md) for the full
 decision (gate table, pluggable-oracle rationale, record schema, reuse
 map, and the CWV migration worked example).
