@@ -92,7 +92,7 @@ pilot slice small). Reservation via `workflow.py new` against gauge
 origin/main (ADR-0015 flow); spec body lands on gauge main (docs-only) so
 sibling sessions see it — implementation stays branch-only.
 
-### Phase 2 — vellum measured redline `[~]`
+### Phase 2 — vellum measured redline `[x]`
 Run vellum's **proven manual pass** against the mockup's table region →
 measured facts (colors, spacing, borders, typography — not hand-read CSS).
 The redline verifies/replaces the spec's hand-extracted AC values; deviations
@@ -164,8 +164,25 @@ oracle missed (the ADR-0059 assumption under test).
   evidence for ADR-0059 OQ1? (Expect: nothing reads it — record that.)
 - Which vellum entry point is the canonical "proven manual pass" for a
   single-file HTML mockup region (vs. a CD design folder)? Resolve at Phase 2.
-- servo plugin version on this machine vs. origin 0.10.0 design-eval schema
-  (Phase 3 preflight).
+- ~~servo plugin version on this machine vs. origin 0.10.0 design-eval schema
+  (Phase 3 preflight).~~ **Resolved 2026-08-31 — refresh needed before
+  Phase 3.** The *active* install is `servo@local-desktop-app-uploads`
+  (user scope, `~/.claude/plugins/marketplaces/local-desktop-app-uploads/servo`,
+  metadata says 0.5.1): it *has* design-eval / edd-suitability / spec-oracle
+  / agent-loop but predates content-fidelity (servo spec 020) and the
+  design-eval 026–029 hardening + v2 schema; servo origin/main is 0.10.0.
+  The sibling marketplace clone (`~/.claude/plugins/marketplaces/servo`) is
+  also stale (0.5.1, last updated 2026-07-02). **Owner action:** refresh the
+  servo plugin via the desktop-app upload flow (or marketplace update)
+  before Phase 3, and expect gauge's `.servo/design-eval/config.json` to
+  need the v2-schema migration servo applied to its own fixtures
+  (`44d4ddd`).
+- **`governance.py identity-check` baseline on gauge (2026-08-31):**
+  `{"ready": false, "reason": "merge-capability signal unavailable
+  (fail-safe)", "run_identity": "julien@ramboz.ch", "merge_identity": null,
+  "merge_capable": null}` — the fail-safe fires as designed; branch-only /
+  no-auto-merge is the enforced posture for Phase 4. First live exercise of
+  the ADR-0051 signal recorded.
 
 ## Log
 
@@ -197,6 +214,33 @@ oracle missed (the ADR-0059 assumption under test).
   consistency pass (vellum spec 010) is CD-facing design *repair* — for a
   single-file, already-frozen mockup the audit half applies at most; the
   redline is the load-bearing Phase-2 artifact here.
+
+- **2026-08-31 — Phase 2 done.** Redline of the mockup's table region
+  produced in vellum's resolved §0–§7 schema, **schema-valid**
+  (`validate_redline.py` → exit 0), landed with an AC3 verification table at
+  gauge `docs/specs/016-portfolio-table-view/design/` (gauge main
+  `f6f649f`). Verdict: **7 CONFIRMED · 0 CORRECTED · 1
+  not-determinable-from-source** (ok/bad status styling — the mockup renders
+  only warn/gray rows; AC3 re-scoped to name the extrapolation). The
+  redline's real added value over the hand-read: the omissions a builder
+  needs (inherited `system-ui`/1.5 typography, header weight 700 via **UA
+  default** — undeclared, word-space gaps with no honest au value, full
+  dark-scheme palette, measured absences: no hover/zebra/sticky/fixed
+  widths). **vellum seam friction (feed to vellum at Phase 6):**
+  (1) schema §1 assumes a *screen* reference frame — a region of a flowing
+  document has no honest frame height (computed estimate flagged);
+  (2) §6 demands a reference render a single-file mockup doesn't ship —
+  proposed `refs/portfolio-table.png` + capture recipe instead; and
+  `validate_redline.py` only checks an image is *named*, so a phantom path
+  passes while the checklist prose says "exists";
+  (3) positions-as-sentences want au numbers for gaps that are literal
+  word-spaces (font-dependent — no honest number exists);
+  (4) §2 is single-palette — no slot for `prefers-color-scheme` variants
+  (dark table appended as an adjunct);
+  (5) no declared-vs-computed provenance slot (UA-default weight 700,
+  border-radius-under-border-collapse rendering quirk live in ad-hoc notes);
+  (6) no prescribed filename for a directly-authored resolved single-region
+  file (cascade prescribes `<screen>.screen.md` only).
 
 ## Conclusion
 
