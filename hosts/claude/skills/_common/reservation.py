@@ -105,6 +105,33 @@ def _git(argv: list[str], cwd: Path) -> tuple[int, str, str]:
     return result.returncode, result.stdout or "", result.stderr or ""
 
 
+def list_branch_refs(project_dir: Path, *, run=None) -> tuple[int, list[str]]:
+    """`git for-each-ref --format=%(refname) refs/heads refs/remotes` — every
+    local branch + remote-tracking ref this checkout can see. Returns
+    `(rc, refs)`; `rc != 0` means the enumeration failed (git unusable /
+    not a repo) and `refs` is empty — the caller degrades.
+
+    Extracted from `scan_max_reserved_number`'s inline call (ADR-0053) so
+    a second reader of "every ref this checkout can see" — `_common.
+    cross_ref_state.find_sibling_done` (ADR-0058 Class C, spec 112-03) —
+    reuses the same enumeration rather than re-issuing the `for-each-ref`
+    call with its own copy of the refspec. This is the third distinct call
+    site for the underlying git invocation (ADR-0053's scan was already the
+    second, after ADR-0058's Class-A read reused `identifier_state_on_ref`'s
+    OWN per-ref content read rather than this enumeration) — per ADR-0002's
+    rule-of-three, the shared shape earns its own name.
+    """
+    git = run if run is not None else _git
+    rc, out, _err = git(
+        ["git", "for-each-ref", "--format=%(refname)",
+         "refs/heads", "refs/remotes"],
+        project_dir,
+    )
+    if rc != 0:
+        return rc, []
+    return rc, [line.strip() for line in out.splitlines() if line.strip()]
+
+
 def _max_in_listing(listing: str, docs_relpath: str, number_re: re.Pattern) -> int:
     """Extract the highest number from a `git ls-tree --name-only` listing (or
     a newline-joined directory listing). `number_re` is applied to each entry's
@@ -171,15 +198,10 @@ def scan_max_reserved_number(
             )
 
     # 2. Enumerate every local + remote-tracking ref.
-    rc, out, _err = git(
-        ["git", "for-each-ref", "--format=%(refname)",
-         "refs/heads", "refs/remotes"],
-        project_dir,
-    )
+    rc, refs = list_branch_refs(project_dir, run=git)
     if rc != 0:
         # git is unusable here — fall back to the working-tree view only.
         return highest
-    refs = [line.strip() for line in out.splitlines() if line.strip()]
 
     # 3. Read each ref's docs directory (non-recursive) and fold in its max.
     for ref in refs:

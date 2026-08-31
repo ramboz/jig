@@ -26,7 +26,10 @@ skill provides a deterministic landing path:
 - **Verify** the slice is actually done — STATUS=DONE in spec.md, full
   test suite green, deviation log section present, DoD checkboxes all
   ticked.
-- **Emit** a structured markdown report with four readiness checks and
+- **Emit** a structured markdown report with five readiness checks
+  (STATUS=DONE, tests green, deviation log present, DoD ticked, and the
+  Class-A cross-ref backstop — spec 112: refuse when the slice/ADR is already
+  integrated on `origin/main`, `JIG_CROSSREF_GATE=0` to bypass) and
   (in `--mode direct` or `--mode pr`) a Next-steps section of suggested
   git commands.
 
@@ -120,7 +123,7 @@ python3 "${PLUGIN_ROOT}/skills/slice-land/land.py" execute \
 
 ### Exit codes
 
-- `0` — all four readiness checks pass; the slice is ready to land
+- `0` — all five readiness checks pass; the slice is ready to land
   (for `prepare`) or was merged successfully (for `execute`).
 - `1` — at least one check failed, a safety guard fired, or a git
   command failed (the report still emits; the user sees what's wrong).
@@ -203,7 +206,7 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01"
 # 2. Get the direct-merge recipe.
 python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode direct
 
-# Expected output (when all four checks pass):
+# Expected output (when all five checks pass):
 #
 #   # Landing readiness — slice 007-01 — land-prepare
 #
@@ -213,6 +216,7 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
 #   - [x] Tests: green (`tdd.py run` exit 0)
 #   - [x] Deviation log: present
 #   - [x] DoD: 9/9 boxes ticked
+#   - [x] Cross-ref state: not already integrated on origin/main
 #
 #   ## Next steps (mode: direct)
 #
