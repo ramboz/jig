@@ -137,3 +137,10 @@ Adopt **Option B**.
   jig only needs the pointer).
 - Whether `attempts` should also increment on `ESCALATED` paths or only on the
   fix-failure re-entry. Resolve in slice 105-01.
+- **Keeping the recovery path exercised.** Quarantine is a *recovery* mechanism,
+  not a prevention gate (EngTip #31, "Optimizing for Recovery, Not Prevention"),
+  and a recovery path that is never used atrophies. The kill criterion above ("a
+  durable quarantine never read by any consumer → shelve it") is the standing
+  guard, but 105-01 should also ensure the *release* path (new-evidence accepted /
+  stale-evidence refused), not just entry to `QUARANTINED`, is covered by the
+  witnessed tests — an untested reopen path is the most likely thing to rot.
