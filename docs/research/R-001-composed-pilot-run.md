@@ -80,7 +80,7 @@ Phase state legend: `[ ]` pending · `[~]` in progress · `[x]` done.
 ### Phase 0 — runbook `[x]`
 This note, committed on jig branch `claude/servo-velum-pilot-e8e406`.
 
-### Phase 1 — jig spec on gauge `[~]`
+### Phase 1 — jig spec on gauge `[x]`
 Reserve + author gauge **spec 016 — portfolio table view** per spec 104's
 authoring nudge: design values extracted into checkable ACs;
 `design_review: true` on the visual slice; **`servo_driven: true`** stamped on
@@ -92,7 +92,7 @@ pilot slice small). Reservation via `workflow.py new` against gauge
 origin/main (ADR-0015 flow); spec body lands on gauge main (docs-only) so
 sibling sessions see it — implementation stays branch-only.
 
-### Phase 2 — vellum measured redline `[ ]`
+### Phase 2 — vellum measured redline `[~]`
 Run vellum's **proven manual pass** against the mockup's table region →
 measured facts (colors, spacing, borders, typography — not hand-read CSS).
 The redline verifies/replaces the spec's hand-extracted AC values; deviations
@@ -172,6 +172,31 @@ oracle missed (the ADR-0059 assumption under test).
 - **2026-08-31** — Pilot started (jig session, branch
   `claude/servo-velum-pilot-e8e406`). Cross-repo state surveyed; target
   (gauge) + slice (table view) decided; this note committed. Phase 1 begun.
+- **2026-08-31 — Phase 1 done.** gauge **spec 016 — portfolio-table-view**
+  reserved on origin/main (`ae601ef`, ADR-0015 flow) and authored
+  (`2bc7e30`, landed on gauge main): slice 016-01 "table view + cards⇄table
+  toggle", `design_review: true` + `servo_driven: true` (OQ1 marker stamped,
+  with an explicit "nothing reads this" comment), 7 design-value +
+  functional ACs, vellum-redline + design-eval wiring as DoR items, spec_lint
+  clean (16 specs), board regenerated. Authoring done in gauge worktree
+  `.claude/worktrees/pilot-016-portfolio-table` (branch
+  `pilot/016-portfolio-table`) — the implementation branch for the loop.
+  **Seam finding (autonomy-relevant):** `workflow.py new`'s reservation push
+  failed on this machine — the default git credential is the EMU account
+  (`ramboz_adobe`), denied on personal `ramboz/*` HTTPS remotes; the dangling
+  reservation commit had to be recovered and re-pushed via the SSH URL
+  (`git push git@github.com:… <sha>:refs/heads/main`). An unattended
+  servo/jig autonomy path on this machine inherits this: any flow that
+  pushes to a personal-repo HTTPS remote fails until the remote (or a
+  pushurl) is SSH. Feed into the run-evidence for ADR-0051-adjacent
+  preflights.
+- **2026-08-31 — Phase 2 begun.** Redline of the mockup's table region
+  delegated (vellum contract per `plugin/skills/redline-request` +
+  `build-to-redline`); deliverables land under gauge
+  `docs/specs/016-portfolio-table-view/design/`. Clarified en route: the
+  consistency pass (vellum spec 010) is CD-facing design *repair* — for a
+  single-file, already-frozen mockup the audit half applies at most; the
+  redline is the load-bearing Phase-2 artifact here.
 
 ## Conclusion
 
