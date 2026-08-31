@@ -1945,5 +1945,92 @@ class Spec091BugReviewPromptTests(unittest.TestCase):
         self.assertIn("none found", lowered)
 
 
+class Bug021GateSurfacesTargetingRefusalTests(unittest.TestCase):
+    """Bug 021: when tdd.py cannot run the *named* test as asked (exit 2 —
+    e.g. a custom command with no {test} placeholder, or an unresolved
+    selector), the transition gates must surface tdd.py's own report instead
+    of a bare exit code, so the refusal is actionable and never mistaken for
+    evidence about the named test."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _bug(self) -> Path:
+        return self.root / "docs" / "bugs" / "001-alpha.md"
+
+    def _fm(self) -> dict:
+        fields, _ = parse_frontmatter(self._bug().read_text())
+        return fields
+
+    def _write_bug(self, *, status: str) -> Path:
+        return write(self._bug(), (
+            "---\n"
+            f"status: {status}\n"
+            "severity: high\n"
+            "tier: standard\n"
+            "regression_test: tests/test_alpha.py::test_bug\n"
+            "main_repro_checked_at: 2026-08-31\n"
+            "main_repro_ref: origin/main@abc123\n"
+            "main_repro_result: reproduces\n"
+            "red_confirmed_at:\n"
+            "green_confirmed_at:\n"
+            "fix_class: local_patch\n"
+            "security_surface: false\n"
+            "escalated_to:\n"
+            "---\n\n"
+            "## Symptom\n\n"
+            "## Repro\n\n"
+            "## Evidence\n\ntrace: log line 7\n\n"
+            "## Hypotheses\n\n- [ ] cache race\n- [x] parser bug\n\n"
+            "## Root cause\n\n"
+            "## Fix\n\n"
+            "## Already tried\n\n"
+            "## Regression test\n\n"
+            "## Proof\n\n"
+            "## Learning\n"
+        ))
+
+    def _fake_tdd_refusing(self, message: str, code: int = 2) -> Path:
+        script = self.root / "fake_tdd_refusing.py"
+        script.write_text(
+            "import sys\n"
+            f"sys.stderr.write({message!r} + '\\n')\n"
+            f"raise SystemExit({code})\n"
+        )
+        return script
+
+    def test_fixing_exit_2_surfaces_tdd_report_and_stamps_no_red(self):
+        self._write_bug(status="ROOT_CAUSED")
+        refusal = (
+            "custom test command does not accept a test selector "
+            "(no {test} placeholder in .jig/test-command)"
+        )
+        r = run_bug(
+            "transition", "001", "FIXING", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd_refusing(refusal))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("does not accept a test selector", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+        self.assertEqual(str(self._fm().get("red_confirmed_at") or ""), "")
+
+    def test_reviewed_green_failure_surfaces_tdd_report(self):
+        self._write_bug(status="FIXING")
+        r = run_bug(
+            "transition", "001", "REVIEWED", "--project-dir", str(self.root),
+            env={"JIG_TDD_HELPER": str(self._fake_tdd_refusing(
+                "unresolved selector: tests/test_alpha.py::test_bug"))},
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("unresolved selector", r.stderr)
+        # The failed attempt is carried forward as evidence, with the report.
+        self.assertEqual(self._fm()["status"], "DIAGNOSING")
+        self.assertIn("unresolved selector", self._bug().read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

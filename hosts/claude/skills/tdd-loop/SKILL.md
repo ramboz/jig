@@ -181,7 +181,16 @@ the main session) use to actually run the loop. The discipline lives in
   `<target>/.jig/test-command` with the first non-blank, non-comment line
   being the exact command to run. This takes priority over all runner
   auto-detection. Useful for projects whose test convention doesn't map to
-  pytest/vitest/jest (e.g. `python3 scripts/run_tests.py` for jig itself).
+  pytest/vitest/jest (e.g. `python3 scripts/run_tests.py {test}` for jig
+  itself).
+- **Targeted runs against a custom command are opt-in** (bug 021). A `{test}`
+  argv token in the command marks where a `--test` selector is substituted;
+  the token is dropped when no selector is passed. Without the token,
+  `run --test …` exits 2 ("does not accept a test selector") instead of
+  silently running the whole suite — a whole-suite exit code is not evidence
+  about one named test, and the bug-fix red→green gates consume this exit
+  code as exactly that. With the token, output reporting no matching tests
+  maps to exit 2 (`unresolved selector`), mirroring the auto-detect runners.
 - **pytest module not installed** (slice 006-04). If pytest is detected via
   filesystem signals but the `pytest` module isn't importable, `run` exits
   2 with "not installed" in stderr — not exit 1 (red tests). Fix:

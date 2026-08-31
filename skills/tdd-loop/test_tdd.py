@@ -767,5 +767,90 @@ class CustomCommandRunTests(unittest.TestCase):
         self.assertIn("no test runner detected", r.stderr)
 
 
+# ------------- Bug 021 — custom-command selector contract -------------
+
+
+class Bug021CustomCommandSelectorContractTests(unittest.TestCase):
+    """Bug 021: a custom .jig/test-command must never silently swallow a
+    requested selector. Targeting is opt-in via a `{test}` placeholder token;
+    without one, a targeted run is refused (exit 2, "could not target"), never
+    silently widened to the whole suite. A targeted run whose command reports
+    no matching tests is an unresolved selector (exit 2), not a red suite."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_recorder(self) -> None:
+        """A stand-in test command that records its argv and exits 0."""
+        (self.target / "recorder.py").write_text(
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "Path('recorder.argv.json').write_text(json.dumps(sys.argv[1:]))\n"
+        )
+
+    def _recorded_argv(self) -> list:
+        return json.loads((self.target / "recorder.argv.json").read_text())
+
+    def test_selector_without_placeholder_is_refused_exit_2(self):
+        # The load-bearing half of the bug: an untargetable command must not
+        # run at all when a selector was requested — a whole-suite exit code
+        # is not evidence about the named test.
+        self._write_recorder()
+        _write(self.target / ".jig" / "test-command", "python3 recorder.py\n")
+        r = run_tdd("run", str(self.target), "--test", "pkg/test_x.py::Case")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("{test}", r.stderr)
+        self.assertIn(".jig/test-command", r.stderr)
+        self.assertFalse(
+            (self.target / "recorder.argv.json").exists(),
+            "the untargetable custom command must not be run at all",
+        )
+
+    def test_selector_substituted_at_placeholder(self):
+        self._write_recorder()
+        _write(self.target / ".jig" / "test-command",
+               "python3 recorder.py {test}\n")
+        r = run_tdd("run", str(self.target), "--test", "pkg/test_x.py::Case")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self._recorded_argv(), ["pkg/test_x.py::Case"])
+
+    def test_placeholder_dropped_when_no_selector(self):
+        self._write_recorder()
+        _write(self.target / ".jig" / "test-command",
+               "python3 recorder.py {test}\n")
+        r = run_tdd("run", str(self.target))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self._recorded_argv(), [])
+
+    def test_unresolved_selector_report_maps_to_exit_2(self):
+        # Parity with the auto-detect runners' _selector_missed protection:
+        # "no matching tests" from a targeted custom run is exit 2, not red.
+        (self.target / "nomatch.py").write_text(
+            "import sys\n"
+            "print('no matching tests: ' + sys.argv[1])\n"
+            "raise SystemExit(1)\n"
+        )
+        _write(self.target / ".jig" / "test-command",
+               "python3 nomatch.py {test}\n")
+        r = run_tdd("run", str(self.target), "--test", "ghost/test_g.py::Nope")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("unresolved selector", r.stderr)
+
+    def test_red_targeted_run_still_exits_1(self):
+        # A command that honors the selector and fails stays a plain red.
+        (self.target / "red.py").write_text(
+            "import sys\n"
+            "print('ran ' + sys.argv[1])\n"
+            "raise SystemExit(1)\n"
+        )
+        _write(self.target / ".jig" / "test-command", "python3 red.py {test}\n")
+        r = run_tdd("run", str(self.target), "--test", "pkg/test_x.py::Case")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

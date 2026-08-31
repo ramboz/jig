@@ -807,6 +807,18 @@ def _run_tdd(project_dir: Path, selector: str) -> subprocess.CompletedProcess:
     )
 
 
+def _tdd_failure_detail(result: subprocess.CompletedProcess) -> str:
+    """One-line tail of a failed tdd.py run. The reason — e.g. a targeting
+    refusal ("does not accept a test selector") or an unresolved selector —
+    must reach the operator, not just an exit code (bug 021)."""
+    for stream in (result.stderr, result.stdout):
+        lines = [ln.strip() for ln in str(stream or "").splitlines() if ln.strip()]
+        if lines:
+            tail = lines[-1]
+            return tail if len(tail) <= 300 else tail[:297] + "..."
+    return ""
+
+
 def _append_already_tried(text: str, message: str) -> str:
     entry = f"- {_today()} - {message.strip()}\n"
     pattern = re.compile(r"(?ms)^##\s+Already tried\s*\n")
@@ -921,13 +933,19 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
                     "capture the bug"
                 )
             if result.returncode == 2:
+                detail = _tdd_failure_detail(result)
                 raise BugError(
-                    "tdd.py environment error while checking regression test"
+                    "tdd.py environment error while checking regression test "
+                    "(exit 2 — could not run the named test, so not evidence "
+                    "of red)"
+                    + (f": {detail}" if detail else "")
                 )
             if result.returncode != 1:
+                detail = _tdd_failure_detail(result)
                 raise BugError(
                     f"unexpected tdd.py exit {result.returncode} while "
                     "checking red regression test"
+                    + (f": {detail}" if detail else "")
                 )
             text = set_frontmatter_field(text, "red_confirmed_at", _today())
 
@@ -952,15 +970,18 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
         if _gate_enabled("JIG_BUG_TEST_GATE"):
             result = _run_tdd(project_dir, selector)
             if result.returncode != 0:
+                detail = _tdd_failure_detail(result)
                 text = set_frontmatter_field(text, "status", "DIAGNOSING")
                 text = _append_already_tried(
                     text,
                     f"green check failed for `{selector}` "
-                    f"(tdd.py exit {result.returncode})",
+                    f"(tdd.py exit {result.returncode})"
+                    + (f": {detail}" if detail else ""),
                 )
                 atomic_write_text(path, text)
                 raise BugError(
                     "green check failed; routed bug back to DIAGNOSING"
+                    + (f" ({detail})" if detail else "")
                 )
             text = set_frontmatter_field(text, "green_confirmed_at", _today())
         diagnostics = _evidence.validate_bug_evidence(path, "REVIEWED")
