@@ -41,7 +41,7 @@ you create a note; update its status/promotion when it resolves.
 
 | ID | Topic | Status | Related / Promoted to |
 |----|-------|--------|------------------------|
-| _(none yet)_ | | | |
+| [R-001](R-001-composed-pilot-run.md) | Composed autonomous UI pilot (jig × vellum × servo) — run record | OPEN | ADR-0059 accept flow; specs 071/104; servo 012-05; inbox 2026-08-30 |
 
 ## Hand-offs
 
