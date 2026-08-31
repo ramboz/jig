@@ -184,13 +184,18 @@ the main session) use to actually run the loop. The discipline lives in
   pytest/vitest/jest (e.g. `python3 scripts/run_tests.py {test}` for jig
   itself).
 - **Targeted runs against a custom command are opt-in** (bug 021). A `{test}`
-  argv token in the command marks where a `--test` selector is substituted;
-  the token is dropped when no selector is passed. Without the token,
-  `run --test …` exits 2 ("does not accept a test selector") instead of
-  silently running the whole suite — a whole-suite exit code is not evidence
-  about one named test, and the bug-fix red→green gates consume this exit
-  code as exactly that. With the token, output reporting no matching tests
-  maps to exit 2 (`unresolved selector`), mirroring the auto-detect runners.
+  token — as its own standalone argument, not embedded in another — marks
+  where a `--test` selector is substituted; the token is dropped when no
+  selector is passed. Without the token, `run --test …` exits 2 ("does not
+  accept a test selector") instead of silently running the whole suite — a
+  whole-suite exit code is not evidence about one named test, and the bug-fix
+  red→green gates consume this exit code as exactly that. With the token, a
+  **non-zero** exit whose output starts a line with a recognized no-match
+  report (`no matching tests`, `no test found`, `no tests found`, `your test
+  suite must contain at least one test`) maps to exit 2 (`unresolved
+  selector`), mirroring the auto-detect runners — a custom command should
+  emit one of those lines for a selector it cannot resolve (a command that
+  exits 0 having matched nothing reads as green, same as the JS runners).
 - **pytest module not installed** (slice 006-04). If pytest is detected via
   filesystem signals but the `pytest` module isn't importable, `run` exits
   2 with "not installed" in stderr — not exit 1 (red tests). Fix:
