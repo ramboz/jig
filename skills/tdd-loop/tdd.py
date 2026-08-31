@@ -42,6 +42,10 @@ NODE_TEST_IMPORT_RE = re.compile(
 NODE_TEST_SCRIPT_RE = re.compile(r"\bnode\b[^|&]*--test\b")
 SHALLOW_SCAN_SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__"}
 
+# Bug 021: selector capability for custom commands is an explicit opt-in —
+# a {test} argv token in .jig/test-command marks where a selector belongs.
+CUSTOM_SELECTOR_PLACEHOLDER = "{test}"
+
 
 def _read_json_safe(path: Path) -> dict:
     """Read JSON, swallowing all errors and returning {}. Same as scaffold.py."""
@@ -359,8 +363,33 @@ def cmd_run(
             sys.stderr.write(".jig/test-command is empty (no runnable command found)\n")
             return 2
         argv = shlex.split(cmd_str)
+        # Bug 021: targeting is opt-in — a {test} token declares where the
+        # selector belongs. Refusing beats silently running the whole suite,
+        # which consumers (bug.py's red→green teeth) would misread as a
+        # verdict on the named test.
+        if test_selector and CUSTOM_SELECTOR_PLACEHOLDER not in argv:
+            sys.stderr.write(
+                "custom test command does not accept a test selector: add a "
+                f"{CUSTOM_SELECTOR_PLACEHOLDER} placeholder to "
+                ".jig/test-command where the selector belongs (refusing to "
+                f"run the whole suite as a stand-in for {test_selector!r})\n"
+            )
+            return 2
         if test_selector:
-            argv = [*argv, test_selector]
+            argv = [
+                test_selector if tok == CUSTOM_SELECTOR_PLACEHOLDER else tok
+                for tok in argv
+            ]
+            try:
+                returncode, output = _run_streaming(argv, target)
+            except (FileNotFoundError, OSError):
+                sys.stderr.write(f"{argv[0]}: command failed to start\n")
+                return 2
+            if _selector_missed("custom", returncode, output):
+                sys.stderr.write(f"unresolved selector: {test_selector}\n")
+                return 2
+            return 0 if returncode == 0 else 1
+        argv = [tok for tok in argv if tok != CUSTOM_SELECTOR_PLACEHOLDER]
         try:
             result = subprocess.run(argv, cwd=str(target))
         except (FileNotFoundError, OSError):

@@ -1320,3 +1320,42 @@ shipped — so the real lesson is about diligence, not the articles.
   (`review/evidence-grounding/universalize`, `spec-workflow/preservation-anchors`)
   and one confirmed gap was fixed inline (the tdd-loop "do not fix a pre-existing
   red test" guidance).
+
+## Bug 021: a gate that consumes an exit code inherits every assumption behind it — make the narrower question representable
+
+Fixing the silent selector drop (`tdd.py` custom commands / `bug.py` red→green
+teeth) surfaced four durable lessons:
+
+**Substance.** `tdd.py`'s exit code answered "did the command succeed?" while
+the bug lifecycle consumed it as "did this *named* test fail?" — two questions,
+one number. A teeth-not-trust gate ended up machine-attesting something it
+never checked (`red_confirmed_at` stamped by pyright errors on unrelated code,
+observed live in bug 020). The repair pattern: make the narrower question
+**representable at the boundary** — targeting became a *declared capability*
+(a `{test}` argv token in `.jig/test-command`), "could not target" became a
+distinct outcome (exit 2 + one-line reason), and the consumer now **surfaces
+the reason, not the number** (`_tdd_failure_detail`). Capability by silent
+convention ("the command probably accepts a trailing selector") is a contract
+nobody wrote and nobody checks; an explicit token is one that can be refused,
+tested, and documented.
+
+**File the friction.** The symptom was observed and *annotated* twice (bug 004
+Learning, bug 007's `JIG_BUG_TEST_GATE=0` escape) before being *filed* once.
+Tooling friction every session works around is a defect record waiting to
+exist — an annotation in someone else's Learning section has no lifecycle.
+
+**Stdlib gotcha.** `unittest.TestLoader.loadTestsFromName`'s miss behaviour is
+version-dependent: 3.9 raises `AttributeError`, newer Pythons return a
+synthetic red `_FailedTest`. When "unresolved" must be distinguishable from
+"red" (it must — a typo'd selector stamping `red_confirmed_at` is this very
+bug-class), resolve the attribute chain explicitly and treat the loader as a
+constructor, not a validator.
+
+**Ceremony economics (supersedes the bug 033 process gotcha).** The
+`→ FIXING` / `→ REVIEWED` gates in this repo are now **targeted**: seconds,
+not the ~7-minute full-suite + pyright budget, and no longer coupled to
+status-board freshness (the board-staleness → green-check-failure →
+back-edge-to-DIAGNOSING trap is gone from the gate path). The full suite +
+pyright + board integrity remain the *landing* bar (slice-land / CI), so
+regenerate boards before the final full-suite run and commit, not before every
+transition.

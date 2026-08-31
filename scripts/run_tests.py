@@ -2,19 +2,30 @@
 Run all jig tests: one test per skill directory + the scripts directory.
 
 Usage:
-    python3 scripts/run_tests.py
+    python3 scripts/run_tests.py [selector ...]
 
-This is the command pointed to by .jig/test-command, so:
-    python3 skills/tdd-loop/tdd.py run .
-...runs this script instead of trying to invoke pytest directly.
+With no arguments: the full suite + the pyright gate. With one or more
+`path/to/test_file.py[::Class[::method]]` selectors (what tdd.py substitutes
+for its `{test}` placeholder — bug 021): just the named tests, no pyright — a
+targeted run answers "does this named test pass?"; the repo-wide gates stay
+with the full run. An unresolved selector reports `no matching tests: <sel>`
+and exits 1, which tdd.py maps to exit 2 (unresolved selector), never red.
+
+This is the command pointed to by .jig/test-command:
+    python3 scripts/run_tests.py {test}
+...so `python3 skills/tdd-loop/tdd.py run .` runs everything, and
+`... run . --test <selector>` targets.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
+import traceback
 import unittest
 from pathlib import Path
 
@@ -159,7 +170,93 @@ def run_pyright_gate(root: Path = ROOT) -> bool:
     return False
 
 
-def main() -> int:
+def _load_test_module(path: Path, root: Path):
+    """Import a test file by location. Skill dirs are hyphenated (not valid
+    dotted-module names), so location-based import is the only route; the
+    module is registered in sys.modules under a path-derived name so
+    dataclass/pickling machinery inside the tests behaves."""
+    rel = path.resolve().relative_to(root.resolve())
+    mod_name = "jig_targeted_" + re.sub(r"[^0-9A-Za-z_]", "_", str(rel))
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _import_failure_case(selector: str, tb: str) -> unittest.TestCase:
+    """A synthetic red test carrying an import failure — mirrors unittest
+    discovery's convention that broken test code is red, not invisible."""
+    def _fail() -> None:
+        raise ImportError(f"failed to import tests for {selector!r}\n{tb}")
+    return unittest.FunctionTestCase(_fail, description=f"import: {selector}")
+
+
+def build_suite_from_selectors(
+    selectors: list[str], root: Path = ROOT,
+) -> tuple[unittest.TestSuite, list[str]]:
+    """Build a targeted suite from `path[::Class[::method]]` selectors
+    (paths relative to the repo root).
+
+    Returns (suite, missing): selectors whose file or dotted name resolve to
+    nothing land in `missing` — reported, never silently widened (bug 021).
+    """
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+    missing: list[str] = []
+    for selector in selectors:
+        path_part, _, name_part = selector.partition("::")
+        file_path = root / path_part
+        if not file_path.is_file():
+            missing.append(selector)
+            continue
+        try:
+            module = _load_test_module(file_path, root)
+        except Exception:
+            suite.addTest(
+                _import_failure_case(selector, traceback.format_exc())
+            )
+            continue
+        if name_part:
+            # Resolve the attribute chain explicitly: loadTestsFromName's
+            # miss behaviour is version-dependent (3.9 raises, newer returns
+            # a synthetic red _FailedTest) — and a typo'd selector must be
+            # reported as unresolved, never run as a red test (bug 021).
+            obj = module
+            try:
+                for part in name_part.split("::"):
+                    obj = getattr(obj, part)
+            except AttributeError:
+                missing.append(selector)
+                continue
+            try:
+                loaded = loader.loadTestsFromName(
+                    name_part.replace("::", "."), module,
+                )
+            except TypeError:
+                missing.append(selector)
+                continue
+        else:
+            loaded = loader.loadTestsFromModule(module)
+        if loaded.countTestCases() == 0:
+            missing.append(selector)
+            continue
+        suite.addTest(loaded)
+    return suite, missing
+
+
+def main(argv: list[str] | None = None) -> int:
+    selectors = list(sys.argv[1:] if argv is None else argv)
+    if selectors:
+        suite, missing = build_suite_from_selectors(selectors, root=ROOT)
+        if missing:
+            for selector in missing:
+                sys.stderr.write(f"no matching tests: {selector}\n")
+            return 1
+        result = unittest.TextTestRunner(verbosity=1).run(suite)
+        return 0 if result.wasSuccessful() else 1
     result = unittest.TextTestRunner(verbosity=1).run(build_suite())
     pyright_ok = run_pyright_gate()
     return 0 if result.wasSuccessful() and pyright_ok else 1
