@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.14.1](https://github.com/ramboz/jig/compare/v2.14.0...v2.14.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **tdd-loop:** custom test commands declare selector capability via {test} placeholder (bug 021) ([#216](https://github.com/ramboz/jig/issues/216)) ([807c40e](https://github.com/ramboz/jig/commit/807c40e4fc575071c6d2fbc2f33a70fc3e1c1fe3))
+
+
+### Documentation
+
+* **decisions:** add ADR-0059 — servo-delivered work earns a light jig design-review before DONE (Proposed) ([eebd907](https://github.com/ramboz/jig/commit/eebd907e21d5e2a80af309deffbe16f453d4d6bf))
+* **decisions:** draft ADR-0060 — per-execution-mode write-boundary enforcement (Proposed) ([2585592](https://github.com/ramboz/jig/commit/25855920692e8b482bc1aa517e2c9a502446e7a2))
+* **decisions:** frame-critique ADR-0060 (2 rounds) — own the servo-absent enforcement residual ([898dff9](https://github.com/ramboz/jig/commit/898dff9e2cffc89d84bd6d9806a2a851a2e1b3ad))
+* **decisions:** reserve adr-0060-unattended-execution-write-boundary ([986c5d5](https://github.com/ramboz/jig/commit/986c5d587d212ca98d94823ccf91a1f8a22f70df))
+* **inbox,refinement-todo:** track unattended write-boundary enforcement gap for servo integration ([9b02919](https://github.com/ramboz/jig/commit/9b02919edbe129011332f3549fdb1207fa961162))
+* **inbox:** park composed servo×vellum autonomy pilot ([#214](https://github.com/ramboz/jig/issues/214)) ([b45c762](https://github.com/ramboz/jig/commit/b45c76283476c3c607de4fcdc2bf0803b6105ce0))
+* **specs:** capture eng-tips [#30](https://github.com/ramboz/jig/issues/30)/[#31](https://github.com/ramboz/jig/issues/31) ideas into refactor + quarantine records ([#212](https://github.com/ramboz/jig/issues/212)) ([7b6b370](https://github.com/ramboz/jig/commit/7b6b370d2b52e7a592e1cce095ec2542c28a24f6))
+
 ## [2.14.0](https://github.com/ramboz/jig/compare/v2.13.0...v2.14.0) (2026-08-28)
 
 
