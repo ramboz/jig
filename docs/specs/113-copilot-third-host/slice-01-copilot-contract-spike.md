@@ -10,12 +10,16 @@ last_verified:
 **Goal:** Resolve the external, Copilot-owned unknowns ADR-0061 flagged so the
 rendering slices commit to a verified shape rather than a guessed one.
 
-**Question:** What exact contract must jig's committed `hosts/copilot/` package
-present to (a) install via `/plugin`, (b) have its skills load (name/namespace +
-description limits), (c) load custom agents (file form/frontmatter), and (d)
-register hooks — under a live GitHub Copilot CLI at Adobe?
+**Question:** (1) What exact contract must jig's committed `hosts/copilot/`
+package present to (a) install via `/plugin`, (b) have its skills load
+(name/namespace + description limits), (c) load custom agents (file
+form/frontmatter), and (d) register hooks — under a live GitHub Copilot CLI at
+Adobe? (2) **Internal:** can jig's existing `HostRenderer` /
+`translate_hook_protocol` seam express Copilot's 14-event/per-event-schema hook
+model as a third subclass, or must the abstraction be reshaped before 113-02?
 
-**Time-box:** 1 day.
+**Time-box:** 1–2 days (adds a source-level probe of the render seam to the
+live-session contract checks).
 
 **Findings:** _Filled during IN_PROGRESS._
 
@@ -45,6 +49,14 @@ register hooks — under a live GitHub Copilot CLI at Adobe?
 4. **Open questions dispositioned.** Each ADR-0061 `## Open questions` item is
    answered or explicitly carried forward; if a finding contradicts an ADR-0061
    premise, an amendment/superseding note is raised (not silently absorbed).
+5. **Internal seam-fit verified.** Inspect the `HostRenderer` seam in
+   `scaffold.py` (`translate_hook_protocol`, `bind_paths`, `renderer_for_host`,
+   `_HOST_RENDERERS`) and map Copilot's verified hook schema onto it. Record
+   whether a `CopilotScaffoldRenderer(HostRenderer)` subclass can express the
+   Claude-PascalCase→Copilot-camelCase event mapping **and** the per-event
+   payload/response-schema differences without reshaping the seam. If reshaping is
+   needed, name the minimal seam change and record it as the 113-02 entry
+   condition — so the renderer slice doesn't discover it mid-implementation.
 
 **DoD:**
 - [ ] Findings block filled with commands run + observed output (grounding).

@@ -22,6 +22,15 @@ plugin under the committed, source-derived per-host model of
 for its own maintainers and for scaffolded projects after the cutover, jig must
 support GitHub Copilot CLI as a first-class host.
 
+**The bar is full parity with the Claude and Codex hosts** — a Copilot user gets
+jig's *enforced* lifecycle intact, not a degraded subset. The cutover date
+motivates *adopting* Copilot now; it is **not** the load-bearing justification for
+this decision and does **not** set the quality bar. The timeline is not a
+constraint on this work, so the ADR optimizes for parity and symmetry, never for a
+rushed survival install. (A minimal "just installs, gates silently degraded"
+lifeboat is exactly Option A below, rejected on parity grounds — not kept as a
+deadline hedge.)
+
 Copilot CLI is deliberately Claude-compatible at the repository layer. Verified
 against the Adobe "Moving from Claude Code" guide and the "Claude → Copilot
 terminology" map (both read 2026-09-15):
@@ -70,7 +79,9 @@ break or degrade under Copilot as-is:
 ADR-0018 already anticipated this: Option E was chosen partly so that "future
 host adapters follow one pattern: canonical source in root, committed
 `hosts/<host>/` package, host-named zip." Adding Copilot is the first exercise of
-that promise, and it is time-boxed by the 2026-09-28 cutover.
+that promise. The 2026-09-28 cutover is why Copilot support is on the roadmap
+*now*, but the decision stands on the parity/symmetry merits above, independent of
+that date.
 
 **Scope.** This ADR and its implementing spec target **GitHub Copilot CLI**,
 matching the Adobe guide's own scope ("GitHub Copilot CLI, not IDE integrations")
@@ -84,8 +95,8 @@ Lean on Copilot's direct reading of `.claude/` (skills, `CLAUDE.md`, settings
 hooks) and `/plugin` marketplace install; fix only the skill-loader breakers in
 the canonical source.
 
-- **Pros:** Smallest change; fastest to the cutover; no new committed package to
-  drift-guard.
+- **Pros:** Smallest change; no new committed package to drift-guard. (It is also
+  the cheapest path to a *bare* install — worth naming, but see the rejection.)
 - **Cons:** Privileges the Claude shape as "the real tree" — the asymmetry
   ADR-0018 rejected for Codex. Hooks fire with Claude payloads/schemas that
   differ from Copilot's, so jig's gates degrade silently. Agents and permissions
@@ -93,6 +104,12 @@ the canonical source.
   Copilot's durable config home. Forcing canonical descriptions to ≤1024 chars to
   satisfy a Copilot limit would degrade Claude/Codex trigger quality — a
   cross-host coupling the render layer should absorb, not the source.
+- **Rejected:** it delivers a *degraded* Copilot, not parity — the enforcement
+  gates fire with mismatched payloads and the native homes are never populated.
+  That is the opposite of this ADR's bar. Option A is the natural "survive the
+  cutover cheaply" lifeboat; because the goal is parity (not survival) and the
+  timeline is not a constraint, the lifeboat is **not** adopted or held in
+  reserve.
 
 ### Option B: Advisory / instructions-only
 
@@ -121,8 +138,11 @@ drift-guarded `hosts/copilot/` package that renders jig into Copilot-native home
 - **Cons:** A third committed package to build, drift-guard, version, and
   release; the hook-translation layer is real engineering (event-name mapping,
   payload/response-schema adaptation, and an explicit inventory of Claude events
-  Copilot cannot express); more release/CI surface. Larger than A/B under a tight
-  deadline — mitigated by spec sequencing (below).
+  Copilot cannot express); more release/CI surface. Larger than A/B — accepted
+  deliberately as the cost of parity, and sequenced into vertical slices (below).
+  A load-bearing assumption here — that jig's existing `HostRenderer` seam extends
+  to Copilot's divergent hook model as *just a third subclass* — is **verified by
+  the spike (113-01), not assumed** (see Open questions).
 
 ### Option D: A separate Copilot-only plugin / repository
 
@@ -181,12 +201,14 @@ The decision commits jig to:
   silently, where it cannot.
 - **Model-id neutrality** for rendered agents (no hard-coded `opus`/`sonnet`).
 
-**Deadline-aware sequencing.** Because 2026-09-28 is hard, the implementing spec
-(spec 113) orders the "actually works under Copilot" core first — loader-compat +
-skill/instruction/agent rendering + hook translation — with the committed-package
-drift-guard, release archive, and release-please coordination as following
-slices. A usable Copilot install can therefore exist before the deadline even if
-release automation lands just after it.
+**Slice ordering.** The implementing spec (spec 113) orders the "actually works
+under Copilot" core first — loader-compat + skill/instruction/agent rendering +
+hook translation — with the committed-package drift-guard, release archive, and
+release-please coordination as following slices. This is ordinary vertical slicing
+(each slice leaves a Copilot user able to do more end-to-end), **not** a
+deadline-forced survival subset carved out of a parity build: the goal is full
+parity and every slice builds toward it. A partial host is a stepping stone, never
+the ship target.
 
 This ADR does **not** decide servo's or shaper's adoption; those are sibling
 decisions that will mirror this pattern (jig-first, per owner direction), each in
@@ -196,8 +218,9 @@ its own repo's ADR.
 
 **Becomes easier:**
 
-- jig survives the Adobe Claude Code cutover and installs natively for Copilot
-  CLI users via `/plugin` and a host-named zip.
+- jig reaches Claude/Copilot parity and installs natively for Copilot CLI users
+  via `/plugin` and a host-named zip — surviving the Adobe Claude Code cutover as
+  a consequence, not merely as the goal.
 - Copilot's cloud agent and server-side code review pick up jig's conventions,
   since they read `.github/`.
 - Future hosts still follow one pattern; the third host proves the ADR-0018
@@ -242,11 +265,18 @@ its own repo's ADR.
 - The Copilot plugin/marketplace manifest shape a committed `hosts/copilot/`
   package must present for `/plugin` install is **unverified** (see Open
   questions); the layout diagram's manifest line is provisional.
+- **The existing `HostRenderer` seam extends to Copilot as a third subclass** —
+  asserted from the Claude+Codex precedent, but Codex inherits Claude's hook
+  protocol unchanged, so the seam has never faced a divergent hook model. Spike
+  113-01 verifies the seam can express Copilot's event/payload/response schema
+  before the rendering slices build on it.
 
 ## Kill criteria
 
-- Adobe reverses or indefinitely postpones the Claude Code disablement — the
-  deadline pressure evaporates (the parity value does not, but priority drops).
+- **Not a kill.** Adobe reversing or postponing the Claude Code disablement
+  removes *urgency* only: the Claude/Copilot parity goal stands on its own merits,
+  so the work continues. This ADR does not treat the deadline as load-bearing, so
+  its removal does not change the decision.
 - Copilot's `/plugin` cannot install jig's Claude-format marketplace package
   **and** no `.github/`-native discovery path works — the committed-package shape
   needs rethinking before building it.
@@ -267,3 +297,12 @@ its own repo's ADR.
 - **`.github/copilot-instructions.md` vs. `CLAUDE.md` direct read** — durable-home
   guidance favors emitting the former; confirm it does not double-load with the
   `CLAUDE.md` Copilot already reads.
+- **Internal render-seam fit (not just external Copilot facts).** The
+  `HostRenderer.translate_hook_protocol` seam has only ever rendered Claude's
+  protocol — `CodexScaffoldRenderer` inherits it unchanged, because Codex is a
+  Claude near-clone — so the seam has never been exercised against a host with a
+  genuinely different hook model. Whether Copilot's 14 camelCase events with
+  per-event-differing payload/response schemas fit that single seam, or force
+  reshaping the abstraction, is **unverified**. Spike 113-01 must probe the
+  *internal* seam-fit, not only the external plugin/agent/skill contract, before
+  113-02/04/05 commit to the subclass shape.

@@ -15,12 +15,15 @@ use_cases: []
 
 ## Overview
 
-Adobe disables Claude Code on **2026-09-28** and makes GitHub Copilot the
-primary coding agent. To survive the cutover, jig must ship as a first-class
-**GitHub Copilot CLI** host alongside Claude and Codex: a committed,
-drift-guarded `hosts/copilot/` package rendered from the same canonical source,
-installable via `/plugin`, with a host-explicit `jig-copilot-vX.Y.Z.zip`
-release archive.
+jig must reach **full parity between the Claude and Codex hosts and GitHub
+Copilot CLI**: a Copilot user gets jig's *enforced* lifecycle intact, not a
+degraded subset. Concretely, that is a committed, drift-guarded `hosts/copilot/`
+package rendered from the same canonical source, installable via `/plugin`, with
+a host-explicit `jig-copilot-vX.Y.Z.zip` release archive. Adobe disabling Claude
+Code on **2026-09-28** in favor of Copilot is why this is on the roadmap now — but
+per [ADR-0061](../../decisions/adr-0061-copilot-third-host.md) the timeline is
+**not** a constraint on scope: parity is the bar, and a partial host is a stepping
+stone, never the ship target.
 
 Per ADR-0061, Copilot CLI reads Claude-format `SKILL.md` skills, `CLAUDE.md`,
 and `.mcp.json` directly and installs Claude-format plugins from marketplaces —
@@ -53,6 +56,11 @@ servo and shaper adopt the same pattern via their own repos' specs (jig-first).
   **unverified** (spike 113-01).
 - **The Copilot plugin/marketplace manifest shape** a committed `hosts/copilot/`
   package must present for `/plugin` is **unverified** (spike 113-01).
+- **jig's `HostRenderer` seam extends to Copilot as a third subclass** — asserted
+  from the Claude+Codex precedent, but Codex inherits Claude's
+  `translate_hook_protocol` unchanged, so the seam has never faced a divergent
+  hook model. Whether it can express Copilot's 14-event/per-event-schema model or
+  must be reshaped is **unverified** (spike 113-01, internal seam-fit).
 
 ## Decomposition
 
@@ -65,8 +73,10 @@ unknowns ADR-0061 flagged, and a final packaging/release **parity** slice.
 
 - **S (113-01)** — resolve the external unknowns (plugin manifest, agent file
   form, `/plugin` install of the Claude-format package, skill namespace/colon
-  behavior). Spike is justified here because the unknowns are external to jig
-  and gate the render shape; it is tightly time-boxed and nested in this spec.
+  behavior) **and the one internal unknown**: whether jig's `HostRenderer` /
+  `translate_hook_protocol` seam can express Copilot's divergent hook model as a
+  subclass, or must be reshaped first. Spike is justified because these unknowns
+  gate the render shape; it is nested in this spec.
 - **I (113-02)** — walking skeleton: `CopilotScaffoldRenderer` +
   `renderer_for_host` wiring + a minimal committed `hosts/copilot/` rendering
   **skills + instructions** that load under Copilot (loader-compat invariant).
@@ -80,9 +90,10 @@ unknowns ADR-0061 flagged, and a final packaging/release **parity** slice.
   guard + CI, the `jig-copilot-vX.Y.Z.zip` release archive + release-please
   coordination, and per-host install/smoke verification.
 
-**Deadline-aware ordering.** 113-01→05 is the "actually works under Copilot"
-core and lands first; 113-06 (drift/release automation) may land at or just
-after 2026-09-28 without blocking a usable install.
+**Slice ordering.** 113-01→05 is the "actually works under Copilot" core and
+lands first; 113-06 (drift/release automation) follows. This is ordinary vertical
+slicing toward full parity, **not** a deadline-forced survival subset — every
+slice builds toward parity and none is the ship target on its own.
 
 **Anti-horizontal-phasing.** Every non-spike slice leaves a Copilot user able to
 do something new end-to-end (install & run skills; use agents; get nudges; get
