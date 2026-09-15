@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: ["adr-0018-dual-host-generated-plugin-artifacts"]
 last_verified: 2026-09-15
 frame_review: true
@@ -9,7 +9,7 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-09-15)
+Accepted (2026-09-15)
 
 ## Context
 
@@ -22,10 +22,16 @@ plugin under the committed, source-derived per-host model of
 for its own maintainers and for scaffolded projects after the cutover, jig must
 support GitHub Copilot CLI as a first-class host.
 
-**The bar is full parity with the Claude and Codex hosts** — a Copilot user gets
-jig's *enforced* lifecycle intact, not a degraded subset. The cutover date
-motivates *adopting* Copilot now; it is **not** the load-bearing justification for
-this decision and does **not** set the quality bar. The timeline is not a
+**The bar is full parity with the Claude and Codex hosts** — every jig capability
+Copilot can express is rendered natively into Copilot's homes, and the irreducible
+residual (the few Claude hook events Copilot has no equivalent for) is explicitly
+inventoried and degrades *visibly*, never silently. A Copilot user gets jig's
+*enforced* lifecycle, not a quietly degraded subset. (Literal 1:1 parity is
+bounded by what Copilot can express — see the mapped-or-unmappable invariant
+below; "full parity" means maximal expressible parity with an honest, visible
+residual, not zero residual.) The cutover date motivates *adopting* Copilot now;
+it is **not** the load-bearing justification for this decision and does **not**
+set the quality bar. The timeline is not a
 constraint on this work, so the ADR optimizes for parity and symmetry, never for a
 rushed survival install. (A minimal "just installs, gates silently degraded"
 lifeboat is exactly Option A below, rejected on parity grounds — not kept as a
@@ -221,7 +227,9 @@ its own repo's ADR.
 - jig reaches Claude/Copilot parity and installs natively for Copilot CLI users
   via `/plugin` and a host-named zip — surviving the Adobe Claude Code cutover as
   a consequence, not merely as the goal.
-- Copilot's cloud agent and server-side code review pick up jig's conventions,
+- If the committed `.github/` layout is adopted into a repo (as opposed to only
+  session-loaded via `/plugin` — a delivery-path question spike 113-01 confirms),
+  Copilot's cloud agent and server-side code review also pick up jig's conventions,
   since they read `.github/`.
 - Future hosts still follow one pattern; the third host proves the ADR-0018
   adapter promise rather than special-casing.
