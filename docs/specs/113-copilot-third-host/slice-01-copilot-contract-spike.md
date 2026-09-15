@@ -1,8 +1,9 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 kind: spike
 dependencies: [adr-0061]
 last_verified:
+claimed_by: claude/adr-0061-spec-113-jig-874db3
 ---
 
 ## Slice 113-01 — copilot-contract-spike
@@ -21,10 +22,119 @@ model as a third subclass, or must the abstraction be reshaped before 113-02?
 **Time-box:** 1–2 days (adds a source-level probe of the render seam to the
 live-session contract checks).
 
-**Findings:** _Filled during IN_PROGRESS._
+**Findings:**
 
-**Outcome:** _Set at DONE — e.g. `spec 113-02..06 unblocked` and/or
-`ADR-0061 amended` (open-questions resolved)._
+_Grounded against the **shipped** Copilot CLI, not the Adobe guide: npm pkg
+`@github/copilot` 1.0.83 (runtime binary reports `1.0.84-8`), inspected at
+`~/.nvm/.../@github/copilot/node_modules/@github/copilot-darwin-arm64/` — the
+`app.js` bundle, the native `copilot` binary, the shipped `copilot-sdk/*.d.ts`
+type definitions + `copilot-sdk/docs/*.md`, and `copilot <sub> --help`._
+
+**AC1 — Plugin install + manifest (VERIFIED).**
+- `copilot plugin install <source>` parses (from `--help`): `plugin@marketplace`,
+  `owner/repo`, **`owner/repo:path` (a repo subdirectory)**, `https://…git`.
+  → jig's committed `hosts/copilot/` installs directly with **no build step and no
+  separate marketplace**: `copilot plugin install ramboz/jig:hosts/copilot`. A
+  marketplace entry is optional/additive, not required.
+- Plugin manifest = **`.plugin/plugin.json`** (observed in the bundled
+  `plugins/computer-use/.plugin/plugin.json`): `{ "name", "version",
+  "description", "mcpServers"?: "./.mcp.json" }`. Bundled `skills/`, `agents/`,
+  and `.github/extensions/` are directory-discovered within the plugin root; only
+  MCP needs an explicit pointer.
+
+**AC2 — Skill-load contract (VERIFIED; two ADR premises corrected).**
+- Discovery roots (`copilot skill --help`): project `.github/skills/`,
+  `.agents/skills/`, `.claude/skills/`; personal `~/.copilot/skills/`,
+  `~/.agents/skills/`; plugin-bundled; custom (`copilot skill add`). SKILL.md
+  format is the **same Agent-Skills shape** (builtin example frontmatter:
+  `name`, `description`, `user-invocable`, `allowed-tools`).
+- **`:` namespace is a non-issue.** Copilot addresses a skill as
+  `${source}:${name}` (e.g. `plugin:spec-workflow`) — the `:` is Copilot's own
+  *source prefix*, applied to the bare `name:` field. jig source skill `name:`
+  fields carry no colon (ADR probe: 0/20), so nothing surfaces a `:`-bearing
+  loaded name. The `jig:` Claude *invocation* prefix is not a skill name and does
+  not travel into the SKILL.md. → **ADR "hard failure #1a" (`:` names) does not
+  reproduce.**
+- **1024-char description limit NOT corroborated** in the shipped loader: every
+  `1024` occurrence in `app.js` is unrelated (YAML `:`-indicator limit
+  `KEY_OVER_1024_CHARS`, LRU cache sizes, diff-size caps). No skill-description
+  length gate was found in the code inspected. → Treat the Adobe-guide ">1024
+  fails to load" claim as **unverified / likely relaxed in 1.0.84**. The renderer
+  should still keep descriptions lean defensively (cheap insurance), but this is
+  not a load-bearing breaker. _(Absence-of-evidence, not proven absence — the
+  loader path in the native binary was not exhaustively decompiled.)_
+
+**AC3 — Agent + hook forms (VERIFIED; hook mechanism is the big finding).**
+- **Agent file form RESOLVED: `.github/agents/<name>.agent.md`** (Markdown +
+  frontmatter) for authored/custom agents — from `app.js`:
+  `` `${name}.agent.md` `` written to `join(cwd, ".github", "agents")`. The
+  `.agent.yaml` form is only the **built-in** YAML agents
+  (`agentsIsYamlBasedAgent`). Agent frontmatter fields (from the shipped
+  `definitions/*.agent.yaml`): `name`, `description`, `tools`, `prompt`
+  (+ `displayName`, `promptParts` for built-ins). Read-only posture is expressed
+  via the `tools` list + prompt (the built-in `code-review` agent uses
+  `tools: ["*"]` and enforces read-only in the prompt).
+- **Hook mechanism — CONTRADICTS ADR-0061.** Copilot has **no shell-command
+  hooks via a JSON settings file** (Claude's model). Per the shipped
+  `copilot-sdk/docs/extensions.md` + `copilot-sdk/types.d.ts`: hooks are **typed
+  JS handler functions** registered by a forked **Node `extension.mjs`**
+  (`.github/extensions/<name>/extension.mjs`, ES module) that calls
+  `joinSession({ hooks: {…} })` from `@github/copilot-sdk/extension` over
+  **JSON-RPC/stdio**. No `hooks.json` / `settings.json` hook-config path exists in
+  the shipped CLI. There is **no `.github/hooks/*.json`** as the ADR-0061 layout
+  diagram assumed.
+- **`SessionHooks` surface (10 handlers, `types.d.ts`):** `onPreToolUse`,
+  `onPreMcpToolCall`, `onPostToolUse`, `onPostToolUseFailure`,
+  `onUserPromptSubmitted`, `onUserPromptTransformed`, `onSessionStart`,
+  `onSessionEnd`, `onErrorOccurred`, `onAgentStop`.
+- **Output field vocabulary is Claude-compatible** (the good news — the *logical*
+  decision maps 1:1): `PreToolUseHookOutput { permissionDecision?:
+  "allow"|"deny"|"ask"; permissionDecisionReason?; modifiedArgs?;
+  additionalContext?; suppressOutput? }`; `SessionStartHookOutput {
+  additionalContext?; modifiedConfig? }`; `PostToolUseHookOutput {
+  modifiedResult?; additionalContext?; suppressOutput? }`; `AgentStopHookOutput {
+  decision?: "block"; reason? }` (docs cite "Claude-compatible `stop_hook_active`
+  semantics"). It is the **delivery mechanism** (shell + `settings.json` +
+  exit-code-2/stdout → JS handler + typed return over JSON-RPC) that differs, not
+  the decision vocabulary.
+- Instructions home: **`.github/copilot-instructions.md`** (`copilot init`
+  generates it; `copilot instruction list` inspects sources). Copilot also reads
+  `CLAUDE.md`/`AGENTS.md`, so the copilot package should emit **one** canonical
+  instructions file to avoid double-load. MCP: `.mcp.json` or `.github/mcp.json`.
+
+**AC5 — Internal seam-fit (VERIFIED; the decisive architectural result).**
+- jig's current seam `HostRenderer.translate_hook_protocol(logical_result: dict)
+  -> dict` (`skills/scaffold-init/scaffold.py:1076`) is defined once, concretely,
+  on `ClaudeScaffoldRenderer`; `CodexScaffoldRenderer(ClaudeScaffoldRenderer)`
+  **inherits it unchanged** (confirmed: only the abstract stub at :1034 and the
+  Claude impl at :1076 exist). It assumes the Claude/Codex model: hooks are shell
+  scripts wired in `settings.json`, and "protocol translation" is a
+  response-schema **dict remap**.
+- **Copilot does not fit that seam as "just a third subclass."** (Frame-critique
+  secondary finding CONFIRMED.) Copilot needs a **new renderer responsibility**:
+  emit `.github/extensions/jig/extension.mjs` that registers `SessionHooks`
+  handlers, each shelling out to the existing `hooks/scripts/jig-*.sh` bash
+  scripts, capturing exit-code + stdout, and mapping to the Copilot `HookOutput`
+  object (exit 2 → `permissionDecision:"deny"` + `permissionDecisionReason`;
+  stdout `additionalContext` → `additionalContext`; agent-stop block →
+  `{decision:"block", reason}`). This is a **bridge/adapter generator**, not a
+  dict remap and not `.github/hooks/*.json`.
+- **Minimal seam change (113-02 entry condition):** add a hook-**emission** seam
+  to `HostRenderer` (e.g. `emit_hooks(pkg_dir)` / `render_hook_delivery`) — Claude
+  & Codex implement it as their existing `settings.json` hooks block (refactor
+  current behavior behind the method); Copilot implements it as
+  `extension.mjs` + the bash-bridge. Keep `translate_hook_protocol` for the
+  reusable logical-decision → host-output field mapping. This is a genuine
+  reshape of the abstraction, not a subclass drop-in.
+
+**Outcome:** `spec 113-02..06 unblocked (verified shape)`;
+**`ADR-0061 amendment REQUIRED`** — the hook-delivery mechanism in the Recommended
+Decision (layout `hooks/*.json`; `translate_hook_protocol` as the sole hook seam)
+is contradicted by the shipped CLI (hooks = `extension.mjs` SDK handlers). Per
+spike AC4 + ADR-0010 (records need an owner-approved `## Amendments` entry) the
+contradiction is **surfaced for owner approval, not silently absorbed** — see the
+session hand-off. Two Adobe-guide "hard failures" (`:` names, >1024 desc) did
+**not** reproduce and are downgraded.
 
 **DoR:**
 - ✅ ADR-0061 recorded (Proposed).
