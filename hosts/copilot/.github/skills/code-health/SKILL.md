@@ -98,7 +98,7 @@ Two subcommands mirror `tdd.py`: `detect` reports which linter resolves, and
 ### Detect the linter
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" detect [target]
+python3 ".github/skills/code-health/health.py" detect [target]
 ```
 
 - `target` defaults to `.` when omitted.
@@ -110,7 +110,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" detect [target]
 ### Run the lint pass
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/code-health/health.py" check [target]
+python3 ".github/skills/code-health/health.py" check [target]
 ```
 
 - Auto-resolves the ecosystem's linter via the same logic as `detect`.

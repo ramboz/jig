@@ -1,11 +1,11 @@
 """
-Tests for scripts/build_copilot_plugin.py — slice 113-02 (renderer-and-skeleton).
+Tests for scripts/build_copilot_plugin.py — slice 113-02
+(renderer-and-skeleton), grown by 113-03 (agents) and 113-04 (advisory-hooks).
 
 Covers:
   - AC #1/#4: the builder materializes a minimal, directly-installable
     `hosts/copilot/` package: `.plugin/plugin.json` + `.github/skills/<name>/
-    SKILL.md` — and nothing beyond that walking-skeleton scope (no agents/,
-    no hooks/, no companion CLAUDE.md, and — per the 113-02 review fix below
+    SKILL.md` (no companion CLAUDE.md, and — per the 113-02 review fix below
     — no pre-rendered instructions file either).
   - AC #2: the loader-compat invariant — every emitted skill has a
     namespace-safe name and a <=1024-char description, with the full
@@ -21,13 +21,24 @@ Covers:
     `/plugin` install must not impose instructions on the consuming repo);
     shipping a full-parity, template-carrying package is 113-06 scope, not
     this walking skeleton.
+  - 113-03: `agents/*.md` renders to `.github/agents/<name>.agent.md`.
+  - 113-04 (`CopilotAdvisoryHookPackagingTests`): the 3 advisory hooks
+    (session git-freshness, boundary-change-warn, entry-gate-nudge) render
+    to `.github/hooks/*.json`, keyed by Copilot's camelCase event names,
+    with their matcher and command paths translated; their scripts ship
+    byte-identical under `.github/hooks/scripts/`. AC3 fail-open and AC2
+    "firing" are verified via the closest deterministic substitute (direct
+    script invocation with a constructed payload), not a live Copilot
+    session — see the slice report for what remains unverified live.
   - Build safety mirrors the Claude/Codex builders (refuse unsafe output
     dirs; atomic replace of a stale tree).
 """
 
 import io
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -41,6 +52,43 @@ import install_contract  # noqa: E402
 import scaffold as scaffold_mod  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _make_repo_behind_origin_main(project_dir: Path) -> None:
+    """Turn `project_dir` into a hermetic, no-network git repo whose `HEAD`
+    is exactly 1 commit behind a LOCAL `refs/remotes/origin/main` ref —
+    the fixture `lib/git_freshness.py`'s `resolve_target`/`_behind_count`
+    need to produce a real, non-trivial nudge (craft review fix: prove
+    genuine firing, not just "does not crash"). Duplicated (not imported)
+    from `skills/scaffold-init/test_copilot_hook_adapter.py`'s identical
+    helper — each test file stays self-contained rather than depending on
+    a sibling test module.
+
+    Mechanics: commit twice on `main`, pin `refs/remotes/origin/main` to
+    the SECOND commit, then hard-reset the branch back to the first — so
+    `origin/main` (a real, resolvable ref) is 1 commit ahead of `HEAD` with
+    no actual remote or network fetch involved."""
+    def _git(*args):
+        subprocess.run(
+            ["git", *args], cwd=str(project_dir), check=True,
+            capture_output=True, text=True,
+        )
+
+    _git("init", "-q", "-b", "main")
+    _git("config", "user.email", "test@example.com")
+    _git("config", "user.name", "Test")
+    _git("commit", "-q", "--allow-empty", "-m", "C1")
+    first = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(project_dir),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _git("commit", "-q", "--allow-empty", "-m", "C2")
+    second = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(project_dir),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _git("update-ref", "refs/remotes/origin/main", second)
+    _git("reset", "-q", "--hard", first)
 
 
 def _build(output_dir: Path, source_root: Path = REPO_ROOT):
@@ -107,18 +155,15 @@ class CopilotPackageContentsTests(unittest.TestCase):
         ]
         self.assertEqual(leaks, [])
 
-    def test_package_is_exactly_manifest_skills_and_agents(self):
-        # 113-03 grows the 113-02 walking skeleton by one thing: rendered
-        # agents under `.github/agents/`. `.plugin/plugin.json` +
-        # `.github/{skills,agents}/**` — still nothing else at the
-        # `.github/` top level (113-04/05 add `.github/hooks/` later).
+    def test_package_is_exactly_manifest_skills_agents_and_hooks(self):
+        # 113-03 grew the 113-02 walking skeleton by rendered agents; 113-04
+        # grows it again by the 3 advisory hooks under `.github/hooks/`.
+        # `.plugin/plugin.json` + `.github/{skills,agents,hooks}/**` — still
+        # nothing else at the `.github/` top level (113-05 adds the rest of
+        # jig's hooks; MCP/settings.json are not this package's scope yet).
         github_dir = self.out_dir / ".github"
         top_level = {p.name for p in github_dir.iterdir()}
-        self.assertEqual(top_level, {"skills", "agents"})
-
-    # Walking-skeleton scope guard (113-04/05 build hooks later)
-    def test_hooks_not_yet_shipped(self):
-        self.assertFalse((self.out_dir / ".github" / "hooks").exists())
+        self.assertEqual(top_level, {"skills", "agents", "hooks"})
 
     def test_excludes_tests_and_caches(self):
         leaks = [
@@ -333,6 +378,398 @@ class CopilotAgentPackagingTests(unittest.TestCase):
         self.assertEqual(sorted(tools), sorted(["view", "glob", "grep", "fetch"]))
 
 
+class CopilotAdvisoryHookPackagingTests(unittest.TestCase):
+    """Slice 113-04 (advisory-hooks) — the 3 advisory hooks (session
+    git-freshness, boundary-change-warn, entry-gate-nudge) render into
+    `.github/hooks/*.json` and ship their scripts under
+    `.github/hooks/scripts/`.
+
+    AC1: event-name + response-schema translation (exercised via the
+    rendered JSON's shape). AC2: the 3 hooks are rendered + their scripts
+    shipped. AC3: fail-open — verified via a deterministic substitute
+    (direct script invocation), since a real Copilot session is not
+    available in this build/test environment. AC4: hook-command paths are
+    plugin-root-relative, not the raw `${CLAUDE_PLUGIN_ROOT}` literal.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-hooks-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _hooks_dir(self) -> Path:
+        return self.out_dir / ".github" / "hooks"
+
+    # AC2
+    def test_all_three_advisory_hook_files_render(self):
+        names = sorted(p.name for p in self._hooks_dir().glob("*.json"))
+        self.assertEqual(
+            names,
+            [
+                "jig-boundary-change-warn.json",
+                "jig-entry-gate.json",
+                "jig-git-freshness.json",
+            ],
+        )
+
+    # AC1
+    def test_git_freshness_hook_keyed_by_session_start_camel_case(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-git-freshness.json").read_text()
+        )
+        self.assertEqual(set(payload.keys()), {"sessionStart"})
+
+    def test_boundary_warn_hook_keyed_by_post_tool_use_camel_case(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-boundary-change-warn.json").read_text()
+        )
+        self.assertEqual(set(payload.keys()), {"postToolUse"})
+
+    def test_entry_gate_hook_keyed_by_post_tool_use_camel_case(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-entry-gate.json").read_text()
+        )
+        self.assertEqual(set(payload.keys()), {"postToolUse"})
+
+    def test_boundary_warn_and_entry_gate_matcher_uses_copilot_tool_names(self):
+        for stem in ("jig-boundary-change-warn", "jig-entry-gate"):
+            payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
+            matcher = payload["postToolUse"][0]["matcher"]
+            self.assertEqual(matcher, "edit|create")
+            self.assertNotIn("Edit", matcher)
+            self.assertNotIn("Write", matcher)
+            self.assertNotIn("MultiEdit", matcher)
+
+    # AC4
+    def test_rendered_hook_commands_have_no_raw_claude_plugin_root(self):
+        for hook_file in self._hooks_dir().glob("*.json"):
+            text = hook_file.read_text()
+            self.assertNotIn("CLAUDE_PLUGIN_ROOT", text, hook_file.name)
+
+    def test_rendered_hook_commands_route_through_the_input_adapter(self):
+        # 113-04 AC1 follow-up: the rendered command now invokes
+        # `copilot_hook_adapter.py <event> <script>` rather than the bare
+        # path-rewritten script, so Copilot's camelCase stdin JSON is
+        # translated before the (unmodified) jig script sees it.
+        payload = json.loads(
+            (self._hooks_dir() / "jig-git-freshness.json").read_text()
+        )
+        command = payload["sessionStart"][0]["hooks"][0]["command"]
+        self.assertEqual(
+            command,
+            "python3 .github/hooks/scripts/copilot_hook_adapter.py "
+            'SessionStart ".github/hooks/scripts/jig-git-freshness.sh"',
+        )
+
+    # AC2 — scripts shipped
+    def test_hook_scripts_and_lib_helpers_shipped(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        for name in (
+            "jig-git-freshness.sh",
+            "jig-boundary-change-warn.sh",
+            "jig-entry-gate.sh",
+            "lib/git_freshness.py",
+            "lib/entry_gate.py",
+            "lib/read_attribution.py",
+            "lib/protected_paths.py",
+            "copilot_hook_adapter.py",
+        ):
+            self.assertTrue(
+                (scripts_dir / name).is_file(), f"missing shipped file: {name}"
+            )
+
+    def test_adapter_shipped_byte_identical_to_its_canonical_source(self):
+        source = (
+            REPO_ROOT / "skills" / "scaffold-init" / "copilot_hook_adapter.py"
+        ).read_bytes()
+        shipped = (
+            self._hooks_dir() / "scripts" / "copilot_hook_adapter.py"
+        ).read_bytes()
+        self.assertEqual(shipped, source)
+
+    def test_shipped_sh_scripts_are_executable(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        for sh in scripts_dir.glob("*.sh"):
+            mode = sh.stat().st_mode
+            self.assertTrue(mode & 0o111, f"{sh.name} is not executable")
+
+    def test_shipped_hook_scripts_are_byte_identical_to_source(self):
+        # Spike 113-01 AC5's design: ship the EXISTING scripts unchanged —
+        # all translation lives in the rendered `.github/hooks/*.json`, none
+        # in the script bodies.
+        for name in ("jig-git-freshness.sh", "jig-boundary-change-warn.sh",
+                     "jig-entry-gate.sh"):
+            source = (REPO_ROOT / "hooks" / "scripts" / name).read_bytes()
+            shipped = (self._hooks_dir() / "scripts" / name).read_bytes()
+            self.assertEqual(shipped, source, name)
+
+    # AC2 — resolvable relative climb to _common (see
+    # `_copy_copilot_hook_scripts`'s docstring: nesting under `.github/`
+    # keeps `jig-entry-gate.sh`'s unmodified `../../skills` climb correct).
+    def test_common_helpers_are_reachable_from_shipped_hook_scripts(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        common_dir = (scripts_dir / ".." / ".." / "skills" / "_common").resolve()
+        self.assertTrue(
+            common_dir.is_dir(),
+            f"entry_gate.py's ../../skills climb from {scripts_dir} does not "
+            f"reach a real _common dir (looked at {common_dir})",
+        )
+        self.assertTrue((common_dir / "project_layout.py").is_file())
+
+    # AC3 — fail-open, verified via the closest deterministic substitute:
+    # invoking the shipped script directly (a real Copilot session is not
+    # available in this environment; see the slice report for what remains
+    # unverified live).
+    def test_git_freshness_script_fires_under_a_copilot_shaped_payload(self):
+        script = self._hooks_dir() / "scripts" / "jig-git-freshness.sh"
+        # git-freshness only reads `source` (spelled identically under
+        # Claude and Copilot) plus `project_dir` from the environment — it
+        # is the one advisory hook this slice's payload-shape gap does not
+        # affect (see the slice report). A non-git CLAUDE_PROJECT_DIR is
+        # expected to degrade silently (fail-open), not crash.
+        payload = json.dumps({
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.tmp),
+            "source": "startup",
+        })
+        result = subprocess.run(
+            ["bash", str(script)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.tmp)},
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # `self.tmp` is not a git repo, so `resolve_target` finds no base —
+        # fail-open degrades to silence, not a crash.
+        self.assertEqual(result.stdout.strip(), "")
+
+    def test_git_freshness_script_fires_a_real_behind_nudge(self):
+        # Craft review fix: prove genuine firing (an `additionalContext`
+        # nudge naming the real behind-count), not merely "does not
+        # crash" — a hermetic, no-network "HEAD is behind origin/main"
+        # fixture.
+        repo_dir = Path(tempfile.mkdtemp(prefix="jig-copilot-freshness-behind-"))
+        try:
+            _make_repo_behind_origin_main(repo_dir)
+            script = self._hooks_dir() / "scripts" / "jig-git-freshness.sh"
+            payload = json.dumps({
+                "sessionId": "abc123",
+                "timestamp": "2026-09-15T00:00:00Z",
+                "workingDirectory": str(repo_dir),
+                "source": "startup",
+            })
+            result = subprocess.run(
+                ["bash", str(script)],
+                input=payload,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo_dir)},
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("additionalContext", result.stdout)
+            self.assertIn("1 commit(s) behind", result.stdout)
+            self.assertIn("origin/main", result.stdout)
+        finally:
+            shutil.rmtree(repo_dir, ignore_errors=True)
+
+    def test_boundary_warn_script_never_crashes_on_a_copilot_shaped_payload(self):
+        # This test invokes the RAW jig script directly (bypassing
+        # `copilot_hook_adapter.py`, which the actually-rendered hook
+        # command routes through — see
+        # `RenderedHookCommandFiresEndToEndTests` below for the real,
+        # adapter-fronted firing path). It pins a second-layer safety net:
+        # even the unmodified script, given Copilot's un-translated
+        # camelCase payload directly, must degrade silently rather than
+        # crash or emit malformed output (AC3) — the same defensive
+        # property it already had before this slice for ANY unrecognized
+        # payload shape.
+        script = self._hooks_dir() / "scripts" / "jig-boundary-change-warn.sh"
+        payload = json.dumps({
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.tmp),
+            "toolName": "edit",
+            "toolArgs": {"path": "openapi.yaml"},
+        })
+        result = subprocess.run(
+            ["bash", str(script)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.tmp)},
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Fail-open degrades to no output at all (sys.exit(0) with nothing
+        # printed) rather than emitting anything malformed.
+        if result.stdout.strip():
+            json.loads(result.stdout)  # must at least be valid JSON if non-empty
+
+    def test_boundary_warn_script_still_fires_under_a_claude_shaped_payload(self):
+        # Regression guard: the Copilot packaging must not have broken the
+        # shared script's Claude-shaped behavior (it is byte-identical to
+        # source — this is really testing the fixture/harness, but pins the
+        # contrast with the Copilot-shaped case above).
+        script = self._hooks_dir() / "scripts" / "jig-boundary-change-warn.sh"
+        target = self.tmp / "openapi.yaml"
+        target.write_text("openapi: 3.0.0\n")
+        payload = json.dumps({
+            "session_id": "abc123",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target)},
+        })
+        result = subprocess.run(
+            ["bash", str(script)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.tmp),
+                 "JIG_PROTECTED_PATHS": "0"},
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("additionalContext", result.stdout)
+
+
+class RenderedHookCommandFiresEndToEndTests(unittest.TestCase):
+    """Slice 113-04 follow-up (coordinator-requested AC1 completion) — the
+    ACTUALLY-BUILT package's rendered `command` string (adapter + script,
+    exactly what a Copilot session would run) fires correctly under a real
+    Copilot-shaped (camelCase) payload. This is the "make boundary-warn +
+    entry-gate fire too" verification, exercised against the real build
+    output rather than a hand-constructed path (see
+    `skills/scaffold-init/test_copilot_hook_adapter.py` for the adapter's
+    own direct/unit-level coverage of the same claim)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-e2e-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+        self.project_dir = Path(tempfile.mkdtemp(prefix="jig-copilot-e2e-proj-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        shutil.rmtree(self.project_dir, ignore_errors=True)
+
+    def _run_rendered_command(self, stem: str, payload: dict):
+        hook_file = self.out_dir / ".github" / "hooks" / f"{stem}.json"
+        rendered = json.loads(hook_file.read_text())
+        event = next(iter(rendered))
+        command = rendered[event][0]["hooks"][0]["command"]
+        # cwd=self.out_dir: the best-hypothesis assumption this slice's
+        # renderer commits to (plugin-root-relative paths) — see
+        # `CopilotScaffoldRenderer.rewrite_hook_command`'s docstring for the
+        # residual on whether Copilot actually spawns hook commands with
+        # this CWD.
+        #
+        # ALSO force CLAUDE_PROJECT_DIR to this test's own temp project dir
+        # (craft review fix — hermeticity): the adapter only exports it
+        # from the payload's `workingDirectory` when it is NOT already
+        # present in the inherited environment. Under a real Claude Code
+        # session CLAUDE_PROJECT_DIR is set to the actual repo being worked
+        # in; without this override, entry_gate.py would evaluate
+        # lifecycle state against THAT repo (which has its own
+        # `.jig/spec-ref` marker) instead of this test's isolated temp
+        # dir — an environment-dependent result, not a hermetic one.
+        env = {
+            **os.environ,
+            "TMPDIR": str(self.project_dir),
+            "CLAUDE_PROJECT_DIR": str(self.project_dir),
+        }
+        return subprocess.run(
+            ["bash", "-c", command],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            cwd=str(self.out_dir),
+            env=env,
+            timeout=15,
+        )
+
+    def test_git_freshness_rendered_command_fires_cleanly(self):
+        # `self.project_dir` is not a git repo, so `resolve_target` finds
+        # no base — fail-open degrades to silence, not a crash.
+        result = self._run_rendered_command("jig-git-freshness", {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "source": "startup",
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+    def test_git_freshness_rendered_command_fires_a_real_behind_nudge(self):
+        # Craft review fix: prove genuine firing (an `additionalContext`
+        # nudge naming the real behind-count) through the ACTUALLY-BUILT
+        # package's rendered command, not merely "does not crash".
+        _make_repo_behind_origin_main(self.project_dir)
+        result = self._run_rendered_command("jig-git-freshness", {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "source": "startup",
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stdout = result.stdout.decode()
+        self.assertIn("additionalContext", stdout)
+        self.assertIn("1 commit(s) behind", stdout)
+        self.assertIn("origin/main", stdout)
+
+    def test_boundary_warn_rendered_command_fires_on_a_contract_artifact(self):
+        result = self._run_rendered_command("jig-boundary-change-warn", {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "toolName": "edit",
+            "toolArgs": {"path": "openapi.yaml"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("additionalContext", result.stdout.decode())
+
+    def test_boundary_warn_rendered_command_fires_on_create_tool(self):
+        result = self._run_rendered_command("jig-boundary-change-warn", {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "toolName": "create",
+            "toolArgs": {"path": "schema.proto"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("additionalContext", result.stdout.decode())
+
+    def test_entry_gate_rendered_command_fires_on_an_out_of_lifecycle_edit(self):
+        result = self._run_rendered_command("jig-entry-gate", {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "toolName": "edit",
+            "toolArgs": {"path": "app.py"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("additionalContext", result.stdout.decode())
+        self.assertIn("outside the jig lifecycle", result.stdout.decode())
+
+    def test_boundary_warn_rendered_command_stays_silent_on_a_non_contract_file(self):
+        result = self._run_rendered_command("jig-boundary-change-warn", {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-15T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "toolName": "edit",
+            "toolArgs": {"path": "README.md"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+
 class ClaudeCodexAgentOutputUnaffectedByCopilotAgentRenderingTests(unittest.TestCase):
     """Slice 113-03 design decision #5 — rendering Copilot agents must not
     touch the Claude/Codex agent source or their own committed outputs."""
@@ -496,6 +933,21 @@ class CommittedCopilotPackageTests(unittest.TestCase):
                 f"committed hosts/copilot agent missing: {name} — run "
                 "`python3 scripts/build_host_packages.py`",
             )
+
+    def test_committed_advisory_hooks_present(self):
+        # 113-04: hooks/ joins the committed package.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        for stem in ("jig-git-freshness", "jig-boundary-change-warn",
+                     "jig-entry-gate"):
+            self.assertTrue(
+                (pkg / ".github" / "hooks" / f"{stem}.json").is_file(),
+                f"committed hosts/copilot hook missing: {stem} — run "
+                "`python3 scripts/build_host_packages.py`",
+            )
+        self.assertTrue(
+            (pkg / ".github" / "hooks" / "scripts" / "jig-git-freshness.sh")
+            .is_file()
+        )
 
     def test_no_pre_rendered_instructions_file_committed(self):
         # 113-02 review fix: no pre-rendered instructions file ships.

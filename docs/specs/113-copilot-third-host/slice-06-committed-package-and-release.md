@@ -32,6 +32,15 @@ step.
    Copilot installs.
 4. **Docs.** README/install docs and `docs/architecture.md` document the Copilot
    install path and the tri-host package topology.
+5. **Package completeness (rewritten command targets resolve).** The committed
+   `hosts/copilot/` ships every tree a rendered skill/hook body references, so the
+   `${CLAUDE_PLUGIN_ROOT}` → Copilot path rewrites actually resolve — notably the
+   `scripts/` tree (e.g. `spec_lint.py`, referenced by the `analyze` skill body and
+   rewritten to `.github/scripts/…` in 113-04, but **not yet shipped**) alongside the
+   already-shipped `.github/skills/`, `.github/agents/`, `.github/hooks/`. A test
+   asserts no rendered skill/hook command points at a path absent from the package.
+   (Surfaced by the 113-04 compliance review — the skill-body rewrite currently
+   targets an unshipped dir; homed here as the packaging-completeness slice.)
 
 **DoD:**
 - [ ] All ACs pass; full suite green; new tests fail when the feature is removed.

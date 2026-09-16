@@ -1,8 +1,7 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [113-02]
 last_verified: 2026-09-15
-claimed_by: claude/adr-0061-spec-113-jig-874db3
 ---
 
 ## Slice 113-03 — agents

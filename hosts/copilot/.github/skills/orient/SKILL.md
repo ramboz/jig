@@ -45,7 +45,7 @@ Do not re-derive the project's lifecycle state by hand — jig already computes 
 Run the read-only command spec 088 added and use its line as your factual base:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" orient --project-dir . --fetch
+python3 ".github/skills/spec-workflow/workflow.py" orient --project-dir . --fetch
 # → jig hint: <scaffold state> · active specs: <rollup> · focus: <slice needing attention>
 #   …and, only when the checkout is ahead of its default branch:
 #   · in flight: <n> commit(s) ahead of <base> on <branch>

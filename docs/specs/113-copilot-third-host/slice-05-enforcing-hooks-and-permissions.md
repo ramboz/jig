@@ -17,6 +17,23 @@ recorded as unmappable**.
 - ✅ 113-04 done (advisory-hook translation + schema proven).
 - ✅ 113-01 finding recorded Copilot's permission-decision (allow/deny) response
   shape.
+- ⚠️ **113-04 input adapter is advisory-only (fail-open) — enforcing needs an
+  output/exit path (arch + compliance review of 113-04):** `copilot_hook_adapter.py`
+  (Copilot-render-only) translates Copilot camelCase hook *input* → jig's snake_case
+  script input and is **always-exit-0**. Enforcing hooks route through the SAME
+  adapter but 113-05 MUST add a runtime **output/exit post-processing** path: capture
+  the child script's exit code + stdout and translate `exit 2` / `block_reason` →
+  Copilot `permissionDecision:"deny"` (+ `permissionDecisionReason`), via a per-hook
+  **advisory-vs-enforcing mode** (e.g. an extra argv). Reusing the advisory adapter
+  verbatim would convert `exit 2` → `exit 0` with no `deny` and **silently lose the
+  gate's teeth** (ADR-0061 "keep their teeth / degrade visibly, not silently").
+  `translate_hook_protocol`'s response half (`block_reason→deny`) is currently
+  render-layer-only/unwired — decide here whether the runtime response mapping lives
+  in the adapter (which is what sees the runtime `exit 2`), and drift-guard any
+  duplicated mapping. **Verify enforcement by positive confirmation (a real deny),
+  not absence-of-error** — the advisory adapter masks failures, so the plugin-root
+  command-path spelling residual (still unverified) hides behind exit-0 until proven
+  by a firing deny.
 
 **Acceptance Criteria:**
 

@@ -16,7 +16,7 @@ user-invocable: true
 ## What this skill does
 
 Generates an AI-native development workspace by copying templates from
-`${CLAUDE_PLUGIN_ROOT}/templates/` into a target directory. Detects project
+`.github/templates/` into a target directory. Detects project
 signals from the filesystem (LLM/agent files, CI, tests, team), runs an optional
 Q&A flow to let the user override those signals, and selects tiers accordingly.
 Tier 0 always installs; Tier 1 installs when test signals are present; Tier 2
@@ -32,7 +32,7 @@ is offered (not auto-installed) when LLM/agent signals are present.
 3. **Run the Q&A flow** (see next section). Collect answers as flag values.
 4. Invoke the wizard with the collected flags:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" \
+   python3 ".github/skills/scaffold-init/scaffold.py" \
      [--runtime <name>] [--team|--solo] [--has-ci|--no-ci] \
      [--has-tests|--no-tests] [--plans-ai|--no-ai] \
      [--in-repo] \
@@ -51,7 +51,7 @@ TOML under `.codex/agents/`. For Codex plugin users who want jig's role agents
 globally available, run the explicit post-install helper:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/scaffold-init/scaffold.py" --install-codex-agents
+python3 ".github/skills/scaffold-init/scaffold.py" --install-codex-agents
 ```
 
 The default destination is `~/.codex/agents`. Use

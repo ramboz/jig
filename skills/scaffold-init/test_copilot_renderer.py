@@ -59,17 +59,26 @@ class RendererDispatchTests(unittest.TestCase):
             scaffold.ClaudeScaffoldRenderer,
         )
 
-    def test_copilot_inherits_hook_protocol_and_bind_paths_from_claude(self):
-        # Design decision (113-02): the Copilot renderer does NOT override
-        # translate_hook_protocol or bind_paths — neither is exercised until
-        # 113-04/05, and inventing a shape now would just be unwound later.
-        self.assertIs(
-            scaffold.CopilotScaffoldRenderer.translate_hook_protocol,
-            scaffold.ClaudeScaffoldRenderer.translate_hook_protocol,
-        )
+    def test_copilot_still_inherits_bind_paths_from_claude(self):
+        # Design decision (113-02, RECONFIRMED 113-04): `bind_paths` stays
+        # inherited — no Copilot plugin-root env var was found even after
+        # 113-04 re-probed (see CopilotScaffoldRenderer's docstring and
+        # `rewrite_hook_command`'s). `translate_hook_protocol` DOES diverge
+        # now (113-04) — see `CopilotHookProtocolTranslationTests` below,
+        # which supersedes this test's old identity assertion for that
+        # method.
         self.assertIs(
             scaffold.CopilotScaffoldRenderer.bind_paths,
             scaffold.ClaudeScaffoldRenderer.bind_paths,
+        )
+
+    def test_copilot_translate_hook_protocol_no_longer_identical_to_claude(self):
+        # Supersedes the old 113-02 identity assertion: 113-04 gives
+        # Copilot its own `translate_hook_protocol` (event-adjacent response
+        # schema differs from Claude's — see CopilotHookProtocolTranslationTests).
+        self.assertIsNot(
+            scaffold.CopilotScaffoldRenderer.translate_hook_protocol,
+            scaffold.ClaudeScaffoldRenderer.translate_hook_protocol,
         )
 
 
@@ -358,6 +367,444 @@ class CopilotAgentFileNameTests(unittest.TestCase):
             "reviewer.md"
         )
         self.assertFalse(result.startswith("jig-"))
+
+
+class ClaudeToCopilotEventMappingTests(unittest.TestCase):
+    """Slice 113-04 (advisory-hooks) AC1 — the Claude PascalCase -> Copilot
+    camelCase `HookType` event map, grounded against the shipped CLI's
+    `schemas/api.schema.json` `HookType` enum (spike 113-01 AC3)."""
+
+    def test_session_start_maps_to_camel_case(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_event_name("SessionStart"),
+            "sessionStart",
+        )
+
+    def test_post_tool_use_maps_to_camel_case(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_event_name("PostToolUse"),
+            "postToolUse",
+        )
+
+    def test_pre_tool_use_maps_to_camel_case(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_event_name("PreToolUse"),
+            "preToolUse",
+        )
+
+    def test_stop_maps_to_agent_stop(self):
+        # Claude's "Stop" (main agent finished responding) is the closest
+        # confirmed Copilot analogue to `agentStop` in the shipped HookType
+        # enum — there is no Copilot event literally named "stop".
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_event_name("Stop"), "agentStop"
+        )
+
+    def test_unmapped_event_raises(self):
+        with self.assertRaises(scaffold.CopilotHookEventError):
+            scaffold.CopilotScaffoldRenderer.copilot_event_name("NotARealClaudeEvent")
+
+    def test_every_mapped_value_is_a_confirmed_copilot_hooktype(self):
+        # Closed-world check against the exact 17-member enum spike 113-01
+        # AC3 read out of the shipped `schemas/api.schema.json` — every
+        # mapped-TO value must be a real Copilot event, not a typo.
+        confirmed_hooktypes = {
+            "preToolUse", "preMcpToolCall", "postToolUse", "postToolUseFailure",
+            "userPromptSubmitted", "userPromptTransformed", "sessionStart",
+            "sessionEnd", "postResult", "prePRDescription", "errorOccurred",
+            "agentStop", "subagentStart", "subagentStop", "preCompact",
+            "permissionRequest", "notification",
+        }
+        for claude_event, copilot_event in (
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_EVENTS.items()
+        ):
+            self.assertIn(
+                copilot_event, confirmed_hooktypes,
+                f"{claude_event} -> {copilot_event!r} is not a confirmed HookType",
+            )
+
+
+class CopilotHookProtocolTranslationTests(unittest.TestCase):
+    """Slice 113-04 AC1/AC3 — `CopilotScaffoldRenderer.translate_hook_protocol`
+    (response-schema half), grounded against the shipped
+    `copilot-sdk/types.d.ts` `HookOutput` interfaces."""
+
+    def setUp(self):
+        self.renderer = scaffold.CopilotScaffoldRenderer(
+            plugin=Path("."), target=Path(".")
+        )
+
+    def test_additional_context_maps_to_additionalContext(self):
+        result = self.renderer.translate_hook_protocol(
+            {"continue": True, "additional_context": "nudge text"}
+        )
+        self.assertEqual(result, {"additionalContext": "nudge text"})
+
+    def test_continue_key_is_dropped_not_translated(self):
+        # AC3 fail-open / AC1 shape: no Copilot HookOutput interface carries
+        # a boolean `continue` field, so it is dropped rather than guessed.
+        result = self.renderer.translate_hook_protocol({"continue": True})
+        self.assertNotIn("continue", result)
+        self.assertEqual(result, {})
+
+    def test_block_reason_maps_to_deny_permission_decision(self):
+        result = self.renderer.translate_hook_protocol(
+            {"block_reason": "denied for cause"}
+        )
+        self.assertEqual(
+            result,
+            {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "denied for cause",
+            },
+        )
+
+    def test_empty_logical_result_translates_to_empty_dict(self):
+        self.assertEqual(self.renderer.translate_hook_protocol({}), {})
+
+    def test_a_translated_advisory_hook_emits_copilot_shaped_json(self):
+        # AC1's own acceptance wording: "a test asserts a translated
+        # advisory hook emits Copilot-shaped JSON" — exactly what jig's 3
+        # advisory hooks print (`{'continue': True, 'additionalContext': ...}`
+        # is the CLAUDE-shaped literal; the LOGICAL/host-neutral form is
+        # `{'continue': True, 'additional_context': ...}`).
+        #
+        # Unit-contract test ONLY — this calls the method directly. It does
+        # NOT prove a real shipped advisory hook's stdout is transformed
+        # this way today (it isn't: `copilot_hook_adapter.py` forwards
+        # child stdout verbatim; nothing calls this method at runtime yet —
+        # see the method's own HONESTY NOTE). For what a real shipped hook
+        # actually emits through the adapter, see
+        # `test_copilot_hook_adapter.ShippedAdvisoryOutputThroughAdapterTests`.
+        logical = {"continue": True, "additional_context": "branch is behind"}
+        copilot_shaped = self.renderer.translate_hook_protocol(logical)
+        self.assertEqual(copilot_shaped, {"additionalContext": "branch is behind"})
+        # And it must be valid, round-trippable JSON.
+        self.assertEqual(
+            json.loads(json.dumps(copilot_shaped)), copilot_shaped
+        )
+
+    def test_claude_translate_hook_protocol_unaffected(self):
+        # Regression guard: Copilot's override must not leak onto Claude's
+        # own method (each host answers `self.translate_hook_protocol`
+        # through its own MRO).
+        claude_renderer = scaffold.ClaudeScaffoldRenderer(
+            plugin=Path("."), target=Path(".")
+        )
+        result = claude_renderer.translate_hook_protocol(
+            {"continue": True, "additional_context": "nudge text"}
+        )
+        self.assertEqual(
+            result, {"continue": True, "additionalContext": "nudge text"}
+        )
+
+    def test_codex_translate_hook_protocol_unaffected(self):
+        codex_renderer = scaffold.CodexScaffoldRenderer(
+            plugin=Path("."), target=Path(".")
+        )
+        result = codex_renderer.translate_hook_protocol(
+            {"continue": True, "additional_context": "nudge text"}
+        )
+        self.assertEqual(
+            result, {"continue": True, "additionalContext": "nudge text"}
+        )
+
+
+class CopilotHookMatcherTranslationTests(unittest.TestCase):
+    """Slice 113-04 — hook `matcher` tool-name translation (distinct from
+    113-03's agent `tools:` vocabulary — see `HOOK_MATCHER_TOOL_MAP`'s
+    docstring)."""
+
+    def test_edit_write_multiedit_matcher_translates_and_dedupes(self):
+        result = scaffold.CopilotScaffoldRenderer.copilot_hook_matcher(
+            "Edit|Write|MultiEdit"
+        )
+        self.assertEqual(result, "edit|create")
+
+    def test_single_token_matcher(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_hook_matcher("Edit"), "edit"
+        )
+
+    def test_unmapped_token_passes_through_unchanged(self):
+        # This slice only renders the Edit|Write|MultiEdit matcher; an
+        # unmapped token (e.g. a future hook's matcher) passes through
+        # rather than raising — 113-05's inventory concern, not this one's.
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_hook_matcher("Task"), "Task"
+        )
+
+
+class CopilotHookCommandPathRewriteTests(unittest.TestCase):
+    """Slice 113-04 AC4 — hook-command half of the `${CLAUDE_PLUGIN_ROOT}`
+    path rewrite (best-hypothesis, plugin-root-relative; see
+    `rewrite_hook_command`'s docstring for the residual)."""
+
+    def test_rewrites_plugin_hook_script_prefix(self):
+        result = scaffold.CopilotScaffoldRenderer.rewrite_hook_command(
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh"
+        )
+        self.assertEqual(
+            result, "bash .github/hooks/scripts/jig-git-freshness.sh"
+        )
+
+    def test_command_with_no_plugin_root_prefix_is_unchanged(self):
+        result = scaffold.CopilotScaffoldRenderer.rewrite_hook_command(
+            "python3 -c 'print(1)'"
+        )
+        self.assertEqual(result, "python3 -c 'print(1)'")
+
+    def test_claude_rewrite_hook_command_unaffected(self):
+        result = scaffold.ClaudeScaffoldRenderer.rewrite_hook_command(
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh"
+        )
+        self.assertEqual(
+            result,
+            "bash ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/jig-git-freshness.sh",
+        )
+
+
+class BuildHookCommandInputAdapterTests(unittest.TestCase):
+    """Slice 113-04 AC1 (input-payload half) — `build_hook_command` wraps
+    the path-rewritten command through `copilot_hook_adapter.py`."""
+
+    def test_wraps_command_through_the_adapter_with_event_and_script_path(self):
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "SessionStart",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh",
+        )
+        self.assertEqual(
+            result,
+            "python3 .github/hooks/scripts/copilot_hook_adapter.py "
+            'SessionStart ".github/hooks/scripts/jig-git-freshness.sh"',
+        )
+
+    def test_different_event_and_script_are_both_reflected(self):
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "PostToolUse",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-entry-gate.sh",
+        )
+        self.assertEqual(
+            result,
+            "python3 .github/hooks/scripts/copilot_hook_adapter.py "
+            'PostToolUse ".github/hooks/scripts/jig-entry-gate.sh"',
+        )
+
+    def test_script_path_is_quoted_against_a_hypothetical_space(self):
+        # Arch review fix: a space in the script path must not split into
+        # extra shell words.
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "PostToolUse",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig with space.sh",
+        )
+        self.assertIn('".github/hooks/scripts/jig with space.sh"', result)
+
+    def test_adapter_path_matches_the_shipped_filename_constant(self):
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "PostToolUse",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-entry-gate.sh",
+        )
+        self.assertIn(
+            scaffold.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME, result
+        )
+
+
+class CopilotSkillBodyPathRewriteTests(unittest.TestCase):
+    """Slice 113-04 AC4 — skill-body half of the `${CLAUDE_PLUGIN_ROOT}`
+    path rewrite, closing the gap 113-02 documented and deferred."""
+
+    def test_rewrites_a_skills_path_reference(self):
+        body = 'python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" new'
+        result = scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths(body)
+        self.assertEqual(
+            result, 'python3 ".github/skills/spec-workflow/workflow.py" new'
+        )
+
+    def test_rewrites_a_bare_scripts_path_reference(self):
+        body = '${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py'
+        result = scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths(body)
+        self.assertEqual(result, ".github/scripts/spec_lint.py")
+
+    def test_rewrites_a_hooks_scripts_path_reference(self):
+        body = '${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh'
+        result = scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths(body)
+        self.assertEqual(result, ".github/hooks/scripts/jig-git-freshness.sh")
+
+    def test_body_with_no_plugin_root_mention_is_byte_identical(self):
+        body = "# spec-workflow\n\nNo runtime paths mentioned here.\n"
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths(body), body
+        )
+
+    def test_multiple_mentions_all_rewritten(self):
+        body = (
+            'python3 "${CLAUDE_PLUGIN_ROOT}/skills/a/a.py"\n'
+            'python3 "${CLAUDE_PLUGIN_ROOT}/skills/b/b.py"\n'
+        )
+        result = scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths(body)
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", result)
+        self.assertIn(".github/skills/a/a.py", result)
+        self.assertIn(".github/skills/b/b.py", result)
+
+    def test_claude_rewrite_skill_md_paths_unaffected(self):
+        body = '${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py'
+        result = scaffold.ClaudeScaffoldRenderer.rewrite_skill_md_paths(body)
+        self.assertEqual(
+            result, "${CLAUDE_PROJECT_DIR}/.claude/skills/jig-spec-workflow/workflow.py"
+        )
+
+
+class RenderCopilotHookFileTests(unittest.TestCase):
+    """Slice 113-04 AC1/AC2 — `scaffold.render_copilot_hook_file`, the
+    source-hooks.json -> one-Copilot-hook-file extraction/render."""
+
+    def _source_hooks(self):
+        return {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-git-freshness.sh"
+                                ),
+                                "timeout": 10,
+                            }
+                        ]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "Edit|Write|MultiEdit",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-post-edit-verify.sh"
+                                ),
+                                "timeout": 5,
+                            },
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-boundary-change-warn.sh"
+                                ),
+                                "timeout": 5,
+                            },
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-entry-gate.sh"
+                                ),
+                                "timeout": 5,
+                            },
+                        ],
+                    }
+                ],
+            }
+        }
+
+    def test_session_start_hook_renders_keyed_by_camel_case_event(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertEqual(set(payload.keys()), {"sessionStart"})
+        self.assertNotIn("hooks", payload)  # no Claude-style wrapper key
+
+    def test_session_start_hook_has_no_matcher(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        entry = payload["sessionStart"][0]
+        self.assertNotIn("matcher", entry)
+
+    def test_session_start_hook_command_routes_through_the_input_adapter(self):
+        # 113-04 AC1 follow-up: the rendered command now invokes
+        # `copilot_hook_adapter.py <event> <script>` instead of the bare
+        # path-rewritten script, so Copilot's camelCase stdin JSON is
+        # translated before the (unmodified) jig script sees it.
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        command = payload["sessionStart"][0]["hooks"][0]["command"]
+        self.assertEqual(
+            command,
+            "python3 .github/hooks/scripts/copilot_hook_adapter.py "
+            'SessionStart ".github/hooks/scripts/jig-git-freshness.sh"',
+        )
+
+    def test_session_start_hook_preserves_timeout(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertEqual(payload["sessionStart"][0]["hooks"][0]["timeout"], 10)
+
+    def test_extracts_only_the_named_script_from_a_shared_matcher_entry(self):
+        # boundary-change-warn and entry-gate share the SAME source entry
+        # (and jig-post-edit-verify.sh, which is out of scope) — each
+        # extraction must yield exactly its own single hook.
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PostToolUse",
+            "jig-boundary-change-warn.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        hooks = payload["postToolUse"][0]["hooks"]
+        self.assertEqual(len(hooks), 1)
+        self.assertIn("jig-boundary-change-warn.sh", hooks[0]["command"])
+
+    def test_post_tool_use_matcher_is_translated_to_copilot_tool_names(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PostToolUse",
+            "jig-entry-gate.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertEqual(payload["postToolUse"][0]["matcher"], "edit|create")
+
+    def test_missing_script_returns_none(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PostToolUse",
+            "jig-not-a-real-hook.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertIsNone(payload)
+
+    def test_missing_event_returns_none(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "Stop",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertIsNone(payload)
+
+    def test_output_is_valid_json(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertEqual(json.loads(json.dumps(payload)), payload)
 
 
 if __name__ == "__main__":

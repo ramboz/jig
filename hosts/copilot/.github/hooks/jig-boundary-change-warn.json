@@ -1,0 +1,14 @@
+{
+  "postToolUse": [
+    {
+      "matcher": "edit|create",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 .github/hooks/scripts/copilot_hook_adapter.py PostToolUse \".github/hooks/scripts/jig-boundary-change-warn.sh\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}

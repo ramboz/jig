@@ -355,8 +355,11 @@ preserved in the SKILL.md body, so no source skill silently fails Copilot's load
 The committed `hosts/copilot/` package renders into Copilot's `.github/` home
 (`.github/skills/<name>/SKILL.md`, `.github/agents/<name>.agent.md` — model-neutral,
 with a Claude→Copilot tool-name map and the reviewer's read-only allowlist preserved
-(spec 113-03) — and `.plugin/plugin.json`; hooks and the release archive land across
-slices 113-04..06). Claude
+(spec 113-03) — `.github/hooks/<name>.json` for jig's advisory nudges (event-keyed
+camelCase; a build-time event/matcher/command translation plus a runtime
+`copilot_hook_adapter.py` shim mapping Copilot's camelCase hook input into jig's
+canonical scripts, fail-open — spec 113-04), and `.plugin/plugin.json`; the enforcing
+gates + permissions and the release archive land across slices 113-05..06). Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 `.claude/agents/`, `.claude/hooks/scripts/`, `.claude/templates/`, and
 `.claude/settings.json`. Codex scaffold mode writes `AGENTS.md`,

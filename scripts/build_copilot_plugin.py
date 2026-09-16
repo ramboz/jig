@@ -8,16 +8,44 @@ third committed host) the repository root stays canonical source and
 `copilot plugin install ramboz/jig:hosts/copilot` — a repo-subdirectory
 install, no build step and no separate marketplace (spike 113-01 AC1).
 
-Scope note (113-02 shipped a **walking skeleton**; 113-03 grows it by one
-thing — custom agents): skills, the plugin manifest, and now `agents/*.md`
-(rendered to `.github/agents/<name>.agent.md`) ship here. Hook translation
-(`.github/hooks/*.json`, 113-04/05) and the release zip (113-06) are still
-deliberately NOT built — `CopilotScaffoldRenderer` inherits
-`translate_hook_protocol`/`bind_paths` unexercised from
-`ClaudeScaffoldRenderer` until those slices verify Copilot's plugin-root env
-var and hook schema. Skill bodies (and agent prompt bodies) still ship
-Claude-native (no path rewriting) — the same documented, deliberate gap
-113-02 opened, not an oversight.
+Scope note (113-02 shipped a **walking skeleton**; 113-03 grew it by custom
+agents; 113-04 grows it by hook translation): skills, the plugin manifest,
+`agents/*.md`, and now the 3 ADVISORY hooks (session git-freshness,
+boundary-change-warn, entry-gate-nudge) ship here, rendered into
+`.github/hooks/*.json` + their bash/python scripts under
+`.github/hooks/scripts/`, fronted by `copilot_hook_adapter.py`.
+
+Honest framing of what "hook translation" means at THIS slice (compliance
+review fix, 113-04): the CONFIG-level translation is real and exercised —
+`CLAUDE_TO_COPILOT_EVENTS` (Claude PascalCase -> Copilot camelCase event
+keys), the hook-matcher tool-name map, and `build_hook_command`'s command
+wrapping all run at BUILD TIME and shape what actually ships. The RUNTIME
+INPUT adapter (`copilot_hook_adapter.py`) is also real and exercised — it
+re-shapes Copilot's camelCase stdin JSON into what the unmodified jig
+scripts read, at HOOK-FIRE TIME. `CopilotScaffoldRenderer.
+translate_hook_protocol` (the RESPONSE-schema half) is NOT exercised by
+either of those: it is the Copilot override of a seam that is unwired
+repo-wide (Claude's and Codex's own `translate_hook_protocol` are equally
+never called at runtime today — see `skills/scaffold-init/scaffold.py`'s
+docstring). The adapter forwards each advisory hook's child stdout
+VERBATIM; nothing currently post-processes it to drop `continue` or map
+`block_reason` -> `permissionDecision`. Wiring `translate_hook_protocol`'s
+RUNTIME application into the adapter is 113-05 scope, deferred there
+because only 113-05's enforcing hooks (spec-gate, review-evidence,
+bug-closure) actually need a `permissionDecision` deny path — the 3
+advisory hooks this slice ships only ever emit `additionalContext`, which
+already round-trips through the adapter unmodified (Copilot's schema
+accepts it under that same key; the harmless, documented residual is that
+`continue` also passes through un-stripped — see
+`test_copilot_hook_adapter.py`'s `ShippedAdvisoryOutputThroughAdapterTests`).
+The full mapped-or-unmappable inventory of every OTHER jig hook (telemetry,
+skill-trace, …) and the release zip are still 113-05/06 scope. Skill bodies
+now get the `${CLAUDE_PLUGIN_ROOT}` path rewrite too (113-04 AC4) — see
+`scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths` for the
+best-hypothesis, not-verified-live caveat. Agent prompt bodies still ship
+Claude-native (no path rewriting) — none of the 3 canonical agents reference
+`${CLAUDE_PLUGIN_ROOT}`, so there is nothing to rewrite there today; a
+documented gap only if that ever changes.
 
 113-02 review fix (owner decision): the package does NOT ship a
 pre-rendered `.github/copilot-instructions.md` either. Parity ruling:
@@ -170,10 +198,13 @@ def _copy_skills(source_root: Path, output_dir: Path) -> None:
             dst = dst_dir / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             if entry.name == "SKILL.md":
-                dst.write_text(
-                    render_copilot_skill_md(entry.read_text(encoding="utf-8")),
-                    encoding="utf-8",
-                )
+                text = render_copilot_skill_md(entry.read_text(encoding="utf-8"))
+                # Slice 113-04 AC4: rewrite any `${CLAUDE_PLUGIN_ROOT}/…`
+                # runtime path to the plugin-root-relative Copilot spelling
+                # (closes the gap 113-02 documented and deferred). A no-op
+                # for the many skill bodies with no such reference.
+                text = scaffold_mod.CopilotScaffoldRenderer.rewrite_skill_md_paths(text)
+                dst.write_text(text, encoding="utf-8")
             else:
                 dst.write_bytes(entry.read_bytes())
 
@@ -198,6 +229,110 @@ def _render_agents(source_root: Path, output_dir: Path) -> None:
             scaffold_mod.CopilotScaffoldRenderer.render_copilot_agent(agent),
             encoding="utf-8",
         )
+
+
+# Slice 113-04 (advisory-hooks) — the 3 hooks this slice renders: the
+# `additionalContext`-emitting nudges (session git-freshness,
+# boundary-change-warn, entry-gate-nudge), matching the slice's explicit
+# scope (enforcing hooks — spec-gate/review-evidence/bug-closure — are
+# 113-05's mapped-or-unmappable inventory, not this slice's). Each tuple is
+# (Claude hook event, source script filename, output file stem); the stem
+# becomes `.github/hooks/<stem>.json`.
+_COPILOT_ADVISORY_HOOKS: tuple[tuple[str, str, str], ...] = (
+    ("SessionStart", "jig-git-freshness.sh", "jig-git-freshness"),
+    ("PostToolUse", "jig-boundary-change-warn.sh", "jig-boundary-change-warn"),
+    ("PostToolUse", "jig-entry-gate.sh", "jig-entry-gate"),
+)
+
+# The scripts (and their `lib/` helpers) the 3 advisory hooks need, shipped
+# VERBATIM — byte-identical, no rewriting — matching spike 113-01 AC5's
+# design ("referencing the existing hooks/scripts/jig-*.sh bash scripts").
+# ALL hook-schema translation lives in the emitted `.github/hooks/*.json`
+# (event name, matcher, command path) — never in the script bodies
+# themselves, so Claude/Codex's own copies of these same canonical files stay
+# byte-for-byte unaffected by anything this builder does.
+_COPILOT_HOOK_SCRIPT_FILES: tuple[str, ...] = (
+    "jig-git-freshness.sh",
+    "jig-boundary-change-warn.sh",
+    "jig-entry-gate.sh",
+)
+_COPILOT_HOOK_LIB_FILES: tuple[str, ...] = (
+    "lib/git_freshness.py",
+    "lib/entry_gate.py",
+    "lib/read_attribution.py",
+    "lib/protected_paths.py",
+)
+
+
+def _write_copilot_hooks(source_root: Path, output_dir: Path) -> None:
+    """Render the 3 advisory hooks into `.github/hooks/<stem>.json` (one file
+    per hook — AC2). Silently does nothing for a hook whose source entry has
+    gone missing (`render_copilot_hook_file` returns `None`) rather than
+    writing an empty/garbage file; `hooks/hooks.json` itself missing (should
+    never happen in this repo) is likewise a silent no-op, matching
+    `_write_codex_hooks`'s own precedent for a missing source file."""
+    source_hooks_path = source_root / "hooks" / "hooks.json"
+    if not source_hooks_path.is_file():
+        return
+    source_hooks = json.loads(source_hooks_path.read_text())
+    hooks_dst = output_dir / ".github" / "hooks"
+    for claude_event, script_name, stem in _COPILOT_ADVISORY_HOOKS:
+        payload = scaffold_mod.render_copilot_hook_file(
+            source_hooks,
+            claude_event,
+            script_name,
+            renderer_cls=scaffold_mod.CopilotScaffoldRenderer,
+        )
+        if payload is None:
+            continue
+        hooks_dst.mkdir(parents=True, exist_ok=True)
+        (hooks_dst / f"{stem}.json").write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+
+def _copy_copilot_hook_scripts(source_root: Path, output_dir: Path) -> None:
+    """Copy the 3 advisory hooks' bash wrappers + their `lib/*.py` helpers
+    into `.github/hooks/scripts/` verbatim, pinning each `.sh` to `0o755`
+    (mirrors `_rewrite_codex_hook_scripts`'s mode-pinning, minus the body
+    rewrite Codex needs and Copilot does not — see the module docstring).
+
+    Placement note: nested under `.github/`, unlike Claude/Codex's
+    plugin-root-level `hooks/scripts/`. This is deliberate, not
+    inconsistent: `jig-entry-gate.sh` locates its sibling `_common` helpers
+    via a `../../skills` climb relative to its OWN directory
+    (`hooks/scripts/../../skills`); nesting Copilot's scripts under
+    `.github/hooks/scripts/` keeps that SAME unmodified relative climb
+    landing on `.github/skills` — exactly where `_copy_skills` already ships
+    `_common` — with zero changes to the shared script.
+
+    Also copies `copilot_hook_adapter.py` — the INPUT-payload half of the
+    hook-protocol translation layer (AC1) — from `skills/scaffold-init/`
+    (its canonical source location; it is Copilot-only and never touches
+    `hooks/scripts/*.sh` / `lib/*.py`) into the SAME directory as the
+    scripts it fronts, so `CopilotScaffoldRenderer.build_hook_command`'s
+    relative command path (`.github/hooks/scripts/copilot_hook_adapter.py`)
+    resolves."""
+    scripts_src = source_root / "hooks" / "scripts"
+    scripts_dst = output_dir / ".github" / "hooks" / "scripts"
+    for rel_name in _COPILOT_HOOK_SCRIPT_FILES + _COPILOT_HOOK_LIB_FILES:
+        src = scripts_src / rel_name
+        if not src.is_file():
+            continue
+        dst = scripts_dst / rel_name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+        if rel_name.endswith(".sh"):
+            dst.chmod(0o755)
+
+    adapter_src = (
+        source_root / "skills" / "scaffold-init"
+        / scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME
+    )
+    if adapter_src.is_file():
+        dst = scripts_dst / scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(adapter_src.read_bytes())
 
 
 def _write_manifest(output_dir: Path, version: str) -> None:
@@ -303,6 +438,8 @@ def build(source_root: Path, output_dir: Path, out=None) -> int:
 
     _copy_skills(source_root, output_dir)
     _render_agents(source_root, output_dir)
+    _write_copilot_hooks(source_root, output_dir)
+    _copy_copilot_hook_scripts(source_root, output_dir)
     _write_manifest(output_dir, version)
 
     out.write(f"OK: built Copilot plugin at {output_dir}\n")

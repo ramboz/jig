@@ -68,7 +68,7 @@ the right one:
   **semantic**. Lint catches "slice file missing `status:` frontmatter";
   this skill catches "slice contradicts ADR-0003" or "spec proposes a
   fourth subagent type". The two layers are complementary — run
-  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py"` first to fix
+  `python3 ".github/scripts/spec_lint.py"` first to fix
   structural issues, then run this skill to find semantic drift.
 - **`/jig:independent-review`** — sibling skill for **spec-vs-implementation
   reviews**. Independent-review reads a finished slice's deliverables

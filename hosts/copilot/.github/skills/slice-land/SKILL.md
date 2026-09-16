@@ -48,7 +48,7 @@ stay user-driven post-landing suggestions.
 ### Run the readiness check
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" prepare \
+python3 ".github/skills/slice-land/land.py" prepare \
   <path-to-spec.md> <slice-fragment> [--mode {direct,pr}]
 ```
 
@@ -70,7 +70,7 @@ After `prepare` confirms the slice is ready, `execute --mode direct`
 runs the direct landing sequence:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
+python3 ".github/skills/slice-land/land.py" execute \
   --mode direct <path-to-spec.md> <slice-fragment> [--dry-run]
 ```
 
@@ -98,7 +98,7 @@ For PR-shaped flows, `execute --mode pr` pushes the branch and opens
 the PR via the GitHub CLI:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/slice-land/land.py" execute \
+python3 ".github/skills/slice-land/land.py" execute \
   --mode pr <path-to-spec.md> <slice-fragment> [--dry-run]
 ```
 

@@ -71,7 +71,7 @@ project uses, and `tdd.py run` invokes it.
 ### Detect the runner
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" detect [target]
+python3 ".github/skills/tdd-loop/tdd.py" detect [target]
 ```
 
 - `target` defaults to `.` when omitted.
@@ -96,8 +96,8 @@ When multiple runners are detected, priority is
 ### Run the suite
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test-path PATH]
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
+python3 ".github/skills/tdd-loop/tdd.py" run [target] [--test-path PATH]
+python3 ".github/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
 ```
 
 - Auto-detects the runner via the same logic as `detect`.

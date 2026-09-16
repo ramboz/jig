@@ -1,0 +1,13 @@
+{
+  "sessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 .github/hooks/scripts/copilot_hook_adapter.py SessionStart \".github/hooks/scripts/jig-git-freshness.sh\"",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

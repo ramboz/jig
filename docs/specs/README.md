@@ -340,7 +340,7 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 🔬 113-01 — copilot-contract-spike | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-02 — renderer-and-skeleton | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-03 — agents | **DONE** |  |
-| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | DRAFT |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | IN_PROGRESS (claude/adr-0061-spec-113-ji…) |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | DRAFT |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-06 — committed-package-and-release | DRAFT |  |
 

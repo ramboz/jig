@@ -181,10 +181,10 @@ of creating a second owner.
 ```bash
 # Reserve the number. Local by default; --push reserves on origin/main
 # (gnarly tier), --pr via PR. Works from any branch/worktree (ADR-0015).
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" new <slug> [--push|--pr]
+python3 ".github/skills/bug-fix/bug.py" new <slug> [--push|--pr]
 
 # Classify. trivial → record deleted, bows out to tdd-loop + commit.
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" triage <id> \
+python3 ".github/skills/bug-fix/bug.py" triage <id> \
   --tier trivial|standard|gnarly [--severity <level>]
 ```
 
@@ -229,8 +229,8 @@ root cause — the bug-review pass treats an empty search as *un*grounded until 
 have shown what closes the set. Then:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> DIAGNOSING
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> ROOT_CAUSED
+python3 ".github/skills/bug-fix/bug.py" transition <id> DIAGNOSING
+python3 ".github/skills/bug-fix/bug.py" transition <id> ROOT_CAUSED
 ```
 
 In **`diagnose` mode, stop here** and present the root cause.
@@ -282,7 +282,7 @@ prompts are answered and not vacuous.
    Then record the outcome:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" main-check <id> \
+   python3 ".github/skills/bug-fix/bug.py" main-check <id> \
      --result reproduces \
      --ref origin/main@<sha> \
      --evidence "<original repro command + observed failure>"
@@ -292,7 +292,7 @@ prompts are answered and not vacuous.
    and stop:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" main-check <id> \
+   python3 ".github/skills/bug-fix/bug.py" main-check <id> \
      --result resolved-on-main \
      --ref origin/main@<sha> \
      --evidence "<original repro command + observed clean result>"
@@ -320,7 +320,7 @@ is read-only — `bug.py` validates the durable verdict artifacts they produce
    prompt with `review.py bug-review`:
 
    ```bash
-   PROMPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/independent-review/review.py" \
+   PROMPT=$(python3 ".github/skills/independent-review/review.py" \
      bug-review "docs/bugs/NNN-<slug>.md" "<deliverable-path>" ...)
    ```
 
@@ -358,12 +358,12 @@ implicitly, bug 017). The `REVIEWED` gate requires `bug-review` +
 ```bash
 # Gnarly/security: re-run the ORIGINAL reported repro (not just the proxy
 # test), attest it in the record, then:
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> VERIFIED
+python3 ".github/skills/bug-fix/bug.py" transition <id> VERIFIED
 
 # Record the learning in docs/memory/learnings.md (the → DONE gate checks it),
 # commit the work, then:
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" transition <id> DONE
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" status-board
+python3 ".github/skills/bug-fix/bug.py" transition <id> DONE
+python3 ".github/skills/bug-fix/bug.py" status-board
 ```
 
 Run `/jig:memory-sync` to consolidate any new learnings. Land the change with
@@ -375,7 +375,7 @@ and a merge conflict on it is resolved by re-running `status-board` rather than
 by picking a side:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" check-board
+python3 ".github/skills/bug-fix/bug.py" check-board
 ```
 
 Read-only; exits non-zero on either problem it can find. **Stale board** — the
@@ -393,7 +393,7 @@ When diagnosis reveals the "bug" is a missing or under-specified
 fixing:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/bug-fix/bug.py" escalate <id> [--slug <spec-slug>]
+python3 ".github/skills/bug-fix/bug.py" escalate <id> [--slug <spec-slug>]
 ```
 
 This calls `workflow.py new`, stamps `escalated_to: NNN` on the bug and

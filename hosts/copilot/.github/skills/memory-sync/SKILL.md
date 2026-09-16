@@ -60,7 +60,7 @@ python3 memory.py add-term "X" "<definition>" .   (or promote if high-frequency)
 Concretely, the commands are:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" lookup "<term>" "<target>"
+python3 ".github/skills/memory-sync/memory.py" lookup "<term>" "<target>"
 # exit 0 = hit (definition + source on stdout)
 # exit 2 = miss (proceed to ask the user)
 ```
@@ -103,11 +103,11 @@ time, then persist now.
    the term/definition/body arguments** — terms may contain spaces, definitions
    often contain punctuation:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-term "<name>" "<definition>" "<target>"
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-learning "<title>" --body "<text>" "<target>"
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-inbox "<text>" "<target>"
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" add-refinement-todo "<raw-markdown-chunk>" "<target>"
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" promote "<term>" "<definition>" "<target>"
+   python3 ".github/skills/memory-sync/memory.py" add-term "<name>" "<definition>" "<target>"
+   python3 ".github/skills/memory-sync/memory.py" add-learning "<title>" --body "<text>" "<target>"
+   python3 ".github/skills/memory-sync/memory.py" add-inbox "<text>" "<target>"
+   python3 ".github/skills/memory-sync/memory.py" add-refinement-todo "<raw-markdown-chunk>" "<target>"
+   python3 ".github/skills/memory-sync/memory.py" promote "<term>" "<definition>" "<target>"
    ```
    `add-refinement-todo` appends raw text (caller composes the markdown chunk —
    H2 category, deferred-/resolution-trigger structure, etc.) to
@@ -120,7 +120,7 @@ time, then persist now.
    Decision / Context / Scope / Commit template; re-running with the same title
    is a no-op):
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" add-lightweight \
+   python3 ".github/skills/memory-sync/decisions.py" add-lightweight \
      --title "<short title>" --decision "<what>" --context "<why>" \
      --scope "<which screen / component / string / asset>" [--commit "<SHA/PR>"]
    ```
@@ -145,7 +145,7 @@ time, then persist now.
 
    - **Clears the trigger** → promote it; do not revise it in place:
      ```bash
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" promote \
+     python3 ".github/skills/memory-sync/decisions.py" promote \
        --title "<existing title>" --no-push [--slug "<adr-slug>"]
      ```
      This creates the ADR via `adr.py new`, seeds it from the entry's own
@@ -163,7 +163,7 @@ time, then persist now.
      asset, no *real* rejected alternatives) → revise it in place. Omitted
      fields keep their recorded values:
      ```bash
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/decisions.py" update \
+     python3 ".github/skills/memory-sync/decisions.py" update \
        --title "<existing title>" [--decision "<what>"] [--context "<why>"] \
        [--scope "<where>"] [--commit "<SHA/PR>"]
      ```
@@ -180,7 +180,7 @@ time, then persist now.
    as a verdict.
 4. **Report a summary** at the end:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" summary <target>
+   python3 ".github/skills/memory-sync/memory.py" summary <target>
    ```
 5. **Re-check the team signal** as the final step (spec 050-01). This
    re-runs scaffold-init's exact team detection (≥2 distinct mailmap git
@@ -188,7 +188,7 @@ time, then persist now.
    `docs/memory/people.md` is absent (and no `.jig/no-people-md` opt-out
    marker is present), the helper surfaces a structured nudge:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" team-check <target>
+   python3 ".github/skills/memory-sync/memory.py" team-check <target>
    ```
    The advisory offers three options — `[y]` bootstrap people.md now,
    `[n]` skip this run, `[never]` suppress future nudges. In an
@@ -199,9 +199,9 @@ time, then persist now.
    matching flag:
    ```bash
    # user chose [y] — create docs/memory/people.md from the template:
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" team-check --bootstrap <target>
+   python3 ".github/skills/memory-sync/memory.py" team-check --bootstrap <target>
    # user chose [never] — write the opt-out marker, never ask again:
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/memory-sync/memory.py" team-check --never <target>
+   python3 ".github/skills/memory-sync/memory.py" team-check --never <target>
    # user chose [n] — do nothing this run (they'll be asked next memory-sync).
    ```
    `team-check` is a no-op when `people.md` already exists, when

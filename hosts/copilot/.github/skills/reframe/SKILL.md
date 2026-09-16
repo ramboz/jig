@@ -149,7 +149,7 @@ Reserve and scaffold the keystone ADR through the **real ADR lifecycle** so it
 inherits the frame-critique `accept` gate:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/adr-workflow/adr.py" new reframe-onto-<slug>
+python3 ".github/skills/adr-workflow/adr.py" new reframe-onto-<slug>
 ```
 
 Then author its body:
@@ -259,7 +259,7 @@ the spec lifecycle rather than left for the session to hand-author. For each
 1. **Reserve a spec** via `workflow.py new`:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" new \
+   python3 ".github/skills/spec-workflow/workflow.py" new \
      retrofit-<artifact>-onto-<reference-slug>
    ```
 
