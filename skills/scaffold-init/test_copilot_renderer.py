@@ -527,11 +527,22 @@ class CopilotHookMatcherTranslationTests(unittest.TestCase):
         )
 
     def test_unmapped_token_passes_through_unchanged(self):
-        # This slice only renders the Edit|Write|MultiEdit matcher; an
-        # unmapped token (e.g. a future hook's matcher) passes through
-        # rather than raising — 113-05's inventory concern, not this one's.
+        # "Task"/"Skill" have no Copilot tool-call analogue (113-05's
+        # mapped-or-unmappable inventory records them UNMAPPABLE, and this
+        # builder does not render a hook file for them at all — see
+        # `build_copilot_plugin._JIG_HOOK_INVENTORY`) — an unmapped token
+        # passes through rather than raising.
         self.assertEqual(
             scaffold.CopilotScaffoldRenderer.copilot_hook_matcher("Task"), "Task"
+        )
+
+    def test_read_matcher_maps_to_view(self):
+        # 113-05 bug fix: jig-context-check.sh's PreToolUse matcher is the
+        # bare string "Read" — without this mapping the rendered matcher
+        # would be the literal, never-matching "Read" (Copilot's own tool
+        # name is "view", per 113-03's `CLAUDE_TO_COPILOT_TOOLS`).
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_hook_matcher("Read"), "view"
         )
 
 
@@ -608,6 +619,42 @@ class BuildHookCommandInputAdapterTests(unittest.TestCase):
             scaffold.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME, result
         )
 
+    # 113-05 — the enforcing-vs-advisory mode switch.
+    def test_default_mode_is_advisory_with_no_enforce_flag(self):
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "PreToolUse",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-spec-gate.sh",
+        )
+        self.assertNotIn("--enforce", result)
+        self.assertEqual(
+            result,
+            "python3 .github/hooks/scripts/copilot_hook_adapter.py "
+            'PreToolUse ".github/hooks/scripts/jig-spec-gate.sh"',
+        )
+
+    def test_enforcing_true_inserts_the_enforce_flag_before_the_event(self):
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "PreToolUse",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-spec-gate.sh",
+            enforcing=True,
+        )
+        self.assertEqual(
+            result,
+            "python3 .github/hooks/scripts/copilot_hook_adapter.py --enforce "
+            'PreToolUse ".github/hooks/scripts/jig-spec-gate.sh"',
+        )
+
+    def test_enforcing_flag_uses_the_shared_constant(self):
+        result = scaffold.CopilotScaffoldRenderer.build_hook_command(
+            "PreToolUse",
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-secret-scan.sh",
+            enforcing=True,
+        )
+        self.assertIn(
+            scaffold.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG,
+            result,
+        )
+
 
 class CopilotSkillBodyPathRewriteTests(unittest.TestCase):
     """Slice 113-04 AC4 — skill-body half of the `${CLAUDE_PLUGIN_ROOT}`
@@ -655,12 +702,52 @@ class CopilotSkillBodyPathRewriteTests(unittest.TestCase):
 
 
 class RenderCopilotHookFileTests(unittest.TestCase):
-    """Slice 113-04 AC1/AC2 — `scaffold.render_copilot_hook_file`, the
-    source-hooks.json -> one-Copilot-hook-file extraction/render."""
+    """Slice 113-04 AC1/AC2 (SCHEMA CORRECTED 113-05) —
+    `scaffold.render_copilot_hook_file`, the source-hooks.json ->
+    one-Copilot-hook-file extraction/render, in the AUTHORITATIVE
+    `{"version": 1, "hooks": {event: [<flat entry>]}}` on-disk shape (NOT
+    Claude's nested `{event: [{matcher?, hooks:[...]}]}` shape 113-04
+    shipped by mistake — see `render_copilot_hook_file`'s own docstring)."""
 
     def _source_hooks(self):
         return {
             "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Edit|Write|MultiEdit",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-spec-gate.sh"
+                                ),
+                                "timeout": 5,
+                            },
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-secret-scan.sh"
+                                ),
+                                "timeout": 5,
+                            },
+                        ],
+                    },
+                    {
+                        "matcher": "Read",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"
+                                    "jig-context-check.sh"
+                                ),
+                                "timeout": 5,
+                            }
+                        ],
+                    },
+                ],
                 "SessionStart": [
                     {
                         "hooks": [
@@ -709,6 +796,16 @@ class RenderCopilotHookFileTests(unittest.TestCase):
             }
         }
 
+    def test_top_level_shape_has_version_and_hooks_keys(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertEqual(set(payload.keys()), {"version", "hooks"})
+        self.assertEqual(payload["version"], 1)
+
     def test_session_start_hook_renders_keyed_by_camel_case_event(self):
         payload = scaffold.render_copilot_hook_file(
             self._source_hooks(),
@@ -716,8 +813,21 @@ class RenderCopilotHookFileTests(unittest.TestCase):
             "jig-git-freshness.sh",
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
-        self.assertEqual(set(payload.keys()), {"sessionStart"})
-        self.assertNotIn("hooks", payload)  # no Claude-style wrapper key
+        self.assertEqual(set(payload["hooks"].keys()), {"sessionStart"})
+
+    def test_session_start_hook_entry_is_flat_not_nested(self):
+        # The authoritative shape has NO Claude-style nested `hooks:[...]`
+        # array inside an entry — each entry IS the hook, flat.
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        entry = payload["hooks"]["sessionStart"][0]
+        self.assertNotIn("hooks", entry)
+        self.assertEqual(entry["type"], "command")
+        self.assertIn("bash", entry)
 
     def test_session_start_hook_has_no_matcher(self):
         payload = scaffold.render_copilot_hook_file(
@@ -726,7 +836,7 @@ class RenderCopilotHookFileTests(unittest.TestCase):
             "jig-git-freshness.sh",
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
-        entry = payload["sessionStart"][0]
+        entry = payload["hooks"]["sessionStart"][0]
         self.assertNotIn("matcher", entry)
 
     def test_session_start_hook_command_routes_through_the_input_adapter(self):
@@ -740,35 +850,37 @@ class RenderCopilotHookFileTests(unittest.TestCase):
             "jig-git-freshness.sh",
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
-        command = payload["sessionStart"][0]["hooks"][0]["command"]
+        command = payload["hooks"]["sessionStart"][0]["bash"]
         self.assertEqual(
             command,
             "python3 .github/hooks/scripts/copilot_hook_adapter.py "
             'SessionStart ".github/hooks/scripts/jig-git-freshness.sh"',
         )
 
-    def test_session_start_hook_preserves_timeout(self):
+    def test_session_start_hook_preserves_timeout_as_timeout_sec(self):
         payload = scaffold.render_copilot_hook_file(
             self._source_hooks(),
             "SessionStart",
             "jig-git-freshness.sh",
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
-        self.assertEqual(payload["sessionStart"][0]["hooks"][0]["timeout"], 10)
+        entry = payload["hooks"]["sessionStart"][0]
+        self.assertEqual(entry["timeoutSec"], 10)
+        self.assertNotIn("timeout", entry)
 
     def test_extracts_only_the_named_script_from_a_shared_matcher_entry(self):
         # boundary-change-warn and entry-gate share the SAME source entry
         # (and jig-post-edit-verify.sh, which is out of scope) — each
-        # extraction must yield exactly its own single hook.
+        # extraction must yield exactly its own single flat entry.
         payload = scaffold.render_copilot_hook_file(
             self._source_hooks(),
             "PostToolUse",
             "jig-boundary-change-warn.sh",
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
-        hooks = payload["postToolUse"][0]["hooks"]
-        self.assertEqual(len(hooks), 1)
-        self.assertIn("jig-boundary-change-warn.sh", hooks[0]["command"])
+        entries = payload["hooks"]["postToolUse"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("jig-boundary-change-warn.sh", entries[0]["bash"])
 
     def test_post_tool_use_matcher_is_translated_to_copilot_tool_names(self):
         payload = scaffold.render_copilot_hook_file(
@@ -777,7 +889,33 @@ class RenderCopilotHookFileTests(unittest.TestCase):
             "jig-entry-gate.sh",
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
-        self.assertEqual(payload["postToolUse"][0]["matcher"], "edit|create")
+        self.assertEqual(payload["hooks"]["postToolUse"][0]["matcher"], "edit|create")
+
+    def test_pre_tool_use_read_matcher_translates_to_view(self):
+        # 113-05 bug fix (see CopilotHookMatcherTranslationTests) exercised
+        # end-to-end through the full render.
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PreToolUse",
+            "jig-context-check.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertEqual(payload["hooks"]["preToolUse"][0]["matcher"], "view")
+
+    def test_pre_tool_use_shared_matcher_extracts_only_spec_gate(self):
+        # jig-spec-gate.sh and jig-secret-scan.sh share ONE source entry
+        # (Edit|Write|MultiEdit) — extracting by script name must not leak
+        # the sibling hook in.
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PreToolUse",
+            "jig-spec-gate.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        entries = payload["hooks"]["preToolUse"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("jig-spec-gate.sh", entries[0]["bash"])
+        self.assertNotIn("jig-secret-scan.sh", entries[0]["bash"])
 
     def test_missing_script_returns_none(self):
         payload = scaffold.render_copilot_hook_file(
@@ -805,6 +943,108 @@ class RenderCopilotHookFileTests(unittest.TestCase):
             renderer_cls=scaffold.CopilotScaffoldRenderer,
         )
         self.assertEqual(json.loads(json.dumps(payload)), payload)
+
+    # 113-05 — the enforcing-vs-advisory mode switch, exercised through the
+    # full render (not just `build_hook_command` in isolation).
+    def test_advisory_default_does_not_enforce(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "SessionStart",
+            "jig-git-freshness.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+        )
+        self.assertNotIn(
+            "--enforce", payload["hooks"]["sessionStart"][0]["bash"]
+        )
+
+    def test_enforcing_true_renders_the_enforce_flag(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PreToolUse",
+            "jig-spec-gate.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+            enforcing=True,
+        )
+        command = payload["hooks"]["preToolUse"][0]["bash"]
+        self.assertIn("--enforce", command)
+        self.assertIn("jig-spec-gate.sh", command)
+
+    def test_enforcing_secret_scan_also_renders_the_enforce_flag(self):
+        payload = scaffold.render_copilot_hook_file(
+            self._source_hooks(),
+            "PreToolUse",
+            "jig-secret-scan.sh",
+            renderer_cls=scaffold.CopilotScaffoldRenderer,
+            enforcing=True,
+        )
+        command = payload["hooks"]["preToolUse"][0]["bash"]
+        self.assertIn("--enforce", command)
+        self.assertIn("jig-secret-scan.sh", command)
+
+
+class RenderPermissionsFloorHookTests(unittest.TestCase):
+    """Slice 113-05 AC3 (owner reshape) —
+    `CopilotScaffoldRenderer.render_permissions_floor_hook`: the
+    destructive-command permissions floor renders as a REAL enforcing
+    `preToolUse` hook, not a settings.json file (an earlier version of this
+    slice rendered `.github/copilot/settings.json` — the owner corrected
+    it: Copilot has no persistent, repo-committable tool-deny mechanism)."""
+
+    def test_top_level_shape_has_version_and_hooks_keys(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        self.assertEqual(set(payload.keys()), {"version", "hooks"})
+        self.assertEqual(payload["version"], 1)
+
+    def test_keyed_by_pre_tool_use_camel_case(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        self.assertEqual(set(payload["hooks"].keys()), {"preToolUse"})
+
+    def test_matcher_is_the_bash_tool_name(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        entry = payload["hooks"]["preToolUse"][0]
+        self.assertEqual(
+            entry["matcher"], scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Bash"]
+        )
+        self.assertEqual(entry["matcher"], "bash")
+
+    def test_entry_is_flat_with_type_command(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        entry = payload["hooks"]["preToolUse"][0]
+        self.assertNotIn("hooks", entry)  # flat, no Claude-style nesting
+        self.assertEqual(entry["type"], "command")
+
+    def test_command_routes_through_the_adapter_in_enforcing_mode(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        command = payload["hooks"]["preToolUse"][0]["bash"]
+        self.assertIn(
+            scaffold.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG,
+            command,
+        )
+        self.assertIn(
+            scaffold.CopilotScaffoldRenderer.COPILOT_PERMISSIONS_FLOOR_FILENAME,
+            command,
+        )
+        self.assertIn("PreToolUse", command)
+
+    def test_command_targets_the_floor_script_under_hooks_scripts(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        command = payload["hooks"]["preToolUse"][0]["bash"]
+        self.assertIn(
+            ".github/hooks/scripts/copilot_permissions_floor.py", command
+        )
+
+    def test_has_a_timeout(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        entry = payload["hooks"]["preToolUse"][0]
+        self.assertIn("timeoutSec", entry)
+
+    def test_output_is_valid_json(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        self.assertEqual(json.loads(json.dumps(payload)), payload)
+
+    def test_no_raw_claude_plugin_root_leaks_through(self):
+        payload = scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook()
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", json.dumps(payload))
 
 
 if __name__ == "__main__":

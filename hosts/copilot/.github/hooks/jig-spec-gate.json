@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py --enforce PreToolUse \".github/hooks/scripts/jig-spec-gate.sh\"",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

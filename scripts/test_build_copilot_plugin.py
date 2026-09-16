@@ -37,6 +37,7 @@ Covers:
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -157,10 +158,15 @@ class CopilotPackageContentsTests(unittest.TestCase):
 
     def test_package_is_exactly_manifest_skills_agents_and_hooks(self):
         # 113-03 grew the 113-02 walking skeleton by rendered agents; 113-04
-        # grows it again by the 3 advisory hooks under `.github/hooks/`.
-        # `.plugin/plugin.json` + `.github/{skills,agents,hooks}/**` — still
-        # nothing else at the `.github/` top level (113-05 adds the rest of
-        # jig's hooks; MCP/settings.json are not this package's scope yet).
+        # grew it by the 3 advisory hooks under `.github/hooks/`; 113-05
+        # grows it by 3 MORE hooks in that SAME directory (spec-gate,
+        # secret-scan, and the permissions-floor guard — NOT a
+        # `.github/copilot/settings.json`; the owner corrected an earlier
+        # version of this slice that tried that, since Copilot has no
+        # persistent, repo-committable tool-deny mechanism). Still just
+        # `.plugin/plugin.json` + `.github/{skills,agents,hooks}/**` — no
+        # new top-level `.github/` directory (MCP config is not this
+        # package's scope).
         github_dir = self.out_dir / ".github"
         top_level = {p.name for p in github_dir.iterdir()}
         self.assertEqual(top_level, {"skills", "agents", "hooks"})
@@ -404,41 +410,51 @@ class CopilotAdvisoryHookPackagingTests(unittest.TestCase):
     def _hooks_dir(self) -> Path:
         return self.out_dir / ".github" / "hooks"
 
-    # AC2
+    # AC2 — advisory files present (enforcing files are asserted separately
+    # by CopilotEnforcingHookPackagingTests; this class stays scoped to the
+    # 3 advisory hooks it names).
     def test_all_three_advisory_hook_files_render(self):
-        names = sorted(p.name for p in self._hooks_dir().glob("*.json"))
-        self.assertEqual(
-            names,
-            [
+        names = {p.name for p in self._hooks_dir().glob("*.json")}
+        self.assertTrue(
+            {
                 "jig-boundary-change-warn.json",
                 "jig-entry-gate.json",
                 "jig-git-freshness.json",
-            ],
+            }.issubset(names)
         )
+
+    # Schema (CORRECTED 113-05) — every rendered hook file, advisory and
+    # enforcing alike, uses the AUTHORITATIVE `{version, hooks: {...}}`
+    # shape, not Claude's nested one 113-04 shipped by mistake.
+    def test_every_rendered_hook_file_has_the_authoritative_top_level_shape(self):
+        for hook_file in self._hooks_dir().glob("*.json"):
+            payload = json.loads(hook_file.read_text())
+            self.assertEqual(payload.get("version"), 1, hook_file.name)
+            self.assertIn("hooks", payload, hook_file.name)
 
     # AC1
     def test_git_freshness_hook_keyed_by_session_start_camel_case(self):
         payload = json.loads(
             (self._hooks_dir() / "jig-git-freshness.json").read_text()
         )
-        self.assertEqual(set(payload.keys()), {"sessionStart"})
+        self.assertEqual(set(payload["hooks"].keys()), {"sessionStart"})
 
     def test_boundary_warn_hook_keyed_by_post_tool_use_camel_case(self):
         payload = json.loads(
             (self._hooks_dir() / "jig-boundary-change-warn.json").read_text()
         )
-        self.assertEqual(set(payload.keys()), {"postToolUse"})
+        self.assertEqual(set(payload["hooks"].keys()), {"postToolUse"})
 
     def test_entry_gate_hook_keyed_by_post_tool_use_camel_case(self):
         payload = json.loads(
             (self._hooks_dir() / "jig-entry-gate.json").read_text()
         )
-        self.assertEqual(set(payload.keys()), {"postToolUse"})
+        self.assertEqual(set(payload["hooks"].keys()), {"postToolUse"})
 
     def test_boundary_warn_and_entry_gate_matcher_uses_copilot_tool_names(self):
         for stem in ("jig-boundary-change-warn", "jig-entry-gate"):
             payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
-            matcher = payload["postToolUse"][0]["matcher"]
+            matcher = payload["hooks"]["postToolUse"][0]["matcher"]
             self.assertEqual(matcher, "edit|create")
             self.assertNotIn("Edit", matcher)
             self.assertNotIn("Write", matcher)
@@ -458,7 +474,7 @@ class CopilotAdvisoryHookPackagingTests(unittest.TestCase):
         payload = json.loads(
             (self._hooks_dir() / "jig-git-freshness.json").read_text()
         )
-        command = payload["sessionStart"][0]["hooks"][0]["command"]
+        command = payload["hooks"]["sessionStart"][0]["bash"]
         self.assertEqual(
             command,
             "python3 .github/hooks/scripts/copilot_hook_adapter.py "
@@ -640,6 +656,358 @@ class CopilotAdvisoryHookPackagingTests(unittest.TestCase):
         self.assertIn("additionalContext", result.stdout)
 
 
+class CopilotEnforcingHookPackagingTests(unittest.TestCase):
+    """Slice 113-05 — the 2 ENFORCING hooks (spec-gate, secret-scan) render
+    into `.github/hooks/*.json` (AUTHORITATIVE flat schema) and ship their
+    scripts under `.github/hooks/scripts/`, exactly like
+    `CopilotAdvisoryHookPackagingTests` for the advisory 3, plus the
+    `--enforce` adapter flag and end-to-end exit-code-preserved firing."""
+
+    # Built by concatenation so this file's own source text never contains
+    # the contiguous AWS-key-shaped substring — see
+    # `skills/scaffold-init/test_copilot_hook_adapter.EnforcingModeTests`'s
+    # identical comment for why.
+    _FAKE_AWS_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-enforcing-hooks-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+        self.project_dir = Path(tempfile.mkdtemp(prefix="jig-copilot-enforcing-proj-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        shutil.rmtree(self.project_dir, ignore_errors=True)
+
+    def _hooks_dir(self) -> Path:
+        return self.out_dir / ".github" / "hooks"
+
+    # AC2
+    def test_both_enforcing_hook_files_render(self):
+        names = {p.name for p in self._hooks_dir().glob("*.json")}
+        self.assertTrue(
+            {"jig-spec-gate.json", "jig-secret-scan.json"}.issubset(names)
+        )
+
+    # AC1 — schema
+    def test_spec_gate_hook_keyed_by_pre_tool_use_camel_case(self):
+        payload = json.loads((self._hooks_dir() / "jig-spec-gate.json").read_text())
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(set(payload["hooks"].keys()), {"preToolUse"})
+
+    def test_spec_gate_and_secret_scan_matcher_uses_copilot_tool_names(self):
+        for stem in ("jig-spec-gate", "jig-secret-scan"):
+            payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
+            matcher = payload["hooks"]["preToolUse"][0]["matcher"]
+            self.assertEqual(matcher, "edit|create")
+
+    def test_spec_gate_and_secret_scan_do_not_leak_into_each_others_file(self):
+        # They share ONE source entry (Edit|Write|MultiEdit) — each
+        # rendered file must carry only its own script.
+        spec_gate = json.loads((self._hooks_dir() / "jig-spec-gate.json").read_text())
+        secret_scan = json.loads(
+            (self._hooks_dir() / "jig-secret-scan.json").read_text()
+        )
+        spec_gate_command = spec_gate["hooks"]["preToolUse"][0]["bash"]
+        secret_scan_command = secret_scan["hooks"]["preToolUse"][0]["bash"]
+        self.assertIn("jig-spec-gate.sh", spec_gate_command)
+        self.assertNotIn("jig-secret-scan.sh", spec_gate_command)
+        self.assertIn("jig-secret-scan.sh", secret_scan_command)
+        self.assertNotIn("jig-spec-gate.sh", secret_scan_command)
+
+    # AC1 — the enforcing mode switch
+    def test_both_enforcing_hooks_render_with_the_enforce_flag(self):
+        for stem in ("jig-spec-gate", "jig-secret-scan"):
+            payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
+            command = payload["hooks"]["preToolUse"][0]["bash"]
+            self.assertIn("--enforce", command, stem)
+
+    def test_advisory_hooks_do_not_render_with_the_enforce_flag(self):
+        # Regression guard: the schema fix must not have bled the enforcing
+        # mode into the advisory hooks.
+        for stem in ("jig-git-freshness", "jig-boundary-change-warn", "jig-entry-gate"):
+            payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
+            event = next(iter(payload["hooks"]))
+            command = payload["hooks"][event][0]["bash"]
+            self.assertNotIn("--enforce", command, stem)
+
+    # AC2 — scripts shipped
+    def test_enforcing_hook_scripts_shipped_and_executable(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        for name in ("jig-spec-gate.sh", "jig-secret-scan.sh"):
+            path = scripts_dir / name
+            self.assertTrue(path.is_file(), f"missing shipped file: {name}")
+            self.assertTrue(path.stat().st_mode & 0o111, f"{name} is not executable")
+
+    def test_enforcing_hook_scripts_are_byte_identical_to_source(self):
+        for name in ("jig-spec-gate.sh", "jig-secret-scan.sh"):
+            source = (REPO_ROOT / "hooks" / "scripts" / name).read_bytes()
+            shipped = (self._hooks_dir() / "scripts" / name).read_bytes()
+            self.assertEqual(shipped, source, name)
+
+    # AC1 — positive confirmation, not absence-of-error: the ACTUALLY-BUILT
+    # package's rendered command, run end to end, DENIES a real blocked
+    # edit (exit 2 + a deny body) and ALLOWS a real safe one (exit 0).
+    def _run_rendered_command(self, stem: str, payload: dict, extra_env=None):
+        hook_file = self._hooks_dir() / f"{stem}.json"
+        rendered = json.loads(hook_file.read_text())
+        event = next(iter(rendered["hooks"]))
+        command = rendered["hooks"][event][0]["bash"]
+        env = {
+            **os.environ,
+            "CLAUDE_PROJECT_DIR": str(self.project_dir),
+            **(extra_env or {}),
+        }
+        return subprocess.run(
+            ["bash", "-c", command],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            cwd=str(self.out_dir),
+            env=env,
+            timeout=15,
+        )
+
+    def test_spec_gate_rendered_command_denies_conventions_md(self):
+        result = self._run_rendered_command("jig-spec-gate", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "docs/conventions.md"},
+        })
+        self.assertEqual(result.returncode, 2)
+        deny = json.loads(result.stdout.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+
+    def test_spec_gate_rendered_command_allows_a_non_gated_file(self):
+        result = self._run_rendered_command("jig-spec-gate", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "README.md"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+    def test_secret_scan_rendered_command_denies_an_aws_key(self):
+        result = self._run_rendered_command("jig-secret-scan", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "config.py", "new_string": self._FAKE_AWS_KEY},
+        })
+        self.assertEqual(result.returncode, 2)
+        deny = json.loads(result.stdout.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+
+    def test_secret_scan_rendered_command_allows_benign_content(self):
+        result = self._run_rendered_command("jig-secret-scan", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "config.py", "new_string": "hello world"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+
+class CopilotPermissionsFloorHookPackagingTests(unittest.TestCase):
+    """Slice 113-05 AC3 (owner reshape) — jig's `_PERMISSIONS_DENY_DEFAULTS`
+    security floor renders as `.github/hooks/jig-permissions-floor.json`, a
+    REAL enforcing `preToolUse` hook — NOT a `.github/copilot/settings.json`
+    file (an earlier version of this slice tried that; the owner corrected
+    it after confirming Copilot has no persistent, repo-committable
+    tool-deny mechanism). See `CopilotEnforcingHookPackagingTests` for the
+    sibling coverage of the spec-gate/secret-scan enforcing hooks."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-permfloor-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _hooks_dir(self) -> Path:
+        return self.out_dir / ".github" / "hooks"
+
+    def test_no_dead_settings_json_rendered(self):
+        # The corrected design ships NO `.github/copilot/` directory at all
+        # — there is no valid persisted key to put there.
+        self.assertFalse((self.out_dir / ".github" / "copilot").exists())
+
+    def test_permissions_floor_hook_file_renders(self):
+        self.assertTrue(
+            (self._hooks_dir() / "jig-permissions-floor.json").is_file()
+        )
+
+    def test_keyed_by_pre_tool_use_camel_case(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-permissions-floor.json").read_text()
+        )
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(set(payload["hooks"].keys()), {"preToolUse"})
+
+    def test_matcher_is_the_bash_tool_name(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-permissions-floor.json").read_text()
+        )
+        self.assertEqual(payload["hooks"]["preToolUse"][0]["matcher"], "bash")
+
+    def test_command_is_enforcing_and_targets_the_floor_script(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-permissions-floor.json").read_text()
+        )
+        command = payload["hooks"]["preToolUse"][0]["bash"]
+        self.assertIn("--enforce", command)
+        self.assertIn("copilot_permissions_floor.py", command)
+
+    def test_floor_script_shipped_alongside_the_adapter(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        self.assertTrue((scripts_dir / "copilot_permissions_floor.py").is_file())
+        self.assertTrue((scripts_dir / "copilot_hook_adapter.py").is_file())
+
+    def test_floor_script_shipped_byte_identical_to_source(self):
+        source = (
+            REPO_ROOT / "skills" / "scaffold-init" / "copilot_permissions_floor.py"
+        ).read_bytes()
+        shipped = (
+            self._hooks_dir() / "scripts" / "copilot_permissions_floor.py"
+        ).read_bytes()
+        self.assertEqual(shipped, source)
+
+    # AC1/AC3 — positive confirmation via the ACTUALLY-BUILT package's
+    # rendered command: a real destructive command denies; a real safe one
+    # allows.
+    def _run_rendered_command(self, command_string: str):
+        hook_file = self._hooks_dir() / "jig-permissions-floor.json"
+        rendered = json.loads(hook_file.read_text())
+        command = rendered["hooks"]["preToolUse"][0]["bash"]
+        payload = {
+            "sessionId": "abc123",
+            "toolName": "bash",
+            "toolArgs": {"command": command_string},
+        }
+        return subprocess.run(
+            ["bash", "-c", command],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            cwd=str(self.out_dir),
+            timeout=15,
+        )
+
+    def test_rendered_command_denies_rm_rf(self):
+        result = self._run_rendered_command("rm -rf /tmp/x")
+        self.assertEqual(result.returncode, 2)
+        deny = json.loads(result.stdout.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+
+    def test_rendered_command_denies_force_push_after_remote_and_branch(self):
+        # The mid-string-wildcard case Copilot's own permission syntax
+        # could not express — the whole reason this is a script, not a
+        # settings.json rule.
+        result = self._run_rendered_command("git push origin main --force")
+        self.assertEqual(result.returncode, 2)
+
+    def test_rendered_command_allows_git_status(self):
+        result = self._run_rendered_command("git status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+    def test_rendered_command_allows_plain_git_push(self):
+        result = self._run_rendered_command("git push origin main")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+
+class HookInventoryCoverageTests(unittest.TestCase):
+    """Slice 113-05 AC2 — `build_copilot_plugin._JIG_HOOK_INVENTORY` covers
+    every REAL (event, matcher, script) hook registration in
+    `hooks/hooks.json` — no jig hook silently dropped (ADR-0061). This is a
+    STRUCTURAL check, not documentation-only: it fails if a future hook is
+    added to `hooks.json` without a matching inventory entry (or vice
+    versa), and it fails if a `SHIPPED` entry is not actually present in the
+    built package. Entries with `source == "copilot-only"` (currently: the
+    permissions-floor hook, which has no hooks.json counterpart to
+    translate FROM) are exempt from the hooks.json cross-check, but still
+    covered by the status/notes/actually-built checks below."""
+
+    def _real_registrations(self):
+        source = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+        registrations = set()
+        for event, entries in source["hooks"].items():
+            for entry in entries:
+                matcher = entry.get("matcher")
+                for h in entry.get("hooks", []):
+                    command = h.get("command", "")
+                    match = re.search(r"(jig-[A-Za-z0-9-]+\.sh)", command)
+                    if match:
+                        registrations.add((event, matcher, match.group(1)))
+        return registrations
+
+    def _inventoried_from_hooks_json(self):
+        return {
+            (r["event"], r["matcher"], r["script"])
+            for r in build_copilot_plugin._JIG_HOOK_INVENTORY
+            if r["source"] == "hooks.json"
+        }
+
+    def test_every_real_registration_is_in_the_inventory(self):
+        missing = self._real_registrations() - self._inventoried_from_hooks_json()
+        self.assertEqual(missing, set(), f"undocumented hook registrations: {missing}")
+
+    def test_inventory_has_no_stale_hooks_json_entries(self):
+        stale = self._inventoried_from_hooks_json() - self._real_registrations()
+        self.assertEqual(
+            stale, set(), f"inventory entries no longer in hooks.json: {stale}"
+        )
+
+    def test_every_entry_has_a_known_source(self):
+        for r in build_copilot_plugin._JIG_HOOK_INVENTORY:
+            self.assertIn(r["source"], {"hooks.json", "copilot-only"})
+
+    def test_every_entry_has_a_known_status(self):
+        for r in build_copilot_plugin._JIG_HOOK_INVENTORY:
+            self.assertIn(r["status"], {"SHIPPED", "MAPPABLE", "UNMAPPABLE"})
+
+    def test_every_entry_has_documented_notes(self):
+        for r in build_copilot_plugin._JIG_HOOK_INVENTORY:
+            self.assertTrue(r.get("notes"), f"{r['script']} ({r['event']}) has no notes")
+
+    def test_permissions_floor_is_a_copilot_only_shipped_entry(self):
+        # The permissions floor (AC3) is NOT a hooks.json translation — it
+        # has no Claude-side hook script (Claude enforces the floor via its
+        # native permissions.deny engine) — but it must still show up here,
+        # accurately, as SHIPPED (not silently left implying "still a
+        # settings.json" or omitted entirely).
+        floor_entries = [
+            r for r in build_copilot_plugin._JIG_HOOK_INVENTORY
+            if r["script"] == "copilot_permissions_floor.py"
+        ]
+        self.assertEqual(len(floor_entries), 1)
+        entry = floor_entries[0]
+        self.assertEqual(entry["source"], "copilot-only")
+        self.assertEqual(entry["status"], "SHIPPED")
+
+    def test_every_shipped_entry_is_actually_built(self):
+        tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-inventory-"))
+        try:
+            out_dir = tmp / "copilot"
+            code, log = _build(out_dir)
+            self.assertEqual(code, 0, log)
+            hooks_dir = out_dir / ".github" / "hooks"
+            rendered_text = "\n".join(
+                f.read_text() for f in hooks_dir.glob("*.json")
+            )
+            for r in build_copilot_plugin._JIG_HOOK_INVENTORY:
+                if r["status"] != "SHIPPED":
+                    continue
+                self.assertIn(
+                    r["script"], rendered_text,
+                    f"{r['script']} marked SHIPPED but not found in any "
+                    "rendered hook file",
+                )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class RenderedHookCommandFiresEndToEndTests(unittest.TestCase):
     """Slice 113-04 follow-up (coordinator-requested AC1 completion) — the
     ACTUALLY-BUILT package's rendered `command` string (adapter + script,
@@ -664,8 +1032,8 @@ class RenderedHookCommandFiresEndToEndTests(unittest.TestCase):
     def _run_rendered_command(self, stem: str, payload: dict):
         hook_file = self.out_dir / ".github" / "hooks" / f"{stem}.json"
         rendered = json.loads(hook_file.read_text())
-        event = next(iter(rendered))
-        command = rendered[event][0]["hooks"][0]["command"]
+        event = next(iter(rendered["hooks"]))
+        command = rendered["hooks"][event][0]["bash"]
         # cwd=self.out_dir: the best-hypothesis assumption this slice's
         # renderer commits to (plugin-root-relative paths) — see
         # `CopilotScaffoldRenderer.rewrite_hook_command`'s docstring for the
@@ -948,6 +1316,37 @@ class CommittedCopilotPackageTests(unittest.TestCase):
             (pkg / ".github" / "hooks" / "scripts" / "jig-git-freshness.sh")
             .is_file()
         )
+
+    def test_committed_enforcing_hooks_present(self):
+        # 113-05: the 2 enforcing hooks join the committed package.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        for stem in ("jig-spec-gate", "jig-secret-scan"):
+            self.assertTrue(
+                (pkg / ".github" / "hooks" / f"{stem}.json").is_file(),
+                f"committed hosts/copilot hook missing: {stem} — run "
+                "`python3 scripts/build_host_packages.py`",
+            )
+        self.assertTrue(
+            (pkg / ".github" / "hooks" / "scripts" / "jig-spec-gate.sh").is_file()
+        )
+
+    def test_committed_permissions_floor_present(self):
+        # 113-05 AC3 (owner reshape): an enforcing preToolUse hook, not a
+        # settings.json file.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        floor_hook = pkg / ".github" / "hooks" / "jig-permissions-floor.json"
+        self.assertTrue(
+            floor_hook.is_file(),
+            "committed hosts/copilot permissions floor hook missing — run "
+            "`python3 scripts/build_host_packages.py`",
+        )
+        data = json.loads(floor_hook.read_text())
+        self.assertEqual(set(data["hooks"].keys()), {"preToolUse"})
+        self.assertTrue(
+            (pkg / ".github" / "hooks" / "scripts" / "copilot_permissions_floor.py")
+            .is_file()
+        )
+        self.assertFalse((pkg / ".github" / "copilot").exists())
 
     def test_no_pre_rendered_instructions_file_committed(self):
         # 113-02 review fix: no pre-rendered instructions file ships.

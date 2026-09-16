@@ -2,7 +2,9 @@
 """
 copilot_hook_adapter.py — slice 113-04 (advisory-hooks), the INPUT half of
 the hook-protocol translation layer (AC1: "adapts the payload/field access
-the hook scripts read").
+the hook scripts read"); grown by slice 113-05 (enforcing-hooks-and-
+permissions) with an enforcing mode (`--enforce`) that preserves exit codes
+for blocking gates.
 
 Rendered ONLY into the Copilot package (copied verbatim by
 `build_copilot_plugin.py` to `hosts/copilot/.github/hooks/scripts/`) — never
@@ -75,11 +77,48 @@ have today under any foreign payload), so a translation bug produces, at
 worst, a missing nudge — never a crash. This adapter also never raises: a
 malformed invocation, an unreadable target script, or a spawn failure all
 return exit 0 rather than propagating an error to Copilot's own hook runner.
-This unconditional-exit-0 posture is scoped to the 3 ADVISORY hooks this
-slice fronts — it is the wrong posture for an ENFORCING hook (spec-gate,
-review-evidence, bug-closure), whose `permissionDecision` deny signal must
-actually reach Copilot; 113-05 must wire a different exit/response posture
-for those rather than reuse this one as-is (see `main`'s own comment).
+This unconditional-exit-0 posture is scoped to ADVISORY hooks (the default
+mode) — it is the wrong posture for an ENFORCING hook (spec-gate,
+secret-scan), whose `permissionDecision` deny signal must actually reach
+Copilot.
+
+Enforcing mode (113-05, NEW): invoked with a leading `--enforce` argv flag
+(before `<claude_event>`), `main()` switches from the advisory posture
+above to one that PRESERVES the target script's exit code, per the
+AUTHORITATIVE Copilot hook contract (GitHub's own hooks reference): exit 0
+allows; exit 2 (and, generalizing the same contract's "other non-zero ->
+fail-closed deny too", ANY non-zero exit) denies — the non-zero exit code
+ALONE is what Copilot treats as a deny, regardless of stdout content. On a
+non-zero exit this adapter ALSO overwrites its own stdout with an explicit
+`{"permissionDecision": "deny", "permissionDecisionReason": <reason>}` body
+(belt-and-suspenders, not the primary mechanism) built by `_deny_response`,
+using the child's stderr (jig's spec-gate/secret-scan write their block
+message there) as the human-readable reason, falling back to stdout, then
+to an empty reason. `_deny_response` intentionally DUPLICATES — rather than
+imports — `CopilotScaffoldRenderer.translate_hook_protocol`'s
+`block_reason` -> `permissionDecision`/`permissionDecisionReason` mapping
+(see that method's own HONESTY NOTE): this adapter ships standalone with no
+`scaffold.py` import dependency (the SAME design choice already made for
+`_COPILOT_TO_CLAUDE_TOOL_NAME` below), and
+`test_copilot_hook_adapter.DenyResponseMatchesTranslateHookProtocolTests`
+pins the duplicate in sync so the two cannot silently drift apart.
+
+An adapter-level SPAWN failure (e.g. an unresolved script path) in
+enforcing mode fails CLOSED (`exit 2` + a stderr message), the opposite of
+advisory's fail-OPEN: silently allowing every future edit through on a
+packaging bug would be exactly the "gate quietly stops blocking" failure
+ADR-0061's "keep their teeth / degrade visibly, not silently" invariant
+forbids — a loud, deterministic deny is the safer failure mode for a
+gate whose entire purpose is blocking.
+
+Interpreter selection (113-05, NEW — see `_interpreter_for`): every target
+script through 113-04 was a `.sh` file, so `main()` always spawned `bash
+<script_path>`. 113-05 adds `copilot_permissions_floor.py` (the
+destructive-command permissions-floor hook, a standalone PYTHON module
+rather than a bash wrapper — see ITS module docstring), so this adapter now
+picks `python3` for a `.py` target and `bash` for everything else, still
+reading the SAME translated stdin JSON and passing the SAME environment
+either way.
 
 RESIDUAL (fail-open covers a wrong guess with a no-op, not breakage): the
 `toolArgs.path` mapping and the `edit`/`create` tool-name vocabulary are
@@ -162,12 +201,42 @@ def project_dir_from_payload(raw: bytes) -> Optional[str]:
         return None
 
 
+ENFORCE_FLAG = "--enforce"
+
+
+def _deny_response(reason: str) -> dict:
+    """Build the Copilot deny-decision JSON body for a blocked enforcing
+    hook. INTENTIONALLY DUPLICATES (not imports)
+    `CopilotScaffoldRenderer.translate_hook_protocol`'s `block_reason` ->
+    `permissionDecision`/`permissionDecisionReason` mapping — see the
+    module docstring's "Enforcing mode" section for why this stays a
+    duplicate rather than an import. Always includes
+    `permissionDecisionReason` (even when `reason` is empty), matching
+    `translate_hook_protocol`'s own unconditional behavior whenever a
+    `block_reason` key is present — pinned exactly by
+    `test_copilot_hook_adapter.DenyResponseMatchesTranslateHookProtocolTests`."""
+    return {"permissionDecision": "deny", "permissionDecisionReason": reason}
+
+
+def _interpreter_for(script_path: str) -> str:
+    """The interpreter used to run `script_path`: `python3` for a `.py`
+    target — `copilot_permissions_floor.py` (113-05's destructive-command
+    floor guard) is the first, and so far only, non-bash target this
+    adapter fronts — `bash` for every other jig hook script (all `.sh`,
+    unchanged since 113-04)."""
+    return "python3" if script_path.endswith(".py") else "bash"
+
+
 def main(argv: list) -> int:
-    if len(argv) < 3:
+    args = argv[1:]
+    enforcing = bool(args) and args[0] == ENFORCE_FLAG
+    if enforcing:
+        args = args[1:]
+    if len(args) < 2:
         # Fail-open: a malformed invocation must not raise a traceback to
         # Copilot's own hook runner. Nothing meaningful to run.
         return 0
-    claude_event, script_path = argv[1], argv[2]
+    claude_event, script_path = args[0], args[1]
 
     raw = sys.stdin.buffer.read()
     translated = translate_payload(raw, claude_event)
@@ -177,28 +246,74 @@ def main(argv: list) -> int:
     if working_dir and "CLAUDE_PROJECT_DIR" not in env:
         env["CLAUDE_PROJECT_DIR"] = working_dir
 
+    if not enforcing:
+        try:
+            subprocess.run(
+                [_interpreter_for(script_path), script_path],
+                input=translated, env=env,
+            )
+        except Exception:
+            # Fail-open: an adapter-side spawn failure (e.g. the script
+            # path does not resolve — the still-unverified
+            # plugin-root-relative residual) must never look like a
+            # blocking error to Copilot. Scoped to ADVISORY mode only —
+            # see the enforcing branch below for the opposite (fail-closed)
+            # posture.
+            pass
+        # Always 0, regardless of the child's own exit code. Each of the 3
+        # advisory hooks (session git-freshness, boundary-change-warn,
+        # entry-gate-nudge) already ends with an unconditional `exit 0` of
+        # its own (best-effort — AC3), so the only way `bash` itself would
+        # report non-zero here is a packaging/path problem, not a
+        # hook-logic failure. Masking that into 0 is the same "never
+        # blocks" guarantee those scripts already give Claude/Codex,
+        # extended to Copilot rather than relaxed for it.
+        return 0
+
+    # Enforcing mode (113-05): preserve the child's exit code so a blocking
+    # gate's `exit 2` actually reaches Copilot as a deny — see the module
+    # docstring's "Enforcing mode" section for the full contract.
     try:
-        subprocess.run(["bash", script_path], input=translated, env=env)
-    except Exception:
-        # Fail-open: an adapter-side spawn failure (e.g. the script path
-        # does not resolve — the still-unverified plugin-root-relative
-        # residual) must never look like a blocking error to Copilot.
-        pass
-    # Always 0, regardless of the child's own exit code — but this posture
-    # is scoped to the 3 ADVISORY hooks this slice (113-04) actually fronts
-    # (session git-freshness, boundary-change-warn, entry-gate-nudge). Each
-    # already ends with an unconditional `exit 0` of its own (best-effort —
-    # AC3), so the only way `bash` itself would report non-zero here is a
-    # packaging/path problem (the command-path residual this slice already
-    # flags), not a hook-logic failure. Masking that into 0 is the same
-    # "never blocks" guarantee those scripts already give Claude/Codex,
-    # extended to Copilot rather than relaxed for it. This is NOT the right
-    # posture for an ENFORCING hook (spec-gate, review-evidence,
-    # bug-closure): those need their `permissionDecision`/deny signal to
-    # actually reach Copilot, which an unconditional exit 0 would mask.
-    # 113-05, which adds those, must wire a DIFFERENT (or parameterized)
-    # exit/response posture for them rather than reusing this one as-is.
-    return 0
+        result = subprocess.run(
+            [_interpreter_for(script_path), script_path], input=translated, env=env,
+            capture_output=True,
+        )
+    except Exception as exc:
+        sys.stderr.write(
+            f"copilot_hook_adapter: enforcing hook failed to spawn "
+            f"{script_path!r}: {exc}\n"
+        )
+        sys.stdout.buffer.write(
+            json.dumps(_deny_response(f"jig enforcing hook adapter error: {exc}"))
+            .encode("utf-8")
+        )
+        return 2
+
+    if result.returncode == 0:
+        if result.stdout:
+            sys.stdout.buffer.write(result.stdout)
+    else:
+        # Replace stdout with a single, clean deny body rather than
+        # concatenating it after whatever the child already wrote — jig's
+        # spec-gate.sh/secret-scan.sh write nothing to stdout on either
+        # exit path today, but a future enforcing hook that DOES emit
+        # stdout on a non-zero exit must not end up with two JSON objects
+        # back to back. The exit code (returned below) is what actually
+        # denies per the authoritative contract; this body is
+        # belt-and-suspenders context for a human or a client that also
+        # reads stdout on a non-zero exit.
+        if result.stderr:
+            reason = result.stderr.decode("utf-8", errors="replace").strip()
+        elif result.stdout:
+            reason = result.stdout.decode("utf-8", errors="replace").strip()
+        else:
+            reason = ""
+        sys.stdout.buffer.write(
+            json.dumps(_deny_response(reason)).encode("utf-8")
+        )
+    if result.stderr:
+        sys.stderr.buffer.write(result.stderr)
+    return result.returncode
 
 
 if __name__ == "__main__":

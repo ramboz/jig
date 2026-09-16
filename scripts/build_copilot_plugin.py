@@ -9,38 +9,70 @@ third committed host) the repository root stays canonical source and
 install, no build step and no separate marketplace (spike 113-01 AC1).
 
 Scope note (113-02 shipped a **walking skeleton**; 113-03 grew it by custom
-agents; 113-04 grows it by hook translation): skills, the plugin manifest,
-`agents/*.md`, and now the 3 ADVISORY hooks (session git-freshness,
-boundary-change-warn, entry-gate-nudge) ship here, rendered into
-`.github/hooks/*.json` + their bash/python scripts under
-`.github/hooks/scripts/`, fronted by `copilot_hook_adapter.py`.
+agents; 113-04 grew it by ADVISORY hook translation; 113-05 grows it by
+ENFORCING hooks + the permissions floor + a hook-schema correction): skills,
+the plugin manifest, `agents/*.md`, the advisory hooks (session
+git-freshness, boundary-change-warn, entry-gate-nudge) AND now the 3
+ENFORCING hooks (spec-gate, secret-scan, and the permissions-floor
+destructive-command guard) ship here, rendered into `.github/hooks/*.json` +
+their bash/python scripts under `.github/hooks/scripts/`, fronted by
+`copilot_hook_adapter.py`.
 
-Honest framing of what "hook translation" means at THIS slice (compliance
-review fix, 113-04): the CONFIG-level translation is real and exercised —
-`CLAUDE_TO_COPILOT_EVENTS` (Claude PascalCase -> Copilot camelCase event
-keys), the hook-matcher tool-name map, and `build_hook_command`'s command
-wrapping all run at BUILD TIME and shape what actually ships. The RUNTIME
-INPUT adapter (`copilot_hook_adapter.py`) is also real and exercised — it
-re-shapes Copilot's camelCase stdin JSON into what the unmodified jig
-scripts read, at HOOK-FIRE TIME. `CopilotScaffoldRenderer.
-translate_hook_protocol` (the RESPONSE-schema half) is NOT exercised by
-either of those: it is the Copilot override of a seam that is unwired
-repo-wide (Claude's and Codex's own `translate_hook_protocol` are equally
-never called at runtime today — see `skills/scaffold-init/scaffold.py`'s
-docstring). The adapter forwards each advisory hook's child stdout
-VERBATIM; nothing currently post-processes it to drop `continue` or map
-`block_reason` -> `permissionDecision`. Wiring `translate_hook_protocol`'s
-RUNTIME application into the adapter is 113-05 scope, deferred there
-because only 113-05's enforcing hooks (spec-gate, review-evidence,
-bug-closure) actually need a `permissionDecision` deny path — the 3
-advisory hooks this slice ships only ever emit `additionalContext`, which
-already round-trips through the adapter unmodified (Copilot's schema
-accepts it under that same key; the harmless, documented residual is that
-`continue` also passes through un-stripped — see
-`test_copilot_hook_adapter.py`'s `ShippedAdvisoryOutputThroughAdapterTests`).
-The full mapped-or-unmappable inventory of every OTHER jig hook (telemetry,
-skill-trace, …) and the release zip are still 113-05/06 scope. Skill bodies
-now get the `${CLAUDE_PLUGIN_ROOT}` path rewrite too (113-04 AC4) — see
+PERMISSIONS FLOOR RESHAPE (113-05, owner-directed correction): an EARLIER
+version of this slice rendered the floor as `.github/copilot/settings.json`
+(`deniedTools`, translated via Copilot's `--allow-tool`/`--deny-tool`
+CLI-flag pattern syntax) — the owner corrected this after confirming
+(authoritative GitHub docs + a live probe) that Copilot has NO persistent,
+repo-committable tool-deny mechanism at all: `copilot help config`'s own
+authored list of PERSISTED settings.json keys has no tool-allow/deny entry
+(only `allowedUrls`/`deniedUrls`, plus `hooks`); `--deny-tool` is
+SESSION-scoped only. A `deniedTools` settings.json key would have been a
+DEAD FILE. The floor now ships as `.github/hooks/jig-permissions-floor.json`
+— a real ENFORCING `preToolUse` hook fronting `copilot_permissions_floor.py`
+(a standalone Python module, mirroring `copilot_hook_adapter.py`'s own
+design) that pattern-matches the shell command against ALL 8 of
+`_PERMISSIONS_DENY_DEFAULTS` (a superset of what Copilot's OWN `shell()`
+permission-pattern syntax could faithfully express — see
+`scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook`'s and
+`copilot_permissions_floor.py`'s own docstrings for the full history and
+evidence trail) and denies (`exit 2`) a match.
+
+SCHEMA CORRECTION (113-05): 113-04 rendered `.github/hooks/*.json` in
+Claude's OWN nested shape (`{event: [{matcher?, hooks:[{type, command,
+timeout}]}]}`), which is NOT what Copilot's loader reads. The AUTHORITATIVE
+on-disk schema (GitHub's own hooks reference, re-verified against the
+installed CLI 1.0.86-0's `copilot help` output) is `{"version": 1, "hooks":
+{"<camelCaseEvent>": [<flat entry: matcher?, type, bash, timeoutSec?>]}}` —
+see `scaffold.render_copilot_hook_file`'s docstring. Fixed here for every
+hook this builder renders, advisory and enforcing alike, since the bug
+would otherwise have made NONE of them loadable.
+
+Honest framing of what "hook translation" means (compliance review fix,
+113-04; RE-CONFIRMED 113-05): the CONFIG-level translation is real and
+exercised — `CLAUDE_TO_COPILOT_EVENTS` (Claude PascalCase -> Copilot
+camelCase event keys), the hook-matcher tool-name map, and
+`build_hook_command`'s command wrapping all run at BUILD TIME and shape
+what actually ships. The RUNTIME INPUT adapter (`copilot_hook_adapter.py`)
+is also real and exercised — it re-shapes Copilot's camelCase stdin JSON
+into what the unmodified jig scripts read, at HOOK-FIRE TIME. As of 113-05,
+the adapter's ENFORCING mode (`--enforce`) also preserves the target
+script's exit code and emits a `permissionDecision: deny` body on a
+non-zero one — but via a mapping the adapter DUPLICATES (drift-guarded by a
+test), not by calling `CopilotScaffoldRenderer.translate_hook_protocol` at
+runtime; that method remains unwired repo-wide (Claude's and Codex's own
+copies are equally never called — see `skills/scaffold-init/scaffold.py`'s
+docstring, and the adapter's own module docstring for why it stays
+standalone rather than importing `scaffold.py`). The 3 advisory hooks still
+only ever emit `additionalContext`, which round-trips through the adapter
+unmodified; the harmless, documented residual that `continue` also passes
+through un-stripped remains — see `test_copilot_hook_adapter.py`'s
+`ShippedAdvisoryOutputThroughAdapterTests`. `build_copilot_plugin._JIG_HOOK_INVENTORY`
+is the mapped-or-unmappable inventory (AC2) for every OTHER jig hook
+(telemetry, skill-trace, …); most remain MAPPABLE-but-not-yet-shipped,
+rendered in 113-06 (AC6 — remaining-advisory-hook parity), and 2 (telemetry's `Task` matcher,
+skill-trace's `Skill` matcher) are recorded UNMAPPABLE (no confirmed
+Copilot tool-call analogue). Skill bodies get the `${CLAUDE_PLUGIN_ROOT}`
+path rewrite too (113-04 AC4) — see
 `scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths` for the
 best-hypothesis, not-verified-live caveat. Agent prompt bodies still ship
 Claude-native (no path rewriting) — none of the 3 canonical agents reference
@@ -263,39 +295,71 @@ _COPILOT_HOOK_LIB_FILES: tuple[str, ...] = (
     "lib/protected_paths.py",
 )
 
+# Slice 113-05 (enforcing-hooks-and-permissions) — the 2 ENFORCING hooks
+# (jig's blocking, `exit 2`-on-block PreToolUse gates): spec-gate and
+# secret-scan. Same tuple shape as `_COPILOT_ADVISORY_HOOKS`; rendered
+# through `render_copilot_hook_file(..., enforcing=True)` (below) so the
+# adapter invocation preserves the target script's exit code instead of
+# masking it to 0.
+_COPILOT_ENFORCING_HOOKS: tuple[tuple[str, str, str], ...] = (
+    ("PreToolUse", "jig-spec-gate.sh", "jig-spec-gate"),
+    ("PreToolUse", "jig-secret-scan.sh", "jig-secret-scan"),
+)
+
+# The 2 enforcing hooks' bash wrappers, shipped VERBATIM (same rationale as
+# `_COPILOT_HOOK_SCRIPT_FILES`). Neither needs a `lib/` helper of its own:
+# `jig-secret-scan.sh` is self-contained inline Python; `jig-spec-gate.sh`
+# imports `gate_telemetry` from `skills/_common/` (already shipped by
+# `_copy_skills`, reached via the SAME `../../skills` climb
+# `_copy_copilot_hook_scripts`'s docstring already establishes for
+# `jig-entry-gate.sh`) — no NEW lib file to copy.
+_COPILOT_ENFORCING_HOOK_SCRIPT_FILES: tuple[str, ...] = (
+    "jig-spec-gate.sh",
+    "jig-secret-scan.sh",
+)
+
 
 def _write_copilot_hooks(source_root: Path, output_dir: Path) -> None:
-    """Render the 3 advisory hooks into `.github/hooks/<stem>.json` (one file
-    per hook — AC2). Silently does nothing for a hook whose source entry has
-    gone missing (`render_copilot_hook_file` returns `None`) rather than
-    writing an empty/garbage file; `hooks/hooks.json` itself missing (should
-    never happen in this repo) is likewise a silent no-op, matching
-    `_write_codex_hooks`'s own precedent for a missing source file."""
+    """Render the advisory + enforcing hooks into `.github/hooks/<stem>.json`
+    (one file per hook — AC2). Silently does nothing for a hook whose source
+    entry has gone missing (`render_copilot_hook_file` returns `None`)
+    rather than writing an empty/garbage file; `hooks/hooks.json` itself
+    missing (should never happen in this repo) is likewise a silent no-op,
+    matching `_write_codex_hooks`'s own precedent for a missing source
+    file."""
     source_hooks_path = source_root / "hooks" / "hooks.json"
     if not source_hooks_path.is_file():
         return
     source_hooks = json.loads(source_hooks_path.read_text())
     hooks_dst = output_dir / ".github" / "hooks"
-    for claude_event, script_name, stem in _COPILOT_ADVISORY_HOOKS:
+
+    def _render(claude_event: str, script_name: str, stem: str, *, enforcing: bool) -> None:
         payload = scaffold_mod.render_copilot_hook_file(
             source_hooks,
             claude_event,
             script_name,
             renderer_cls=scaffold_mod.CopilotScaffoldRenderer,
+            enforcing=enforcing,
         )
         if payload is None:
-            continue
+            return
         hooks_dst.mkdir(parents=True, exist_ok=True)
         (hooks_dst / f"{stem}.json").write_text(
             json.dumps(payload, indent=2) + "\n", encoding="utf-8"
         )
 
+    for claude_event, script_name, stem in _COPILOT_ADVISORY_HOOKS:
+        _render(claude_event, script_name, stem, enforcing=False)
+    for claude_event, script_name, stem in _COPILOT_ENFORCING_HOOKS:
+        _render(claude_event, script_name, stem, enforcing=True)
+
 
 def _copy_copilot_hook_scripts(source_root: Path, output_dir: Path) -> None:
-    """Copy the 3 advisory hooks' bash wrappers + their `lib/*.py` helpers
-    into `.github/hooks/scripts/` verbatim, pinning each `.sh` to `0o755`
-    (mirrors `_rewrite_codex_hook_scripts`'s mode-pinning, minus the body
-    rewrite Codex needs and Copilot does not — see the module docstring).
+    """Copy the advisory + enforcing hooks' bash wrappers + their `lib/*.py`
+    helpers into `.github/hooks/scripts/` verbatim, pinning each `.sh` to
+    `0o755` (mirrors `_rewrite_codex_hook_scripts`'s mode-pinning, minus the
+    body rewrite Codex needs and Copilot does not — see the module
+    docstring).
 
     Placement note: nested under `.github/`, unlike Claude/Codex's
     plugin-root-level `hooks/scripts/`. This is deliberate, not
@@ -315,7 +379,12 @@ def _copy_copilot_hook_scripts(source_root: Path, output_dir: Path) -> None:
     resolves."""
     scripts_src = source_root / "hooks" / "scripts"
     scripts_dst = output_dir / ".github" / "hooks" / "scripts"
-    for rel_name in _COPILOT_HOOK_SCRIPT_FILES + _COPILOT_HOOK_LIB_FILES:
+    all_files = (
+        _COPILOT_HOOK_SCRIPT_FILES
+        + _COPILOT_ENFORCING_HOOK_SCRIPT_FILES
+        + _COPILOT_HOOK_LIB_FILES
+    )
+    for rel_name in all_files:
         src = scripts_src / rel_name
         if not src.is_file():
             continue
@@ -325,14 +394,241 @@ def _copy_copilot_hook_scripts(source_root: Path, output_dir: Path) -> None:
         if rel_name.endswith(".sh"):
             dst.chmod(0o755)
 
-    adapter_src = (
-        source_root / "skills" / "scaffold-init"
-        / scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME
-    )
-    if adapter_src.is_file():
-        dst = scripts_dst / scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME
+    # `copilot_hook_adapter.py` (113-04) and `copilot_permissions_floor.py`
+    # (113-05) both ship the SAME way: standalone Python modules copied
+    # verbatim from `skills/scaffold-init/` (their canonical source
+    # location; each is Copilot-only and never touches
+    # `hooks/scripts/*.sh` / `lib/*.py`) into this SAME scripts directory,
+    # so their rendered relative command paths resolve.
+    for standalone_filename in (
+        scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME,
+        scaffold_mod.CopilotScaffoldRenderer.COPILOT_PERMISSIONS_FLOOR_FILENAME,
+    ):
+        src = source_root / "skills" / "scaffold-init" / standalone_filename
+        if not src.is_file():
+            continue
+        dst = scripts_dst / standalone_filename
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(adapter_src.read_bytes())
+        dst.write_bytes(src.read_bytes())
+
+
+def _write_permissions_floor_hook(output_dir: Path) -> None:
+    """Slice 113-05 AC3 (owner reshape) — render the destructive-command
+    permissions FLOOR as an ENFORCING `preToolUse` hook,
+    `.github/hooks/jig-permissions-floor.json`, REPLACING an earlier
+    (dead — Copilot cannot persist a tool-deny setting) `.github/copilot/
+    settings.json` attempt this same slice tried. See
+    `scaffold.CopilotScaffoldRenderer.render_permissions_floor_hook`'s own
+    docstring for the schema and matcher, and
+    `copilot_permissions_floor.py`'s module docstring for the guard
+    script's own design."""
+    payload = scaffold_mod.CopilotScaffoldRenderer.render_permissions_floor_hook()
+    hooks_dst = output_dir / ".github" / "hooks"
+    hooks_dst.mkdir(parents=True, exist_ok=True)
+    (hooks_dst / "jig-permissions-floor.json").write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+# Slice 113-05 AC2 — the mapped-or-unmappable inventory (ADR-0061: "every
+# jig hook is either mapped to a Copilot event with equivalent enforcement,
+# or explicitly recorded as unmappable with the residual documented"). One
+# record per (event, matcher, script) registration in the REAL
+# `hooks/hooks.json` — a script registered under more than one
+# event/matcher gets one record per registration (e.g.
+# `jig-decision-inflight.sh` is both a PostToolUse/AskUserQuestion
+# registration, UNMAPPABLE, and a UserPromptSubmit registration, MAPPABLE
+# — the SAME script degrades differently depending on which trigger fires).
+#
+# `source` is one of:
+#   "hooks.json"    — a real (event, matcher, script) registration in the
+#                     canonical `hooks/hooks.json`; `HookInventoryCoverageTests`
+#                     cross-checks these against that file both ways (no
+#                     undocumented registration, no stale inventory entry).
+#   "copilot-only"  — a hook that exists ONLY in the Copilot package, with
+#                     no Claude-format `hooks/hooks.json` entry to translate
+#                     FROM (currently: the permissions-floor deny-hook,
+#                     whose Claude-side equivalent is its native
+#                     `permissions.deny` engine, not a jig hook script).
+#                     Exempt from the hooks.json cross-check for the
+#                     obvious reason there is nothing in hooks.json to
+#                     cross-check it against — but still required to carry
+#                     a known `status` and `notes`, same as every other
+#                     entry.
+#
+# `status` is one of:
+#   SHIPPED     — rendered + shipped in THIS package; verified by
+#                 `HookInventoryCoverageTests.test_every_shipped_entry_is_actually_built`
+#                 (scripts/test_build_copilot_plugin.py) against the
+#                 build's own output, not just asserted here.
+#   MAPPABLE    — a Copilot event (and matcher, if any) exist to render
+#                 this hook the SAME way SHIPPED ones are, but it is not
+#                 yet built into this package — an advisory nudge, not a
+#                 gate, rendered in 113-06 (AC6 — remaining-advisory-hook parity).
+#   UNMAPPABLE  — no confirmed Copilot analogue exists for the matcher/tool
+#                 this hook keys on; `notes` documents the residual. The
+#                 hook's nudge/telemetry does not fire under Copilot — a
+#                 DOCUMENTED gap, never a silent one.
+#
+# `HookInventoryCoverageTests` reads the REAL `hooks/hooks.json` and asserts
+# every (event, matcher, script) triple found there is represented among the
+# `source == "hooks.json"` entries here (and vice versa) — so a hook added
+# to `hooks.json` later without a matching inventory entry fails a test
+# rather than silently falling through.
+_JIG_HOOK_INVENTORY: tuple[dict, ...] = (
+    {
+        "source": "hooks.json",
+        "event": "PreToolUse", "matcher": "Task", "script": "jig-telemetry.sh",
+        "status": "UNMAPPABLE",
+        "notes": (
+            "no confirmed Copilot tool literally named \"Task\" fires under "
+            "preToolUse; Copilot's own subagentStart/subagentStop HookType "
+            "members (confirmed enum values) are a plausible future remap "
+            "target for this telemetry's INTENT, but that would change "
+            "which EVENT the hook fires under, not just translate its "
+            "matcher spelling — a bigger step than this slice's render-layer "
+            "translation scope, not attempted here"
+        ),
+    },
+    {
+        "source": "hooks.json",
+        "event": "PreToolUse", "matcher": "Skill", "script": "jig-skill-trace.sh",
+        "status": "UNMAPPABLE",
+        "notes": (
+            "no confirmed Copilot tool literally named \"Skill\" fires under "
+            "preToolUse; Copilot's skill invocation is loader-driven, not a "
+            "discrete hookable tool call"
+        ),
+    },
+    {
+        "source": "hooks.json",
+        "event": "PreToolUse", "matcher": "Edit|Write|MultiEdit",
+        "script": "jig-spec-gate.sh", "status": "SHIPPED",
+        "notes": "enforcing (exit 2 blocks); 113-05",
+    },
+    {
+        "source": "hooks.json",
+        "event": "PreToolUse", "matcher": "Edit|Write|MultiEdit",
+        "script": "jig-secret-scan.sh", "status": "SHIPPED",
+        "notes": "enforcing (exit 2 blocks); 113-05",
+    },
+    {
+        "source": "hooks.json",
+        "event": "PreToolUse", "matcher": "Read", "script": "jig-context-check.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "PostToolUse", "matcher": "Edit|Write|MultiEdit",
+        "script": "jig-post-edit-verify.sh", "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "PostToolUse", "matcher": "Edit|Write|MultiEdit",
+        "script": "jig-boundary-change-warn.sh", "status": "SHIPPED",
+        "notes": "advisory; 113-04",
+    },
+    {
+        "source": "hooks.json",
+        "event": "PostToolUse", "matcher": "Edit|Write|MultiEdit",
+        "script": "jig-entry-gate.sh", "status": "SHIPPED",
+        "notes": "advisory; 113-04",
+    },
+    {
+        "source": "hooks.json",
+        "event": "PostToolUse", "matcher": "AskUserQuestion",
+        "script": "jig-decision-inflight.sh", "status": "UNMAPPABLE",
+        "notes": (
+            "no confirmed Copilot tool literally named \"AskUserQuestion\" "
+            "fires under postToolUse; see this SAME script's "
+            "UserPromptSubmit registration below, which IS mappable — this "
+            "one trigger of the two is the degraded one, not the whole hook"
+        ),
+    },
+    {
+        "source": "hooks.json",
+        "event": "SessionStart", "matcher": None, "script": "jig-context-check.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "SessionStart", "matcher": None, "script": "jig-project-orient.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "SessionStart", "matcher": None, "script": "jig-semantic-index.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "SessionStart", "matcher": None, "script": "jig-git-freshness.sh",
+        "status": "SHIPPED", "notes": "advisory; 113-04",
+    },
+    {
+        "source": "hooks.json",
+        "event": "UserPromptSubmit", "matcher": None, "script": "jig-memory-scan.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "UserPromptSubmit", "matcher": None, "script": "jig-context-check.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "UserPromptSubmit", "matcher": None,
+        "script": "jig-decision-inflight.sh", "status": "MAPPABLE",
+        "notes": (
+            "advisory; rendered in 113-06 (AC6 remaining-advisory-hook parity) — "
+            "THIS registration IS mappable "
+            "(userPromptSubmitted is a confirmed event, no matcher needed), "
+            "unlike the PostToolUse/AskUserQuestion registration of the "
+            "same script above"
+        ),
+    },
+    {
+        "source": "hooks.json",
+        "event": "Stop", "matcher": None, "script": "jig-task-capture.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "Stop", "matcher": None, "script": "jig-decision-capture.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "hooks.json",
+        "event": "Stop", "matcher": None, "script": "jig-claim-check.sh",
+        "status": "MAPPABLE",
+        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+    },
+    {
+        "source": "copilot-only",
+        "event": "PreToolUse", "matcher": "bash",
+        "script": "copilot_permissions_floor.py", "status": "SHIPPED",
+        "notes": (
+            "enforcing (exit 2 blocks); 113-05 owner reshape of AC3 — NOT a "
+            "translation of a hooks.json entry (Claude's equivalent is its "
+            "native permissions.deny engine, not a jig hook script); "
+            "replaces an earlier, dead .github/copilot/settings.json "
+            "attempt (Copilot has no persistent, repo-committable tool-deny "
+            "mechanism) with a real enforcing preToolUse hook that covers "
+            "all 8 of _PERMISSIONS_DENY_DEFAULTS, including the 2 "
+            "mid-string-wildcard force-push variants Copilot's own "
+            "shell() permission-pattern syntax could not express"
+        ),
+    },
+)
 
 
 def _write_manifest(output_dir: Path, version: str) -> None:
@@ -440,6 +736,7 @@ def build(source_root: Path, output_dir: Path, out=None) -> int:
     _render_agents(source_root, output_dir)
     _write_copilot_hooks(source_root, output_dir)
     _copy_copilot_hook_scripts(source_root, output_dir)
+    _write_permissions_floor_hook(output_dir)
     _write_manifest(output_dir, version)
 
     out.write(f"OK: built Copilot plugin at {output_dir}\n")

@@ -358,8 +358,21 @@ with a Claude→Copilot tool-name map and the reviewer's read-only allowlist pre
 (spec 113-03) — `.github/hooks/<name>.json` for jig's advisory nudges (event-keyed
 camelCase; a build-time event/matcher/command translation plus a runtime
 `copilot_hook_adapter.py` shim mapping Copilot's camelCase hook input into jig's
-canonical scripts, fail-open — spec 113-04), and `.plugin/plugin.json`; the enforcing
-gates + permissions and the release archive land across slices 113-05..06). Claude
+canonical scripts, fail-open — spec 113-04) and jig's **enforcing gates** (spec-gate
++ secret-scan run through the same adapter in `--enforce` mode, which preserves the
+child `exit 2` and emits Copilot's `permissionDecision:"deny"` so a blocking gate
+actually blocks — fail-**closed** on spawn error; spec 113-05), plus a **permissions
+floor** rendered as a Copilot-only enforcing `preToolUse` deny-hook
+(`copilot_permissions_floor.py`, which mirrors `_PERMISSIONS_DENY_DEFAULTS` under a
+drift guard) — a reshape from a would-be `settings.json`, because Copilot CLI has no
+persistent, repo-committable tool-deny mechanism (spec 113-05), and
+`.plugin/plugin.json`; the release archive lands in slice 113-06). Every jig hook's
+Copilot disposition is tracked in `build_copilot_plugin._JIG_HOOK_INVENTORY` — the
+**mapped-or-unmappable inventory** (ADR-0061): each hook is `SHIPPED`, `MAPPABLE`
+(renderable via the advisory path, rendered in 113-06 for full parity), or
+`UNMAPPABLE` (no Copilot analogue — the `Task`/`Skill`/`AskUserQuestion` matchers),
+structurally cross-checked against `hooks/hooks.json` so no jig hook is ever silently
+dropped. Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 `.claude/agents/`, `.claude/hooks/scripts/`, `.claude/templates/`, and
 `.claude/settings.json`. Codex scaffold mode writes `AGENTS.md`,

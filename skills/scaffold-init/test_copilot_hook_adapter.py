@@ -31,6 +31,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import copilot_hook_adapter  # noqa: E402
@@ -516,6 +517,199 @@ class ShippedAdvisoryOutputThroughAdapterTests(unittest.TestCase):
         parsed = json.loads(result.stdout.decode())
         self.assertIn("additionalContext", parsed)  # fires
         self.assertIs(parsed.get("continue"), True)  # documented residual
+
+
+class DenyResponseMatchesTranslateHookProtocolTests(unittest.TestCase):
+    """Slice 113-05 DoR — the adapter's enforcing-mode deny-JSON builder
+    (`_deny_response`) intentionally DUPLICATES (not imports)
+    `CopilotScaffoldRenderer.translate_hook_protocol`'s `block_reason` ->
+    `permissionDecision`/`permissionDecisionReason` mapping (the adapter
+    ships standalone — see its own module docstring). This pins the
+    duplicate in sync with the original so they cannot silently drift
+    apart, mirroring `ReverseToolMapConsistencyTests`'s own idiom for
+    `_COPILOT_TO_CLAUDE_TOOL_NAME`."""
+
+    def _renderer(self):
+        return scaffold.CopilotScaffoldRenderer(plugin=Path("."), target=Path("."))
+
+    def test_matches_for_a_nonempty_reason(self):
+        reason = "Blocked: some reason.\n"
+        self.assertEqual(
+            copilot_hook_adapter._deny_response(reason),
+            self._renderer().translate_hook_protocol({"block_reason": reason}),
+        )
+
+    def test_matches_for_an_empty_reason(self):
+        self.assertEqual(
+            copilot_hook_adapter._deny_response(""),
+            self._renderer().translate_hook_protocol({"block_reason": ""}),
+        )
+
+
+class EnforcingModeTests(unittest.TestCase):
+    """Slice 113-05 AC1 — the `--enforce` argv flag against the REAL
+    (unmodified) `jig-spec-gate.sh` / `jig-secret-scan.sh`: exit code
+    preserved end to end (a block denies with exit 2 + a deny JSON body; an
+    allow stays exit 0), and the identical payload WITHOUT `--enforce` stays
+    fail-open (regression guard against the two modes bleeding into each
+    other)."""
+
+    # Built by concatenation, not a literal, so this TEST FILE's own source
+    # text never contains the contiguous AWS-key-shaped substring — jig's
+    # OWN secret-scan gate (the enforcing hook this test class exercises)
+    # would otherwise block editing this very file. The concatenated VALUE
+    # is what actually reaches `jig-secret-scan.sh` at test-runtime, via
+    # the subprocess payload below, which is what the test needs.
+    _FAKE_AWS_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"
+
+    def setUp(self):
+        self.project_dir = Path(tempfile.mkdtemp(prefix="jig-copilot-enforce-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.project_dir, ignore_errors=True)
+
+    def _run(self, script_name: str, payload: dict, *, enforcing: bool, extra_env=None):
+        script_path = HOOK_SCRIPTS_DIR / script_name
+        argv = [sys.executable, str(ADAPTER_PATH)]
+        if enforcing:
+            argv.append("--enforce")
+        argv += ["PreToolUse", str(script_path)]
+        env = {
+            **os.environ,
+            "CLAUDE_PROJECT_DIR": str(self.project_dir),
+            **(extra_env or {}),
+        }
+        return subprocess.run(
+            argv, input=json.dumps(payload).encode(),
+            capture_output=True, timeout=15, env=env,
+        )
+
+    def test_spec_gate_allows_a_non_gated_file_with_exit_0(self):
+        result = self._run("jig-spec-gate.sh", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "README.md"},
+        }, enforcing=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+    def test_spec_gate_denies_conventions_md_with_exit_2_and_a_deny_body(self):
+        result = self._run("jig-spec-gate.sh", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "docs/conventions.md"},
+        }, enforcing=True)
+        self.assertEqual(result.returncode, 2)
+        deny = json.loads(result.stdout.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+        self.assertIn("deliberate approval", deny["permissionDecisionReason"])
+
+    def test_spec_gate_allows_conventions_md_when_approved(self):
+        result = self._run(
+            "jig-spec-gate.sh",
+            {
+                "sessionId": "abc123",
+                "toolName": "edit",
+                "toolArgs": {"path": "docs/conventions.md"},
+            },
+            enforcing=True,
+            extra_env={"JIG_CONVENTIONS_APPROVED": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+    def test_secret_scan_allows_benign_content_with_exit_0(self):
+        result = self._run("jig-secret-scan.sh", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "config.py", "new_string": "hello world"},
+        }, enforcing=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode().strip(), "")
+
+    def test_secret_scan_denies_an_aws_key_with_exit_2_and_a_deny_body(self):
+        result = self._run("jig-secret-scan.sh", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {
+                "path": "config.py",
+                "new_string": self._FAKE_AWS_KEY,
+            },
+        }, enforcing=True)
+        self.assertEqual(result.returncode, 2)
+        deny = json.loads(result.stdout.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+        self.assertIn("secret pattern", deny["permissionDecisionReason"])
+
+    def test_advisory_mode_stays_fail_open_for_the_same_blocked_edit(self):
+        # Regression guard: the SAME payload that denies under --enforce
+        # must stay exit 0 without it — the two modes must not bleed into
+        # each other.
+        result = self._run("jig-spec-gate.sh", {
+            "sessionId": "abc123",
+            "toolName": "edit",
+            "toolArgs": {"path": "docs/conventions.md"},
+        }, enforcing=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unresolvable_script_path_denies_via_bashs_own_nonzero_exit(self):
+        # `bash` itself spawns fine and reports ITS OWN non-zero exit (e.g.
+        # 127, "No such file or directory") for an unresolvable script path
+        # — this hits the ordinary non-zero-exit deny branch, not the
+        # spawn-exception one (see EnforcingModeSpawnFailureTests for that
+        # one, which needs a mock since `bash` itself is always present).
+        result = subprocess.run(
+            [sys.executable, str(ADAPTER_PATH), "--enforce", "PreToolUse",
+             "/no/such/script.sh"],
+            input=b"{}", capture_output=True, timeout=15,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        deny = json.loads(result.stdout.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+
+    def test_too_few_args_after_enforce_flag_returns_zero(self):
+        # In-process (no target script identified — nothing to spawn,
+        # mirrors MainInvocationTests.test_too_few_args_returns_zero).
+        self.assertEqual(
+            copilot_hook_adapter.main(["adapter.py", "--enforce"]), 0
+        )
+        self.assertEqual(
+            copilot_hook_adapter.main(["adapter.py", "--enforce", "PreToolUse"]),
+            0,
+        )
+
+
+class EnforcingModeSpawnFailureTests(unittest.TestCase):
+    """Slice 113-05 — enforcing mode's fail-CLOSED spawn-exception branch
+    (the opposite of advisory's fail-open one — see the module docstring).
+    Hard to trigger via a real subprocess (`bash` itself is a hard OS
+    dependency every jig hook script already assumes present, so a bad
+    SCRIPT path still lets `bash` spawn and fail on its own — see
+    `EnforcingModeTests.test_unresolvable_script_path_denies_via_bashs_own_nonzero_exit`)
+    — a mocked `subprocess.run` isolates the adapter-level spawn exception
+    itself."""
+
+    def test_spawn_exception_denies_with_exit_2(self):
+        fake_stdin = mock.Mock()
+        fake_stdin.buffer.read.return_value = b"{}"
+        with mock.patch.object(sys, "stdin", fake_stdin), \
+             mock.patch.object(
+                 copilot_hook_adapter.subprocess, "run",
+                 side_effect=OSError("boom"),
+             ), \
+             mock.patch.object(sys, "stdout") as fake_stdout, \
+             mock.patch.object(sys, "stderr"):
+            code = copilot_hook_adapter.main(
+                ["adapter.py", "--enforce", "PreToolUse", "/some/script.sh"]
+            )
+        self.assertEqual(code, 2)
+        written = b"".join(
+            call_args.args[0]
+            for call_args in fake_stdout.buffer.write.call_args_list
+        )
+        deny = json.loads(written.decode())
+        self.assertEqual(deny["permissionDecision"], "deny")
+        self.assertIn("boom", deny["permissionDecisionReason"])
 
 
 if __name__ == "__main__":

@@ -14,7 +14,11 @@ verification — so remote `/plugin` install works from the repo with no build
 step.
 
 **DoR:**
-- ✅ 113-02..05 done (renderer emits the full `hosts/copilot/` content).
+- ✅ 113-02..05 done (renderer + skeleton, agents, and a **representative** hook
+  set: 3 advisory hooks in 113-04 + 3 enforcing/floor hooks in 113-05). The
+  renderer does **not** yet emit jig's *complete* hook set — the remaining
+  `MAPPABLE` advisory hooks recorded in `_JIG_HOOK_INVENTORY` are rendered here
+  (AC6) to reach full Claude↔Copilot hook parity.
 
 **Acceptance Criteria:**
 
@@ -41,6 +45,23 @@ step.
    asserts no rendered skill/hook command points at a path absent from the package.
    (Surfaced by the 113-04 compliance review — the skill-body rewrite currently
    targets an unshipped dir; homed here as the packaging-completeness slice.)
+
+6. **Remaining advisory-hook parity (completes the mapped-or-unmappable
+   invariant).** Every hook the 113-05 inventory marks `MAPPABLE` — the remaining
+   advisory context/nudge hooks (`context-check`, `post-edit-verify`,
+   `project-orient`, `semantic-index`, `memory-scan`,
+   `decision-inflight`[userPromptSubmit], `task-capture`, `decision-capture`,
+   `claim-check`) — is rendered into `hosts/copilot/.github/hooks/` via the
+   existing advisory-render path (translate + adapter + `render_copilot_hook_file`,
+   fail-open preserved), so the Copilot host fires jig's **full** context/nudge
+   hook set. Each flips `MAPPABLE`→`SHIPPED` in `_JIG_HOOK_INVENTORY`; the only
+   non-`SHIPPED` residuals that survive are the genuinely `UNMAPPABLE` ones
+   (Task/Skill/AskUserQuestion), which stay documented. A test asserts **no
+   `MAPPABLE` entry remains** (every inventory entry is `SHIPPED` or `UNMAPPABLE`)
+   — closing the ADR-0061 "mapped or explicitly unmappable, never silently
+   dropped" invariant for real, not just in the ledger.
+   (Surfaced by the 113-05 arch review — the inventory homed these hooks to 113-06
+   but no AC owned rendering them; this AC is that home.)
 
 **DoD:**
 - [ ] All ACs pass; full suite green; new tests fail when the feature is removed.

@@ -1,9 +1,8 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [113-02]
 last_verified: 2026-09-15
 arch_review: true  # introduces the hook-protocol translation layer
-claimed_by: claude/adr-0061-spec-113-jig-874db3
 ---
 
 ## Slice 113-04 — advisory-hooks

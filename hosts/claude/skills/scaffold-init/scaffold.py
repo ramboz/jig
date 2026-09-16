@@ -1684,16 +1684,59 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
         OVERRIDDEN): the `${CLAUDE_PLUGIN_ROOT}/…` path rewrite 113-02
         honestly deferred — see their docstrings for the BEST-HYPOTHESIS,
         NOT-VERIFIED-LIVE caveat (no confirmed Copilot plugin-root env var).
-      - `build_hook_command` (113-04, NEW) + `copilot_hook_adapter.py`
-        (113-04, NEW standalone script): the INPUT-payload half of the hook
-        translation (AC1's "adapts the payload/field access the hook
-        scripts read") — grounded (not deferred, unlike the plugin-root
-        var): every rendered hook command now runs through the adapter,
-        which re-shapes Copilot's camelCase stdin JSON
-        (`toolName`/`toolArgs`/`sessionId`/`workingDirectory`, per
-        `copilot-sdk/types.d.ts` + the shipped `app.js` tool-arg schemas)
-        into the snake_case shape the UNMODIFIED jig scripts already read,
-        before they ever see it.
+      - `build_hook_command` (113-04, NEW; `enforcing=` kwarg added 113-05) +
+        `copilot_hook_adapter.py` (113-04, NEW standalone script): the
+        INPUT-payload half of the hook translation (AC1's "adapts the
+        payload/field access the hook scripts read") — grounded (not
+        deferred, unlike the plugin-root var): every rendered hook command
+        now runs through the adapter, which re-shapes Copilot's camelCase
+        stdin JSON (`toolName`/`toolArgs`/`sessionId`/`workingDirectory`,
+        per `copilot-sdk/types.d.ts` + the shipped `app.js` tool-arg
+        schemas) into the snake_case shape the UNMODIFIED jig scripts
+        already read, before they ever see it.
+      - `render_copilot_hook_file` (SCHEMA CORRECTED 113-05): 113-04 shipped
+        Claude's OWN nested shape (`{event: [{matcher?, hooks:[{type,
+        command, timeout}]}]}`) as if it were Copilot's — it is not. The
+        AUTHORITATIVE on-disk schema (GitHub's own hooks reference,
+        re-verified against the installed CLI 1.0.86-0's `copilot help`
+        output this slice): one JSON object per `.github/hooks/*.json`
+        file, `{"version": 1, "hooks": {"<camelCaseEvent>": [<flat
+        entry>]}}` — entries are FLAT (no nested `hooks:[…]` array):
+        `{matcher?, type: "command", bash, cwd?, env?, timeoutSec}`. Fixed
+        here for BOTH the 3 advisory hooks (113-04) and the 2 new enforcing
+        hooks (113-05) — the corrected shape is what makes any of them
+        loadable at all.
+      - `enforcing=` on `render_copilot_hook_file` / `build_hook_command`
+        (113-05, NEW): a per-hook advisory-vs-enforcing mode. Advisory
+        (default) renders the SAME command shape 113-04 shipped (now under
+        the corrected schema). Enforcing adds a `--enforce` flag to the
+        `copilot_hook_adapter.py` invocation, switching the adapter from
+        its unconditional-exit-0 posture to one that PRESERVES the target
+        script's exit code — the mechanism spec-gate/secret-scan's `exit 2`
+        block needs to actually reach Copilot as a deny (see the adapter's
+        own module docstring).
+      - `render_permissions_floor_hook` (113-05, NEW; REPLACES an earlier
+        `.github/copilot/settings.json` approach this same slice tried and
+        the owner corrected): jig's `_PERMISSIONS_DENY_DEFAULTS` security
+        floor (ADR-0013) renders as an ENFORCING `preToolUse` hook, not a
+        settings.json file. OWNER-CONFIRMED FINDING (authoritative GitHub
+        docs + a live probe): Copilot has NO persistent, repo-committable
+        tool-deny mechanism — a repo `.github/copilot/settings.json`'s only
+        confirmed persisted permission-shaped keys are `allowedUrls`/
+        `deniedUrls` (URL rules); `--deny-tool`/`--allow-tool` are
+        SESSION-scoped CLI flags with no settings.json counterpart
+        (`copilot help config`'s own authored list of persisted keys omits
+        any tool-deny key). A rendered `deniedTools` settings.json entry
+        would therefore be a DEAD FILE Copilot never reads — corrected
+        before ship. See `render_permissions_floor_hook`'s own docstring
+        and `copilot_permissions_floor.py`'s module docstring for the
+        replacement design.
+      - `HOOK_MATCHER_TOOL_MAP["Read"] = "view"` (113-05, bug fix): 113-04's
+        map only covered the 3 advisory hooks' shared
+        `Edit|Write|MultiEdit` matcher; `jig-context-check.sh`'s
+        `PreToolUse`/`Read` registration would otherwise render a literal,
+        never-matching `"matcher": "Read"` — a SILENT drop disguised as a
+        successful render (exactly what the AC2 inventory exists to catch).
 
     All of the above are enforced HERE, in the render layer, never in the
     canonical source, so Claude/Codex output stays byte-for-byte unchanged.
@@ -1923,10 +1966,18 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
     # source agent's `tools:` list, so it is mapped HERE to Copilot's
     # single-target `edit` (its closest analogue) rather than adding an
     # unverified `MultiEdit` entry to the agent tool map.
+    # "Read": "view" (113-05 bug fix): jig-context-check.sh's PreToolUse
+    # matcher is the bare string "Read" (not the Edit|Write|MultiEdit group
+    # 113-04 covered) — without this entry `copilot_hook_matcher` would pass
+    # "Read" through unchanged (the unmapped-token fallback below), and
+    # Copilot has no tool literally named "Read" (113-03's own
+    # `CLAUDE_TO_COPILOT_TOOLS` already maps Claude's `Read` -> `view`),
+    # so the rendered matcher would silently never match anything.
     HOOK_MATCHER_TOOL_MAP = {
         "Edit": "edit",
         "Write": "create",
         "MultiEdit": "edit",
+        "Read": "view",
     }
 
     @classmethod
@@ -1949,20 +2000,28 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
     def translate_hook_protocol(self, logical_result: dict) -> dict:
         """Response-schema half of the hook-protocol translation (113-04).
 
-        HONESTY NOTE (compliance review fix): this method is a designed
-        DICT-TO-DICT CONTRACT, not something currently invoked on any
-        runtime path. It has zero call sites repo-wide today —
-        `ClaudeScaffoldRenderer`'s and `CodexScaffoldRenderer`'s own copies
-        are equally never called — and `copilot_hook_adapter.py` (the
-        runtime piece this slice DOES wire in) forwards each advisory
-        hook's child stdout verbatim rather than post-processing it
-        through this method. What follows describes the mapping this
-        method COMPUTES when called directly (as the unit tests do, and as
-        113-05's adapter will once enforcing hooks need the deny path
-        below) — not something that already happens to a real hook's
-        output today. The one place this DOES matter for the 3 advisory
-        hooks already shipped: because nothing strips `continue` from
-        their real stdout, it currently passes through to Copilot
+        HONESTY NOTE (compliance review fix, RE-CONFIRMED 113-05): this
+        method is a designed DICT-TO-DICT CONTRACT and still has ZERO call
+        sites repo-wide — `ClaudeScaffoldRenderer`'s and
+        `CodexScaffoldRenderer`'s own copies are equally never called, and
+        `copilot_hook_adapter.py` still does not import `scaffold.py` at
+        all (113-05 DECISION: the adapter ships standalone into the
+        Copilot package — see its own module docstring — so importing this
+        BUILD-TIME render module into a runtime hook shim would add a
+        cross-package dependency the standalone design deliberately
+        avoids). 113-05's enforcing-mode deny path
+        (`copilot_hook_adapter._deny_response`) DUPLICATES this method's
+        `block_reason` -> `permissionDecision`/`permissionDecisionReason`
+        mapping rather than calling it, and is pinned in sync with it by
+        `test_copilot_hook_adapter.DenyResponseMatchesTranslateHookProtocolTests`
+        (the same "duplicate, don't import; drift-guard the duplicate" idiom
+        the adapter's own `_COPILOT_TO_CLAUDE_TOOL_NAME` reverse-map already
+        established at 113-04). What follows describes the mapping this
+        method COMPUTES when called directly (the unit tests below, and the
+        adapter's independently-pinned duplicate) — not something invoked
+        through THIS method at runtime. The one place this matters for the
+        3 advisory hooks already shipped: because nothing strips `continue`
+        from their real stdout, it currently passes through to Copilot
         un-translated — a harmless, documented residual (see
         `test_copilot_hook_adapter.ShippedAdvisoryOutputThroughAdapterTests`),
         since Copilot's schema simply ignores an unrecognized key.
@@ -2065,8 +2124,16 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
             cls.PLUGIN_HOOK_SCRIPT_PREFIX, cls.COPILOT_HOOK_SCRIPT_PREFIX
         )
 
+    # The adapter argv flag that switches it from its advisory (default,
+    # unconditional exit 0) posture to enforcing (exit code preserved) —
+    # 113-05. A bare constant, not inlined, so the render side and the
+    # adapter's own argv parser can't spell it differently.
+    COPILOT_HOOK_ADAPTER_ENFORCE_FLAG = "--enforce"
+
     @classmethod
-    def build_hook_command(cls, claude_event: str, command: str) -> str:
+    def build_hook_command(
+        cls, claude_event: str, command: str, *, enforcing: bool = False
+    ) -> str:
         """Wrap a Claude hook command through `copilot_hook_adapter.py`
         (AC1's input-payload half) after applying the AC4 path rewrite.
 
@@ -2076,7 +2143,17 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
         <rewritten-script-path>` instead of the script directly — the
         adapter re-shapes Copilot's camelCase stdin JSON into what the
         (unmodified) target script already expects, then execs it (see the
-        adapter's own module docstring for the full field mapping)."""
+        adapter's own module docstring for the full field mapping).
+
+        `enforcing=False` (default, UNCHANGED from 113-04 — every existing
+        caller/test keeps rendering the exact same command string) renders
+        the adapter's ADVISORY posture: the target script's exit code is
+        always masked to 0. `enforcing=True` (113-05, NEW) inserts
+        `COPILOT_HOOK_ADAPTER_ENFORCE_FLAG` before the event name, telling
+        the adapter to instead PRESERVE the target script's exit code (and
+        emit a `permissionDecision: deny` body on a non-zero one) — the
+        posture jig's blocking gates (spec-gate, secret-scan) need to keep
+        their teeth under Copilot."""
         rewritten = cls.rewrite_hook_command(command)
         # `rewritten` is "bash <relative-script-path>" — extract the path
         # (the one part that varies) rather than re-deriving it, so this
@@ -2085,9 +2162,75 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
         # Arch review fix: quote the script path so a space in it (or in a
         # future differently-named script) can't split into extra shell
         # words and break the command.
+        mode_flag = f"{cls.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG} " if enforcing else ""
         return (
-            f'python3 {cls.COPILOT_HOOK_ADAPTER_PATH} {claude_event} "{script_path}"'
+            f'python3 {cls.COPILOT_HOOK_ADAPTER_PATH} {mode_flag}'
+            f'{claude_event} "{script_path}"'
         )
+
+    # Slice 113-05 AC3 (OWNER RESHAPE) — the permissions FLOOR renders as an
+    # ENFORCING preToolUse hook, not a settings.json file. An EARLIER version
+    # of this slice rendered `.github/copilot/settings.json` with a
+    # `deniedTools` key translated from `_PERMISSIONS_DENY_DEFAULTS` via
+    # Copilot's documented `--allow-tool`/`--deny-tool` CLI-flag pattern
+    # syntax (`shell(command:*?)`, from `copilot help permissions`) — the
+    # owner corrected this: authoritative GitHub docs plus a live probe
+    # confirmed Copilot has NO persistent, repo-committable tool-deny
+    # mechanism at all. `copilot help config`'s own authored list of
+    # PERSISTED settings.json keys documents `allowedUrls`/`deniedUrls`
+    # (URL rules) and `hooks`, but no tool-allow/deny key — `--deny-tool`
+    # only ever applies to the CLI SESSION that passes the flag. A rendered
+    # `deniedTools` settings.json key would be silently ignored, exactly
+    # the "gate quietly stops blocking" failure ADR-0061 forbids — worse
+    # than doing nothing, since it LOOKS like coverage. See
+    # `copilot_permissions_floor.py`'s module docstring for the replacement
+    # (a real, enforcing hook) and the shell-tool-name/toolArgs evidence.
+    #
+    # Copilot's own built-in tool name for a shell/bash command execution —
+    # NOT the coarser `shell` category name `--allow-tool`'s own
+    # `shell(...)` permission-PATTERN kind uses for a different purpose
+    # (confirmed in the shipped CLI's own `explore.agent.yaml` restrictive
+    # `tools:` allowlist and `copilot-sdk` `generated/rpc.d.ts`'s
+    # `ToolsShellDescriptorConfig.shellToolName` config-key shape, both
+    # `bash` — the SAME value 113-03's `CLAUDE_TO_COPILOT_TOOLS["Bash"]`
+    # already established for the agent-`tools:`-frontmatter vocabulary,
+    # reused here rather than re-hardcoded so the two cannot drift apart).
+    COPILOT_PERMISSIONS_FLOOR_FILENAME = "copilot_permissions_floor.py"
+
+    @classmethod
+    def render_permissions_floor_hook(cls) -> dict:
+        """Construct the Copilot-native `.github/hooks/*.json` payload for
+        the destructive-command permissions FLOOR hook (AC3, owner
+        reshape), in the SAME authoritative flat schema
+        `render_copilot_hook_file` produces. Unlike every other hook this
+        module renders, this one has NO Claude-format `hooks/hooks.json`
+        source entry to translate FROM — Claude's own equivalent is its
+        native `permissions.deny` engine (ADR-0013), not a jig-authored
+        hook script — so this builds the payload directly instead of
+        reusing `render_copilot_hook_file`'s extract-from-Claude-source
+        machinery, while still reusing `build_hook_command` (the SAME
+        adapter-wrapping + `--enforce` mechanism every other enforcing hook
+        uses) rather than reinventing command construction.
+
+        `matcher` is `CLAUDE_TO_COPILOT_TOOLS["Bash"]` (`"bash"`) — see the
+        class attribute comment above for the evidence this is the tool
+        name a `preToolUse` hook actually reports for a shell-exec call,
+        not the coarser `"shell"` permission-category name.
+
+        Always enforcing (`--enforce`): a destructive-command match must
+        actually deny the tool call — the entire reason this hook exists."""
+        script_command = (
+            f"bash {cls.COPILOT_HOOK_SCRIPT_PREFIX}"
+            f"{cls.COPILOT_PERMISSIONS_FLOOR_FILENAME}"
+        )
+        command = cls.build_hook_command("PreToolUse", script_command, enforcing=True)
+        entry = {
+            "matcher": cls.CLAUDE_TO_COPILOT_TOOLS["Bash"],
+            "type": "command",
+            "bash": command,
+            "timeoutSec": 5,
+        }
+        return {"version": 1, "hooks": {cls.copilot_event_name("PreToolUse"): [entry]}}
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
@@ -2424,17 +2567,30 @@ def render_codex_plugin_hooks(source: dict, command_rewriter=None) -> dict:
 
 
 def render_copilot_hook_file(
-    source: dict, claude_event: str, script_name: str, *, renderer_cls
+    source: dict,
+    claude_event: str,
+    script_name: str,
+    *,
+    renderer_cls,
+    enforcing: bool = False,
 ) -> dict | None:
     """Extract the hook entries for `script_name` under `claude_event` from a
     Claude-format `hooks/hooks.json` payload (`source`, already
     `json.loads`-parsed) and render them into ONE Copilot
-    `.github/hooks/*.json` file payload (slice 113-04), keyed directly by the
-    translated camelCase event name — no top-level `"hooks"` wrapper, unlike
-    Claude's `hooks.json` (spike 113-01 AC3: Copilot's file-configurable hook
-    files are "keyed by event name" directly; the wrapper key is a Claude/
-    settings.json-ism, since a `.github/hooks/*.json` file has no sibling
-    top-level config to disambiguate from).
+    `.github/hooks/*.json` file payload, in the AUTHORITATIVE on-disk shape
+    (SCHEMA CORRECTED 113-05 — GitHub's own hooks reference, re-verified
+    against the installed CLI 1.0.86-0's `copilot help` output this slice):
+
+        {"version": 1, "hooks": {"<camelCaseEvent>": [<flat entry>, ...]}}
+
+    where each entry is FLAT — `{matcher?, type: "command", bash,
+    timeoutSec?}` — NOT Claude's nested `{matcher?, hooks: [{type, command,
+    timeout}]}` shape 113-04 shipped by mistake (that shape is simply not
+    what Copilot's loader reads; fixing it here makes the ALREADY-SHIPPED
+    advisory hooks loadable too, not only the enforcing ones this slice
+    adds). `bash` (not `command`) carries the invocation string — Unix-only,
+    matching every other jig hook script; `timeout` (Claude's key) becomes
+    `timeoutSec` (Copilot's).
 
     Returns `None` when no entry under `claude_event` references
     `script_name` — nothing to render (the caller skips writing a file for
@@ -2450,18 +2606,24 @@ def render_copilot_hook_file(
     A single source entry may bundle several hooks under one shared matcher
     (jig's `Edit|Write|MultiEdit` PostToolUse entry bundles
     jig-post-edit-verify.sh, jig-boundary-change-warn.sh, and
-    jig-entry-gate.sh together) — this function extracts only the ONE
-    matching inner hook, so two calls against the same shared entry (one per
-    `script_name`) each produce their own single-hook file, matching this
-    slice's per-script `.github/hooks/<script-stem>.json` emission.
+    jig-entry-gate.sh together; its `Edit|Write|MultiEdit` PreToolUse sibling
+    bundles jig-spec-gate.sh and jig-secret-scan.sh) — this function
+    extracts only the hook(s) matching `script_name`, so two calls against
+    the same shared entry (one per `script_name`) each produce their own
+    single-hook file, matching this slice's per-script
+    `.github/hooks/<script-stem>.json` emission.
 
-    The rendered `command` routes through `renderer_cls.build_hook_command`
+    The rendered `bash` command routes through `renderer_cls.build_hook_command`
     (AC1's input-payload adapter + AC4's path rewrite), not the bare
     path-rewritten script — so the rendered hook's stdin gets translated
     from Copilot's camelCase shape before the (unmodified) jig script ever
-    sees it."""
+    sees it. `enforcing=True` (113-05, NEW) forwards to
+    `build_hook_command(..., enforcing=True)`, switching the adapter
+    invocation from its advisory (always-exit-0) posture to one that
+    preserves the target script's exit code — the mechanism a blocking gate
+    (spec-gate, secret-scan) needs to keep its teeth under Copilot."""
     entries = (source.get("hooks") or {}).get(claude_event) or []
-    matching_entries: list = []
+    flat_entries: list = []
     for entry in entries:
         inner = [
             h
@@ -2470,27 +2632,27 @@ def render_copilot_hook_file(
         ]
         if not inner:
             continue
-        new_inner = []
+        matcher = None
+        if "matcher" in entry:
+            matcher = renderer_cls.copilot_hook_matcher(entry["matcher"])
         for h in inner:
-            rewritten = {"type": h.get("type", "command")}
+            flat_entry: dict = {}
+            if matcher is not None:
+                flat_entry["matcher"] = matcher
+            flat_entry["type"] = h.get("type", "command")
             command = h.get("command")
             if isinstance(command, str):
-                rewritten["command"] = renderer_cls.build_hook_command(
-                    claude_event, command
+                flat_entry["bash"] = renderer_cls.build_hook_command(
+                    claude_event, command, enforcing=enforcing
                 )
             if "timeout" in h:
-                rewritten["timeout"] = h["timeout"]
-            new_inner.append(rewritten)
-        new_entry: dict = {}
-        if "matcher" in entry:
-            new_entry["matcher"] = renderer_cls.copilot_hook_matcher(entry["matcher"])
-        new_entry["hooks"] = new_inner
-        matching_entries.append(new_entry)
+                flat_entry["timeoutSec"] = h["timeout"]
+            flat_entries.append(flat_entry)
 
-    if not matching_entries:
+    if not flat_entries:
         return None
     copilot_event = renderer_cls.copilot_event_name(claude_event)
-    return {copilot_event: matching_entries}
+    return {"version": 1, "hooks": {copilot_event: flat_entries}}
 
 
 def _build_jig_hook_entries(plugin: Path) -> dict:
