@@ -31,10 +31,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "skills" / "scaffold-init"))
+
 import install_contract  # noqa: E402
 import verify_install  # noqa: E402
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+import scaffold as scaffold_mod  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -693,12 +695,27 @@ class PresenceHelperTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+# Slice 113-08 (AC4) — the fixture's ONE well-formed hook command must be
+# the REAL adapter-invocation shape `_parse_copilot_hook_command` expects
+# (`python3 <adapter> [--enforce] <ClaudeEvent> "<script>"`), with both
+# referenced files actually present on disk, so the "good package validates
+# clean" baseline exercises the strengthened validator rather than being
+# skipped by it (a bare `plugin_root=None` shape check would have hidden
+# this).
+_GOOD_HOOK_ADAPTER_PATH = ".github/hooks/scripts/copilot_hook_adapter.py"
+_GOOD_HOOK_SCRIPT_PATH = ".github/hooks/scripts/jig-example.sh"
+_GOOD_HOOK_BASH = (
+    f'python3 {_GOOD_HOOK_ADAPTER_PATH} SessionStart "{_GOOD_HOOK_SCRIPT_PATH}"'
+)
+
+
 def _make_good_copilot_package(root: Path) -> None:
     """A minimal but CONTRACT-COMPLETE synthetic `hosts/copilot/`-shaped
-    tree: every expected skill/agent, one well-formed hook file, the
-    scripts/ allowlist, and the templates/ tree. Each negative test below
-    starts from this and breaks exactly ONE thing, so its assertion stays
-    about that one break."""
+    tree: every expected skill/agent, one well-formed hook file (a REAL
+    adapter-routed command whose adapter + target script both exist and are
+    executable), the scripts/ allowlist, and the templates/ tree. Each
+    negative test below starts from this and breaks exactly ONE thing, so
+    its assertion stays about that one break."""
     (root / ".plugin").mkdir(parents=True)
     (root / ".plugin" / "plugin.json").write_text(
         json.dumps({
@@ -724,19 +741,25 @@ def _make_good_copilot_package(root: Path) -> None:
         )
     hooks_dir = root / ".github" / "hooks"
     hooks_dir.mkdir(parents=True)
+    scripts_dir = hooks_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "copilot_hook_adapter.py").write_text("# stub adapter\n")
+    hook_script = scripts_dir / "jig-example.sh"
+    hook_script.write_text("#!/bin/bash\nexit 0\n")
+    hook_script.chmod(0o755)
     hook_payload = {
         "version": 1,
         "hooks": {
             "sessionStart": [
-                {"type": "command", "bash": "python3 x.py", "timeoutSec": 5}
+                {"type": "command", "bash": _GOOD_HOOK_BASH, "timeoutSec": 5}
             ]
         },
     }
     (hooks_dir / "jig-example.json").write_text(json.dumps(hook_payload))
     (hooks_dir / "hooks.json").write_text(json.dumps(hook_payload))
-    scripts_dir = root / ".github" / "scripts"
-    scripts_dir.mkdir(parents=True)
-    (scripts_dir / "spec_lint.py").write_text("# stub\n")
+    scripts_root_dir = root / ".github" / "scripts"
+    scripts_root_dir.mkdir(parents=True)
+    (scripts_root_dir / "spec_lint.py").write_text("# stub\n")
     templates_dir = root / ".github" / "templates"
     templates_dir.mkdir(parents=True)
     (templates_dir / "CLAUDE.md.template").write_text("stub\n")
@@ -878,10 +901,192 @@ class CopilotPackageValidationTests(unittest.TestCase):
         problems = install_contract.validate_copilot_package(pkg)
         self.assertTrue(any("hooks" in p for p in problems), problems)
 
+    # ------------------------------------------------------------------ #
+    # Slice 113-08 AC4 — every generated hook command/dependency resolves
+    # from the ACTUAL installed package layout; invalid event names,
+    # malformed matchers, missing executables, and missing command
+    # dependencies are all rejected rather than shipped as dead
+    # configuration.
+    # ------------------------------------------------------------------ #
+
+    def _write_hook_bash(self, pkg: Path, bash: str, *, matcher=None) -> None:
+        entry = {"type": "command", "bash": bash}
+        if matcher is not None:
+            entry["matcher"] = matcher
+        payload = {"version": 1, "hooks": {"sessionStart": [entry]}}
+        (pkg / ".github" / "hooks" / "jig-example.json").write_text(json.dumps(payload))
+
+    def test_invalid_event_name_key_fails(self):
+        pkg = self._pkg()
+        payload = {
+            "version": 1,
+            "hooks": {"bogusEvent": [
+                {"type": "command", "bash": _GOOD_HOOK_BASH}
+            ]},
+        }
+        (pkg / ".github" / "hooks" / "jig-example.json").write_text(json.dumps(payload))
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("bogusEvent" in p and "not a known Copilot hook event" in p
+                for p in problems),
+            problems,
+        )
+
+    def test_malformed_empty_matcher_fails(self):
+        pkg = self._pkg()
+        self._write_hook_bash(pkg, _GOOD_HOOK_BASH, matcher="")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("matcher" in p for p in problems), problems)
+
+    def test_malformed_double_pipe_matcher_fails(self):
+        pkg = self._pkg()
+        self._write_hook_bash(pkg, _GOOD_HOOK_BASH, matcher="edit||create")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("matcher is malformed" in p for p in problems), problems
+        )
+
+    def test_well_formed_matcher_passes(self):
+        pkg = self._pkg()
+        self._write_hook_bash(pkg, _GOOD_HOOK_BASH, matcher="edit|create")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertEqual(problems, [])
+
+    def test_command_not_routed_through_adapter_fails(self):
+        pkg = self._pkg()
+        self._write_hook_bash(pkg, f'bash {_GOOD_HOOK_SCRIPT_PATH}')
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("must invoke the hook adapter" in p for p in problems), problems
+        )
+
+    def test_missing_adapter_script_fails(self):
+        pkg = self._pkg()
+        (pkg / _GOOD_HOOK_ADAPTER_PATH).unlink()
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("adapter script" in p and "does not resolve to a file" in p
+                for p in problems),
+            problems,
+        )
+
+    def test_adapter_path_with_wrong_filename_fails(self):
+        pkg = self._pkg()
+        wrong_adapter = pkg / ".github" / "hooks" / "scripts" / "not-the-adapter.py"
+        wrong_adapter.write_text("# not the real adapter\n")
+        self._write_hook_bash(
+            pkg,
+            f'python3 .github/hooks/scripts/not-the-adapter.py SessionStart '
+            f'"{_GOOD_HOOK_SCRIPT_PATH}"',
+        )
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("is not" in p and "copilot_hook_adapter.py" in p for p in problems),
+            problems,
+        )
+
+    def test_missing_target_script_fails(self):
+        pkg = self._pkg()
+        (pkg / _GOOD_HOOK_SCRIPT_PATH).unlink()
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("target script" in p and "does not resolve to a file" in p
+                for p in problems),
+            problems,
+        )
+
+    def test_non_executable_target_script_fails(self):
+        pkg = self._pkg()
+        (pkg / _GOOD_HOOK_SCRIPT_PATH).chmod(0o644)
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("target script" in p and "not executable" in p for p in problems),
+            problems,
+        )
+
+    def test_invalid_adapter_event_argument_fails(self):
+        pkg = self._pkg()
+        self._write_hook_bash(
+            pkg,
+            f'python3 {_GOOD_HOOK_ADAPTER_PATH} NotARealEvent '
+            f'"{_GOOD_HOOK_SCRIPT_PATH}"',
+        )
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("NotARealEvent" in p and "not a known jig hook event" in p
+                for p in problems),
+            problems,
+        )
+
+    def test_command_dependency_escaping_package_root_fails(self):
+        pkg = self._pkg()
+        self._write_hook_bash(
+            pkg,
+            f'python3 {_GOOD_HOOK_ADAPTER_PATH} SessionStart '
+            f'"../../../../etc/passwd"',
+        )
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("must stay inside the plugin root" in p for p in problems), problems
+        )
+
+    def test_enforcing_flag_still_parses_correctly(self):
+        pkg = self._pkg()
+        self._write_hook_bash(
+            pkg,
+            f'python3 {_GOOD_HOOK_ADAPTER_PATH} --enforce SessionStart '
+            f'"{_GOOD_HOOK_SCRIPT_PATH}"',
+        )
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertEqual(problems, [])
+
+    def test_malformed_shell_syntax_command_fails(self):
+        pkg = self._pkg()
+        self._write_hook_bash(pkg, 'python3 "unterminated quote')
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(
+            any("not valid shell syntax" in p for p in problems), problems
+        )
+
 
 # ---------------------------------------------------------------------------
 # Real-repo integration: the live plugin satisfies its own contract
 # ---------------------------------------------------------------------------
+
+
+class CopilotEventVocabularyConsistencyTests(unittest.TestCase):
+    """Slice 113-08 AC4 — the restated Copilot hook-vocabulary constants
+    (`COPILOT_HOOK_EVENT_NAMES`, `COPILOT_HOOK_ADAPTER_CLAUDE_EVENT_NAMES`,
+    `COPILOT_HOOK_ADAPTER_FILENAME`, `COPILOT_HOOK_ADAPTER_ENFORCE_FLAG`)
+    stay pinned equal to their source of truth in
+    `scaffold.CopilotScaffoldRenderer` — the same restate-plus-consistency-
+    test idiom `EXPECTED_SKILLS`/`REQUIRED_AGENTS` already use, so this
+    stdlib-only module cannot silently drift from the renderer that
+    actually produces the commands it validates."""
+
+    def test_copilot_hook_event_names_matches_renderer(self):
+        self.assertEqual(
+            install_contract.COPILOT_HOOK_EVENT_NAMES,
+            frozenset(scaffold_mod.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_EVENTS.values()),
+        )
+
+    def test_adapter_claude_event_names_matches_renderer(self):
+        self.assertEqual(
+            install_contract.COPILOT_HOOK_ADAPTER_CLAUDE_EVENT_NAMES,
+            frozenset(scaffold_mod.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_EVENTS.keys()),
+        )
+
+    def test_adapter_filename_matches_renderer(self):
+        self.assertEqual(
+            install_contract.COPILOT_HOOK_ADAPTER_FILENAME,
+            scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME,
+        )
+
+    def test_adapter_enforce_flag_matches_renderer(self):
+        self.assertEqual(
+            install_contract.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG,
+            scaffold_mod.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG,
+        )
 
 
 class RealRepoContractTests(unittest.TestCase):

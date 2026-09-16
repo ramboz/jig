@@ -505,10 +505,38 @@ rm -rf "$COPILOT_HOME" "$WORK"
 ```
 
 The final command intentionally asks for a missing agent and checks Copilot's
-"available agents" list; plugin agents are namespaced by plugin name. A
-headless `copilot -p` session still does not reliably prove hook firing
-(folder-trust/mode limits), so hook verification remains the declared-path
-validator plus release-zip smoke rather than plugin presence in `plugin list`.
+"available agents" list; plugin agents are namespaced by plugin name.
+
+For actual hook-firing proof (not just discovery), use the slice 113-08 live
+smoke command with a real authenticated `copilot` CLI session:
+
+```bash
+python3 scripts/copilot_live_hook_smoke.py
+```
+
+This installs the committed `hosts/copilot/` package into an isolated
+`COPILOT_HOME`, runs three real `copilot -p ... --log-level debug` sessions
+(an advisory SessionStart check, an enforcing-hook denial against a protected
+path, and a safe-edit-allowed control), and parses the debug log's real
+`[hook stdout] {...}` JSON lines for advisory `additionalContext` and
+`permissionDecision: "deny"` evidence. It prints a machine-checkable JSON
+summary and exits `0` (PASS), `1` (FAIL), or `2` (INCONCLUSIVE — e.g. `copilot`
+missing or not authenticated); it makes real, quota-consuming model calls, so
+it is a manual/opt-in command, not something CI runs by default. Its automated
+test wrapper, `scripts/test_copilot_live_hook_smoke.py`, keeps its log-parsing
+and CLI-wiring checks in the normal suite but gates the real E2E case
+(`LiveHookRuntimeE2ETests`) behind `JIG_COPILOT_LIVE_HOOK_E2E=1`:
+
+```bash
+JIG_COPILOT_LIVE_HOOK_E2E=1 python3 -m unittest scripts.test_copilot_live_hook_smoke -v
+```
+
+By contrast, `scripts/test_build_copilot_plugin.py`'s
+`CopilotAdvisoryHookPackagingTests` / `CopilotEnforcingHookPackagingTests`
+spawn each rendered hook command directly with a constructed payload — a
+useful, always-on STATIC package check, but not proof Copilot itself
+discovers and fires the hook; see those classes' docstrings for the same
+distinction.
 
 ## Spec workflow (short version)
 

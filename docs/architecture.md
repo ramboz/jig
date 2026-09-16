@@ -306,13 +306,39 @@ zip archives `hosts/claude/` (`.plugin/plugin.json` at the zip root, not
 marketplace-wrapped like Codex's bundle). Verification is a STATIC,
 deterministic package validator — `install_contract.validate_copilot_package`,
 wired into `build_release_zip.py`'s `--smoke-test` — rather than a live-CLI
-smoke harness: a headless `copilot -p` session does not reliably fire repo
-hooks (folder-trust/mode limits, observed probing this during 113-04/113-05),
-so hook firing still needs later live-contract work; the static check
-(manifest-declared component paths, skill/agent/hook presence, hook-file schema,
-scripts/templates trees) is the reliable package substitute, and the live
-discovery smoke separately proves `spec-workflow` and `jig:reviewer` load from
-a clean working directory.
+smoke harness for every CI run: an unauthenticated/CI-headless `copilot -p`
+session does not reliably fire repo hooks (folder-trust/mode limits, observed
+probing this during 113-04/113-05), so the deterministic package check
+(manifest-declared component paths, skill/agent/hook presence, hook-file
+schema — 113-08 strengthened this to resolve every generated hook command and
+its adapter/script dependency from the real install layout, and to reject
+invalid event names, malformed matchers, and missing executable bits, not
+just shape) is what CI runs by default, and the live discovery smoke
+(`CopilotLivePluginDiscoverySmokeTests`) separately proves `spec-workflow` and
+`jig:reviewer` load from a clean working directory without needing an
+authenticated model call.
+
+Slice 113-08 closes the remaining live-contract gap with a real,
+authenticated E2E proof that installed hooks actually fire from a real
+Copilot session (not just render correctly): `scripts/copilot_live_hook_smoke.py`
+is the documented, repeatable manual/CI-optional command — it installs the
+committed `hosts/copilot/` package into an isolated `COPILOT_HOME`, drives
+three real `copilot -p ... --log-level debug` sessions (an advisory
+SessionStart check, an enforcing-hook denial against a protected path, and a
+safe-edit-allowed control), parses the debug log's `[hook stdout] {...}`
+JSON lines for real advisory `additionalContext` and real
+`permissionDecision: "deny"` evidence, and exits 0 (PASS) / 1 (FAIL) / 2
+(INCONCLUSIVE — e.g. `copilot` missing or unauthenticated) with a
+machine-checkable JSON summary. `scripts/test_copilot_live_hook_smoke.py`
+wraps it: its log-parsing and CLI-wiring tests always run, and its
+`LiveHookRuntimeE2ETests` (the genuine E2E case, which makes real
+model-quota-consuming calls) is opt-in via `JIG_COPILOT_LIVE_HOOK_E2E=1` —
+run it manually with real Copilot auth to (re)confirm live hook firing;
+CI does not enable it by default. This is distinct from
+`CopilotAdvisoryHookPackagingTests`/`CopilotEnforcingHookPackagingTests` in
+`test_build_copilot_plugin.py`, which are STATIC package checks (they spawn
+the rendered hook command directly with a constructed payload) and are
+explicitly labeled as non-E2E in their own docstrings.
 
 Every jig hook's Copilot disposition is tracked in
 `build_copilot_plugin._JIG_HOOK_INVENTORY` — the mapped-or-unmappable

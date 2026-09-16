@@ -417,12 +417,22 @@ class CopilotAdvisoryHookPackagingTests(unittest.TestCase):
     `.github/hooks/*.json` and ship their scripts under
     `.github/hooks/scripts/`.
 
+    NOT E2E (slice 113-08 honesty label): every test in this class invokes
+    the rendered `bash` command directly with a constructed stdin payload
+    and a manually-chosen `cwd`/`CLAUDE_PROJECT_DIR` — a STATIC PACKAGE
+    CHECK proving the command, once spawned, behaves correctly. It does
+    NOT prove Copilot itself discovers, resolves, and spawns that command
+    from an installed plugin cache with Copilot's own real working
+    directory and stdin payload — that is
+    `scripts/test_copilot_live_hook_smoke.py`'s `LiveHookRuntimeE2ETests`
+    (opt-in, real `copilot` CLI) and `scripts/copilot_live_hook_smoke.py`
+    (the documented, repeatable, authenticated/manual command — AC5).
+
     AC1: event-name + response-schema translation (exercised via the
     rendered JSON's shape). AC2: the 3 hooks are rendered + their scripts
-    shipped. AC3: fail-open — verified via a deterministic substitute
-    (direct script invocation), since a real Copilot session is not
-    available in this build/test environment. AC4: hook-command paths are
-    plugin-root-relative, not the raw `${CLAUDE_PLUGIN_ROOT}` literal.
+    shipped. AC3: fail-open — verified via the deterministic substitute
+    described above. AC4: hook-command paths are plugin-root-relative, not
+    the raw `${CLAUDE_PLUGIN_ROOT}` literal.
     """
 
     def setUp(self):
@@ -688,7 +698,16 @@ class CopilotEnforcingHookPackagingTests(unittest.TestCase):
     into `.github/hooks/*.json` (AUTHORITATIVE flat schema) and ship their
     scripts under `.github/hooks/scripts/`, exactly like
     `CopilotAdvisoryHookPackagingTests` for the advisory 3, plus the
-    `--enforce` adapter flag and end-to-end exit-code-preserved firing."""
+    `--enforce` adapter flag and end-to-end exit-code-preserved firing.
+
+    NOT E2E (slice 113-08 honesty label — see
+    `CopilotAdvisoryHookPackagingTests`'s own docstring for the full
+    rationale): the `_run_rendered_command` tests below spawn the rendered
+    command directly with a constructed payload, not through a real
+    Copilot session. Live, Copilot-driven enforcement proof is
+    `scripts/test_copilot_live_hook_smoke.py`'s `LiveHookRuntimeE2ETests`
+    (opt-in) / `scripts/copilot_live_hook_smoke.py` (AC5's documented
+    manual command)."""
 
     # Built by concatenation so this file's own source text never contains
     # the contiguous AWS-key-shaped substring — see
