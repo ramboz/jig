@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py PostToolUse \".github/hooks/scripts/jig-post-edit-verify.sh\"",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

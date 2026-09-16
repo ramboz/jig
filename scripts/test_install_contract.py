@@ -23,6 +23,7 @@ second copy left to keep in sync.
 """
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -685,6 +686,138 @@ class PresenceHelperTests(unittest.TestCase):
         (self.tmp / "agents" / "reviewer.md").unlink()
         problems = install_contract.missing_agents(self.tmp)
         self.assertTrue(any("agents/reviewer.md" in p for p in problems))
+
+
+# ---------------------------------------------------------------------------
+# Copilot install-tree contract (committed hosts/copilot package — 113-06)
+# ---------------------------------------------------------------------------
+
+
+def _make_good_copilot_package(root: Path) -> None:
+    """A minimal but CONTRACT-COMPLETE synthetic `hosts/copilot/`-shaped
+    tree: every expected skill/agent, one well-formed hook file, the
+    scripts/ allowlist, and the templates/ tree. Each negative test below
+    starts from this and breaks exactly ONE thing, so its assertion stays
+    about that one break."""
+    (root / ".plugin").mkdir(parents=True)
+    (root / ".plugin" / "plugin.json").write_text(
+        json.dumps({"name": "jig", "version": "0.0.0", "description": "x"})
+    )
+    for skill in install_contract.EXPECTED_SKILLS:
+        skill_dir = root / ".github" / "skills" / skill
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {skill}\ndescription: x\n---\n\nBody.\n"
+        )
+    agents_dir = root / ".github" / "agents"
+    agents_dir.mkdir(parents=True)
+    for agent in install_contract.REQUIRED_AGENTS:
+        (agents_dir / f"{agent}.agent.md").write_text(
+            f"---\nname: {agent}\n---\n\nBody.\n"
+        )
+    hooks_dir = root / ".github" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "jig-example.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {
+            "sessionStart": [
+                {"type": "command", "bash": "python3 x.py", "timeoutSec": 5}
+            ]
+        },
+    }))
+    scripts_dir = root / ".github" / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "spec_lint.py").write_text("# stub\n")
+    templates_dir = root / ".github" / "templates"
+    templates_dir.mkdir(parents=True)
+    (templates_dir / "CLAUDE.md.template").write_text("stub\n")
+
+
+class CopilotPackageValidationTests(unittest.TestCase):
+    """Slice 113-06 AC3 — `validate_copilot_package` is the static,
+    deterministic Copilot install-tree validator (a green Claude build is
+    not proof Copilot installs). Mirrors `validate_claude_package` /
+    `codex_install_smoke._validate_generated_package`'s structure and
+    error-list style."""
+
+    def _pkg(self) -> Path:
+        tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-validate-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        _make_good_copilot_package(tmp)
+        return tmp
+
+    def test_good_package_validates_clean(self):
+        problems = install_contract.validate_copilot_package(self._pkg())
+        self.assertEqual(problems, [])
+
+    def test_missing_manifest_fails(self):
+        pkg = self._pkg()
+        (pkg / ".plugin" / "plugin.json").unlink()
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("plugin.json" in p for p in problems), problems)
+
+    def test_missing_scripts_dir_fails(self):
+        pkg = self._pkg()
+        shutil.rmtree(pkg / ".github" / "scripts")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("spec_lint.py" in p for p in problems), problems)
+
+    def test_missing_templates_dir_fails(self):
+        pkg = self._pkg()
+        shutil.rmtree(pkg / ".github" / "templates")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("templates" in p for p in problems), problems)
+
+    def test_missing_agent_fails(self):
+        pkg = self._pkg()
+        (pkg / ".github" / "agents" / "reviewer.agent.md").unlink()
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("reviewer" in p for p in problems), problems)
+
+    def test_missing_skill_fails(self):
+        pkg = self._pkg()
+        shutil.rmtree(pkg / ".github" / "skills" / "spec-workflow")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("spec-workflow" in p for p in problems), problems)
+
+    def test_malformed_hook_wrong_type_fails(self):
+        pkg = self._pkg()
+        (pkg / ".github" / "hooks" / "jig-example.json").write_text(json.dumps({
+            "version": 1,
+            "hooks": {"sessionStart": [{"type": "not-command", "bash": "x"}]},
+        }))
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("type" in p for p in problems), problems)
+
+    def test_malformed_hook_missing_bash_fails(self):
+        pkg = self._pkg()
+        (pkg / ".github" / "hooks" / "jig-example.json").write_text(json.dumps({
+            "version": 1,
+            "hooks": {"sessionStart": [{"type": "command"}]},
+        }))
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("bash" in p for p in problems), problems)
+
+    def test_invalid_json_hook_file_fails(self):
+        pkg = self._pkg()
+        (pkg / ".github" / "hooks" / "jig-example.json").write_text("{not json")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("invalid JSON" in p for p in problems), problems)
+
+    def test_wrong_version_key_fails(self):
+        pkg = self._pkg()
+        (pkg / ".github" / "hooks" / "jig-example.json").write_text(json.dumps({
+            "version": 2,
+            "hooks": {"sessionStart": [{"type": "command", "bash": "x"}]},
+        }))
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("version" in p for p in problems), problems)
+
+    def test_no_hook_files_at_all_fails(self):
+        pkg = self._pkg()
+        shutil.rmtree(pkg / ".github" / "hooks")
+        problems = install_contract.validate_copilot_package(pkg)
+        self.assertTrue(any("hooks" in p for p in problems), problems)
 
 
 # ---------------------------------------------------------------------------

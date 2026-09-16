@@ -13,9 +13,13 @@ Usage:
     # installable plugin zip):
     python3 scripts/build_release_zip.py --host codex --version 1.10.0 [--output <path>]
 
+    # Build the flat Copilot plugin zip (repo-subdirectory-shaped, spec 113-06):
+    python3 scripts/build_release_zip.py --host copilot --version 1.10.0 [--output <path>]
+
     # Smoke-test an existing zip (host required so the report names the host):
-    python3 scripts/build_release_zip.py --host claude --smoke-test <path-to-zip>
-    python3 scripts/build_release_zip.py --host codex  --smoke-test <path-to-zip>
+    python3 scripts/build_release_zip.py --host claude  --smoke-test <path-to-zip>
+    python3 scripts/build_release_zip.py --host codex   --smoke-test <path-to-zip>
+    python3 scripts/build_release_zip.py --host copilot --smoke-test <path-to-zip>
 
 Shapes:
     - Claude zip: archives `hosts/claude/` with arcnames relative to that root,
@@ -26,6 +30,11 @@ Shapes:
       `plugins/jig/.codex-plugin/plugin.json`. Codex has no direct zip-drop;
       this is an extract-then-add marketplace bundle (extract, then
       `codex plugin marketplace add <extracted-dir>`).
+    - Copilot zip: archives `hosts/copilot/` with arcnames relative to that
+      root, so `.plugin/plugin.json` lands at the zip root alongside
+      `.github/{skills,agents,hooks,scripts,templates}` — flat, the same
+      repo-subdirectory shape `copilot plugin install ramboz/jig:hosts/copilot`
+      installs directly from source (spec 113-06).
 
 Exit codes:
     0  zip built successfully / smoke-test passed
@@ -45,13 +54,14 @@ from typing import Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import install_contract  # noqa: E402
 
-HOSTS = ("claude", "codex")
+HOSTS = ("claude", "codex", "copilot")
 
 # Relative path (within each `hosts/<host>/` package) to the manifest whose
 # `version` field is the version-coherence source of truth for that host.
 _HOST_MANIFEST_REL: dict[str, str] = {
     "claude": ".claude-plugin/plugin.json",
     "codex": "plugins/jig/.codex-plugin/plugin.json",
+    "copilot": ".plugin/plugin.json",
 }
 
 # ---------------------------------------------------------------------------
@@ -193,13 +203,21 @@ def build(
             "(.claude-plugin/plugin.json at the root; loadable via "
             "--plugin-dir).\n"
         )
-    else:  # codex
+    elif host == "codex":
         out.write(
             f"OK: built codex zip {output_path} ({len(entries)} entries, "
             f"version {version}) — an extract-then-add marketplace bundle: "
             "extract, then `codex plugin marketplace add <extracted-dir>`. "
             "Codex has no zip-drop install; do not treat this as a plugin "
             "zip you load in place.\n"
+        )
+    else:  # copilot
+        out.write(
+            f"OK: built copilot zip {output_path} ({len(entries)} entries, "
+            f"version {version}) — flat, repo-subdirectory-shaped Copilot "
+            "plugin (.plugin/plugin.json at the root, same as the "
+            "`copilot plugin install ramboz/jig:hosts/copilot` install "
+            "path); extract, then point Copilot at the extracted directory.\n"
         )
     return 0
 
@@ -257,14 +275,46 @@ def _smoke_codex(extracted: Path, out) -> int:
     return 0 if passed else 1
 
 
+def _smoke_copilot(extracted: Path, out) -> int:
+    """Validate the extracted flat Copilot plugin tree.
+
+    Reuses install_contract.validate_copilot_package — the static,
+    deterministic Copilot install-tree validator (spec 113-06 AC3): a green
+    Claude/Codex build is not proof Copilot installs, and a headless
+    `copilot -p` session does not reliably fire repo hooks (see
+    `build_copilot_plugin.py`'s module docstring for the evidence trail), so
+    this static check is the reliable path rather than a live-CLI probe.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import install_contract  # noqa: E402
+
+    problems = install_contract.validate_copilot_package(extracted)
+    if problems:
+        out.write(
+            "FAIL smoke[copilot]: extracted flat Copilot plugin "
+            "FAILED validation — " + "; ".join(problems) + "\n"
+        )
+        return 1
+    out.write(
+        "PASS smoke[copilot]: extracted flat Copilot plugin validated — "
+        ".plugin/plugin.json at root, all skills/agents/hooks/scripts/"
+        "templates present.\n"
+    )
+    return 0
+
+
 def smoke_test(host: str, zip_path: Path, out=None) -> int:
     """Extract `zip_path` and validate it for `host`. Names the host in output.
 
-    Claude: extract + install_contract.validate_claude_package on the flat tree
-            (NOT verify_install.run_headless — the committed Claude package omits
-            the marketplace.json that run_headless requires; see _smoke_claude).
-    Codex:  extract + codex_install_smoke._validate_generated_package on the
-            extracted marketplace bundle.
+    Claude:  extract + install_contract.validate_claude_package on the flat
+             tree (NOT verify_install.run_headless — the committed Claude
+             package omits the marketplace.json that run_headless requires;
+             see _smoke_claude).
+    Codex:   extract + codex_install_smoke._validate_generated_package on the
+             extracted marketplace bundle.
+    Copilot: extract + install_contract.validate_copilot_package on the flat
+             tree — a static substitute for a live Copilot CLI probe (see
+             _smoke_copilot).
     """
     import tempfile
 
@@ -286,7 +336,9 @@ def smoke_test(host: str, zip_path: Path, out=None) -> int:
             zf.extractall(tmp_path)
         if host == "claude":
             return _smoke_claude(tmp_path, out)
-        return _smoke_codex(tmp_path, out)
+        if host == "codex":
+            return _smoke_codex(tmp_path, out)
+        return _smoke_copilot(tmp_path, out)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -300,7 +352,8 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=HOSTS,
         help="which committed host package to archive / smoke-test "
-             "(claude = flat plugin zip; codex = extract-then-add marketplace bundle)",
+             "(claude = flat plugin zip; codex = extract-then-add marketplace "
+             "bundle; copilot = flat, repo-subdirectory-shaped plugin zip)",
     )
     p.add_argument(
         "--version",

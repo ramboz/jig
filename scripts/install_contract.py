@@ -541,6 +541,19 @@ CODEX_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
     "scripts/spec_lint.py",
 )
 
+# The Copilot-package equivalent (spec 113-06 AC5). Same rationale as
+# `CODEX_INCLUDE_SCRIPT_FILES`: the rendered `analyze`/`migrate` skill bodies
+# invoke `spec_lint.py`, rewritten to `.github/scripts/spec_lint.py` by
+# `CopilotScaffoldRenderer.rewrite_skill_md_paths` (113-04 AC4) — a reference
+# that resolved nowhere until this constant's consumer,
+# `build_copilot_plugin._copy_runtime_scripts`, shipped the file (113-06). No
+# Copilot skill references `verify_install.py` / `scaffold_contract.py`
+# (the Claude-only pair CODEX_INCLUDE_SCRIPT_FILES also excludes), so the
+# allowlist matches Codex's today.
+COPILOT_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
+    "scripts/spec_lint.py",
+)
+
 # (The directory-name exclusions live in `_EXCLUDED_DIR_NAMES` above. They are
 # limited to truly defensive exclusions — caches, VCS artifacts — plus the
 # reserved `fixtures/` name: top-level dev-only dirs (`scripts/`, `docs/`,
@@ -770,4 +783,123 @@ def validate_claude_package(plugin_root: Path) -> list[str]:
 
     problems.extend(skill_contract_problems(plugin_root))
     problems.extend(missing_agents(plugin_root))
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# Copilot install-tree contract (committed hosts/copilot package — spec 113)
+# ---------------------------------------------------------------------------
+#
+# Per ADR-0061 / spec 113-06 AC3: a Copilot install/smoke check runs
+# independent of the Claude/Codex checks — a green Claude build is not proof
+# Copilot installs. Unlike Codex's live-CLI-capable `codex_install_smoke.py`,
+# a headless `copilot -p` session does not reliably fire repo hooks
+# (folder-trust/mode limits, observed in slices 113-04/113-05 — see
+# `build_copilot_plugin.py`'s module docstring for the evidence trail), so
+# this validator is the STATIC, deterministic substitute: it checks the
+# Copilot package's OWN shape (`.plugin/plugin.json`, `.github/{skills,
+# agents,hooks,scripts,templates}`) rather than exercising a live CLI.
+
+
+def _validate_copilot_hook_file(name: str, payload: object) -> list[str]:
+    """Validate one parsed `.github/hooks/<name>.json` payload against the
+    AUTHORITATIVE flat schema `scaffold.render_copilot_hook_file` emits:
+    `{"version": 1, "hooks": {"<camelCaseEvent>": [<flat entry>, ...]}}`,
+    entries carrying `type: "command"` and a non-empty `bash` string.
+    Returns diagnostics (empty == valid), each naming the file and the
+    offending path within it."""
+    if not isinstance(payload, dict):
+        return [f"{name}: top-level value must be a JSON object"]
+    problems: list[str] = []
+    if payload.get("version") != 1:
+        problems.append(f"{name}: 'version' must be 1, got {payload.get('version')!r}")
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict) or not hooks:
+        problems.append(f"{name}: 'hooks' must be a non-empty object")
+        return problems
+    for event, entries in hooks.items():
+        if not isinstance(entries, list) or not entries:
+            problems.append(f"{name}: hooks.{event} must be a non-empty array")
+            continue
+        for idx, entry in enumerate(entries):
+            where = f"{name}: hooks.{event}[{idx}]"
+            if not isinstance(entry, dict):
+                problems.append(f"{where} must be an object")
+                continue
+            if entry.get("type") != "command":
+                problems.append(f"{where}.type must be 'command'")
+            bash = entry.get("bash")
+            if not isinstance(bash, str) or not bash.strip():
+                problems.append(f"{where}.bash must be a non-empty string")
+    return problems
+
+
+def validate_copilot_package(plugin_root: Path) -> list[str]:
+    """Validate `plugin_root` as a committed Copilot install tree (spec
+    113-06 AC3). Requires:
+
+      - `.plugin/plugin.json` present, valid JSON, and satisfying the
+        plugin manifest contract (name/version/description);
+      - the public skill set exactly matches EXPECTED_SKILLS under
+        `.github/skills/` (reuses `skill_contract_problems`, which already
+        operates relative to a `skills/` dir — pointed at `.github/` here);
+      - every REQUIRED agent present as `.github/agents/<name>.agent.md`;
+      - `.github/hooks/*.json` present and every file parses as the
+        AUTHORITATIVE flat `{version, hooks}` schema;
+      - `.github/scripts/spec_lint.py` present (AC5 — the rewritten
+        `${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py` skill-body reference
+        must resolve);
+      - `.github/templates/` present and non-empty (AC5).
+
+    Returns diagnostics (empty == valid); each names the offending path and
+    the rule, mirroring `validate_claude_package` / `codex_install_smoke.
+    _validate_generated_package`'s structure and error-list style."""
+    problems: list[str] = []
+
+    manifest_path = plugin_root / ".plugin" / "plugin.json"
+    if not manifest_path.is_file():
+        problems.append(f".plugin/plugin.json: missing at {manifest_path}")
+    else:
+        try:
+            data = json.loads(manifest_path.read_text())
+        except (ValueError, OSError) as exc:
+            problems.append(f".plugin/plugin.json: unreadable/invalid JSON ({exc})")
+        else:
+            problems.extend(validate_plugin_manifest(data))
+
+    problems.extend(skill_contract_problems(plugin_root / ".github"))
+
+    agents_dir = plugin_root / ".github" / "agents"
+    for agent in REQUIRED_AGENTS:
+        if not (agents_dir / f"{agent}.agent.md").is_file():
+            problems.append(
+                f".github/agents/{agent}.agent.md: missing agent definition "
+                "(expected per install contract)"
+            )
+
+    hooks_dir = plugin_root / ".github" / "hooks"
+    hook_files = sorted(hooks_dir.glob("*.json")) if hooks_dir.is_dir() else []
+    if not hook_files:
+        problems.append(f".github/hooks/: no hook files found under {hooks_dir}")
+    else:
+        for hook_file in hook_files:
+            try:
+                payload = json.loads(hook_file.read_text())
+            except (ValueError, OSError) as exc:
+                problems.append(f".github/hooks/{hook_file.name}: invalid JSON ({exc})")
+                continue
+            problems.extend(
+                _validate_copilot_hook_file(f".github/hooks/{hook_file.name}", payload)
+            )
+
+    scripts_marker = plugin_root / ".github" / "scripts" / "spec_lint.py"
+    if not scripts_marker.is_file():
+        problems.append(f".github/scripts/spec_lint.py: missing at {scripts_marker}")
+
+    templates_dir = plugin_root / ".github" / "templates"
+    if not templates_dir.is_dir() or not any(
+        p.is_file() for p in templates_dir.rglob("*")
+    ):
+        problems.append(f".github/templates/: missing or empty at {templates_dir}")
+
     return problems

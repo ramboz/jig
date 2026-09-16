@@ -66,14 +66,17 @@ class ReleasePleaseConfigTests(unittest.TestCase):
             and e.get("jsonpath") == "$.version"
         }
         # release-please must bump EVERY version-bearing plugin.json in the
-        # same release commit — the two root descriptors AND the two committed
-        # host-package copies under hosts/. The host plugin.json files are
-        # byte-copies of the root descriptors (build_claude/codex_plugin copy
-        # them verbatim), so if release-please bumps only the roots, the
-        # committed hosts/ packages stay on the old version at the tagged
-        # commit. build_release_zip.py then refuses to build ("version
-        # mismatch — committed package declares <old>"), and the release ships
-        # with no host zips (regression seen on v2.0.1). Keep all four here.
+        # same release commit — the two root descriptors AND the THREE committed
+        # host-package copies under hosts/ (claude, codex, copilot). The host
+        # plugin.json files carry the root version (build_{claude,codex,copilot}_plugin
+        # copy/emit them from the root descriptor), so if release-please bumps
+        # only the roots, the committed hosts/ packages stay on the old version
+        # at the tagged commit. build_release_zip.py then refuses to build
+        # ("version mismatch — committed package declares <old>"), and the
+        # release ships with no host zips (regression seen on v2.0.1). The
+        # copilot host has NO third root descriptor (its committed manifest reads
+        # the root .claude-plugin version at build time), so its committed copy
+        # MUST be listed here or it silently desyncs. Keep all five here.
         self.assertEqual(
             paths,
             {
@@ -81,9 +84,10 @@ class ReleasePleaseConfigTests(unittest.TestCase):
                 ".codex-plugin/plugin.json",
                 "hosts/claude/.claude-plugin/plugin.json",
                 "hosts/codex/plugins/jig/.codex-plugin/plugin.json",
+                "hosts/copilot/.plugin/plugin.json",
             },
             "expected release-please to version both root plugin manifests AND "
-            f"both committed host-package copies, got {extra!r}",
+            f"all three committed host-package copies, got {extra!r}",
         )
 
 
@@ -219,6 +223,16 @@ class ReleaseWorkflowHostZipTests(unittest.TestCase):
     def test_uploads_both_host_zips(self):
         self.assertIn("dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip", self.text)
         self.assertIn("dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip", self.text)
+
+    def test_builds_smokes_and_uploads_copilot(self):
+        # 113-06: Copilot is the third committed host — its zip must build,
+        # smoke-test, and upload alongside claude + codex.
+        self.assertIn("--host copilot", self.text)
+        self.assertIn("jig-copilot-v", self.text)
+        self.assertIn(
+            "dist/jig-copilot-v${{ needs.release-please.outputs.version }}.zip",
+            self.text,
+        )
 
     def test_legacy_alias_copied_from_claude(self):
         # Legacy host-neutral zip kept one cycle as a byte-identical Claude alias.

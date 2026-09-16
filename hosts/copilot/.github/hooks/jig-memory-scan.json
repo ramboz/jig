@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py UserPromptSubmit \".github/hooks/scripts/jig-memory-scan.sh\"",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

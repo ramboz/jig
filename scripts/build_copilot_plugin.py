@@ -68,10 +68,13 @@ unmodified; the harmless, documented residual that `continue` also passes
 through un-stripped remains — see `test_copilot_hook_adapter.py`'s
 `ShippedAdvisoryOutputThroughAdapterTests`. `build_copilot_plugin._JIG_HOOK_INVENTORY`
 is the mapped-or-unmappable inventory (AC2) for every OTHER jig hook
-(telemetry, skill-trace, …); most remain MAPPABLE-but-not-yet-shipped,
-rendered in 113-06 (AC6 — remaining-advisory-hook parity), and 2 (telemetry's `Task` matcher,
-skill-trace's `Skill` matcher) are recorded UNMAPPABLE (no confirmed
-Copilot tool-call analogue). Skill bodies get the `${CLAUDE_PLUGIN_ROOT}`
+(telemetry, skill-trace, …); as of 113-06 (AC6 — remaining-advisory-hook
+parity) every entry that was ever `MAPPABLE` is now `SHIPPED`, and the only
+residuals are the 2 genuinely UNMAPPABLE ones (telemetry's `Task` matcher,
+skill-trace's `Skill` matcher — no confirmed Copilot tool-call analogue) plus
+`jig-decision-inflight.sh`'s SECOND registration (its `PostToolUse`/
+`AskUserQuestion` trigger; the SAME script's `UserPromptSubmit` registration
+IS shipped). Skill bodies get the `${CLAUDE_PLUGIN_ROOT}`
 path rewrite too (113-04 AC4) — see
 `scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths` for the
 best-hypothesis, not-verified-live caveat. Agent prompt bodies still ship
@@ -80,12 +83,34 @@ Claude-native (no path rewriting) — none of the 3 canonical agents reference
 documented gap only if that ever changes.
 
 113-02 review fix (owner decision): the package does NOT ship a
-pre-rendered `.github/copilot-instructions.md` either. Parity ruling:
-Claude/Codex builders ship `templates/CLAUDE.md.template` UNRENDERED rather
-than a rendered project-instructions file, and a `/plugin` install must not
-impose instructions on the consuming repo. Shipping `templates/` (unrendered,
-matching Claude/Codex) is 113-06 full-package-parity scope, not this
-skeleton.
+pre-rendered `.github/copilot-instructions.md`. Parity ruling: Claude/Codex
+builders ship `templates/CLAUDE.md.template` UNRENDERED rather than a
+rendered project-instructions file, and a `/plugin` install must not impose
+instructions on the consuming repo. `templates/` itself (unrendered, matching
+Claude/Codex) DOES ship as of 113-06 (AC5), at `.github/templates/` —
+see the 113-06 paragraph below.
+
+113-06 (AC5 package-completeness + AC6 remaining-advisory-hook-parity):
+grows the package to full Claude/Codex parity in two ways. First, the
+remaining 9 `MAPPABLE` advisory hooks (`jig-context-check.sh` — 3 event
+registrations — `jig-post-edit-verify.sh`, `jig-project-orient.sh`,
+`jig-semantic-index.sh`, `jig-memory-scan.sh`, `jig-decision-inflight.sh`'s
+`UserPromptSubmit` registration, `jig-task-capture.sh`,
+`jig-decision-capture.sh`, `jig-claim-check.sh`) render alongside the 6
+already-shipped hooks — see `_write_copilot_hooks`'s docstring for the
+multi-event MERGE this required (`jig-context-check.sh` backs THREE Claude
+events; without merging by output stem, two of its three registrations would
+have been silently lost to a last-write-wins filename collision). Second,
+`_copy_runtime_scripts` + `_copy_templates` ship `.github/scripts/` (the
+`spec_lint.py` runtime allowlist rewritten skill bodies invoke) and
+`.github/templates/` (unrendered) — completing the `${CLAUDE_PLUGIN_ROOT}` ->
+`.github/` rewrite targets `rewrite_skill_md_paths` already emitted but that,
+until now, resolved nowhere in the package (surfaced by the 113-04
+compliance review). `install_contract.validate_copilot_package` (wired into
+`build_release_zip.py`'s `--smoke-test`) is the STATIC, deterministic
+per-host verification substitute (AC3) for a live Copilot CLI probe, which
+does not reliably fire repo hooks in a headless/scripted session
+(folder-trust/mode limits observed probing this).
 
 Loader-compat invariant (ADR-0061 / spike 113-01 AC2): Copilot's skill loader
 rejects a `name:` containing `:` and a `description:` over 1024 characters.
@@ -293,6 +318,23 @@ _COPILOT_HOOK_LIB_FILES: tuple[str, ...] = (
     "lib/entry_gate.py",
     "lib/read_attribution.py",
     "lib/protected_paths.py",
+    # 113-06 audit (Step 1b) — lib deps the 9 remaining advisory hooks pull
+    # in that the 113-04/113-05 allowlist above (curated for the original 6
+    # hooks only) did not need: jig-context-check.sh imports
+    # lib/context_fill.py; jig-decision-inflight.sh AND jig-decision-capture.sh
+    # both import lib/decision_scratch.py; jig-decision-capture.sh also
+    # imports lib/decision_scan.py; jig-claim-check.sh imports
+    # lib/claim_check.py. The one nested lib import — decision_scratch.py
+    # imports decision_scan.py — is itself shipped (listed below); beyond that
+    # the set is stdlib-only (no `_common`/further-lib imports), confirmed by
+    # reading each source file. A hook
+    # missing its lib dep would be a broken hook — the AC5 completeness test
+    # (`PackageCompletenessTests`, 113-06 Step 2) and this file's own
+    # `RemainingAdvisoryHookPackagingTests` both catch a future regression.
+    "lib/context_fill.py",
+    "lib/decision_scratch.py",
+    "lib/decision_scan.py",
+    "lib/claim_check.py",
 )
 
 # Slice 113-05 (enforcing-hooks-and-permissions) — the 2 ENFORCING hooks
@@ -318,22 +360,94 @@ _COPILOT_ENFORCING_HOOK_SCRIPT_FILES: tuple[str, ...] = (
     "jig-secret-scan.sh",
 )
 
+# Slice 113-06 AC6 (remaining-advisory-hook parity) — the 9 remaining
+# `MAPPABLE` advisory hooks `_JIG_HOOK_INVENTORY` deferred from 113-04's
+# initial 3: the context/nudge hooks that complete jig's full advisory hook
+# set under Copilot. Same tuple shape as `_COPILOT_ADVISORY_HOOKS`.
+#
+# `jig-context-check.sh` registers under THREE distinct Claude events
+# (PreToolUse/Read, SessionStart, UserPromptSubmit) — three tuples sharing
+# the SAME stem `jig-context-check`, so `_write_copilot_hooks` MERGES all
+# three registrations' rendered `hooks` keys into ONE
+# `jig-context-check.json` file rather than writing (and silently
+# collapsing) three separate files under the same name. `jig-decision-
+# inflight.sh` also appears in `_JIG_HOOK_INVENTORY` under a SECOND
+# registration (PostToolUse/AskUserQuestion) that stays UNMAPPABLE — only
+# its UserPromptSubmit registration is listed here.
+_COPILOT_REMAINING_ADVISORY_HOOKS: tuple[tuple[str, str, str], ...] = (
+    ("PreToolUse", "jig-context-check.sh", "jig-context-check"),
+    ("SessionStart", "jig-context-check.sh", "jig-context-check"),
+    ("UserPromptSubmit", "jig-context-check.sh", "jig-context-check"),
+    ("PostToolUse", "jig-post-edit-verify.sh", "jig-post-edit-verify"),
+    ("SessionStart", "jig-project-orient.sh", "jig-project-orient"),
+    ("SessionStart", "jig-semantic-index.sh", "jig-semantic-index"),
+    ("UserPromptSubmit", "jig-memory-scan.sh", "jig-memory-scan"),
+    ("UserPromptSubmit", "jig-decision-inflight.sh", "jig-decision-inflight"),
+    ("Stop", "jig-task-capture.sh", "jig-task-capture"),
+    ("Stop", "jig-decision-capture.sh", "jig-decision-capture"),
+    ("Stop", "jig-claim-check.sh", "jig-claim-check"),
+)
+
+# The 9 remaining advisory hooks' bash wrappers, shipped VERBATIM (same
+# rationale as `_COPILOT_HOOK_SCRIPT_FILES`). Their `lib/` deps are folded
+# into `_COPILOT_HOOK_LIB_FILES` above (the 113-06 audit findings); their
+# `skills/_common/` deps (semantic_index.py, lexicon.py) need no separate
+# entry here — `_copy_skills` already ships the whole `skills/_common` tree
+# unconditionally.
+_COPILOT_REMAINING_ADVISORY_HOOK_SCRIPT_FILES: tuple[str, ...] = (
+    "jig-context-check.sh",
+    "jig-post-edit-verify.sh",
+    "jig-project-orient.sh",
+    "jig-semantic-index.sh",
+    "jig-memory-scan.sh",
+    "jig-decision-inflight.sh",
+    "jig-task-capture.sh",
+    "jig-decision-capture.sh",
+    "jig-claim-check.sh",
+)
+
 
 def _write_copilot_hooks(source_root: Path, output_dir: Path) -> None:
-    """Render the advisory + enforcing hooks into `.github/hooks/<stem>.json`
-    (one file per hook — AC2). Silently does nothing for a hook whose source
-    entry has gone missing (`render_copilot_hook_file` returns `None`)
-    rather than writing an empty/garbage file; `hooks/hooks.json` itself
-    missing (should never happen in this repo) is likewise a silent no-op,
-    matching `_write_codex_hooks`'s own precedent for a missing source
-    file."""
+    """Render every advisory + enforcing hook registration into
+    `.github/hooks/<stem>.json` (AC2/AC6) — ONE file PER SCRIPT, merging
+    every Claude event a script registers under into that file's `hooks`
+    dict.
+
+    A naive "one `render_copilot_hook_file` call, one file write" approach
+    (113-04's original shape) silently breaks once a script backs more than
+    one Claude event: `jig-context-check.sh` registers under THREE
+    (PreToolUse/Read, SessionStart, UserPromptSubmit) — three separate
+    `hooks_dst / f"{stem}.json"` writes would collide on the SAME filename,
+    last-write-wins, silently dropping the first two registrations (113-06
+    AC6 fix). `render_copilot_hook_file` renders exactly one `claude_event`
+    per call, returning `{"version": 1, "hooks": {<one-copilot-event>:
+    [...]}}`; this function accumulates every call's `hooks` sub-dict for
+    the same output stem via an explicit per-event-key insert that RAISES on a
+    duplicate key (never a silent `dict.update` last-write-wins) — a single
+    script's several registrations never share a Copilot event key today, and
+    the guard keeps that non-lossy invariant enforced rather than merely assumed
+    — then writes the merged payload ONCE per stem, after every registration has
+    been processed.
+
+    A single-event script (every hook 113-04/113-05 shipped, and 8 of the 9
+    113-06 adds) round-trips byte-for-byte identical to the pre-merge shape:
+    one call, one key, nothing to merge — the already-committed hooks stay
+    drift-clean.
+
+    Silently does nothing for a hook whose source entry has gone missing
+    (`render_copilot_hook_file` returns `None`) rather than writing an
+    empty/garbage file; `hooks/hooks.json` itself missing (should never
+    happen in this repo) is likewise a silent no-op, matching
+    `_write_codex_hooks`'s own precedent for a missing source file."""
     source_hooks_path = source_root / "hooks" / "hooks.json"
     if not source_hooks_path.is_file():
         return
     source_hooks = json.loads(source_hooks_path.read_text())
     hooks_dst = output_dir / ".github" / "hooks"
 
-    def _render(claude_event: str, script_name: str, stem: str, *, enforcing: bool) -> None:
+    merged: dict[str, dict] = {}
+
+    def _merge(claude_event: str, script_name: str, stem: str, *, enforcing: bool) -> None:
         payload = scaffold_mod.render_copilot_hook_file(
             source_hooks,
             claude_event,
@@ -343,15 +457,39 @@ def _write_copilot_hooks(source_root: Path, output_dir: Path) -> None:
         )
         if payload is None:
             return
-        hooks_dst.mkdir(parents=True, exist_ok=True)
+        target = merged.setdefault(stem, {"version": payload["version"], "hooks": {}})
+        # Merge this registration's event key(s) into the per-stem file. Guard
+        # the non-lossy invariant EXPLICITLY rather than trusting a plain
+        # `.update()`: if two registrations under one output stem ever resolve to
+        # the SAME Copilot event key, `.update()` would silently drop one — the
+        # exact "never silently dropped" bug this slice closes, at event
+        # granularity. Safe today (CLAUDE_TO_COPILOT_EVENTS is injective and a
+        # script's Claude events are distinct), so this only fires on a future
+        # regression — which is precisely when a loud failure beats a silent drop.
+        for event_key, entries in payload["hooks"].items():
+            if event_key in target["hooks"]:
+                raise ValueError(
+                    f"copilot hook merge collision: script {script_name!r} maps two "
+                    f"registrations to the same Copilot event {event_key!r} under output "
+                    f"stem {stem!r}. A plain merge would silently drop one — give the "
+                    f"registrations distinct stems or reconcile the event mapping."
+                )
+            target["hooks"][event_key] = entries
+
+    for claude_event, script_name, stem in _COPILOT_ADVISORY_HOOKS:
+        _merge(claude_event, script_name, stem, enforcing=False)
+    for claude_event, script_name, stem in _COPILOT_REMAINING_ADVISORY_HOOKS:
+        _merge(claude_event, script_name, stem, enforcing=False)
+    for claude_event, script_name, stem in _COPILOT_ENFORCING_HOOKS:
+        _merge(claude_event, script_name, stem, enforcing=True)
+
+    if not merged:
+        return
+    hooks_dst.mkdir(parents=True, exist_ok=True)
+    for stem, payload in merged.items():
         (hooks_dst / f"{stem}.json").write_text(
             json.dumps(payload, indent=2) + "\n", encoding="utf-8"
         )
-
-    for claude_event, script_name, stem in _COPILOT_ADVISORY_HOOKS:
-        _render(claude_event, script_name, stem, enforcing=False)
-    for claude_event, script_name, stem in _COPILOT_ENFORCING_HOOKS:
-        _render(claude_event, script_name, stem, enforcing=True)
 
 
 def _copy_copilot_hook_scripts(source_root: Path, output_dir: Path) -> None:
@@ -382,6 +520,7 @@ def _copy_copilot_hook_scripts(source_root: Path, output_dir: Path) -> None:
     all_files = (
         _COPILOT_HOOK_SCRIPT_FILES
         + _COPILOT_ENFORCING_HOOK_SCRIPT_FILES
+        + _COPILOT_REMAINING_ADVISORY_HOOK_SCRIPT_FILES
         + _COPILOT_HOOK_LIB_FILES
     )
     for rel_name in all_files:
@@ -515,14 +654,14 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
     {
         "source": "hooks.json",
         "event": "PreToolUse", "matcher": "Read", "script": "jig-context-check.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": "advisory; 113-06",
     },
     {
         "source": "hooks.json",
         "event": "PostToolUse", "matcher": "Edit|Write|MultiEdit",
-        "script": "jig-post-edit-verify.sh", "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "script": "jig-post-edit-verify.sh", "status": "SHIPPED",
+        "notes": "advisory; 113-06",
     },
     {
         "source": "hooks.json",
@@ -550,20 +689,26 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
     {
         "source": "hooks.json",
         "event": "SessionStart", "matcher": None, "script": "jig-context-check.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": (
+            "advisory; 113-06 — INPUT-DEGRADED for THIS event on Copilot: the "
+            "transcript-tail nudge reads `transcript_path`, which Copilot's "
+            "sessionStart does not supply; fires but fail-open no-ops. (This "
+            "script's preToolUse/Read + userPromptSubmitted registrations work.) "
+            "See refinement-todo 'Copilot conversational-input parity'."
+        ),
     },
     {
         "source": "hooks.json",
         "event": "SessionStart", "matcher": None, "script": "jig-project-orient.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": "advisory; 113-06",
     },
     {
         "source": "hooks.json",
         "event": "SessionStart", "matcher": None, "script": "jig-semantic-index.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": "advisory; 113-06",
     },
     {
         "source": "hooks.json",
@@ -573,22 +718,24 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
     {
         "source": "hooks.json",
         "event": "UserPromptSubmit", "matcher": None, "script": "jig-memory-scan.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": (
+            "advisory; 113-06 — reads `prompt`, forwarded by copilot_hook_adapter "
+            "from userPromptSubmitted; fires fully."
+        ),
     },
     {
         "source": "hooks.json",
         "event": "UserPromptSubmit", "matcher": None, "script": "jig-context-check.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": "advisory; 113-06",
     },
     {
         "source": "hooks.json",
         "event": "UserPromptSubmit", "matcher": None,
-        "script": "jig-decision-inflight.sh", "status": "MAPPABLE",
+        "script": "jig-decision-inflight.sh", "status": "SHIPPED",
         "notes": (
-            "advisory; rendered in 113-06 (AC6 remaining-advisory-hook parity) — "
-            "THIS registration IS mappable "
+            "advisory; 113-06 — THIS registration IS mappable "
             "(userPromptSubmitted is a confirmed event, no matcher needed), "
             "unlike the PostToolUse/AskUserQuestion registration of the "
             "same script above"
@@ -597,20 +744,37 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
     {
         "source": "hooks.json",
         "event": "Stop", "matcher": None, "script": "jig-task-capture.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": (
+            "advisory; 113-06 — INPUT-DEGRADED on Copilot: reads `messages`, "
+            "which Copilot's agentStop does not supply (it gives transcriptPath); "
+            "registered + fires but fail-open no-ops. See refinement-todo "
+            "'Copilot conversational-input parity'."
+        ),
     },
     {
         "source": "hooks.json",
         "event": "Stop", "matcher": None, "script": "jig-decision-capture.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": (
+            "advisory; 113-06 — INPUT-DEGRADED on Copilot: its scan reads "
+            "`messages` (like task-capture/claim-check), which Copilot's agentStop "
+            "does not supply, so that path fail-open no-ops. Its in-flight decision "
+            "STUBS — surfaced by jig-decision-inflight, which IS fixed via `prompt` "
+            "— still work. See refinement-todo 'Copilot conversational-input "
+            "parity'."
+        ),
     },
     {
         "source": "hooks.json",
         "event": "Stop", "matcher": None, "script": "jig-claim-check.sh",
-        "status": "MAPPABLE",
-        "notes": "advisory; rendered in 113-06 (AC6 — remaining-advisory-hook parity)",
+        "status": "SHIPPED",
+        "notes": (
+            "advisory; 113-06 — INPUT-DEGRADED on Copilot: reads `messages`, "
+            "which Copilot's agentStop does not supply; registered + fires but "
+            "fail-open no-ops. See refinement-todo 'Copilot conversational-input "
+            "parity'."
+        ),
     },
     {
         "source": "copilot-only",
@@ -629,6 +793,64 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
         ),
     },
 )
+
+
+def _copy_runtime_scripts(source_root: Path, output_dir: Path) -> None:
+    """Copy the host-neutral runtime-scripts subset into `.github/scripts/`
+    (slice 113-06 AC5 — package completeness). Mirrors
+    `build_codex_plugin._copy_runtime_scripts`: `install_contract.
+    COPILOT_INCLUDE_SCRIPT_FILES` (currently just `spec_lint.py`, matching
+    Codex's own allowlist) ships verbatim so
+    `.github/scripts/spec_lint.py` — the pre-implementation structural gate
+    the rendered `analyze`/`migrate` skill bodies invoke, rewritten to that
+    path by `CopilotScaffoldRenderer.rewrite_skill_md_paths` — actually
+    resolves in the installed Copilot package. `spec_lint.py` is host-neutral
+    Python (pure stdlib, no `${CLAUDE_PLUGIN_ROOT}`/`.claude/` assumptions),
+    so it is copied byte-for-byte with no host rewrite."""
+    for rel_name in install_contract.COPILOT_INCLUDE_SCRIPT_FILES:
+        src = source_root / rel_name
+        if not src.is_file():
+            continue
+        dst = output_dir / ".github" / rel_name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+
+
+def _copy_templates(source_root: Path, output_dir: Path) -> None:
+    """Copy `templates/` into `.github/templates/` UNRENDERED (slice 113-06
+    AC5), matching how Claude/Codex ship `templates/CLAUDE.md.template`
+    unrendered rather than a rendered project-instructions file (113-02
+    review fix — a `/plugin` install must not impose instructions on the
+    consuming repo). Mirrors `build_codex_plugin._copy_templates`: a
+    `.md.template` file gets the SAME `${CLAUDE_PLUGIN_ROOT}/` -> Copilot
+    path rewrite `rewrite_skill_md_paths` already applies to rendered
+    SKILL.md bodies (113-04 AC4), so a template referencing e.g.
+    `${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py` resolves the
+    same `.github/`-relative way once copied verbatim into a scaffolded
+    project by the runtime helpers that read it (`decisions.py`, `adr.py`,
+    `memory.py`, `workflow.py` — see `docs/architecture.md`'s "Both scaffold
+    hosts copy templates/" note). Every other file ships byte-for-byte."""
+    templates_src = source_root / "templates"
+    templates_dst = output_dir / ".github" / "templates"
+    if not templates_src.is_dir():
+        return
+    for entry in sorted(templates_src.rglob("*")):
+        if entry.is_dir():
+            continue
+        rel = entry.relative_to(templates_src)
+        if _is_excluded(rel):
+            continue
+        dst = templates_dst / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if entry.name.endswith(".md.template"):
+            dst.write_text(
+                scaffold_mod.CopilotScaffoldRenderer.rewrite_skill_md_paths(
+                    entry.read_text(encoding="utf-8")
+                ),
+                encoding="utf-8",
+            )
+        else:
+            dst.write_bytes(entry.read_bytes())
 
 
 def _write_manifest(output_dir: Path, version: str) -> None:
@@ -737,6 +959,8 @@ def build(source_root: Path, output_dir: Path, out=None) -> int:
     _write_copilot_hooks(source_root, output_dir)
     _copy_copilot_hook_scripts(source_root, output_dir)
     _write_permissions_floor_hook(output_dir)
+    _copy_runtime_scripts(source_root, output_dir)
+    _copy_templates(source_root, output_dir)
     _write_manifest(output_dir, version)
 
     out.write(f"OK: built Copilot plugin at {output_dir}\n")

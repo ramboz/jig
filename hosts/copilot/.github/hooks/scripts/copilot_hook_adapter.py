@@ -182,6 +182,25 @@ def translate_payload(raw: bytes, claude_event: str) -> bytes:
         if "source" in payload:
             out["source"] = payload["source"]
 
+        # userPromptSubmitted supplies `prompt` (SDK UserPromptSubmittedHookInput);
+        # jig's prompt-consuming hooks (jig-memory-scan, jig-decision-inflight) read
+        # `data['prompt']`. Without this they saw only the base fields and degraded
+        # to a silent no-op (113-06 craft review).
+        if "prompt" in payload:
+            out["prompt"] = payload["prompt"]
+
+        # NOT forwarded (deliberately): Copilot's agentStop supplies `transcriptPath`
+        # (SDK AgentStopHookInput), but NO jig hook consumes `transcript_path` on
+        # agentStop — the Stop hooks (jig-task-capture, jig-claim-check,
+        # jig-decision-capture) read an inline `messages` array Copilot does not
+        # supply, and jig-context-check reads `transcript_path` only on non-agentStop
+        # events. Forwarding `transcriptPath` today would be dead code; it becomes
+        # live only once those Stop hooks are reworked to read the transcript (the
+        # "better fix" in docs/refinement-todo.md "Copilot conversational-input
+        # parity"), which re-adds the mapping alongside that rework. Until then those
+        # hooks degrade to their designed fail-open no-op — a documented input
+        # residual, not a silent drop.
+
         return json.dumps(out).encode("utf-8")
     except Exception:
         return raw

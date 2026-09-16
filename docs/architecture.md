@@ -38,6 +38,8 @@ the workflow model.
 | Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output remains the default ownership model. |
 | Codex | Scaffold | v2 supported | Project-local output lives under `AGENTS.md` and `.codex/`. |
 | Codex | Plugin | v2 supported | `.codex-plugin/plugin.json` plus rendered Codex skills, root `hooks/hooks.json`, templates, and canonical agent prompts are produced by `scripts/build_codex_plugin.py`. |
+| GitHub Copilot CLI | Plugin | v2 supported (spec 113 / ADR-0061) | `.plugin/plugin.json` plus rendered `.github/{skills,agents,hooks,scripts,templates}` are produced by `scripts/build_copilot_plugin.py`; installs as a repo-subdirectory package (`copilot plugin install ramboz/jig:hosts/copilot`), no separate marketplace. |
+| GitHub Copilot CLI | Scaffold | out of scope | Not offered — Copilot reads Claude-format `SKILL.md`/`CLAUDE.md` directly (ADR-0061), so the plugin path covers it; no forked scaffold recipe. |
 | Other harnesses | Any | out of scope | Future adapters need their own real user signal and spec slices. |
 
 ### Lifecycle entry gate — host capability (spec 098 / ADR-0044)
@@ -266,6 +268,57 @@ custom agents. The explicit `--install-codex-agents` helper remains the
 supported plugin contract until official docs or the probe show plugin-native
 discovery.
 
+### Copilot plugin packaging (spec 113 / ADR-0061)
+*Principle:* same workflow model, host-native materialization — full parity
+with Claude/Codex, not a degraded subset.
+
+Copilot CLI reads Claude-format `SKILL.md`, `CLAUDE.md`, and `.mcp.json`
+directly and installs Claude-format plugins from marketplaces, but has no
+scaffold mode of its own and a genuinely different hook model (14 camelCase
+events, a flat `.github/hooks/*.json` schema, and its own permission surface).
+The **install path** is a repo-subdirectory package, not a marketplace bundle:
+`copilot plugin install ramboz/jig:hosts/copilot` (spike 113-01 AC1) resolves
+straight to the committed `hosts/copilot/` package, so a Copilot user installs
+jig with one command and no build step.
+
+`scripts/build_copilot_plugin.py` materializes that package from the SAME
+canonical source the Claude/Codex builders read, via `CopilotScaffoldRenderer`
+(§ Host adapter boundary above): `.plugin/plugin.json` (name/version/description
+only — no `mcpServers`, jig ships none) plus `.github/skills/<name>/SKILL.md`
+(loader-compat: `:`-free names, ≤1024-char descriptions, full text preserved in
+the body), `.github/agents/<name>.agent.md` (Claude→Copilot tool-name map, the
+reviewer's read-only allowlist preserved), `.github/hooks/<stem>.json` (jig's
+full advisory nudge set PLUS the spec-gate/secret-scan enforcing gates and the
+permissions floor — one file per SCRIPT, merging every Claude event a script
+registers under into that file's `hooks` dict, since a script like
+`jig-context-check.sh` backs three events and a naive one-call-one-file
+approach would silently collide), `.github/scripts/spec_lint.py` (the runtime
+allowlist rewritten skill bodies resolve against), and `.github/templates/`
+(unrendered, matching Claude/Codex — a `/plugin` install must not impose
+instructions on the consuming repo).
+
+The release archive is `jig-copilot-vX.Y.Z.zip` (`scripts/build_release_zip.py
+--host copilot`), archived flat from `hosts/copilot/` the same way the Claude
+zip archives `hosts/claude/` (`.plugin/plugin.json` at the zip root, not
+marketplace-wrapped like Codex's bundle). Verification is a STATIC,
+deterministic package validator — `install_contract.validate_copilot_package`,
+wired into `build_release_zip.py`'s `--smoke-test` — rather than a live-CLI
+smoke harness: a headless `copilot -p` session does not reliably fire repo
+hooks (folder-trust/mode limits, observed probing this during 113-04/113-05),
+so a live probe would not be a trustworthy independent signal; the static
+check (manifest, skill/agent/hook presence, hook-file schema, scripts/
+templates trees) is the reliable substitute, recorded honestly as such rather
+than as an unverified "it works."
+
+Every jig hook's Copilot disposition is tracked in
+`build_copilot_plugin._JIG_HOOK_INVENTORY` — the mapped-or-unmappable
+inventory (ADR-0061): each entry is `SHIPPED` or `UNMAPPABLE` (no live
+`MAPPABLE` residual survives 113-06's remaining-advisory-hook-parity pass) —
+the `UNMAPPABLE` residuals are the `Task`/`Skill` tool matchers and the
+`AskUserQuestion` matcher (no confirmed Copilot analogue), structurally
+cross-checked against `hooks/hooks.json` so no jig hook is ever silently
+dropped.
+
 ### Context economy (the "dumb zone")
 *Principle:* see [product-vision.md § Design principles](product-vision.md#design-principles) (#2).
 *Mechanics:* the `jig-context-check` hook warns at session start when fill approaches the ~40% threshold, and nudges again on in-session growth as context crosses configurable bands (40/60/80%, plus a higher active-compaction band). Skills use progressive disclosure — body loads only on trigger; supporting files load only when referenced.
@@ -352,27 +405,9 @@ host-neutral `HostRenderer` interface plus concrete renderers for Claude
 overriding only what diverges and adding a **loader-compat invariant**: every
 emitted Copilot skill gets a `:`-free name and a ≤1024-char description, full text
 preserved in the SKILL.md body, so no source skill silently fails Copilot's loader).
-The committed `hosts/copilot/` package renders into Copilot's `.github/` home
-(`.github/skills/<name>/SKILL.md`, `.github/agents/<name>.agent.md` — model-neutral,
-with a Claude→Copilot tool-name map and the reviewer's read-only allowlist preserved
-(spec 113-03) — `.github/hooks/<name>.json` for jig's advisory nudges (event-keyed
-camelCase; a build-time event/matcher/command translation plus a runtime
-`copilot_hook_adapter.py` shim mapping Copilot's camelCase hook input into jig's
-canonical scripts, fail-open — spec 113-04) and jig's **enforcing gates** (spec-gate
-+ secret-scan run through the same adapter in `--enforce` mode, which preserves the
-child `exit 2` and emits Copilot's `permissionDecision:"deny"` so a blocking gate
-actually blocks — fail-**closed** on spawn error; spec 113-05), plus a **permissions
-floor** rendered as a Copilot-only enforcing `preToolUse` deny-hook
-(`copilot_permissions_floor.py`, which mirrors `_PERMISSIONS_DENY_DEFAULTS` under a
-drift guard) — a reshape from a would-be `settings.json`, because Copilot CLI has no
-persistent, repo-committable tool-deny mechanism (spec 113-05), and
-`.plugin/plugin.json`; the release archive lands in slice 113-06). Every jig hook's
-Copilot disposition is tracked in `build_copilot_plugin._JIG_HOOK_INVENTORY` — the
-**mapped-or-unmappable inventory** (ADR-0061): each hook is `SHIPPED`, `MAPPABLE`
-(renderable via the advisory path, rendered in 113-06 for full parity), or
-`UNMAPPABLE` (no Copilot analogue — the `Task`/`Skill`/`AskUserQuestion` matchers),
-structurally cross-checked against `hooks/hooks.json` so no jig hook is ever silently
-dropped. Claude
+See "Copilot plugin packaging" above for the committed `.github/` package shape,
+the hook-translation/enforcing-gate mechanics, and the release/verification path.
+Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 `.claude/agents/`, `.claude/hooks/scripts/`, `.claude/templates/`, and
 `.claude/settings.json`. Codex scaffold mode writes `AGENTS.md`,
@@ -454,7 +489,7 @@ Jig is a workflow layer, not a data application (per [product-vision.md](product
 
 <!-- elicited: 2026-05-15 / status: skipped -->
 
-_Skipped: jig does not currently expose schema-shaped external interfaces. It is a dual-host plugin/scaffold package — the external surfaces are host plugin manifests, skill frontmatter/bodies consumed by Claude Code or Codex routers, Codex custom-agent TOML, hook configuration files, and CLI argparse interfaces on the `.py` helpers consumed by humans + scripts. None warrants an OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL artifact. If jig later grows an HTTP / events / RPC surface (e.g. a telemetry sink endpoint, a remote-spec-status query API), this section gets filled per the `/jig:contracts` skill's per-surface recommendation table._
+_Skipped: jig does not currently expose schema-shaped external interfaces. It is a tri-host plugin/scaffold package (Claude Code and Codex in plugin + scaffold shapes; GitHub Copilot CLI in plugin shape only, spec 113 / ADR-0061) — the external surfaces are host plugin manifests, skill frontmatter/bodies consumed by Claude Code / Codex / Copilot routers, Codex custom-agent TOML, Copilot custom-agent Markdown, hook configuration files, and CLI argparse interfaces on the `.py` helpers consumed by humans + scripts. None warrants an OpenAPI / JSON Schema / AsyncAPI / `.proto` / GraphQL SDL artifact. If jig later grows an HTTP / events / RPC surface (e.g. a telemetry sink endpoint, a remote-spec-status query API), this section gets filled per the `/jig:contracts` skill's per-surface recommendation table._
 
 <!-- The `status: skipped` marker plus the no-bullet body above are load-bearing: together they signal "no surfaces to check" to the independent-review reviewer prompt's conditional contract-surface detector, keeping it quiet on jig's own slice reviews. -->
 

@@ -122,6 +122,25 @@ class TranslatePayloadTests(unittest.TestCase):
         out = json.loads(copilot_hook_adapter.translate_payload(raw, "SessionStart"))
         self.assertEqual(out["source"], "startup")
 
+    def test_prompt_maps_from_user_prompt_submitted(self):
+        # SDK UserPromptSubmittedHookInput supplies `prompt`; jig-memory-scan and
+        # jig-decision-inflight read `data['prompt']`. Without this mapping they
+        # degraded to a silent no-op under Copilot (113-06 craft review).
+        raw = json.dumps({"prompt": "explain spec 042"}).encode()
+        out = json.loads(copilot_hook_adapter.translate_payload(raw, "UserPromptSubmit"))
+        self.assertEqual(out["prompt"], "explain spec 042")
+
+    def test_transcript_path_is_not_forwarded_no_consumer_on_agent_stop(self):
+        # Copilot's agentStop supplies `transcriptPath`, but no jig hook consumes
+        # `transcript_path` on agentStop (the Stop hooks read an inline `messages`
+        # array Copilot does not supply), so the adapter deliberately does NOT
+        # forward it — forwarding would be dead code. Pins that decision so it is
+        # not silently re-added without the Stop-hook rework that would make it
+        # live. See docs/refinement-todo.md "Copilot conversational-input parity".
+        raw = json.dumps({"transcriptPath": "/tmp/sess/transcript.jsonl"}).encode()
+        out = json.loads(copilot_hook_adapter.translate_payload(raw, "Stop"))
+        self.assertNotIn("transcript_path", out)
+
     def test_a_full_post_tool_use_payload_translates_completely(self):
         raw = json.dumps({
             "sessionId": "s1",
@@ -441,6 +460,69 @@ class AllThreeHooksFireUnderCopilotInputTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.decode().strip(), "")
+
+
+class PromptConsumingHookFiresUnderCopilotInputTests(unittest.TestCase):
+    """End-to-end (113-06 craft-review fix): a hook that reads a field BEYOND
+    `tool_input`/`source` must actually receive it through the adapter.
+    Copilot's `userPromptSubmitted` supplies `prompt` (SDK
+    UserPromptSubmittedHookInput); before the adapter forwarded it,
+    jig-memory-scan / jig-decision-inflight were registered-but-inert. Proven
+    by a REAL lexicon surfacing driven by the forwarded prompt, not
+    "does not crash"."""
+
+    LEXICON_COMMON = HOOK_SCRIPTS_DIR.parent.parent / "skills" / "_common"
+
+    def setUp(self):
+        self.project_dir = Path(tempfile.mkdtemp(prefix="jig-copilot-prompt-e2e-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.project_dir, ignore_errors=True)
+
+    def _run(self, claude_event, script_name, payload):
+        env = {
+            **os.environ,
+            "TMPDIR": str(self.project_dir),
+            "CLAUDE_PROJECT_DIR": str(self.project_dir),
+            # Resolve the lexicon deterministically against the real shipped
+            # skills/_common (memory-scan's default resolution walks SCRIPT_DIR,
+            # which varies by invocation shape) so the assertion is stable.
+            "JIG_LEXICON_COMMON_DIR": str(self.LEXICON_COMMON),
+        }
+        return subprocess.run(
+            [sys.executable, str(ADAPTER_PATH), claude_event,
+             str(HOOK_SCRIPTS_DIR / script_name)],
+            input=json.dumps(payload).encode(),
+            capture_output=True, timeout=15, env=env,
+        )
+
+    def test_memory_scan_surfaces_lexicon_terms_from_a_copilot_prompt(self):
+        # Without the adapter forwarding `prompt`, memory-scan sees prompt='' and
+        # surfaces NOTHING — so this fails if the prompt-forwarding is removed
+        # (the exact registered-but-inert defect the craft review found).
+        payload = {
+            "sessionId": "abc123",
+            "timestamp": "2026-09-16T00:00:00Z",
+            "workingDirectory": str(self.project_dir),
+            "prompt": "explain SPIDR and the vertical slice",
+        }
+        result = self._run("UserPromptSubmit", "jig-memory-scan.sh", payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = result.stdout.decode()
+        self.assertIn("additionalContext", out)
+        self.assertIn("spidr", out.lower())
+
+    def test_memory_scan_stays_silent_when_no_prompt_field_is_present(self):
+        # Negative control: no `prompt` (as when the adapter dropped it) → no
+        # surfacing. Pins that the surfacing above is driven by the forwarded
+        # prompt, not something ambient in the environment.
+        payload = {
+            "sessionId": "abc123",
+            "workingDirectory": str(self.project_dir),
+        }
+        result = self._run("UserPromptSubmit", "jig-memory-scan.sh", payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("spidr", result.stdout.decode().lower())
 
 
 class ShippedAdvisoryOutputThroughAdapterTests(unittest.TestCase):

@@ -391,11 +391,12 @@ follow conventional-commit semantics organically.
 ### Building and smoke-testing a release zip locally
 
 The release workflow attaches **one host-explicit zip per host** —
-`jig-claude-vX.Y.Z.zip` (flat, drag-droppable) and `jig-codex-vX.Y.Z.zip`
-(extract-then-add marketplace bundle) — to every GitHub Release. Both are
+`jig-claude-vX.Y.Z.zip` (flat, drag-droppable), `jig-codex-vX.Y.Z.zip`
+(extract-then-add marketplace bundle), and `jig-copilot-vX.Y.Z.zip` (flat,
+repo-subdirectory-shaped) — to every GitHub Release. All three are
 archived from the committed host packages under `hosts/` (see
 [README § Install shapes](README.md#install-shapes)). The build script now
-requires `--host`; you can build and verify either zip locally before pushing
+requires `--host`; you can build and verify any zip locally before pushing
 any change to it:
 
 ```bash
@@ -408,6 +409,10 @@ python3 scripts/build_release_zip.py --host claude --smoke-test dist/jig-claude-
 # Build the Codex zip (extract-then-add bundle; no direct zip-drop install):
 python3 scripts/build_release_zip.py --host codex --version 1.0.0
 python3 scripts/build_release_zip.py --host codex --smoke-test dist/jig-codex-v1.0.0.zip
+
+# Build the Copilot zip (flat; extract, then point Copilot at the directory):
+python3 scripts/build_release_zip.py --host copilot --version 1.0.0
+python3 scripts/build_release_zip.py --host copilot --smoke-test dist/jig-copilot-v1.0.0.zip
 ```
 
 The Claude smoke-test prints the same `PASS marketplace / manifest / agents
@@ -466,6 +471,29 @@ This validates `jig-implementer`, `jig-reviewer`, and `jig-architect` TOML
 files, then probes local Codex debug/sandbox surfaces when available. See
 [docs/codex-role-capability.md](docs/codex-role-capability.md) for the
 interactive `/agent` dogfood prompt and the noninteractive review fallback.
+
+### Verifying the Copilot plugin package locally
+
+GitHub Copilot CLI gets a separate generated package (`hosts/copilot/`) and a
+**static, deterministic** install-contract validator —
+`install_contract.validate_copilot_package` — rather than a live-CLI smoke
+harness like Codex's: a headless `copilot -p` session does not reliably fire
+repo hooks (folder-trust/mode limits, observed probing this during
+113-04/113-05 — see `scripts/build_copilot_plugin.py`'s module docstring for
+the full evidence trail), so a live probe would not be a trustworthy signal
+here. Exercise the validator against the committed package via the release
+zip's `--smoke-test` flag (same command shown above):
+
+```bash
+python3 scripts/build_release_zip.py --host copilot --version 1.0.0
+python3 scripts/build_release_zip.py --host copilot --smoke-test dist/jig-copilot-v1.0.0.zip
+```
+
+This checks `.plugin/plugin.json`, every expected skill/agent under
+`.github/{skills,agents}`, every rendered `.github/hooks/*.json` file's schema,
+`.github/scripts/spec_lint.py`, and the `.github/templates/` tree. Any
+regression here is a hard failure — there is no `UNAVAILABLE` row to fall back
+on, since nothing here depends on a live CLI being present.
 
 ## Spec workflow (short version)
 

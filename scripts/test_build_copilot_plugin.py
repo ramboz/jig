@@ -156,20 +156,24 @@ class CopilotPackageContentsTests(unittest.TestCase):
         ]
         self.assertEqual(leaks, [])
 
-    def test_package_is_exactly_manifest_skills_agents_and_hooks(self):
+    def test_package_is_exactly_manifest_skills_agents_hooks_scripts_templates(self):
         # 113-03 grew the 113-02 walking skeleton by rendered agents; 113-04
         # grew it by the 3 advisory hooks under `.github/hooks/`; 113-05
         # grows it by 3 MORE hooks in that SAME directory (spec-gate,
         # secret-scan, and the permissions-floor guard — NOT a
         # `.github/copilot/settings.json`; the owner corrected an earlier
         # version of this slice that tried that, since Copilot has no
-        # persistent, repo-committable tool-deny mechanism). Still just
-        # `.plugin/plugin.json` + `.github/{skills,agents,hooks}/**` — no
-        # new top-level `.github/` directory (MCP config is not this
-        # package's scope).
+        # persistent, repo-committable tool-deny mechanism); 113-06 grows it
+        # by `.github/scripts/` (the runtime-scripts allowlist, e.g.
+        # `spec_lint.py`) and `.github/templates/` (unrendered, matching
+        # Claude/Codex) for AC5 package completeness. Still no OTHER new
+        # top-level `.github/` directory (MCP config is not this package's
+        # scope).
         github_dir = self.out_dir / ".github"
         top_level = {p.name for p in github_dir.iterdir()}
-        self.assertEqual(top_level, {"skills", "agents", "hooks"})
+        self.assertEqual(
+            top_level, {"skills", "agents", "hooks", "scripts", "templates"}
+        )
 
     def test_excludes_tests_and_caches(self):
         leaks = [
@@ -1007,6 +1011,237 @@ class HookInventoryCoverageTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    # 113-06 AC6 — the invariant-closure check: every remaining advisory hook
+    # this slice renders flips MAPPABLE -> SHIPPED, so the ONLY entries left
+    # at a non-SHIPPED status are the genuinely UNMAPPABLE ones (Task/Skill/
+    # AskUserQuestion). A future hook landing back at MAPPABLE (added to
+    # hooks.json but never rendered) fails this test rather than silently
+    # sitting in limbo forever.
+    def test_no_mappable_entry_remains(self):
+        mappable = [
+            r for r in build_copilot_plugin._JIG_HOOK_INVENTORY
+            if r["status"] == "MAPPABLE"
+        ]
+        self.assertEqual(
+            mappable, [],
+            f"MAPPABLE entries remain un-rendered: {mappable!r}",
+        )
+
+
+class RemainingAdvisoryHookPackagingTests(unittest.TestCase):
+    """Slice 113-06 AC6 (remaining-advisory-hook parity) — the 9 remaining
+    `MAPPABLE` advisory hooks (`jig-context-check.sh`,
+    `jig-post-edit-verify.sh`, `jig-project-orient.sh`,
+    `jig-semantic-index.sh`, `jig-memory-scan.sh`,
+    `jig-decision-inflight.sh`, `jig-task-capture.sh`,
+    `jig-decision-capture.sh`, `jig-claim-check.sh`) render into
+    `.github/hooks/*.json` and ship their scripts + `lib/` deps under
+    `.github/hooks/scripts/`, exactly like `CopilotAdvisoryHookPackagingTests`
+    for the original 3.
+
+    `jig-context-check.sh` backs THREE Claude events (PreToolUse/Read,
+    SessionStart, UserPromptSubmit) — the multi-event MERGE fix this slice
+    makes: without it, three separate `.github/hooks/jig-context-check.json`
+    writes would collide (last-write-wins), silently dropping two of the
+    three registrations."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-remaining-hooks-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _hooks_dir(self) -> Path:
+        return self.out_dir / ".github" / "hooks"
+
+    # The multi-event merge, the load-bearing fix.
+    def test_context_check_is_one_file_with_three_event_keys(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-context-check.json").read_text()
+        )
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(
+            set(payload["hooks"].keys()),
+            {"preToolUse", "sessionStart", "userPromptSubmitted"},
+        )
+
+    def test_context_check_pretooluse_matcher_is_view(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-context-check.json").read_text()
+        )
+        entry = payload["hooks"]["preToolUse"][0]
+        self.assertEqual(entry["matcher"], "view")
+
+    def test_context_check_sessionstart_and_userpromptsubmit_have_no_matcher(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-context-check.json").read_text()
+        )
+        for event in ("sessionStart", "userPromptSubmitted"):
+            entry = payload["hooks"][event][0]
+            self.assertNotIn("matcher", entry, event)
+
+    def test_context_check_every_event_command_targets_the_script(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-context-check.json").read_text()
+        )
+        for event, entries in payload["hooks"].items():
+            self.assertIn("jig-context-check.sh", entries[0]["bash"], event)
+
+    # Filename-uniqueness guard (spec 113-06 AC6): the merge-by-stem fix must
+    # never let two DIFFERENT scripts collide on the same output filename —
+    # every rendered `.json` file corresponds to exactly one script.
+    def test_no_two_distinct_scripts_share_an_output_filename(self):
+        all_registrations = (
+            build_copilot_plugin._COPILOT_ADVISORY_HOOKS
+            + build_copilot_plugin._COPILOT_REMAINING_ADVISORY_HOOKS
+            + build_copilot_plugin._COPILOT_ENFORCING_HOOKS
+        )
+        stem_to_scripts: dict = {}
+        for _event, script_name, stem in all_registrations:
+            stem_to_scripts.setdefault(stem, set()).add(script_name)
+        collisions = {
+            stem: scripts
+            for stem, scripts in stem_to_scripts.items()
+            if len(scripts) > 1
+        }
+        self.assertEqual(collisions, {}, f"stem collides across scripts: {collisions!r}")
+
+    def test_merge_collision_on_same_stem_same_event_raises_not_silently_drops(self):
+        # Defensive guard (113-06 arch review): the per-script event merge must
+        # RAISE if two registrations under one output stem ever resolve to the
+        # same Copilot event key — never silently drop one (the exact bug this
+        # slice fixes, at event granularity). Force it with two SessionStart
+        # scripts sharing a stem: both render {sessionStart: [...]}, colliding on
+        # the "sessionStart" key. Guards against a future non-injective event map
+        # or a duplicate registration reintroducing the silent drop.
+        colliding = (
+            ("SessionStart", "jig-project-orient.sh", "jig-collide"),
+            ("SessionStart", "jig-semantic-index.sh", "jig-collide"),
+        )
+        out = Path(tempfile.mkdtemp(prefix="jig-copilot-collide-"))
+        saved = build_copilot_plugin._COPILOT_REMAINING_ADVISORY_HOOKS
+        build_copilot_plugin._COPILOT_REMAINING_ADVISORY_HOOKS = colliding
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                build_copilot_plugin._write_copilot_hooks(REPO_ROOT, out)
+            self.assertIn("merge collision", str(ctx.exception))
+        finally:
+            build_copilot_plugin._COPILOT_REMAINING_ADVISORY_HOOKS = saved
+            shutil.rmtree(out, ignore_errors=True)
+
+    def test_every_rendered_hook_file_on_disk_maps_to_exactly_one_stem(self):
+        # Every *.json file under .github/hooks/ is named after exactly one
+        # stem — no two registrations ever wrote to the same path for
+        # different content (the specific silent-drop bug this slice fixes).
+        rendered_stems = {p.stem for p in self._hooks_dir().glob("*.json")}
+        expected_stems = {
+            stem for _event, _script, stem in (
+                build_copilot_plugin._COPILOT_ADVISORY_HOOKS
+                + build_copilot_plugin._COPILOT_REMAINING_ADVISORY_HOOKS
+                + build_copilot_plugin._COPILOT_ENFORCING_HOOKS
+            )
+        }
+        expected_stems.add("jig-permissions-floor")
+        self.assertEqual(rendered_stems, expected_stems)
+
+    # AC2/AC6 — every hook file for the 9 remaining scripts renders.
+    def test_post_edit_verify_renders_under_post_tool_use(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-post-edit-verify.json").read_text()
+        )
+        self.assertEqual(set(payload["hooks"].keys()), {"postToolUse"})
+
+    def test_project_orient_and_semantic_index_render_under_session_start(self):
+        for stem in ("jig-project-orient", "jig-semantic-index"):
+            payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
+            self.assertEqual(set(payload["hooks"].keys()), {"sessionStart"})
+
+    def test_memory_scan_renders_under_user_prompt_submit(self):
+        payload = json.loads(
+            (self._hooks_dir() / "jig-memory-scan.json").read_text()
+        )
+        self.assertEqual(set(payload["hooks"].keys()), {"userPromptSubmitted"})
+
+    def test_decision_inflight_renders_only_the_mappable_userpromptsubmit_registration(self):
+        # The PostToolUse/AskUserQuestion registration of this SAME script
+        # stays UNMAPPABLE (no confirmed Copilot AskUserQuestion analogue) —
+        # only the UserPromptSubmit registration renders.
+        payload = json.loads(
+            (self._hooks_dir() / "jig-decision-inflight.json").read_text()
+        )
+        self.assertEqual(set(payload["hooks"].keys()), {"userPromptSubmitted"})
+
+    def test_task_capture_decision_capture_claim_check_render_under_stop(self):
+        for stem in ("jig-task-capture", "jig-decision-capture", "jig-claim-check"):
+            payload = json.loads((self._hooks_dir() / f"{stem}.json").read_text())
+            self.assertEqual(set(payload["hooks"].keys()), {"agentStop"}, stem)
+
+    # AC2 — scripts + lib deps shipped (the 113-06 audit: these libs are NOT
+    # covered by the 113-04/113-05 lib allowlist, which was curated for the
+    # original 6 hooks only).
+    def test_nine_remaining_scripts_shipped_and_executable(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        for name in (
+            "jig-context-check.sh",
+            "jig-post-edit-verify.sh",
+            "jig-project-orient.sh",
+            "jig-semantic-index.sh",
+            "jig-memory-scan.sh",
+            "jig-decision-inflight.sh",
+            "jig-task-capture.sh",
+            "jig-decision-capture.sh",
+            "jig-claim-check.sh",
+        ):
+            path = scripts_dir / name
+            self.assertTrue(path.is_file(), f"missing shipped file: {name}")
+            self.assertTrue(path.stat().st_mode & 0o111, f"{name} is not executable")
+
+    def test_nine_remaining_scripts_are_byte_identical_to_source(self):
+        scripts_dir = self._hooks_dir() / "scripts"
+        for name in (
+            "jig-context-check.sh",
+            "jig-post-edit-verify.sh",
+            "jig-project-orient.sh",
+            "jig-semantic-index.sh",
+            "jig-memory-scan.sh",
+            "jig-decision-inflight.sh",
+            "jig-task-capture.sh",
+            "jig-decision-capture.sh",
+            "jig-claim-check.sh",
+        ):
+            source = (REPO_ROOT / "hooks" / "scripts" / name).read_bytes()
+            shipped = (scripts_dir / name).read_bytes()
+            self.assertEqual(shipped, source, name)
+
+    def test_newly_required_lib_deps_shipped(self):
+        # The 113-06 audit findings: context-check needs lib/context_fill.py;
+        # decision-inflight and decision-capture need lib/decision_scratch.py;
+        # decision-capture also needs lib/decision_scan.py; claim-check needs
+        # lib/claim_check.py. None of these 4 were in the 113-04/05 allowlist
+        # (curated for the original 6 hooks only).
+        scripts_dir = self._hooks_dir() / "scripts"
+        for rel_name in (
+            "lib/context_fill.py",
+            "lib/decision_scratch.py",
+            "lib/decision_scan.py",
+            "lib/claim_check.py",
+        ):
+            self.assertTrue(
+                (scripts_dir / rel_name).is_file(), f"missing shipped lib dep: {rel_name}"
+            )
+
+    def test_project_orient_can_resolve_spec_workflow_skill_via_relative_climb(self):
+        # jig-project-orient.sh's fallback candidate is
+        # `script_dir.parents[1] / 'skills' / 'spec-workflow' / 'workflow.py'`
+        # — from `.github/hooks/scripts` that climbs to `.github/skills/
+        # spec-workflow/workflow.py`, which `_copy_skills` already ships.
+        scripts_dir = self._hooks_dir() / "scripts"
+        workflow = scripts_dir.parents[1] / "skills" / "spec-workflow" / "workflow.py"
+        self.assertTrue(workflow.is_file(), str(workflow))
+
 
 class RenderedHookCommandFiresEndToEndTests(unittest.TestCase):
     """Slice 113-04 follow-up (coordinator-requested AC1 completion) — the
@@ -1220,6 +1455,91 @@ class DescriptionFieldEncodingTests(unittest.TestCase):
         self.assertIn("é", rendered_fm)
 
 
+class PackageCompletenessTests(unittest.TestCase):
+    """Slice 113-06 AC5 (package completeness) — every `.github/...` path a
+    rendered SKILL.md body or hook `.json` command references must resolve
+    to a real path inside the built package. Surfaced by the 113-04
+    compliance review: `rewrite_skill_md_paths` rewrites
+    `${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py` (the `analyze` skill body)
+    to `.github/scripts/spec_lint.py`, but the package shipped no
+    `scripts/` tree at all — a rewritten reference pointing at nothing."""
+
+    # Matches a `.github/...` path reference in rendered text, trimmed of a
+    # trailing sentence-period a naked (non-code-span) prose mention might
+    # carry (no such case exists in the repo TODAY — every real reference is
+    # inside a code span/quotes — but stripping it keeps this robust against
+    # a future prose-only mention).
+    _GITHUB_PATH_RE = re.compile(r'\.github/[A-Za-z0-9_.\-/]+')
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-completeness-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _referenced_github_paths(self) -> set:
+        refs: set = set()
+        skills_dir = self.out_dir / ".github" / "skills"
+        for skill_md in skills_dir.glob("*/SKILL.md"):
+            text = skill_md.read_text(encoding="utf-8")
+            refs.update(m.rstrip(".") for m in self._GITHUB_PATH_RE.findall(text))
+        hooks_dir = self.out_dir / ".github" / "hooks"
+        for hook_file in hooks_dir.glob("*.json"):
+            text = hook_file.read_text(encoding="utf-8")
+            refs.update(m.rstrip(".") for m in self._GITHUB_PATH_RE.findall(text))
+        return refs
+
+    def test_every_referenced_github_path_resolves_in_the_package(self):
+        refs = self._referenced_github_paths()
+        self.assertTrue(refs, "no .github/ references found — fixture drifted")
+        missing = []
+        for ref in sorted(refs):
+            target = self.out_dir / ref
+            ok = target.is_dir() if ref.endswith("/") else target.is_file()
+            if not ok:
+                missing.append(ref)
+        self.assertEqual(
+            missing, [],
+            f"rendered .github/ reference(s) resolve to nothing in the "
+            f"package: {missing!r}",
+        )
+
+    # Explicit per slice 113-06: the analyze skill's rewritten
+    # ${CLAUDE_PLUGIN_ROOT}/scripts/spec_lint.py reference.
+    def test_spec_lint_reference_resolves_explicitly(self):
+        analyze_skill = self.out_dir / ".github" / "skills" / "analyze" / "SKILL.md"
+        text = analyze_skill.read_text(encoding="utf-8")
+        self.assertIn(".github/scripts/spec_lint.py", text)
+        self.assertTrue(
+            (self.out_dir / ".github" / "scripts" / "spec_lint.py").is_file()
+        )
+
+    def test_migrate_skill_references_still_resolve(self):
+        migrate_skill = self.out_dir / ".github" / "skills" / "migrate" / "SKILL.md"
+        text = migrate_skill.read_text(encoding="utf-8")
+        self.assertIn(".github/skills/migrate/migrate.py", text)
+        self.assertTrue(
+            (self.out_dir / ".github" / "skills" / "migrate" / "migrate.py").is_file()
+        )
+
+    def test_templates_tree_directory_reference_resolves(self):
+        scaffold_skill = (
+            self.out_dir / ".github" / "skills" / "scaffold-init" / "SKILL.md"
+        )
+        text = scaffold_skill.read_text(encoding="utf-8")
+        self.assertIn(".github/templates/", text)
+        self.assertTrue((self.out_dir / ".github" / "templates").is_dir())
+
+    # AC3 — the actually-built package satisfies the static Copilot
+    # install-contract validator.
+    def test_actually_built_package_validates_clean(self):
+        problems = install_contract.validate_copilot_package(self.out_dir)
+        self.assertEqual(problems, [])
+
+
 class CopilotPackageBuildSafetyTests(unittest.TestCase):
     """Build safety mirrors Claude/Codex — refuse unsafe output dirs; replace
     atomically."""
@@ -1352,6 +1672,52 @@ class CommittedCopilotPackageTests(unittest.TestCase):
         # 113-02 review fix: no pre-rendered instructions file ships.
         pkg = REPO_ROOT / "hosts" / "copilot"
         self.assertFalse((pkg / ".github" / "copilot-instructions.md").exists())
+
+    def test_committed_remaining_advisory_hooks_present(self):
+        # 113-06 AC6: the 9 remaining MAPPABLE advisory hooks join the
+        # committed package.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        for stem in (
+            "jig-context-check", "jig-post-edit-verify", "jig-project-orient",
+            "jig-semantic-index", "jig-memory-scan", "jig-decision-inflight",
+            "jig-task-capture", "jig-decision-capture", "jig-claim-check",
+        ):
+            self.assertTrue(
+                (pkg / ".github" / "hooks" / f"{stem}.json").is_file(),
+                f"committed hosts/copilot hook missing: {stem} — run "
+                "`python3 scripts/build_host_packages.py`",
+            )
+
+    def test_committed_context_check_has_three_event_keys(self):
+        # The multi-event merge fix (113-06) — one file, three Copilot event
+        # keys, not a last-write-wins collision.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        data = json.loads(
+            (pkg / ".github" / "hooks" / "jig-context-check.json").read_text()
+        )
+        self.assertEqual(
+            set(data["hooks"].keys()),
+            {"preToolUse", "sessionStart", "userPromptSubmitted"},
+        )
+
+    def test_committed_scripts_and_templates_present(self):
+        # 113-06 AC5: package-completeness — the runtime scripts allowlist
+        # and the unrendered templates tree both join the committed package.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        self.assertTrue(
+            (pkg / ".github" / "scripts" / "spec_lint.py").is_file(),
+            "committed hosts/copilot scripts/spec_lint.py missing — run "
+            "`python3 scripts/build_host_packages.py`",
+        )
+        self.assertTrue(
+            (pkg / ".github" / "templates" / "CLAUDE.md.template").is_file(),
+            "committed hosts/copilot templates/ tree missing — run "
+            "`python3 scripts/build_host_packages.py`",
+        )
+
+    def test_committed_package_validates_clean(self):
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        self.assertEqual(install_contract.validate_copilot_package(pkg), [])
 
 
 if __name__ == "__main__":
