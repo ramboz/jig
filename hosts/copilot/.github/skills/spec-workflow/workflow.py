@@ -1,0 +1,5556 @@
+"""
+jig spec-workflow helper — slice 003-01 (lifecycle-helper)
+
+Deterministic state-transition + status-board sync for the spec-driven
+workflow. Mirrors the scaffold.py / memory.py pattern: Claude reads the
+SKILL.md for judgment-driven steps; this script handles file mutations.
+
+Usage:
+    python3 workflow.py transition <spec.md> <slice-name> <new-status>
+    python3 workflow.py status-board <project-dir>
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+# Commands such as `orient` must remain read-only even when this helper and
+# `_common` are installed inside the target project.
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import (
+    derived_docs,
+    project_layout,
+    reservation,
+    subtree,
+    team_signal,  # noqa: F401  (re-exported for test monkeypatching)
+)
+from _common import review_evidence as _evidence
+from _common.atomic_io import atomic_write_text
+from _common.claim_ref import (
+    create_local_claim,
+    push_claim,
+    release_local_claim,
+    release_remote_claim,
+)
+from _common.cross_ref_state import (
+    ABSENT,  # noqa: F401 (re-export for callers/tests)
+    find_sibling_done,
+    find_sibling_in_progress_claim,
+    identifier_state_on_ref,
+)
+from _common.gate_telemetry import emit_gate_bypass, read_spec_ref
+from _common.parsing import (
+    FRONTMATTER_TRUTHY,
+    SliceLookupError,
+    check_deviation_log,
+    check_reconciliation_sweep,
+    clear_frontmatter_field,
+    env_gate_enabled,
+    frontmatter_flag_truthy,
+    parse_frontmatter,
+    set_frontmatter_field,
+)
+from _common.parsing import iter_slices as _iter_slices_common
+from _common.parsing import load_slice as _load_slice_common
+from _common.review_evidence import evidence_gate_enabled as _evidence_gate_enabled
+from _common.review_evidence import validate_evidence
+from _common.scaffold_state import classify_scaffold_state
+from _common.scaffold_state import precondition_enabled as _scaffold_precondition_enabled
+from _common.team_signal import team_context_drift
+from _common.use_cases import (
+    has_use_cases_section,
+    parse_use_cases,
+    resolve_use_cases,
+)
+
+VALID_STATUSES = (
+    "DRAFT",
+    "READY_FOR_REVIEW",
+    "READY_FOR_IMPLEMENTATION",
+    "IN_PROGRESS",
+    "REVIEWED",
+    "RECONCILED",
+    "DONE",
+    "DEFERRED",
+    "ABANDONED",
+)
+
+# Slice 014-02: only DRAFT (and DEFERRED itself, idempotent) are valid
+# outbound transitions from DEFERRED. Re-opening means going back to
+# DRAFT and starting the lifecycle over. Other states require explicit
+# DRAFT first to avoid silently skipping review gates.
+# Slice 085-01: DEFERRED -> ABANDONED is also allowed — a parked slice can
+# be permanently dropped without first re-opening to DRAFT (AC1 explicitly
+# lists DEFERRED among the pre-DONE states ABANDONED must be reachable
+# from).
+_DEFERRED_ALLOWED_NEXT = ("DRAFT", "DEFERRED", "ABANDONED")
+
+# Slice 085-01: ABANDONED mirrors DEFERRED's restricted outbound edges —
+# only DRAFT (re-open) or ABANDONED itself (idempotent) are valid targets.
+_ABANDONED_ALLOWED_NEXT = ("DRAFT", "ABANDONED")
+
+# Slice 003-04: auto-tick the review-passed DoD box on the gating
+# transition. Maps `new_status` → label-substring (case-insensitive) the
+# auto-tick logic looks for in the slice's DoD. Other transitions don't
+# tick anything.
+_AUTO_TICK_LABELS = {
+    "REVIEWED": "implementation review passed",
+    "RECONCILED": "reconciliation review passed",
+}
+
+# Same regex shape as slice-land's CLOSE_OUT_RE — keep them in sync; slice
+# 009-01 established this convention. Boxes inside a `### Close-out (post-DONE)`
+# subsection are post-DONE follow-up and NOT eligible for auto-tick.
+_CLOSE_OUT_RE = re.compile(r"(?im)^###\s+close[- ]?out\b")
+
+# Inbox 2026-05-18 `spec-workflow/transition/status-marker-clobber` —
+# anchor the slice's prose STATUS marker to the START of a line so
+# quoted prose like `` `**STATUS: DRAFT**` `` inside a deviation log
+# (preceded by a backtick or other character) doesn't get matched and
+# rewritten as if it were the slice's own status line. The canonical
+# shape is `**STATUS: VALUE**` starting at column 0, optionally followed
+# by a trailing italic annotation like ` _(deferred — gated on …)_`
+# (many legacy DEFERRED slices use this form, e.g. 005-02, 006-02,
+# 007-04, 012-02, 014-02, 017-04). Only `^**` is anchored — trailing
+# content after the closing `**` is allowed. Hit on slice 030-01
+# (frontmatter-only slice with no real prose marker, where the regex
+# matched the FIRST prose-quoted marker and clobbered it). All five
+# sites in this file share this constant.
+_STATUS_MARKER_RE = re.compile(r"(?m)^(\*\*STATUS:\s*)([A-Z_]+)(\*\*)")
+
+# Slice 029-02: visible marker prepended to a slice's row when the slice's
+# frontmatter carries `kind: spike`. Single emoji (no schema churn — see
+# spec 029 Open question #3 lean), recomputed at render time from each
+# slice's `kind:` field (so the marker is never the source of truth; the
+# slice frontmatter is). Manual edits to the board that strip the marker
+# are re-added on the next regen; manual edits to a slice's `kind:` field
+# propagate on the next regen.
+SPIKE_MARKER = "\U0001f52c"  # 🔬
+
+
+class WorkflowError(RuntimeError):
+    """Raised for user-facing workflow errors (CLI exits non-zero)."""
+
+
+class StatusBoardRaceError(WorkflowError):
+    """Slice 028-03: raised when `regenerate_status_board` detects that
+    `docs/specs/README.md` changed on disk between pre-regen checksum
+    and pre-write checksum (another worktree's regen ran in the gap).
+
+    Caught explicitly in `main()` and surfaces as exit code 4 (after the
+    0/1/2/3 conventions; see also `StatusBoardRaceError` reference in
+    SKILL.md). Bypassable via the `--force` flag / `force=True` kwarg.
+    """
+
+
+# Slice 028-03: module-level helper extracted so tests can monkeypatch
+# `_checksum` to inject deterministic mid-regen mutations
+# (`patch.object(_wf, "_checksum", side_effect=[pre, post])`). SHA256 on
+# read bytes (not mtime+size — mtime is coarse on some filesystems;
+# SHA256 on a few-KB README is cheap and bulletproof).
+def _checksum(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_slice(spec_path, slice_fragment: str):
+    """Resolve a slice fragment to a `SliceLocation` (path / text / start
+    / end / label), dual-read across slice files and `## Slice` sections.
+    Re-raises `SliceLookupError` as `WorkflowError` to keep CLI messages
+    consistent.
+
+    Slice 018-02 migration: replaced `find_slice_section(text, fragment)`
+    + manual `read_text()` with this helper. Write-side callers use
+    `atomic_write_text(loc.path, new_text)` (slice 032-01) to write back
+    to whichever file the slice lives in (slice file or spec.md).
+    """
+    try:
+        return _load_slice_common(spec_path, slice_fragment)
+    except SliceLookupError as e:
+        raise WorkflowError(str(e)) from e
+
+
+def _auto_tick_review_box(section: str, label_substring: str) -> tuple:
+    """In a slice's section, find the single `- [ ]` (or `- [x]`) checkbox
+    whose label contains `label_substring` (case-insensitive) and flip it
+    to ticked. Returns (new_section, warning_or_None).
+
+    Behavior:
+    - 0 matches → (section, None) — best-effort, no warning. The
+      transition still succeeds; auto-tick isn't a gate.
+    - 1 match (unticked) → flip to `[x]`; (new_section, None).
+    - 1 match (already ticked) → no-op; (section, None) — idempotent.
+    - 2+ matches → (section, warning_string), no tick. The user's DoD
+      is non-canonical; the helper refuses to guess.
+
+    Excludes any `### Close-out` subsection from the search (slice 009-01
+    convention; post-DONE items aren't tickable by transition).
+    """
+    co = _CLOSE_OUT_RE.search(section)
+    dod_region = section[:co.start()] if co else section
+
+    box_re = re.compile(r"(?m)^(\s*-\s+\[)([ xX])(\]\s+)([^\n]*)$")
+    matches = [
+        cb for cb in box_re.finditer(dod_region)
+        if label_substring.lower() in cb.group(4).lower()
+    ]
+
+    if len(matches) == 0:
+        return section, None
+    if len(matches) > 1:
+        return section, (
+            f"multiple matches for {label_substring!r} in slice DoD; "
+            "not auto-ticking — please disambiguate manually"
+        )
+
+    cb = matches[0]
+    if cb.group(2).lower() == "x":
+        return section, None  # already ticked — idempotent
+
+    new_box = cb.group(1) + "x" + cb.group(3) + cb.group(4)
+    new_section = section[:cb.start()] + new_box + section[cb.end():]
+    return new_section, None
+
+
+_SLICE_HEADING_LINE_RE = re.compile(r"(?m)^##\s+Slice[^\n]*\n")
+
+
+def _split_slice_section(section: str) -> tuple:
+    """Split a slice section into (head_chunk, body_chunk).
+
+    Two layouts (slice 018-02):
+    - **Embedded** (section comes from a `## Slice ...` block inside
+      spec.md): section starts with the heading line; frontmatter, if
+      present, follows it. `head_chunk` is the heading line (including
+      trailing `\\n`); `body_chunk` is everything after.
+    - **Slice-file** (section is a whole `slice-*.md` file): file
+      starts with a `---\\n...---\\n` frontmatter block; the heading
+      appears later. `head_chunk` is empty so that `body_chunk` is the
+      full file — `parse_frontmatter(body_chunk)` will then locate the
+      frontmatter at column 0 as designed.
+
+    Detection: if the section starts with `## Slice`, it's embedded;
+    otherwise treat it as slice-file (or as a section with no header,
+    in which case the whole thing is body)."""
+    if section.startswith("##"):
+        nl = section.find("\n")
+        if nl < 0:
+            return section, ""
+        return section[: nl + 1], section[nl + 1:]
+    # Slice-file layout (or no header at all) — body is the full section
+    # so frontmatter parsing / writing operates on the canonical location.
+    return "", section
+
+
+def _today() -> str:
+    return datetime.date.today().isoformat()
+
+
+def _slice_frontmatter(section: str) -> tuple:
+    """Returns (fields, body_offset_within_section). body_offset is
+    measured from the start of `section` (i.e. includes the header
+    line)."""
+    _hdr, body = _split_slice_section(section)
+    fields, body_off = parse_frontmatter(body)
+    header_len = len(section) - len(body)
+    return fields, header_len + body_off
+
+
+def _set_slice_frontmatter_field(section: str, key: str, value) -> str:
+    hdr, body = _split_slice_section(section)
+    new_body = set_frontmatter_field(body, key, value)
+    return hdr + new_body
+
+
+def _clear_slice_frontmatter_field(section: str, key: str) -> str:
+    """Slice 049-01: drop a frontmatter field from a slice section,
+    layout-aware (mirrors `_set_slice_frontmatter_field`)."""
+    hdr, body = _split_slice_section(section)
+    new_body = clear_frontmatter_field(body, key)
+    return hdr + new_body
+
+
+# Slice 031-02: tokens treated as truthy in the `arch_review:` frontmatter
+# field. Slice 045-03 (must-do d) lifted the tuple + the truthiness test
+# into `_common.parsing` so this orchestrator reader and
+# `review_evidence._arch_review_flag` (the gate's reader) share ONE source
+# and cannot drift. The module-level name is kept as an alias to the shared
+# constant — pinned to be the SAME object by
+# `ArchReviewTruthyUnificationTests` — so prior in-module references stay
+# valid while the source of truth is single.
+_ARCH_REVIEW_TRUTHY = FRONTMATTER_TRUTHY
+
+
+def slice_needs_arch_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares `arch_review: true`
+    (or any of the lower-cased truthy tokens in `_ARCH_REVIEW_TRUTHY`:
+    `true` / `yes` / `on` / `1`).
+
+    Slice 031-02 AC #4: this helper drives the orchestrator's decision
+    to spawn the on-demand arch-review pass. Defaults to False when:
+      - the slice's frontmatter is absent entirely
+      - the `arch_review:` field is absent
+      - the value is anything other than a recognized truthy token
+
+    Layout-aware via `_slice_frontmatter`: works for both file-per-slice
+    (frontmatter at top of slice file) and legacy embedded slices
+    (frontmatter inside the `## Slice` section). Consistent with how
+    `collect_slices` / `compute_spec_status` / `_lookup_slice_status`
+    read slice-level frontmatter elsewhere in this module.
+
+    Raises WorkflowError on slice lookup failures (missing spec,
+    unknown slice, ambiguous fragment) — the orchestrator must surface
+    those as gating errors, not silently default to False.
+
+    Slice 045-03: truthiness now delegates to
+    `_common.parsing.frontmatter_flag_truthy` (handles the non-string /
+    defensive cases too) so this and the gate share one predicate.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("arch_review", ""))
+
+
+def slice_needs_code_health_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares
+    `code_health_review: true` (slice 060-05; mirrors
+    `slice_needs_arch_review` exactly).
+
+    Drives the orchestrator's decision to spawn the on-demand code-health
+    review pass, and keeps the spawner in lock-step with the evidence
+    gate's reader (`review_evidence._code_health_review_flag`) via the same
+    shared `frontmatter_flag_truthy` predicate. Defaults to False on any
+    miss (no frontmatter, field absent, non-truthy value) so every
+    existing slice (no flag) is unaffected — the pass is opt-in/gated.
+
+    Layout-aware via `load_slice`; raises WorkflowError on slice lookup
+    failures, like `slice_needs_arch_review`.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("code_health_review", ""))
+
+
+def slice_needs_design_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares
+    `design_review: true` (slice 071-01; mirrors `slice_needs_arch_review`
+    exactly).
+
+    Drives the orchestrator's decision to spawn the on-demand, attest-only
+    design-review pass (a read-only reviewer ATTESTS the external
+    design-fidelity eval's frozen verdict — ADR-0022), and keeps the
+    spawner in lock-step with the evidence gate's reader
+    (`review_evidence._design_review_flag`) via the same shared
+    `frontmatter_flag_truthy` predicate. Defaults to False on any miss (no
+    frontmatter, field absent, non-truthy value) so every existing slice
+    (no flag) is unaffected — the pass is opt-in/gated.
+
+    Layout-aware via `load_slice`; raises WorkflowError on slice lookup
+    failures, like `slice_needs_arch_review`.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("design_review", ""))
+
+
+# ---------- derived frame_review trigger (slice 064-04 / ADR-0020) ----------
+
+# A `## Assumptions` bullet/line that is a placeholder rather than a real
+# assumption — the risk-gated "no unverified load-bearing assumptions" state.
+# Compared case-insensitively against the stripped, markdown-stripped content.
+# `None` is the canonical "no assumptions" marker (spec 064-02 template);
+# `_TBD_` / `_TODO_` are the italic stub placeholders the reservation stub /
+# slice template ship. Anything else (real prose) flips the trigger on.
+_FRAME_ASSUMPTION_PLACEHOLDERS = ("none", "tbd", "todo", "n/a", "na")
+
+_ADR_BASENAME_RE = re.compile(r"^adr-\d", re.IGNORECASE)
+
+
+def _extract_section_body(text: str, heading: str) -> str:
+    """Return the body of a `## <heading>` section — everything from after
+    the heading line up to (but not including) the next `## ` heading (or
+    EOF). Returns "" when the heading is absent. Pure / read-only.
+
+    Used by `derive_frame_review` to read the `## Assumptions` section. A
+    small local reader rather than a shared helper because it has exactly
+    one caller (ADR-0002: extract on the third)."""
+    m = re.search(r"(?m)^##[ \t]+" + re.escape(heading) + r"[ \t]*$", text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    nxt = re.search(r"(?m)^##[ \t]", rest)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def _assumptions_are_real(body: str) -> bool:
+    """True iff the `## Assumptions` section body carries >=1 real (non-
+    placeholder) assumption. Conservative: empty body, or a body whose only
+    meaningful content is a placeholder, returns False.
+
+    A line is a PLACEHOLDER iff (a) it is fully emphasis-wrapped — `_..._` /
+    `*...*` — i.e. the template guidance stub the spec/ADR ships
+    (`_TBD — list load-bearing assumptions ..._`, `- _TODO_`), OR (b) its
+    WHOLE content (ignoring a leading bullet + trailing punctuation) is a bare
+    placeholder token (`None` / `TBD` / `TODO` / `N/A`). Matching the *whole*
+    line — not just the first token — means a real assumption that merely
+    *begins* with a placeholder word ("None of the dates are tz-aware",
+    "TBD-style configs are validated") correctly counts as real (064-04
+    craft-review fix: the first-token heuristic false-negatived these and
+    silently suppressed the trigger — the exact failure 064 guards against)."""
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Strip a leading list-bullet marker.
+        line = re.sub(r"^[-*+]\s+", "", line).strip()
+        if not line:
+            continue
+        # (a) Fully emphasis-wrapped → template guidance stub, not a real
+        #     assumption.
+        if re.fullmatch(r"_.+_", line) or re.fullmatch(r"\*.+\*", line):
+            continue
+        # (b) Whole line is a bare placeholder token (trailing punctuation
+        #     tolerated) → "no assumptions".
+        token = line.strip("_*").strip().rstrip(".:;—- ").lower()
+        if token in _FRAME_ASSUMPTION_PLACEHOLDERS:
+            continue
+        # Anything else is a real, surfaced assumption.
+        return True
+    return False
+
+
+def derive_frame_review(spec_path, slice_fragment: str) -> bool:
+    """Slice 064-04 (AC1/AC2): DERIVE whether `frame_review: true` should be
+    set for a target — the mechanical, side-effect-free rule that makes the
+    adversarial frame-critique pass (064-03) auto-trigger exactly when there
+    is an unverified frame to attack. This DERIVES the flag; it does NOT read
+    an existing one (contrast `slice_needs_arch_review`, which reads).
+
+    The rule (ADR-0020 Option B §3 + Amendments OQ3, 2026-06-07):
+      - **ADR target** — the path basename matches `adr-*.md` (an ADR under
+        `docs/decisions/`): always-on (`True`). OQ3 resolved ADRs always
+        carry frame-review; encoded here even though the ADR-side accept-gate
+        is slice 064-05.
+      - **else a spec/slice**: `True` iff the **spec's** `## Assumptions`
+        section (in spec.md — where 064-02 places it; the slice template only
+        *points* at it) OR, defensively, the slice's own `## Assumptions`
+        section carries >=1 real (non-placeholder) assumption.
+        This is the mechanical link 064-02 set up: the act of grounding +
+        surfacing assumptions produces the trigger signal. The ADR-0020 rule
+        also names "introduces a new external dependency / asserts external
+        library/API/version/perf behavior" — but per the 064-02 contract
+        those claims LIVE in `## Assumptions`, so the assumptions-non-empty
+        check subsumes them. No fragile NLP external-dependency heuristic.
+      - **else**: `False`.
+
+    Conservative + pure (clarify-style): any parse miss / empty section /
+    placeholder-only body returns False — default-off, so existing specs are
+    unaffected. No file writes, no frontmatter mutation (stdout/return only,
+    like `session_plan`).
+
+    Raises WorkflowError on slice lookup failure for the spec/slice path
+    (mirrors `slice_needs_arch_review`) — the CLI surfaces it as a non-zero
+    exit. ADR targets short-circuit on the path basename before any slice
+    lookup (an ADR file is not a sliced spec)."""
+    p = Path(spec_path)
+    if _ADR_BASENAME_RE.match(p.name):
+        return True
+    # Validate the slice exists (CLI contract: raise on a bad fragment,
+    # mirroring slice_needs_arch_review); keep `loc` for the slice-level
+    # fallback below.
+    loc = load_slice(spec_path, slice_fragment)
+    # PRIMARY signal: the SPEC-level `## Assumptions` (spec 064-02 places it
+    # in spec.md; the slice template only *points* at it). The frame being
+    # critiqued is the spec's, so its load-bearing assumptions are spec-level.
+    spec_text = p.read_text(encoding="utf-8")
+    if _assumptions_are_real(_extract_section_body(spec_text, "Assumptions")):
+        return True
+    # DEFENSIVE fallback: a slice that carries its own `## Assumptions`.
+    section = loc.text[loc.start:loc.end]
+    return _assumptions_are_real(_extract_section_body(section, "Assumptions"))
+
+
+# ---------- session-plan: delegation-first dispatch plan (slice 057-01) ----------
+
+# The standard per-slice phase sequence. Each tuple is
+# (phase, subagent type, skill) — the orchestrator dispatches each phase to
+# the named subagent + skill rather than doing the turn-heavy work itself.
+# Each phase is either DELEGATED to a subagent (runs in its own isolated
+# context) or an ORCHESTRATOR dispatch step (the orchestrator's own loop).
+# Fields: (phase, mode, actor, skill) where mode is "delegate"|"dispatch",
+# `actor` is the subagent type for delegated phases (None for dispatch
+# steps the orchestrator drives itself), and `skill` is the jig skill the
+# phase runs (None when the phase has no skill — e.g. `implement`, which
+# the `implementer` *agent* performs). Mirrors CLAUDE.md "Session workflow"
+# and docs/workflow.md "Post-implementation review".
+# The arch phase is conditional (emitted iff the slice declares
+# `arch_review: true`); it is inserted between `craft` and `reconcile`.
+# The code-health phase is likewise conditional (emitted iff the slice
+# declares `code_health_review: true` — slice 060-05); it is inserted
+# after the arch phase (or after craft when no arch) and before reconcile.
+# The design-review phase is likewise conditional (emitted iff the slice
+# declares `design_review: true` — slice 071-01); the attest-only pass is
+# inserted after the code-health phase and before reconcile.
+_SESSION_PLAN_PHASES = (
+    ("implement", "delegate", "implementer", None),
+    ("compliance", "delegate", "reviewer", "jig:independent-review"),
+    ("craft", "delegate", "reviewer", "pr-review"),
+    # arch + code-health (both conditional) inserted here, in that order.
+    ("reconcile", "dispatch", None, "jig:independent-review"),
+    ("land", "dispatch", None, "jig:slice-land"),
+)
+
+# Slice 064-04: the conditional PRE-implementation frame-critique phase
+# (ADR-0020 Option B). Emitted as the FIRST phase, BEFORE `implement`, iff
+# the slice declares `frame_review: true` — the adversarial pass gates
+# DRAFT → READY_FOR_REVIEW (pre-implementation), so the orchestrator must
+# dispatch it before building. This closes the spawner/gate dispatch gap the
+# 064-03 arch review flagged (a flagged spec would otherwise hit a gate it
+# was never dispatched to satisfy — the dead-loop ADR-0020 warns against).
+_SESSION_PLAN_FRAME_PHASE = (
+    "frame-critique", "delegate", "reviewer", "jig:independent-review")
+
+_SESSION_PLAN_ARCH_PHASE = ("arch", "delegate", "reviewer", "arch-review")
+
+# Where the conditional arch phase slots into the sequence (after craft).
+_SESSION_PLAN_ARCH_AFTER = "craft"
+
+# The conditional code-health phase (slice 060-05). Slots in right after
+# the craft block (and after arch, since arch is emitted first).
+_SESSION_PLAN_CODE_HEALTH_PHASE = (
+    "code-health", "delegate", "reviewer", "jig:code-health")
+
+# The conditional design-review phase (slice 071-01). The attest-only pass
+# runs via jig:independent-review (a read-only `reviewer` subagent attesting
+# the external design-fidelity eval's frozen verdict — never re-deriving it,
+# the ADR-0022 honesty boundary). Slots in after the code-health phase and
+# before reconcile.
+_SESSION_PLAN_DESIGN_REVIEW_PHASE = (
+    "design-review", "delegate", "reviewer", "jig:independent-review")
+
+# Slice 074-02: host-mode hints are advisory UX guidance, not lifecycle
+# state. Keep the values host-neutral so adapters can map them to Claude,
+# Codex, or another host without changing jig transition semantics.
+_SESSION_PLAN_HOST_MODE_HINTS = {
+    "frame-critique": "plan",
+    "implement": "implement",
+    "compliance": "review",
+    "craft": "review",
+    "arch": "review",
+    "code-health": "review",
+    "design-review": "review",
+    "reconcile": "reconcile",
+    "land": "land",
+}
+
+
+def _slice_status_from_section(section: str) -> str:
+    """Layout-aware status read for a slice section/file — frontmatter
+    `status:` first, else the prose `**STATUS: X**` marker. Mirrors the
+    read in `collect_slices` / `compute_spec_status`. Returns "" when
+    neither is present."""
+    fm_fields, _ = _slice_frontmatter(section)
+    if fm_fields.get("status"):
+        return str(fm_fields["status"])
+    sm = _STATUS_MARKER_RE.search(section)
+    return sm.group(2) if sm else ""
+
+
+def session_plan(spec_path: Path) -> str:
+    """Slice 057-01: emit a deterministic, delegation-first dispatch plan
+    for a spec — each non-DEFERRED, non-ABANDONED slice (slice 085-01
+    AC5) mapped to its phase sequence
+    ([frame-critique iff `frame_review: true`, PRE-implementation] →
+    implement → compliance → craft → [arch iff `arch_review: true`] →
+    [code-health iff `code_health_review: true`] → reconcile → land) with
+    the subagent type + skill for each phase.
+
+    The conditional frame-critique phase (slice 064-04 / ADR-0020) is
+    emitted FIRST, before `implement` — the adversarial pass gates
+    DRAFT → READY_FOR_REVIEW (pre-implementation), so the orchestrator
+    dispatches it before building. This closes the dispatch gap 064-03
+    flagged: a `frame_review: true` slice now surfaces its pass on the
+    dispatch surface the orchestrator follows.
+
+    Pure function of the spec's slices + their frontmatter — no hidden
+    state, no side effects on spec/slice files (clarify Q1/Q2: helper
+    form, stdout-only). The orchestrator then *dispatches against the
+    plan* rather than improvising each step across many turns — cutting
+    turn count, the data-confirmed cost driver (cost ∝ turns, r = 0.92).
+
+    Empty / non-standard edge case: a spec with zero non-DEFERRED slices
+    prints a clear "no slices to plan" message (with the reason) rather
+    than crashing or emitting an empty plan.
+    """
+    spec_path = Path(spec_path)
+
+    # Enumerate slices via the shared dual-layout iterator, excluding
+    # DEFERRED. `arch_review` is read per-slice from its frontmatter via
+    # the shared truthy predicate (no hand-rolled truthiness).
+    # list of (label, needs_frame, needs_arch, needs_code_health,
+    #          needs_design)
+    planned = []
+    total = 0
+    for loc in _iter_slices_common(spec_path):
+        total += 1
+        section = loc.text[loc.start:loc.end]
+        status = _slice_status_from_section(section)
+        if status in ("DEFERRED", "ABANDONED"):
+            continue
+        fm_fields, _ = _slice_frontmatter(section)
+        needs_frame = frontmatter_flag_truthy(fm_fields.get("frame_review", ""))
+        needs_arch = frontmatter_flag_truthy(fm_fields.get("arch_review", ""))
+        needs_code_health = frontmatter_flag_truthy(
+            fm_fields.get("code_health_review", ""))
+        needs_design = frontmatter_flag_truthy(
+            fm_fields.get("design_review", ""))
+        planned.append((loc.label, needs_frame, needs_arch, needs_code_health,
+                        needs_design))
+
+    lines = []
+    lines.append(f"# Session plan — {spec_path}")
+    lines.append("")
+    # Delegation-first framing + turn-count rationale (AC #2).
+    lines.append("Delegation-first dispatch plan. The orchestrator re-reads "
+                 "its full context on EVERY turn, so its cost is roughly "
+                 "context-size x turn count (the data-confirmed driver: "
+                 "cost is proportional to turns, r = 0.92). Push multi-turn "
+                 "sub-work into bounded subagents that return compact "
+                 "summaries; the orchestrator DISPATCHES each phase below and "
+                 "INTEGRATES the result, rather than doing turn-heavy work "
+                 "itself.")
+    lines.append("")
+    lines.append("Each phase is either DELEGATED to a [subagent] (runs in its "
+                 "own isolated context) or an ORCHESTRATOR step (the "
+                 "orchestrator's own dispatch-and-integrate loop). A phase that "
+                 "runs a jig {skill} names it; `implement` runs the "
+                 "[implementer] agent (no skill), and `reconcile`/`land` are "
+                 "orchestrator-driven steps.")
+    lines.append("Host-mode hints are advisory only: they suggest the portable "
+                 "phase to use in a native host UX (`plan`, `implement`, "
+                 "`review`, `reconcile`, or `land`) and never satisfy or block "
+                 "workflow.py transitions, review evidence, or dependency "
+                 "checks.")
+    lines.append("")
+
+    if not planned:
+        if total == 0:
+            reason = "this spec has no slices"
+        else:
+            reason = "every slice is DEFERRED or ABANDONED"
+        lines.append(f"No slices to plan ({reason}).")
+        return "\n".join(lines) + "\n"
+
+    def _render_phase(step, phase, mode, actor, skill, note=""):
+        if mode == "delegate":
+            head = f"DELEGATE to [{actor}] subagent"
+        else:  # dispatch — orchestrator's own loop
+            head = "ORCHESTRATOR step"
+        if skill:
+            head += f", runs {{{skill}}}"
+        hint = _SESSION_PLAN_HOST_MODE_HINTS[phase]
+        head += f" (host-mode hint: {hint}; advisory only)"
+        line = f"  {step}. {phase} — {head}"
+        if note:
+            line += f"  {note}"
+        return line
+
+    for label, needs_frame, needs_arch, needs_code_health, needs_design \
+            in planned:
+        lines.append(f"## Slice {label}")
+        lines.append("")
+        step = 1
+        # Slice 064-04: the conditional frame-critique phase is emitted FIRST,
+        # before `implement` — it gates DRAFT → READY_FOR_REVIEW (pre-impl).
+        if needs_frame:
+            fphase, fmode, factor, fskill = _SESSION_PLAN_FRAME_PHASE
+            lines.append(_render_phase(
+                step, fphase, fmode, factor, fskill,
+                note="(slice declares frame_review: true — PRE-implementation, "
+                     "gates READY_FOR_REVIEW)"))
+            step += 1
+        for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
+            lines.append(_render_phase(step, phase, mode, actor, skill))
+            step += 1
+            if phase == _SESSION_PLAN_ARCH_AFTER:
+                # arch first (when declared), then code-health, then
+                # design-review — all conditional, all slotted between
+                # craft and reconcile.
+                if needs_arch:
+                    aphase, amode, aactor, askill = _SESSION_PLAN_ARCH_PHASE
+                    lines.append(_render_phase(
+                        step, aphase, amode, aactor, askill,
+                        note="(slice declares arch_review: true)"))
+                    step += 1
+                if needs_code_health:
+                    cphase, cmode, cactor, cskill = \
+                        _SESSION_PLAN_CODE_HEALTH_PHASE
+                    lines.append(_render_phase(
+                        step, cphase, cmode, cactor, cskill,
+                        note="(slice declares code_health_review: true)"))
+                    step += 1
+                if needs_design:
+                    dphase, dmode, dactor, dskill = \
+                        _SESSION_PLAN_DESIGN_REVIEW_PHASE
+                    lines.append(_render_phase(
+                        step, dphase, dmode, dactor, dskill,
+                        note="(slice declares design_review: true — "
+                             "attest-only)"))
+                    step += 1
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _validate_dependencies(deps: list, project_dir: Path,
+                           current_spec: Path) -> list:
+    """For each dep token, verify it's satisfied. Returns a list of
+    human-readable reasons for unsatisfied deps (empty == all good).
+
+    Recognized tokens:
+      - `NNN-MM` (slice fragment) — found in any spec, must be DONE.
+      - `adr-NNNN` (case-insensitive) — corresponding ADR file under
+        docs/decisions/, must show `Accepted` in Status section.
+
+    Unrecognized token shapes are reported as `unknown dependency token`.
+    """
+    failures = []
+    specs_dir = project_layout.specs_dir(project_dir)
+    decisions_dir = project_layout.decisions_dir(project_dir)
+
+    for dep in deps:
+        token = dep.strip()
+        if not token:
+            continue
+        slice_match = re.match(r"^(\d{3})-(\d{2})$", token)
+        adr_match = re.match(r"(?i)^adr-(\d{1,4})$", token)
+        if slice_match:
+            found_status = _lookup_slice_status(specs_dir, token, current_spec)
+            if found_status is None:
+                failures.append(f"{token}: slice not found in any spec")
+            elif found_status != "DONE":
+                failures.append(f"{token}: STATUS is {found_status} (not DONE)")
+        elif adr_match:
+            num = adr_match.group(1).zfill(4)
+            ok, reason = _lookup_adr_accepted(decisions_dir, num)
+            if not ok:
+                failures.append(f"adr-{num}: {reason}")
+        else:
+            failures.append(f"{token}: unknown dependency token shape")
+    return failures
+
+
+def _lookup_slice_status(specs_dir: Path, fragment: str,
+                         current_spec: Path) -> str | None:
+    """Walk every spec under specs_dir (both layouts via iter_slices),
+    return the status of the slice whose label contains `fragment`.
+    Returns None if not found. A slice can depend on an earlier slice
+    in the same spec.
+
+    Slice 018-02: uses `iter_slices` so dependency-validation sees
+    file-per-slice slices, not just `## Slice` sections inside spec.md.
+    """
+    if not specs_dir.is_dir():
+        return None
+    needle = fragment.lower()
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        for loc in _iter_slices_common(spec_md):
+            if needle not in loc.label.lower():
+                continue
+            section = loc.text[loc.start:loc.end]
+            # Prefer frontmatter status, fall back to prose marker.
+            fields, _ = _slice_frontmatter(section)
+            if "status" in fields and fields["status"]:
+                return fields["status"]
+            m = _STATUS_MARKER_RE.search(section)
+            if m:
+                return m.group(2)
+            return "UNKNOWN"
+    return None
+
+
+def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
+    """Find docs/decisions/adr-<num>-*.md and verify it is Accepted for
+    dependency purposes. Returns (ok, reason).
+
+    Resolution is **frontmatter-first, prose-fallback** (ADR-0026):
+
+      1. If the ADR's frontmatter carries a `status:` field, it is
+         canonical — satisfied iff `status == "Accepted"` (exact,
+         case-sensitive). `Superseded` / `Proposed` / anything else →
+         not satisfied, with a human-readable reason naming the state
+         (and, for `Superseded`, the superseder pulled from the prose
+         `Superseded by` line when present). The prose `^Accepted` scan
+         is NOT consulted in this branch.
+      2. If there is no frontmatter `status:` field (every legacy ADR
+         authored before ADR-0026), fall back to the existing prose
+         `## Status` scan — but treat a `Superseded by` line in that
+         section as NOT accepted even when an `Accepted (date)` line is
+         also present (fixes the prose-only bug on e.g. adr-0002 /
+         adr-0008, where `supersede` leaves the `Accepted` line in
+         place). Only when there is no `Superseded by` line does the
+         `^Accepted` check decide.
+
+    `Superseded`-detection is a minimal inline `Superseded by` line
+    check — NOT a lift of adr.py's `_classify_status`. Per jig's
+    rule-of-three extraction convention (ADR-0002) this reader is only
+    the second place needing prose Superseded-vs-Accepted logic;
+    extraction waits for a third caller.
+    """
+    if not decisions_dir.is_dir():
+        return False, "docs/decisions/ not found"
+    candidates = sorted(decisions_dir.glob(f"adr-{num}-*.md"))
+    if not candidates:
+        return False, "ADR file not found under docs/decisions/"
+    name = candidates[0].name
+    adr_text = candidates[0].read_text()
+
+    # Isolate the prose `## Status` section once (used by both branches:
+    # the frontmatter branch reads the `Superseded by` superseder from it,
+    # the prose branch decides on it).
+    sm = re.search(r"(?m)^##\s+Status\s*$", adr_text)
+    if sm:
+        rest = adr_text[sm.end():]
+        nxt = re.search(r"(?m)^##\s", rest)
+        section = rest[: nxt.start()] if nxt else rest
+    else:
+        section = None
+
+    # Pull the superseder (e.g. `ADR-0200`) from a prose `Superseded by`
+    # line when one is present, so the not-satisfied reason can name it.
+    superseder = None
+    if section is not None:
+        sup = re.search(
+            r"(?im)^Superseded\s+by\s+\[(ADR-\d{1,4})\]", section
+        )
+        if sup:
+            superseder = sup.group(1)
+
+    # (1) Frontmatter-first: when `status:` is present, it is canonical.
+    fields, _ = parse_frontmatter(adr_text)
+    if "status" in fields:
+        status = fields["status"]
+        if status == "Accepted":
+            return True, "accepted"
+        if status == "Superseded":
+            if superseder:
+                return False, f"{name} is Superseded by {superseder}"
+            return False, f"{name} is Superseded"
+        return False, f"{name} is {status} (not Accepted)"
+
+    # (2) Prose fallback (legacy ADRs with no frontmatter `status:`).
+    if section is None:
+        # Name BOTH accepted encodings (ADR-0026): the refusal is not
+        # "you must add a `## Status` section" — a `status:` frontmatter
+        # field satisfies branch (1) equally. A bare inline
+        # `**Status:** Accepted` prose line (a common pre-jig house style)
+        # matches neither branch, so this is the message that repo sees.
+        return (
+            False,
+            f"{name} has no readable status — add a `status:` frontmatter "
+            f"field or a '## Status' section",
+        )
+    if superseder:
+        return False, f"{name} is Superseded by {superseder}"
+    if re.search(r"(?m)^Accepted\b", section):
+        return True, "accepted"
+    return False, f"{name} is not Accepted"
+
+
+# ---------- Slice 045-03: review-evidence transition gate (ADR-0014 §5) ----------
+
+# The states whose transitions are gated on review evidence (ADR-0014 §5).
+# READY_FOR_REVIEW → frame-critique (iff `frame_review`); REVIEWED →
+# compliance+craft(+arch); RECONCILED → reconciliation + deviation log +
+# reconciliation sweep;
+# DONE → the REVIEWED + RECONCILED sets re-validated (plus the existing
+# dependency check) — frame-critique is NOT re-validated at DONE (one-time
+# pre-implementation gate). Every OTHER target — DRAFT /
+# READY_FOR_IMPLEMENTATION / IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT
+# re-open, and the two review back-edges (REVIEWED→IN_PROGRESS,
+# RECONCILED→IN_PROGRESS) — relaxes or advances status with nothing to gate
+# and is left untouched (AC4). An unflagged READY_FOR_REVIEW transition is
+# similarly free (empty required set).
+# Slice 064-03 / ADR-0020 added READY_FOR_REVIEW: it gates the
+# pre-implementation frame-critique pass iff the slice declares
+# `frame_review: true` (an unflagged slice yields an empty required set →
+# no gating, so existing specs transition DRAFT → READY_FOR_REVIEW freely).
+# This is the only PRE-implementation evidence gate.
+_EVIDENCE_GATED_STATES = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED", "DONE")
+
+# The review-evidence gate enable/disable predicate is shared with the
+# ADR-side accept gate (slice 064-05): both read `JIG_REVIEW_EVIDENCE_GATE`
+# identically, so the predicate + its falsey-token set now live in
+# `_common.review_evidence` (single source — see that module's
+# `evidence_gate_enabled`). `_evidence_gate_enabled` is imported above as an
+# alias so the call sites + tests in this module are unchanged. The
+# dependency check on DONE is NOT part of the evidence gate and still runs
+# under the bypass.
+
+
+def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
+                   new_status: str) -> None:
+    """Enforce the ADR-0014 §5 evidence requirements for a gated transition.
+
+    Raises `WorkflowError` (the user-facing type → CLI exit 2) with a
+    diagnostic that names the missing/invalid artifact and the command to
+    produce it (AC3). No-op for ungated states or when the gate is disabled.
+
+    Delegates shape/verdict validation to
+    `review_evidence.validate_evidence` (the 045-02 validator — single
+    source of truth) and the reconciliation heading presence checks to shared
+    `_common.parsing` predicates. The gate only checks subsection shape;
+    reviewers attest content quality.
+    """
+    if new_status not in _EVIDENCE_GATED_STATES:
+        return
+    if not _evidence_gate_enabled():
+        # Spec 078-01: the gate is honoring its deliberateness override —
+        # log that fact (gate name, env var, best-effort spec-ref) so the
+        # bypass leaves an auditable trail. Fail-open / content-free by
+        # construction (emit_gate_bypass never raises, never logs the
+        # transition's target status or slice content).
+        root = _project_root_for_spec(spec_md)
+        emit_gate_bypass(root, "review-evidence", "JIG_REVIEW_EVIDENCE_GATE",
+                          spec_ref=read_spec_ref(root))
+        return
+
+    diagnostics: list = []
+    # READY_FOR_REVIEW-stage: the adversarial frame-critique pass, required
+    # iff the slice declares `frame_review: true` (slice 064-03 / ADR-0020).
+    # This is a ONE-TIME pre-implementation gate — deliberately NOT added to
+    # the DONE re-validation below (DONE re-runs REVIEWED + RECONCILED only;
+    # the frame is critiqued once, before code exists, not re-litigated at
+    # close). An unflagged slice yields an empty required set → no gating.
+    if new_status == "READY_FOR_REVIEW":
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "READY_FOR_REVIEW")
+        )
+    # REVIEWED-stage evidence is required for REVIEWED and re-validated for
+    # DONE (ADR-0014 §5: DONE re-runs REVIEWED + RECONCILED).
+    if new_status in ("REVIEWED", "DONE"):
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "REVIEWED")
+        )
+    # RECONCILED-stage: the reconciliation verdict, deviation log, and
+    # reconciliation sweep; required for RECONCILED and re-validated for DONE.
+    if new_status in ("RECONCILED", "DONE"):
+        diagnostics.extend(
+            validate_evidence(spec_md, slice_fragment, "RECONCILED")
+        )
+        if not check_deviation_log(section):
+            diagnostics.append(
+                "[reconciliation] deviation log missing — add a "
+                "`### Deviation log` subsection under the slice heading "
+                "before reconciling (the reconciliation reviewer attests "
+                "its content; the gate only checks presence)"
+            )
+        if not check_reconciliation_sweep(section):
+            diagnostics.append(
+                "[reconciliation] reconciliation sweep missing — add a "
+                "`### Reconciliation sweep` subsection under the slice "
+                "heading before reconciling (the reconciliation reviewer "
+                "judges artifact coverage and disposition quality; the gate "
+                "only checks presence)"
+            )
+
+    if diagnostics:
+        joined = "\n  - ".join(diagnostics)
+        raise WorkflowError(
+            f"cannot transition to {new_status} — review evidence is "
+            f"incomplete (ADR-0014 §5):\n  - " + joined
+        )
+
+
+# ---------- Slice 056-03: .jig/spec-ref attribution marker ----------
+#
+# When a slice begins (transition -> IN_PROGRESS), stamp a working-tree-local
+# `.jig/spec-ref` marker so `scripts/usage.py` can map this session's
+# transcripts to the exact spec, instead of guessing from content mentions.
+#
+# Format (simple, line-oriented `key=value`, one per line — both this writer
+# and usage.py's reader agree on it):
+#
+#     spec=056
+#     slice=056-03
+#
+# `spec=` is the three-digit spec number (the attribution key usage.py reads);
+# `slice=` records the current slice for human/debug context. The file lives at
+# <project-root>/.jig/spec-ref — alongside the tracked `.jig/test-command` —
+# and is git-ignored (a scoped `.gitignore` entry, NOT a blanket `.jig/`
+# ignore, so the tracked test-command file is unaffected). It is working-tree-
+# local on purpose: it reflects what THIS tree is working on and must not
+# travel across branches as a tracked file.
+IN_PROGRESS_STATUS = "IN_PROGRESS"
+
+
+def _spec_number_from_label(label: str) -> str:
+    """Extract the three-digit spec number from a slice label like
+    ``056-03 — foo`` / ``Slice 056-03``. Returns "" when no NNN-NN id is
+    present (defensive — the marker write then no-ops via the caller)."""
+    m = re.search(r"\b(\d{3})-\d{2}\b", label)
+    return m.group(1) if m else ""
+
+
+def _slice_id_from_label(label: str) -> str:
+    """Extract the ``NNN-NN`` slice id from a slice label. Returns "" when
+    absent."""
+    m = re.search(r"\b(\d{3}-\d{2})\b", label)
+    return m.group(1) if m else ""
+
+
+def _write_spec_ref_marker(spec_md: Path, slice_label: str) -> None:
+    """Best-effort: stamp `<project-root>/.jig/spec-ref` with the spec number
+    and current slice (slice 056-03). Idempotent — a repeated IN_PROGRESS
+    transition rewrites the same bytes via `atomic_write_text`.
+
+    Side-effect-isolated (AC #1 / AC #4): wrapped so ANY failure (unwritable
+    `.jig`, a non-dir occupying the path, a permission error, an
+    unresolvable project root) is swallowed and the transition — including
+    its review-evidence gates — proceeds unaffected. The marker is a
+    reporting aid, never a gate.
+
+    Project root is the spec's `parents[3]` (docs/specs/<dir>/spec.md ->
+    [0]=<dir>, [1]=specs, [2]=docs, [3]=root), matching the DONE-dependency
+    resolution in `transition`.
+    """
+    try:
+        spec_num = _spec_number_from_label(slice_label)
+        if not spec_num:
+            return  # no recognizable spec number — nothing useful to stamp
+        slice_id = _slice_id_from_label(slice_label)
+        root = _project_root_for_spec(spec_md)
+        jig_dir = root / ".jig"
+        jig_dir.mkdir(parents=True, exist_ok=True)
+        body = f"spec={spec_num}\n"
+        if slice_id:
+            body += f"slice={slice_id}\n"
+        atomic_write_text(jig_dir / "spec-ref", body)
+    except Exception:  # noqa: BLE001 — best-effort; never block the transition
+        return
+
+
+def _project_root_for_spec(spec_md: Path) -> Path:
+    """Project root for a spec.md path — sentinel-anchored (ADR-0033 §5a).
+
+    The nearest ancestor carrying `scaffold.json` wins, so a track-local
+    subproject (`docs_root="."`, spec at `<root>/specs/<dir>/spec.md`) resolves
+    to the subproject and never climbs into an enclosing repo. When NO sentinel
+    is found, falls back to the legacy depth arithmetic — `parents[3]`
+    ([0]=<dir>, [1]=specs, [2]=docs, [3]=root) for a default-layout spec, then
+    the nearest `.git` ancestor, then the spec's own directory (degrade
+    gracefully on shallow test-fixture paths). The fallback keeps default-layout
+    projects and jig's own repo (no sentinel) identical to before."""
+    def _legacy(p: Path) -> Path:
+        resolved = p.resolve()
+        parents = resolved.parents
+        if len(parents) > 3:
+            return parents[3]
+        for anc in parents:
+            if (anc / ".git").exists():
+                return anc
+        return resolved.parent
+
+    return project_layout.project_root_for(spec_md, fallback=_legacy)
+
+
+def _find_live_dependents(project_dir: Path, slice_fragment: str,
+                          abandoned_slice_path: Path) -> list:
+    """Slice 085-01 (AC8): find every OTHER slice, anywhere in the
+    project, whose `dependencies:` frontmatter list names
+    `slice_fragment` (e.g. "085-01") AND whose own status is not already
+    DONE or ABANDONED. Returns a list of `"<spec_dir> <label> (<status>)"`
+    strings, one per live dependent, in walk order.
+
+    Advisory-only lookup — read-only, never mutates the dependent, never
+    cascades. `abandoned_slice_path` excludes the just-abandoned slice's
+    own file from the scan so a self-referential (or same-file, same-spec)
+    `dependencies:` entry never self-warns.
+    """
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return []
+    needle = slice_fragment.strip().lower()
+    if not needle:
+        return []
+    dependents = []
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        for loc in _iter_slices_common(spec_md):
+            if loc.path.resolve() == abandoned_slice_path.resolve():
+                continue
+            section = loc.text[loc.start:loc.end]
+            fm_fields, _ = _slice_frontmatter(section)
+            deps = fm_fields.get("dependencies") or []
+            if not isinstance(deps, list):
+                continue
+            if not any(str(d).strip().lower() == needle for d in deps):
+                continue
+            status = None
+            if fm_fields.get("status"):
+                status = fm_fields["status"]
+            else:
+                sm = _STATUS_MARKER_RE.search(section)
+                if sm:
+                    status = sm.group(2)
+            if status in ("DONE", "ABANDONED"):
+                continue
+            spec_dir = spec_md.parent.name
+            dependents.append(f"{spec_dir} {loc.label} ({status or 'UNKNOWN'})")
+    return dependents
+
+
+def _branch_freshness_warning(project_dir: Path) -> str:
+    """Return a one-line warning when HEAD is behind fetched origin/main.
+
+    This is deliberately soft. Review/reconcile may run offline or in local-only
+    repos, so no-origin and git/fetch/count failures do not block transitions.
+    """
+    try:
+        origin = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, cwd=str(project_dir),
+        )
+    except FileNotFoundError:
+        return ""
+    if origin.returncode != 0 or not origin.stdout.strip():
+        return ""
+
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        capture_output=True, text=True, cwd=str(project_dir),
+    )
+    if fetch.returncode != 0:
+        detail = fetch.stderr.strip() or fetch.stdout.strip() or "unknown error"
+        return (
+            "warning: could not fetch `origin/main`; review/reconcile test "
+            f"results are against the local view ({detail})."
+        )
+
+    count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD..origin/main"],
+        capture_output=True, text=True, cwd=str(project_dir),
+    )
+    if count.returncode != 0:
+        return ""
+    try:
+        behind = int(count.stdout.strip())
+    except ValueError:
+        return ""
+    if behind <= 0:
+        return ""
+
+    commits = "commit" if behind == 1 else "commits"
+    return (
+        f"warning: current branch is {behind} {commits} behind `origin/main`; "
+        "integrate before review/reconcile/landing. Test results against a "
+        "stale base may misattribute failures to main."
+    )
+
+
+def _canonical_transition_spec_path(path: Path) -> Path:
+    """Resolve a file-per-slice input to its canonical spec overview.
+
+    `transition` historically documented a `spec.md` first argument, but the
+    shared dual-layout slice loader also accepts a sibling `slice-*.md` path.
+    Normalize that permissive input once so evidence checks, rollups, and all
+    other transition concerns agree on the overview's identity. A recognized
+    slice path without its overview is an invalid file-per-slice layout and
+    must fail before any mutation.
+    """
+    path = Path(path)
+    if path.match("slice-*.md"):
+        if not path.is_file():
+            raise WorkflowError(f"slice file not found: {path}")
+        overview = path.with_name("spec.md")
+        if not overview.is_file():
+            raise WorkflowError(
+                f"slice file requires a sibling spec.md overview: {path}"
+            )
+        return overview
+    return path
+
+
+def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
+               push: bool = False, pr_mode: bool = False,
+               release: bool = False, reason: str | None = None,
+               reopen: bool = False) -> str:
+    """Transition the named slice's STATUS to `new_status`. Auto-ticks
+    "Implementation review passed" on REVIEWED, and "Reconciliation
+    review passed" on RECONCILED (slice 003-04). When the slice has a
+    frontmatter block (slice 014-01), the `status:` field is updated
+    too, and `last_verified: <today>` is written on the RECONCILED
+    transition. DONE transitions refuse if any `dependencies:` entry
+    is unsatisfied.
+
+    Slice 045-03: REVIEWED / RECONCILED / DONE are gated on review
+    evidence (ADR-0014 §5) — the move is refused unless the required
+    verdict artifacts exist and clear (and, for RECONCILED/DONE, the
+    deviation log and reconciliation sweep are present). The gate is ON
+    by default; bypass with `JIG_REVIEW_EVIDENCE_GATE=0`.
+
+    Slice 049-01, as amended by ADR-0045: the lifecycle splits two ways
+    for ownership. A transition into a WORKING state
+    (`_CLAIM_WORKING_STATUSES` — READY_FOR_REVIEW / IN_PROGRESS /
+    REVIEWED / RECONCILED) STAMPS a `claimed_by:` identifier (branch
+    name, or `JIG_CLAIM_ID`), so spec-level work is marked and not just
+    implementation. A transition into a RELEASE POINT
+    (`_CLAIM_RELEASE_STATUSES` — the pickup-queue states DRAFT /
+    READY_FOR_IMPLEMENTATION, plus terminal DONE / DEFERRED /
+    ABANDONED) CLEARS it, as does `release` (with a `reason`), which
+    additionally appends a `## Release log` entry. The two sets
+    partition VALID_STATUSES.
+
+    The queue-state exclusion is load-bearing, NOT an oversight: those
+    two states are the ones the pickup flow tells a reader to choose
+    work from, so a residual owner there would mark a FREE slice as
+    occupied — inverting the very bug this amendment exists to fix.
+
+    Two levels of protection, deliberately different widths: a foreign
+    claim HARD-REFUSES only when both ends are IN_PROGRESS (spec 049
+    AC3, unchanged) — two sessions building one slice — on the local
+    copy and, symmetrically, on origin/main. Any other foreign claim
+    emits a non-blocking warning and the claim transfers to this
+    session. `push`/`pr_mode` additionally reserve the claim on
+    origin/main (local by default) for any working state; only an
+    IN_PROGRESS reservation also publishes `status:` there.
+
+    Slice 051-04: → IN_PROGRESS also consults the AUTHORITATIVE
+    origin/main copy of the slice (`git fetch` + `git show
+    origin/main:<path>`) and hard-blocks a start-time collision — the
+    slice already DONE on origin/main (duplicate landed work) or
+    IN_PROGRESS under a foreign `claimed_by`. Soft on reachability
+    (offline/local-only degrades to proceed). Bypass with
+    `JIG_START_COLLISION_GATE=0`.
+
+    Slice 112-02 / ADR-0058 Class A: a transition into any OTHER working
+    state (`READY_FOR_REVIEW` / `REVIEWED` / `RECONCILED` — 051-04 already
+    covers `IN_PROGRESS`) refuses when the slice's identifier is already
+    `DONE` on `origin/main`, reusing the 112-01 `identifier_state_on_ref`
+    primitive — the stale-branch re-advance case, caught at `transition`'s
+    earliest boundary (earlier than 112-01's `land.py` backstop). Best-
+    effort: an unreachable `origin/main` degrades to a non-blocking
+    warning. Bypass with `JIG_CROSSREF_GATE=0`, or a deliberate
+    `reopen=True` (sanctioned re-open/supersession — ADR-0058 Open-
+    question 4), which skips the check entirely and is distinct from the
+    blanket env escape.
+
+    Slice 112-03 / ADR-0058 Class C: a transition into ANY working state
+    (this one DOES include `IN_PROGRESS` — the reported incident's exact
+    entry point) additionally refuses when a SIBLING ref (any local or
+    remote-tracking branch other than the current one, its own
+    remote-tracking ref, and `origin/main` — Class A's territory, already
+    checked above/by 051-04) holds the identifier at an evidence-complete
+    `DONE`: finished work never integrated to `origin/main`, whose live
+    claim was already released at DONE, so neither Class A nor the claim
+    machinery sees it. Reuses `_common.cross_ref_state.find_sibling_done`
+    (112-01's per-ref read + ADR-0053's ref enumeration). Same bypass
+    surface as Class A (`JIG_CROSSREF_GATE=0` / `reopen=True`) — one
+    escape name for the whole cross-ref family. Best-effort per AC5: an
+    unreachable/timed-out sibling ref degrades to a non-blocking warning,
+    never a false block. Returns a summary string."""
+    if new_status not in VALID_STATUSES:
+        raise WorkflowError(
+            f"invalid status: '{new_status}'. valid: {', '.join(VALID_STATUSES)}"
+        )
+    spec_md = _canonical_transition_spec_path(spec_md)
+    if not spec_md.is_file():
+        raise WorkflowError(f"spec file not found: {spec_md}")
+
+    # Slice 049-01: --release requires an audit reason (AC5).
+    if release and not (reason and reason.strip()):
+        raise WorkflowError(
+            '--release requires --reason "<text>" for the audit trail.'
+        )
+
+    loc = load_slice(spec_md, slice_fragment)
+    section = loc.text[loc.start:loc.end]
+
+    fm_fields, _ = _slice_frontmatter(section)
+    has_frontmatter = bool(fm_fields)
+
+    # Slice 014-02: DEFERRED can only transition to DRAFT (re-open) or
+    # stay DEFERRED (idempotent). Other outbound transitions are refused
+    # so the lifecycle gates (review, reconcile) aren't silently skipped.
+    current_status = None
+    if has_frontmatter and fm_fields.get("status"):
+        current_status = fm_fields["status"]
+    else:
+        sm = _STATUS_MARKER_RE.search(section)
+        if sm:
+            current_status = sm.group(2)
+    if current_status == "DEFERRED" and new_status not in _DEFERRED_ALLOWED_NEXT:
+        raise WorkflowError(
+            f"invalid transition: DEFERRED → {new_status}. "
+            f"From DEFERRED, only DRAFT (re-open) is allowed."
+        )
+
+    # Slice 085-01: ABANDONED mirrors DEFERRED's restricted outbound edges
+    # (only DRAFT re-open, or ABANDONED itself, idempotent).
+    if current_status == "ABANDONED" and new_status not in _ABANDONED_ALLOWED_NEXT:
+        raise WorkflowError(
+            f"invalid transition: ABANDONED → {new_status}. "
+            f"From ABANDONED, only DRAFT (re-open) is allowed."
+        )
+
+    # Slice 085-01 AC1: DONE -> ABANDONED is refused. Frame-critique found
+    # no case for collapsing "never attempted" and "shipped, then
+    # deliberately removed" into one bucket (see spec 085 Non-goals). The
+    # error names the reason so an author who hits it understands why.
+    if current_status == "DONE" and new_status == "ABANDONED":
+        raise WorkflowError(
+            "cannot transition DONE → ABANDONED: marking already-shipped "
+            "work as abandoned is out of scope (see spec 085 Non-goals)."
+        )
+
+    # Slice 112-02 / ADR-0058 Class A: refuse advancing a slice already
+    # `DONE` on `origin/main` — before ANY status flip or claim bookkeeping.
+    # See `_refuse_integrated_advance` for the deliberate `IN_PROGRESS`
+    # exclusion (051-04 already covers it) and the reopen/bypass surface.
+    if new_status in _CROSSREF_ADVANCE_STATUSES and not release:
+        _refuse_integrated_advance(
+            _project_root_for_spec(spec_md), loc.label, new_status,
+            reopen=reopen,
+        )
+
+    # Slice 112-03 / ADR-0058 Class C: refuse advancing into ANY working
+    # state (unlike the Class-A block above, this DOES include
+    # `IN_PROGRESS` — the reported incident's entry point) when a SIBLING
+    # ref holds the identifier at an evidence-complete `DONE`. Composed at
+    # the SAME dispatch point as Class A rather than a new site — see
+    # `_refuse_sibling_done`'s docstring for the class boundary and bypass
+    # surface (shared with Class A).
+    if new_status in _CLAIM_WORKING_STATUSES and not release:
+        _refuse_sibling_done(
+            _project_root_for_spec(spec_md), loc.label, new_status,
+            reopen=reopen,
+        )
+
+    if new_status in {"REVIEWED", "RECONCILED"}:
+        freshness_warning = _branch_freshness_warning(
+            _project_root_for_spec(spec_md))
+        if freshness_warning:
+            sys.stderr.write(freshness_warning.rstrip() + "\n")
+
+    # Slice 049-01: claim context. Claims live in slice frontmatter, so the
+    # claim machinery is a no-op for legacy prose-only (no-frontmatter)
+    # slices — stamping a field there would synthesize a spurious `---`
+    # block. project_dir mirrors the DONE-branch derivation below
+    # (docs/specs/<dir>/spec.md → parents[3]), via a depth-safe helper.
+    existing_claim = str(fm_fields.get(CLAIM_FIELD) or "").strip()
+    claim_identifier = None
+    if (has_frontmatter and new_status in _CLAIM_WORKING_STATUSES
+            and not release):
+        claim_project_dir = _project_root_for_spec(spec_md)
+        claim_identifier = _claim_identifier(claim_project_dir)
+        foreign = bool(existing_claim and existing_claim != claim_identifier)
+        # AC3: refuse a foreign claim that is already IN_PROGRESS on disk.
+        # ADR-0045 holds this refusal at its original width ON PURPOSE — note
+        # BOTH ends must be IN_PROGRESS, which is what the pre-ADR-0045 code
+        # meant implicitly (it only ever reached here for an IN_PROGRESS
+        # target). Two sessions BUILDING one slice stays a hard block; a
+        # session moving a slice FORWARD out of IN_PROGRESS, or two sessions
+        # editing one spec, can be legitimate — a reviewer worktree recording
+        # a verdict on the implementer's slice is the everyday case. Widening
+        # the block would manufacture false refusals. The gap being closed was
+        # the missing SIGNAL, not a missing refusal.
+        if (foreign and current_status == IN_PROGRESS_STATUS
+                and new_status == IN_PROGRESS_STATUS):
+            raise WorkflowError(
+                f"slice {loc.label} is currently claimed by "
+                f"{existing_claim!r} (status IN_PROGRESS). To take it over, "
+                f"have the owner release it, or force-release with:\n"
+                f"    workflow.py transition <spec> {loc.label} "
+                f'READY_FOR_IMPLEMENTATION --release --reason "..."'
+            )
+        # ADR-0045: any OTHER foreign claim is surfaced loudly and proceeds.
+        # This is the signal that did not exist before — walking into another
+        # session's spec-level work used to be completely silent.
+        #
+        # Wording notes, both from the craft pass: (a) this fires BEFORE the
+        # evidence gate and the start-collision guard, either of which can
+        # still refuse, so it must not assert a completed takeover; (b) the
+        # suggested `--release` target is the ungated
+        # READY_FOR_IMPLEMENTATION (mirroring the refusal above) rather than
+        # `current_status`, which may be an evidence-gated state or `None` on
+        # a slice with neither a frontmatter `status:` nor a prose marker.
+        if foreign:
+            where = (f" (status {current_status})" if current_status
+                     else "")
+            sys.stderr.write(
+                f"warning: slice {loc.label} is claimed by {existing_claim!r}"
+                f"{where} — another session may be working it right now. If "
+                f"this transition succeeds the claim will transfer to you. If "
+                f"that is wrong, coordinate first, or force-release with:\n"
+                f"    workflow.py transition <spec> {loc.label} "
+                f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+            )
+
+        # Slice 051-04: the on-disk guard above trusts a possibly-stale local
+        # file. Consult the AUTHORITATIVE origin/main copy before building
+        # starts — hard-block if the slice is already DONE (duplicate landed
+        # work) or IN_PROGRESS under a foreign claim on origin/main. Soft on
+        # reachability (warns/proceeds offline). Only meaningful for a
+        # dedicated slice file (`loc.path` == spec.md ⇒ embedded slice, whose
+        # origin copy is the spec, not this slice — skip, as before 051-04).
+        #
+        # This ORIGIN/MAIN-reading call (`_refuse_start_collision`) runs on
+        # the DEFAULT (local) path ONLY: with `--push`/`--pr`,
+        # `_reserve_claim_on_main` already fetches + reads the origin/main
+        # copy and refuses the same DONE / foreign-IN_PROGRESS collisions
+        # there, so re-running that half too would double-fetch for no gain.
+        #
+        # NOT covered by that skip: the ADR-0058 Class B SIBLING/REMOTE scan
+        # `_refuse_start_collision` also carries (`find_sibling_in_progress_
+        # claim`, spec 112-05). `_reserve_claim_on_main` reads `origin/main`
+        # ONLY, so a foreign `IN_PROGRESS` claim visible solely on a sibling
+        # or remote-tracking ref would otherwise be silently uncovered on
+        # the `--push`/`--pr` path — making the flag that PUBLISHES a claim
+        # more widely (ADR-0045's encouraged usage) enforce it WEAKER than
+        # the default path, for the same-machine sibling case. So that half
+        # is wired SEPARATELY on `--push`/`--pr` below, via a direct call to
+        # `_refuse_sibling_in_progress_claim` — at THIS SAME POINT in the
+        # function (not down by `_reserve_claim_on_main`), so a confirmed
+        # collision aborts BEFORE the CAS-ref reservation below ever
+        # attempts a network write (compliance-review finding, spec 112-05).
+        #
+        # ADR-0045 widened the enclosing claim block to every working state, but
+        # this guard stays IN_PROGRESS-only: it is a START-of-building check,
+        # and running it on every transition would put a `git fetch` on the hot
+        # path of routine lifecycle moves.
+        if new_status == IN_PROGRESS_STATUS and loc.path.name != "spec.md":
+            if not (push or pr_mode):
+                try:
+                    start_rel_path = loc.path.resolve().relative_to(
+                        claim_project_dir).as_posix()
+                except ValueError:
+                    # Unexpected layout (slice outside the resolved project
+                    # root): degrade to a loud warning rather than a silent
+                    # skip, per AC5 ("read failures degrade to a warning,
+                    # never a false block").
+                    start_rel_path = None
+                    sys.stderr.write(
+                        "warning: start-collision check skipped: could not "
+                        f"locate {loc.path} under project root "
+                        f"{claim_project_dir}\n")
+                if start_rel_path is not None:
+                    _refuse_start_collision(
+                        claim_project_dir, start_rel_path, claim_identifier,
+                        loc.label,
+                        already_warned=existing_claim if foreign else "")
+            else:
+                _refuse_sibling_in_progress_claim(
+                    claim_project_dir, claim_identifier, loc.label)
+
+        # ADR-0058 Class B (spec 112-05): reserve the refs/claims/<N> CAS
+        # ref on entering IN_PROGRESS as a NEW claim. UNCONDITIONAL on
+        # `push`/`pr_mode` (unlike `_refuse_start_collision` above, which
+        # only runs on the default local path): the local ref-CAS is a pure
+        # local git call (no network — spike 112-04 A2: linked worktrees
+        # share the ref store), so it always fires; the cross-machine push
+        # happens only under --push/--pr, matching `_reserve_claim_on_main`'s
+        # convention. Excludes the idempotent re-entry case (already our own
+        # IN_PROGRESS claim) — re-running the same transition must not read
+        # its own ref as a collision.
+        if (new_status == IN_PROGRESS_STATUS
+                and not (current_status == IN_PROGRESS_STATUS
+                        and existing_claim == claim_identifier)):
+            m_cas = re.match(r"^(\d{3}-\d{2})", loc.label.strip())
+            if m_cas:
+                _reserve_claim_ref(claim_project_dir, m_cas.group(1),
+                                   loc.label, push=push, pr_mode=pr_mode)
+
+    # Pre-flight: DONE transition validates `dependencies:` from frontmatter.
+    if new_status == "DONE" and fm_fields.get("dependencies"):
+        # Sentinel-anchored project root (ADR-0033 §5a) — nearest scaffold.json
+        # wins, else the legacy `docs/specs/<dir>/spec.md → parents[3]` depth
+        # arithmetic. Keeps default layout identical; a track-local subtree
+        # resolves to the subproject, not the enclosing repo.
+        project_dir = _project_root_for_spec(spec_md)
+        failures = _validate_dependencies(
+            fm_fields["dependencies"], project_dir, spec_md,
+        )
+        if failures:
+            joined = "\n  - ".join(failures)
+            raise WorkflowError(
+                "cannot transition to DONE — unsatisfied dependencies:\n  - "
+                + joined
+            )
+
+    # Slice 045-03: gate REVIEWED / RECONCILED / DONE on review evidence
+    # (ADR-0014 §5). Runs AFTER the DONE dependency check so a missing
+    # dependency surfaces on its own; raises WorkflowError before any status
+    # write. No-op for ungated targets, the review back-edges, and when the
+    # gate is bypassed via JIG_REVIEW_EVIDENCE_GATE.
+    _gate_evidence(spec_md, slice_fragment, section, new_status)
+
+    m = _STATUS_MARKER_RE.search(section)
+    old_status = None
+    new_section = section
+    if m:
+        old_status = m.group(2)
+        new_section = (
+            section[: m.start()]
+            + f"{m.group(1)}{new_status}{m.group(3)}"
+            + section[m.end():]
+        )
+    if has_frontmatter:
+        if old_status is None:
+            old_status = fm_fields.get("status", "UNKNOWN")
+        new_section = _set_slice_frontmatter_field(new_section, "status", new_status)
+        if new_status == "RECONCILED":
+            new_section = _set_slice_frontmatter_field(
+                new_section, "last_verified", _today(),
+            )
+    if old_status is None:
+        raise WorkflowError(
+            "no `**STATUS: ...**` marker or frontmatter `status:` field "
+            "found in slice section"
+        )
+
+    # Slice 049-01 + ADR-0045: claim bookkeeping in the slice frontmatter
+    # (no-op on legacy prose-only slices, which have no frontmatter to carry a
+    # claim — stamping a field there would synthesize a spurious `---` block).
+    #   - release           : clear claimed_by + append a ## Release log entry.
+    #   - → a WORKING state : stamp claimed_by (the identifier resolved above).
+    #   - → a RELEASE POINT : clear claimed_by — the slice is either queued for
+    #                         whoever comes next (DRAFT /
+    #                         READY_FOR_IMPLEMENTATION) or finished, parked, or
+    #                         dropped (DONE / DEFERRED / ABANDONED).
+    if has_frontmatter:
+        if release:
+            if reason is None:
+                raise WorkflowError("--release requires --reason")
+            released_from = existing_claim or "(unclaimed)"
+            new_section = _clear_slice_frontmatter_field(
+                new_section, CLAIM_FIELD)
+            new_section = _append_release_log(
+                new_section, released_from, reason)
+        elif new_status in _CLAIM_WORKING_STATUSES:
+            new_section = _set_slice_frontmatter_field(
+                new_section, CLAIM_FIELD, claim_identifier,
+            )
+        elif new_status in _CLAIM_RELEASE_STATUSES and existing_claim:
+            new_section = _clear_slice_frontmatter_field(
+                new_section, CLAIM_FIELD)
+
+        # The claim is LOCAL by default (no network — preserves the everyday
+        # "start a slice" UX). `--push` / `--pr` opt into reserving it on
+        # origin/main so parallel worktrees see it. The reservation runs
+        # BEFORE the local write, so a collision / race / unreachable-origin
+        # refusal leaves the caller's slice file untouched.
+        #
+        # ADR-0045 widened this to every working state: a session
+        # reconciling can now make its claim visible to parallel worktrees,
+        # which was impossible while only IN_PROGRESS could be reserved.
+        if (new_status in _CLAIM_WORKING_STATUSES and not release
+                and (push or pr_mode)):
+            if claim_identifier is None:
+                raise WorkflowError("cannot reserve a claim without a claim identifier")
+            claim_project_dir = _project_root_for_spec(spec_md)
+            rel_path = loc.path.resolve().relative_to(
+                claim_project_dir).as_posix()
+            # ADR-0058 Class B (spec 112-05, compliance-review fix): the
+            # sibling/remote IN_PROGRESS halt for --push/--pr is already run
+            # ABOVE (alongside `_refuse_start_collision`'s local-path call,
+            # at the same point in the function, before the CAS-ref reserve
+            # step) — NOT re-run here, so a single transition never scans
+            # sibling refs twice. `_reserve_claim_on_main` below still only
+            # ever reads `origin/main`; the sibling/remote coverage for this
+            # path comes entirely from that earlier call.
+            _reserve_claim_on_main(
+                claim_project_dir, rel_path, claim_identifier, loc.label,
+                pr_mode=pr_mode, new_status=new_status,
+                already_warned=existing_claim if foreign else "",
+            )
+
+        # ADR-0058 Class B (spec 112-05): release the refs/claims/<N> CAS
+        # ref whenever the BUILD boundary closes — leaving IN_PROGRESS
+        # (forward to another working state, or a release point) or an
+        # explicit --release. Mirrors `claimed_by`'s own release semantics
+        # above. This is the ONLY liveness mechanism for the CAS ref (AC4 /
+        # ADR-0058 Assumption A3, resolved this slice): manual `--release`
+        # only, no TTL/heartbeat — kept lean, since a CAS ref alone cannot
+        # cheaply distinguish a live claim from a stale one anyway (see
+        # `_common.claim_ref`'s module docstring).
+        if release or (current_status == IN_PROGRESS_STATUS
+                      and new_status != IN_PROGRESS_STATUS):
+            m_release = re.match(r"^(\d{3}-\d{2})", loc.label.strip())
+            if m_release:
+                _release_claim_ref(_project_root_for_spec(spec_md),
+                                   m_release.group(1), push=push,
+                                   pr_mode=pr_mode)
+    elif release or (new_status in _CLAIM_WORKING_STATUSES
+                     and (push or pr_mode)):
+        # Claims require a frontmatter slice; surface rather than silently
+        # synthesize a block on a legacy prose-only slice.
+        raise WorkflowError(
+            f"slice {loc.label} has no frontmatter block — claim operations "
+            f"(--push / --pr / --release) require a file-per-slice "
+            f"(frontmatter) layout (spec 018)."
+        )
+
+    # Slice 018-02: `loc.label` is already the resolved slice label from
+    # the common parser. Earlier code derived it by re-parsing the first
+    # line of `new_section`, which broke for slice-file layout (first
+    # line is `---`, not `## Slice ...`).
+    slice_name = loc.label
+
+    # Slice 003-04: auto-tick the corresponding review-passed DoD box on
+    # the two gating transitions. Other transitions don't tick anything.
+    auto_tick_label = _AUTO_TICK_LABELS.get(new_status)
+    if auto_tick_label:
+        new_section, warning = _auto_tick_review_box(new_section, auto_tick_label)
+        if warning:
+            # AC #5: name the spec and slice in the warning so a CI / log
+            # grep can disambiguate which slice triggered it when many
+            # specs share the same canonical DoD labels.
+            sys.stderr.write(
+                f"warning: {spec_md}: slice {slice_name}: {warning}\n"
+            )
+
+    new_text = loc.text[:loc.start] + new_section + loc.text[loc.end:]
+    # Slice 018-02: write back to whichever file the slice lives in —
+    # `loc.path` is the slice file when dual-read picked it, or spec.md
+    # otherwise. Same behavior for legacy specs, correct behavior for
+    # file-per-slice ones.
+    # Slice 032-01: atomic via _common.atomic_io to avoid torn writes on
+    # interrupted transitions.
+    atomic_write_text(loc.path, new_text)
+
+    # Slice 030-01: roll up spec.md's frontmatter `status:` from the
+    # current slice states. Idempotent — no-op when the rollup matches
+    # what's already in spec.md (or when spec.md has no frontmatter).
+    # Ordered AFTER the slice write so the rollup reflects the new state.
+    _write_spec_rollup(spec_md)
+
+    # Slice 056-03: when a slice begins, stamp the working-tree-local
+    # `.jig/spec-ref` attribution marker. Ordered AFTER all status writes
+    # so the marker only follows a successful status transition (no git
+    # commit happens here — the ordering is about local write success). Best-effort and
+    # side-effect-isolated — a failed write never blocks the transition or
+    # its review-evidence gates (the gate already ran and passed above).
+    if new_status == IN_PROGRESS_STATUS:
+        _write_spec_ref_marker(spec_md, slice_name)
+
+    # Slice 085-01 AC8: on a successful transition TO ABANDONED, warn
+    # (stderr, one-time, non-blocking) about any live dependent — another
+    # slice, anywhere in the project, whose `dependencies:` names this
+    # slice and whose own status isn't already DONE/ABANDONED. Advisory
+    # only — never blocks the transition, never modifies the dependent,
+    # never cascades. Mirrors the `_branch_freshness_warning` call
+    # pattern above (best-effort stderr.write, no exception on failure to
+    # find anything).
+    if new_status == "ABANDONED":
+        fragment = _slice_id_from_label(slice_name) or slice_fragment
+        dependents = _find_live_dependents(
+            _project_root_for_spec(spec_md), fragment, loc.path,
+        )
+        if dependents:
+            joined = "\n  - ".join(dependents)
+            sys.stderr.write(
+                f"warning: slice {slice_name} was marked ABANDONED; the "
+                f"following live dependent(s) name it in their "
+                f"`dependencies:` and may need attention:\n  - {joined}\n"
+            )
+
+    return f"transitioned {slice_name}: {old_status} → {new_status}"
+
+
+_RESOLUTION_TRIGGER_RE = re.compile(
+    r"(?im)^\*\*Resolution trigger:\*\*\s*([^\n]+)"
+)
+
+
+def _extract_resolution_trigger(section: str) -> str:
+    """Slice 014-02: pull the `**Resolution trigger:** ...` line out of a
+    slice's body, mirroring the convention used in docs/refinement-todo.md.
+    Returns "" when absent."""
+    m = _RESOLUTION_TRIGGER_RE.search(section)
+    return m.group(1).strip() if m else ""
+
+
+_ABANDONMENT_REASON_RE = re.compile(
+    r"(?im)^\*\*Abandonment reason:\*\*\s*([^\n]+)"
+)
+
+
+def _extract_abandonment_reason(section: str) -> str:
+    """Slice 085-01 (AC3): pull the `**Abandonment reason:** ...` line out
+    of a slice's body — same convention shape as
+    `_extract_resolution_trigger`, different label. Returns "" when
+    absent."""
+    m = _ABANDONMENT_REASON_RE.search(section)
+    return m.group(1).strip() if m else ""
+
+
+_BLOCKED_RE = re.compile(
+    r"(?im)^\*\*Blocked:\*\*\s*([^\n]+)"
+)
+
+
+def _extract_blocked(section: str) -> str:
+    """Slice 111-01 (AC2): pull the `**Blocked:** ...` line out of a
+    slice's body — same convention shape as `_extract_resolution_trigger`
+    / `_extract_abandonment_reason`, different label. Returns "" when
+    absent. ADR-0057: the frontmatter `blocked_by:` is the machine-readable
+    signal; this body line is the optional human-detail half of the
+    convention (the unblock condition), and — unlike the other two
+    extractors — is not gated on a specific status here: `collect_slices`
+    always extracts it, and `render_blocked_table` is what applies the
+    actionable-state filter (AC4)."""
+    m = _BLOCKED_RE.search(section)
+    return m.group(1).strip() if m else ""
+
+
+def compute_spec_status(spec_path: Path) -> str:
+    """Slice 030-01: derive the spec-level rollup from slice states.
+    Widened by slice 085-01 (AC4) to a 4th return value, `"ABANDONED"`.
+
+    Returns one of "DRAFT", "IN_PROGRESS", "DONE", "ABANDONED":
+      - No slices at all                                        → DRAFT
+      - All slices DEFERRED                                     → DRAFT
+      - All slices DEFERRED + ABANDONED (no DONE/live)          → DRAFT
+      - All slices ABANDONED                                    → ABANDONED
+      - All non-DEFERRED/non-ABANDONED slices are DRAFT         → DRAFT
+      - At least one non-DEFERRED/non-ABANDONED slice AND every
+        such slice has status DONE (mix of DONE + ABANDONED
+        allowed)                                                → DONE
+      - Anything else (mix of DONE+DRAFT, any IN_PROGRESS,
+        REVIEWED, RECONCILED, READY_FOR_REVIEW, ...)            → IN_PROGRESS
+
+    Pure function: reads spec slices via `iter_slices` (dual-layout,
+    matches `collect_slices`'s status-read pattern). Defensive: a spec.md
+    without frontmatter still gets a computed status — the WRITE step
+    (handled by callers `transition` / `status-board`) is what's skipped
+    on missing frontmatter, not the compute.
+    """
+    statuses = []
+    for loc in _iter_slices_common(spec_path):
+        section = loc.text[loc.start:loc.end]
+        fm_fields, _ = _slice_frontmatter(section)
+        if fm_fields.get("status"):
+            statuses.append(fm_fields["status"])
+            continue
+        m = _STATUS_MARKER_RE.search(section)
+        if m:
+            statuses.append(m.group(2))
+
+    # No slices at all → DRAFT
+    if not statuses:
+        return "DRAFT"
+
+    # Every slice is ABANDONED → ABANDONED (spec 036 Q3's previously-open
+    # "specs whose entire scope was abandoned" case).
+    if all(s == "ABANDONED" for s in statuses):
+        return "ABANDONED"
+
+    non_deferred = [s for s in statuses if s != "DEFERRED"]
+
+    # Every slice is DEFERRED → DRAFT (no live work)
+    if not non_deferred:
+        return "DRAFT"
+
+    non_deferred_or_abandoned = [s for s in non_deferred if s != "ABANDONED"]
+
+    # Every non-DEFERRED slice is ABANDONED (mix of DEFERRED + ABANDONED
+    # only, no DONE/live work) → DRAFT — same human action (reopen the
+    # resumable part, or close it out entirely) as all-DEFERRED today; see
+    # spec 085 Assumptions #4.
+    if not non_deferred_or_abandoned:
+        return "DRAFT"
+
+    # Every non-DEFERRED/non-ABANDONED slice is DONE → DONE (a mix of
+    # DONE + ABANDONED rolls up the same as DONE + DEFERRED today).
+    if all(s == "DONE" for s in non_deferred_or_abandoned):
+        return "DONE"
+
+    # Every non-DEFERRED/non-ABANDONED slice is DRAFT → DRAFT (no work begun)
+    if all(s == "DRAFT" for s in non_deferred_or_abandoned):
+        return "DRAFT"
+
+    # Mix of DONE + DRAFT, or any active state → IN_PROGRESS
+    return "IN_PROGRESS"
+
+
+_ORIENT_FOCUS_ORDER = (
+    "IN_PROGRESS",
+    "REVIEWED",
+    "RECONCILED",
+    "READY_FOR_IMPLEMENTATION",
+    "READY_FOR_REVIEW",
+    "DRAFT",
+)
+_ORIENT_FOCUS_RANK = {
+    status: idx for idx, status in enumerate(_ORIENT_FOCUS_ORDER)
+}
+_ORIENT_CLASSIFICATION_LABELS = {
+    "scaffolded": "Scaffolded jig project",
+    "adoptable": "Adoptable jig project",
+    "greenfield": "Greenfield jig project",
+}
+_ORIENT_MAX_GROUPS = 8
+_ORIENT_SAFE_CLAIM_RE = re.compile(r"[^A-Za-z0-9._/-]+")
+# Slice 101-01. Seconds allowed for any *single* git call inside `orient`.
+_ORIENT_IN_FLIGHT_GIT_TIMEOUT = 0.75
+# Seconds allowed for *all* git work in one `orient` call. A per-call timeout
+# is not a bound: `_in_flight_summary` can issue nine calls, and per-call × 9
+# is what actually reaches the SessionStart hook. That hook bounds the whole
+# command at 4 s and swallows a timeout as *no orientation at all* — strictly
+# worse than the pre-101 headline. So the calls share one wall-clock deadline.
+_ORIENT_IN_FLIGHT_TOTAL_BUDGET = 1.5
+# Remote-tracking before local, `main` before `master`; consulted only after
+# `origin/HEAD`, and every entry is verified rather than assumed to exist.
+_ORIENT_IN_FLIGHT_BASE_CANDIDATES = (
+    "origin/main", "origin/master", "main", "master")
+# Ref names are repository-controlled and reach the SessionStart headline, so
+# they get the same whitelist as a claim — at a cap that fits a real branch
+# name (`_sanitize_orient_claim`'s 30 would truncate most feature branches).
+_ORIENT_IN_FLIGHT_REF_MAX = 60
+# Bug 031. Seconds the *interactive* `/jig:orient` path (the `--fetch` flag)
+# may spend on one best-effort `git fetch` to refresh remote-tracking refs
+# before reporting staleness. Aligned with spec 103's git-freshness default.
+# This never runs in the 4 s SessionStart hook (which passes no `--fetch`),
+# so a network round-trip is affordable here; it is fail-soft regardless.
+_ORIENT_FRESHNESS_FETCH_TIMEOUT = 5.0
+
+
+def _spec_num_from_dirname(spec_dir: str) -> tuple[int, str]:
+    """Return (numeric value, zero-padded label) from a spec directory name."""
+    m = re.match(r"^(\d{3})\b", spec_dir)
+    if not m:
+        return (10**9, spec_dir)
+    return (int(m.group(1)), m.group(1))
+
+
+def _sanitize_orient_claim(value: str) -> str:
+    """Collapse repository-controlled claim text to the one-line safe grammar."""
+    cleaned = _ORIENT_SAFE_CLAIM_RE.sub("?", str(value or ""))
+    return cleaned[:30]
+
+
+def _render_orient_groups(groups: list[tuple[int, int, str]]) -> str:
+    rendered = []
+    for start, end, status in groups:
+        if start == end:
+            rendered.append(f"{start:03d} {status}")
+        else:
+            rendered.append(f"{start:03d}-{end:03d} {status}")
+    return ", ".join(rendered)
+
+
+def _active_spec_summary(project_dir: Path, rows: list[tuple]) -> str:
+    """Render the compact active-spec rollup for `orient`.
+
+    A spec is active iff it has at least one slice in a lifecycle-continuation
+    state. Its displayed rollup is still the canonical computed spec rollup,
+    read-only via `compute_spec_status()`.
+    """
+    active_dirs = {
+        spec_dir for spec_dir, _label, status, *_rest in rows
+        if status in _ORIENT_FOCUS_RANK
+    }
+    if not active_dirs:
+        return "none"
+
+    specs_dir = project_layout.specs_dir(project_dir)
+    specs = []
+    for spec_dir in active_dirs:
+        num, label = _spec_num_from_dirname(spec_dir)
+        spec_md = specs_dir / spec_dir / "spec.md"
+        rollup = compute_spec_status(spec_md) if spec_md.is_file() else "UNKNOWN"
+        specs.append((num, label, rollup))
+    specs.sort(key=lambda item: (item[0], item[1]))
+
+    groups: list[tuple[int, int, str]] = []
+    for num, _label, rollup in specs:
+        if num >= 10**9:
+            # Defensive fallback for non-canonical dirs: no range compression,
+            # but keep the value stable in numeric-order position.
+            groups.append((num, num, rollup))
+            continue
+        if groups and groups[-1][2] == rollup and num == groups[-1][1] + 1:
+            start, _end, status = groups[-1]
+            groups[-1] = (start, num, status)
+        else:
+            groups.append((num, num, rollup))
+
+    more = max(0, len(groups) - _ORIENT_MAX_GROUPS)
+    if more:
+        # Keep the newest active groups visible; project pickup usually cares
+        # about the current tail of the numbered spec stream.
+        groups = groups[-_ORIENT_MAX_GROUPS:]
+    summary = _render_orient_groups(groups)
+    if more:
+        summary += f", +{more} more"
+    return summary
+
+
+def _focus_summary(rows: list[tuple]) -> str:
+    best = None
+    # `*_rest` tolerates rows longer than the 7-tuple this unpack names
+    # (e.g. slice 111-01's blocked_by/blocked_line additions) as well as
+    # the exact 7-tuple shape — never a strict-arity break on row growth.
+    for order, (_spec_dir, label, status, _trigger, _kind, claimed_by,
+                _abandonment_reason, *_rest) in enumerate(rows):
+        rank = _ORIENT_FOCUS_RANK.get(status)
+        if rank is None:
+            continue
+        slice_id = _slice_id_from_label(label)
+        if not slice_id:
+            continue
+        candidate = (rank, order, slice_id, status, claimed_by)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    if best is None:
+        return "none"
+
+    _rank, _order, slice_id, status, claimed_by = best
+    focus = f"{slice_id} {status}"
+    if claimed_by:
+        safe_claim = _sanitize_orient_claim(claimed_by)
+        if safe_claim:
+            focus += f" (claimed by {safe_claim})"
+    return focus
+
+
+def _in_flight_git(
+    project_dir: Path, *args: str, deadline: float
+) -> str | None:
+    """Run one read-only git command; return stripped stdout, or None.
+
+    None on *any* failure — git missing from PATH, not a repository, non-zero
+    exit, timeout, undecodable output, or the shared deadline already being
+    spent. Slice 101-01 AC3: orientation must never fail because git did, so
+    every call site treats None as "say nothing".
+
+    `deadline` is required, not defaulted: it is the shared budget, and a
+    caller that forgot it would silently get up to five unbounded calls —
+    which is exactly the hole the round-1 review caught.
+    """
+    budget = min(_ORIENT_IN_FLIGHT_GIT_TIMEOUT, deadline - time.monotonic())
+    if budget <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), *args],
+            capture_output=True,
+            text=True,
+            # A ref name need not be valid in the ambient encoding (and under
+            # LC_ALL=C any non-ASCII branch is not). Strict decoding would
+            # raise UnicodeDecodeError — a ValueError, so not covered by the
+            # except clause below — straight out of orient().
+            errors="replace",
+            timeout=budget,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _sanitize_orient_ref(value: str) -> str:
+    """Ref names are repository-controlled text bound for the hook headline.
+
+    Git forbids spaces and control characters in refs but permits `·` — the
+    headline's own field separator — plus assorted punctuation and arbitrary
+    length, so an unsanitised branch name can forge a headline field. Same
+    whitelist as `_sanitize_orient_claim`, wider cap (see the constant).
+    """
+    cleaned = _ORIENT_SAFE_CLAIM_RE.sub("?", str(value or ""))
+    return cleaned[:_ORIENT_IN_FLIGHT_REF_MAX]
+
+
+def _in_flight_base(project_dir: Path, *, deadline: float) -> str:
+    """Resolve the default branch instead of assuming `main` (101-01 AC4).
+
+    `origin/HEAD` is consulted first — it is what the remote actually calls
+    its trunk — but its target is **verified like any other candidate rather
+    than trusted**. A stale `origin/HEAD` (left behind by a default-branch
+    rename, or pointing at a pruned ref) would otherwise either silence the
+    segment permanently or, worse, produce a confidently wrong count against
+    the old trunk. On a miss we fall through to the conventional names.
+    Returns "" when none resolves, which the caller turns into silence.
+    """
+    head = _in_flight_git(
+        project_dir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD",
+        deadline=deadline)
+    candidates: list[str] = []
+    if head and head.startswith("refs/remotes/"):
+        candidates.append(head[len("refs/remotes/"):])
+    candidates.extend(_ORIENT_IN_FLIGHT_BASE_CANDIDATES)
+    seen: set[str] = set()
+    for ref in candidates:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        if _in_flight_git(
+                project_dir, "rev-parse", "--verify", "--quiet", ref,
+                deadline=deadline) is not None:
+            return ref
+    return ""
+
+
+def _in_flight_summary(project_dir: Path) -> str:
+    """`5 commits ahead of main on claude/night-prep`, or "" (slice 101-01).
+
+    A status board only ever describes the default branch, so work sitting on
+    an unmerged branch — or committed locally and never pushed — is invisible
+    to every artifact orient reads, and the project reads as "nothing in
+    progress" when it is not.
+
+    Silence is the default and covers every degraded case: not a git
+    repository, no git binary, no resolvable trunk, a detached HEAD, and a
+    HEAD level with or behind trunk. AC2 pins that the headline is then
+    byte-identical to its pre-101 form.
+
+    All git work shares one deadline (`_ORIENT_IN_FLIGHT_TOTAL_BUDGET`) so the
+    worst case is bounded no matter how many refs have to be probed, and both
+    ref names are sanitised before they reach the headline.
+    """
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=deadline) != "true":
+        return ""
+    branch = _in_flight_git(
+        project_dir, "rev-parse", "--abbrev-ref", "HEAD", deadline=deadline)
+    if not branch or branch == "HEAD":
+        # Detached HEAD — there is no branch name to report, so say nothing
+        # rather than printing the literal string "HEAD".
+        return ""
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if not base:
+        return ""
+    raw = _in_flight_git(
+        project_dir, "rev-list", "--count", f"{base}..HEAD", deadline=deadline)
+    # `isdecimal`, not `isdigit`: "²".isdigit() is True but int("²") raises,
+    # and AC3 lists unexpected git output as a case that must not raise.
+    if raw is None or not raw.isdecimal():
+        return ""
+    count = int(raw)
+    if count == 0:
+        return ""
+    noun = "commit" if count == 1 else "commits"
+    return (
+        f"{count} {noun} ahead of {_sanitize_orient_ref(base)} "
+        f"on {_sanitize_orient_ref(branch)}"
+    )
+
+
+def _orient_fetch_origin(project_dir: Path) -> bool:
+    """Best-effort bounded `git fetch origin`; True iff it succeeded.
+
+    Bug 031. Never raises: git missing, offline, auth failure, or timeout all
+    return False. The caller uses the boolean to distinguish "in sync against
+    refs we actually refreshed" from "cannot vouch — the fetch failed", so a
+    stale local view is never silently reported as fresh.
+
+    `GIT_TERMINAL_PROMPT=0` disables git's interactive credential prompt: on an
+    auth-required origin the fetch fails fast (returns False) instead of the
+    timeout having to backstop a stalled prompt.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), "fetch", "--quiet", "origin"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_ORIENT_FRESHNESS_FETCH_TIMEOUT,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return result.returncode == 0
+
+
+def _freshness_summary(project_dir: Path) -> str:
+    """`2 commits behind origin/main`, `could not reach origin`, or "".
+
+    Bug 031. Orient builds its whole picture from local artifacts (boards,
+    slice STATUS, ADRs) that are only as current as the last fetch; a checkout
+    whose base has drifted behind trunk otherwise renders stale state as
+    current. This runs ONLY on the interactive `--fetch` path (the `/jig:orient`
+    skill), never the 4 s SessionStart hook, so a bounded network fetch is
+    affordable.
+
+    Fail-soft in orient's tradition — not a git repo, no `origin` remote, an
+    unresolvable trunk, or unexpected git output all return "" (silence). The
+    one case surfaced rather than silenced is a configured-but-unreachable
+    origin: reporting "not behind" against refs we failed to refresh is exactly
+    the false-fresh signal this bug is about.
+    """
+    # Local ref probing shares the same bounded budget as `_in_flight_summary`;
+    # resolved fresh *after* the fetch so the fetch's own timeout does not eat
+    # into it.
+    probe_deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=probe_deadline) != "true":
+        return ""
+    origin_url = _in_flight_git(
+        project_dir, "config", "--get", "remote.origin.url",
+        deadline=probe_deadline)
+    if not origin_url:
+        # Local-only repo: nothing to be stale against.
+        return ""
+
+    fetch_ok = _orient_fetch_origin(project_dir)
+
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if base:
+        behind = _in_flight_git(
+            project_dir, "rev-list", "--count", f"HEAD..{base}",
+            deadline=deadline)
+        if behind is not None and behind.isdecimal():
+            count = int(behind)
+            if count > 0:
+                noun = "commit" if count == 1 else "commits"
+                return (
+                    f"{count} {noun} behind {_sanitize_orient_ref(base)}"
+                )
+            # count == 0: in sync against refs we DID refresh → silence, unless
+            # the fetch failed (then the "0" is against a stale ref we can't
+            # trust — fall through to the could-not-reach signal below).
+            if fetch_ok:
+                return ""
+    # No resolvable base, unexpected output, or a zero count we can't vouch
+    # for: surface unreachability, stay silent when the fetch actually worked.
+    return "" if fetch_ok else "could not reach origin"
+
+
+def orient(project_dir: Path, *, fetch: bool = False) -> str:
+    """Read-only project pickup headline (slice 088-01).
+
+    The headline is deliberately one line and starts with `jig hint:` so hook
+    injections cannot be confused for user-authored text. Its lifecycle content
+    comes from durable jig artifacts only: `scaffold.json` / spec-driven layout
+    classification plus spec and slice lifecycle state. It never infers
+    application skeleton or technology-stack state from the shallow source
+    tree.
+
+    Slice 101-01 adds one further, clearly-bounded source: local `git` state,
+    used solely to report commits that have not reached the default branch
+    (`_in_flight_summary`). That is still not source-tree inference — it is
+    read-only VCS fact — and it fails soft, so the headline degrades to its
+    pre-101 form rather than disappearing when git is absent or slow.
+
+    Bug 031 adds `fetch`: when True (the interactive `/jig:orient` path only,
+    never the 4 s SessionStart hook) orient does one bounded, fail-soft
+    `git fetch` and appends a `freshness:` segment when the checkout is behind
+    origin or origin could not be reached — so a stale local view is never
+    presented as current. When False the headline is byte-identical to its
+    pre-031 form, keeping the hot path untouched.
+    """
+    project_dir = Path(project_dir)
+    state = classify_scaffold_state(project_dir)
+    classification = _ORIENT_CLASSIFICATION_LABELS.get(
+        state, f"{state.title()} jig project")
+    rows = collect_slices(project_dir)
+    active_specs = _active_spec_summary(project_dir, rows)
+    focus = _focus_summary(rows)
+    headline = (
+        f"jig hint: {classification} · active specs: {active_specs} · "
+        f"focus: {focus}"
+    )
+    # Slice 101-01: appended only when there is something to say, so the
+    # pre-101 headline stays byte-identical everywhere else (AC2).
+    in_flight = _in_flight_summary(project_dir)
+    if in_flight:
+        headline += f" · in flight: {in_flight}"
+    # Bug 031: only on the interactive path; the SessionStart hook passes no
+    # `fetch`, so its headline stays byte-identical.
+    if fetch:
+        freshness = _freshness_summary(project_dir)
+        if freshness:
+            headline += f" · freshness: {freshness}"
+    return headline + "\n"
+
+
+def _write_spec_rollup(spec_path: Path) -> bool:
+    """Slice 030-01: idempotently update spec.md's frontmatter `status:`
+    field to the computed rollup. Returns True if the file was written
+    (rollup value changed), False otherwise.
+
+    Defensive — when spec.md has NO frontmatter block at all, return
+    False without writing (no frontmatter insertion; lazy-migration
+    consistent with slice 015-01).
+    """
+    if not spec_path.is_file():
+        return False
+    text = spec_path.read_text()
+    fields, _ = parse_frontmatter(text)
+    if not fields:
+        # No frontmatter block → leave the file alone (defensive).
+        return False
+    computed = compute_spec_status(spec_path)
+    current = fields.get("status", "")
+    if current == computed:
+        return False
+    new_text = set_frontmatter_field(text, "status", computed)
+    if new_text == text:
+        return False
+    atomic_write_text(spec_path, new_text)
+    return True
+
+
+def collect_slices(project_dir: Path) -> list:
+    """Walk docs/specs/*/spec.md and collect (spec_dir, slice_label, status,
+    resolution_trigger, kind, claimed_by, abandonment_reason, blocked_by,
+    blocked_line) tuples in file order. resolution_trigger is the empty
+    string when the slice is not DEFERRED (or simply has no `**Resolution
+    trigger:**` line). abandonment_reason (slice 085-01) is the empty
+    string when the slice is not ABANDONED (or has no `**Abandonment
+    reason:**` line). `kind` is the slice's frontmatter `kind:` value
+    (slice 029-01: `"spike"` / `"feature"` / `""` for unset). Slice 029-02
+    reads this to drive the marker in `render_status_table` — recomputed
+    every regen from the slice's frontmatter, so the marker is never
+    stored separately. `claimed_by` (slice 049-02) is the slice's
+    frontmatter `claimed_by:` value — the session working the slice,
+    stamped by `transition` on entry to a WORKING state (ADR-0045) and
+    rendered as a suffix on those Status cells.
+
+    An empty `claimed_by` means NO CLAIM IS RECORDED — it is not proof the
+    slice is free. Claims are local by default (`--push`/`--pr` opt into
+    origin/main), so a parallel worktree's unpushed claim is invisible here,
+    and a plain `Edit`-tool write to a slice never takes a claim at all.
+
+    `blocked_by` (slice 111-01 / ADR-0057) is the slice's frontmatter
+    `blocked_by:` value, read the same way `claimed_by` is — a whitespace-
+    only value is normalized to "" (treated as unset). `blocked_line` is
+    the extracted `**Blocked:**` body line (via `_extract_blocked`),
+    carried alongside so `render_blocked_table` has both the
+    machine-readable annotation and the optional human prose without
+    re-reading the file. Neither is gated on `status` here — the
+    actionable-state filter is `render_blocked_table`'s concern (AC4)."""
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return []
+    rows = []
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        spec_dir = spec_md.parent.name
+        # Slice 018-02: walk both layouts via the common iterator. Slice
+        # files come first (sorted by filename), then embedded sections in
+        # spec.md document order — deterministic display.
+        for loc in _iter_slices_common(spec_md):
+            section = loc.text[loc.start:loc.end]
+            # Layout-aware status read: frontmatter at top (slice file)
+            # OR after the heading line (embedded section).
+            fm_fields, _ = _slice_frontmatter(section)
+            status = None
+            if fm_fields.get("status"):
+                status = fm_fields["status"]
+            else:
+                sm = _STATUS_MARKER_RE.search(section)
+                if sm:
+                    status = sm.group(2)
+            trigger = (_extract_resolution_trigger(section)
+                       if status == "DEFERRED" else "")
+            abandonment_reason = (_extract_abandonment_reason(section)
+                                  if status == "ABANDONED" else "")
+            # Slice 029-02: read `kind:` from frontmatter (slice 029-01
+            # convention). Defaults to "" when unset — same as feature.
+            kind = str(fm_fields.get("kind", "")).strip()
+            # Slice 049-02: read `claimed_by:` (spec 049-01). "" when unset.
+            claimed_by = str(fm_fields.get(CLAIM_FIELD, "")).strip()
+            # Slice 111-01: read `blocked_by:` (ADR-0057) the same way.
+            # "" when unset, whitespace-only normalized to "".
+            blocked_by = str(fm_fields.get(BLOCKED_FIELD, "")).strip()
+            blocked_line = _extract_blocked(section)
+            rows.append(
+                (spec_dir, loc.label, status or "UNKNOWN", trigger, kind,
+                 claimed_by, abandonment_reason, blocked_by, blocked_line),
+            )
+    return rows
+
+
+def parse_existing_notes(existing: str) -> dict:
+    """Extract a {(spec_dir, slice_label): notes_text} map from the current
+    board's table. Used to preserve curated Notes across regen — the workflow's
+    most valuable per-row content (test counts, review state, links).
+
+    Slice 029-02: the slice cell may be marker-prefixed (`🔬 <label>`) for
+    spike rows. The marker is stripped when computing the lookup key so
+    notes-preservation is stable across marker comes/goes (e.g. a slice
+    whose `kind:` changes between regens, or a user who hand-strips the
+    marker on the board — see AC #2).
+    """
+    notes_map = {}
+    # Match `| [spec-link]... | slice | status | notes |` rows; preamble + headers skipped.
+    # Two constraints are load-bearing for not gluing adjacent rows together:
+    #   1. `[^\S\n]*` (horizontal whitespace only) between the status cell and
+    #      the notes cell — prevents `\s*` from consuming `\n` and continuing
+    #      the match onto the NEXT line when the current row has 3 cells (e.g.
+    #      rows from the `## Deferred slices` table, shape `| spec | slice |
+    #      trigger |`).
+    #   2. `[^|\n]*?` for the notes cell — rejects already-corrupted rows whose
+    #      notes cell contains pipes (the sign of a previously-glued row). Clean
+    #      notes never contain a raw `|` by convention (SKILL.md gotcha lists
+    #      `&#124;` as the escape).
+    row_pattern = re.compile(
+        r"^\|\s*\[([^\]]+)\][^|]*\|\s*([^|]+?)\s*\|\s*[^|]+\|[^\S\n]*([^|\n]*?)\s*\|\s*$",
+        re.MULTILINE,
+    )
+    for m in row_pattern.finditer(existing):
+        spec_dir = m.group(1).strip()
+        label = m.group(2).strip()
+        notes = m.group(3).strip()
+        # Skip the header row ("Spec" / "Slice" / "Status" / "Notes")
+        if spec_dir.lower() == "spec":
+            continue
+        # Slice 029-02: strip a leading `SPIKE_MARKER ` prefix so the
+        # lookup key is the unmarked label. Without this, a hand-curated
+        # note on a spike row would orphan whenever the marker comes
+        # or goes across regens.
+        if label.startswith(SPIKE_MARKER):
+            label = label[len(SPIKE_MARKER):].lstrip()
+        notes_map[(spec_dir, label)] = notes
+    return notes_map
+
+
+# Slice 049-02: cap the `claimed_by` suffix rendered in the board's Status
+# cell so a long branch name can't blow out the column width. A claim at or
+# below CLAIM_DISPLAY_MAX renders in full; a longer one is truncated to
+# CLAIM_DISPLAY_TRUNC chars + an ellipsis. Invariant: keep
+# CLAIM_DISPLAY_TRUNC < CLAIM_DISPLAY_MAX so a truncated suffix is always
+# shorter than the untruncated bound (the +ellipsis still fits the budget).
+CLAIM_DISPLAY_MAX = 30
+CLAIM_DISPLAY_TRUNC = 27
+
+
+def _render_claim_suffix(claimed_by: str) -> str:
+    """Slice 049-02: ` (<claim>)` suffix for a WORKING-state Status cell (ADR-0045), or
+    "" when unclaimed. Truncates an over-long claim to keep the cell bounded
+    (AC6)."""
+    claim = (claimed_by or "").strip()
+    if not claim:
+        return ""
+    if len(claim) > CLAIM_DISPLAY_MAX:
+        claim = claim[:CLAIM_DISPLAY_TRUNC] + "…"
+    return f" ({claim})"
+
+
+def render_status_table(rows: list, notes_map: dict | None = None) -> str:
+    """Build the Markdown table for the status board. `notes_map` carries
+    Notes from the prior version of the board, looked up by (spec_dir, label).
+    Tolerates 3-tuple (legacy), 4-tuple (slice 014-02), 5-tuple
+    (slice 029-02, with `kind`), 6-tuple (slice 049-02, with
+    `claimed_by`), 7-tuple (slice 085-01, with `abandonment_reason`),
+    and 9-tuple (slice 111-01, with `blocked_by` + blocked body line)
+    row shapes — index-guarded, so it reads only the leading columns it
+    needs.
+
+    Slice 029-02: when a row's `kind == "spike"`, the slice cell is
+    prepended with the `SPIKE_MARKER` glyph + a space. The marker is a
+    pure rendering concern — `notes_map` is keyed by the unmarked label
+    so curated notes survive across runs where the marker comes or goes.
+    """
+    notes_map = notes_map or {}
+    lines = ["| Spec | Slice | Status | Notes |", "|------|-------|--------|-------|"]
+    for row in rows:
+        spec_dir, label, status = row[0], row[1], row[2]
+        kind = row[4] if len(row) >= 5 else ""
+        claimed_by = row[5] if len(row) >= 6 else ""
+        spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
+        status_cell = f"**{status}**" if status == "DONE" else status
+        # Slice 049-02: surface the owning worktree on the status cell.
+        # ADR-0045 widened this from IN_PROGRESS-only to every WORKING state —
+        # while the board could only show an owner on IN_PROGRESS rows, it was
+        # structurally unable to say "someone is reconciling this", which is
+        # exactly the read that sent a second session onto a live slice
+        # (bug 014). Release-point rows (pickup-queue + terminal) never
+        # carry a claim; legacy / unclaimed
+        # rows fall back to the plain status (empty suffix).
+        if status in _CLAIM_WORKING_STATUSES:
+            status_cell = status + _render_claim_suffix(claimed_by)
+        notes = notes_map.get((spec_dir, label), "")
+        # Slice 029-02: prepend the spike marker on the slice cell only
+        # when the slice's `kind == "spike"`. Single-emoji + space prefix;
+        # no schema churn, no new column.
+        if kind == "spike":
+            slice_cell = f"{SPIKE_MARKER} {label}"
+        else:
+            slice_cell = label
+        lines.append(f"| {spec_link} | {slice_cell} | {status_cell} | {notes} |")
+    return "\n".join(lines) + "\n"
+
+
+_DEFERRED_HEADING = "## Deferred slices"
+
+
+def render_deferred_table(rows: list) -> str:
+    """Slice 014-02: separate table for `DEFERRED` slices with the
+    Resolution trigger as the per-row context. Returns the empty string
+    when no rows are deferred (so the section is fully omitted, not
+    rendered as a heading with an empty table).
+
+    Slice 029-02: tolerates the 5-tuple row shape and prepends the
+    `SPIKE_MARKER` glyph for `kind == "spike"` rows so DEFERRED spikes
+    are visually consistent with active spikes in the upper table.
+    Falls back to no-marker rendering for legacy 3- or 4-tuple rows
+    (no kind field available)."""
+    deferred = [r for r in rows if len(r) >= 3 and r[2] == "DEFERRED"]
+    if not deferred:
+        return ""
+    lines = [
+        "",
+        _DEFERRED_HEADING,
+        "",
+        "> Slices parked with a stated resolution trigger. Re-open by "
+        "transitioning to DRAFT.",
+        "",
+        "| Spec | Slice | Resolution trigger |",
+        "|------|-------|--------------------|",
+    ]
+    for row in deferred:
+        spec_dir, label = row[0], row[1]
+        trigger = row[3] if len(row) >= 4 else ""
+        kind = row[4] if len(row) >= 5 else ""
+        spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
+        slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
+        lines.append(f"| {spec_link} | {slice_cell} | {trigger} |")
+    return "\n".join(lines) + "\n"
+
+
+_ABANDONED_HEADING = "## Abandoned slices"
+
+
+def render_abandoned_table(rows: list) -> str:
+    """Slice 085-01 (AC3): separate table for `ABANDONED` slices with the
+    Abandonment reason as the per-row context. Mirrors
+    `render_deferred_table`: returns the empty string when no rows are
+    abandoned (section fully omitted, not rendered with an empty table).
+    Reads the `abandonment_reason` element (index 6) from `collect_slices`'s
+    row (now a 9-tuple as of slice 111-01; access is index-guarded, so the
+    added trailing `blocked_by` columns are ignored here) and prepends the
+    `SPIKE_MARKER` glyph for `kind == "spike"` rows, matching the Deferred
+    table's rendering."""
+    abandoned = [r for r in rows if len(r) >= 3 and r[2] == "ABANDONED"]
+    if not abandoned:
+        return ""
+    lines = [
+        "",
+        _ABANDONED_HEADING,
+        "",
+        "> Slices permanently dropped, with a stated reason. This is "
+        "distinct from Deferred (parked, resumable) — re-open by "
+        "transitioning to DRAFT.",
+        "",
+        "| Spec | Slice | Abandonment reason |",
+        "|------|-------|---------------------|",
+    ]
+    for row in abandoned:
+        spec_dir, label = row[0], row[1]
+        kind = row[4] if len(row) >= 5 else ""
+        reason = row[6] if len(row) >= 7 else ""
+        spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
+        slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
+        lines.append(f"| {spec_link} | {slice_cell} | {reason} |")
+    return "\n".join(lines) + "\n"
+
+
+_BLOCKED_HEADING = "## Blocked slices"
+
+
+def render_blocked_table(rows: list) -> str:
+    """Slice 111-01 (AC3-AC6) / ADR-0057: separate table for
+    **actionable-state** slices carrying a non-empty `blocked_by:` — a
+    blocker is an annotation on an actionable slice, not a lifecycle
+    state. Mirrors `render_deferred_table` / `render_abandoned_table`:
+    returns the empty string when nothing qualifies (AC5 — the section is
+    fully omitted, not rendered as a heading with an empty table, so a
+    clean project's board is unaffected).
+
+    "Actionable" is `_BLOCKER_ACTIONABLE_STATUSES`
+    (`READY_FOR_IMPLEMENTATION` + the WORKING states) — a `blocked_by:` on
+    a DRAFT / DONE / DEFERRED / ABANDONED slice does not count (AC4; that
+    misfile is 111-02's `spec_lint` concern, not a board entry).
+
+    The "Blocked on" cell prefers the extracted `**Blocked:**` body line
+    (row[8]) over the raw `blocked_by:` frontmatter value (row[7]) when
+    both are present, falling back to the frontmatter value alone.
+
+    Unlike the Deferred/Abandoned tables — which rely on an author-side
+    `&#124;` convention rather than escaping — a raw `|` in the rendered
+    cell is **actively escaped** here (AC6): `blocked_by:` is free text
+    and far more likely to contain a literal `|`, so this render path
+    escapes it itself rather than trusting authors, and adjacent rows
+    can never be glued by it."""
+    blocked = [
+        r for r in rows
+        if len(r) >= 8 and r[2] in _BLOCKER_ACTIONABLE_STATUSES and r[7]
+    ]
+    if not blocked:
+        return ""
+    lines = [
+        "",
+        _BLOCKED_HEADING,
+        "",
+        "> Actionable slices stuck on a named thing. Clear by removing "
+        "the `blocked_by:` annotation.",
+        "",
+        "| Spec | Slice | Blocked on |",
+        "|------|-------|------------|",
+    ]
+    for row in blocked:
+        spec_dir, label = row[0], row[1]
+        kind = row[4] if len(row) >= 5 else ""
+        blocked_by = row[7]
+        blocked_line = row[8] if len(row) >= 9 else ""
+        blocked_on = (blocked_line or blocked_by).replace("|", "&#124;")
+        spec_link = f"[{spec_dir}]({spec_dir}/spec.md)"
+        slice_cell = f"{SPIKE_MARKER} {label}" if kind == "spike" else label
+        lines.append(f"| {spec_link} | {slice_cell} | {blocked_on} |")
+    return "\n".join(lines) + "\n"
+
+
+def _substrate_audit_section(project_dir: Path) -> str:
+    """Render the richer-skill selection audit (spec 096-05 AC5) — the
+    kill-criterion-1 aggregator (ADR-0040). Scans every recorded slice-evidence
+    verdict file's `substrate:` and counts the two aggregated signals
+    (`not-shown` = the defect signal; `non-interactive` = declared
+    no-orchestrator) plus the calibrated `shown`-and-declined anomalies. Emits a
+    small regen-managed section only when there is something to report — a clean
+    corpus (all `config` / `shown`-with-a-pick / pre-096 field-absent) yields
+    `""` so quiet projects see no noise. Defensive: unreadable files are
+    skipped, never raised."""
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return ""
+    not_shown = 0
+    non_interactive = 0
+    anomalies: list = []  # (slice-file, applied, [declined])
+    for vf in sorted(specs_dir.glob("*/reviews/slice-*.md")):
+        try:
+            rec = _evidence.parse_verdict_file(vf)
+        except (OSError, ValueError):
+            continue
+        substrate = (rec.fields or {}).get("substrate")
+        if substrate == "not-shown":
+            not_shown += 1
+        elif substrate == "non-interactive":
+            non_interactive += 1
+        declined = _evidence.substrate_anomaly(rec.fields)
+        if declined:
+            anomalies.append((vf.parent.parent.name + "/" + vf.name,
+                              rec.fields.get("applied_skill", "none"), declined))
+    if not (not_shown or non_interactive or anomalies):
+        return ""
+    lines = ["\n## Richer-skill selection audit (spec 096-05)\n",
+             "Advisory (ADR-0040 auditability — never blocks). Regenerated from "
+             "`reviews/slice-*.md` `substrate:` fields.\n",
+             f"- **{not_shown}** pass(es) recorded `not-shown` "
+             "(selection step did not run — the kill-criterion-1 defect signal).",
+             f"- **{non_interactive}** pass(es) recorded `non-interactive` "
+             "(declared no-orchestrator / CI).",
+             f"- **{len(anomalies)}** shown-and-declined anomaly(ies) "
+             "(a high-confidence richer skill was shown and not applied):"]
+    for name, applied, declined in anomalies:
+        lines.append(f"  - `{name}` — applied `{applied}`; "
+                     f"declined: {', '.join(declined)}")
+    return "\n".join(lines) + "\n"
+
+
+def _compose_board(project_dir: Path, existing: str, rows: list | None = None) -> str:
+    """Render the board text from the spec records on disk, carrying the
+    curated Notes column and the preamble over from `existing`.
+
+    Pure — no writes, no `status:` rollup. Shared by `regenerate_status_board`
+    (which writes the result) and `check_board` (which compares against it),
+    so the check can never drift from what regeneration would produce.
+    """
+    if rows is None:
+        rows = collect_slices(project_dir)
+    notes_map = parse_existing_notes(existing)
+    body = (
+        render_status_table(rows, notes_map)
+        + render_deferred_table(rows)
+        + render_abandoned_table(rows)
+        + render_blocked_table(rows)
+        + _substrate_audit_section(project_dir)
+    )
+    m = re.search(r"(?m)^\|\s*Spec\b", existing)
+    if m:
+        preamble = existing[: m.start()]
+    else:
+        preamble = existing
+        if not preamble.endswith("\n"):
+            preamble += "\n"
+    return preamble + body
+
+
+def _duplicate_spec_ids(project_dir: Path) -> dict:
+    """Map spec number -> sorted directory names, for numbers claimed by more
+    than one spec.
+
+    `render_status_table` renders two specs sharing a number as two groups of
+    rows without complaint, and a drift check can't see the problem either —
+    both groups are faithfully derived. Today the only thing that surfaces it
+    is the merge conflict on the board, which is exactly what we want to stop
+    resolving by hand (issue #149). So it needs its own detector.
+    """
+    specs_dir = project_layout.specs_dir(project_dir)
+    if not specs_dir.is_dir():
+        return {}
+    pairs = []
+    for spec_md in sorted(specs_dir.glob("*/spec.md")):
+        spec_dir = spec_md.parent
+        spec_id = derived_docs.id_from_numeric_prefix(spec_dir)
+        if spec_id is not None:
+            pairs.append((spec_id, spec_dir.name))
+    return derived_docs.duplicate_ids(pairs)
+
+
+def check_board(project_dir: Path) -> list:
+    """Read-only audit of `docs/specs/README.md`. Returns a list of
+    human-readable problems — empty means clean.
+
+    Never writes. CI runs this against a checkout, and a check that repairs
+    what it measures can't be trusted to report it. Note this rules out
+    calling `regenerate_status_board` and diffing: that helper also writes a
+    `status:` rollup into every spec.md it walks.
+    """
+    problems = []
+    for spec_id, names in _duplicate_spec_ids(project_dir).items():
+        problems.append(
+            f"duplicate spec id {spec_id}: {', '.join(names)} — renumber one "
+            "before landing; parallel branches both allocated it"
+        )
+    board_path = project_layout.specs_dir(project_dir) / "README.md"
+    if not board_path.is_file():
+        problems.append(
+            f"missing board: {board_path} — run `workflow.py status-board "
+            "<project-dir>` to create it"
+        )
+        return problems
+    existing = board_path.read_text()
+    if existing != _compose_board(project_dir, existing):
+        problems.append(
+            f"stale board: {board_path} does not match the spec records — run "
+            "`workflow.py status-board <project-dir>` and commit the result"
+        )
+    return problems
+
+
+def regenerate_status_board(project_dir: Path, force: bool = False) -> str:
+    """Regenerate docs/specs/README.md table from spec.md files.
+    Preserves preamble before the first `| Spec` line AND Notes column
+    content from the existing table. Slice 014-02: appends a separate
+    `## Deferred slices` table after the active table when any slice
+    is in `DEFERRED`. Slice 085-01: appends a further `## Abandoned
+    slices` table after the Deferred table when any slice is in
+    `ABANDONED`. Slice 030-01: also writes the spec.md `status:`
+    rollup for each walked spec (idempotent — only writes when the
+    computed value differs from what's currently in spec.md frontmatter,
+    and skipped for spec.md files without frontmatter). Idempotent.
+
+    Slice 028-03: checksum-based race-detection guard. The helper
+    captures the pre-regen SHA256 of `docs/specs/README.md` and
+    re-checksums immediately before the write. If the two checksums
+    differ, another writer regenerated the board in the gap; the helper
+    raises `StatusBoardRaceError` rather than silently overwriting.
+    Surfaces as exit code 4 via `main()`. The `--force` flag (or
+    `force=True` kwarg) bypasses the check and writes anyway.
+
+    Spec-rollup writes (`_write_spec_rollup`) are NOT under the race
+    check — they touch individual spec.md files (not the README) and
+    happen before the race window opens.
+    """
+    board_path = project_layout.specs_dir(project_dir) / "README.md"
+    if not board_path.is_file():
+        raise WorkflowError(f"status board not found: {board_path}")
+
+    existing = board_path.read_text()
+    # Slice 028-03 AC #1: capture pre-regen checksum so we can detect a
+    # mid-regen mutation by another writer. Skipped when `force=True`
+    # since a forced overwrite intentionally bypasses the guard.
+    pre_checksum = None if force else _checksum(board_path)
+
+    rows = collect_slices(project_dir)
+    new_content = _compose_board(project_dir, existing, rows)
+
+    # Slice 030-01: roll up spec-level status to spec.md frontmatter for
+    # every spec walked. Side-effect of regen — independent of whether
+    # the board's table text itself changed, so a spec whose frontmatter
+    # drifted from its slice states still gets corrected. Idempotent
+    # per spec via `_write_spec_rollup`.
+    specs_dir = project_layout.specs_dir(project_dir)
+    if specs_dir.is_dir():
+        for spec_md in sorted(specs_dir.glob("*/spec.md")):
+            _write_spec_rollup(spec_md)
+
+    if new_content == existing:
+        return "status board already current; no changes"
+    # Slice 028-03 AC #2: re-checksum right before the write. If the file
+    # changed between the pre-regen read and now, another writer raced us
+    # — refuse rather than silently overwrite their work. Skipped on
+    # `--force` (the operator explicitly opted in to an overwrite).
+    # Stale-checksum false-positive: if a concurrent writer rewrote the
+    # README with identical content, SHA256 stays the same → no race
+    # detected → write proceeds. Content-based check correctly treats
+    # "same content" as "no race" (documented behavior, not a bug).
+    if not force:
+        post_checksum = _checksum(board_path)
+        if post_checksum != pre_checksum:
+            raise StatusBoardRaceError(
+                "status board changed during regen — another writer may "
+                "have run. Re-run `workflow.py status-board` to retry."
+            )
+    atomic_write_text(board_path, new_content)
+    return (f"regenerated status board: {len(rows)} slice(s) across "
+            f"{len({r[0] for r in rows})} spec(s)")
+
+
+def _resolve_dep_path(dep: str, project_dir: Path) -> Path | None:
+    """Map a dep token to its underlying doc file. Returns None if the
+    token shape is unrecognized or no file matches.
+
+    Slice 018-02: for slice deps, walk both layouts via `iter_slices`
+    and return the file the slice actually lives in (slice-NN-*.md
+    when file-per-slice, spec.md when embedded). Staleness checks
+    against this path then reflect the right mtime.
+    """
+    slice_m = re.match(r"^(\d{3})-(\d{2})$", dep)
+    adr_m = re.match(r"(?i)^adr-(\d{1,4})$", dep)
+    if slice_m:
+        spec_num = slice_m.group(1)
+        specs_dir = project_layout.specs_dir(project_dir)
+        needle = dep.lower()
+        for spec_md in sorted(specs_dir.glob(f"{spec_num}-*/spec.md")):
+            for loc in _iter_slices_common(spec_md):
+                if needle in loc.label.lower():
+                    return loc.path
+        return None
+    if adr_m:
+        num = adr_m.group(1).zfill(4)
+        candidates = sorted(project_layout.decisions_dir(project_dir).glob(
+            f"adr-{num}-*.md"))
+        return candidates[0] if candidates else None
+    return None
+
+
+def _file_modified_iso(path: Path) -> str:
+    """Return the file's most-recent modification date as YYYY-MM-DD,
+    preferring `git log -1 --format=%cs` when inside a git repo (so the
+    answer reflects committed state, not local working-copy touches).
+    Falls back to filesystem mtime when git is unavailable or the file
+    isn't tracked."""
+    import subprocess as _sp
+    try:
+        result = _sp.run(
+            ["git", "log", "-1", "--format=%cs", "--", str(path)],
+            capture_output=True, text=True, cwd=str(path.parent),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (FileNotFoundError, OSError):
+        pass
+    return datetime.date.fromtimestamp(path.stat().st_mtime).isoformat()
+
+
+def _stale_check(item_path: Path, last_verified_str: str,
+                 dependencies: list, days: int,
+                 project_dir: Path, today: datetime.date) -> tuple:
+    """Return ``(is_stale, reason)``. `reason` is a single-line summary
+    when stale, otherwise the empty string."""
+    try:
+        verified = datetime.date.fromisoformat(last_verified_str)
+    except ValueError:
+        return False, ""
+    age_days = (today - verified).days
+    if age_days <= days:
+        return False, ""
+    # Age trigger fired; now check that at least one dep is fresher.
+    for dep in dependencies:
+        dep_path = _resolve_dep_path(dep.strip(), project_dir)
+        if dep_path is None or not dep_path.is_file():
+            continue
+        dep_date_str = _file_modified_iso(dep_path)
+        try:
+            dep_date = datetime.date.fromisoformat(dep_date_str)
+        except ValueError:
+            continue
+        if dep_date > verified:
+            rel = dep_path.relative_to(project_dir) if dep_path.is_absolute() \
+                else dep_path
+            return True, (
+                f"verified {last_verified_str} ({age_days} days ago); "
+                f"dep {rel} modified {dep_date_str}"
+            )
+    return False, ""
+
+
+def find_stale_items(project_dir: Path, days: int = 90) -> list:
+    """Walk slices and ADRs; return a list of `(display, reason, category)`
+    findings. Read-only.
+
+    `category` distinguishes finding kinds so downstream filters (CI,
+    scripts) can act on them differently (slice 050-02 AC5):
+      - `"last-verified"` — the conjunctive freshness drift (last_verified
+        older than `days` AND a dependency changed since); the original and
+        only finding kind before slice 050-02.
+      - `"team-context"` — the team signal fires but `docs/memory/people.md`
+        is absent (and the `.jig/no-people-md` opt-out marker is absent).
+        Computed once per invocation via `team_context_drift` (a single git
+        walk — AC6, no double-walk)."""
+    today = datetime.date.today()
+    out = []
+
+    # Slices: walk every slice in every spec dir, both layouts (018-02).
+    specs_dir = project_layout.specs_dir(project_dir)
+    if specs_dir.is_dir():
+        for spec_md in sorted(specs_dir.glob("*/spec.md")):
+            for loc in _iter_slices_common(spec_md):
+                section = loc.text[loc.start:loc.end]
+                # Layout-aware frontmatter read (handles both shapes).
+                fm, _ = _slice_frontmatter(section)
+                lv = fm.get("last_verified", "").strip()
+                deps = fm.get("dependencies") or []
+                if not lv or not deps:
+                    continue
+                # Display path: prefer the slice file's relative path
+                # when the slice lives in its own file; fall back to
+                # spec.md :: Slice label for embedded layout.
+                if loc.path != spec_md:
+                    rel = loc.path.relative_to(project_dir)
+                    display = str(rel)
+                else:
+                    rel_spec = spec_md.relative_to(project_dir)
+                    display = f"{rel_spec} :: Slice {loc.label}"
+                is_stale, reason = _stale_check(
+                    spec_md, lv, deps, days, project_dir, today,
+                )
+                if is_stale:
+                    out.append((display, reason, "last-verified"))
+
+    # ADRs: docs/decisions/adr-NNNN-*.md
+    decisions_dir = project_layout.decisions_dir(project_dir)
+    if decisions_dir.is_dir():
+        for adr_path in sorted(decisions_dir.glob("adr-*.md")):
+            if not re.match(r"^adr-\d{4}-", adr_path.name):
+                continue
+            text = adr_path.read_text()
+            fm, _ = parse_frontmatter(text)
+            lv = fm.get("last_verified", "").strip()
+            deps = fm.get("dependencies") or []
+            if not lv or not deps:
+                continue
+            rel = adr_path.relative_to(project_dir)
+            is_stale, reason = _stale_check(
+                adr_path, lv, deps, days, project_dir, today,
+            )
+            if is_stale:
+                out.append((str(rel), reason, "last-verified"))
+
+    # Slice 050-02 — team-context drift: the team signal fires but
+    # docs/memory/people.md is absent (and no .jig/no-people-md opt-out).
+    # `team_context_drift` encodes the full predicate (signal + absences) and
+    # performs at most one git walk, so the count is computed once per `stale`
+    # invocation (AC6 — no double-walk; AC3 — marker suppresses; AC2 —
+    # read-only, it never writes). Surfaced as a finding row like every
+    # last_verified drift (AC1); stale stays exit-0 (AC4 resolved intent).
+    contributor_count = team_context_drift(project_dir)
+    if contributor_count is not None:
+        out.append((
+            "team-signal",
+            f"project has {contributor_count} contributors but people.md "
+            "is absent. Run /jig:memory-sync to bootstrap.",
+            "team-context",
+        ))
+
+    return out
+
+
+def stale(project_dir: Path, days: int = 90) -> str:
+    """Render the stale-items report to a string. Always exits 0; the report
+    is informational, never gating (a deliberate 015-03 design — the CLI
+    dispatch returns 0 regardless of findings).
+
+    Each finding is a `(display, reason, category)` tuple (slice 050-02);
+    `category` is carried for downstream filtering but not rendered in the
+    human report, which stays the unchanged `  <display>: <reason>` shape so
+    a `team-context` row reads `  team-signal: project has N contributors
+    but people.md is absent. Run /jig:memory-sync to bootstrap.`"""
+    items = find_stale_items(project_dir, days=days)
+    if not items:
+        return f"no stale items (threshold: {days} days)\n"
+    lines = [f"stale items ({len(items)}; threshold: {days} days):"]
+    for display, reason, _category in items:
+        lines.append(f"  {display}: {reason}")
+    return "\n".join(lines) + "\n"
+
+
+# ---------- Slice 041-02: skill-routing histogram ----------
+#
+# Read surface for the routing observability the PreToolUse/Skill hook
+# (hooks/scripts/jig-skill-trace.sh) captures. Renders a category-split
+# histogram from the shared .claude/skill-usage.jsonl trace: per category
+# (the invoked skill's name with any leading `jig:` plugin scope stripped),
+# how many invocations were jig's baseline (`jig:<name>`) vs. a non-jig
+# ("other", typically a richer user-installed) skill. That split is what
+# answers "did the deferral route away from jig's baseline?" (spec 031 /
+# the two refinement-todo entries this spec closes).
+#
+# Two event sources share the file. Only `event == "skill_invoked"` rows
+# carry a skill name; the Task-spawn rows written by jig-telemetry.sh do
+# not, so they are filtered out (load-bearing invariant — see the verifier
+# in docs/skill-routing-verification.md). Stdout-only; never writes, never
+# raises for normal empty states (mirrors `stale`, which is informational).
+
+
+def _parse_iso_utc(ts: str):
+    """Parse an ISO-8601 timestamp to an aware UTC datetime, or None when
+    unparseable. Tolerates a trailing 'Z' and naive (offset-less) stamps
+    (assumed UTC). The hook writes `datetime.now(timezone.utc).isoformat()`
+    (offset `+00:00`); this stays tolerant in case that format drifts."""
+    if not ts:
+        return None
+    raw = ts.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
+
+
+def routing_stats(project_dir: Path, days: int = 30) -> str:
+    """Render the skill-routing histogram to a string. Always informational
+    (the caller exits 0); never gates. Reads .claude/skill-usage.jsonl,
+    filters to `skill_invoked` events within the last `days`, and buckets
+    each by category (jig baseline vs. other)."""
+    log_path = project_dir / ".claude" / "skill-usage.jsonl"
+    if not log_path.is_file():
+        return (
+            f"no routing data — {log_path} not found.\n"
+            "the PreToolUse/Skill trace (hooks/scripts/jig-skill-trace.sh) "
+            "writes it as skills fire.\n"
+        )
+
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(days=days))
+    counts: dict = {}  # category -> [jig_count, other_count]
+    total = 0
+    outside_window = 0
+
+    # errors="replace": a non-UTF-8 byte in the trace must not raise — it
+    # would escape the per-line try below and break the "always exits 0"
+    # contract (AC #5). A corrupted line decodes to replacement chars and is
+    # then dropped by the json.loads guard, same as any other malformed line.
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (ValueError, TypeError):
+            continue  # malformed line — skip, never crash
+        if not isinstance(entry, dict) or entry.get("event") != "skill_invoked":
+            continue  # Task-spawn rows (no event/skill_name) and noise
+        name = str(entry.get("skill_name") or "").strip()
+        if not name:
+            continue
+        dt = _parse_iso_utc(str(entry.get("timestamp") or ""))
+        if dt is None:
+            continue  # can't window an unparseable timestamp
+        if dt < cutoff:
+            outside_window += 1
+            continue
+        is_jig = name.startswith("jig:")
+        category = name[len("jig:"):] if is_jig else name
+        bucket = counts.setdefault(category, [0, 0])
+        bucket[0 if is_jig else 1] += 1
+        total += 1
+
+    if total == 0:
+        plural = "y" if outside_window == 1 else "ies"
+        return (
+            f"no skill invocations in the last {days} days "
+            f"({outside_window} older entr{plural} outside the window).\n"
+        )
+
+    # Sort by total desc, then category asc for a stable, scannable order.
+    rows = sorted(
+        ((cat, jig, other) for cat, (jig, other) in counts.items()),
+        key=lambda r: (-(r[1] + r[2]), r[0]),
+    )
+
+    cat_w = max(len("category"), max(len(r[0]) for r in rows))
+    cat_plural = "y" if len(rows) == 1 else "ies"
+    header = f"  {'category':<{cat_w}}  {'jig':>4}  {'other':>5}  {'total':>5}"
+    sep = f"  {'-' * cat_w}  {'-' * 4}  {'-' * 5}  {'-' * 5}"
+    lines = [
+        f"skill-routing stats (last {days} days) — {log_path}",
+        f"  {total} skill invocation(s) across {len(rows)} categor{cat_plural}; "
+        f"{outside_window} outside window; Task-spawn rows excluded.",
+        "",
+        header,
+        sep,
+    ]
+    for cat, jig, other in rows:
+        lines.append(f"  {cat:<{cat_w}}  {jig:>4}  {other:>5}  {jig + other:>5}")
+    lines.append("")
+    lines.append(
+        "legend: 'jig' = jig baseline (jig:<name>) fired; 'other' = a non-jig\n"
+        "(typically a richer user-installed) skill in that category fired. "
+        "Where jig\nships a deferring baseline, 'other' > 0 with 'jig' = 0 means "
+        "routing chose\nthe richer skill over jig's."
+    )
+    return "\n".join(lines) + "\n"
+
+
+# ---------- Slice 078-02: gate-bypass stats digest ----------
+#
+# Read surface for the bypass events 078-01's gates emit when they honor
+# their env-var override. Shares .claude/skill-usage.jsonl with the
+# `skill_invoked` / `task_spawned` rows (routing_stats above); only
+# `event == "gate_bypassed"` rows carry a `gate` field, so — mirroring
+# routing_stats's own filter — everything else is silently skipped.
+# Stdout-only, read-only, never gates; empty/absent sink is exit 0.
+
+
+def gate_stats(project_dir: Path, days: int = 30) -> str:
+    """Render a per-gate bypass histogram to a string (spec 078-02).
+
+    Reads .claude/skill-usage.jsonl, filters to `gate_bypassed` events
+    within the last `days`, and counts occurrences per gate name. Always
+    informational (the caller exits 0); never gates."""
+    log_path = project_dir / ".claude" / "skill-usage.jsonl"
+    if not log_path.is_file():
+        return (
+            f"no gate-bypass data — {log_path} not found.\n"
+            "gate-bypass events are written when a gate honors its "
+            "env-var override (spec 078-01).\n"
+        )
+
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(days=days))
+    counts: dict = {}  # gate -> count
+    total = 0
+    outside_window = 0
+
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (ValueError, TypeError):
+            continue  # malformed line — skip, never crash
+        if not isinstance(entry, dict) or entry.get("event") != "gate_bypassed":
+            continue  # skill_invoked / task_spawned rows and noise
+        gate = str(entry.get("gate") or "").strip()
+        if not gate:
+            continue
+        dt = _parse_iso_utc(str(entry.get("timestamp") or ""))
+        if dt is None:
+            continue  # can't window an unparseable timestamp
+        if dt < cutoff:
+            outside_window += 1
+            continue
+        counts[gate] = counts.get(gate, 0) + 1
+        total += 1
+
+    if total == 0:
+        plural = "y" if outside_window == 1 else "ies"
+        return (
+            f"no gate bypasses in the last {days} days "
+            f"({outside_window} older entr{plural} outside the window).\n"
+        )
+
+    rows = sorted(counts.items(), key=lambda r: (-r[1], r[0]))
+    gate_w = max(len("gate"), max(len(r[0]) for r in rows))
+    lines = [
+        f"gate-bypass stats (last {days} days) — {log_path}",
+        f"  {total} bypass(es) across {len(rows)} gate(s); "
+        f"{outside_window} outside window.",
+        "",
+        f"  {'gate':<{gate_w}}  {'count':>5}",
+        f"  {'-' * gate_w}  {'-' * 5}",
+    ]
+    for gate, count in rows:
+        lines.append(f"  {gate:<{gate_w}}  {count:>5}")
+    lines.append("")
+    lines.append(
+        "each row is a gate that honored its env-var override at least "
+        "once in the window — an audit trail of how often each gate is\n"
+        "bypassed (spec 078 / EngTip #19). Counts are bypasses only (no "
+        "denominator of respected fires), so read them as override "
+        "frequency, not a 'gate is deadweight' verdict."
+    )
+    return "\n".join(lines) + "\n"
+
+
+# ---------- Slice 048-04: amendment-effective-state digest ----------
+
+# A closed record's "current truth" lives under a `## Amendments` section
+# (per ADR-0010): the original prose is preserved in place and a dated
+# entry overrides it. This digest indexes those overrides so a reader finds
+# current state without rereading every historical drift block. The regexes
+# mirror the ones proven in scripts/test_closed_spec_drift_sweep.py. Em-dash,
+# en-dash, or hyphen is accepted as the date↔title separator.
+_AMENDMENTS_HEADING_RE = re.compile(r"^## Amendments\s*$", re.MULTILINE)
+_AMENDMENT_ENTRY_RE = re.compile(
+    r"^###\s+(\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.+?)\s*$", re.MULTILINE,
+)
+# ```-fenced regions: an illustrative `## Amendments` example shown as
+# documentation (e.g. ADR-0008, which documents the amendment *format* in a
+# fenced block) is NOT a real amendment and must not enter the digest.
+_CODE_FENCE_RE = re.compile(r"(?ms)^[ \t]*```.*?^[ \t]*```[ \t]*$")
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove ```-fenced code blocks so a `## Amendments` heading shown
+    *inside* a fence (an illustrative example, not a live amendment) is not
+    mistaken for a real one."""
+    return _CODE_FENCE_RE.sub("", text)
+
+
+def _amendments_section(text: str) -> str:
+    """Return the body after a `## Amendments` heading up to the next `## `
+    heading (or EOF), or '' if the artifact has no amendments section.
+    Fenced code blocks are stripped first so documented examples don't
+    register as amendments."""
+    text = _strip_code_fences(text)
+    m = _AMENDMENTS_HEADING_RE.search(text)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    nxt = re.search(r"^## ", rest, re.MULTILINE)
+    return rest if nxt is None else rest[: nxt.start()]
+
+
+def find_amendment_artifacts(project_dir: Path):
+    """Scan amendment-bearing artifacts under `docs/specs/` (spec.md +
+    slice files) and `docs/decisions/` (ADRs). Return a list of
+    (relative_posix_path, [(date, title), ...]) for every artifact that
+    carries a `## Amendments` section with at least one dated entry.
+    Sorted by path; entries within each artifact sorted by date. Read-only
+    — never modifies any artifact (ADR-0010: history is preserved)."""
+    candidates = []
+    specs_dir = project_layout.specs_dir(project_dir)
+    if specs_dir.is_dir():
+        candidates.extend(specs_dir.rglob("*.md"))
+    decisions_dir = project_layout.decisions_dir(project_dir)
+    if decisions_dir.is_dir():
+        candidates.extend(decisions_dir.glob("*.md"))
+
+    results = []
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        body = _amendments_section(text)
+        if not body:
+            continue
+        entries = sorted(
+            (m.group(1), m.group(2).strip())
+            for m in _AMENDMENT_ENTRY_RE.finditer(body)
+        )
+        if not entries:
+            continue
+        results.append((path.relative_to(project_dir).as_posix(), entries))
+    results.sort(key=lambda r: r[0])
+    return results
+
+
+def amendment_digest(project_dir: Path) -> str:
+    """Render the amendment digest to a string. Read-only and never gating
+    (always exits 0). Indexes the `## Amendments` overrides on closed
+    records (ADR-0010) so a reader sees current truth without rereading the
+    preserved historical prose."""
+    artifacts = find_amendment_artifacts(project_dir)
+    lines = ["# Amendment digest", ""]
+    if not artifacts:
+        lines.append(
+            "No amendment-bearing artifacts found under docs/specs/ or "
+            "docs/decisions/."
+        )
+        return "\n".join(lines) + "\n"
+    n_entries = sum(len(entries) for _, entries in artifacts)
+    lines.append(
+        f"Effective overrides recorded under `## Amendments` in closed "
+        f"records (ADR-0010); the original prose is preserved in place. "
+        f"{n_entries} amendment(s) across {len(artifacts)} artifact(s)."
+    )
+    lines.append("")
+    for rel, entries in artifacts:
+        # Heading is a markdown link so the path is both visible (CLI) and
+        # click-navigable back to the source if the digest is rendered.
+        lines.append(f"## [{rel}]({rel})")
+        for date, title in entries:
+            lines.append(f"- {date} — {title}")
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+# ---------- Slice 068-03: bidirectional use-case coverage ----------
+#
+# The project-wide BACKSTOP to slice 02's framing-time grow prompt: a
+# DETERMINISTIC set-difference over slice 02's `use_cases:` trace links +
+# stable UC-N ids (no reviewer subagent — ADR-0025 §A4). Surfaced at the
+# reconcile checkpoint, ADVISORY by default (OQ3 / ADR-0011): it warns,
+# never gates RECONCILED / DONE. A fourth read-only project-wide query
+# sibling of `stale` / `routing-stats` / `amendment_digest` — same shape
+# (`--project-dir`, stdout, always exits 0).
+#
+# It lives here, NOT as a `/jig:analyze` extension: `/jig:analyze` is a
+# judgment-only skill with no `.py` helper, and a deterministic
+# set-difference has no home in an LLM-judgment surface. `workflow.py`
+# already hosts the read-only query family, so coverage joins it.
+#
+# Bidirectional (AC1):
+#   - coverage GAP  — a vision use case with no implementing spec.
+#   - scope CREEP   — a spec that cites no (resolvable) parent use case.
+# Plus a subordinate third honesty category: a spec citing a UC id absent
+# from the vision (unresolvable trace link). `resolve_use_cases` already
+# hands these over; dropping them silently would hide a data error.
+#
+# NO-OP STATE (load-bearing): a project whose vision has no `## Use cases`
+# section has not adopted the breadth layer (jig's own repo; opted-out
+# libraries / single-flow CLIs). It must emit a no-op note with ZERO
+# findings and exit 0 — never a finding, never non-zero.
+#
+# Computed from frontmatter `use_cases:` METADATA, not spec prose (AC2).
+
+
+def coverage(project_dir: Path) -> str:
+    """Render the bidirectional use-case coverage report to a string.
+
+    Read-only and ADVISORY (the caller always exits 0; a finding never
+    gates RECONCILED / DONE — ADR-0025 OQ3 / ADR-0011). Reuses slice 02's
+    `parse_use_cases` + `resolve_use_cases` (a deterministic set-difference,
+    not an LLM reviewer pass — AC4).
+
+    Algorithm:
+      1. No `docs/product-vision.md` → advisory 'skipped' note (no crash).
+      2. Vision has no `## Use cases` section → NO-OP note, zero findings.
+         (The breadth layer is not adopted — jig's own repo / opted-out
+         project classes. Load-bearing: must never emit findings.)
+      3. For each `docs/specs/*/spec.md`, read its `use_cases:` frontmatter
+         (a list; a bare or `[]` value means 'no citations'), resolve the
+         cited ids against the vision, and accumulate:
+           - covered ids (for the gap direction),
+           - scope-creep specs (cited nothing),
+           - unresolvable-citation specs (cited a UC absent from the vision).
+      4. Coverage gaps = vision use cases not in the covered set (document
+         order, rendered with id + goal text).
+    """
+    vision = project_layout.docs_base(project_dir) / "product-vision.md"
+    if not vision.is_file():
+        return (
+            "Use-case coverage (advisory, non-blocking) — skipped: "
+            f"{vision.as_posix()} not found. The bidirectional check needs "
+            "a project vision with a `## Use cases` section "
+            "(ADR-0025 / spec 068).\n"
+        )
+
+    vision_text = vision.read_text(encoding="utf-8")
+    if not has_use_cases_section(vision_text):
+        return (
+            "Use-case coverage (advisory, non-blocking) — no-op: the "
+            "use-case breadth layer is not adopted (no `## Use cases` "
+            "section in docs/product-vision.md). Coverage is a no-op here "
+            "(e.g. a library, a single-flow CLI, or jig's own repo). "
+            "ADR-0025 / spec 068-03.\n"
+        )
+
+    vision_ucs = parse_use_cases(vision_text)  # ordered {UC-id: goal}
+
+    covered: set = set()
+    scope_creep: list = []        # spec dirnames citing nothing
+    unresolvable: list = []       # (spec dirname, [bad UC ids])
+
+    specs_dir = project_layout.specs_dir(project_dir)
+    # Materialize once: the loop and the `n_specs` summary count share this
+    # list (a glob on a missing dir yields [], so no `is_dir()` guard is
+    # needed — n_specs is then 0).
+    spec_paths = sorted(specs_dir.glob("*/spec.md"))
+    for spec_md in spec_paths:
+        fields, _ = parse_frontmatter(spec_md.read_text(encoding="utf-8"))
+        raw = fields.get("use_cases")
+        # A bare `use_cases:` parses to "" and `use_cases: []` to [] — both
+        # mean "no citations". Only a real list carries cited ids.
+        cited = raw if isinstance(raw, list) else []
+        result = resolve_use_cases(cited, vision_text)
+        spec_name = spec_md.parent.name
+        if not cited:
+            scope_creep.append(spec_name)
+        covered.update(result.resolved)
+        if result.unresolvable:
+            unresolvable.append((spec_name, list(result.unresolvable)))
+
+    gaps = [(uc, goal) for uc, goal in vision_ucs.items()
+            if uc not in covered]
+
+    n_specs = len(spec_paths)
+
+    lines = [
+        "# Use-case coverage",
+        "",
+        "**ADVISORY (non-blocking).** A finding here does NOT block "
+        "RECONCILED / DONE (ADR-0025 OQ3 / ADR-0011); it is the "
+        "reconcile-time backstop to slice 02's framing-time grow prompt.",
+        "",
+    ]
+
+    if not gaps and not scope_creep and not unresolvable:
+        lines.append(
+            f"✓ coverage clean — all {len(vision_ucs)} use case(s) have an "
+            f"implementing spec, and all {n_specs} traced spec(s) resolve to "
+            "a stated use case."
+        )
+        return "\n".join(lines) + "\n"
+
+    # Direction 1 — coverage gaps (AC1).
+    lines.append("## Coverage gaps (use case → no implementing spec)")
+    if gaps:
+        for uc, goal in gaps:
+            lines.append(f"- {uc}: {goal}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    # Direction 2 — scope creep (AC1).
+    lines.append("## Scope creep (spec → no parent use case)")
+    if scope_creep:
+        for name in scope_creep:
+            lines.append(f"- docs/specs/{name}/spec.md")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    # Subordinate third category — dangling trace links (honesty; kept
+    # visually below the two headline directions). A spec citing a UC id
+    # absent from the vision: a data error, surfaced not silently dropped.
+    lines.append(
+        "## Unresolvable trace links (spec cites a use case absent from "
+        "the vision)"
+    )
+    if unresolvable:
+        for name, bad_ids in unresolvable:
+            lines.append(f"- docs/specs/{name}/spec.md: {', '.join(bad_ids)}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+
+    lines.append(
+        f"Summary: {len(vision_ucs)} use case(s), {n_specs} spec(s) traced; "
+        f"{len(gaps)} gap(s) / {len(scope_creep)} orphan(s) / "
+        f"{len(unresolvable)} dangling."
+    )
+    return "\n".join(lines) + "\n"
+
+
+# ---------- Slice 003-03: reserve-spec-on-main ----------
+
+# Valid slug shape: starts with lowercase letter; lowercase letters,
+# digits, hyphens; no `--` (which would create empty path segments after
+# any future split-on-hyphen). Mirrors the convention used across all
+# existing `docs/specs/NNN-<slug>/` directories.
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+# Push-failure classification is shared across bug.py / adr.py / workflow.py
+# (spec 107 / ADR-0053): the signal tuples and the classifier live once in
+# `_common/reservation.py`. Protection is checked before race (specific over
+# generic), and `gh013` / `repository rule violations` join the protection set.
+# The re-exports below keep the historical module-level names for existing
+# call sites and tests.
+_PUSH_PROTECTION_SIGNALS = reservation._PUSH_PROTECTION_SIGNALS
+_PUSH_RACE_SIGNALS = reservation._PUSH_RACE_SIGNALS
+
+
+def _title_case_slug(slug: str) -> str:
+    """Spec AC #2: `parallel-worktree-collision` → `Parallel-worktree collision`.
+
+    Replace the LAST hyphen with a space (so the slug reads as
+    `<adjective-chain> <noun>`), then capitalize only the first letter.
+    Single-token slugs (no hyphens) just get a capital first letter.
+    """
+    if "-" in slug:
+        head, tail = slug.rsplit("-", 1)
+        joined = f"{head} {tail}"
+    else:
+        joined = slug
+    if not joined:
+        return joined
+    return joined[0].upper() + joined[1:]
+
+
+def _next_spec_number(specs_dir: Path,
+                      project_dir: Path | None = None,
+                      use_origin: bool = False) -> int:
+    """Scan for `NNN-*/` entries; return max(NNN) + 1.
+
+    Spec 037-02: in push mode (`use_origin=True`), the listing source
+    is `origin/main` (via `git ls-tree --name-only origin/main
+    docs/specs/`) so the reservation honors the team-wide contract
+    instead of the local working tree. The `--no-push` path keeps
+    using the working tree (no remote contract to honor — AC #2).
+
+    Algorithm (matches the spec 037 clarifications Q1, Q4, Q5; mirrors
+    `_check_ff_viable`'s fall-through shape at `land.py:555-655`):
+
+      1. If `use_origin=False` (i.e. `--no-push`), scan
+         `specs_dir.iterdir()` as before. AC #2 contract.
+      2. Otherwise:
+         a. If `git config --get remote.origin.url` fails, fall
+            through SILENTLY to the working-tree scan (AC #3, Q4 —
+            local-only-repo contract, no warning).
+         b. If `git rev-parse --verify origin/main` returns non-zero
+            OR empty stdout (ref absent or fetch failed earlier per
+            AC #6), fall through SILENTLY to the working-tree scan
+            (AC #3, AC #6).
+         c. Otherwise run `git ls-tree --name-only origin/main
+            docs/specs/` and apply the same `NNN-*` regex as the
+            working-tree path (AC #1). Non-spec entries ignored.
+
+    Ignores non-spec entries (README.md, files, dirs that don't start
+    with three digits + hyphen). Returns 1 when the directory is empty."""
+    if use_origin and project_dir is not None:
+        # Step 2a — origin presence
+        url_rc, url_out, _url_err = _run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=project_dir,
+        )
+        if url_rc == 0 and url_out.strip():
+            # Step 2b — origin/main ref existence (post-fetch)
+            verify_rc, verify_out, _verify_err = _run(
+                ["git", "rev-parse", "--verify", "origin/main"],
+                cwd=project_dir,
+            )
+            if verify_rc == 0 and verify_out.strip():
+                # Step 2c — enumerate against origin/main
+                ls_rc, ls_out, _ls_err = _run(
+                    ["git", "ls-tree", "--name-only",
+                     "origin/main", "docs/specs/"],
+                    cwd=project_dir,
+                )
+                if ls_rc == 0:
+                    max_n = 0
+                    for line in ls_out.splitlines():
+                        # ls-tree may emit `docs/specs/NNN-slug` or
+                        # `NNN-slug` depending on pathspec form; both
+                        # are handled by extracting the basename.
+                        name = line.strip().rstrip("/").rsplit("/", 1)[-1]
+                        m = re.match(r"^(\d{3})-", name)
+                        if m:
+                            n = int(m.group(1))
+                            if n > max_n:
+                                max_n = n
+                    return max_n + 1
+            # rev-parse failed OR ls-tree failed: silent fall-through
+        # No origin or origin/main ref: silent fall-through (AC #3)
+
+    # Working-tree scan (AC #2 path, and AC #3 fall-back).
+    max_n = 0
+    if not specs_dir.is_dir():
+        return 1
+    for entry in specs_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        m = re.match(r"^(\d{3})-", entry.name)
+        if m:
+            n = int(m.group(1))
+            if n > max_n:
+                max_n = n
+    return max_n + 1
+
+
+def _preflight_diverged_main(project_dir: Path) -> None:
+    """Spec 037-02 AC #4: refuse if local `main` is strictly behind
+    `origin/main`.
+
+    Algorithm (mirrors `_check_ff_viable` at `land.py:555-655`, the
+    sibling slice's precedent):
+
+      1. If `git rev-parse --verify origin/main` fails OR returns
+         empty SHA, fall through silently (no origin/main to compare
+         against — AC #3 / AC #6).
+      2. Read the local `main` SHA via `git rev-parse main`. If that
+         fails, fall through silently.
+      3. If the two SHAs are equal, local is in sync — no refusal.
+      4. Otherwise run `git merge-base --is-ancestor main
+         origin/main`:
+         - rc == 0 AND SHAs differ → local is STRICTLY behind →
+           raise `WorkflowError`. AC #4: message MUST contain
+           "origin/main" and "pull or rebase" (substrings are
+           fixture-stable).
+         - rc != 0 → local is ahead-or-diverged; the push step's
+           race classifier (AC #7) handles any actual conflict.
+
+    AC #5: raises `WorkflowError`, which `main()` already maps to
+    exit 2 — no new exit code is introduced.
+    """
+    rc, out, _err = _run(
+        ["git", "rev-parse", "--verify", "origin/main"], cwd=project_dir,
+    )
+    if rc != 0 or not out.strip():
+        return  # no origin/main ref → silent fall-through
+    origin_sha = out.strip()
+
+    rc, out, _err = _run(
+        ["git", "rev-parse", "main"], cwd=project_dir,
+    )
+    if rc != 0 or not out.strip():
+        return  # no local main SHA → can't compare; let later steps fail
+    local_sha = out.strip()
+
+    if local_sha == origin_sha:
+        return  # in sync
+
+    anc_rc, _anc_out, _anc_err = _run(
+        ["git", "merge-base", "--is-ancestor", "main", "origin/main"],
+        cwd=project_dir,
+    )
+    if anc_rc == 0:
+        # main is a strict ancestor of origin/main → local is behind.
+        raise WorkflowError(
+            "refusing: local main is behind origin/main — "
+            "pull or rebase before reserving"
+        )
+
+
+def _render_stub_spec(num_str: str, slug: str, today_iso: str) -> str:
+    """Build the spec.md stub body. Header-only — slice bodies live in
+    sibling `slice-NN-*.md` files (slice 018-03).
+
+    Note: kept `## SPIDR analysis` as a placeholder section name in the
+    legacy stub through 018-02. Slice 018-03 renames it to
+    `## Decomposition` (matching jig's own spec.md prose convention)
+    and adds a `## Slices` link section that points to the starter
+    slice file emitted alongside this spec.md."""
+    title = _title_case_slug(slug)
+    starter_slice_fragment = f"{num_str}-01"
+    starter_slice_filename = "slice-01-tbd.md"
+    return (
+        "---\n"
+        "status: DRAFT\n"
+        "skill:\n"
+        # Spec 068-02 / ADR-0025 — the use-case trace link. A flow-list of
+        # `UC-N` ids (the vision's `## Use cases` section) this spec serves,
+        # the same `dependencies:`-style shape `parsing.py` already parses.
+        # Seeded EMPTY: soft/advisory (AC4 — never blocks a transition), and
+        # the empty state is exactly what trips the AC5 cite/grow/decline
+        # framing prompt at draft time. Leave `[]` when this spec serves no
+        # captured behavior (infra/refactor) or the layer isn't adopted.
+        "use_cases: []\n"
+        "---\n"
+        "\n"
+        # Spec 065-04 — self-defining vocabulary reminder, emitted into the
+        # spec stub so an author meets it where they write (reaches scaffolded
+        # projects, where the template file is not distributed).
+        "<!-- jig self-defining vocabulary (soft, forward-only): expand each "
+        "acronym on first use and link the term to docs/memory/glossary.md (or "
+        "jig's lexicon). See docs/workflow.md \"Self-defining vocabulary\". -->\n"
+        "\n"
+        f"# Spec {num_str}: {title}\n"
+        "\n"
+        f"> Reserved on {today_iso} via `workflow.py new`. "
+        "Body to be drafted in a feature branch.\n"
+        "\n"
+        "## Overview\n"
+        "\n"
+        "_TBD_\n"
+        "\n"
+        # Spec 064-02 / ADR-0020 §1–§2 — risk-gated grounding/assumptions
+        # section. Makes jig's existing informal "Current state (verified …)"
+        # discipline mandatory + derived (064-01 retro): load-bearing factual
+        # claims about runnable surfaces must be probe-backed or marked here.
+        # Slice 064-04 derives the frame_review trigger from what lands here.
+        "## Assumptions\n"
+        "\n"
+        "_TBD — list load-bearing assumptions about runnable surfaces "
+        "(library/API capability, version/perf behavior, behavior of existing "
+        "code); probe-back (run it / cite source) or mark explicitly here. "
+        "Risk-gated: omit (or write \"None\") when there are no unverified "
+        "load-bearing assumptions — do not pad with boilerplate._\n"
+        "\n"
+        "## Decomposition\n"
+        "\n"
+        "_TBD — SPIDR analysis. See SKILL.md for the five axes "
+        "(Spike / Paths / Interfaces / Data / Rules)._\n"
+        "\n"
+        "## Slices\n"
+        "\n"
+        f"- [{starter_slice_fragment} — tbd]({starter_slice_filename})\n"
+    )
+
+
+def _render_stub_slice(num_str: str, slice_num: str = "01",
+                       name: str = "tbd") -> str:
+    """Build a starter slice file body from `templates/docs/specs/
+    slice-template.md`. Substitutes `{{NUMBER}}` → `<spec_num>-<slice_num>`
+    and `{{NAME}}` → `name`. Returns the rendered text.
+
+    Falls back to an inline minimal template when the file template
+    isn't reachable (e.g. running the helper outside the jig tree).
+
+    Since slice 095-01 both scaffold hosts copy `templates/` beside the copied
+    machinery, so `parents[2]` reaches the real template in a scaffolded
+    project too — this helper is one of the template-reading family ADR-0038
+    enumerates, and it silently stopped needing the fallback there."""
+    template_path = (Path(__file__).resolve().parents[2]
+                     / "templates" / "docs" / "specs" / "slice-template.md")
+    fragment = f"{num_str}-{slice_num}"
+    try:
+        # Explicit utf-8: slice-template.md carries em-dashes, ✅ and →. Slice
+        # 095-01 makes this path reach a real file in scaffold mode for the
+        # first time, so a default-encoding read would newly raise
+        # UnicodeDecodeError under LANG=C — a ValueError, which would escape
+        # the OSError fallback below and crash where the old behaviour cleanly
+        # degraded.
+        body = template_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # Inline fallback — keeps the helper functional even when the
+        # template file isn't on disk (e.g. minimal scaffold smoke tests, or a
+        # project scaffolded before slice 095-01, which is when copied
+        # machinery started carrying `templates/`). Carries the spec 065-04
+        # self-defining-vocabulary reminder so the author meets it here too, in
+        # parity with the on-disk slice-template.md.
+        body = (
+            "---\nstatus: DRAFT\ndependencies: []\nlast_verified:\n---\n"
+            "\n<!-- jig self-defining vocabulary (soft, forward-only): expand "
+            "each acronym on first use and link the term to "
+            "docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "
+            "\"Self-defining vocabulary\". -->\n"
+            "\n## Slice {{NUMBER}} — {{NAME}}\n\n"
+            "**Goal:** _TBD_\n\n"
+            "**DoD:**\n"
+            "- [ ] All ACs pass; full test suite green (no regressions).\n"
+            "- [ ] Deviation log produced under this slice heading.\n"
+            "- [ ] Reconciliation sweep produced under this slice heading.\n"
+            "- [ ] Reconciliation review passed.\n"
+            "\n### Deviation log (after reconciliation)\n\n"
+            "_TODO: numbered sections covering deviations from the planned "
+            "shape, reviewer findings folded back in, doc updates, plan "
+            "adherence._\n"
+            "\n### Reconciliation sweep\n\n"
+            "Record the drift-prone surfaces checked during reconciliation. "
+            "The transition gate only requires this subsection to exist; the "
+            "reviewer judges whether coverage and rationales are honest.\n\n"
+            "| Artifact | Disposition | Rationale |\n"
+            "|----------|-------------|-----------|\n"
+            "| `README.md` | `no-op` | _TODO._ |\n"
+            "| `docs/specs/README.md` | `updated` | _TODO._ |\n"
+            "| `docs/product-vision.md` | `no-op` | _TODO._ |\n"
+            "| `docs/architecture.md` | `no-op` | _TODO._ |\n"
+            "| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | "
+            "`no-op` | _TODO._ |\n"
+            "| `docs/inbox.md` | `no-op` | _TODO._ |\n"
+            "| `docs/refinement-todo.md` | `no-op` | _TODO._ |\n"
+            "| `docs/memory/**` | `no-op` | _TODO._ |\n"
+            "| `docs/decisions/README.md` / ADR index | `no-op` | _TODO._ |\n"
+            "| Additional live prose / generated templates | `deferred` | _TODO._ |\n"
+        )
+    return body.replace("{{NUMBER}}", fragment).replace("{{NAME}}", name)
+
+
+def _run(argv: list, cwd: Path) -> tuple:
+    """Run a subprocess and return (returncode, stdout, stderr).
+
+    Uses module-level `subprocess.run` so tests can patch it via
+    `patch.object(_workflow, "subprocess")`. Mirrors the
+    `_run_git_cmd` / `_run_gh_cmd` shape from skills/slice-land/land.py
+    (ADR-0003 — inline-mirror until a third caller emerges)."""
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, cwd=str(cwd),
+        )
+    except FileNotFoundError:
+        return 127, "", f"{argv[0]}: not found on PATH"
+    return result.returncode, result.stdout or "", result.stderr or ""
+
+
+# Re-export the shared classifier under the historical module-level name so
+# existing call sites and tests continue to resolve `_classify_push_failure`
+# (spec 107 / ADR-0053).
+_classify_push_failure = reservation.classify_push_failure
+
+
+def _validate_slug(slug: str) -> None:
+    """Raise WorkflowError naming both the slug and the violated rule.
+    AC #5: bad slug refusal happens before any mutation."""
+    if not slug:
+        raise WorkflowError("invalid slug: empty (rule: must start "
+                            "with [a-z], no '--')")
+    if "--" in slug:
+        raise WorkflowError(
+            f"invalid slug {slug!r}: contains '--' "
+            f"(rule: no consecutive hyphens)"
+        )
+    if not _SLUG_RE.match(slug):
+        raise WorkflowError(
+            f"invalid slug {slug!r}: must match {_SLUG_RE.pattern} "
+            f"(lowercase letters, digits, hyphens; starts with letter)"
+        )
+
+
+def _refuse_if_dirty(project_dir: Path) -> None:
+    """Refuse if the worktree has uncommitted changes. The on-main
+    reservation path commits on local `main`, so it must start clean.
+
+    The branch==main check that used to live here moved to the
+    `_current_branch` dispatch in `reserve_spec` (see the worktree-aware
+    reservation block) so off-main callers route to the detached-worktree
+    path instead of being refused — keeping the single `git symbolic-ref`
+    call the on-main path already made."""
+    rc, stdout, _stderr = _run(
+        ["git", "status", "--porcelain"], cwd=project_dir,
+    )
+    if rc != 0:
+        # Non-fatal if status itself fails — but if it's truly broken,
+        # downstream git commands will fail anyway. Treat as clean.
+        return
+    if stdout.strip():
+        raise WorkflowError(
+            "refusing: working tree has uncommitted changes (rule: "
+            "clean worktree required). Run `git status` to see them, "
+            "then stash or commit before reserving."
+        )
+
+
+def _check_gh_and_remote(project_dir: Path) -> None:
+    """AC #4 prereqs: `gh` on PATH AND `origin` URL contains `github.com`.
+    Mirrors the slice-land 007-03 guard precedent."""
+    if shutil.which("gh") is None:
+        raise WorkflowError(
+            "refusing PR-fallback: 'gh' CLI not found on PATH. "
+            "Install GitHub CLI (https://cli.github.com/) or re-run "
+            "with `--no-push` to commit locally only."
+        )
+    rc, stdout, stderr = _run(
+        ["git", "config", "--get", "remote.origin.url"], cwd=project_dir,
+    )
+    if rc != 0 or not stdout.strip():
+        raise WorkflowError(
+            "refusing PR-fallback: no 'origin' remote configured "
+            f"(git: {stderr.strip() or 'empty url'})"
+        )
+    url = stdout.strip()
+    if "github.com" not in url:
+        raise WorkflowError(
+            f"refusing PR-fallback: remote 'origin' does not point at "
+            f"github.com (url: {url}). PR-fallback requires a GitHub "
+            f"remote; re-run with `--no-push` for local-only commit."
+        )
+
+
+def _do_pr_fallback(project_dir: Path, branch_name: str,
+                    num_str: str, slug: str,
+                    pr_body: str) -> None:
+    """AC #4 — branch-and-PR sequence. Any step's failure aborts and
+    surfaces what state the user's repo is left in.
+
+    Sequence:
+      1. git branch <branch> HEAD
+      2. git reset --hard origin/main (un-strand local main)
+      3. git checkout <branch>
+      4. git push -u origin <branch>
+      5. gh pr create --title ... --body ...
+    """
+    _check_gh_and_remote(project_dir)
+
+    # 1. Create the branch at the reservation commit.
+    rc, _out, err = _run(
+        ["git", "branch", branch_name, "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git branch {branch_name} HEAD`: "
+            f"{err.strip()}. The reservation commit is still on local main; "
+            f"re-run after fixing, or `git reset --hard origin/main` to drop it."
+        )
+
+    # 2. Reset local main so it no longer carries the stranded commit.
+    rc, _out, err = _run(
+        ["git", "reset", "--hard", "origin/main"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git reset --hard origin/main`: "
+            f"{err.strip()}. The reservation commit lives on local "
+            f"{branch_name!r}; check `git log {branch_name}` to confirm "
+            f"before pushing manually."
+        )
+
+    # 3. Switch to the reservation branch.
+    rc, _out, err = _run(
+        ["git", "checkout", branch_name], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git checkout {branch_name}`: "
+            f"{err.strip()}. The branch exists locally; switch to it "
+            f"manually with `git checkout {branch_name}`."
+        )
+
+    # 4. Push the branch to origin.
+    rc, _out, err = _run(
+        ["git", "push", "-u", "origin", branch_name], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `git push -u origin {branch_name}`: "
+            f"{err.strip()}. The reservation commit lives on local "
+            f"{branch_name!r}; push manually once the remote allows it."
+        )
+
+    # 5. Open the PR.
+    title = f"docs(specs): reserve {num_str}-{slug}"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback failed at `gh pr create`: {err.strip()}. "
+            f"The branch is already pushed to origin/{branch_name}; "
+            f"open the PR manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+# ---------- Worktree-aware reservation (prototype) ----------
+#
+# The 003-03 flow above commits on local `main`, then pushes `origin main`.
+# That requires the caller to BE on `main` — but a linked git worktree can
+# never check out `main` (it is held by the primary worktree; `git checkout
+# main` there fails with "'main' is already used by worktree at ..."). So
+# the branch==main guard was structurally unsatisfiable from exactly the
+# place jig's own worktree-based workflow puts you. The helpers below make
+# reservation work from any branch or worktree by building the reservation
+# commit in an EPHEMERAL DETACHED worktree checked out at origin/main —
+# detached, so it sidesteps the one-checkout-per-branch rule — then pushing
+# `HEAD:main`. The caller's cwd, branch, and branch tip are never touched.
+
+
+# Slice 084-03 (AC5): track-local subtree detection lives in `_common.subtree`
+# so the spec-reservation and ADR-reservation push doors share one definition.
+# Re-exported here for back-compat with existing call sites / tests.
+git_toplevel = subtree.git_toplevel
+
+
+def _refuse_push_in_subtree(project_dir: Path) -> None:
+    """Slice 084-03 (AC5): refuse PUSH-mode spec reservation when `project_dir`
+    is a track-local subproject inside a larger git repo. Push-mode would
+    rebuild paths against the enclosing repo root and reserve against a shared
+    `main`. Local mode (`--no-push`) does NOT call this. Detection is shared via
+    `_common.subtree.detect_subtree`; this door raises `WorkflowError`."""
+    found = subtree.detect_subtree(project_dir)
+    if found is not None:
+        repo_root, subproject_root = found
+        raise WorkflowError(
+            f"subtree push-mode unsupported: {project_dir} is a track-local "
+            f"subproject (root {subproject_root}) inside git repo {repo_root}. "
+            f"Push-mode reservation would write to the wrong root and reserve "
+            f"against a shared main — use local mode (--no-push). Subtree push "
+            f"is a spec 084 non-goal."
+        )
+
+
+def _current_branch(project_dir: Path):
+    """Return the current branch name, or None if detached / undeterminable.
+
+    A linked worktree reports its own branch here (never `main`, which the
+    primary worktree holds), which is what routes reservation onto the
+    worktree-aware path."""
+    rc, out, _err = _run(
+        ["git", "symbolic-ref", "--short", "HEAD"], cwd=project_dir,
+    )
+    if rc != 0:
+        return None
+    return out.strip() or None
+
+
+def _print_draft_hint(spec_dirname: str) -> None:
+    """The reservation lands on origin/main, not in the caller's branch.
+    Tell them how to pull it in to start drafting. Written to stderr so the
+    stdout contract (reserved-line + path) stays clean for scripts."""
+    sys.stderr.write(
+        f"note: reservation {spec_dirname} lives on origin/main, not in "
+        f"your current branch. To draft it here:\n"
+        f"    git fetch origin main && git merge origin/main\n"
+        f"then edit docs/specs/{spec_dirname}/spec.md\n"
+    )
+
+
+def _reserve_local_on_current_branch(slug: str, project_dir: Path,
+                                     specs_dir: Path) -> int:
+    """`--no-push` from off-main: commit a provisional reservation stub to
+    the CURRENT branch. The number is computed from the local working tree,
+    so it is PROVISIONAL — it may collide at merge time. Use the default
+    (push) mode to claim a number for real on origin/main."""
+    next_n = _next_spec_number(specs_dir)
+    num_str = f"{next_n:03d}"
+    spec_dirname = f"{num_str}-{slug}"
+    spec_dir = specs_dir / spec_dirname
+    if spec_dir.exists():
+        raise WorkflowError(
+            f"refusing: {spec_dir} already exists. Re-run after "
+            f"resolving the conflict."
+        )
+    spec_dir.mkdir(parents=True)
+    today_iso = _today()
+    atomic_write_text(spec_dir / "spec.md",
+                      _render_stub_spec(num_str, slug, today_iso))
+    atomic_write_text(spec_dir / "slice-01-tbd.md",
+                      _render_stub_slice(num_str))
+    rel_spec = f"docs/specs/{spec_dirname}/spec.md"
+    rel_slice = f"docs/specs/{spec_dirname}/slice-01-tbd.md"
+    rc, _out, err = _run(["git", "add", rel_spec, rel_slice], cwd=project_dir)
+    if rc != 0:
+        raise WorkflowError(
+            f"`git add {rel_spec} {rel_slice}` failed: {err.strip()}. "
+            f"The stub files are on disk; stage and commit manually."
+        )
+    # Pathspec-limited commit: only the stub lands, even if the caller had
+    # unrelated work already staged. Off-main reservation deliberately does
+    # NOT require a clean tree (worktree sessions are usually mid-edit), so
+    # we must not sweep that staged work into the reservation commit.
+    commit_msg = f"docs(specs): reserve {spec_dirname}"
+    rc, _out, err = _run(
+        ["git", "commit", "-m", commit_msg, "--", rel_spec, rel_slice],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"`git commit` failed: {err.strip()}. "
+            f"The stub spec.md is staged; commit manually."
+        )
+    print(f"reserved {spec_dirname} (local provisional — not yet on origin/main)")
+    print(str((spec_dir / "spec.md").resolve()))
+    return 0
+
+
+def _pr_fallback_from_worktree(sha: str, project_dir: Path,
+                               reserve_branch: str, num_str: str,
+                               slug: str, pr_body: str) -> None:
+    """Protected-branch fallback for the detached-worktree path. Simpler
+    than the on-main `_do_pr_fallback` (there is no local `main` to
+    un-strand): push the detached reservation commit (BY SHA, from
+    `project_dir` so a relative `origin` URL resolves) straight to a new
+    remote branch and open the PR. `gh`/remote guards mirror 003-03."""
+    _check_gh_and_remote(project_dir)
+    rc, _out, err = _run(
+        ["git", "push", "origin", f"{sha}:refs/heads/{reserve_branch}"],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback push to {reserve_branch!r} failed: {err.strip()}. "
+            f"The reservation commit exists only in the reservation "
+            f"worktree; re-run to retry."
+        )
+    title = f"docs(specs): reserve {num_str}-{slug}"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body,
+         "--head", reserve_branch, "--base", "main"],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback `gh pr create` failed: {err.strip()}. "
+            f"Branch origin/{reserve_branch} is pushed; open the PR "
+            f"manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def _reserve_via_detached_worktree(slug: str, project_dir: Path,
+                                   pr_mode: bool = False) -> int:
+    """Push-mode reservation that works from ANY branch or worktree.
+
+    Claims the next free spec number on origin/main by building the
+    reservation commit inside an ephemeral, detached worktree checked out
+    at origin/main, then pushing `HEAD:main`. The caller's working tree,
+    branch, and branch tip are never touched. Race + protection handling
+    mirror the on-main 003-03 flow; race recovery is trivial here (the
+    stranded commit lives only in the worktree we remove in `finally`)."""
+    # Fetch every origin ref (not just main) so the number scan below sees
+    # in-flight branch claims and the commit parent is current. This single
+    # fetch is why the scan runs `fetch=False` — a narrower `git fetch origin
+    # main` would refresh origin/main but leave in-flight branches stale,
+    # reintroducing the blindness spec 107 / ADR-0053 exists to fix.
+    rc, _out, err = _run(["git", "fetch", "origin"], cwd=project_dir)
+    if rc != 0:
+        sys.stderr.write(
+            f"warning: `git fetch origin` failed: {err.strip()}; "
+            f"proceeding with the local origin view\n"
+        )
+
+    wt = Path(tempfile.mkdtemp(prefix="jig-reserve-spec-"))
+    try:
+        # Detached checkout of origin/main: no branch is checked out, so
+        # this never collides with `main` being held by another worktree.
+        rc, _out, err = _run(
+            ["git", "worktree", "add", "--detach", str(wt), "origin/main"],
+            cwd=project_dir,
+        )
+        if rc != 0:
+            raise WorkflowError(
+                f"could not create the ephemeral reservation worktree at "
+                f"origin/main ({err.strip()}). Most likely there is no "
+                f"origin/main to reserve against — use `--no-push` for a "
+                f"local provisional reservation, or run from a clone with "
+                f"an 'origin' remote."
+            )
+
+        # Number scan reads the freshly checked-out origin/main tree, then
+        # (spec 107 / ADR-0053) clears every in-flight branch's claim too —
+        # not just what has merged to origin/main. This path is push-only.
+        next_n = _next_spec_number(wt / "docs" / "specs")
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        next_n = max(next_n, scanned + 1)
+        num_str = f"{next_n:03d}"
+        spec_dirname = f"{num_str}-{slug}"
+        spec_dir = wt / "docs" / "specs" / spec_dirname
+        if spec_dir.exists():
+            raise WorkflowError(
+                f"refusing: {spec_dirname} already exists on origin/main."
+            )
+
+        spec_dir.mkdir(parents=True)
+        today_iso = _today()
+        atomic_write_text(spec_dir / "spec.md",
+                          _render_stub_spec(num_str, slug, today_iso))
+        atomic_write_text(spec_dir / "slice-01-tbd.md",
+                          _render_stub_slice(num_str))
+        rel_spec = f"docs/specs/{spec_dirname}/spec.md"
+        rel_slice = f"docs/specs/{spec_dirname}/slice-01-tbd.md"
+        rc, _out, err = _run(["git", "add", rel_spec, rel_slice], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git add` in the reservation worktree failed: "
+                f"{err.strip()}."
+            )
+        commit_msg = f"docs(specs): reserve {spec_dirname}"
+        rc, _out, err = _run(["git", "commit", "-m", commit_msg], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git commit` in the reservation worktree failed: "
+                f"{err.strip()}."
+            )
+        print(f"reserved {spec_dirname}")
+
+        # Resolve the reservation commit's SHA so we can push it BY SHA from
+        # `project_dir`. Pushing from `wt` would resolve a RELATIVE `origin`
+        # URL against the temp dir and fail; the commit's objects live in the
+        # shared object store, so its SHA is reachable from `project_dir`,
+        # where the `origin` remote-name resolves correctly.
+        rc, sha, err = _run(["git", "rev-parse", "HEAD"], cwd=wt)
+        if rc != 0 or not sha.strip():
+            raise WorkflowError(
+                f"could not resolve the reservation commit SHA ({err.strip()}); "
+                f"the ephemeral worktree will be removed."
+            )
+        sha = sha.strip()
+
+        pr_body = _build_pr_body(num_str, slug, project_dir)
+        reserve_branch = f"reserve/{spec_dirname}"
+
+        if pr_mode:
+            _pr_fallback_from_worktree(
+                sha, project_dir, reserve_branch, num_str, slug, pr_body,
+            )
+            _print_draft_hint(spec_dirname)
+            return 0
+
+        # Direct push of the detached reservation commit onto main, BY SHA
+        # from project_dir (where the `origin` remote-name resolves).
+        rc, _out, err = _run(
+            ["git", "push", "origin", f"{sha}:refs/heads/main"],
+            cwd=project_dir,
+        )
+        if rc == 0:
+            print(f"reserved {spec_dirname} on origin/main")
+            _print_draft_hint(spec_dirname)
+            return 0
+
+        kind = _classify_push_failure(err)
+        if kind == "race":
+            # No `reset --hard HEAD~1` needed: the stranded commit lives
+            # only in the worktree the `finally` removes.
+            sys.stderr.write(
+                f"race detected: origin/main advanced during reservation. "
+                f"Re-run 'workflow.py new {slug}' to pick the next free "
+                f"number.\n"
+            )
+            raise WorkflowError(f"race-on-push: {err.strip()}")
+
+        if kind == "protection":
+            sys.stderr.write(
+                f"direct push refused ({err.strip()}); falling back to "
+                f"PR mode...\n"
+            )
+            _pr_fallback_from_worktree(
+                sha, project_dir, reserve_branch, num_str, slug, pr_body,
+            )
+            _print_draft_hint(spec_dirname)
+            return 0
+
+        raise WorkflowError(
+            f"`git push origin {sha}:refs/heads/main` failed: {err.strip()} "
+            f"(the reservation commit lived only in the reservation "
+            f"worktree, which has been removed; inspect and re-run)."
+        )
+    finally:
+        # Always tear down the ephemeral worktree. --force because git sees
+        # it as carrying a checkout; ignore errors so cleanup never masks
+        # the real outcome.
+        _run(["git", "worktree", "remove", "--force", str(wt)],
+             cwd=project_dir)
+        shutil.rmtree(wt, ignore_errors=True)
+        # Prune any stale .git/worktrees/ admin entry so it can't accumulate
+        # if `worktree remove` ever failed above.
+        _run(["git", "worktree", "prune"], cwd=project_dir)
+
+
+def reserve_spec(slug: str, project_dir: Path,
+                 no_push: bool = False, pr_mode: bool = False) -> int:
+    """Slice 003-03 entry point. Reserve the next free spec number by
+    committing a stub spec.md and (by default) pushing it to origin/main.
+
+    Returns the intended process exit code (0 on success). Raises
+    WorkflowError for refusals — main() converts these to exit 2.
+    """
+    # AC #5 (bad-slug) — refuse BEFORE any other check. Bad slug is the
+    # cheapest failure to surface and shouldn't waste git invocations.
+    _validate_slug(slug)
+
+    specs_dir = project_layout.specs_dir(project_dir)
+
+    # Spec 063-01: scaffold-state PRECONDITION. Replaces the weak, dead-end
+    # `docs/specs/`-presence check with a three-way, scaffold.json-first
+    # classification that ROUTES an unscaffolded project to the right setup
+    # skill instead of refusing into a dead end (ADR-0011 / ADR-0013:
+    # route-don't-block; jig redirects, the user/agent acts — it never runs
+    # scaffold-init / migrate on the user's behalf).
+    #
+    # The bypass (`JIG_SCAFFOLD_PRECONDITION=0|false|off|no`) is a
+    # deliberateness signal, not human-only enforcement: when set it skips
+    # classification and preserves TODAY's behavior, including the legacy
+    # weak `docs/specs/`-absent refusal below.
+    if _scaffold_precondition_enabled():
+        state = classify_scaffold_state(project_dir)
+        if state == "greenfield":
+            raise WorkflowError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: greenfield — no scaffold.json and no "
+                f"spec-driven layout). Run `/jig:scaffold-init` to set jig "
+                f"up here first, then re-run `new`."
+            )
+        if state == "adoptable":
+            raise WorkflowError(
+                f"refusing: {project_dir} is not a scaffolded jig project "
+                f"(detected state: adoptable — a spec-driven layout exists "
+                f"but no scaffold.json). Run `/jig:migrate` to adopt it into "
+                f"jig first, then re-run `new`."
+            )
+        # state == "scaffolded": fall through to the existing reserve flow
+        # unchanged (number computation, stub write, commit, push routing).
+    else:
+        # Bypass active — preserve today's behavior, including the legacy
+        # weak refusal so a deliberate actor sees identical output.
+        if not specs_dir.is_dir():
+            raise WorkflowError(
+                f"refusing: docs/specs/ not found under {project_dir} "
+                f"(not inside a scaffolded jig project)"
+            )
+
+    # Slice 084-03 (AC5): refuse PUSH-mode reservation in a track-local subtree
+    # BEFORE routing — covers both the on-main push and the off-main detached-
+    # worktree push (each would write to the enclosing repo root / reserve
+    # against a shared main). Local mode (--no-push) is unaffected.
+    if not no_push:
+        _refuse_push_in_subtree(project_dir)
+
+    # Worktree-aware routing (prototype): the original flow below REQUIRES
+    # being on `main` (it commits on local main, then pushes `origin main`).
+    # A linked worktree can't check out `main`, so route off-main callers to
+    # the detached-worktree path (push) or a current-branch commit
+    # (`--no-push`) instead of refusing. On `main`, the proven 003-03 +
+    # 037-02 flow runs unchanged.
+    if _current_branch(project_dir) != "main":
+        if no_push:
+            return _reserve_local_on_current_branch(
+                slug, project_dir, specs_dir,
+            )
+        return _reserve_via_detached_worktree(
+            slug, project_dir, pr_mode=pr_mode,
+        )
+
+    # On `main`: enforce a clean tree (the commit lands on local main).
+    # The branch check already happened at the dispatch above.
+    _refuse_if_dirty(project_dir)
+
+    # Fetch every origin ref first; the divergence preflight and the
+    # next-number scan both read from origin (spec 037-02 AC #1 + AC #4 +
+    # AC #8). Origin-wide (not just main) so the in-flight-branch scan
+    # below can run `fetch=False` off these refs — a narrower `git fetch
+    # origin main` would leave in-flight branches stale and reintroduce
+    # the blindness spec 107 / ADR-0053 fixes. Skipped for --no-push.
+    if not no_push:
+        rc, _out, err = _run(
+            ["git", "fetch", "origin"], cwd=project_dir,
+        )
+        # A failed fetch isn't fatal — we still proceed with the local
+        # view (spec 037-02 AC #6 preserves this verbatim). The push
+        # step will catch any out-of-date condition via the race-on-
+        # push classifier (003-03 AC #6 / 037-02 AC #7).
+        if rc != 0:
+            sys.stderr.write(
+                f"warning: `git fetch origin` failed: "
+                f"{err.strip()}; proceeding with local view\n"
+            )
+        # Spec 037-02 AC #4: refuse if local main is strictly behind
+        # origin/main. Internally guarded so a failed fetch (no
+        # origin/main ref) silently falls through — preserving AC #6.
+        _preflight_diverged_main(project_dir)
+
+    # Compute the next number AFTER the fetch so we pick up any specs
+    # that landed in the gap. Spec 037-02 AC #1: push-mode reads from
+    # `origin/main` via `git ls-tree`; `--no-push` keeps the working-
+    # tree scan (AC #2).
+    next_n = _next_spec_number(
+        specs_dir, project_dir=project_dir, use_origin=not no_push,
+    )
+    # Spec 107 / ADR-0053: in push mode also clear every in-flight branch's
+    # claim, not just origin/main. --no-push stays working-tree-only.
+    if not no_push:
+        scanned = reservation.scan_max_reserved_number(
+            project_dir, "docs/specs", reservation.SPEC_NUMBER_RE, run=_run,
+            fetch=False,  # the origin-wide fetch above already refreshed refs
+        )
+        next_n = max(next_n, scanned + 1)
+    num_str = f"{next_n:03d}"
+    spec_dirname = f"{num_str}-{slug}"
+    spec_dir = specs_dir / spec_dirname
+
+    # Defensive: if the target dir already exists, refuse rather than
+    # overwrite. This shouldn't happen in practice (we just computed
+    # max + 1) but guards against unexpected race-with-self.
+    if spec_dir.exists():
+        raise WorkflowError(
+            f"refusing: {spec_dir} already exists. Re-run after "
+            f"resolving the conflict."
+        )
+
+    # Write the stub (slice 018-03: spec.md header + starter slice file).
+    spec_dir.mkdir(parents=True)
+    spec_md = spec_dir / "spec.md"
+    today_iso = _today()
+    atomic_write_text(spec_md, _render_stub_spec(num_str, slug, today_iso))
+    starter_slice = spec_dir / "slice-01-tbd.md"
+    atomic_write_text(starter_slice, _render_stub_slice(num_str))
+
+    # Stage + commit locally.
+    rel_spec = f"docs/specs/{spec_dirname}/spec.md"
+    rel_slice = f"docs/specs/{spec_dirname}/slice-01-tbd.md"
+    rc, _out, err = _run(["git", "add", rel_spec, rel_slice], cwd=project_dir)
+    if rc != 0:
+        raise WorkflowError(
+            f"`git add {rel_spec} {rel_slice}` failed: {err.strip()}. "
+            f"The stub files are on disk; stage and commit manually."
+        )
+    commit_msg = f"docs(specs): reserve {spec_dirname}"
+    rc, _out, err = _run(
+        ["git", "commit", "-m", commit_msg], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"`git commit` failed: {err.strip()}. "
+            f"The stub spec.md is staged; commit manually."
+        )
+
+    # Print the success line BEFORE any push so users see the
+    # reservation even on subsequent push failure.
+    print(f"reserved {spec_dirname}")
+    print(str(spec_md.resolve()))
+
+    # AC #7 — `--no-push` stops here.
+    if no_push:
+        return 0
+
+    pr_body = _build_pr_body(num_str, slug, project_dir)
+    branch_name = f"reserve/{spec_dirname}"
+
+    # AC #7 — `--pr` skips the direct-push attempt entirely.
+    if pr_mode:
+        _do_pr_fallback(project_dir, branch_name, num_str, slug, pr_body)
+        return 0
+
+    # AC #3 — default: try direct push first.
+    rc, _out, err = _run(
+        ["git", "push", "origin", "main"], cwd=project_dir,
+    )
+    if rc == 0:
+        print(f"reserved {spec_dirname} on origin/main")
+        return 0
+
+    kind = _classify_push_failure(err)
+    if kind == "race":
+        # AC #6 — drop the stranded commit so re-run starts clean.
+        sys.stderr.write(
+            f"race detected: origin/main advanced during reservation. "
+            f"Re-run 'workflow.py new {slug}' to pick the next free "
+            f"number.\n"
+        )
+        _reset_rc, _reset_out, _reset_err = _run(
+            ["git", "reset", "--hard", "HEAD~1"], cwd=project_dir,
+        )
+        # Refinement-todo (slice 003-03 review): `git reset --hard HEAD~1`
+        # un-strands the commit but leaves the now-empty spec dir on disk.
+        # Functionally harmless (`_next_spec_number` works either way) but
+        # untidy and surfaces as a "dirty worktree" smell on `git status`.
+        # Remove it unconditionally on race recovery; harmless if it's
+        # somehow already gone.
+        shutil.rmtree(spec_dir, ignore_errors=True)
+        # Even if reset fails, the race signal already fired — surface
+        # the original push failure to the user.
+        raise WorkflowError(
+            f"race-on-push: {err.strip()}"
+        )
+
+    if kind == "protection":
+        # AC #4 — fall back to branch + PR.
+        sys.stderr.write(
+            f"direct push refused ({err.strip()}); falling back to "
+            f"PR mode...\n"
+        )
+        _do_pr_fallback(project_dir, branch_name, num_str, slug, pr_body)
+        return 0
+
+    # AC #3 — anything else: hard error; leave commit in place.
+    raise WorkflowError(
+        f"`git push origin main` failed: {err.strip()} "
+        f"(local commit left in place; inspect with `git log -1` "
+        f"and decide how to recover)."
+    )
+
+
+def _build_pr_body(num_str: str, slug: str, project_dir: Path) -> str:
+    """Compose a PR body explaining the reservation purpose, naming the
+    slot, and pointing reviewers at this slice for context."""
+    return (
+        f"Reserves spec number `{num_str}` for slug `{slug}` on the "
+        f"shared trunk, so parallel worktrees cannot both claim the "
+        f"same `NNN`.\n"
+        f"\n"
+        f"This PR adds stubs `docs/specs/{num_str}-{slug}/spec.md` "
+        f"(header + `## Overview` / `## Decomposition` / `## Slices` "
+        f"placeholders) and `slice-01-tbd.md` (starter slice file). "
+        f"The actual spec body and slice contents will be drafted in "
+        f"a separate feature branch.\n"
+        f"\n"
+        f"Generated by `workflow.py new {slug}` "
+        f"(see spec 003-03 reserve-spec-on-main for rationale).\n"
+    )
+
+
+# ---------- end slice 003-03 ----------
+
+
+# ---------- Slice 049-01: claim-on-transition ----------
+#
+# Mirrors the spec 028-01 / 003-03 reserve-on-main primitives (reused
+# directly: _run, _classify_push_failure, _check_gh_and_remote,
+# _current_branch) and the spec 051 / ADR-0015 worktree-aware
+# detached-checkout shape. Where `workflow.py new` reserves a NEW spec
+# number by CREATING files, a transition reserves a CLAIM on an EXISTING
+# slice file: it stamps `claimed_by:` on the origin/main copy so two
+# parallel worktrees cannot both pick up the same slice — and, for an
+# IN_PROGRESS target only, also flips `status: IN_PROGRESS` there so the
+# 051-04 start-collision guard can read it (ADR-0045). A single detached-worktree path serves
+# every branch (incl. a linked worktree that can't check out `main`),
+# since the claim edits an existing file rather than creating one. Per
+# ADR-0002's three-callers rule the push/race/PR-fallback shape stays
+# inline-mirrored, not extracted (this is the second caller).
+
+CLAIM_FIELD = "claimed_by"
+
+# Slice 111-01 / ADR-0057: the frontmatter field naming what an actionable
+# slice is blocked on — read by `collect_slices` the same way `claimed_by`
+# is. A blocker is an annotation on an actionable slice, not a lifecycle
+# state (see `_BLOCKER_ACTIONABLE_STATUSES` below for the actionable-state
+# boundary that gates rendering).
+BLOCKED_FIELD = "blocked_by"
+
+# ADR-0045 / bug 014 (issue #130): a claim marks "a session is working this
+# slice right now" across the WORKING states — not just "who is
+# implementing". Spec 049 scoped the stamp to IN_PROGRESS and cleared it on
+# REVIEWED / READY_FOR_IMPLEMENTATION / DRAFT, which left every spec-level
+# phase unmarked — most damagingly REVIEWED → RECONCILED, the heaviest write
+# phase in the lifecycle. Readers then took "no claim" for "nobody here".
+#
+# The split is by what a state MEANS, not by "non-terminal vs terminal". Two
+# kinds of state exist:
+#
+#   WORKING states — a session is doing something here. Stamp the claim.
+#   QUEUE states   — the slice is parked awaiting whoever comes next. Release.
+#
+# `DRAFT` and `READY_FOR_IMPLEMENTATION` are QUEUE states: they are precisely
+# the two states `spec-workflow/SKILL.md` names when it says "check the board
+# for the next slice in READY_FOR_IMPLEMENTATION (or DRAFT for a slice you
+# intend to plan now)".
+# Stamping them INVERTS this bug instead of fixing it — the spec author's
+# `→ READY_FOR_IMPLEMENTATION` would leave their branch name on a slice that is
+# now free, so the board would label every ready slice with a departed owner and
+# the implementer's first `→ IN_PROGRESS` would warn on the routine path. Bug
+# 013's "blank reads as free" would become "residue reads as occupied", which is
+# the same defect with the sign flipped. Spec 049's Non-goal on
+# `READY_FOR_IMPLEMENTATION` was right and is PRESERVED; caught by the
+# frame-critique pass and reproduced before narrowing.
+#
+# Entering a queue state is therefore a RELEASE ("I am done here; it is
+# available"), which is also why two of spec 049 AC4's three original clearing
+# edges survive unchanged — only the REVIEWED edge is reversed.
+_CLAIM_WORKING_STATUSES = (
+    "READY_FOR_REVIEW",
+    IN_PROGRESS_STATUS,
+    "REVIEWED",
+    "RECONCILED",
+)
+_CLAIM_RELEASE_STATUSES = (
+    "DRAFT",
+    "READY_FOR_IMPLEMENTATION",
+    "DONE",
+    "DEFERRED",
+    "ABANDONED",
+)
+
+# Slice 111-01 / ADR-0057: the "actionable" boundary for a first-class
+# blocker — its next step is real work that is now prevented. Widens
+# `_CLAIM_WORKING_STATUSES` (started work) with `READY_FOR_IMPLEMENTATION`
+# (ready to start but not yet claimed) to cover the "ready-but-stuck" case
+# (ADR-0057 A2). Deliberately excludes DRAFT (next step is shaping, always
+# available), DONE (finished), and DEFERRED/ABANDONED (parked/dropped by
+# choice, not prevented).
+_BLOCKER_ACTIONABLE_STATUSES = _CLAIM_WORKING_STATUSES + (
+    "READY_FOR_IMPLEMENTATION",
+)
+
+
+def _claim_identifier(project_dir: Path) -> str:
+    """Identity stamped into `claimed_by:`. The `JIG_CLAIM_ID` env
+    override wins (spec 049 non-goal: no human-identity inference);
+    otherwise the current branch name (parity with `workflow.py new`'s
+    routing). Falls back to 'detached' when neither is available."""
+    env = os.environ.get("JIG_CLAIM_ID")
+    if env and env.strip():
+        return env.strip()
+    return _current_branch(project_dir) or "detached"
+
+
+def _ref_safe(label: str) -> str:
+    """Slug a slice label into a git-ref-safe token for the PR-fallback
+    branch name. The human label (e.g. `049-01 — claim-and-release`)
+    carries spaces / em-dashes that are invalid in a ref; lower-case and
+    collapse every non-`[a-z0-9]` run to a single hyphen (mirrors the
+    003-03 precedent of branching off the filesystem-safe `spec_dirname`,
+    not the prose label)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    return slug or "slice"
+
+
+def _build_claim_pr_body(slice_label: str, identifier: str,
+                         rel_path: str,
+                         new_status: str = IN_PROGRESS_STATUS) -> str:
+    """PR body for the protected-branch claim fallback.
+
+    ADR-0045: narrates what the commit actually does, which now depends on the
+    transition's target state — only an `IN_PROGRESS` reservation publishes
+    `status:` to the trunk copy."""
+    if new_status == IN_PROGRESS_STATUS:
+        change = (f"This PR flips `status: IN_PROGRESS` and stamps "
+                  f"`claimed_by: {identifier}` on `{rel_path}`.\n")
+    else:
+        change = (f"This PR stamps `claimed_by: {identifier}` on `{rel_path}`, "
+                  f"leaving the trunk copy's `status:` untouched (the local "
+                  f"transition target is `{new_status}`; trunk lifecycle state "
+                  f"is owned by the landing flow).\n")
+    return (
+        f"Claims slice `{slice_label}` for `{identifier}` on the shared "
+        f"trunk, so parallel worktrees cannot both pick it up.\n"
+        f"\n"
+        f"{change}"
+        f"\n"
+        f"Generated by `workflow.py transition ... {new_status}` "
+        f"(see spec 049-01 + ADR-0045 for rationale).\n"
+    )
+
+
+def _claim_pr_fallback(sha: str, project_dir: Path, claim_branch: str,
+                       slice_label: str, identifier: str,
+                       pr_body: str) -> None:
+    """Protected-branch fallback for the claim push: push the claim
+    commit (BY SHA, from project_dir so a relative `origin` URL resolves)
+    to a new `claim/` branch and open a PR. Mirrors
+    `_pr_fallback_from_worktree` (003-03) with claim-flavored messaging."""
+    _check_gh_and_remote(project_dir)
+    rc, _out, err = _run(
+        ["git", "push", "origin", f"{sha}:refs/heads/{claim_branch}"],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback push to {claim_branch!r} failed: {err.strip()}. "
+            f"The claim commit exists only in the ephemeral worktree; "
+            f"re-run to retry."
+        )
+    title = f"docs(specs): claim {slice_label} ({identifier})"
+    rc, out, err = _run(
+        ["gh", "pr", "create", "--title", title, "--body", pr_body,
+         "--head", claim_branch, "--base", "main"],
+        cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"PR-fallback `gh pr create` failed: {err.strip()}. "
+            f"Branch origin/{claim_branch} is pushed; open the PR "
+            f"manually via the GitHub web UI."
+        )
+    pr_url = out.strip()
+    if pr_url:
+        print(pr_url)
+
+
+def _reserve_claim_on_main(project_dir: Path, rel_path: str,
+                           identifier: str, slice_label: str,
+                           pr_mode: bool = False,
+                           new_status: str = IN_PROGRESS_STATUS,
+                           already_warned: str = "") -> None:
+    """Reserve a slice claim on origin/main. Fetches origin/main, reads
+    the slice's origin/main copy, refuses if BOTH the trunk copy and this
+    transition's target are IN_PROGRESS under a different identifier (the
+    collision backstop — both ends, matching the local path), then
+    builds the claim commit in an ephemeral detached worktree and pushes
+    `HEAD:main` BY SHA. Race → re-run; protected branch → PR fallback.
+    Raises WorkflowError on collision / race / unreachable origin; the
+    caller's working tree, branch, and branch tip are never touched.
+
+    MAY RETURN WITHOUT RESERVING ANYTHING. A claim-only reservation (any
+    non-IN_PROGRESS target) declines to write when the trunk copy is at
+    `status: IN_PROGRESS` under someone else's claim (or none), because that
+    state is enforced by `_refuse_start_collision`. Stamping a claim onto it
+    would either move a live lock and get the previous owner refused in this
+    session's name, or — on an unclaimed copy — manufacture the enforced pair
+    from the other direction and refuse everyone. So `--push` at a
+    working state is BEST-EFFORT: it warns, exits 0, and pushes nothing.
+    `already_warned` carries an identifier the caller has already named, so the
+    REPLACE warning never repeats a holder the caller's on-disk warning already
+    reported. (The decline warning above is not deduped — it carries materially
+    different information: that nothing was pushed.)
+
+    ADR-0045 widened the caller to every working state, which makes
+    `new_status` load-bearing: the reservation writes `status:` to the trunk
+    copy ONLY for `IN_PROGRESS`. That single write is deliberate and
+    load-bearing — `_refuse_start_collision` reads exactly
+    `status: IN_PROGRESS` + a foreign `claimed_by` off origin/main, so
+    publishing it is what makes the start-time guard work (spec 049 AC2 /
+    051-04). For every other working state the reservation publishes the
+    **claim alone** and leaves the trunk's `status:` untouched: trunk
+    lifecycle state is owned by the landing flow, not by a feature branch's
+    in-flight transitions. Writing it here would regress the trunk copy in
+    whichever direction the local branch happened to be moving — a
+    `RECONCILED --push` stamping `IN_PROGRESS` (the pre-fix bug) or a
+    `DRAFT --push` stamping `DRAFT` over a landed `REVIEWED` are the same
+    defect. Worse, a fabricated trunk `IN_PROGRESS` would then hard-block
+    every other worktree via `_refuse_start_collision` — the exact
+    false-refusal class ADR-0045 set out to avoid."""
+    # ONE name, TWO invariants keyed off it: what the reservation writes
+    # (trunk `status:` only for an IN_PROGRESS target) and what the trunk
+    # hard-refusal gates on (both ends IN_PROGRESS). Named for the test it
+    # performs, not for one of its uses, so a future change to the publish
+    # rule cannot silently re-widen the refusal (craft pass).
+    target_is_in_progress = new_status == IN_PROGRESS_STATUS
+    rc, _out, err = _run(["git", "fetch", "origin", "main"], cwd=project_dir)
+    if rc != 0:
+        raise WorkflowError(
+            f"cannot reserve the claim: `git fetch origin main` failed "
+            f"({err.strip()}). origin/main is unreachable — re-run without "
+            f"--push for a local-only claim."
+        )
+
+    rc, content, err = _run(
+        ["git", "show", f"origin/main:{rel_path}"], cwd=project_dir,
+    )
+    if rc != 0:
+        raise WorkflowError(
+            f"cannot reserve the claim: {rel_path} is not on origin/main "
+            f"({err.strip()}). Land the slice on main first, or re-run "
+            f"without --push for a local-only claim."
+        )
+
+    fields, _ = parse_frontmatter(content)
+    existing = str(fields.get(CLAIM_FIELD) or "").strip()
+    origin_status = str(fields.get("status") or "").strip()
+    # Slice 051-04 AC6: refuse to reserve a claim on a slice already DONE on
+    # origin/main. Without this, a `--push`/`--pr` claim (and, a fortiori, any
+    # future push-by-default) would flip the origin/main copy DONE →
+    # IN_PROGRESS, regressing a landed slice's status on the shared trunk.
+    # This is an integrity guard on origin/main and is NOT covered by
+    # JIG_START_COLLISION_GATE (which only relaxes the transition-time block);
+    # you may force a local start, but never a trunk regression.
+    if origin_status == "DONE":
+        raise WorkflowError(
+            f"slice {slice_label} is already DONE on origin/main — refusing to "
+            f"reserve a claim on landed work (it would advertise an owner for a "
+            f"finished slice, and for a → IN_PROGRESS claim would regress its "
+            f"status on the shared trunk). Your local copy is stale; integrate "
+            f"origin/main before starting new work."
+        )
+    # BOTH ends must be IN_PROGRESS, exactly as on the local path.
+    # Pre-ADR-0045 this callee was only ever reached for an IN_PROGRESS target,
+    # so the refusal was structurally both-ends-IN_PROGRESS; widening the call
+    # site to every working state made it reachable for `REVIEWED --push`
+    # against a trunk copy the implementer is still building — which would have
+    # refused a reviewer worktree recording a verdict, the precise false block
+    # ADR-0045 says it avoids. `target_is_in_progress` IS the target-is-IN_PROGRESS
+    # test. Anything else falls through to the warning below. Caught by the
+    # bug-review + craft passes.
+    if (target_is_in_progress and existing and existing != identifier
+            and origin_status == IN_PROGRESS_STATUS):
+        raise WorkflowError(
+            f"slice {slice_label} is already claimed by {existing!r} on "
+            f"origin/main (status IN_PROGRESS). Have the current owner "
+            f"release it, or force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."'
+        )
+    # ADR-0045: never TRANSFER AN ENFORCED LOCK sideways. A trunk copy at
+    # `status: IN_PROGRESS` under a foreign claim is not merely informational —
+    # `_refuse_start_collision` hard-blocks on exactly that pair. If a
+    # claim-only reservation replaced the `claimed_by:` there while leaving the
+    # status alone, the trunk would read "IN_PROGRESS, claimed by the reviewer",
+    # and the ORIGINAL BUILDER's next `→ IN_PROGRESS` would be refused, naming
+    # someone else. That manufactures the false-block class ADR-0045 exists to
+    # avoid — indirectly, by moving an enforced lock rather than by refusing.
+    # So: warn, leave the trunk claim intact, and let the local transition
+    # proceed. Caught by the round-4 bug-review pass.
+    #
+    # The condition takes TWO tests, not one. `status: IN_PROGRESS` on the trunk
+    # copy is what makes a lock enforceable — not the name beside it, so
+    # publishing our claim onto an UNCLAIMED IN_PROGRESS trunk copy manufactures
+    # the same enforced pair from the other direction,
+    # and that copy is reachable through supported commands (`transition …
+    # IN_PROGRESS --release` leaves IN_PROGRESS with no claim; a plain
+    # `Edit`-tool write never takes one). Keying on a NON-EMPTY `existing` left
+    # exactly that hole, silently — caught by the round-5 bug-review pass.
+    #
+    # But it must still exclude OUR OWN claim, which the round-5 fix swept in and
+    # the round-6 passes caught: what makes a lock *enforceable* (the trunk
+    # status) and what makes replacing it *harmful* (it belongs to someone else)
+    # are two different tests, and both are required. Without the identity test,
+    # the documented `IN_PROGRESS --push` → `REVIEWED --push` sequence warned the
+    # session about its own live claim and advised force-releasing it — a false
+    # alarm on this fix's flagship path. An own claim falls through to the
+    # idempotent short-circuit below, which says so benignly. `existing == ""`
+    # still trips the guard, so the unclaimed hole stays closed.
+    if (not target_is_in_progress and existing != identifier
+            and origin_status == IN_PROGRESS_STATUS):
+        held = f"claimed by {existing!r} and " if existing else ""
+        sys.stderr.write(
+            f"warning: slice {slice_label} is {held}IN_PROGRESS on "
+            f"origin/main — that state is ENFORCED (it blocks other sessions "
+            f"from starting the slice), so this reservation is SKIPPED rather "
+            f"than stamping a claim onto it. Your local transition to "
+            f"{new_status} proceeds, but nothing was pushed. There is no "
+            f"self-service fix for a trunk-side claim — `--release` clears only "
+            f"your own copy — so coordinate with the holder, or wait for their "
+            f"work to land on main.\n"
+        )
+        return
+
+    # ADR-0045: a foreign claim on the TRUNK copy outside IN_PROGRESS is newly
+    # reachable — before the widening, a trunk claim could only ever coexist
+    # with `status: IN_PROGRESS`, because that was the only reservation the code
+    # could perform. It can now, and overwriting it silently would break this
+    # decision's headline promise (a loud warning for every foreign claim the
+    # block does not cover). The on-disk warning in `transition` cannot cover
+    # this case: it reads the CALLER's copy, which in the cross-branch scenario
+    # that motivated bug 014 does not carry the other session's claim at all.
+    # Caught by the craft + bug-review passes.
+    if existing and existing != identifier and existing != already_warned:
+        sys.stderr.write(
+            f"warning: slice {slice_label} is claimed by {existing!r} on "
+            f"origin/main (status {origin_status or 'unknown'}) — another "
+            f"session may be working it right now. This reservation will "
+            f"replace that claim on the shared trunk. If that is wrong, "
+            f"coordinate first, or force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+        )
+
+    # Idempotent re-claim — already ours on origin/main; nothing to push. Keyed
+    # on what this reservation would actually WRITE (ADR-0045): for a
+    # non-IN_PROGRESS state we only publish the claim, so an identical claim is
+    # already the whole desired trunk state regardless of the trunk's status.
+    if existing == identifier and (
+            not target_is_in_progress or origin_status == IN_PROGRESS_STATUS):
+        print(f"claim already held by {identifier!r} on origin/main")
+        return
+
+    if target_is_in_progress:
+        new_content = set_frontmatter_field(
+            content, "status", IN_PROGRESS_STATUS)
+    else:
+        new_content = content
+    new_content = set_frontmatter_field(new_content, CLAIM_FIELD, identifier)
+
+    wt = Path(tempfile.mkdtemp(prefix="jig-claim-"))
+    try:
+        rc, _out, err = _run(
+            ["git", "worktree", "add", "--detach", str(wt), "origin/main"],
+            cwd=project_dir,
+        )
+        if rc != 0:
+            raise WorkflowError(
+                f"could not create the ephemeral claim worktree at "
+                f"origin/main ({err.strip()})."
+            )
+
+        target = wt / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(target, new_content)
+        rc, _out, err = _run(["git", "add", rel_path], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git add {rel_path}` in the claim worktree failed: "
+                f"{err.strip()}."
+            )
+        commit_msg = f"docs(specs): claim {slice_label} ({identifier})"
+        rc, _out, err = _run(["git", "commit", "-m", commit_msg], cwd=wt)
+        if rc != 0:
+            raise WorkflowError(
+                f"`git commit` in the claim worktree failed: {err.strip()}."
+            )
+
+        # Resolve the SHA so we can push BY SHA from project_dir (a relative
+        # `origin` URL would not resolve against the temp worktree — the
+        # 051 lesson).
+        rc, sha, err = _run(["git", "rev-parse", "HEAD"], cwd=wt)
+        if rc != 0 or not sha.strip():
+            raise WorkflowError(
+                f"could not resolve the claim commit SHA ({err.strip()})."
+            )
+        sha = sha.strip()
+
+        pr_body = _build_claim_pr_body(slice_label, identifier, rel_path,
+                                       new_status)
+        claim_branch = f"claim/{_ref_safe(slice_label)}"
+
+        if pr_mode:
+            _claim_pr_fallback(
+                sha, project_dir, claim_branch, slice_label, identifier,
+                pr_body,
+            )
+            return
+
+        rc, _out, err = _run(
+            ["git", "push", "origin", f"{sha}:refs/heads/main"],
+            cwd=project_dir,
+        )
+        if rc == 0:
+            print(f"claimed {slice_label} on origin/main as {identifier!r}")
+            return
+
+        kind = _classify_push_failure(err)
+        if kind == "race":
+            # The stranded commit lives only in the worktree the `finally`
+            # removes — no reset needed.
+            raise WorkflowError(
+                f"race-on-push claiming {slice_label}: origin/main advanced "
+                f"({err.strip()}). Re-run the transition to re-check the "
+                f"claim against the new origin/main."
+            )
+        if kind == "protection":
+            sys.stderr.write(
+                f"direct push refused ({err.strip()}); falling back to "
+                f"PR mode...\n"
+            )
+            _claim_pr_fallback(
+                sha, project_dir, claim_branch, slice_label, identifier,
+                pr_body,
+            )
+            return
+
+        raise WorkflowError(
+            f"`git push origin {sha}:refs/heads/main` failed claiming "
+            f"{slice_label}: {err.strip()} (the claim commit lived only in "
+            f"the ephemeral worktree, which has been removed; re-run)."
+        )
+    finally:
+        _run(["git", "worktree", "remove", "--force", str(wt)],
+             cwd=project_dir)
+        shutil.rmtree(wt, ignore_errors=True)
+        _run(["git", "worktree", "prune"], cwd=project_dir)
+
+
+# ---- ADR-0058 Class B: refs/claims/<N> CAS-ref reservation (spec 112-05) ---
+#
+# `claimed_by:` (ADR-0045) is the human-readable OWNER; these two helpers
+# manage the CAS ref that is the atomic MECHANISM behind it (spike 112-04's
+# resolved primitive — see `_common.claim_ref`). Best-effort by construction:
+# every outcome is a stdout/stderr signal, never a raise — the identity-based
+# hard block lives in `_refuse_start_collision` /
+# `find_sibling_in_progress_claim`, not here (see `_common.claim_ref`'s
+# module docstring for why a CAS-ref collision alone cannot safely block).
+
+def _reserve_claim_ref(project_dir: Path, slice_id: str, slice_label: str, *,
+                       push: bool = False, pr_mode: bool = False) -> None:
+    """Create the local refs/claims/<slice_id> CAS ref (spike 112-04's local
+    CAS — AC1), and, under --push/--pr, best-effort push it for
+    cross-machine visibility (AC1's cross-machine half, AC5's remote race,
+    AC6's offline degrade). Never raises."""
+    won, _detail = create_local_claim(slice_id, project_dir)
+    if won is False:
+        sys.stderr.write(
+            f"warning: a local claim-reservation ref for {slice_label} "
+            f"(refs/claims/{slice_id}) already exists — another session on "
+            f"this machine may be claiming it right now (a simultaneous-"
+            f"create race), or it is a stale ref left by a crashed session "
+            f"(this module tracks no liveness — see AC4/A3). This does not "
+            f"block the transition; if the ref is stale, clear it with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+        )
+    # `won is True` (created) or `None` (git unusable here — the same
+    # best-effort degrade every other "not a git repo" path in this module
+    # takes) both proceed silently.
+
+    if not (push or pr_mode):
+        return
+
+    status, detail = push_claim(slice_id, project_dir)
+    if status == "pushed":
+        print(f"reserved refs/claims/{slice_id} on origin for {slice_label!r}")
+    elif status == "race":
+        sys.stderr.write(
+            f"warning: refs/claims/{slice_id} already exists on origin — "
+            f"another machine may be claiming {slice_label} right now "
+            f"(a simultaneous-create race). This does not block the "
+            f"transition; the local claim still applies.\n"
+        )
+    elif status == "fallback-pushed":
+        print(
+            f"refs/claims/{slice_id} was rejected by origin (the custom ref "
+            f"namespace is not permitted there); reserved via the "
+            f"{detail} branch fallback instead."
+        )
+    else:  # "fallback-failed" / "offline"
+        sys.stderr.write(
+            f"warning: could not reserve a cross-machine claim for "
+            f"{slice_label} on origin ({detail.strip() or 'unreachable'}) — "
+            f"this is best-effort; the local claim still applies.\n"
+        )
+
+
+def _release_claim_ref(project_dir: Path, slice_id: str, *,
+                       push: bool = False, pr_mode: bool = False) -> None:
+    """Best-effort release of the refs/claims/<slice_id> CAS ref, local and
+    (under --push/--pr) remote (AC4's liveness policy — manual release
+    only). Never raises."""
+    release_local_claim(slice_id, project_dir)
+    if push or pr_mode:
+        release_remote_claim(slice_id, project_dir)
+
+
+# ---- Slice 051-04: start-time claim-collision guard (→ IN_PROGRESS) --------
+#
+# Issue 81 (twice observed): a parallel worktree built an entire slice already
+# DONE on origin/main and only collided at merge, because → IN_PROGRESS did
+# ZERO network work and the on-disk claim guard trusted a possibly-stale local
+# file. This guard reuses `_reserve_claim_on_main`'s remote-read shape
+# (`git show origin/main:<rel_path>` + `parse_frontmatter`) to consult the
+# authoritative origin/main copy BEFORE building starts, and hard-blocks a
+# DONE / foreign-IN_PROGRESS collision. It is deliberately soft on
+# reachability (parity with `_branch_freshness_warning`): a local-only repo or
+# an unreachable origin degrades to proceed (silent for no-origin, a loud
+# warning for a genuine fetch/read failure), never a false block. Gated ON by
+# default; `JIG_START_COLLISION_GATE=0` (also false/off/no) bypasses it.
+
+START_COLLISION_GATE_ENV = "JIG_START_COLLISION_GATE"
+
+
+def _origin_slice_state(project_dir: Path, rel_path: str) -> tuple:
+    """Fetch origin/main and read the slice's origin/main frontmatter.
+
+    Returns `(kind, payload)`:
+      - `("no-origin", "")`       — no `origin` remote (local-only repo).
+      - `("fetch-failed", err)`   — `git fetch origin main` failed.
+      - `("absent", "")`          — slice not present on origin/main (a
+                                     brand-new local slice — the normal case).
+      - `("unreadable", reason)`  — present but no parseable `status:`.
+      - `("present", (status, claimed_by))` — the authoritative remote copy.
+
+    Never raises: every git failure maps to a `kind` the caller degrades on.
+    Mirrors `_branch_freshness_warning`'s no-origin short-circuit and
+    `_reserve_claim_on_main`'s `git show origin/main:<rel>` read.
+    """
+    origin = _run(["git", "config", "--get", "remote.origin.url"], project_dir)
+    if origin[0] != 0 or not origin[1].strip():
+        return ("no-origin", "")
+
+    fetch = _run(["git", "fetch", "origin", "main"], project_dir)
+    if fetch[0] != 0:
+        return ("fetch-failed",
+                fetch[2].strip() or fetch[1].strip() or "unknown error")
+
+    rc, content, _err = _run(["git", "show", f"origin/main:{rel_path}"],
+                             project_dir)
+    if rc != 0:
+        # git show fails when the path is absent on origin/main — the
+        # brand-new-local-slice case (AC4), not an error.
+        return ("absent", "")
+
+    fields, _ = parse_frontmatter(content)
+    status = str(fields.get("status") or "").strip()
+    if not status:
+        return ("unreadable",
+                f"{rel_path} on origin/main has no parseable status")
+    claimed_by = str(fields.get(CLAIM_FIELD) or "").strip()
+    return ("present", (status, claimed_by))
+
+
+def _refuse_sibling_in_progress_claim(project_dir: Path, identifier: str,
+                                      slice_label: str) -> None:
+    """ADR-0058 Class B (spec 112-05): hard-block a → IN_PROGRESS transition
+    when the slice's identifier is already `IN_PROGRESS` under a FOREIGN
+    claim on a sibling or remote-tracking ref — any branch other than
+    `origin/main` (which `_refuse_start_collision`'s own read covers on the
+    default path, and `_reserve_claim_on_main` covers under --push/--pr).
+
+    Extracted as a STANDALONE function (compliance-review finding, spec
+    112-05) so this SAME identity-based halt runs on BOTH the default path
+    (via `_refuse_start_collision`, which delegates here) and the
+    `--push`/`--pr` path (see `transition`'s claim-reservation dispatch,
+    which calls this directly alongside `_reserve_claim_on_main`).
+    `_reserve_claim_on_main` reads `origin/main` ONLY — without this
+    separate call, opting into `--push`/`--pr` (the ADR-0045-encouraged way
+    to make a claim visible to parallel worktrees) would silently DROP the
+    sibling/remote hard block down to a non-blocking CAS-ref warning, which
+    is backwards: publishing a claim more widely must never make the guard
+    weaker.
+
+    Shares `_refuse_start_collision`'s bypass surface
+    (`JIG_START_COLLISION_GATE`) — one gate for the whole start-collision
+    guard family, not a second name to remember. Emits its own
+    `emit_gate_bypass` audit event when the gate is off, so the `--push`
+    call site (which has no other gate check of its own) still leaves a
+    trail.
+
+    Deliberately does NOT change WHEN the halt fires — still exactly
+    `status == IN_PROGRESS` plus a foreign `claimed_by`
+    (`_common.cross_ref_state.find_sibling_in_progress_claim`'s hit
+    condition). A foreign claim on a sibling in any OTHER working state
+    (REVIEWED / RECONCILED / READY_FOR_REVIEW) is never a hit here —
+    ADR-0045's warn-and-transfer for those states is unchanged, preserved
+    by construction rather than by a second check.
+
+    Raises `WorkflowError` (CLI exit 2) on a confirmed sibling collision.
+    Best-effort otherwise: an unreachable/timed-out sibling ref degrades to
+    a non-blocking stderr warning (AC5/AC6), never a false block. No-op
+    when the gate is bypassed.
+    """
+    if not env_gate_enabled(START_COLLISION_GATE_ENV):
+        emit_gate_bypass(project_dir, "start-collision", START_COLLISION_GATE_ENV,
+                         spec_ref=read_spec_ref(project_dir))
+        return
+
+    m = re.match(r"^(\d{3}-\d{2})", slice_label.strip())
+    if not m:
+        return  # not a `NNN-MM`-shaped label (e.g. a legacy free-form title)
+    slice_id = m.group(1)
+    sibling_hit, sibling_warnings = find_sibling_in_progress_claim(
+        slice_id, project_dir, current_branch=_current_branch(project_dir),
+        exclude_refs={"origin/main"},
+    )
+    for warning in sibling_warnings:
+        sys.stderr.write(warning.rstrip() + "\n")
+    if sibling_hit is not None and sibling_hit.claimed_by != identifier:
+        raise WorkflowError(
+            f"slice {slice_label} is claimed by "
+            f"{sibling_hit.claimed_by!r} on sibling ref "
+            f"{sibling_hit.ref!r} (status IN_PROGRESS) — another "
+            f"session may be building it right now. Have the owner "
+            f"release it, or force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+            f"To override this guard, set {START_COLLISION_GATE_ENV}=0."
+        )
+
+
+def _refuse_start_collision(project_dir: Path, rel_path: str,
+                            identifier: str, slice_label: str,
+                            already_warned: str = "") -> None:
+    """Slice 051-04: hard-block a → IN_PROGRESS that would duplicate landed
+    work (slice DONE on origin/main) or collide with a foreign active claim
+    (IN_PROGRESS under a different `claimed_by` on origin/main). Warns and
+    proceeds when origin is unreachable; silent-proceeds for a local-only repo
+    or a brand-new (absent-on-origin) slice. No-op when the gate is bypassed.
+
+    Raises `WorkflowError` (CLI exit 2) on a confirmed collision.
+
+    ADR-0045 also emits a NON-BLOCKING warning for a foreign trunk claim at a
+    working state other than IN_PROGRESS (someone reviewing or reconciling the
+    slice). `already_warned` carries the identifier the caller's on-disk warning
+    has just named, so a single transition never prints two near-identical
+    warnings about the same holder.
+
+    ADR-0058 Class B (spec 112-05): ALSO hard-blocks on a foreign
+    `IN_PROGRESS` claim visible on a SIBLING or remote-tracking ref (any
+    branch other than `origin/main`, which the check above already covers)
+    — extending this SAME block's READ SCOPE, not its firing condition
+    (still exactly both-ends-`IN_PROGRESS`). See
+    `_refuse_sibling_in_progress_claim` — that check is a SEPARATE function
+    (not inlined here) so the SAME sibling/remote halt can also run on the
+    `--push`/`--pr` path, which this function is not called on (see
+    `transition`'s dispatch; `_reserve_claim_on_main` covers only
+    `origin/main` there, never the sibling/remote case).
+    """
+    if not env_gate_enabled(START_COLLISION_GATE_ENV):
+        # Deliberateness override honored — leave a content-free audit trail
+        # (parity with the review-evidence gate's emit_gate_bypass).
+        emit_gate_bypass(project_dir, "start-collision", START_COLLISION_GATE_ENV,
+                         spec_ref=read_spec_ref(project_dir))
+        return
+
+    # ADR-0058 Class B (spec 112-05): the gate above already confirmed
+    # enabled, so this delegates straight to the sibling/remote scan — see
+    # `_refuse_sibling_in_progress_claim`'s docstring for why it is a
+    # standalone function rather than inlined here.
+    _refuse_sibling_in_progress_claim(project_dir, identifier, slice_label)
+
+    kind, payload = _origin_slice_state(project_dir, rel_path)
+    if kind in ("no-origin", "absent"):
+        return
+    if kind in ("fetch-failed", "unreadable"):
+        sys.stderr.write(
+            f"warning: start-collision check skipped: {payload}\n")
+        return
+
+    origin_status, origin_claim = payload
+    if origin_status == "DONE":
+        raise WorkflowError(
+            f"slice {slice_label} is already DONE on origin/main — starting it "
+            f"here would duplicate landed work. Your local copy is stale; "
+            f"integrate origin/main (e.g. `git merge origin/main`) before "
+            f"picking up new work. To override this guard for a deliberate "
+            f"re-open, set {START_COLLISION_GATE_ENV}=0."
+        )
+    if (origin_status == IN_PROGRESS_STATUS and origin_claim
+            and origin_claim != identifier):
+        raise WorkflowError(
+            f"slice {slice_label} is claimed by {origin_claim!r} on "
+            f"origin/main (status IN_PROGRESS). Have the owner release it, or "
+            f"force-release with:\n"
+            f"    workflow.py transition <spec> {slice_label} "
+            f'READY_FOR_IMPLEMENTATION --release --reason "..."\n'
+            f"To override this guard, set {START_COLLISION_GATE_ENV}=0."
+        )
+
+    # ADR-0045: a foreign trunk claim at a WORKING state other than IN_PROGRESS
+    # (someone reviewing or reconciling the slice) warns but does not block —
+    # this is the cross-worktree half of the widened claim, and without it the
+    # reservation would publish a trunk field that nothing ever reads, making
+    # "--push so other worktrees see it" true only after a merge. Non-blocking
+    # for the same reason as the on-disk warning: it is not the both-ends-
+    # IN_PROGRESS case, so a refusal would be a false block. Caught by the
+    # bug-review + craft passes.
+    if (origin_status in _CLAIM_WORKING_STATUSES
+            and origin_status != IN_PROGRESS_STATUS
+            and origin_claim and origin_claim != identifier
+            and origin_claim != already_warned):
+        sys.stderr.write(
+            f"warning: slice {slice_label} is claimed by {origin_claim!r} on "
+            f"origin/main (status {origin_status}) — another session may be "
+            f"working it right now. Starting here anyway; coordinate first if "
+            f"that is wrong.\n"
+        )
+
+
+# ---------- cross-ref lifecycle-state Class-A advance guard (ADR-0058 / spec 112-02) ----------
+#
+# `identifier_state_on_ref` (`_common.cross_ref_state`, built by slice 112-01)
+# reads a slice/ADR's lifecycle marker as committed on a given git ref.
+# 112-01 wired it as `land.py prepare`'s Class-A backstop — the LATEST
+# boundary, right before a landing push. This wires the SAME primitive at
+# `transition`'s EARLIEST boundary: advancing into a working state on a
+# slice already `DONE` on `origin/main` is refused before the local status
+# flip — a stale branch cannot re-advance work that already landed.
+#
+# Deliberately excludes → IN_PROGRESS: slice 051-04's `_refuse_start_collision`
+# already hard-blocks that exact case (DONE-on-origin at build start), reading
+# origin/main via its own `_origin_slice_state` helper (predates the 112-01
+# primitive, and additionally covers the foreign-IN_PROGRESS-claim case this
+# guard does not attempt). Duplicating the DONE check here for IN_PROGRESS
+# would run two origin reads for one answer and risk diverging wording —
+# left to 051-04 rather than reimplemented, per "reuse, don't reimplement."
+#
+# Bypass: `JIG_CROSSREF_GATE=0` — the SAME env var / vocabulary as 112-01's
+# land-gate bypass (one bypass name for the whole cross-ref Class-A family) —
+# OR the explicit `reopen=True` / `--reopen` CLI flag for a SANCTIONED
+# re-open/supersession (ADR-0058 Open-question 4). `--reopen` is deliberately
+# distinct from the blanket env escape: a re-open is a first-class, audited
+# action (its own `emit_gate_bypass` event), not routed through the same
+# "something's wrong, disable the gate" vocabulary as the error-case escape.
+
+_CROSSREF_ADVANCE_STATUSES = tuple(
+    s for s in _CLAIM_WORKING_STATUSES if s != IN_PROGRESS_STATUS
+)
+CROSSREF_GATE_ENV = "JIG_CROSSREF_GATE"
+_CROSSREF_TRANSITION_BASE_REF = "origin/main"
+
+
+def _refuse_integrated_advance(project_dir: Path, slice_label: str,
+                               new_status: str, *, reopen: bool = False) -> None:
+    """Class-A hard gate at `transition`'s earliest boundary (spec 112-02).
+
+    Raises `WorkflowError` when `slice_label`'s identifier is already
+    `DONE` on `origin/main` — a stale branch trying to advance work that is
+    already integrated. No-op (returns) for every other outcome: absent,
+    present-but-not-`DONE`, `reopen=True`, or `JIG_CROSSREF_GATE=0`.
+    Best-effort: an unresolvable `origin/main` (offline, no remote,
+    unreachable ref) degrades to a non-blocking stderr warning, mirroring
+    `_branch_freshness_warning` / 112-01's land-gate posture — never a
+    false block. Never raises for any OTHER reason (every git read behind
+    `identifier_state_on_ref` is already best-effort).
+    """
+    if reopen:
+        emit_gate_bypass(project_dir, "cross-ref-advance", "--reopen",
+                         spec_ref=read_spec_ref(project_dir))
+        return
+    if not env_gate_enabled(CROSSREF_GATE_ENV):
+        emit_gate_bypass(project_dir, "cross-ref-advance", CROSSREF_GATE_ENV,
+                         spec_ref=read_spec_ref(project_dir))
+        return
+
+    m = re.match(r"^(\d{3}-\d{2})", slice_label.strip())
+    if not m:
+        return  # not a `NNN-MM`-shaped label (e.g. a legacy free-form title)
+    slice_id = m.group(1)
+
+    state = identifier_state_on_ref(slice_id, _CROSSREF_TRANSITION_BASE_REF,
+                                    repo_root=project_dir)
+    if state is None:
+        sys.stderr.write(
+            "warning: cross-ref state check skipped: could not resolve "
+            f"`{_CROSSREF_TRANSITION_BASE_REF}` to check whether slice "
+            f"{slice_label} is already integrated (offline, no remote, or "
+            "the ref is unreachable) — proceeding without the Class-A "
+            "already-integrated check.\n"
+        )
+        return
+    if state == "DONE":
+        raise WorkflowError(
+            f"slice {slice_label} is already `DONE` on "
+            f"`{_CROSSREF_TRANSITION_BASE_REF}` — this work may already be "
+            f"integrated; advancing it here (→ {new_status}) on a stale "
+            "branch would duplicate landed work. If this is a sanctioned "
+            "re-open/supersession, re-run with --reopen, or bypass with "
+            f"{CROSSREF_GATE_ENV}=0."
+        )
+
+
+# ----- cross-ref lifecycle-state Class-C sibling-DONE guard (ADR-0058 / spec 112-03) -----
+#
+# Class A (above) reads exactly ONE ref — `origin/main` — and only for
+# NON-`IN_PROGRESS` targets (051-04's `_refuse_start_collision` covers
+# `IN_PROGRESS` against that same single ref). Class C is the DIFFERENT,
+# reported-incident case: identifier N is `DONE` on a SIBLING branch that
+# was never integrated to `origin/main` at all, so neither of those reads
+# ever sees it — and ADR-0045's claim mutex already cleared at that
+# branch's DONE, so no live claim exists either. `_common.cross_ref_state.
+# find_sibling_done` scans every OTHER local/remote-tracking ref
+# (excluding the current branch, its own remote, and `origin/main` — Class
+# A's territory) for an EVIDENCE-COMPLETE `DONE`/`Accepted`.
+#
+# Composed at the SAME `transition` dispatch point as Class A (per the
+# slice 112-03 spec's explicit "reuse, don't reimplement" instruction) —
+# but the condition is wider (`_CLAIM_WORKING_STATUSES`, which includes
+# `IN_PROGRESS`) since Class C's un-integrated-sibling read is genuinely
+# NEW information for the IN_PROGRESS target too (051-04 never scans
+# siblings, only origin/main). For a non-IN_PROGRESS target this guard runs
+# strictly AFTER Class A above, so an origin/main-DONE case is already
+# refused before reaching here — Class C only ever contributes new
+# coverage for a sibling OTHER than origin/main, or for IN_PROGRESS.
+#
+# Bypass: the SAME env var / `--reopen` flag as Class A — one escape
+# surface for the whole cross-ref family, not a second name to remember.
+
+def _refuse_sibling_done(project_dir: Path, slice_label: str,
+                         new_status: str, *, reopen: bool = False) -> None:
+    """Class-C hard gate (spec 112-03): refuse a transition into any WORKING
+    state when `slice_label`'s identifier is already evidence-complete
+    `DONE` on a SIBLING ref — a finished-but-un-integrated branch, the
+    reported incident's exact shape. No-op (returns) for every other
+    outcome: no sibling hit, a marker-only (not evidence-complete) sibling
+    `DONE` (downgraded to a warning — AC2's chosen posture), `reopen=True`,
+    or `JIG_CROSSREF_GATE=0`. Best-effort: an unreachable/timed-out sibling
+    ref degrades to a non-blocking stderr warning (AC5) — never a false
+    block, and the scan is timeout-guarded so it never hangs the command.
+    """
+    if reopen:
+        emit_gate_bypass(project_dir, "cross-ref-sibling-done", "--reopen",
+                         spec_ref=read_spec_ref(project_dir))
+        return
+    if not env_gate_enabled(CROSSREF_GATE_ENV):
+        emit_gate_bypass(project_dir, "cross-ref-sibling-done",
+                         CROSSREF_GATE_ENV, spec_ref=read_spec_ref(project_dir))
+        return
+
+    m = re.match(r"^(\d{3}-\d{2})", slice_label.strip())
+    if not m:
+        return  # not a `NNN-MM`-shaped label (e.g. a legacy free-form title)
+    slice_id = m.group(1)
+
+    current_branch = _current_branch(project_dir)
+    hit, warnings = find_sibling_done(
+        slice_id, project_dir, current_branch=current_branch,
+        exclude_refs={_CROSSREF_TRANSITION_BASE_REF},
+    )
+    for warning in warnings:
+        sys.stderr.write(warning.rstrip() + "\n")
+    if hit is None:
+        return
+    raise WorkflowError(
+        f"slice {slice_label} is already `DONE` on sibling branch "
+        f"{hit.ref!r} — that work is finished (recorded review evidence is "
+        f"committed there) but not yet integrated to `origin/main`. "
+        f"Advancing it here (→ {new_status}) would duplicate finished "
+        f"work. Build on / integrate {hit.ref!r} instead of starting a "
+        "duplicate. If this is a sanctioned re-open/supersession, re-run "
+        f"with --reopen, or bypass with {CROSSREF_GATE_ENV}=0."
+    )
+
+
+def _append_release_log(section: str, released_from: str, reason: str) -> str:
+    """Append a dated release entry to the slice's `## Release log`
+    section (created if absent). Audit trail for `--release` (AC5)."""
+    entry = f"- {_today()} — released claim from {released_from}: {reason.strip()}\n"
+    body = section.rstrip("\n")
+    if "## Release log" in section:
+        return body + "\n" + entry
+    return body + "\n\n## Release log\n\n" + entry
+
+
+# ---------- end slice 049-01 ----------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="workflow.py",
+                                description="jig spec-workflow helper")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    pt = sub.add_parser("transition", help="transition a slice's STATUS marker")
+    pt.add_argument(
+        "spec",
+        help="path to spec.md or a sibling slice-*.md file",
+    )
+    pt.add_argument("slice", help="slice name or fragment (case-insensitive substring)")
+    pt.add_argument("status", help=f"new status; one of: {', '.join(VALID_STATUSES)}")
+    # Slice 049-01 + ADR-0045: slice-claim flags (meaningful on a transition
+    # into a WORKING state, + --release — at a release point there is no claim
+    # to reserve, so --push/--pr no-op there). The claim is local by default;
+    # --push / --pr opt into reserving it on origin/main.
+    pt.add_argument("--push", action="store_true",
+                    help="(any working state) reserve the claim on "
+                         "origin/main so parallel worktrees see it "
+                         "(default: local-only). BEST-EFFORT at a working "
+                         "state other than IN_PROGRESS: declines with a "
+                         "warning, and exits 0, if the origin/main copy is "
+                         "IN_PROGRESS under another claim or none")
+    pt.add_argument("--pr", dest="pr_mode", action="store_true",
+                    help="(any working state) reserve the claim on "
+                         "origin/main via a PR instead of a direct push "
+                         "(implies --push; same best-effort caveat)")
+    pt.add_argument("--release", action="store_true",
+                    help="force-release an existing claim (clears claimed_by); "
+                         "requires --reason")
+    pt.add_argument("--reason", default=None,
+                    help="audit reason recorded in the slice's ## Release log "
+                         "(required with --release)")
+    pt.add_argument("--reopen", action="store_true",
+                    help="sanctioned re-open/supersession of already-"
+                         "finished work (ADR-0058): skips BOTH the Class-A "
+                         "already-DONE-on-origin/main check AND the Class-C "
+                         "evidence-complete-DONE-on-a-sibling-branch check "
+                         "for this transition. Distinct from the blanket "
+                         "JIG_CROSSREF_GATE=0 escape.")
+
+    pb = sub.add_parser("status-board",
+                        help="regenerate docs/specs/README.md from spec.md files")
+    pb.add_argument("project", help="project root directory")
+    # Slice 028-03: bypass the checksum-based race-detection guard.
+    # Use when you intentionally want to overwrite a concurrent writer's
+    # output (e.g., after manually resolving a known conflict).
+    pb.add_argument("--force", action="store_true",
+                    help="bypass the race-detection guard and overwrite even "
+                         "if docs/specs/README.md changed mid-regen "
+                         "(slice 028-03)")
+
+    pcb = sub.add_parser(
+        "check-board",
+        help="read-only: verify docs/specs/README.md matches the spec "
+             "records and that no spec number is claimed twice",
+    )
+    pcb.add_argument("project", help="project root directory")
+
+    ps = sub.add_parser(
+        "stale",
+        help="list slices/ADRs whose last_verified is > N days old AND "
+             "whose dependencies have changed since",
+    )
+    ps.add_argument("--project-dir", default=".",
+                    help="project root directory (default: cwd)")
+    ps.add_argument("--days", type=int, default=90,
+                    help="staleness threshold in days (default: 90)")
+
+    # Slice 041-02: read-only histogram of skill-routing observations from
+    # .claude/skill-usage.jsonl — jig baseline vs. richer/"other" per
+    # category. Surfaces whether deferral routed away from jig's baseline.
+    prs = sub.add_parser(
+        "routing-stats",
+        help="histogram of which skills fired (jig baseline vs. richer/"
+             "other) from .claude/skill-usage.jsonl (slice 041-02)",
+    )
+    prs.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+    prs.add_argument("--days", type=int, default=30,
+                     help="window in days (default: 30)")
+
+    # Slice 078-02: read-only per-gate bypass histogram from
+    # .claude/skill-usage.jsonl — how often each gate is bypassed (an
+    # override-frequency audit trail, not a gate-value verdict).
+    pgs = sub.add_parser(
+        "gate-stats",
+        help="histogram of gate-bypass events (which gates honored their "
+             "env-var override, and how often) from .claude/skill-usage.jsonl "
+             "(slice 078-02)",
+    )
+    pgs.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+    pgs.add_argument("--days", type=int, default=30,
+                     help="window in days (default: 30)")
+
+    po = sub.add_parser(
+        "orient",
+        help="print one read-only project pickup headline from scaffold and "
+             "lifecycle artifacts (slice 088-01)",
+    )
+    po.add_argument("--project-dir", default=".",
+                    help="project root directory (default: cwd)")
+    po.add_argument("--fetch", action="store_true",
+                    help="bug 031: do one bounded, fail-soft `git fetch` and "
+                         "report when the checkout is behind origin (for the "
+                         "interactive `/jig:orient` path, not the "
+                         "SessionStart hook)")
+
+    pn = sub.add_parser(
+        "new",
+        help="reserve the next free spec number on origin/main (slice 003-03)",
+    )
+    pn.add_argument("slug",
+                    help="slug for the new spec (matches ^[a-z][a-z0-9-]*$, "
+                         "no '--')")
+    pn.add_argument("--project-dir", default=".",
+                    help="project root directory (default: cwd)")
+    mx = pn.add_mutually_exclusive_group()
+    mx.add_argument("--no-push", action="store_true",
+                    help="commit locally only; skip fetch / push entirely")
+    mx.add_argument("--pr", action="store_true", dest="pr_mode",
+                    help="skip direct-push; go straight to branch + PR")
+
+    # Slice 031-02: orchestrator queries whether a slice opted into the
+    # on-demand arch-review pass via its `arch_review:` frontmatter flag.
+    pa = sub.add_parser(
+        "arch-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`arch_review: true`; 'false' otherwise (slice 031-02)",
+    )
+    pa.add_argument("spec", help="path to spec.md")
+    pa.add_argument("slice",
+                    help="slice name or fragment (case-insensitive substring)")
+
+    # Slice 060-05: code-health-pass gating mirror of arch-review-needed.
+    pch = sub.add_parser(
+        "code-health-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`code_health_review: true`; 'false' otherwise (slice 060-05)",
+    )
+    pch.add_argument("spec", help="path to spec.md")
+    pch.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
+    # Slice 071-01: design-review-pass gating mirror of arch-review-needed.
+    pdr = sub.add_parser(
+        "design-review-needed",
+        help="print 'true' if the slice's frontmatter declares "
+             "`design_review: true`; 'false' otherwise (slice 071-01)",
+    )
+    pdr.add_argument("spec", help="path to spec.md")
+    pdr.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
+    # Slice 064-04: DERIVE (not read) whether the frame-critique pass should
+    # fire — the mechanical ADR-0020 trigger (ADRs always-on; specs iff the
+    # `## Assumptions` section carries >=1 real assumption). Mirrors
+    # `arch-review-needed`'s CLI/exit-code shape.
+    pfr = sub.add_parser(
+        "frame-review-needed",
+        help="print 'true' if the frame-critique pass should fire for this "
+             "target (ADR → always; spec/slice → iff `## Assumptions` carries "
+             ">=1 real assumption); 'false' otherwise — DERIVED, not read "
+             "(slice 064-04)",
+    )
+    pfr.add_argument("spec", help="path to spec.md (or an ADR path)")
+    pfr.add_argument("slice",
+                     help="slice name or fragment (case-insensitive substring)")
+
+    # Slice 057-01: delegation-first per-slice dispatch plan (stdout-only).
+    psp = sub.add_parser(
+        "session-plan",
+        help="print a delegation-first dispatch plan for a spec — each "
+             "non-DEFERRED slice mapped to its phase sequence (implement → "
+             "reviews → reconcile → land) with subagent + skill per phase "
+             "(slice 057-01)",
+    )
+    psp.add_argument("spec", help="path to spec.md")
+
+    # Slice 048-04: read-only digest of the `## Amendments` overrides on
+    # closed records (ADR-0010) — current truth without rereading drift.
+    pam = sub.add_parser(
+        "amendments",
+        help="digest the `## Amendments` overrides on closed records "
+             "under docs/specs/ and docs/decisions/ (slice 048-04)",
+    )
+    pam.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+
+    # Slice 068-03: read-only, ADVISORY, project-wide bidirectional
+    # use-case coverage check — a deterministic set-difference over slice
+    # 02's `use_cases:` trace links. Reports coverage gaps (use case → no
+    # spec) and scope creep (spec → no use case). Never gates (exits 0);
+    # no-op when the vision has no `## Use cases` section.
+    pcov = sub.add_parser(
+        "coverage",
+        help="read-only, advisory, project-wide bidirectional use-case "
+             "coverage check: use cases with no implementing spec (gap) + "
+             "specs citing no parent use case (scope creep) (slice 068-03)",
+    )
+    pcov.add_argument("--project-dir", default=".",
+                      help="project root directory (default: cwd)")
+    return p
+
+
+def main(argv: list) -> int:
+    parser = _build_parser()
+    try:
+        ns = parser.parse_args(argv[1:])
+    except SystemExit as exc:
+        return int(exc.code) if exc.code is not None else 2
+
+    try:
+        if ns.command == "transition":
+            summary = transition(
+                Path(ns.spec), ns.slice, ns.status,
+                push=ns.push, pr_mode=ns.pr_mode,
+                release=ns.release, reason=ns.reason,
+                reopen=ns.reopen,
+            )
+            print(summary)
+        elif ns.command == "status-board":
+            summary = regenerate_status_board(Path(ns.project), force=ns.force)
+            print(summary)
+        elif ns.command == "check-board":
+            problems = check_board(Path(ns.project))
+            for problem in problems:
+                print(f"spec board: {problem}", file=sys.stderr)
+            if problems:
+                return 1
+            print("spec board: clean")
+        elif ns.command == "stale":
+            report = stale(Path(ns.project_dir), days=ns.days)
+            sys.stdout.write(report)
+        elif ns.command == "routing-stats":
+            sys.stdout.write(
+                routing_stats(Path(ns.project_dir), days=ns.days)
+            )
+        elif ns.command == "gate-stats":
+            sys.stdout.write(
+                gate_stats(Path(ns.project_dir), days=ns.days)
+            )
+        elif ns.command == "orient":
+            sys.stdout.write(orient(Path(ns.project_dir), fetch=ns.fetch))
+        elif ns.command == "new":
+            return reserve_spec(
+                ns.slug,
+                project_dir=Path(ns.project_dir).resolve(),
+                no_push=ns.no_push,
+                pr_mode=ns.pr_mode,
+            )
+        elif ns.command == "arch-review-needed":
+            needed = slice_needs_arch_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "code-health-review-needed":
+            needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "design-review-needed":
+            needed = slice_needs_design_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "frame-review-needed":
+            needed = derive_frame_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "session-plan":
+            sys.stdout.write(session_plan(Path(ns.spec)))
+        elif ns.command == "amendments":
+            sys.stdout.write(amendment_digest(Path(ns.project_dir)))
+        elif ns.command == "coverage":
+            # Advisory (slice 068-03): always exits 0 — never raise
+            # WorkflowError for a finding. Only a genuine error (e.g. an
+            # unreadable tree) falls through to the generic handler.
+            sys.stdout.write(coverage(Path(ns.project_dir)))
+    except StatusBoardRaceError as exc:
+        # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
+        # Must be caught before the generic `WorkflowError → 2` handler so
+        # the more specific subclass routes here. 3 is taken by scaffold /
+        # migrate (config-conflict / unmanaged-hooks); 4 is next free.
+        sys.stderr.write(f"{exc}\n")
+        return 4
+    except WorkflowError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+    except Exception as exc:
+        sys.stderr.write(f"workflow.py failed: {exc}\n")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

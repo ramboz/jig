@@ -1,16 +1,20 @@
 ---
-status: DRAFT
+status: RECONCILED
 dependencies: [113-01, adr-0061]
-last_verified:
-# arch_review: true  # this slice adds a HostRenderer subclass + dispatch wiring
+last_verified: 2026-09-15
+arch_review: true  # this slice adds a HostRenderer subclass + dispatch wiring
+claimed_by: claude/adr-0061-spec-113-jig-874db3
 ---
 
 ## Slice 113-02 — renderer-and-skeleton
 
-**Goal:** A Copilot user can install jig and invoke its skills — the walking
-skeleton: a `CopilotScaffoldRenderer` wired into host dispatch that renders a
-minimal committed `hosts/copilot/` package whose skills and instructions load
-correctly under Copilot CLI.
+**Goal:** A Copilot user can install jig and invoke its **judgment-only** skills —
+the walking skeleton: a `CopilotScaffoldRenderer` wired into host dispatch that
+renders a minimal committed `hosts/copilot/` package whose skills load correctly
+under Copilot CLI. (Honest scope, per the 113-02 arch review: the ~13
+helper-backed skills load and route, but their `${CLAUDE_PLUGIN_ROOT}/…` commands
+do not resolve under Copilot until the plugin-root path rewrite lands in 113-04 —
+see AC4 and the `docs/refinement-todo.md` entry that owns the gap.)
 
 **DoR:**
 - ✅ 113-01 done (spike). Verified shape (see [slice-01 Findings](slice-01-copilot-contract-spike.md)):
@@ -23,9 +27,12 @@ correctly under Copilot CLI.
     (jig source: 0/20 already compliant) and `description` ≤1024 chars
     (`memory-sync` 1059 + `vision-elicitation` 1058 must be shortened for Copilot,
     full text preserved in the body).
-  - **Instructions home:** `.github/copilot-instructions.md` — emit ONE canonical
-    instructions file; do not also ship a `CLAUDE.md` in the copilot package
-    (Copilot reads `CLAUDE.md`/`AGENTS.md` too → avoid double-load).
+  - **Instructions (ruling):** Copilot reads `CLAUDE.md`/`AGENTS.md` and the
+    consuming repo's own `.github/copilot-instructions.md`. The committed plugin
+    package therefore ships **no** pre-rendered instructions file — parity with the
+    Claude/Codex builders, which ship `templates/CLAUDE.md.template` *unrendered*
+    rather than a rendered project-instructions file (owner-approved 2026-09-15).
+    See AC3.
   - **Install (no build step):** `copilot plugin install ramboz/jig:hosts/copilot`
     (repo subdirectory); `copilot skill list` / `/skills` verifies load.
 
@@ -40,19 +47,109 @@ correctly under Copilot CLI.
    skill that would violate either limit is transformed by the renderer, not the
    source — Claude/Codex output is byte-for-byte unchanged. A test proves a
    >1024-char source description (e.g. `memory-sync`) renders ≤1024 for Copilot.
-3. **Instructions rendered.** `hosts/copilot/.github/copilot-instructions.md` is
-   generated from the canonical brief/`CLAUDE.md` source, without double-loading
-   against the `CLAUDE.md` Copilot also reads (per the 113-01 finding).
-4. **Skeleton installs + runs.** The rendered `hosts/copilot/` package installs
-   in a Copilot CLI session (or the closest deterministic substitute, recorded
-   honestly) and at least one jig skill loads and is invocable.
+3. **No pre-rendered instructions file (parity ruling — owner-approved).** The
+   committed package does **not** ship a pre-rendered
+   `.github/copilot-instructions.md`. This matches how the Claude/Codex builders
+   ship `templates/CLAUDE.md.template` **unrendered** rather than a rendered
+   project-instructions file, and avoids a `/plugin` install imposing jig's
+   instructions on — or double-loading against — the consuming repo's own
+   `.github/copilot-instructions.md` / `CLAUDE.md`. (Full-package `templates/`
+   shipping and ADR-0061's copilot-instructions.md open question are carried to
+   113-06 packaging scope.)
+4. **Skeleton installs + skills load (verified live, recorded honestly).** The
+   rendered `hosts/copilot/` package's skills load under the real Copilot CLI, and
+   the judgment-only skills are fully invocable. **Verified 2026-09-15:** the built
+   `.github/skills/` tree was placed in a scratch project and the installed
+   `copilot` CLI (1.0.84) run — `copilot skill list` discovered all 20 jig skills
+   as `source: project`, enabled, with **zero loader errors/warnings** (reproduced
+   independently by the implementer and the orchestrator). Helper-backed skills
+   load and route but their `${CLAUDE_PLUGIN_ROOT}/…` commands do not resolve until
+   the 113-04 path rewrite — a known, homed gap (`docs/refinement-todo.md`), not a
+   silent break.
 
 **DoD:**
-- [ ] All ACs pass; full suite green; new tests fail when the feature is removed.
-- [ ] Claude/Codex host output unchanged (drift guard clean for those hosts).
-- [ ] Reviewed by `reviewer` subagent (compliance + craft; arch pass — this slice
-      sets `arch_review: true`).
-- [ ] Deviation log + reconciliation sweep produced.
+- [x] All ACs pass; full suite green (4578 tests, pyright clean); new tests fail
+      when the feature is removed (red-before/green-after verified).
+- [x] Claude/Codex host output unchanged (drift guard `--check` clean; rendered
+      artifacts byte-identical — shared `scaffold.py` source copies regenerated by
+      the `agent_frontmatter_value` hoist, behaviorally unchanged).
+- [x] Reviewed by `reviewer` subagent — compliance (pass, R2) + craft (pass) +
+      arch (pass, R2); verdicts recorded under `reviews/`.
+- [x] Deviation log + reconciliation sweep produced; reconciliation review pass.
 
 **Anti-horizontal-phasing check:** After this slice a Copilot user can install
 jig and run a skill — observable end-to-end value, not internal plumbing.
+
+### Deviation log (after reconciliation)
+
+- **AC3 reframed mid-slice (owner-approved, decision B1).** Original AC3 required a
+  rendered `.github/copilot-instructions.md`. Review (compliance + arch) found the
+  seed-template render produced fresh-project boilerplate and diverged from how the
+  Claude/Codex builders treat that template (they ship `templates/CLAUDE.md.template`
+  **unrendered**). Owner ruling 2026-09-15: the committed package ships **no**
+  pre-rendered instructions file. `_write_instructions` + the emitted file were
+  removed; AC3 rewritten. Full-package `templates/` shipping + ADR-0061's
+  copilot-instructions.md open question move to 113-06 packaging scope.
+- **AC2 exemplar drifted since spike 113-01.** The spike/ADR cite `memory-sync`
+  (1059) / `vision-elicitation` (1058) as >1024. Measured today via
+  `install_contract._read_skill_description` (whitespace-normalized — the
+  Codex-established basis, bug 009), every current public skill is ≤1024 (max
+  `memory-sync` = 1010). So the real build makes **zero** truncations; the
+  loader-compat truncation path is proven by a synthetic over-budget fixture, and a
+  real-repo test asserts byte-identical (no truncation). The invariant + machinery
+  are correct and load-bearing against future description drift; the named exemplar
+  simply no longer triggers it. (Raw 1059 vs normalized 1010: confirm against a live
+  over-budget probe in 113-04 if one arises — Copilot's loader is assumed to count
+  the parsed value.)
+- **Helper-backed skill commands deferred (homed, not silent).** ~13 helper-backed
+  skills ship `${CLAUDE_PLUGIN_ROOT}/…` commands that don't resolve under Copilot
+  (spike surfaced no Copilot plugin-root var). The **fix** is deferred (YAGNI —
+  inventing a var would be unwound) and homed: `docs/refinement-todo.md` entry +
+  new **slice-04 AC4** (both hook-command and skill-body rewrite, one plugin-root
+  resolution). Goal + AC4 qualified honestly; judgment-only skills fully work.
+- **Craft/arch nits fixed in-slice:** dropped the non-deterministic `TIMESTAMP`
+  sub (removed with the instructions path); hoisted `agent_frontmatter_value` from
+  `CodexScaffoldRenderer` to `HostRenderer` (`@staticmethod`) to kill cross-host
+  coupling; `ensure_ascii=False` on the truncation writer for non-ASCII
+  length-consistency.
+- **`CopilotScaffoldRenderer.phase_mode_substitutions()` kept though currently
+  uncalled** (its instructions caller was removed). Arch reviewer confirmed: a
+  correct Codex-symmetric override of an existing `@abstractmethod` contract, not a
+  speculative knob — a near-future slice (113-03/04 rendering Copilot-facing docs)
+  calls it. Revisit if those land without a caller.
+- **Status board regenerated mid-slice** (pre-existing staleness: 113-02 read DRAFT
+  after 113-01's DONE closure, since the IN_PROGRESS transition doesn't regen the
+  board).
+
+### Reconciliation sweep
+
+- **docs/architecture.md** — `updated`: host-adapter boundary + build-pipeline
+  sections now include `CopilotScaffoldRenderer`, the committed `hosts/copilot/`
+  package, and `build_host_packages.py` / `build_copilot_plugin.py` + the
+  host-agnostic drift guard.
+- **Architecture impact / ADR** — `no-op` (no NEW ADR): the module-boundary change
+  (a third renderer + builder) was already decided in **ADR-0061** (this slice
+  implements it); the render layer absorbing Copilot's differences is exactly the
+  accepted decision.
+- **docs/refinement-todo.md** — `updated`: added the Copilot skill-body/hook-command
+  `${CLAUDE_PLUGIN_ROOT}` path-rewrite entry (owned by 113-04).
+- **slice-04-advisory-hooks.md** — `updated`: new AC4 takes the render-layer path
+  rewrite.
+- **Loader-compat invariant location** — `verified`: render layer only. "Byte-identical"
+  here is precise about the *rendered artifacts* (skill/agent output) and the
+  loader-compat transform — the shared `scaffold.py` **source** copies under
+  `hosts/claude/` and `hosts/codex/` *were* legitimately regenerated by the
+  `agent_frontmatter_value` hoist (behaviorally unchanged; `--check` drift-clean), so
+  those two host trees are not untouched at the byte level.
+- **docs/specs/README.md (status board)** — `updated (regenerated)`: a pre-existing
+  staleness (113-02 read DRAFT after 113-01's closure) was resynced via
+  `workflow.py status-board` (also noted in the deviation log).
+- **docs/conventions.md** — `no-op` (no new convention).
+- **Lightweight decisions** — `no-op`: the B1 instructions ruling is a spec-AC
+  decision recorded here + in AC3, governed by ADR-0061 — not a
+  `lightweight-decisions.md` UI/copy item.
+- **Inbox** — `no-op`.
+- **Primer hygiene (CLAUDE.md)** — `no-op`: spec 113 is not closed (only 113-01/02
+  done); the Active-specs entry stays in-flight, compressed on spec close (113-06).
+- **Memory-sync** — run at close-out (the SDK-docs-vs-product-docs probing lesson is
+  already recorded from the spike).

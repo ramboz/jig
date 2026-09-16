@@ -339,7 +339,7 @@ Six top-level concerns, named in [product-vision.md § Core features](product-vi
 - `scripts/` — top-level repo tooling, not skill helpers: `usage.py` (per-spec token/cost reporting), `verify_install.py`, `spec_lint.py`, `validate_manifests.py`, `skill_routing.py` (skill-routing eval), `build_release_zip.py`, `build_codex_plugin.py`, the `*_contract.py` builders, and `run_tests.py`
 - `.claude-plugin/` — Claude plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
 - `.codex-plugin/` — Codex plugin manifest (`plugin.json`)
-- `scripts/build_codex_plugin.py` — produces Codex plugin package output plus its generated marketplace descriptor
+- `scripts/build_host_packages.py` — unified entry point that materializes every committed host package (`hosts/claude/`, `hosts/codex/`, `hosts/copilot/`) via the per-host builders `build_claude_plugin.py` / `build_codex_plugin.py` / `build_copilot_plugin.py` (spec 113 / ADR-0061 adds the Copilot arm), with a host-agnostic regenerate-and-diff **drift guard** (`--check`, CI-enforced per ADR-0018)
 
 The host adapter boundary sits inside the scaffold/runtime-rendering
 concern: shared helper logic stays source-centralized, while host
@@ -347,7 +347,14 @@ renderers own path rewrites, primer choice, agent format, hook
 registration, and hook protocol translation.
 `skills/scaffold-init/scaffold.py` currently exposes this boundary as a
 host-neutral `HostRenderer` interface plus concrete renderers for Claude
-(`ClaudeScaffoldRenderer`) and Codex (`CodexScaffoldRenderer`). Claude
+(`ClaudeScaffoldRenderer`), Codex (`CodexScaffoldRenderer`), and GitHub Copilot
+(`CopilotScaffoldRenderer` — spec 113 / ADR-0061; subclasses the Claude renderer,
+overriding only what diverges and adding a **loader-compat invariant**: every
+emitted Copilot skill gets a `:`-free name and a ≤1024-char description, full text
+preserved in the SKILL.md body, so no source skill silently fails Copilot's loader).
+The committed `hosts/copilot/` package renders into Copilot's `.github/` home
+(`.github/skills/<name>/SKILL.md` + `.plugin/plugin.json`; agents, hooks, and the
+release archive land across slices 113-03..06). Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 `.claude/agents/`, `.claude/hooks/scripts/`, `.claude/templates/`, and
 `.claude/settings.json`. Codex scaffold mode writes `AGENTS.md`,

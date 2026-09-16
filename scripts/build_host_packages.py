@@ -1,14 +1,19 @@
 """
 build_host_packages.py — slice 061-02 (unified host-package build entry point).
 
-Builds BOTH committed host packages from canonical source in one invocation:
+Builds all THREE committed host packages from canonical source in one
+invocation:
 
-  - the Claude package at `hosts/claude/`   (via build_claude_plugin.build)
-  - the Codex package at  `hosts/codex/...` (via build_codex_plugin.build)
+  - the Claude package at   `hosts/claude/`   (via build_claude_plugin.build)
+  - the Codex package at    `hosts/codex/...` (via build_codex_plugin.build)
+  - the Copilot package at  `hosts/copilot/`  (via build_copilot_plugin.build,
+    slice 113-02 — a walking skeleton: skills + manifest only, with NO
+    pre-rendered instructions file, matching how Claude/Codex ship the
+    CLAUDE.md template unrendered; see slice 113-02 AC3)
 
-Per ADR-0018 the repository root stays canonical source and each `hosts/<host>/`
-tree is the clean, runtime install payload its host's marketplace pointer
-resolves to.
+Per ADR-0018 (extended to Copilot by ADR-0061) the repository root stays
+canonical source and each `hosts/<host>/` tree is the clean, runtime install
+payload its host's marketplace pointer / install command resolves to.
 
 Slice 061-03 adds a regenerate-and-diff **drift guard** so the committed
 packages are safe to keep in git: `--check` rebuilds into a scratch dir and
@@ -21,7 +26,7 @@ Contributor loop: edit source -> `python3 scripts/build_host_packages.py` ->
 commit `hosts/` (see docs/workflow.md).
 
 Usage:
-    # rebuild both committed packages in place:
+    # rebuild all committed host packages in place:
     python3 scripts/build_host_packages.py [--source-root <root>] [--hosts-root <dir>]
     # drift guard (no in-place rebuild; exits non-zero when stale):
     python3 scripts/build_host_packages.py --check
@@ -43,13 +48,15 @@ if str(ROOT / "scripts") not in sys.path:
 
 import build_claude_plugin  # noqa: E402
 import build_codex_plugin  # noqa: E402
+import build_copilot_plugin  # noqa: E402
 
 
 def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
-    """Build the Claude and Codex committed packages under `hosts_root`.
+    """Build the Claude, Codex, and Copilot committed packages under
+    `hosts_root`.
 
-    Returns 0 only if BOTH builders succeed; the first non-zero builder exit
-    code otherwise. Both builders are invoked regardless so a single run
+    Returns 0 only if EVERY builder succeeds; the first non-zero builder exit
+    code otherwise. Every builder is invoked regardless so a single run
     reports every problem rather than stopping at the first."""
     if out is None:
         out = sys.stdout
@@ -58,6 +65,7 @@ def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
 
     claude_out = hosts_root / "claude"
     codex_out = hosts_root / "codex" / "plugins" / "jig"
+    copilot_out = hosts_root / "copilot"
 
     claude_code = build_claude_plugin.build(
         source_root=source_root, output_dir=claude_out, out=out
@@ -70,7 +78,11 @@ def build_all(source_root: Path, hosts_root: Path, out=None) -> int:
     else:
         out.write(f"ERROR: Codex package build exited {codex_code}\n")
 
-    return claude_code or codex_code
+    copilot_code = build_copilot_plugin.build(
+        source_root=source_root, output_dir=copilot_out, out=out
+    )
+
+    return claude_code or codex_code or copilot_code
 
 
 REGEN_COMMAND = "python3 scripts/build_host_packages.py"
@@ -185,7 +197,7 @@ def check_drift(source_root: Path, hosts_root: Path, out=None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="build_host_packages.py",
-        description="materialize jig's committed Claude and Codex packages",
+        description="materialize jig's committed Claude, Codex, and Copilot packages",
     )
     parser.add_argument(
         "--source-root",

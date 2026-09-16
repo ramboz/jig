@@ -280,6 +280,13 @@ class CodexAgentRoleError(RuntimeError):
     """Raised when a Codex agent role lacks an explicit sandbox mapping."""
 
 
+class CopilotSkillNameError(RuntimeError):
+    """Raised when a skill's `name:` frontmatter field contains `:` — Copilot's
+    skill loader rejects a namespace-unsafe name (spike 113-01 AC2 /
+    ADR-0061). jig source names are already colon-free (0/20 probed at spike
+    time); this guards against regression rather than papering over one."""
+
+
 class LooksAlreadySpecDrivenError(RuntimeError):
     """Raised when target has no scaffold.json but ≥3 of the four migrate
     triggers (specs-or-slices, decisions-or-adrs, workflow.md,
@@ -1042,6 +1049,23 @@ class HostRenderer(ABC):
     def phase_mode_substitutions(self) -> dict[str, str]:
         raise NotImplementedError
 
+    @staticmethod
+    def agent_frontmatter_value(frontmatter: str, key: str, default: str) -> str:
+        """Return the value of a simple one-line `key: value` frontmatter
+        field, or `default` when absent. A generic frontmatter accessor (not
+        Codex-specific), used by any host renderer that needs to read a
+        single-line field out of a SKILL.md/agent frontmatter block — e.g.
+        Codex's agent-TOML rendering and Copilot's skill-name extraction.
+        113-02 review fix: previously lived only on `CodexScaffoldRenderer`,
+        which meant a sibling renderer had to reach across the hierarchy to
+        use it; hoisted here so every subclass gets it via ordinary
+        inheritance."""
+        for line in frontmatter.splitlines():
+            match = re.match(rf"^{re.escape(key)}:\s*(.*)$", line)
+            if match:
+                return match.group(1).strip().strip("\"'") or default
+        return default
+
 
 class ClaudeScaffoldRenderer(HostRenderer):
     """Claude Code scaffold renderer metadata and path rewrites."""
@@ -1557,14 +1581,6 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             ) from exc
 
     @staticmethod
-    def agent_frontmatter_value(frontmatter: str, key: str, default: str) -> str:
-        for line in frontmatter.splitlines():
-            match = re.match(rf"^{re.escape(key)}:\s*(.*)$", line)
-            if match:
-                return match.group(1).strip().strip("\"'") or default
-        return default
-
-    @staticmethod
     def toml_string(value: str) -> str:
         return json.dumps(value)
 
@@ -1608,9 +1624,95 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         }
 
 
+class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
+    """GitHub Copilot CLI scaffold/plugin renderer metadata (spec 113-02).
+
+    Copilot's SKILL.md format is the SAME Agent-Skills shape Claude Code uses
+    (spike 113-01 AC2) — unlike Codex, which needs broad Claude-vocabulary and
+    path rewrites, Copilot needs none of that YET. This renderer therefore
+    inherits `ClaudeScaffoldRenderer` wholesale — including
+    `translate_hook_protocol` and `bind_paths`, neither exercised until
+    113-04/05 render `.github/hooks/*.json` — and overrides only the host
+    name plus the one thing that genuinely diverges at this slice: Copilot's
+    loader-compat invariant. Copilot's skill loader fails to load a skill
+    whose `name:` contains `:` or whose `description:` exceeds 1024
+    characters (ADR-0061 / spike 113-01 AC2). Both limits are enforced HERE,
+    in the render layer, never in the canonical source, so Claude/Codex
+    output stays byte-for-byte unchanged.
+
+    `bind_paths` is deliberately NOT overridden: spike 113-01 did not resolve
+    a Copilot plugin-root env var analogous to Claude's `CLAUDE_PLUGIN_ROOT` /
+    Codex's `PLUGIN_ROOT`, and inventing one here would commit a shape 113-04
+    would then have to unwind. Skill bodies render Claude-native (unrewritten)
+    until that seam is verified."""
+
+    name = "copilot"
+
+    # Spike 113-01 AC2: Copilot's skill loader rejects a description over
+    # 1024 characters (the same limit bug 009 already enforces for Codex —
+    # `install_contract.MAX_SKILL_DESCRIPTION_CHARS`). Restated here rather
+    # than imported: `install_contract` lives in `scripts/`, a layer above
+    # this skill, so this module does not import it (mirrors why
+    # `install_contract.py` restates `EXPECTED_SKILLS` instead of importing
+    # `scaffold` — the dependency only runs one direction).
+    MAX_SKILL_DESCRIPTION_CHARS = 1024
+    _DESCRIPTION_TRUNCATION_SUFFIX = " (full description in skill body)"
+
+    @classmethod
+    def loader_safe_description(cls, description: str) -> str:
+        """Return `description` unchanged when it already fits Copilot's
+        1024-character skill-loader limit; otherwise return a truncated
+        summary that fits the same budget. Never drops content silently —
+        the caller (the Copilot builder) is responsible for preserving the
+        untruncated original elsewhere (the SKILL.md body); this method only
+        bounds the returned string's length."""
+        if len(description) <= cls.MAX_SKILL_DESCRIPTION_CHARS:
+            return description
+        suffix = cls._DESCRIPTION_TRUNCATION_SUFFIX
+        budget = cls.MAX_SKILL_DESCRIPTION_CHARS - len(suffix)
+        truncated = description[:budget].rstrip()
+        if " " in truncated:
+            truncated = truncated.rsplit(" ", 1)[0]
+        return truncated + suffix
+
+    @classmethod
+    def assert_namespace_safe_name(cls, name: str) -> None:
+        """Raise `CopilotSkillNameError` if `name` contains `:`. A
+        render-layer guard, not a transform: a colon-bearing skill name is a
+        source defect to fix, not something this renderer silently launders
+        (ADR-0061 loader-compat invariant)."""
+        if ":" in name:
+            raise CopilotSkillNameError(
+                f"skill name {name!r} contains ':' — Copilot's skill loader "
+                "rejects namespace-unsafe names; fix the source SKILL.md "
+                "'name:' field"
+            )
+
+    def phase_mode_substitutions(self) -> dict[str, str]:
+        return {
+            "HOST_PHASE_MODE_TERM": "Copilot CLI session discipline",
+            "HOST_PHASE_MODE_PRIMER": (
+                "Frame the slice before editing and rely on jig's own "
+                "`IN_PROGRESS` transition — not any particular CLI session "
+                "or mode feature — to mark the switch to implementation; "
+                "jig specs, slices, and review artifacts remain the source "
+                "of truth."
+            ),
+            "HOST_PHASE_MODE_WORKFLOW": (
+                "Shape the slice, confirm unknowns, and decide the next "
+                "action before editing. Once the slice is `IN_PROGRESS`, "
+                "move to normal implementation for file changes, tests, and "
+                "review follow-up. Do not treat any Copilot CLI session "
+                "state as a lifecycle gate; update the jig slice, "
+                "`plan.md`, `tasks.md`, or review evidence instead."
+            ),
+        }
+
+
 _HOST_RENDERERS = {
     "claude": ClaudeScaffoldRenderer,
     "codex": CodexScaffoldRenderer,
+    "copilot": CopilotScaffoldRenderer,
 }
 
 

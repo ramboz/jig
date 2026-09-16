@@ -338,7 +338,7 @@
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-06 — classd-advisory-fallback | DEFERRED |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-07 — durable-landed-anchor | DEFERRED |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 🔬 113-01 — copilot-contract-spike | **DONE** |  |
-| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-02 — renderer-and-skeleton | DRAFT |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-02 — renderer-and-skeleton | IN_PROGRESS (claude/adr-0061-spec-113-ji…) |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-03 — agents | DRAFT |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | DRAFT |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | DRAFT |  |
