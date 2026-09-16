@@ -126,3 +126,18 @@ context nudges in-session — observable behavior.
 - **Status board** — `updated (regenerated)` after the IN_PROGRESS transition.
 - **Memory-sync** — light; per-slice progress on the board; copilot-migration project
   memory updated at spec close.
+
+## Amendments
+
+- **2026-09-16 (owner-approved) — hook-schema correction, superseded by 113-05.** This slice
+  shipped the Copilot hook `.github/hooks/*.json` files in Claude's **nested**
+  `{event:[{matcher, hooks:[{command, timeout}]}]}` shape (see the 113-04 deviation-log
+  "Event/matcher/schema" line, which described that Claude-compatible structure). That shape is
+  **not loadable by Copilot** — Copilot's authoritative schema (GitHub's hooks reference +
+  `api.schema.json` `HookType`/`DiscoveredHook`) is the **flat** `{version:1,
+  hooks:{<camelCaseEvent>:[{matcher?, type:"command", bash, timeoutSec}]}}`. Discovered while
+  wiring 113-05's enforcing hooks; `render_copilot_hook_file` was corrected centrally in 113-05
+  and every advisory JSON re-rendered flat (see the 113-05 deviation log). Folded into 113-05
+  rather than reopening this slice — the fix lives with the code 113-05 was already modifying
+  (arch-endorsed seam call). Per ADR-0010, this note records the superseded shape on the closed
+  record; the amendment is owner-approved (spec 102 authorization guardrail).
