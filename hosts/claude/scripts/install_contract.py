@@ -834,16 +834,132 @@ def _validate_copilot_hook_file(name: str, payload: object) -> list[str]:
     return problems
 
 
+COPILOT_COMPONENT_PATHS: dict[str, str] = {
+    "skills": ".github/skills",
+    "agents": ".github/agents",
+    "hooks": ".github/hooks/hooks.json",
+}
+
+
+def _relative_manifest_path(where: str, value: object) -> tuple[Path | None, list[str]]:
+    """Return one relative manifest path, or diagnostics for a malformed one.
+
+    jig's Copilot package deliberately uses one path per component field. The
+    legacy reference allows arrays for skills/agents, but the release contract
+    stays exact so a future renderer cannot silently move or split component
+    roots without updating the manifest and tests.
+    """
+    if not isinstance(value, str) or not value:
+        return None, [f".plugin/plugin.json: {where!r} must be a non-empty string path"]
+    path = Path(value)
+    if path.is_absolute() or value.startswith("/"):
+        return None, [
+            f".plugin/plugin.json: {where!r} path {value!r} must be relative to "
+            "the plugin root"
+        ]
+    if ".." in path.parts:
+        return None, [
+            f".plugin/plugin.json: {where!r} path {value!r} must stay inside the "
+            "plugin root (no '..')"
+        ]
+    return path, []
+
+
+def _validate_copilot_manifest_component_paths(
+    plugin_root: Path, data: dict
+) -> tuple[dict[str, Path], list[str]]:
+    """Validate jig's legacy Copilot component path declarations.
+
+    Returns the resolved relative paths for fields that are well-formed so the
+    caller can validate component contents at the declared location, not at a
+    hard-coded fallback.
+    """
+    paths: dict[str, Path] = {}
+    problems: list[str] = []
+    for field, expected in COPILOT_COMPONENT_PATHS.items():
+        if field not in data:
+            problems.append(
+                f".plugin/plugin.json: missing {field!r} component path; jig "
+                f"renders this component under {expected!r}, outside Copilot's "
+                "legacy default location"
+            )
+            continue
+        rel_path, path_problems = _relative_manifest_path(field, data[field])
+        problems.extend(path_problems)
+        if rel_path is None:
+            continue
+        if rel_path.as_posix() != expected:
+            problems.append(
+                f".plugin/plugin.json: {field!r} must be {expected!r} for the "
+                f"generated package, got {data[field]!r}"
+            )
+        paths[field] = rel_path
+
+    skills_path = paths.get("skills")
+    if skills_path is not None:
+        skills_dir = plugin_root / skills_path
+        if not skills_dir.is_dir():
+            problems.append(
+                f".plugin/plugin.json: 'skills' points to {skills_path.as_posix()!r}, "
+                "but that directory does not exist"
+            )
+        elif not any(skills_dir.glob("*/SKILL.md")):
+            problems.append(
+                f".plugin/plugin.json: 'skills' points to {skills_path.as_posix()!r}, "
+                "but it contains no skill directories with SKILL.md"
+            )
+
+    agents_path = paths.get("agents")
+    if agents_path is not None:
+        agents_dir = plugin_root / agents_path
+        if not agents_dir.is_dir():
+            problems.append(
+                f".plugin/plugin.json: 'agents' points to {agents_path.as_posix()!r}, "
+                "but that directory does not exist"
+            )
+        elif not any(agents_dir.glob("*.agent.md")):
+            problems.append(
+                f".plugin/plugin.json: 'agents' points to {agents_path.as_posix()!r}, "
+                "but it contains no .agent.md files"
+            )
+
+    hooks_path = paths.get("hooks")
+    if hooks_path is not None:
+        hook_file = plugin_root / hooks_path
+        if not hook_file.is_file():
+            problems.append(
+                f".plugin/plugin.json: 'hooks' points to {hooks_path.as_posix()!r}, "
+                "but that hook configuration file does not exist"
+            )
+        else:
+            try:
+                payload = json.loads(hook_file.read_text())
+            except (ValueError, OSError) as exc:
+                problems.append(
+                    f".plugin/plugin.json: 'hooks' configuration file "
+                    f"{hooks_path.as_posix()!r} is invalid JSON ({exc})"
+                )
+            else:
+                problems.extend(
+                    _validate_copilot_hook_file(
+                        f".plugin/plugin.json hooks -> {hooks_path.as_posix()}",
+                        payload,
+                    )
+                )
+    return paths, problems
+
+
 def validate_copilot_package(plugin_root: Path) -> list[str]:
     """Validate `plugin_root` as a committed Copilot install tree (spec
     113-06 AC3). Requires:
 
-      - `.plugin/plugin.json` present, valid JSON, and satisfying the
-        plugin manifest contract (name/version/description);
-      - the public skill set exactly matches EXPECTED_SKILLS under
-        `.github/skills/` (reuses `skill_contract_problems`, which already
-        operates relative to a `skills/` dir — pointed at `.github/` here);
-      - every REQUIRED agent present as `.github/agents/<name>.agent.md`;
+      - `.plugin/plugin.json` present, valid JSON, satisfying the manifest
+        metadata contract, and declaring the legacy component paths
+        `.github/skills`, `.github/agents`, and `.github/hooks/hooks.json`;
+      - the public skill set exactly matches EXPECTED_SKILLS under the
+        declared skills path;
+      - every REQUIRED agent present under the declared agents path as
+        `<name>.agent.md`;
       - `.github/hooks/*.json` present and every file parses as the
         AUTHORITATIVE flat `{version, hooks}` schema;
       - `.github/scripts/spec_lint.py` present (AC5 — the rewritten
@@ -857,6 +973,7 @@ def validate_copilot_package(plugin_root: Path) -> list[str]:
     problems: list[str] = []
 
     manifest_path = plugin_root / ".plugin" / "plugin.json"
+    component_paths: dict[str, Path] = {}
     if not manifest_path.is_file():
         problems.append(f".plugin/plugin.json: missing at {manifest_path}")
     else:
@@ -866,10 +983,24 @@ def validate_copilot_package(plugin_root: Path) -> list[str]:
             problems.append(f".plugin/plugin.json: unreadable/invalid JSON ({exc})")
         else:
             problems.extend(validate_plugin_manifest(data))
+            if isinstance(data, dict):
+                component_paths, component_problems = (
+                    _validate_copilot_manifest_component_paths(plugin_root, data)
+                )
+                problems.extend(component_problems)
 
-    problems.extend(skill_contract_problems(plugin_root / ".github"))
+    skills_root = (
+        (plugin_root / component_paths["skills"]).parent
+        if "skills" in component_paths
+        else plugin_root / ".github"
+    )
+    problems.extend(skill_contract_problems(skills_root))
 
-    agents_dir = plugin_root / ".github" / "agents"
+    agents_dir = (
+        plugin_root / component_paths["agents"]
+        if "agents" in component_paths
+        else plugin_root / ".github" / "agents"
+    )
     for agent in REQUIRED_AGENTS:
         if not (agents_dir / f"{agent}.agent.md").is_file():
             problems.append(

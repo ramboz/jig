@@ -38,7 +38,7 @@ the workflow model.
 | Claude Code | Scaffold | v1 supported | Existing `.claude/` scaffold output remains the default ownership model. |
 | Codex | Scaffold | v2 supported | Project-local output lives under `AGENTS.md` and `.codex/`. |
 | Codex | Plugin | v2 supported | `.codex-plugin/plugin.json` plus rendered Codex skills, root `hooks/hooks.json`, templates, and canonical agent prompts are produced by `scripts/build_codex_plugin.py`. |
-| GitHub Copilot CLI | Plugin | v2 supported (spec 113 / ADR-0061) | `.plugin/plugin.json` plus rendered `.github/{skills,agents,hooks,scripts,templates}` are produced by `scripts/build_copilot_plugin.py`; installs as a repo-subdirectory package (`copilot plugin install ramboz/jig:hosts/copilot`), no separate marketplace. |
+| GitHub Copilot CLI | Plugin | v2 supported (spec 113 / ADR-0061) | `.plugin/plugin.json` declares legacy component paths into rendered `.github/{skills,agents,hooks,scripts,templates}`; produced by `scripts/build_copilot_plugin.py`; installs as a repo-subdirectory package (`copilot plugin install ramboz/jig:hosts/copilot`), no separate marketplace. |
 | GitHub Copilot CLI | Scaffold | out of scope | Not offered — Copilot reads Claude-format `SKILL.md`/`CLAUDE.md` directly (ADR-0061), so the plugin path covers it; no forked scaffold recipe. |
 | Other harnesses | Any | out of scope | Future adapters need their own real user signal and spec slices. |
 
@@ -283,8 +283,10 @@ jig with one command and no build step.
 
 `scripts/build_copilot_plugin.py` materializes that package from the SAME
 canonical source the Claude/Codex builders read, via `CopilotScaffoldRenderer`
-(§ Host adapter boundary above): `.plugin/plugin.json` (name/version/description
-only — no `mcpServers`, jig ships none) plus `.github/skills/<name>/SKILL.md`
+(§ Host adapter boundary above): `.plugin/plugin.json` (name/version/
+description plus legacy component paths `skills: ".github/skills"`,
+`agents: ".github/agents"`, `hooks: ".github/hooks/hooks.json"`; no
+`mcpServers`, jig ships none) plus `.github/skills/<name>/SKILL.md`
 (loader-compat: `:`-free names, ≤1024-char descriptions, full text preserved in
 the body), `.github/agents/<name>.agent.md` (Claude→Copilot tool-name map, the
 reviewer's read-only allowlist preserved), `.github/hooks/<stem>.json` (jig's
@@ -292,10 +294,11 @@ full advisory nudge set PLUS the spec-gate/secret-scan enforcing gates and the
 permissions floor — one file per SCRIPT, merging every Claude event a script
 registers under into that file's `hooks` dict, since a script like
 `jig-context-check.sh` backs three events and a naive one-call-one-file
-approach would silently collide), `.github/scripts/spec_lint.py` (the runtime
-allowlist rewritten skill bodies resolve against), and `.github/templates/`
-(unrendered, matching Claude/Codex — a `/plugin` install must not impose
-instructions on the consuming repo).
+approach would silently collide), `.github/hooks/hooks.json` (the
+loader-facing aggregate declared by the legacy manifest), `.github/scripts/
+spec_lint.py` (the runtime allowlist rewritten skill bodies resolve against),
+and `.github/templates/` (unrendered, matching Claude/Codex — a `/plugin`
+install must not impose instructions on the consuming repo).
 
 The release archive is `jig-copilot-vX.Y.Z.zip` (`scripts/build_release_zip.py
 --host copilot`), archived flat from `hosts/copilot/` the same way the Claude
@@ -305,10 +308,11 @@ deterministic package validator — `install_contract.validate_copilot_package`,
 wired into `build_release_zip.py`'s `--smoke-test` — rather than a live-CLI
 smoke harness: a headless `copilot -p` session does not reliably fire repo
 hooks (folder-trust/mode limits, observed probing this during 113-04/113-05),
-so a live probe would not be a trustworthy independent signal; the static
-check (manifest, skill/agent/hook presence, hook-file schema, scripts/
-templates trees) is the reliable substitute, recorded honestly as such rather
-than as an unverified "it works."
+so hook firing still needs later live-contract work; the static check
+(manifest-declared component paths, skill/agent/hook presence, hook-file schema,
+scripts/templates trees) is the reliable package substitute, and the live
+discovery smoke separately proves `spec-workflow` and `jig:reviewer` load from
+a clean working directory.
 
 Every jig hook's Copilot disposition is tracked in
 `build_copilot_plugin._JIG_HOOK_INVENTORY` — the mapped-or-unmappable

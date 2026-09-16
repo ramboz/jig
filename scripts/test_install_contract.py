@@ -701,7 +701,14 @@ def _make_good_copilot_package(root: Path) -> None:
     about that one break."""
     (root / ".plugin").mkdir(parents=True)
     (root / ".plugin" / "plugin.json").write_text(
-        json.dumps({"name": "jig", "version": "0.0.0", "description": "x"})
+        json.dumps({
+            "name": "jig",
+            "version": "0.0.0",
+            "description": "x",
+            "skills": ".github/skills",
+            "agents": ".github/agents",
+            "hooks": ".github/hooks/hooks.json",
+        })
     )
     for skill in install_contract.EXPECTED_SKILLS:
         skill_dir = root / ".github" / "skills" / skill
@@ -717,14 +724,16 @@ def _make_good_copilot_package(root: Path) -> None:
         )
     hooks_dir = root / ".github" / "hooks"
     hooks_dir.mkdir(parents=True)
-    (hooks_dir / "jig-example.json").write_text(json.dumps({
+    hook_payload = {
         "version": 1,
         "hooks": {
             "sessionStart": [
                 {"type": "command", "bash": "python3 x.py", "timeoutSec": 5}
             ]
         },
-    }))
+    }
+    (hooks_dir / "jig-example.json").write_text(json.dumps(hook_payload))
+    (hooks_dir / "hooks.json").write_text(json.dumps(hook_payload))
     scripts_dir = root / ".github" / "scripts"
     scripts_dir.mkdir(parents=True)
     (scripts_dir / "spec_lint.py").write_text("# stub\n")
@@ -755,6 +764,56 @@ class CopilotPackageValidationTests(unittest.TestCase):
         (pkg / ".plugin" / "plugin.json").unlink()
         problems = install_contract.validate_copilot_package(pkg)
         self.assertTrue(any("plugin.json" in p for p in problems), problems)
+
+    def test_missing_manifest_component_paths_fail(self):
+        pkg = self._pkg()
+        (pkg / ".plugin" / "plugin.json").write_text(json.dumps({
+            "name": "jig",
+            "version": "0.0.0",
+            "description": "x",
+        }))
+        problems = install_contract.validate_copilot_package(pkg)
+        joined = " ".join(problems)
+        self.assertIn("skills", joined)
+        self.assertIn("agents", joined)
+        self.assertIn("hooks", joined)
+
+    def test_manifest_skill_path_must_resolve_to_skill_directory(self):
+        pkg = self._pkg()
+        manifest = json.loads((pkg / ".plugin" / "plugin.json").read_text())
+        manifest["skills"] = ".github/agents"
+        (pkg / ".plugin" / "plugin.json").write_text(json.dumps(manifest))
+
+        problems = install_contract.validate_copilot_package(pkg)
+
+        self.assertTrue(
+            any("skills" in p and "SKILL.md" in p for p in problems), problems
+        )
+
+    def test_manifest_agent_path_must_resolve_to_agent_directory(self):
+        pkg = self._pkg()
+        manifest = json.loads((pkg / ".plugin" / "plugin.json").read_text())
+        manifest["agents"] = ".github/skills"
+        (pkg / ".plugin" / "plugin.json").write_text(json.dumps(manifest))
+
+        problems = install_contract.validate_copilot_package(pkg)
+
+        self.assertTrue(
+            any("agents" in p and ".agent.md" in p for p in problems), problems
+        )
+
+    def test_manifest_hooks_path_must_resolve_to_hook_config_file(self):
+        pkg = self._pkg()
+        manifest = json.loads((pkg / ".plugin" / "plugin.json").read_text())
+        manifest["hooks"] = ".github/hooks"
+        (pkg / ".plugin" / "plugin.json").write_text(json.dumps(manifest))
+
+        problems = install_contract.validate_copilot_package(pkg)
+
+        self.assertTrue(
+            any("hooks" in p and "configuration file" in p for p in problems),
+            problems,
+        )
 
     def test_missing_scripts_dir_fails(self):
         pkg = self._pkg()

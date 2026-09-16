@@ -343,6 +343,9 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-06 — committed-package-and-release | **DONE** | Tri-host Copilot (ADR-0061): 3rd committed host `hosts/copilot/`, plugin-only, full **package** parity (single builder + drift + release-please). Open residuals (refinement-todo): (a) `.github/…` command-path spelling unverified live under a `/plugin` cache install; (b) input-parity — the `messages`-reading Stop hooks + context-check/sessionStart fail-open no-op (Copilot supplies no inline `messages`/no `transcriptPath` there). |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-07 — plugin-component-discovery | DRAFT |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-08 — live-hook-runtime-contract | DRAFT |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-09 — conversational-hook-parity | DRAFT |  |
 
 ## Deferred slices
 

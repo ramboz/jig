@@ -569,6 +569,30 @@ def _write_permissions_floor_hook(output_dir: Path) -> None:
     )
 
 
+def _write_aggregate_hook_config(output_dir: Path) -> None:
+    """Write the single legacy `hooks` manifest target from the final hook set.
+
+    Copilot's legacy manifest accepts one hooks configuration path. jig keeps
+    the per-hook JSON files for testability and source-map clarity, then emits
+    `.github/hooks/hooks.json` as the loader-facing aggregate after every hook,
+    including Copilot-only hooks, has been rendered.
+    """
+    hooks_dst = output_dir / ".github" / "hooks"
+    aggregate_hooks: dict[str, list[dict]] = {}
+    for hook_file in sorted(hooks_dst.glob("*.json")):
+        if hook_file.name == "hooks.json":
+            continue
+        payload = json.loads(hook_file.read_text())
+        for event_key, entries in payload["hooks"].items():
+            aggregate_hooks.setdefault(event_key, []).extend(entries)
+    if not aggregate_hooks:
+        return
+    (hooks_dst / "hooks.json").write_text(
+        json.dumps({"version": 1, "hooks": aggregate_hooks}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 # Slice 113-05 AC2 — the mapped-or-unmappable inventory (ADR-0061: "every
 # jig hook is either mapped to a Copilot event with equivalent enforcement,
 # or explicitly recorded as unmappable with the residual documented"). One
@@ -854,15 +878,22 @@ def _copy_templates(source_root: Path, output_dir: Path) -> None:
 
 
 def _write_manifest(output_dir: Path, version: str) -> None:
-    """Write `.plugin/plugin.json` — the minimal manifest shape spike 113-01
-    AC1 verified against the shipped Copilot CLI: `{name, version,
-    description[, mcpServers]}` (jig ships no MCP server, so that key is
-    omitted). Mirrors `plugins/computer-use/.plugin/plugin.json`'s observed
-    shape."""
+    """Write `.plugin/plugin.json` in Copilot's legacy format.
+
+    The component path fields are required because jig intentionally renders
+    runtime components under `.github/` instead of the legacy defaults
+    (`skills/`, `agents/`, root `hooks.json`). Copilot's legacy plugin
+    reference documents `skills`, `agents`, and `hooks` as configurable
+    component paths; a live 1.0.86 probe confirmed `skills`/`agents` load from
+    these paths and plugin agents are exposed as `jig:<agent>`.
+    """
     payload = {
         "name": "jig",
         "version": version,
         "description": _COPILOT_DESCRIPTION,
+        "skills": ".github/skills",
+        "agents": ".github/agents",
+        "hooks": ".github/hooks/hooks.json",
     }
     dst = output_dir / ".plugin" / "plugin.json"
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -959,6 +990,7 @@ def build(source_root: Path, output_dir: Path, out=None) -> int:
     _write_copilot_hooks(source_root, output_dir)
     _copy_copilot_hook_scripts(source_root, output_dir)
     _write_permissions_floor_hook(output_dir)
+    _write_aggregate_hook_config(output_dir)
     _copy_runtime_scripts(source_root, output_dir)
     _copy_templates(source_root, output_dir)
     _write_manifest(output_dir, version)

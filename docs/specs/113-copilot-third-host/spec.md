@@ -1,5 +1,5 @@
 ---
-status: DONE
+status: IN_PROGRESS
 skill: scaffold-init
 use_cases: []
 ---
@@ -108,3 +108,18 @@ touches only an internal layer.
 - [113-04 — advisory-hooks](slice-04-advisory-hooks.md) — translate advisory/context hooks to Copilot events.
 - [113-05 — enforcing-hooks-and-permissions](slice-05-enforcing-hooks-and-permissions.md) — translate enforcing hooks + permissions floor; mapped-or-unmappable inventory.
 - [113-06 — committed-package-and-release](slice-06-committed-package-and-release.md) — drift guard + CI + release archive + per-host verification.
+- [113-07 — plugin-component-discovery](slice-07-plugin-component-discovery.md) — make the installed legacy plugin discover its packaged skills, agents, and hooks.
+- [113-08 — live-hook-runtime-contract](slice-08-live-hook-runtime-contract.md) — prove hook command resolution and enforcement through Copilot CLI.
+- [113-09 — conversational-hook-parity](slice-09-conversational-hook-parity.md) — make transcript-backed Stop hooks useful under Copilot.
+
+## Amendments
+
+### 2026-09-16 — post-release Copilot CLI audit
+
+The package was recorded as complete based on deterministic package-shape
+checks, but a clean-directory Copilot CLI probe found that its legacy manifest
+does not point to the emitted `.github/{skills,agents,hooks}` directories:
+`copilot skill list` exposes none of jig's plugin skills, and
+`copilot --agent reviewer` reports that the agent is unavailable. Slices
+113-07 through 113-09 reopen the unfinished runtime and input-parity work; the
+original completion evidence remains above.
