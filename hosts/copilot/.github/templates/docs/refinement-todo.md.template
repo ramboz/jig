@@ -1,0 +1,32 @@
+> Status: Draft (wizard-generated)
+>
+> Decisions the initial setup explicitly deferred. Each item has a resolution trigger.
+> Resolve by writing an ADR and linking it here.
+
+# Refinement Todo: {{PROJECT_NAME}}
+
+## Architecture
+
+### Decision: Tech stack
+**Deferred:** No signal from the initial pitch about runtime, language, framework, or platform.
+**Resolution trigger:** First spec that touches code execution. Record decision via an ADR.
+
+### Decision: Module boundaries
+**Deferred:** No modules yet — boundaries become explicit when the first contract is defined.
+**Resolution trigger:** First spec that introduces a contract or interface.
+
+## Conventions
+
+### Decision: Code style and linting
+**Deferred:** No signal from the initial pitch.
+**Resolution trigger:** First spec that produces non-trivial code, or first time inconsistency causes friction.
+
+### Decision: Testing framework
+**Deferred:** No signal from the initial pitch.
+**Resolution trigger:** First spec that requires tests beyond ad-hoc verification.
+
+## Operations
+
+### Decision: CI/CD setup
+**Deferred:** No signal that CI is set up.
+**Resolution trigger:** First spec that crosses a deploy boundary.

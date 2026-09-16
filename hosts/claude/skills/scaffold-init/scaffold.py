@@ -27,6 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout
 from _common.atomic_io import atomic_write_text
 
+# Slice 113-03 (agents): reuses the SAME `tools:` block-list parser
+# `land.py`/`workflow.py`'s frontmatter reads already depend on, rather than
+# writing a second one just to read a source agent's `tools:` list.
+from _common.parsing import parse_frontmatter
+
 # Sibling module in this same skill dir. Insert THIS dir on sys.path so the
 # import resolves no matter how scaffold.py is loaded — as a script (dir already
 # on sys.path), as a namespace-package import, or via importlib
@@ -278,6 +283,31 @@ class CodexAgentInstallConflictError(RuntimeError):
 
 class CodexAgentRoleError(RuntimeError):
     """Raised when a Codex agent role lacks an explicit sandbox mapping."""
+
+
+class CopilotSkillNameError(RuntimeError):
+    """Raised when a skill's `name:` frontmatter field contains `:` — Copilot's
+    skill loader rejects a namespace-unsafe name (spike 113-01 AC2 /
+    ADR-0061). jig source names are already colon-free (0/20 probed at spike
+    time); this guards against regression rather than papering over one."""
+
+
+class CopilotAgentToolError(RuntimeError):
+    """Raised when a source agent's `tools:` frontmatter names a Claude tool
+    absent from `CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS` (slice
+    113-03). A closed, hand-verified mapping — an unmapped tool is a source
+    drift to fix (a new Claude tool added to `agents/*.md` with no Copilot
+    counterpart decided yet), not something to silently drop or pass
+    through unmapped into a rendered `.agent.md`."""
+
+
+class CopilotHookEventError(RuntimeError):
+    """Raised when a Claude hook event name is absent from
+    `CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_EVENTS` (slice 113-04). Mirrors
+    `CopilotAgentToolError`'s stance for the event-name half of the hook
+    translation: an unmapped event is a gap to fix or explicitly record as
+    unmappable (ADR-0061), never a silently-passed-through PascalCase string
+    written into a camelCase `.github/hooks/*.json` file."""
 
 
 class LooksAlreadySpecDrivenError(RuntimeError):
@@ -1042,6 +1072,23 @@ class HostRenderer(ABC):
     def phase_mode_substitutions(self) -> dict[str, str]:
         raise NotImplementedError
 
+    @staticmethod
+    def agent_frontmatter_value(frontmatter: str, key: str, default: str) -> str:
+        """Return the value of a simple one-line `key: value` frontmatter
+        field, or `default` when absent. A generic frontmatter accessor (not
+        Codex-specific), used by any host renderer that needs to read a
+        single-line field out of a SKILL.md/agent frontmatter block — e.g.
+        Codex's agent-TOML rendering and Copilot's skill-name extraction.
+        113-02 review fix: previously lived only on `CodexScaffoldRenderer`,
+        which meant a sibling renderer had to reach across the hierarchy to
+        use it; hoisted here so every subclass gets it via ordinary
+        inheritance."""
+        for line in frontmatter.splitlines():
+            match = re.match(rf"^{re.escape(key)}:\s*(.*)$", line)
+            if match:
+                return match.group(1).strip().strip("\"'") or default
+        return default
+
 
 class ClaudeScaffoldRenderer(HostRenderer):
     """Claude Code scaffold renderer metadata and path rewrites."""
@@ -1557,14 +1604,6 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
             ) from exc
 
     @staticmethod
-    def agent_frontmatter_value(frontmatter: str, key: str, default: str) -> str:
-        for line in frontmatter.splitlines():
-            match = re.match(rf"^{re.escape(key)}:\s*(.*)$", line)
-            if match:
-                return match.group(1).strip().strip("\"'") or default
-        return default
-
-    @staticmethod
     def toml_string(value: str) -> str:
         return json.dumps(value)
 
@@ -1608,9 +1647,637 @@ class CodexScaffoldRenderer(ClaudeScaffoldRenderer):
         }
 
 
+class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
+    """GitHub Copilot CLI scaffold/plugin renderer metadata (spec 113-02,
+    hook translation added 113-04).
+
+    Copilot's SKILL.md format is the SAME Agent-Skills shape Claude Code uses
+    (spike 113-01 AC2) — unlike Codex, which needs broad Claude-vocabulary and
+    path rewrites, Copilot needs none of that for skill bodies' PROSE. This
+    renderer inherits `ClaudeScaffoldRenderer` wholesale except for the things
+    that genuinely diverge:
+
+      - The loader-compat invariant (113-02): Copilot's skill loader fails to
+        load a skill whose `name:` contains `:` or whose `description:`
+        exceeds 1024 characters (ADR-0061 / spike 113-01 AC2).
+      - `translate_hook_protocol` (113-04, OVERRIDDEN): Copilot's hook
+        `HookOutput` schema (`copilot-sdk/types.d.ts`) is Claude-adjacent but
+        not identical — see the method's own docstring. HONESTY NOTE
+        (compliance review fix): this is the designed RESPONSE-schema
+        contract, not something currently wired into a runtime call path —
+        `translate_hook_protocol` has zero call sites repo-wide (Claude's
+        and Codex's own versions are equally unwired), and
+        `copilot_hook_adapter.py` forwards each advisory hook's child
+        stdout verbatim rather than post-processing it through this
+        method. Wiring its RUNTIME application into the adapter is 113-05
+        scope (needed once enforcing hooks require the `permissionDecision`
+        deny path this method already computes).
+      - The event-name map (`CLAUDE_TO_COPILOT_EVENTS` /
+        `copilot_event_name`, 113-04, NEW): Claude's PascalCase hook events
+        translate to Copilot's camelCase `HookType` enum.
+      - The hook-matcher tool vocabulary (`HOOK_MATCHER_TOOL_MAP` /
+        `copilot_hook_matcher`, 113-04, NEW): a hook's `matcher` string names
+        Claude tool names that must become Copilot's own (113-03's
+        `CLAUDE_TO_COPILOT_TOOLS`, extended with a hook-only `MultiEdit`
+        entry no agent `tools:` list ever carries).
+      - `rewrite_hook_command` / `rewrite_skill_md_paths` (113-04,
+        OVERRIDDEN): the `${CLAUDE_PLUGIN_ROOT}/…` path rewrite 113-02
+        honestly deferred — see their docstrings for the BEST-HYPOTHESIS,
+        NOT-VERIFIED-LIVE caveat (no confirmed Copilot plugin-root env var).
+      - `build_hook_command` (113-04, NEW; `enforcing=` kwarg added 113-05) +
+        `copilot_hook_adapter.py` (113-04, NEW standalone script): the
+        INPUT-payload half of the hook translation (AC1's "adapts the
+        payload/field access the hook scripts read") — grounded (not
+        deferred, unlike the plugin-root var): every rendered hook command
+        now runs through the adapter, which re-shapes Copilot's camelCase
+        stdin JSON (`toolName`/`toolArgs`/`sessionId`/`workingDirectory`,
+        per `copilot-sdk/types.d.ts` + the shipped `app.js` tool-arg
+        schemas) into the snake_case shape the UNMODIFIED jig scripts
+        already read, before they ever see it.
+      - `render_copilot_hook_file` (SCHEMA CORRECTED 113-05): 113-04 shipped
+        Claude's OWN nested shape (`{event: [{matcher?, hooks:[{type,
+        command, timeout}]}]}`) as if it were Copilot's — it is not. The
+        AUTHORITATIVE on-disk schema (GitHub's own hooks reference,
+        re-verified against the installed CLI 1.0.86-0's `copilot help`
+        output this slice): one JSON object per `.github/hooks/*.json`
+        file, `{"version": 1, "hooks": {"<camelCaseEvent>": [<flat
+        entry>]}}` — entries are FLAT (no nested `hooks:[…]` array):
+        `{matcher?, type: "command", bash, cwd?, env?, timeoutSec}`. Fixed
+        here for BOTH the 3 advisory hooks (113-04) and the 2 new enforcing
+        hooks (113-05) — the corrected shape is what makes any of them
+        loadable at all.
+      - `enforcing=` on `render_copilot_hook_file` / `build_hook_command`
+        (113-05, NEW): a per-hook advisory-vs-enforcing mode. Advisory
+        (default) renders the SAME command shape 113-04 shipped (now under
+        the corrected schema). Enforcing adds a `--enforce` flag to the
+        `copilot_hook_adapter.py` invocation, switching the adapter from
+        its unconditional-exit-0 posture to one that PRESERVES the target
+        script's exit code — the mechanism spec-gate/secret-scan's `exit 2`
+        block needs to actually reach Copilot as a deny (see the adapter's
+        own module docstring).
+      - `render_permissions_floor_hook` (113-05, NEW; REPLACES an earlier
+        `.github/copilot/settings.json` approach this same slice tried and
+        the owner corrected): jig's `_PERMISSIONS_DENY_DEFAULTS` security
+        floor (ADR-0013) renders as an ENFORCING `preToolUse` hook, not a
+        settings.json file. OWNER-CONFIRMED FINDING (authoritative GitHub
+        docs + a live probe): Copilot has NO persistent, repo-committable
+        tool-deny mechanism — a repo `.github/copilot/settings.json`'s only
+        confirmed persisted permission-shaped keys are `allowedUrls`/
+        `deniedUrls` (URL rules); `--deny-tool`/`--allow-tool` are
+        SESSION-scoped CLI flags with no settings.json counterpart
+        (`copilot help config`'s own authored list of persisted keys omits
+        any tool-deny key). A rendered `deniedTools` settings.json entry
+        would therefore be a DEAD FILE Copilot never reads — corrected
+        before ship. See `render_permissions_floor_hook`'s own docstring
+        and `copilot_permissions_floor.py`'s module docstring for the
+        replacement design.
+      - `HOOK_MATCHER_TOOL_MAP["Read"] = "view"` (113-05, bug fix): 113-04's
+        map only covered the 3 advisory hooks' shared
+        `Edit|Write|MultiEdit` matcher; `jig-context-check.sh`'s
+        `PreToolUse`/`Read` registration would otherwise render a literal,
+        never-matching `"matcher": "Read"` — a SILENT drop disguised as a
+        successful render (exactly what the AC2 inventory exists to catch).
+
+    All of the above are enforced HERE, in the render layer, never in the
+    canonical source, so Claude/Codex output stays byte-for-byte unchanged.
+
+    `bind_paths` is still deliberately NOT overridden: no Copilot plugin-root
+    ENV VAR analogous to Claude's `CLAUDE_PLUGIN_ROOT` / Codex's
+    `PLUGIN_ROOT` was found (113-04 re-confirmed this — see
+    `rewrite_hook_command`'s docstring) — `bind_paths`'s `plugin_root_env`
+    contract has nothing honest to report for Copilot, so it stays inherited
+    rather than invented. The AC4 path rewrite instead uses a
+    plugin-root-RELATIVE path, a different (and independently verifiable)
+    mechanism from an env var."""
+
+    name = "copilot"
+
+    # Spike 113-01 AC2: Copilot's skill loader rejects a description over
+    # 1024 characters (the same limit bug 009 already enforces for Codex —
+    # `install_contract.MAX_SKILL_DESCRIPTION_CHARS`). Restated here rather
+    # than imported: `install_contract` lives in `scripts/`, a layer above
+    # this skill, so this module does not import it (mirrors why
+    # `install_contract.py` restates `EXPECTED_SKILLS` instead of importing
+    # `scaffold` — the dependency only runs one direction).
+    MAX_SKILL_DESCRIPTION_CHARS = 1024
+    _DESCRIPTION_TRUNCATION_SUFFIX = " (full description in skill body)"
+
+    @classmethod
+    def loader_safe_description(cls, description: str) -> str:
+        """Return `description` unchanged when it already fits Copilot's
+        1024-character skill-loader limit; otherwise return a truncated
+        summary that fits the same budget. Never drops content silently —
+        the caller (the Copilot builder) is responsible for preserving the
+        untruncated original elsewhere (the SKILL.md body); this method only
+        bounds the returned string's length."""
+        if len(description) <= cls.MAX_SKILL_DESCRIPTION_CHARS:
+            return description
+        suffix = cls._DESCRIPTION_TRUNCATION_SUFFIX
+        budget = cls.MAX_SKILL_DESCRIPTION_CHARS - len(suffix)
+        truncated = description[:budget].rstrip()
+        if " " in truncated:
+            truncated = truncated.rsplit(" ", 1)[0]
+        return truncated + suffix
+
+    @classmethod
+    def assert_namespace_safe_name(cls, name: str) -> None:
+        """Raise `CopilotSkillNameError` if `name` contains `:`. A
+        render-layer guard, not a transform: a colon-bearing skill name is a
+        source defect to fix, not something this renderer silently launders
+        (ADR-0061 loader-compat invariant)."""
+        if ":" in name:
+            raise CopilotSkillNameError(
+                f"skill name {name!r} contains ':' — Copilot's skill loader "
+                "rejects namespace-unsafe names; fix the source SKILL.md "
+                "'name:' field"
+            )
+
+    # Slice 113-03 (agents) — the Claude -> Copilot custom-agent tool-name
+    # vocabulary, hand-verified against the installed `copilot` 1.0.84-9 CLI
+    # (spike 113-01 AC3 resolved the AGENT FILE FORM — `.agent.md` +
+    # name/description/tools/prompt frontmatter — but not this vocabulary,
+    # which is internal to the shipped binary and undocumented in the Adobe
+    # guides). Evidence:
+    #   - `copilot-sdk/docs/agent-author.md`: "Modify the generated
+    #     extension.mjs using `edit` or `create` tools" — confirms `edit`
+    #     and `create` as the two file-mutation tool names (Copilot splits
+    #     Claude's single `Write` into "make a new file" (`create`) vs.
+    #     "modify an existing one" (`edit`); jig's agents already list both
+    #     Claude tools separately, so this is a clean 1:1, not a fan-out).
+    #   - The shipped `app.js`'s tool-kind switch statements: literal
+    #     `case"view"`/`case"create"`/`case"edit"`/`case"glob"`/`case"grep"`/
+    #     `case"web_fetch":case"fetch"` — confirms `view` (not `read`) is the
+    #     file-read tool name, and `fetch` (with `web_fetch` as a legacy
+    #     alias) the URL-fetch tool.
+    #   - `definitions/explore.agent.yaml` — the ONE shipped built-in agent
+    #     with a genuinely restrictive (non-`"*"`) `tools:` allowlist:
+    #     `grep`, `glob`, `view`, `bash`, `read_bash`, `stop_bash`,
+    #     `powershell`, `read_powershell`, `stop_powershell`, `lsp`, plus
+    #     namespaced MCP tools. Confirms `bash` (not `shell`) as the real,
+    #     loadable shell-exec tool name.
+    #   - CORRECTION vs. an initial "Bash -> shell" guess: `shell` DOES
+    #     appear in the shipped binary, but only as (a) the CLI's own
+    #     `--allow-tool`/`--deny-tool` SESSION-PERMISSION flag syntax
+    #     (`copilot --help`'s own example: `--allow-tool='shell(git:*)'`) and
+    #     (b) an internal permission-request "kind" category grouping
+    #     `commands`/shell execution for allow/deny prompts — a coarser,
+    #     DIFFERENT vocabulary than the concrete tool-implementation names an
+    #     agent's `tools:` frontmatter allowlist actually loads. No shipped
+    #     `tools:` list (custom or built-in) uses the literal string
+    #     `"shell"`; `explore.agent.yaml` is the only real, working
+    #     restrictive example, and it uses `bash`.
+    #   - Did NOT verify live agent-load / live tool-call denial: the CLI has
+    #     no non-interactive `agent list`/`agent inspect` command analogous
+    #     to `copilot skill list` (113-02's AC4 evidence source), and
+    #     provoking a denied tool call would need a live, credit-consuming
+    #     `--agent ... -p` session. This mapping rests on the structural
+    #     evidence above (the shipped agent-author guide + the one real
+    #     restrictive built-in example + the tool-kind switch statements),
+    #     not a live-session confirmation.
+    CLAUDE_TO_COPILOT_TOOLS = {
+        "Read": "view",
+        "Glob": "glob",
+        "Grep": "grep",
+        "Write": "create",
+        "Edit": "edit",
+        "Bash": "bash",
+        "WebSearch": "fetch",
+    }
+
+    @classmethod
+    def copilot_tool_names(cls, claude_tools: list) -> list:
+        """Map a jig source agent's Claude `tools:` list to Copilot's
+        tool-name vocabulary (`CLAUDE_TO_COPILOT_TOOLS`), preserving order.
+        Raises `CopilotAgentToolError` on any name absent from that mapping
+        — a render-layer guard, not a transform, mirroring
+        `assert_namespace_safe_name`'s stance: an unmapped tool is a source
+        defect (or an un-updated mapping) to fix, never silently dropped or
+        passed through unmapped."""
+        mapped = []
+        for tool in claude_tools:
+            try:
+                mapped.append(cls.CLAUDE_TO_COPILOT_TOOLS[tool])
+            except KeyError as exc:
+                raise CopilotAgentToolError(
+                    f"no Copilot tool mapping for Claude tool {tool!r} — add "
+                    "an entry to CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS"
+                ) from exc
+        return mapped
+
+    @staticmethod
+    def copilot_agent_file_name(name: str) -> str:
+        """`<name>.agent.md` — the committed custom-agent file shape spike
+        113-01 AC3 verified against the shipped CLI. Bare-named, with NO
+        `jig-` prefix: unlike Codex (`CodexScaffoldRenderer.
+        codex_agent_file_name` prefixes `jig-` because Codex's custom-agent
+        namespace is global/user-scoped), Copilot agents live under this
+        package's own `.github/agents/` — the same bare-name convention
+        113-02 already established for `.github/skills/<name>/`."""
+        return f"{Path(name).stem}.agent.md"
+
+    @classmethod
+    def render_copilot_agent(cls, agent: Path) -> str:
+        """Render one `agents/<name>.md` source agent to Copilot's
+        `.agent.md` form (spike 113-01 AC3): YAML frontmatter carrying
+        `name`, `description`, and `tools` (mapped via
+        `copilot_tool_names`), plus the source Markdown body AS-IS as the
+        agent prompt.
+
+        Design decisions (113-03):
+          - No `model` field is ever written (AC2 — model selection defers
+            to Copilot's own `/model`; jig's source agents carry no `model:`
+            field either, so there is nothing to read and nothing to emit).
+          - The body ships VERBATIM — unlike
+            `CodexScaffoldRenderer.rewrite_agent_body`, this does NOT rewrite
+            "Claude"/"CLAUDE.md" vocabulary. Any leftover
+            `${CLAUDE_PLUGIN_ROOT}`-shaped text is the same deferred,
+            documented gap 113-02 left in skill bodies — a later slice's
+            concern, not one this render invents a fix for.
+        """
+        source = agent.read_text(encoding="utf-8")
+        fields, body_offset = parse_frontmatter(source)
+        body = source[body_offset:]
+        name = fields.get("name", "") or agent.stem
+        description = fields.get("description", "") or name
+        claude_tools = fields.get("tools", [])
+        if isinstance(claude_tools, str):
+            claude_tools = [claude_tools] if claude_tools else []
+        copilot_tools = cls.copilot_tool_names(claude_tools)
+        tools_block = "".join(f"  - {tool}\n" for tool in copilot_tools)
+        new_frontmatter = (
+            "---\n"
+            f"name: {name}\n"
+            f"description: {json.dumps(description, ensure_ascii=False)}\n"
+            f"tools:\n{tools_block}"
+            "---\n"
+        )
+        return new_frontmatter + "\n" + body.lstrip("\n")
+
+    # ------------------------------------------------------------------ #
+    # Slice 113-04 (advisory-hooks) — hook-protocol translation.
+    # ------------------------------------------------------------------ #
+
+    # Claude PascalCase hook event -> Copilot camelCase `HookType`. Grounded
+    # against the shipped CLI's own `schemas/api.schema.json` `HookType` enum
+    # (spike 113-01 AC3) — the same source that confirmed the
+    # file-configurable `.github/hooks/*.json` mechanism (as opposed to the
+    # separate, callback-only `extension.mjs` SDK surface). Only jig's
+    # currently-used Claude events are listed; an event jig starts using
+    # later that has no entry here must be added deliberately —
+    # `copilot_event_name` raises rather than passing an unmapped PascalCase
+    # string through, the ADR-0061 "mapped or explicitly unmappable"
+    # invariant applied to event names (113-03's `CLAUDE_TO_COPILOT_TOOLS` /
+    # `CopilotAgentToolError` already applies it to tool names).
+    CLAUDE_TO_COPILOT_EVENTS = {
+        "PreToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+        "PostToolUseFailure": "postToolUseFailure",
+        "UserPromptSubmit": "userPromptSubmitted",
+        "SessionStart": "sessionStart",
+        "SessionEnd": "sessionEnd",
+        "Stop": "agentStop",
+        "SubagentStop": "subagentStop",
+        "PreCompact": "preCompact",
+        "Notification": "notification",
+    }
+
+    @classmethod
+    def copilot_event_name(cls, claude_event: str) -> str:
+        """Map one Claude PascalCase hook event to Copilot's camelCase
+        `HookType`. Raises `CopilotHookEventError` on an event absent from
+        `CLAUDE_TO_COPILOT_EVENTS` — a render-layer guard, not a transform,
+        mirroring `copilot_tool_names`'s stance."""
+        try:
+            return cls.CLAUDE_TO_COPILOT_EVENTS[claude_event]
+        except KeyError as exc:
+            raise CopilotHookEventError(
+                f"no Copilot event mapping for Claude hook event "
+                f"{claude_event!r} — add an entry to "
+                "CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_EVENTS"
+            ) from exc
+
+    # Hook-matcher tool-name translation. Deliberately SEPARATE from
+    # `CLAUDE_TO_COPILOT_TOOLS` (113-03's custom-AGENT `tools:` frontmatter
+    # vocabulary) even though the mapped-to values overlap: a hook `matcher`
+    # gates on the HOST's own tool-call dispatch, not an agent's declared
+    # capability allowlist. `MultiEdit` — a Claude-only multi-region edit
+    # tool with no listed Copilot counterpart in spike 113-01 AC3's
+    # tool-kind inventory — only ever appears in a hook matcher, never in a
+    # source agent's `tools:` list, so it is mapped HERE to Copilot's
+    # single-target `edit` (its closest analogue) rather than adding an
+    # unverified `MultiEdit` entry to the agent tool map.
+    # "Read": "view" (113-05 bug fix): jig-context-check.sh's PreToolUse
+    # matcher is the bare string "Read" (not the Edit|Write|MultiEdit group
+    # 113-04 covered) — without this entry `copilot_hook_matcher` would pass
+    # "Read" through unchanged (the unmapped-token fallback below), and
+    # Copilot has no tool literally named "Read" (113-03's own
+    # `CLAUDE_TO_COPILOT_TOOLS` already maps Claude's `Read` -> `view`),
+    # so the rendered matcher would silently never match anything.
+    HOOK_MATCHER_TOOL_MAP = {
+        "Edit": "edit",
+        "Write": "create",
+        "MultiEdit": "edit",
+        "Read": "view",
+    }
+
+    @classmethod
+    def copilot_hook_matcher(cls, claude_matcher: str) -> str:
+        """Translate a Claude hook `matcher` string (e.g.
+        `"Edit|Write|MultiEdit"`) to Copilot's tool-name vocabulary,
+        preserving order and de-duplicating (`Edit` and `MultiEdit` both map
+        to `edit`). A token absent from `HOOK_MATCHER_TOOL_MAP` passes
+        through unchanged: this slice renders only the two advisory hooks
+        sharing the `Edit|Write|MultiEdit` matcher, and a future hook with a
+        differently-shaped matcher is 113-05's mapped-or-unmappable
+        inventory to resolve, not a reason to fail this render."""
+        mapped: list = []
+        for token in claude_matcher.split("|"):
+            copilot_token = cls.HOOK_MATCHER_TOOL_MAP.get(token, token)
+            if copilot_token not in mapped:
+                mapped.append(copilot_token)
+        return "|".join(mapped)
+
+    def translate_hook_protocol(self, logical_result: dict) -> dict:
+        """Response-schema half of the hook-protocol translation (113-04).
+
+        HONESTY NOTE (compliance review fix, RE-CONFIRMED 113-05): this
+        method is a designed DICT-TO-DICT CONTRACT and still has ZERO call
+        sites repo-wide — `ClaudeScaffoldRenderer`'s and
+        `CodexScaffoldRenderer`'s own copies are equally never called, and
+        `copilot_hook_adapter.py` still does not import `scaffold.py` at
+        all (113-05 DECISION: the adapter ships standalone into the
+        Copilot package — see its own module docstring — so importing this
+        BUILD-TIME render module into a runtime hook shim would add a
+        cross-package dependency the standalone design deliberately
+        avoids). 113-05's enforcing-mode deny path
+        (`copilot_hook_adapter._deny_response`) DUPLICATES this method's
+        `block_reason` -> `permissionDecision`/`permissionDecisionReason`
+        mapping rather than calling it, and is pinned in sync with it by
+        `test_copilot_hook_adapter.DenyResponseMatchesTranslateHookProtocolTests`
+        (the same "duplicate, don't import; drift-guard the duplicate" idiom
+        the adapter's own `_COPILOT_TO_CLAUDE_TOOL_NAME` reverse-map already
+        established at 113-04). What follows describes the mapping this
+        method COMPUTES when called directly (the unit tests below, and the
+        adapter's independently-pinned duplicate) — not something invoked
+        through THIS method at runtime. The one place this matters for the
+        3 advisory hooks already shipped: because nothing strips `continue`
+        from their real stdout, it currently passes through to Copilot
+        un-translated — a harmless, documented residual (see
+        `test_copilot_hook_adapter.ShippedAdvisoryOutputThroughAdapterTests`),
+        since Copilot's schema simply ignores an unrecognized key.
+
+        Maps jig's host-neutral logical hook result — the same `continue` /
+        `additional_context` / `block_reason` keys
+        `ClaudeScaffoldRenderer.translate_hook_protocol` reads — onto
+        Copilot's `HookOutput` field names, grounded against the shipped
+        CLI's `copilot-sdk/types.d.ts` (`SessionStartHookOutput`,
+        `PostToolUseHookOutput`, `PreToolUseHookOutput`, and siblings):
+
+          - `additional_context` -> `additionalContext`. Same field name
+            Claude uses; every `HookOutput` variant this slice's 3 advisory
+            hooks fire under (SessionStart, PostToolUse) carries it.
+          - `block_reason` -> `{"permissionDecision": "deny",
+            "permissionDecisionReason": ...}` — the confirmed
+            `PreToolUseHookOutput` deny shape. Not exercised by this slice's
+            3 advisory hooks (none set `block_reason`); kept for symmetry
+            with `ClaudeScaffoldRenderer`'s method and so 113-05's enforcing-
+            hook translation has a starting point rather than a gap.
+          - `continue` is DROPPED, not translated. No `HookOutput` interface
+            in `copilot-sdk/types.d.ts` carries a boolean `continue` field —
+            Claude's whole-session stop signal has no confirmed Copilot
+            equivalent among the file-configurable hook outputs this slice
+            verified. Passing an unrecognized key through would be a guess
+            dressed as a translation; dropping it is the honest choice, and
+            harmless here since every jig hook that sets it also sets it to
+            `True` (advisory, never actually stopping anything) — though,
+            per the honesty note above, this method dropping it in a unit
+            test is not the same as it being dropped from a real hook's
+            shipped stdout today.
+        """
+        translated: dict = {}
+        if "additional_context" in logical_result:
+            translated["additionalContext"] = logical_result["additional_context"]
+        if "block_reason" in logical_result:
+            translated["permissionDecision"] = "deny"
+            translated["permissionDecisionReason"] = logical_result["block_reason"]
+        return translated
+
+    # Slice 113-04 AC4 — the render-layer `${CLAUDE_PLUGIN_ROOT}` path
+    # rewrite, owning the gap 113-02 honestly deferred (see the class
+    # docstring: no confirmed Copilot plugin-root env var).
+    #
+    # BEST-HYPOTHESIS, NOT VERIFIED LIVE. Re-probed this slice (113-04):
+    #   - No `COPILOT_*PLUGIN*` environment variable exists in the shipped
+    #     CLI (grep of the bundled `app.js` and the native binary's string
+    #     table; `copilot --help`'s own `environment` topic lists none).
+    #   - The closest confirmed relative-path convention is `copilot --help`
+    #     itself: `--plugin-dir <directory>` and `--add-dir <directory>`
+    #     both document "a relative path resolves against the session
+    #     working directory" — but that describes a CLI FLAG ARGUMENT typed
+    #     by the invoking user, a different code path from how an
+    #     ALREADY-INSTALLED plugin's OWN hook `command` string resolves a
+    #     relative path at spawn time.
+    #   - The one concrete plugin-relative precedent is the manifest itself:
+    #     `.plugin/plugin.json`'s `"mcpServers": "./.mcp.json"` (spike 113-01
+    #     AC1) is a path relative to the PLUGIN ROOT. This constant follows
+    #     that precedent for hook commands and skill bodies alike.
+    #   - Residual TENSION worth flagging explicitly: jig's shared hook
+    #     scripts locate the user's PROJECT directory via
+    #     `os.environ.get('CLAUDE_PROJECT_DIR', '.')` (falling back to the
+    #     subprocess's CWD). If Copilot spawns a plugin-origin hook command
+    #     with CWD = the plugin root (this rewrite's own assumption), that
+    #     fallback would resolve to the WRONG directory (the plugin's
+    #     install location, not the user's repository) — whereas if CWD =
+    #     the session/repository working directory (as the `--plugin-dir`/
+    #     `--add-dir` help text's phrasing suggests more generally for this
+    #     CLI), a bare plugin-relative COMMAND path would instead fail to
+    #     resolve the script at all. These two needs (a resolvable command
+    #     path vs. a correct working directory for the script's own
+    #     operation) are not simultaneously satisfiable by a single CWD
+    #     value unless Copilot resolves a declared hook's `command` path
+    #     relative to the discovered `.github/hooks/*.json` FILE's own
+    #     location rather than via shell CWD semantics (plausible, common
+    #     for declarative config, and NOT excluded by anything read this
+    #     slice) while spawning the process itself with CWD = the session
+    #     working directory. Unresolved without a live installed-plugin
+    #     probe; recorded here for 113-05/06 to verify once the package is
+    #     pushed, per this slice's brief.
+    COPILOT_RUNTIME_PREFIX = ".github/"
+    COPILOT_HOOK_SCRIPT_PREFIX = COPILOT_RUNTIME_PREFIX + "hooks/scripts/"
+
+    # The INPUT half of the hook-protocol translation layer (AC1: "adapts
+    # the payload/field access the hook scripts read" — completing what
+    # `translate_hook_protocol` intentionally left to a companion: that
+    # method is the RESPONSE-schema half, grounded in `HookOutput`
+    # interfaces; this is the REQUEST-schema half, grounded in
+    # `BaseHookInput`/`PostToolUseHookInput` + the shipped tool-arg
+    # schemas). `copilot_hook_adapter.py` ships standalone (copied verbatim
+    # by `build_copilot_plugin.py` from `skills/scaffold-init/`, never
+    # touching canonical `hooks/scripts/*.sh` / `lib/*.py`) alongside the
+    # scripts it fronts.
+    COPILOT_HOOK_ADAPTER_FILENAME = "copilot_hook_adapter.py"
+    COPILOT_HOOK_ADAPTER_PATH = COPILOT_HOOK_SCRIPT_PREFIX + COPILOT_HOOK_ADAPTER_FILENAME
+
+    @classmethod
+    def rewrite_hook_command(cls, command: str) -> str:
+        return command.replace(
+            cls.PLUGIN_HOOK_SCRIPT_PREFIX, cls.COPILOT_HOOK_SCRIPT_PREFIX
+        )
+
+    # The adapter argv flag that switches it from its advisory (default,
+    # unconditional exit 0) posture to enforcing (exit code preserved) —
+    # 113-05. A bare constant, not inlined, so the render side and the
+    # adapter's own argv parser can't spell it differently.
+    COPILOT_HOOK_ADAPTER_ENFORCE_FLAG = "--enforce"
+
+    @classmethod
+    def build_hook_command(
+        cls, claude_event: str, command: str, *, enforcing: bool = False
+    ) -> str:
+        """Wrap a Claude hook command through `copilot_hook_adapter.py`
+        (AC1's input-payload half) after applying the AC4 path rewrite.
+
+        `command` is the ORIGINAL Claude-shaped command string (e.g.
+        `"bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/jig-git-freshness.sh"`).
+        Returns a command that invokes the adapter with `<claude_event>
+        <rewritten-script-path>` instead of the script directly — the
+        adapter re-shapes Copilot's camelCase stdin JSON into what the
+        (unmodified) target script already expects, then execs it (see the
+        adapter's own module docstring for the full field mapping).
+
+        `enforcing=False` (default, UNCHANGED from 113-04 — every existing
+        caller/test keeps rendering the exact same command string) renders
+        the adapter's ADVISORY posture: the target script's exit code is
+        always masked to 0. `enforcing=True` (113-05, NEW) inserts
+        `COPILOT_HOOK_ADAPTER_ENFORCE_FLAG` before the event name, telling
+        the adapter to instead PRESERVE the target script's exit code (and
+        emit a `permissionDecision: deny` body on a non-zero one) — the
+        posture jig's blocking gates (spec-gate, secret-scan) need to keep
+        their teeth under Copilot."""
+        rewritten = cls.rewrite_hook_command(command)
+        # `rewritten` is "bash <relative-script-path>" — extract the path
+        # (the one part that varies) rather than re-deriving it, so this
+        # stays correct even if `rewrite_hook_command`'s own prefix changes.
+        script_path = rewritten.split(" ", 1)[1] if " " in rewritten else rewritten
+        # Arch review fix: quote the script path so a space in it (or in a
+        # future differently-named script) can't split into extra shell
+        # words and break the command.
+        mode_flag = f"{cls.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG} " if enforcing else ""
+        return (
+            f'python3 {cls.COPILOT_HOOK_ADAPTER_PATH} {mode_flag}'
+            f'{claude_event} "{script_path}"'
+        )
+
+    # Slice 113-05 AC3 (OWNER RESHAPE) — the permissions FLOOR renders as an
+    # ENFORCING preToolUse hook, not a settings.json file. An EARLIER version
+    # of this slice rendered `.github/copilot/settings.json` with a
+    # `deniedTools` key translated from `_PERMISSIONS_DENY_DEFAULTS` via
+    # Copilot's documented `--allow-tool`/`--deny-tool` CLI-flag pattern
+    # syntax (`shell(command:*?)`, from `copilot help permissions`) — the
+    # owner corrected this: authoritative GitHub docs plus a live probe
+    # confirmed Copilot has NO persistent, repo-committable tool-deny
+    # mechanism at all. `copilot help config`'s own authored list of
+    # PERSISTED settings.json keys documents `allowedUrls`/`deniedUrls`
+    # (URL rules) and `hooks`, but no tool-allow/deny key — `--deny-tool`
+    # only ever applies to the CLI SESSION that passes the flag. A rendered
+    # `deniedTools` settings.json key would be silently ignored, exactly
+    # the "gate quietly stops blocking" failure ADR-0061 forbids — worse
+    # than doing nothing, since it LOOKS like coverage. See
+    # `copilot_permissions_floor.py`'s module docstring for the replacement
+    # (a real, enforcing hook) and the shell-tool-name/toolArgs evidence.
+    #
+    # Copilot's own built-in tool name for a shell/bash command execution —
+    # NOT the coarser `shell` category name `--allow-tool`'s own
+    # `shell(...)` permission-PATTERN kind uses for a different purpose
+    # (confirmed in the shipped CLI's own `explore.agent.yaml` restrictive
+    # `tools:` allowlist and `copilot-sdk` `generated/rpc.d.ts`'s
+    # `ToolsShellDescriptorConfig.shellToolName` config-key shape, both
+    # `bash` — the SAME value 113-03's `CLAUDE_TO_COPILOT_TOOLS["Bash"]`
+    # already established for the agent-`tools:`-frontmatter vocabulary,
+    # reused here rather than re-hardcoded so the two cannot drift apart).
+    COPILOT_PERMISSIONS_FLOOR_FILENAME = "copilot_permissions_floor.py"
+
+    @classmethod
+    def render_permissions_floor_hook(cls) -> dict:
+        """Construct the Copilot-native `.github/hooks/*.json` payload for
+        the destructive-command permissions FLOOR hook (AC3, owner
+        reshape), in the SAME authoritative flat schema
+        `render_copilot_hook_file` produces. Unlike every other hook this
+        module renders, this one has NO Claude-format `hooks/hooks.json`
+        source entry to translate FROM — Claude's own equivalent is its
+        native `permissions.deny` engine (ADR-0013), not a jig-authored
+        hook script — so this builds the payload directly instead of
+        reusing `render_copilot_hook_file`'s extract-from-Claude-source
+        machinery, while still reusing `build_hook_command` (the SAME
+        adapter-wrapping + `--enforce` mechanism every other enforcing hook
+        uses) rather than reinventing command construction.
+
+        `matcher` is `CLAUDE_TO_COPILOT_TOOLS["Bash"]` (`"bash"`) — see the
+        class attribute comment above for the evidence this is the tool
+        name a `preToolUse` hook actually reports for a shell-exec call,
+        not the coarser `"shell"` permission-category name.
+
+        Always enforcing (`--enforce`): a destructive-command match must
+        actually deny the tool call — the entire reason this hook exists."""
+        script_command = (
+            f"bash {cls.COPILOT_HOOK_SCRIPT_PREFIX}"
+            f"{cls.COPILOT_PERMISSIONS_FLOOR_FILENAME}"
+        )
+        command = cls.build_hook_command("PreToolUse", script_command, enforcing=True)
+        entry = {
+            "matcher": cls.CLAUDE_TO_COPILOT_TOOLS["Bash"],
+            "type": "command",
+            "bash": command,
+            "timeoutSec": 5,
+        }
+        return {"version": 1, "hooks": {cls.copilot_event_name("PreToolUse"): [entry]}}
+
+    @classmethod
+    def rewrite_skill_md_paths(cls, body: str) -> str:
+        """Rewrite every `${CLAUDE_PLUGIN_ROOT}/…` runtime path in a rendered
+        SKILL.md body to the plugin-root-relative Copilot spelling (AC4).
+        One mechanical prefix swap covers all three forms the slice names —
+        `…/skills/…`, `…/scripts/…`, and `…/hooks/scripts/…` — because
+        Copilot's package nests every rendered runtime directory one level
+        under `.github/` relative to where Claude/Codex place them at the
+        plugin root (`.github/skills/`, `.github/hooks/scripts/`, and any
+        future `.github/scripts/`). A body with no `${CLAUDE_PLUGIN_ROOT}`
+        mention (the common case) round-trips unchanged. See
+        `rewrite_hook_command`'s docstring for the same best-hypothesis
+        caveat — unverified live, and if anything LESS likely to hold here
+        than for a host-spawned hook command: an agent-issued Bash tool call
+        (how a skill's prescribed command actually runs) has its CWD set by
+        the AGENT's own session, not necessarily anything Copilot controls
+        per-plugin."""
+        return body.replace(
+            cls.PLUGIN_ROOT_PREFIX + "/", cls.COPILOT_RUNTIME_PREFIX
+        )
+
+    def phase_mode_substitutions(self) -> dict[str, str]:
+        return {
+            "HOST_PHASE_MODE_TERM": "Copilot CLI session discipline",
+            "HOST_PHASE_MODE_PRIMER": (
+                "Frame the slice before editing and rely on jig's own "
+                "`IN_PROGRESS` transition — not any particular CLI session "
+                "or mode feature — to mark the switch to implementation; "
+                "jig specs, slices, and review artifacts remain the source "
+                "of truth."
+            ),
+            "HOST_PHASE_MODE_WORKFLOW": (
+                "Shape the slice, confirm unknowns, and decide the next "
+                "action before editing. Once the slice is `IN_PROGRESS`, "
+                "move to normal implementation for file changes, tests, and "
+                "review follow-up. Do not treat any Copilot CLI session "
+                "state as a lifecycle gate; update the jig slice, "
+                "`plan.md`, `tasks.md`, or review evidence instead."
+            ),
+        }
+
+
 _HOST_RENDERERS = {
     "claude": ClaudeScaffoldRenderer,
     "codex": CodexScaffoldRenderer,
+    "copilot": CopilotScaffoldRenderer,
 }
 
 
@@ -1897,6 +2564,95 @@ def _build_codex_hooks_from_source(source: dict, command_rewriter=None) -> dict:
 def render_codex_plugin_hooks(source: dict, command_rewriter=None) -> dict:
     """Render a Codex plugin ``hooks/hooks.json`` payload from source hooks."""
     return {"hooks": _build_codex_hooks_from_source(source, command_rewriter)}
+
+
+def render_copilot_hook_file(
+    source: dict,
+    claude_event: str,
+    script_name: str,
+    *,
+    renderer_cls,
+    enforcing: bool = False,
+) -> dict | None:
+    """Extract the hook entries for `script_name` under `claude_event` from a
+    Claude-format `hooks/hooks.json` payload (`source`, already
+    `json.loads`-parsed) and render them into ONE Copilot
+    `.github/hooks/*.json` file payload, in the AUTHORITATIVE on-disk shape
+    (SCHEMA CORRECTED 113-05 — GitHub's own hooks reference, re-verified
+    against the installed CLI 1.0.86-0's `copilot help` output this slice):
+
+        {"version": 1, "hooks": {"<camelCaseEvent>": [<flat entry>, ...]}}
+
+    where each entry is FLAT — `{matcher?, type: "command", bash,
+    timeoutSec?}` — NOT Claude's nested `{matcher?, hooks: [{type, command,
+    timeout}]}` shape 113-04 shipped by mistake (that shape is simply not
+    what Copilot's loader reads; fixing it here makes the ALREADY-SHIPPED
+    advisory hooks loadable too, not only the enforcing ones this slice
+    adds). `bash` (not `command`) carries the invocation string — Unix-only,
+    matching every other jig hook script; `timeout` (Claude's key) becomes
+    `timeoutSec` (Copilot's).
+
+    Returns `None` when no entry under `claude_event` references
+    `script_name` — nothing to render (the caller skips writing a file for
+    that hook). `async` hook metadata is dropped (Codex's own
+    `_build_codex_hooks_from_source` already established this precedent;
+    Copilot's schema, like Codex's, has no confirmed file-configurable-hook
+    async concept). `matcher` and `command` are translated via
+    `renderer_cls.copilot_hook_matcher` / `renderer_cls.rewrite_hook_command`
+    — `renderer_cls` is a parameter (not a hardcoded
+    `CopilotScaffoldRenderer` reference) so this function stays a pure
+    source-to-dict render, testable without importing the builder.
+
+    A single source entry may bundle several hooks under one shared matcher
+    (jig's `Edit|Write|MultiEdit` PostToolUse entry bundles
+    jig-post-edit-verify.sh, jig-boundary-change-warn.sh, and
+    jig-entry-gate.sh together; its `Edit|Write|MultiEdit` PreToolUse sibling
+    bundles jig-spec-gate.sh and jig-secret-scan.sh) — this function
+    extracts only the hook(s) matching `script_name`, so two calls against
+    the same shared entry (one per `script_name`) each produce their own
+    single-hook file, matching this slice's per-script
+    `.github/hooks/<script-stem>.json` emission.
+
+    The rendered `bash` command routes through `renderer_cls.build_hook_command`
+    (AC1's input-payload adapter + AC4's path rewrite), not the bare
+    path-rewritten script — so the rendered hook's stdin gets translated
+    from Copilot's camelCase shape before the (unmodified) jig script ever
+    sees it. `enforcing=True` (113-05, NEW) forwards to
+    `build_hook_command(..., enforcing=True)`, switching the adapter
+    invocation from its advisory (always-exit-0) posture to one that
+    preserves the target script's exit code — the mechanism a blocking gate
+    (spec-gate, secret-scan) needs to keep its teeth under Copilot."""
+    entries = (source.get("hooks") or {}).get(claude_event) or []
+    flat_entries: list = []
+    for entry in entries:
+        inner = [
+            h
+            for h in entry.get("hooks", [])
+            if script_name in (h.get("command") or "")
+        ]
+        if not inner:
+            continue
+        matcher = None
+        if "matcher" in entry:
+            matcher = renderer_cls.copilot_hook_matcher(entry["matcher"])
+        for h in inner:
+            flat_entry: dict = {}
+            if matcher is not None:
+                flat_entry["matcher"] = matcher
+            flat_entry["type"] = h.get("type", "command")
+            command = h.get("command")
+            if isinstance(command, str):
+                flat_entry["bash"] = renderer_cls.build_hook_command(
+                    claude_event, command, enforcing=enforcing
+                )
+            if "timeout" in h:
+                flat_entry["timeoutSec"] = h["timeout"]
+            flat_entries.append(flat_entry)
+
+    if not flat_entries:
+        return None
+    copilot_event = renderer_cls.copilot_event_name(claude_event)
+    return {"version": 1, "hooks": {copilot_event: flat_entries}}
 
 
 def _build_jig_hook_entries(plugin: Path) -> dict:

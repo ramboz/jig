@@ -337,6 +337,12 @@
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-05 — classb-claim-reservation | **DONE** |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-06 — classd-advisory-fallback | DEFERRED |  |
 | [112-cross-ref-lifecycle-state](112-cross-ref-lifecycle-state/spec.md) | 112-07 — durable-landed-anchor | DEFERRED |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 🔬 113-01 — copilot-contract-spike | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-02 — renderer-and-skeleton | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-03 — agents | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-06 — committed-package-and-release | **DONE** | Tri-host Copilot (ADR-0061): 3rd committed host `hosts/copilot/`, plugin-only, full **package** parity (single builder + drift + release-please). Open residuals (refinement-todo): (a) `.github/…` command-path spelling unverified live under a `/plugin` cache install; (b) input-parity — the `messages`-reading Stop hooks + context-check/sessionStart fail-open no-op (Copilot supplies no inline `messages`/no `transcriptPath` there). |
 
 ## Deferred slices
 
@@ -379,7 +385,12 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **21** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **2** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **7** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
+  - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
+  - `113-copilot-third-host/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
+  - `113-copilot-third-host/slice-03-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
+  - `113-copilot-third-host/slice-04-arch.md` — applied `none`; declined: arch-review
+  - `113-copilot-third-host/slice-04-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review

@@ -64,6 +64,7 @@
 - [ADR-0058: Ref-aware lifecycle checks and claim-based work reservation](adr-0058-cross-ref-lifecycle-state-check.md) — A session rebuilt an already-finished slice from scratch — a duplicate implementation and a duplicate ADR — because it trusted a stale on-disk marker over a durable record that named the real work. (2026-08-27, Accepted)
 - [ADR-0059: Servo-delivered work earns a light jig design-review before DONE — an oracle pass is not "done"](adr-0059-servo-delivered-work-design-review-gate.md) — The servo↔jig routing principle (servo drives unattended loops where the oracle is strong; jig stays supervised where it is weak) is sound, but it has an under-specified seam: **what happens when a strong-oracle servo loop reports `oracle_passed`?** In practice that has been treated as "done." It is not. (2026-08-27, Proposed)
 - [ADR-0060: Per-execution-mode write-boundary enforcement](adr-0060-unattended-execution-write-boundary.md) — jig enforces its checkpoints with soft, advisory hooks, a posture that quietly assumes a human is attending every run. (2026-09-08, Proposed)
+- [ADR-0061: GitHub Copilot CLI as a third committed host](adr-0061-copilot-third-host.md) — Adobe is retiring Claude Code as its sanctioned coding agent. (2026-09-15, Accepted)
 
 ## Lightweight decisions
 

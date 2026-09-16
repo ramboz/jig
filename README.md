@@ -98,9 +98,10 @@ project — copied in as editable files you own and can customize, with no plugi
 dependency. It's the self-contained option for teams that want to pin, fork, or
 tailor jig's machinery to their repo.
 
-Use the recipe for your host below — Claude Code or Codex. For each host the
-**plugin** recipe is the recommended default and the **scaffold** recipe is the
-copy-it-in alternative. See
+Use the recipe for your host below — Claude Code, Codex, or GitHub Copilot
+CLI. For each host the **plugin** recipe is the recommended default and the
+**scaffold** recipe is the copy-it-in alternative (Copilot ships plugin-only —
+see below). See
 [ADR-0041](docs/decisions/adr-0041-scaffold-defaults-to-plugin-mode.md) for the
 full rationale.
 
@@ -140,6 +141,17 @@ git clone https://github.com/ramboz/jig.git
 python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host codex --in-repo <your-project>
 ```
 
+**Copilot plugin**
+
+*Installs jig as a plugin from this repo's committed package; nothing is
+copied into your repo. No scaffold recipe — Copilot reads Claude-format
+`SKILL.md`/`CLAUDE.md` directly (ADR-0061), so the plugin path is the only
+one it needs.*
+
+```bash
+copilot plugin install ramboz/jig:hosts/copilot
+```
+
 ### Project setup
 
 Once installed, open a new project directory in Claude Code and say:
@@ -177,6 +189,15 @@ prove the other installs and runs:
 - **Codex:** `python3 scripts/codex_install_smoke.py` validates the committed
   `hosts/codex` package and probes a live Codex CLI when present. Spec 061-07
   owns the full Codex install-verification slice.
+- **Copilot:** `install_contract.validate_copilot_package` — wired into
+  `python3 scripts/build_release_zip.py --host copilot --smoke-test <zip>` —
+  validates the committed `hosts/copilot` package's manifest, skills, agents,
+  hooks, and scripts/templates trees. This is a **static, deterministic**
+  check rather than a live-CLI probe: a headless `copilot -p` session does not
+  reliably fire repo hooks (folder-trust/mode limits — see
+  `scripts/build_copilot_plugin.py`'s module docstring for the evidence
+  trail), so the static check is the trustworthy signal here. Spec 113-06
+  owns the full Copilot install-verification slice.
 
 ### From source (contributors)
 
@@ -185,14 +206,15 @@ workflow used during development.
 
 ## Repository structure (for contributors)
 
-Three peers: the **canonical source root**, the committed **`hosts/claude`**
-package, and the committed **`hosts/codex`** package. The two host packages are
-**committed, source-derived build outputs** — kept fresh by the drift guard
-(`python3 scripts/build_host_packages.py [--check]`) and **NOT hand-edited**.
-The host packages have **different internal shapes**: Claude is a **flat**
-plugin (`.claude-plugin/plugin.json` at the package root) while Codex is
-**marketplace-wrapped** (`hosts/codex/.agents/plugins/marketplace.json` +
-`hosts/codex/plugins/jig/...`).
+Four peers: the **canonical source root**, and the committed **`hosts/claude`**,
+**`hosts/codex`**, and **`hosts/copilot`** packages. The three host packages
+are **committed, source-derived build outputs** — kept fresh by the drift
+guard (`python3 scripts/build_host_packages.py [--check]`) and **NOT
+hand-edited**. The host packages have **different internal shapes**: Claude
+and Copilot are both **flat** plugins (`.claude-plugin/plugin.json` /
+`.plugin/plugin.json` at the package root — Copilot's runtime tree nests under
+`.github/` instead of the package root) while Codex is **marketplace-wrapped**
+(`hosts/codex/.agents/plugins/marketplace.json` + `hosts/codex/plugins/jig/...`).
 
 ```
 # Canonical source root (dev tooling + the tree the host packages build from):
@@ -216,6 +238,9 @@ hosts/
   codex/                         # COMMITTED marketplace-wrapped Codex package
     .agents/plugins/marketplace.json
     plugins/jig/                 # the Codex plugin tree
+  copilot/                       # COMMITTED flat Copilot plugin package
+    .plugin/plugin.json
+    .github/{skills,agents,hooks,scripts,templates}/
 dist/                            # gitignored — host-explicit release ZIPS ONLY
 ```
 
@@ -238,8 +263,11 @@ Tier 0 and Tier 1 are complete — all 20 skills, 3 subagents, and the jig hooks
 ship today, and jig is dogfooded on its own spec lifecycle. For live per-slice
 state, see the **[status board](docs/specs/README.md)**.
 
-**Supported today:** Claude Code and Codex in scaffold and plugin shapes from
-the shared source tree. Codex role prompts are bundled as prompt source, rendered
+**Supported today:** Claude Code and Codex in scaffold and plugin shapes, plus
+GitHub Copilot CLI in plugin shape (spec 113 / ADR-0061), all from the shared
+source tree. Codex role prompts are bundled as prompt source, rendered
 to TOML for scaffold mode, and installable for plugin users via the explicit
 Codex agent helper; plugin-native Codex custom-agent discovery remains the
 tracked follow-up in [spec 033](docs/specs/033-host-adapter-portability/spec.md).
+Copilot's per-host install verification is a static package validator, not a
+live-CLI probe — see "Verifying a host install" above.

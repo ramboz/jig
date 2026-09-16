@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py Stop \".github/hooks/scripts/jig-task-capture.sh\"",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

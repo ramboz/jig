@@ -38,10 +38,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Host-explicit release zips (slice 061-04), each archived from its
-      # committed hosts/<host>/ package:
-      #   - jig-claude-vX.Y.Z.zip : flat, drag-droppable Claude plugin
-      #   - jig-codex-vX.Y.Z.zip  : extract-then-add Codex marketplace bundle
+      # Host-explicit release zips (slice 061-04; Copilot added in 113-06), each
+      # archived from its committed hosts/<host>/ package:
+      #   - jig-claude-vX.Y.Z.zip  : flat, drag-droppable Claude plugin
+      #   - jig-codex-vX.Y.Z.zip   : extract-then-add Codex marketplace bundle
+      #   - jig-copilot-vX.Y.Z.zip : committed Copilot CLI plugin (.github/ package)
       - name: Build Claude release zip
         run: |
           python3 scripts/build_release_zip.py \
@@ -56,6 +57,13 @@ jobs:
             --version "${{ needs.release-please.outputs.version }}" \
             --output "dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip"
 
+      - name: Build Copilot release zip
+        run: |
+          python3 scripts/build_release_zip.py \
+            --host copilot \
+            --version "${{ needs.release-please.outputs.version }}" \
+            --output "dist/jig-copilot-v${{ needs.release-please.outputs.version }}.zip"
+
       - name: Smoke-test Claude zip
         run: |
           python3 scripts/build_release_zip.py \
@@ -67,6 +75,12 @@ jobs:
           python3 scripts/build_release_zip.py \
             --host codex \
             --smoke-test "dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip"
+
+      - name: Smoke-test Copilot zip
+        run: |
+          python3 scripts/build_release_zip.py \
+            --host copilot \
+            --smoke-test "dist/jig-copilot-v${{ needs.release-please.outputs.version }}.zip"
 
       # Legacy host-neutral jig-vX.Y.Z.zip: kept ONE cycle as a byte-identical
       # alias of the Claude zip (the legacy artifact was always Claude-shaped).
@@ -86,6 +100,7 @@ jobs:
             "${{ needs.release-please.outputs.tag_name }}" \
             "dist/jig-claude-v${{ needs.release-please.outputs.version }}.zip" \
             "dist/jig-codex-v${{ needs.release-please.outputs.version }}.zip" \
+            "dist/jig-copilot-v${{ needs.release-please.outputs.version }}.zip" \
             "dist/jig-v${{ needs.release-please.outputs.version }}.zip"
 
       # Append a fixed "Install artifacts" note to release-please's notes
@@ -109,6 +124,11 @@ jobs:
             bundle** for Codex: extract it, then run
             \`codex plugin marketplace add <extracted-dir>\`. Codex has no
             zip-drop install; do not load this archive in place as a plugin.
+          - \`jig-copilot-v${VERSION}.zip\` — the committed GitHub Copilot CLI
+            plugin package (\`.plugin/plugin.json\` + \`.github/\` skills, agents,
+            hooks, and scripts). Copilot installs the plugin from the repo via
+            \`/plugin\` (\`copilot plugin install <owner/repo>:hosts/copilot\`);
+            this archive is the released, drift-guarded snapshot of that package.
           - \`jig-v${VERSION}.zip\` — **deprecated** byte-identical alias of the
             Claude zip, kept one cycle for compatibility and **removed next
             release**. Switch to \`jig-claude-v${VERSION}.zip\`.

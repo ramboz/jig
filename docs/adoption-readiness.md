@@ -16,9 +16,9 @@ next action and links out, rather than recreating a leadership curriculum.
 
 ## Who jig is for
 
-- **Devs starting a new Claude Code or Codex project** who want spec-driven slices,
-  reviewer gates, and a memory layer on day 1 instead of inventing them
-  over the first few sprints.
+- **Devs starting a new Claude Code, Codex, or GitHub Copilot CLI project**
+  who want spec-driven slices, reviewer gates, and a memory layer on day 1
+  instead of inventing them over the first few sprints.
 - **Small teams who want a thin, opinionated baseline** they can extend
   with their own richer skills — jig's baselines defer to user-installed
   ones (see [README § Extension points](../README.md#extension-points)).
@@ -34,12 +34,14 @@ next action and links out, rather than recreating a leadership curriculum.
   lifecycle is overhead you won't recoup.
 - You **can't keep specs/ADRs in the repo** (e.g. process forbids it) —
   jig's whole contract is that "done" is verifiable in version control.
-- You need a host beyond **Claude Code or Codex** today. New host adapters need
-  real user signal and their own spec slices.
+- You need a host beyond **Claude Code, Codex, or GitHub Copilot CLI** today.
+  New host adapters need real user signal and their own spec slices.
 
 ## Prerequisites
 
-- **Claude Code or Codex** — whichever host you plan to run jig from.
+- **Claude Code, Codex, or GitHub Copilot CLI** — whichever host you plan to
+  run jig from. Copilot ships plugin-install only (no scaffold recipe — it
+  reads Claude-format files directly).
 - **A git repository** in reasonable health (a clean-ish tree; you can
   commit). jig reserves spec/ADR numbers on `origin/main` when a remote is
   present and falls back gracefully when it isn't.
@@ -54,8 +56,8 @@ next action and links out, rather than recreating a leadership curriculum.
 Run through this before scaffolding. Each item is a quick yes/no:
 
 - [ ] **Git repo health** — initialized, not mid-rebase, you can commit.
-- [ ] **Host access** — you can open this repo in a Claude Code or Codex
-      session.
+- [ ] **Host access** — you can open this repo in a Claude Code, Codex, or
+      Copilot CLI session.
 - [ ] **Python 3 available** — `python3 --version` works.
 - [ ] **Test command** — you know your stack's test command, or you accept
       there isn't one yet (jig still works; `tdd-loop` reports the gap).

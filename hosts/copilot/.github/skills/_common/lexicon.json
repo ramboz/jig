@@ -1,0 +1,91 @@
+{
+  "jig": {
+    "short": "The skill pack itself — \"a jig is a tool that guides other tools.\"",
+    "plain": "jig is the Claude Code plugin you're using. It scaffolds a set of opinionated, AI-native development practices into your project: a spec-driven workflow, review gates, memory files, and helper skills. The name is a metaphor — a jig in woodworking is a guide that makes a tool cut accurately and repeatably, and this jig guides the AI to build software the same careful way every time.",
+    "see_also": ["scaffolded install / scaffold mode", "hot cache"]
+  },
+  "spidr": {
+    "short": "Mike Cohn's five story-splitting techniques: Spike, Path, Interface, Data, Rules.",
+    "plain": "SPIDR is a checklist of five ways to chop a big feature into small, shippable pieces (slices). The letters stand for Spike (a quick experiment to learn something), Path (split by user journey), Interface (split by which screen or API), Data (split by which data it handles), and Rules (split by business rule). You pick whichever lets each slice still deliver real end-to-end value. Spike is the last resort — only when you genuinely don't yet know enough to plan.",
+    "example": "A login feature split by Path: slice 1 = email/password, slice 2 = social login, slice 3 = password reset.",
+    "see_also": ["vertical slice"]
+  },
+  "adr": {
+    "short": "Architecture Decision Record — a short doc capturing one hard-to-reverse decision and why.",
+    "plain": "An ADR is a small markdown file that records a single significant decision: what you chose, what else you considered, and why you picked it. You write one when a choice is expensive to undo (a database, a public interface, a core convention) so future readers — including future you — understand the reasoning instead of guessing. In jig they live in docs/decisions/ and are created with /jig:adr-workflow.",
+    "example": "ADR-0021 records where jig's lexicon lives and that a project's glossary overrides it.",
+    "see_also": ["deferred"]
+  },
+  "tier 0 / tier 1 / tier 2": {
+    "short": "The three installation tiers that decide which jig skills a project gets.",
+    "plain": "jig's skills are grouped into tiers so a project only installs what it needs. Tier 0 is always installed (the core workflow, review, memory, and contracts skills). Tier 1 is the sensible default for most projects (ADR workflow, test loop, slice-landing, PR and architecture review). Tier 2 is opt-in for specialized needs. A project records which tiers it installed in scaffold.json, and can add a higher tier later without re-scaffolding.",
+    "see_also": ["scaffolded install / scaffold mode"]
+  },
+  "hot cache": {
+    "short": "The structured section of CLAUDE.md for frequently-referenced project terms, loaded every session.",
+    "plain": "The Hot Cache is the part of CLAUDE.md that holds the handful of terms, names, and active work the AI needs at its fingertips in every session. It's deliberately small because everything in it is re-read on every turn, which costs tokens. Rarely-needed definitions live out in docs/memory/ and are pulled in only on demand, so the always-loaded cache stays lean.",
+    "see_also": ["dumb zone"]
+  },
+  "dumb zone": {
+    "short": "The context fill level (~40%) above which a model's recall and reasoning start to degrade.",
+    "plain": "As you fill a model's context window, its ability to recall details and reason carefully drops off well before the window is full — roughly past 40% in practice. That degraded region is the \"dumb zone.\" jig keeps the always-loaded docs small and delegates file-heavy reading to subagents specifically to stay below it, so the orchestrator stays sharp.",
+    "see_also": ["hot cache"]
+  },
+  "reconciliation": {
+    "short": "The post-implementation, pre-DONE phase: write a deviation log, update docs, run a second review.",
+    "plain": "Reconciliation is the clean-up phase that happens after a slice's code is written and the first review passes, but before it's marked DONE. In it you write a deviation log (what you built differently from the spec and why), update any docs whose meaning changed, and run a second review pass on those doc changes. It's how jig keeps the written record honest about what was actually built.",
+    "see_also": ["deviation log", "dod"]
+  },
+  "vertical slice": {
+    "short": "A spec slice that crosses all layers and delivers end-to-end value on its own.",
+    "plain": "A vertical slice is a piece of work thin enough to finish quickly but complete enough to be genuinely usable: it touches every layer it needs (data, logic, interface) and produces a working capability, not just scaffolding. The opposite — and the AI's common failure mode — is horizontal phasing: building all the database first, then all the API, then all the UI, so nothing works until the very end.",
+    "example": "\"User can reset their password\" is vertical; \"add a password-reset column to the users table\" is a horizontal phase.",
+    "see_also": ["spidr"]
+  },
+  "scaffolded install / scaffold mode": {
+    "short": "jig's install shape that copies its skills/agents/hooks into your project's .claude/ directory.",
+    "plain": "jig can be used two ways. A plugin install runs jig from the central plugin location. A scaffolded install instead copies jig's skills, agents, and hooks directly into your project's own .claude/ folder, so you own and can edit them and check them into version control. Scaffold-init does this; the copied files travel as plain machinery so existing projects pick up new ones on their next copy.",
+    "see_also": ["tier 0 / tier 1 / tier 2"]
+  },
+  "deferred": {
+    "short": "A spec-lifecycle state for work that was scoped but parked, not yet a priority.",
+    "plain": "A slice marked DEFERRED has been thought through enough to know what it would involve, but it's intentionally on hold — not the current priority. It's different from DRAFT (\"not yet fleshed out\"). A deferred item can only be re-opened back to DRAFT; it can't jump straight to a later state, so its review gates can't be skipped when someone picks it back up.",
+    "see_also": ["resolution trigger"]
+  },
+  "resolution trigger": {
+    "short": "A noted condition describing the concrete signal that would justify re-opening a deferred item.",
+    "plain": "When jig parks a decision or a slice as deferred, it records a resolution trigger: a one-line description of the specific thing that would make the work worth doing now. It turns \"maybe later\" into \"do this when X happens,\" so a parked item has a clear re-open condition instead of being forgotten.",
+    "see_also": ["deferred"]
+  },
+  "lazy migration": {
+    "short": "When a layout changes, parsers tolerate both old and new shapes; only new items use the new shape.",
+    "plain": "Lazy migration is jig's way of changing a file format without a risky mass rewrite. When a new shape is introduced, the code is taught to read both the old and the new shape indefinitely, and only newly created items adopt the new shape. Existing files are left alone. The trade-off is supporting two shapes for a long time, in exchange for zero giant migration diffs and zero risk of garbling rare old files.",
+    "see_also": []
+  },
+  "deviation log": {
+    "short": "A record, written during reconciliation, of how the implementation differed from its spec and why.",
+    "plain": "A deviation log is a short note attached to a slice that lists where the actual implementation diverged from what the spec said — and the reason for each difference. Specs are written before the code, so some drift is normal and healthy; the log captures it honestly instead of silently editing the spec, so reviewers and future readers see what really happened. It's a required step before a slice can be marked DONE.",
+    "see_also": ["reconciliation", "dod"]
+  },
+  "dor": {
+    "short": "Definition of Ready — the checklist a slice must satisfy before implementation can start.",
+    "plain": "DoR stands for Definition of Ready. It's a short checklist at the top of a slice listing what must be true before anyone starts coding it: the format is decided, dependencies exist, the relevant decision is recorded, and so on. Its job is to stop work from starting on something still too vague to build well. Each item is usually ticked off with a checkmark when satisfied.",
+    "see_also": ["ac", "dod"]
+  },
+  "ac": {
+    "short": "Acceptance Criteria — the specific, testable conditions a slice must meet to be considered done.",
+    "plain": "AC stands for Acceptance Criteria: a numbered list in a slice spelling out exactly what the finished work must do, written so each item can be checked or tested. They're the contract between the spec and the implementation — you write one failing test per criterion, then make them pass. If something isn't in the ACs, it isn't required by this slice.",
+    "see_also": ["dor", "dod"]
+  },
+  "dod": {
+    "short": "Definition of Done — the checklist that must all be true before a slice is marked DONE.",
+    "plain": "DoD stands for Definition of Done. It's the checklist at the bottom of a slice covering everything required to truly finish it: all acceptance criteria pass, the test suite is green, the reviews passed, the deviation log is written, and the docs are updated. A slice isn't DONE just because the code works — every DoD box has to be genuinely satisfied first.",
+    "see_also": ["ac", "dor", "reconciliation"]
+  },
+  "frontmatter": {
+    "short": "The small metadata block (between --- fences) at the top of a markdown file.",
+    "plain": "Frontmatter is the fenced block of key/value metadata at the very top of a markdown file, wrapped in lines of three dashes (---). In jig, a slice's frontmatter carries fields like its status, dependencies, and who has claimed it. Tools read this block to understand the file without parsing the prose. It looks like simplified YAML: 'key: value' on each line.",
+    "example": "A slice's frontmatter might contain 'status: IN_PROGRESS' and 'dependencies: []'.",
+    "see_also": []
+  }
+}

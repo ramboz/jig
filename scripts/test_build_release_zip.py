@@ -37,12 +37,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HOSTS_ROOT = REPO_ROOT / "hosts"
 CLAUDE_PKG = HOSTS_ROOT / "claude"
 CODEX_PKG = HOSTS_ROOT / "codex"
+COPILOT_PKG = HOSTS_ROOT / "copilot"
 
 _CLAUDE_VERSION = json.loads(
     (CLAUDE_PKG / ".claude-plugin" / "plugin.json").read_text()
 )["version"]
 _CODEX_VERSION = json.loads(
     (CODEX_PKG / "plugins" / "jig" / ".codex-plugin" / "plugin.json").read_text()
+)["version"]
+_COPILOT_VERSION = json.loads(
+    (COPILOT_PKG / ".plugin" / "plugin.json").read_text()
 )["version"]
 
 
@@ -188,6 +192,80 @@ class CodexZipShapeTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Slice 113-06 AC2 — Copilot zip is the hosts/copilot/ package, flat at root
+# (a `/plugin`-equivalent repo-subdirectory install payload, same flat shape
+# as Claude — `.plugin/plugin.json` at the zip root, not marketplace-wrapped
+# like Codex).
+# ---------------------------------------------------------------------------
+
+
+class CopilotZipShapeTests(unittest.TestCase):
+    def setUp(self):
+        self.zip_path, self.output = _build_once("copilot", _COPILOT_VERSION)
+        self.addCleanup(shutil.rmtree, self.zip_path.parent, ignore_errors=True)
+        with zipfile.ZipFile(self.zip_path) as zf:
+            self.names = set(zf.namelist())
+
+    def test_copilot_plugin_json_at_root(self):
+        self.assertIn(".plugin/plugin.json", self.names)
+
+    def test_no_hosts_prefix(self):
+        leaked = [n for n in self.names if n.startswith("hosts/")]
+        self.assertEqual(
+            leaked, [], f"arcnames must be relative to hosts/copilot/; got {leaked!r}"
+        )
+
+    def test_runtime_dirs_present(self):
+        skill_files = [n for n in self.names if n.startswith(".github/skills/")]
+        self.assertGreater(len(skill_files), 0)
+        self.assertTrue(
+            any(n.startswith(".github/agents/") for n in self.names)
+        )
+        self.assertTrue(any(n.startswith(".github/hooks/") for n in self.names))
+
+    def test_package_completeness_paths_present(self):
+        # AC5 — the scripts/ and templates/ trees this slice adds.
+        self.assertIn(".github/scripts/spec_lint.py", self.names)
+        self.assertIn(".github/templates/CLAUDE.md.template", self.names)
+
+    def test_context_check_hook_has_three_event_keys_in_the_zip(self):
+        # The multi-event merge fix (113-06 AC6) survives archiving.
+        with zipfile.ZipFile(self.zip_path) as zf:
+            data = json.loads(zf.read(".github/hooks/jig-context-check.json"))
+        self.assertEqual(
+            set(data["hooks"].keys()),
+            {"preToolUse", "sessionStart", "userPromptSubmitted"},
+        )
+
+    def test_scripts_are_the_runtime_allowlist_only(self):
+        # Mirrors ClaudeZipShapeTests.test_scripts_are_the_runtime_allowlist_only
+        # — `.github/scripts/` carries exactly the Copilot allowlist, nothing
+        # from dev-only scripts/ leaks in.
+        shipped_scripts = {
+            n for n in self.names if n.startswith(".github/scripts/")
+        }
+        expected = {
+            f".github/{rel}" for rel in install_contract.COPILOT_INCLUDE_SCRIPT_FILES
+        }
+        self.assertEqual(
+            shipped_scripts, expected,
+            f"Copilot zip .github/scripts/ must equal COPILOT_INCLUDE_SCRIPT_FILES; "
+            f"got {sorted(shipped_scripts)!r}",
+        )
+
+    def test_no_pycache_or_dsstore(self):
+        junk = [n for n in self.names if "__pycache__" in n or n.endswith(".pyc")
+                or Path(n).name == ".DS_Store"]
+        self.assertEqual(junk, [])
+
+    def test_copilot_default_output_name(self):
+        self.assertEqual(
+            build_release_zip.default_output_path(REPO_ROOT, "copilot", _COPILOT_VERSION),
+            REPO_ROOT / "dist" / f"jig-copilot-v{_COPILOT_VERSION}.zip",
+        )
+
+
+# ---------------------------------------------------------------------------
 # AC3 — Codex language is exact: extract-then-add, never directly-installable.
 # ---------------------------------------------------------------------------
 
@@ -265,6 +343,22 @@ class VersionCoherenceTests(unittest.TestCase):
         self.assertIn("9.9.9", sink.getvalue())
         self.assertIn("mislabeled", sink.getvalue())
 
+    def test_copilot_version_mismatch_exits_2(self):
+        tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-mismatch-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        out = tmp / "jig-copilot-v9.9.9.zip"
+        sink = io.StringIO()
+        code = build_release_zip.build(
+            host="copilot",
+            hosts_root=HOSTS_ROOT,
+            version="9.9.9",
+            output_path=out,
+            out=sink,
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("9.9.9", sink.getvalue())
+        self.assertIn("mislabeled", sink.getvalue())
+
     def test_stale_hosts_tree_fails_coherence(self):
         # Edge case: a hosts/ tree whose manifest version differs from the
         # requested release version must refuse, not ship a stale package.
@@ -312,6 +406,13 @@ class DeterminismTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, b.parent, ignore_errors=True)
         self.assertEqual(a.read_bytes(), b.read_bytes())
 
+    def test_copilot_two_builds_identical(self):
+        a, _ = _build_once("copilot", _COPILOT_VERSION)
+        b, _ = _build_once("copilot", _COPILOT_VERSION)
+        self.addCleanup(shutil.rmtree, a.parent, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, b.parent, ignore_errors=True)
+        self.assertEqual(a.read_bytes(), b.read_bytes())
+
 
 # ---------------------------------------------------------------------------
 # AC5 — per-host smoke tests name the host.
@@ -336,6 +437,34 @@ class SmokeTests(unittest.TestCase):
         code = build_release_zip.smoke_test("codex", zip_path, out=sink)
         self.assertEqual(code, 0, msg=sink.getvalue())
         self.assertIn("codex", sink.getvalue().lower())
+
+    def test_copilot_smoke_passes_and_names_host(self):
+        zip_path, _ = _build_once("copilot", _COPILOT_VERSION)
+        self.addCleanup(shutil.rmtree, zip_path.parent, ignore_errors=True)
+        sink = io.StringIO()
+        code = build_release_zip.smoke_test("copilot", zip_path, out=sink)
+        self.assertEqual(code, 0, msg=sink.getvalue())
+        self.assertIn("copilot", sink.getvalue().lower())
+
+    def test_copilot_smoke_fails_on_a_broken_zip(self):
+        # Positive confirmation the smoke path actually validates content,
+        # not just "did the zip extract": corrupt the manifest inside a real
+        # copilot zip and confirm the smoke test catches it.
+        zip_path, _ = _build_once("copilot", _COPILOT_VERSION)
+        self.addCleanup(shutil.rmtree, zip_path.parent, ignore_errors=True)
+        broken_dir = zip_path.parent / "broken"
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(broken_dir)
+        (broken_dir / ".plugin" / "plugin.json").unlink()
+        broken_zip = zip_path.parent / "broken.zip"
+        with zipfile.ZipFile(broken_zip, "w") as zf:
+            for path in broken_dir.rglob("*"):
+                if path.is_file():
+                    zf.write(path, path.relative_to(broken_dir).as_posix())
+        sink = io.StringIO()
+        code = build_release_zip.smoke_test("copilot", broken_zip, out=sink)
+        self.assertNotEqual(code, 0)
+        self.assertIn("FAIL", sink.getvalue())
 
     def test_smoke_fails_on_missing_zip_names_host(self):
         sink = io.StringIO()
@@ -381,6 +510,23 @@ class CliTests(unittest.TestCase):
             code = build_release_zip.main([
                 "build_release_zip.py", "--host", "codex",
                 "--version", _CODEX_VERSION, "--output", str(out),
+            ])
+        finally:
+            sys.stdout = original
+        self.assertEqual(code, 0, msg=captured.getvalue())
+        self.assertTrue(out.is_file())
+
+    def test_main_build_copilot(self):
+        tmp = Path(tempfile.mkdtemp(prefix="jig-cli-copilot-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        out = tmp / f"jig-copilot-v{_COPILOT_VERSION}.zip"
+        captured = io.StringIO()
+        original = sys.stdout
+        sys.stdout = captured
+        try:
+            code = build_release_zip.main([
+                "build_release_zip.py", "--host", "copilot",
+                "--version", _COPILOT_VERSION, "--output", str(out),
             ])
         finally:
             sys.stdout = original

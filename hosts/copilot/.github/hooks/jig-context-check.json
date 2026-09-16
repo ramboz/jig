@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "view",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py PreToolUse \".github/hooks/scripts/jig-context-check.sh\"",
+        "timeoutSec": 5
+      }
+    ],
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py SessionStart \".github/hooks/scripts/jig-context-check.sh\"",
+        "timeoutSec": 5
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py UserPromptSubmit \".github/hooks/scripts/jig-context-check.sh\"",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

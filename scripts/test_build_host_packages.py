@@ -10,6 +10,7 @@ assertion, and CI enforcement.
 """
 
 import io
+import json
 import shutil
 import sys
 import tempfile
@@ -74,6 +75,42 @@ class BuildHostPackagesTests(unittest.TestCase):
         log = out.getvalue()
         self.assertIn("claude", log)
         self.assertIn("codex", log)
+
+
+class CopilotPackageBuiltByBuildAllTests(unittest.TestCase):
+    """Slice 113-02 — `build_all` builds the Copilot skeleton package
+    (skills + manifest — no pre-rendered instructions file, per the 113-02
+    review fix) alongside Claude and Codex."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-host-pkgs-copilot-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_build_all_also_builds_copilot(self):
+        out = io.StringIO()
+        code = build_host_packages.build_all(
+            source_root=REPO_ROOT, hosts_root=self.tmp, out=out
+        )
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertTrue((self.tmp / "copilot" / ".plugin" / "plugin.json").is_file())
+        self.assertTrue(
+            (
+                self.tmp / "copilot" / ".github" / "skills" / "scaffold-init"
+                / "SKILL.md"
+            ).is_file()
+        )
+        self.assertFalse(
+            (self.tmp / "copilot" / ".github" / "copilot-instructions.md").exists()
+        )
+
+    def test_reports_copilot_target(self):
+        out = io.StringIO()
+        build_host_packages.build_all(
+            source_root=REPO_ROOT, hosts_root=self.tmp, out=out
+        )
+        self.assertIn("copilot", out.getvalue())
 
     def test_main_default_targets_repo_hosts(self):
         # main() with no args should default to the repo hosts/ dir; we don't
@@ -188,6 +225,20 @@ class DriftCheckTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("claude/STALE_ARTIFACT.txt", out.getvalue())
 
+    def test_check_detects_stale_copilot_file(self):
+        # Slice 113-02: the drift guard is host-agnostic (walks the whole
+        # hosts_root), so it must catch a stale Copilot file with no
+        # Copilot-specific code — this proves that, rather than assuming it.
+        hosts = self._seed_committed()
+        stale = hosts / "copilot" / ".plugin" / "plugin.json"
+        stale.write_text("DRIFTED\n")
+        out = io.StringIO()
+        code = build_host_packages.check_drift(
+            source_root=REPO_ROOT, hosts_root=hosts, out=out
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("copilot/.plugin/plugin.json", out.getvalue())
+
     def test_check_flag_wires_to_check_drift(self):
         hosts = self._seed_committed()
         (hosts / "claude" / ".claude-plugin" / "plugin.json").write_text("x\n")
@@ -276,6 +327,46 @@ class EdgeCaseTests(unittest.TestCase):
         log = out.getvalue()
         self.assertIn("claude/.claude-plugin/plugin.json", log)
         self.assertIn("plugins/jig/.codex-plugin/plugin.json", log)
+        # NOTE: this mutation appends a sibling `_v` field rather than
+        # changing "version"'s VALUE, so it does not exercise the Copilot
+        # manifest (which derives its version from that field's semantic
+        # value, not the manifest file's raw bytes) — see
+        # `test_copilot_manifest_reflects_an_actual_version_bump` below for
+        # the assertion that DOES touch the version value.
+
+    def test_copilot_manifest_reflects_an_actual_version_bump(self):
+        # Unlike Claude/Codex (which copy .claude-plugin/.codex-plugin's
+        # manifest file byte-for-byte), the Copilot manifest is derived from
+        # the "version" FIELD'S VALUE (see build_copilot_plugin.build) — so
+        # only a change to that value, not an unrelated byte in the file,
+        # should flag hosts/copilot/.plugin/plugin.json as stale.
+        src = self.tmp / "src2"
+        shutil.copytree(
+            REPO_ROOT,
+            src,
+            ignore=shutil.ignore_patterns(
+                ".git", "hosts", "dist", "__pycache__", "*.pyc",
+                ".pytest_cache", ".mypy_cache",
+            ),
+        )
+        hosts = self.tmp / "hosts2"
+        self.assertEqual(
+            0,
+            build_host_packages.build_all(
+                source_root=src, hosts_root=hosts, out=io.StringIO()
+            ),
+        )
+        claude_manifest = src / ".claude-plugin" / "plugin.json"
+        data = json.loads(claude_manifest.read_text())
+        data["version"] = "9.9.9"
+        claude_manifest.write_text(json.dumps(data))
+
+        out = io.StringIO()
+        code = build_host_packages.check_drift(
+            source_root=src, hosts_root=hosts, out=out
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("copilot/.plugin/plugin.json", out.getvalue())
 
     def test_partial_hosts_is_fully_replaced_not_merged(self):
         hosts = self.tmp / "hosts"

@@ -8,8 +8,9 @@
 
 ## Vision statement
 
-A small, opinionated workflow scaffold for Claude Code and Codex that installs
-AI-native development practices — spec-driven slices, independent review,
+A small, opinionated workflow scaffold for Claude Code, Codex, and GitHub
+Copilot CLI that installs AI-native development practices — spec-driven slices,
+independent review,
 memory continuity, deterministic gates — into a project on day 1, and gets out
 of the way after.
 
@@ -38,8 +39,9 @@ want their tooling to make architectural decisions for them.
 
 ## The core problem
 
-Claude Code and Codex are powerful but deliberately unopinionated about
-*project workflow*. Teams adopting them tend to land in one of three places:
+Claude Code, Codex, and GitHub Copilot CLI are powerful but deliberately
+unopinionated about *project workflow*. Teams adopting them tend to land in one
+of three places:
 
 1. **Build the workflow yourself, slowly.** Each project re-invents
    spec discipline, review gates, memory conventions, and
@@ -240,8 +242,9 @@ Track in [docs/specs/README.md](specs/README.md) and
 [docs/refinement-todo.md](refinement-todo.md). High-level horizon:
 
 - **Multi-host portability** — shipped in the v2 line through the
-  host-adapter layer for Claude Code and Codex. The next horizon is a
-  multi-repo federation tier, tracked in [docs/roadmap.md](roadmap.md).
+  host-adapter layer for Claude Code, Codex, and GitHub Copilot CLI (Copilot
+  added by spec 113 / ADR-0061). The next horizon is a multi-repo federation
+  tier, tracked in [docs/roadmap.md](roadmap.md).
 - **Tier 2 stays empty** until `local-dev-parity` (or another
   candidate) gets a real user signal.
 - **`contracts` skill stays a deliberate stub** until a third caller
