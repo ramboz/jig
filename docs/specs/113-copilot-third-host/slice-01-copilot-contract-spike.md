@@ -1,9 +1,8 @@
 ---
-status: IN_PROGRESS
+status: DONE
 kind: spike
 dependencies: [adr-0061]
 last_verified:
-claimed_by: claude/adr-0061-spec-113-jig-874db3
 ---
 
 ## Slice 113-01 — copilot-contract-spike
@@ -159,9 +158,10 @@ an unreliable binary grep, and defer to the authoritative product docs. Recorded
 to memory._
 
 **DoR:**
-- ✅ ADR-0061 recorded (Proposed).
-- ✅ Access to a licensed GitHub Copilot CLI session (`copilot`) on the Adobe
-  tenant, and to GitHub's Copilot CLI hooks/agents/plugin reference docs.
+- ✅ ADR-0061 recorded (Accepted 2026-09-15).
+- ✅ Access to a licensed GitHub Copilot CLI session (`copilot` 1.0.84) on the
+  Adobe tenant, and to GitHub's Copilot CLI hooks/agents/plugin reference docs
+  (Adobe migration + terminology guides).
 
 **Acceptance Criteria:**
 
@@ -191,9 +191,45 @@ to memory._
    condition — so the renderer slice doesn't discover it mid-implementation.
 
 **DoD:**
-- [ ] Findings block filled with commands run + observed output (grounding).
-- [ ] Outcome set; downstream slices' DoR updated with the verified shape.
-- [ ] `docs/refinement-todo.md` updated if any decision was deferred.
+- [x] Findings block filled with commands run + observed output (grounding).
+- [x] Outcome set; downstream slices' DoR updated with the verified shape (113-02
+      DoR expanded with the verified contract; 113-03/04/05 inherit it).
+- [x] `docs/refinement-todo.md` updated if any decision was deferred — **N/A**: no
+      decision deferred; the spike confirmed ADR-0061 rather than opening a new
+      question. (The one methodology lesson was recorded to session memory.)
 
 **Anti-horizontal-phasing check:** Exempt — `kind: spike`. Delivers verified
 decisions that unblock 113-02..06, not user-facing behavior.
+
+### Deviation log (after reconciliation)
+
+- **Time-box:** planned 1–2 days; the source-level seam probe + a mid-spike
+  correction (below) fit within it.
+- **Major correction (owner-caught).** The first findings pass reported an
+  ADR-0061 contradiction — "Copilot hooks are `extension.mjs` SDK handlers only;
+  no `.github/hooks/*.json`" — and recommended an ADR amendment. That was **wrong**:
+  it rested on the SDK authoring docs (one surface) + an unreliable native-binary
+  grep. On owner challenge I re-verified against the Adobe migration + terminology
+  guides AND the CLI's own `schemas/api.schema.json`, which establish the
+  file-configurable `.github/hooks/*.json` path — the ADR premise. Outcome flipped
+  to **ADR-0061 CONFIRMED — no amendment**; Findings AC2/AC3/AC5 + Outcome were
+  rewritten (commit 9cb8a2b).
+- **AC5 seam-fit** flipped with it: `translate_hook_protocol` **fits** as a third
+  subclass (event-name map + response remap + `.github/hooks/*.json` emission); no
+  `extension.mjs` bridge / abstraction reshape needed.
+
+### Reconciliation sweep
+
+- **113-02 DoR** — `updated`: expanded with the verified contract (manifest,
+  discovery roots, loader-compat invariant, instructions home, subdir install).
+- **113-03/04/05/06 DoR** — `no-op`: inherit 113-02's verified shape; hook details
+  (`.github/hooks/*.json`, `HookType` enum, permission-deny path) live in
+  slice-01 Findings AC3, pulled in when 113-04/05 are picked up.
+- **ADR-0061** — `no-op` (confirmed, not amended); no `## Amendments` entry.
+- **docs/refinement-todo.md** — `no-op`: nothing deferred.
+- **Session memory** — `updated`: recorded the SDK-docs-vs-product-docs probing
+  lesson.
+- **Review evidence** — `deferred`: `kind: spike` delivers verified decisions, not
+  code; compliance/craft passes are N/A. Closure uses `JIG_REVIEW_EVIDENCE_GATE=0`
+  with this log as the audit trail (findings already stress-tested via the owner
+  challenge + 3-source re-verification).

@@ -13,8 +13,21 @@ minimal committed `hosts/copilot/` package whose skills and instructions load
 correctly under Copilot CLI.
 
 **DoR:**
-- ✅ 113-01 done: verified plugin-manifest shape, skill discovery root, and the
-  namespace/description loader rules.
+- ✅ 113-01 done (spike). Verified shape (see [slice-01 Findings](slice-01-copilot-contract-spike.md)):
+  - **Manifest:** `.plugin/plugin.json` = `{name, version, description,
+    mcpServers?}`; bundled `skills/`/`agents/` directory-discovered.
+  - **Skill discovery roots:** `.github/skills/`, `.agents/skills/`,
+    `.claude/skills/` (project); SKILL.md format identical to Claude Agent-Skills
+    (`name`, `description`, `user-invocable`, `allowed-tools`).
+  - **Loader-compat invariant is real:** rendered skill `name:` must be `:`-free
+    (jig source: 0/20 already compliant) and `description` ≤1024 chars
+    (`memory-sync` 1059 + `vision-elicitation` 1058 must be shortened for Copilot,
+    full text preserved in the body).
+  - **Instructions home:** `.github/copilot-instructions.md` — emit ONE canonical
+    instructions file; do not also ship a `CLAUDE.md` in the copilot package
+    (Copilot reads `CLAUDE.md`/`AGENTS.md` too → avoid double-load).
+  - **Install (no build step):** `copilot plugin install ramboz/jig:hosts/copilot`
+    (repo subdirectory); `copilot skill list` / `/skills` verifies load.
 
 **Acceptance Criteria:**
 
