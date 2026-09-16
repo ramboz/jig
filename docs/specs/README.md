@@ -340,7 +340,7 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 🔬 113-01 — copilot-contract-spike | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-02 — renderer-and-skeleton | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-03 — agents | **DONE** |  |
-| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | IN_PROGRESS (claude/adr-0061-spec-113-ji…) |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | DRAFT |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-06 — committed-package-and-release | DRAFT |  |
 
@@ -386,9 +386,11 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **21** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **5** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **7** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
   - `113-copilot-third-host/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-03-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
+  - `113-copilot-third-host/slice-04-arch.md` — applied `none`; declined: arch-review
+  - `113-copilot-third-host/slice-04-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
