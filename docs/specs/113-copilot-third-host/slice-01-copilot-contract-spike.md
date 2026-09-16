@@ -42,29 +42,28 @@ type definitions + `copilot-sdk/docs/*.md`, and `copilot <sub> --help`._
   and `.github/extensions/` are directory-discovered within the plugin root; only
   MCP needs an explicit pointer.
 
-**AC2 — Skill-load contract (VERIFIED; two ADR premises corrected).**
+**AC2 — Skill-load contract (VERIFIED; loader limits are real — jig is compliant).**
 - Discovery roots (`copilot skill --help`): project `.github/skills/`,
   `.agents/skills/`, `.claude/skills/`; personal `~/.copilot/skills/`,
   `~/.agents/skills/`; plugin-bundled; custom (`copilot skill add`). SKILL.md
   format is the **same Agent-Skills shape** (builtin example frontmatter:
   `name`, `description`, `user-invocable`, `allowed-tools`).
-- **`:` namespace is a non-issue.** Copilot addresses a skill as
-  `${source}:${name}` (e.g. `plugin:spec-workflow`) — the `:` is Copilot's own
-  *source prefix*, applied to the bare `name:` field. jig source skill `name:`
-  fields carry no colon (ADR probe: 0/20), so nothing surfaces a `:`-bearing
-  loaded name. The `jig:` Claude *invocation* prefix is not a skill name and does
-  not travel into the SKILL.md. → **ADR "hard failure #1a" (`:` names) does not
-  reproduce.**
-- **1024-char description limit NOT corroborated** in the shipped loader: every
-  `1024` occurrence in `app.js` is unrelated (YAML `:`-indicator limit
-  `KEY_OVER_1024_CHARS`, LRU cache sizes, diff-size caps). No skill-description
-  length gate was found in the code inspected. → Treat the Adobe-guide ">1024
-  fails to load" claim as **unverified / likely relaxed in 1.0.84**. The renderer
-  should still keep descriptions lean defensively (cheap insurance), but this is
-  not a load-bearing breaker. _(Absence-of-evidence, not proven absence — the
-  loader path in the native binary was not exhaustively decompiled.)_
+- **Loader limits are real** (Adobe terminology map, CLI 1.0.84: *"names
+  containing `:` and descriptions over 1,024 characters fail to load"*) —
+  ADR-0061's loader-compat invariant stands. jig's exposure: the `:` limit is
+  about the SKILL.md `name:` field, and jig source names carry no colon (ADR
+  probe: 0/20), so jig is already compliant — the `jig:` *invocation* prefix is
+  not the skill `name:` and does not travel into the rendered SKILL.md. The
+  >1024-char limit bites `memory-sync` (1059) and `vision-elicitation` (1058), so
+  the renderer **must** shorten their Copilot descriptions (full text preserved in
+  the SKILL.md body). Separately, Copilot *addresses* a loaded skill as
+  `${source}:${name}` (e.g. `plugin:spec-workflow`) — that `:` is Copilot's own
+  source prefix, distinct from the forbidden `:`-in-name. _(Correction: my first
+  pass under-weighted these as "not corroborated in app.js" — the `1024` grep hits
+  were unrelated, but that is absence-of-evidence; the Adobe pilot directly
+  observed the failures, so the invariant is load-bearing.)_
 
-**AC3 — Agent + hook forms (VERIFIED; hook mechanism is the big finding).**
+**AC3 — Agent + hook forms (VERIFIED; hook mechanism = config-file `.github/hooks/*.json`, ADR-0061 confirmed).**
 - **Agent file form RESOLVED: `.github/agents/<name>.agent.md`** (Markdown +
   frontmatter) for authored/custom agents — from `app.js`:
   `` `${name}.agent.md` `` written to `join(cwd, ".github", "agents")`. The
@@ -74,67 +73,90 @@ type definitions + `copilot-sdk/docs/*.md`, and `copilot <sub> --help`._
   (+ `displayName`, `promptParts` for built-ins). Read-only posture is expressed
   via the `tools` list + prompt (the built-in `code-review` agent uses
   `tools: ["*"]` and enforces read-only in the prompt).
-- **Hook mechanism — CONTRADICTS ADR-0061.** Copilot has **no shell-command
-  hooks via a JSON settings file** (Claude's model). Per the shipped
-  `copilot-sdk/docs/extensions.md` + `copilot-sdk/types.d.ts`: hooks are **typed
-  JS handler functions** registered by a forked **Node `extension.mjs`**
-  (`.github/extensions/<name>/extension.mjs`, ES module) that calls
-  `joinSession({ hooks: {…} })` from `@github/copilot-sdk/extension` over
-  **JSON-RPC/stdio**. No `hooks.json` / `settings.json` hook-config path exists in
-  the shipped CLI. There is **no `.github/hooks/*.json`** as the ADR-0061 layout
-  diagram assumed.
-- **`SessionHooks` surface (10 handlers, `types.d.ts`):** `onPreToolUse`,
-  `onPreMcpToolCall`, `onPostToolUse`, `onPostToolUseFailure`,
-  `onUserPromptSubmitted`, `onUserPromptTransformed`, `onSessionStart`,
-  `onSessionEnd`, `onErrorOccurred`, `onAgentStop`.
-- **Output field vocabulary is Claude-compatible** (the good news — the *logical*
-  decision maps 1:1): `PreToolUseHookOutput { permissionDecision?:
-  "allow"|"deny"|"ask"; permissionDecisionReason?; modifiedArgs?;
-  additionalContext?; suppressOutput? }`; `SessionStartHookOutput {
-  additionalContext?; modifiedConfig? }`; `PostToolUseHookOutput {
-  modifiedResult?; additionalContext?; suppressOutput? }`; `AgentStopHookOutput {
-  decision?: "block"; reason? }` (docs cite "Claude-compatible `stop_hook_active`
-  semantics"). It is the **delivery mechanism** (shell + `settings.json` +
-  exit-code-2/stdout → JS handler + typed return over JSON-RPC) that differs, not
-  the decision vocabulary.
+- **Hook mechanism — ADR-0061 CONFIRMED (correction from this session's first
+  pass).** Copilot loads **file-configurable hooks** from
+  **`.github/hooks/*.json`** (+ `~/.copilot/hooks/`, `.github/copilot/settings*.json`,
+  and cross-tool `.claude/settings*.json`), across tiers user / **repository** /
+  **plugin** / policy — exactly the ADR-0061 premise. Verified in the shipped CLI's
+  own `schemas/api.schema.json`: `HooksDiscoverRequest`/`HooksDiscoverResult`,
+  `DiscoveredHook`, `HookOrigin` (`user|repository|plugin|policy`, incl.
+  "repository hook directory"), `SessionLoadDeferredRepoHooks*`, and
+  `PermissionDecisionDeniedByPermissionRequestHook`; and in both Adobe docs
+  (migration guide: "Copilot loads hooks from `.github/hooks/*.json`"; terminology
+  map: "14 events … payloads differ").
+- **Two hook surfaces, one event vocabulary.** `api.schema.json`'s `HookType`
+  note: *"Discovery emits the file-configurable subset; SDK callbacks additionally
+  support callback-only events."* (a) **File-configurable / discovered hooks**
+  (`.github/hooks/*.json`) — the declarative path jig renders into. (b) SDK
+  **callback** hooks via a Node `extension.mjs` + `joinSession({hooks})` over
+  JSON-RPC (`copilot-sdk/docs/extensions.md`) — a *separate, more-powerful*
+  mechanism jig does **not** need. My first pass found only (b) and wrongly
+  concluded (a) was absent; the api-schema + Adobe docs correct that.
+- **`HookType` events (17 in schema; ~14 file-configurable per the Adobe map),
+  camelCase:** `preToolUse`, `preMcpToolCall`, `postToolUse`, `postToolUseFailure`,
+  `userPromptSubmitted`, `userPromptTransformed`, `sessionStart`, `sessionEnd`,
+  `postResult`, `prePRDescription`, `errorOccurred`, `agentStop`,
+  `subagentStart`, `subagentStop`, `preCompact`, `permissionRequest`,
+  `notification`. Claude is PascalCase → an event-name map is needed.
+- **Response schema is Claude-adjacent** (maps cleanly): the output types carry
+  `permissionDecision?: "allow"|"deny"|"ask"`, `permissionDecisionReason?`,
+  `additionalContext?`, `suppressOutput?`, and agent-stop `{decision:"block",
+  reason}` ("Claude-compatible `stop_hook_active` semantics"). Enforcing gates keep
+  teeth via a `permissionRequest`/`preToolUse` hook that denies
+  (`PermissionDecisionDeniedByPermissionRequestHook` = `kind:
+  "denied-by-permission-request-hook"`, `message`, `interrupt`). Payloads/response
+  differ from Claude's in detail → per-hook translation + testing required (the
+  ADR's mapped-or-unmappable inventory invariant), but the shape is translatable,
+  not alien.
 - Instructions home: **`.github/copilot-instructions.md`** (`copilot init`
   generates it; `copilot instruction list` inspects sources). Copilot also reads
   `CLAUDE.md`/`AGENTS.md`, so the copilot package should emit **one** canonical
   instructions file to avoid double-load. MCP: `.mcp.json` or `.github/mcp.json`.
 
-**AC5 — Internal seam-fit (VERIFIED; the decisive architectural result).**
-- jig's current seam `HostRenderer.translate_hook_protocol(logical_result: dict)
-  -> dict` (`skills/scaffold-init/scaffold.py:1076`) is defined once, concretely,
-  on `ClaudeScaffoldRenderer`; `CodexScaffoldRenderer(ClaudeScaffoldRenderer)`
-  **inherits it unchanged** (confirmed: only the abstract stub at :1034 and the
-  Claude impl at :1076 exist). It assumes the Claude/Codex model: hooks are shell
-  scripts wired in `settings.json`, and "protocol translation" is a
-  response-schema **dict remap**.
-- **Copilot does not fit that seam as "just a third subclass."** (Frame-critique
-  secondary finding CONFIRMED.) Copilot needs a **new renderer responsibility**:
-  emit `.github/extensions/jig/extension.mjs` that registers `SessionHooks`
-  handlers, each shelling out to the existing `hooks/scripts/jig-*.sh` bash
-  scripts, capturing exit-code + stdout, and mapping to the Copilot `HookOutput`
-  object (exit 2 → `permissionDecision:"deny"` + `permissionDecisionReason`;
-  stdout `additionalContext` → `additionalContext`; agent-stop block →
-  `{decision:"block", reason}`). This is a **bridge/adapter generator**, not a
-  dict remap and not `.github/hooks/*.json`.
-- **Minimal seam change (113-02 entry condition):** add a hook-**emission** seam
-  to `HostRenderer` (e.g. `emit_hooks(pkg_dir)` / `render_hook_delivery`) — Claude
-  & Codex implement it as their existing `settings.json` hooks block (refactor
-  current behavior behind the method); Copilot implements it as
-  `extension.mjs` + the bash-bridge. Keep `translate_hook_protocol` for the
-  reusable logical-decision → host-output field mapping. This is a genuine
-  reshape of the abstraction, not a subclass drop-in.
+**AC5 — Internal seam-fit (VERIFIED; the seam extends — corrected).**
+- jig's seam `HostRenderer.translate_hook_protocol(logical_result: dict) -> dict`
+  (`skills/scaffold-init/scaffold.py:1076`) is defined once on
+  `ClaudeScaffoldRenderer`; `CodexScaffoldRenderer` inherits it unchanged (only the
+  abstract stub :1034 + the Claude impl :1076 exist). It maps a hook's logical
+  decision → the host's response-schema dict.
+- **The seam extends to Copilot as a third subclass — no abstraction reshape.**
+  Because Copilot's file-configurable hooks reuse the Claude-adjacent decision
+  vocabulary, `CopilotScaffoldRenderer.translate_hook_protocol` is a genuine
+  response-schema remap (the method's designed purpose), plus a
+  Claude-PascalCase → Copilot-camelCase **event-name** map. The renderer emits
+  `hosts/copilot/.github/hooks/*.json` referencing the existing
+  `hooks/scripts/jig-*.sh` bash scripts — exactly ADR-0061's committed
+  `translate_hook_protocol` + `.github/hooks/*.json` layout.
+- **113-02 entry note (design, not blocker):** the event-name map + the
+  `.github/hooks/*.json` file emission are companions to `translate_hook_protocol`
+  (which handles the response fields); one method vs. a small helper is an ordinary
+  implementation choice, not an abstraction-breaking reshape. **The frame-critique's
+  seam-fit question is answered: the seam fits.** _(Correction: my first pass
+  claimed the seam did NOT fit and needed an `extension.mjs` bridge — that was a
+  consequence of the wrong hook-mechanism finding, now retracted.)_
 
-**Outcome:** `spec 113-02..06 unblocked (verified shape)`;
-**`ADR-0061 amendment REQUIRED`** — the hook-delivery mechanism in the Recommended
-Decision (layout `hooks/*.json`; `translate_hook_protocol` as the sole hook seam)
-is contradicted by the shipped CLI (hooks = `extension.mjs` SDK handlers). Per
-spike AC4 + ADR-0010 (records need an owner-approved `## Amendments` entry) the
-contradiction is **surfaced for owner approval, not silently absorbed** — see the
-session hand-off. Two Adobe-guide "hard failures" (`:` names, >1024 desc) did
-**not** reproduce and are downgraded.
+**Outcome:** `spec 113-02..06 unblocked (verified shape)`; **`ADR-0061 CONFIRMED
+— no amendment`.** Every load-bearing ADR premise holds against the shipped CLI
+1.0.84 + the Adobe migration/terminology guides: file-configurable hooks at
+`.github/hooks/*.json` translated via `translate_hook_protocol` (event-name map +
+Claude-adjacent response schema); `.github/` durable home; `/plugin` Claude-format
+install; `.github/agents/*.agent.md`; and the loader-compat invariant (`:`-free
+names + ≤1024-char descriptions — `memory-sync`/`vision-elicitation` need
+shortening). Net-new verified detail for downstream DoR: install via a **repo
+subdirectory** (`copilot plugin install ramboz/jig:hosts/copilot`, no separate
+marketplace); manifest `.plugin/plugin.json`; the 17-name `HookType` enum +
+`PermissionDecisionDeniedByPermissionRequestHook` deny path; a *second* SDK
+`extension.mjs` callback surface jig does **not** need.
+
+_Correction note (owner challenge): this session's **first** spike pass wrongly
+reported an ADR contradiction ("hooks = `extension.mjs` only") after inspecting
+only the SDK authoring docs (`copilot-sdk/docs/extensions.md` + `types.d.ts`) plus
+an unreliable native-binary grep. Re-checking the Adobe docs and the CLI's own
+`schemas/api.schema.json` (`HookType`/`DiscoveredHook`/`HookOrigin`) established the
+file-configurable `.github/hooks/*.json` path. Lesson: an authoring SDK's docs
+describe one surface; do not infer a mechanism's absence from a subsystem's docs +
+an unreliable binary grep, and defer to the authoritative product docs. Recorded
+to memory._
 
 **DoR:**
 - ✅ ADR-0061 recorded (Proposed).
