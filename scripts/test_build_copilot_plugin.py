@@ -107,16 +107,17 @@ class CopilotPackageContentsTests(unittest.TestCase):
         ]
         self.assertEqual(leaks, [])
 
-    def test_package_is_exactly_manifest_and_skills(self):
-        # 113-02 walking-skeleton layout: `.plugin/plugin.json` +
-        # `.github/skills/**`, nothing else at the `.github/` top level.
+    def test_package_is_exactly_manifest_skills_and_agents(self):
+        # 113-03 grows the 113-02 walking skeleton by one thing: rendered
+        # agents under `.github/agents/`. `.plugin/plugin.json` +
+        # `.github/{skills,agents}/**` — still nothing else at the
+        # `.github/` top level (113-04/05 add `.github/hooks/` later).
         github_dir = self.out_dir / ".github"
         top_level = {p.name for p in github_dir.iterdir()}
-        self.assertEqual(top_level, {"skills"})
+        self.assertEqual(top_level, {"skills", "agents"})
 
-    # Walking-skeleton scope guard (113-03/04/05 build these later)
-    def test_agents_and_hooks_not_yet_shipped(self):
-        self.assertFalse((self.out_dir / ".github" / "agents").exists())
+    # Walking-skeleton scope guard (113-04/05 build hooks later)
+    def test_hooks_not_yet_shipped(self):
         self.assertFalse((self.out_dir / ".github" / "hooks").exists())
 
     def test_excludes_tests_and_caches(self):
@@ -227,6 +228,146 @@ class SyntheticOverBudgetDescriptionTests(unittest.TestCase):
         )
         with self.assertRaises(scaffold_mod.CopilotSkillNameError):
             build_copilot_plugin.render_copilot_skill_md(source)
+
+
+class CopilotAgentPackagingTests(unittest.TestCase):
+    """Slice 113-03 (agents) — the 3 jig custom agents render into
+    `.github/agents/<name>.agent.md`.
+
+    AC #1: agents rendered, frontmatter mapped to Copilot's tool vocabulary.
+    AC #2: no rendered agent emits a `model:` field or leaks a
+    Claude-specific model id.
+    AC #3: the rendered reviewer keeps its read-only tool restriction.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-agents-"))
+        self.out_dir = self.tmp / "copilot"
+        code, self.log = _build(self.out_dir)
+        self.assertEqual(code, 0, self.log)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _agents_dir(self) -> Path:
+        return self.out_dir / ".github" / "agents"
+
+    def _agent_tools(self, name: str) -> list:
+        text = (self._agents_dir() / f"{name}.agent.md").read_text()
+        fields, _ = scaffold_mod.parse_frontmatter(text)
+        return fields.get("tools", [])
+
+    # AC #1
+    def test_all_three_agents_render_under_github_agents(self):
+        names = sorted(p.name for p in self._agents_dir().glob("*.agent.md"))
+        self.assertEqual(
+            names,
+            ["architect.agent.md", "implementer.agent.md", "reviewer.agent.md"],
+        )
+
+    def test_agent_frontmatter_has_name_description_and_tools(self):
+        for name in ("architect", "implementer", "reviewer"):
+            text = (self._agents_dir() / f"{name}.agent.md").read_text()
+            fm, _ = scaffold_mod._split_frontmatter(text)
+            self.assertIn(f"name: {name}", fm)
+            self.assertIn("description:", fm)
+            self.assertIn("tools:", fm)
+
+    def test_agent_body_ships_verbatim_from_source(self):
+        for name in ("architect", "implementer", "reviewer"):
+            source_body = scaffold_mod._split_frontmatter(
+                (REPO_ROOT / "agents" / f"{name}.md").read_text()
+            )[1]
+            rendered_body = scaffold_mod._split_frontmatter(
+                (self._agents_dir() / f"{name}.agent.md").read_text()
+            )[1]
+            self.assertEqual(rendered_body.strip(), source_body.strip())
+
+    def test_agent_tools_use_copilot_vocabulary_not_claude_names(self):
+        # Every rendered tool name must come out of the Copilot mapping
+        # table's VALUES — no leftover Claude-cased tool name (Read/Write/
+        # Edit/Bash/Glob/Grep/WebSearch) survives the render.
+        claude_names = set(scaffold_mod.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS)
+        for name in ("architect", "implementer", "reviewer"):
+            tools = self._agent_tools(name)
+            self.assertTrue(tools, f"{name} rendered with no tools")
+            self.assertFalse(
+                claude_names.intersection(tools),
+                f"{name} leaked a Claude-cased tool name: {tools}",
+            )
+
+    # AC #2
+    def test_no_rendered_agent_emits_a_model_field(self):
+        for path in self._agents_dir().glob("*.agent.md"):
+            fm, _ = scaffold_mod._split_frontmatter(path.read_text())
+            self.assertNotIn("model:", fm, path.name)
+
+    def test_no_claude_specific_model_id_leaks_into_any_rendered_agent(self):
+        forbidden = ("opus", "sonnet", "claude-")
+        for path in self._agents_dir().glob("*.agent.md"):
+            text = path.read_text().lower()
+            for token in forbidden:
+                self.assertNotIn(token, text, f"{path.name} leaked {token!r}")
+
+    # AC #3
+    def test_reviewer_carries_zero_mutating_tools(self):
+        tools = self._agent_tools("reviewer")
+        for mutating in ("create", "edit", "write", "shell", "bash", "fetch"):
+            self.assertNotIn(mutating, tools, f"reviewer must stay read-only: {tools}")
+
+    def test_reviewer_keeps_its_read_only_tool_trio(self):
+        self.assertEqual(sorted(self._agent_tools("reviewer")), ["glob", "grep", "view"])
+
+    def test_reviewer_prompt_still_states_read_only_access(self):
+        text = (self._agents_dir() / "reviewer.agent.md").read_text()
+        self.assertIn("Read-only access only", text)
+
+    def test_implementer_keeps_its_write_and_edit_capable_tools(self):
+        tools = self._agent_tools("implementer")
+        self.assertEqual(
+            sorted(tools), sorted(["view", "create", "edit", "bash", "glob", "grep"])
+        )
+
+    def test_architect_is_read_only_plus_fetch(self):
+        tools = self._agent_tools("architect")
+        self.assertEqual(sorted(tools), sorted(["view", "glob", "grep", "fetch"]))
+
+
+class ClaudeCodexAgentOutputUnaffectedByCopilotAgentRenderingTests(unittest.TestCase):
+    """Slice 113-03 design decision #5 — rendering Copilot agents must not
+    touch the Claude/Codex agent source or their own committed outputs."""
+
+    def test_canonical_source_agents_directory_untouched(self):
+        # The Copilot builder reads FROM agents/*.md; it must never write
+        # back into the canonical source tree the Claude/Codex builders also
+        # read from.
+        before = {
+            p: p.read_bytes() for p in (REPO_ROOT / "agents").glob("*.md")
+        }
+        tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-agents-noimpact-"))
+        try:
+            code, log = _build(tmp / "copilot")
+            self.assertEqual(code, 0, log)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        after = {p: p.read_bytes() for p in (REPO_ROOT / "agents").glob("*.md")}
+        self.assertEqual(before, after)
+
+    def test_committed_codex_agent_toml_unaffected(self):
+        codex_agent = (
+            REPO_ROOT / "hosts" / "codex" / "plugins" / "jig" / "agents"
+            / "jig-reviewer.toml"
+        )
+        if not codex_agent.is_file():
+            self.skipTest("committed hosts/codex package not built in this checkout")
+        before = codex_agent.read_bytes()
+        tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-agents-codex-noimpact-"))
+        try:
+            code, log = _build(tmp / "copilot")
+            self.assertEqual(code, 0, log)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self.assertEqual(codex_agent.read_bytes(), before)
 
 
 class DescriptionFieldEncodingTests(unittest.TestCase):
@@ -345,6 +486,16 @@ class CommittedCopilotPackageTests(unittest.TestCase):
             (pkg / ".github" / "skills" / "scaffold-init" / "SKILL.md").is_file(),
             "committed hosts/copilot skills missing",
         )
+
+    def test_committed_agents_present(self):
+        # 113-03: agents/ joins the committed package.
+        pkg = REPO_ROOT / "hosts" / "copilot"
+        for name in ("architect", "implementer", "reviewer"):
+            self.assertTrue(
+                (pkg / ".github" / "agents" / f"{name}.agent.md").is_file(),
+                f"committed hosts/copilot agent missing: {name} — run "
+                "`python3 scripts/build_host_packages.py`",
+            )
 
     def test_no_pre_rendered_instructions_file_committed(self):
         # 113-02 review fix: no pre-rendered instructions file ships.

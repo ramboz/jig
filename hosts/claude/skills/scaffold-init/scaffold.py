@@ -27,6 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import project_layout
 from _common.atomic_io import atomic_write_text
 
+# Slice 113-03 (agents): reuses the SAME `tools:` block-list parser
+# `land.py`/`workflow.py`'s frontmatter reads already depend on, rather than
+# writing a second one just to read a source agent's `tools:` list.
+from _common.parsing import parse_frontmatter
+
 # Sibling module in this same skill dir. Insert THIS dir on sys.path so the
 # import resolves no matter how scaffold.py is loaded — as a script (dir already
 # on sys.path), as a namespace-package import, or via importlib
@@ -285,6 +290,15 @@ class CopilotSkillNameError(RuntimeError):
     skill loader rejects a namespace-unsafe name (spike 113-01 AC2 /
     ADR-0061). jig source names are already colon-free (0/20 probed at spike
     time); this guards against regression rather than papering over one."""
+
+
+class CopilotAgentToolError(RuntimeError):
+    """Raised when a source agent's `tools:` frontmatter names a Claude tool
+    absent from `CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS` (slice
+    113-03). A closed, hand-verified mapping — an unmapped tool is a source
+    drift to fix (a new Claude tool added to `agents/*.md` with no Copilot
+    counterpart decided yet), not something to silently drop or pass
+    through unmapped into a rendered `.agent.md`."""
 
 
 class LooksAlreadySpecDrivenError(RuntimeError):
@@ -1687,6 +1701,127 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
                 "rejects namespace-unsafe names; fix the source SKILL.md "
                 "'name:' field"
             )
+
+    # Slice 113-03 (agents) — the Claude -> Copilot custom-agent tool-name
+    # vocabulary, hand-verified against the installed `copilot` 1.0.84-9 CLI
+    # (spike 113-01 AC3 resolved the AGENT FILE FORM — `.agent.md` +
+    # name/description/tools/prompt frontmatter — but not this vocabulary,
+    # which is internal to the shipped binary and undocumented in the Adobe
+    # guides). Evidence:
+    #   - `copilot-sdk/docs/agent-author.md`: "Modify the generated
+    #     extension.mjs using `edit` or `create` tools" — confirms `edit`
+    #     and `create` as the two file-mutation tool names (Copilot splits
+    #     Claude's single `Write` into "make a new file" (`create`) vs.
+    #     "modify an existing one" (`edit`); jig's agents already list both
+    #     Claude tools separately, so this is a clean 1:1, not a fan-out).
+    #   - The shipped `app.js`'s tool-kind switch statements: literal
+    #     `case"view"`/`case"create"`/`case"edit"`/`case"glob"`/`case"grep"`/
+    #     `case"web_fetch":case"fetch"` — confirms `view` (not `read`) is the
+    #     file-read tool name, and `fetch` (with `web_fetch` as a legacy
+    #     alias) the URL-fetch tool.
+    #   - `definitions/explore.agent.yaml` — the ONE shipped built-in agent
+    #     with a genuinely restrictive (non-`"*"`) `tools:` allowlist:
+    #     `grep`, `glob`, `view`, `bash`, `read_bash`, `stop_bash`,
+    #     `powershell`, `read_powershell`, `stop_powershell`, `lsp`, plus
+    #     namespaced MCP tools. Confirms `bash` (not `shell`) as the real,
+    #     loadable shell-exec tool name.
+    #   - CORRECTION vs. an initial "Bash -> shell" guess: `shell` DOES
+    #     appear in the shipped binary, but only as (a) the CLI's own
+    #     `--allow-tool`/`--deny-tool` SESSION-PERMISSION flag syntax
+    #     (`copilot --help`'s own example: `--allow-tool='shell(git:*)'`) and
+    #     (b) an internal permission-request "kind" category grouping
+    #     `commands`/shell execution for allow/deny prompts — a coarser,
+    #     DIFFERENT vocabulary than the concrete tool-implementation names an
+    #     agent's `tools:` frontmatter allowlist actually loads. No shipped
+    #     `tools:` list (custom or built-in) uses the literal string
+    #     `"shell"`; `explore.agent.yaml` is the only real, working
+    #     restrictive example, and it uses `bash`.
+    #   - Did NOT verify live agent-load / live tool-call denial: the CLI has
+    #     no non-interactive `agent list`/`agent inspect` command analogous
+    #     to `copilot skill list` (113-02's AC4 evidence source), and
+    #     provoking a denied tool call would need a live, credit-consuming
+    #     `--agent ... -p` session. This mapping rests on the structural
+    #     evidence above (the shipped agent-author guide + the one real
+    #     restrictive built-in example + the tool-kind switch statements),
+    #     not a live-session confirmation.
+    CLAUDE_TO_COPILOT_TOOLS = {
+        "Read": "view",
+        "Glob": "glob",
+        "Grep": "grep",
+        "Write": "create",
+        "Edit": "edit",
+        "Bash": "bash",
+        "WebSearch": "fetch",
+    }
+
+    @classmethod
+    def copilot_tool_names(cls, claude_tools: list) -> list:
+        """Map a jig source agent's Claude `tools:` list to Copilot's
+        tool-name vocabulary (`CLAUDE_TO_COPILOT_TOOLS`), preserving order.
+        Raises `CopilotAgentToolError` on any name absent from that mapping
+        — a render-layer guard, not a transform, mirroring
+        `assert_namespace_safe_name`'s stance: an unmapped tool is a source
+        defect (or an un-updated mapping) to fix, never silently dropped or
+        passed through unmapped."""
+        mapped = []
+        for tool in claude_tools:
+            try:
+                mapped.append(cls.CLAUDE_TO_COPILOT_TOOLS[tool])
+            except KeyError as exc:
+                raise CopilotAgentToolError(
+                    f"no Copilot tool mapping for Claude tool {tool!r} — add "
+                    "an entry to CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS"
+                ) from exc
+        return mapped
+
+    @staticmethod
+    def copilot_agent_file_name(name: str) -> str:
+        """`<name>.agent.md` — the committed custom-agent file shape spike
+        113-01 AC3 verified against the shipped CLI. Bare-named, with NO
+        `jig-` prefix: unlike Codex (`CodexScaffoldRenderer.
+        codex_agent_file_name` prefixes `jig-` because Codex's custom-agent
+        namespace is global/user-scoped), Copilot agents live under this
+        package's own `.github/agents/` — the same bare-name convention
+        113-02 already established for `.github/skills/<name>/`."""
+        return f"{Path(name).stem}.agent.md"
+
+    @classmethod
+    def render_copilot_agent(cls, agent: Path) -> str:
+        """Render one `agents/<name>.md` source agent to Copilot's
+        `.agent.md` form (spike 113-01 AC3): YAML frontmatter carrying
+        `name`, `description`, and `tools` (mapped via
+        `copilot_tool_names`), plus the source Markdown body AS-IS as the
+        agent prompt.
+
+        Design decisions (113-03):
+          - No `model` field is ever written (AC2 — model selection defers
+            to Copilot's own `/model`; jig's source agents carry no `model:`
+            field either, so there is nothing to read and nothing to emit).
+          - The body ships VERBATIM — unlike
+            `CodexScaffoldRenderer.rewrite_agent_body`, this does NOT rewrite
+            "Claude"/"CLAUDE.md" vocabulary. Any leftover
+            `${CLAUDE_PLUGIN_ROOT}`-shaped text is the same deferred,
+            documented gap 113-02 left in skill bodies — a later slice's
+            concern, not one this render invents a fix for.
+        """
+        source = agent.read_text(encoding="utf-8")
+        fields, body_offset = parse_frontmatter(source)
+        body = source[body_offset:]
+        name = fields.get("name", "") or agent.stem
+        description = fields.get("description", "") or name
+        claude_tools = fields.get("tools", [])
+        if isinstance(claude_tools, str):
+            claude_tools = [claude_tools] if claude_tools else []
+        copilot_tools = cls.copilot_tool_names(claude_tools)
+        tools_block = "".join(f"  - {tool}\n" for tool in copilot_tools)
+        new_frontmatter = (
+            "---\n"
+            f"name: {name}\n"
+            f"description: {json.dumps(description, ensure_ascii=False)}\n"
+            f"tools:\n{tools_block}"
+            "---\n"
+        )
+        return new_frontmatter + "\n" + body.lstrip("\n")
 
     def phase_mode_substitutions(self) -> dict[str, str]:
         return {

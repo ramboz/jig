@@ -209,5 +209,156 @@ class AgentFrontmatterValueHoistedOntoHostRendererTests(unittest.TestCase):
         )
 
 
+class ClaudeToCopilotToolMappingTests(unittest.TestCase):
+    """Slice 113-03 (agents) — the Claude->Copilot tool-name vocabulary.
+
+    Verified against the installed `copilot` 1.0.84-9 CLI: the shipped
+    `app.js` tool-kind switch statements (`case"view"`/`case"create"`/
+    `case"edit"`/`case"glob"`/`case"grep"`/`case"web_fetch":case"fetch"`),
+    the ONE shipped built-in custom agent with a genuinely restrictive
+    (non-`"*"`) `tools:` allowlist (`definitions/explore.agent.yaml`, which
+    lists `bash`/`read_bash`/`stop_bash`/`powershell`/... — never `shell`),
+    and the bundled `copilot-sdk/docs/agent-author.md` ("Modify ... using
+    `edit` or `create` tools"). `shell` is a DIFFERENT, coarser vocabulary —
+    confirmed via `copilot --help`'s own `--allow-tool='shell(git:*)'`
+    example — for the CLI's session-level permission-category flags, not
+    this custom-agent frontmatter `tools:` allowlist; using it here would be
+    an unverified guess dressed as a citation."""
+
+    def test_read_maps_to_view(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Read"], "view"
+        )
+
+    def test_glob_maps_to_glob(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Glob"], "glob"
+        )
+
+    def test_grep_maps_to_grep(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Grep"], "grep"
+        )
+
+    def test_write_maps_to_create(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Write"], "create"
+        )
+
+    def test_edit_maps_to_edit(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Edit"], "edit"
+        )
+
+    def test_bash_maps_to_bash_not_shell(self):
+        # Deliberate correction vs. an unverified "Bash -> shell" guess —
+        # see the class docstring.
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["Bash"], "bash"
+        )
+
+    def test_websearch_maps_to_fetch(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_TOOLS["WebSearch"],
+            "fetch",
+        )
+
+    def test_copilot_tool_names_maps_a_list_preserving_order(self):
+        result = scaffold.CopilotScaffoldRenderer.copilot_tool_names(
+            ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch"]
+        )
+        self.assertEqual(
+            result, ["view", "create", "edit", "bash", "glob", "grep", "fetch"]
+        )
+
+    def test_copilot_tool_names_empty_list_is_a_no_op(self):
+        self.assertEqual(scaffold.CopilotScaffoldRenderer.copilot_tool_names([]), [])
+
+    def test_unmapped_tool_raises(self):
+        with self.assertRaises(scaffold.CopilotAgentToolError):
+            scaffold.CopilotScaffoldRenderer.copilot_tool_names(["NotARealClaudeTool"])
+
+
+class RenderCopilotAgentTests(unittest.TestCase):
+    """Slice 113-03 (agents) — `CopilotScaffoldRenderer.render_copilot_agent`
+    against a synthetic fixture (isolates the render from source-agent
+    drift; real 3-agent end-to-end coverage lives in
+    scripts/test_build_copilot_plugin.py)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-copilot-agent-render-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_fixture(self, tools):
+        text = (
+            "---\n"
+            "name: fixture-agent\n"
+            "description: A fixture agent for render tests.\n"
+            "tools:\n"
+            + "".join(f"  - {t}\n" for t in tools)
+            + "---\n\n"
+            "You are a fixture agent.\n"
+            "Second body line.\n"
+        )
+        path = self.tmp / "fixture-agent.md"
+        path.write_text(text)
+        return path
+
+    def test_renders_name_description_and_mapped_tools(self):
+        path = self._write_fixture(["Read", "Glob", "Grep"])
+        rendered = scaffold.CopilotScaffoldRenderer.render_copilot_agent(path)
+        fm, body = scaffold._split_frontmatter(rendered)
+        self.assertIn("name: fixture-agent", fm)
+        self.assertIn('description: "A fixture agent for render tests."', fm)
+        self.assertIn("tools:\n  - view\n  - glob\n  - grep\n", fm)
+        self.assertIn("You are a fixture agent.", body)
+
+    def test_never_emits_a_model_field(self):
+        path = self._write_fixture(["Read"])
+        rendered = scaffold.CopilotScaffoldRenderer.render_copilot_agent(path)
+        fm, _ = scaffold._split_frontmatter(rendered)
+        self.assertNotIn("model:", fm)
+
+    def test_body_ships_verbatim_from_source(self):
+        # `.strip()` on both sides: the one blank line separating the closing
+        # frontmatter fence from the body (present in both the fixture and
+        # the render, matching every real `agents/*.md` source file's own
+        # shape) is formatting, not body content to pin exactly.
+        path = self._write_fixture(["Read"])
+        rendered = scaffold.CopilotScaffoldRenderer.render_copilot_agent(path)
+        _, body = scaffold._split_frontmatter(rendered)
+        self.assertEqual(
+            body.strip(), "You are a fixture agent.\nSecond body line."
+        )
+
+    def test_raises_on_an_unmapped_source_tool(self):
+        path = self._write_fixture(["NotARealClaudeTool"])
+        with self.assertRaises(scaffold.CopilotAgentToolError):
+            scaffold.CopilotScaffoldRenderer.render_copilot_agent(path)
+
+
+class CopilotAgentFileNameTests(unittest.TestCase):
+    """Slice 113-03 — the committed file shape (spike 113-01 AC3:
+    `.github/agents/<name>.agent.md`), bare-named (no `jig-` prefix, unlike
+    Codex's global-namespace `jig-<role>.toml`) since Copilot agents/skills
+    both ship bare-named under the plugin's own `.github/` tree already
+    (113-02 ships skills this way)."""
+
+    def test_agent_file_name_has_agent_md_suffix(self):
+        self.assertEqual(
+            scaffold.CopilotScaffoldRenderer.copilot_agent_file_name("architect.md"),
+            "architect.agent.md",
+        )
+
+    def test_agent_file_name_has_no_jig_prefix(self):
+        result = scaffold.CopilotScaffoldRenderer.copilot_agent_file_name(
+            "reviewer.md"
+        )
+        self.assertFalse(result.startswith("jig-"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -353,8 +353,10 @@ overriding only what diverges and adding a **loader-compat invariant**: every
 emitted Copilot skill gets a `:`-free name and a ≤1024-char description, full text
 preserved in the SKILL.md body, so no source skill silently fails Copilot's loader).
 The committed `hosts/copilot/` package renders into Copilot's `.github/` home
-(`.github/skills/<name>/SKILL.md` + `.plugin/plugin.json`; agents, hooks, and the
-release archive land across slices 113-03..06). Claude
+(`.github/skills/<name>/SKILL.md`, `.github/agents/<name>.agent.md` — model-neutral,
+with a Claude→Copilot tool-name map and the reviewer's read-only allowlist preserved
+(spec 113-03) — and `.plugin/plugin.json`; hooks and the release archive land across
+slices 113-04..06). Claude
 scaffold mode writes `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
 `.claude/agents/`, `.claude/hooks/scripts/`, `.claude/templates/`, and
 `.claude/settings.json`. Codex scaffold mode writes `AGENTS.md`,

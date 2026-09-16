@@ -8,14 +8,16 @@ third committed host) the repository root stays canonical source and
 `copilot plugin install ramboz/jig:hosts/copilot` — a repo-subdirectory
 install, no build step and no separate marketplace (spike 113-01 AC1).
 
-Scope note (113-02 is a **walking skeleton**, not the full parity build):
-only skills and the plugin manifest ship here. Custom agents (113-03), hook
-translation (`.github/hooks/*.json`, 113-04/05), and the release zip
-(113-06) are deliberately NOT built yet — `CopilotScaffoldRenderer` inherits
+Scope note (113-02 shipped a **walking skeleton**; 113-03 grows it by one
+thing — custom agents): skills, the plugin manifest, and now `agents/*.md`
+(rendered to `.github/agents/<name>.agent.md`) ship here. Hook translation
+(`.github/hooks/*.json`, 113-04/05) and the release zip (113-06) are still
+deliberately NOT built — `CopilotScaffoldRenderer` inherits
 `translate_hook_protocol`/`bind_paths` unexercised from
 `ClaudeScaffoldRenderer` until those slices verify Copilot's plugin-root env
-var and hook schema. Skill bodies therefore ship Claude-native (no path
-rewriting) — a documented, deliberate 113-02 gap, not an oversight.
+var and hook schema. Skill bodies (and agent prompt bodies) still ship
+Claude-native (no path rewriting) — the same documented, deliberate gap
+113-02 opened, not an oversight.
 
 113-02 review fix (owner decision): the package does NOT ship a
 pre-rendered `.github/copilot-instructions.md` either. Parity ruling:
@@ -176,6 +178,28 @@ def _copy_skills(source_root: Path, output_dir: Path) -> None:
                 dst.write_bytes(entry.read_bytes())
 
 
+def _render_agents(source_root: Path, output_dir: Path) -> None:
+    """Render jig's 3 canonical `agents/*.md` role prompts into Copilot's
+    committed custom-agent form (slice 113-03): `.github/agents/<name>.
+    agent.md`, mirroring `_copy_skills`'s "read canonical source, render, and
+    write into the Copilot-shaped tree" pattern. Reuses the SAME source
+    `agents/` directory the Claude/Codex builders read — no forked agent
+    source, matching `_render_codex_agent_templates`'s own precedent."""
+    agents_src = source_root / "agents"
+    if not agents_src.is_dir():
+        return
+    agents_dst = output_dir / ".github" / "agents"
+    agents_dst.mkdir(parents=True, exist_ok=True)
+    for agent in sorted(agents_src.glob("*.md")):
+        dst = agents_dst / scaffold_mod.CopilotScaffoldRenderer.copilot_agent_file_name(
+            agent.name
+        )
+        dst.write_text(
+            scaffold_mod.CopilotScaffoldRenderer.render_copilot_agent(agent),
+            encoding="utf-8",
+        )
+
+
 def _write_manifest(output_dir: Path, version: str) -> None:
     """Write `.plugin/plugin.json` — the minimal manifest shape spike 113-01
     AC1 verified against the shipped Copilot CLI: `{name, version,
@@ -278,6 +302,7 @@ def build(source_root: Path, output_dir: Path, out=None) -> int:
     output_dir.mkdir(parents=True)
 
     _copy_skills(source_root, output_dir)
+    _render_agents(source_root, output_dir)
     _write_manifest(output_dir, version)
 
     out.write(f"OK: built Copilot plugin at {output_dir}\n")

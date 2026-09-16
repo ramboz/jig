@@ -1,9 +1,8 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [113-01, adr-0061]
 last_verified: 2026-09-15
 arch_review: true  # this slice adds a HostRenderer subclass + dispatch wiring
-claimed_by: claude/adr-0061-spec-113-jig-874db3
 ---
 
 ## Slice 113-02 — renderer-and-skeleton
