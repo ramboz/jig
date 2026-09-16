@@ -341,7 +341,7 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-02 — renderer-and-skeleton | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-03 — agents | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | **DONE** |  |
-| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | DRAFT |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-06 — committed-package-and-release | DRAFT |  |
 
 ## Deferred slices
@@ -385,7 +385,7 @@
 Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/slice-*.md` `substrate:` fields.
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
-- **21** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
+- **23** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
 - **7** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
