@@ -1,9 +1,8 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [113-08]
 last_verified: 2026-09-16
 arch_review: true
-claimed_by: copilot-plugin-audit
 ---
 
 ## Slice 113-09 — conversational-hook-parity
