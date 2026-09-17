@@ -2,7 +2,7 @@
 validate_manifests.py — slice 013-01 (ci-baseline);
 strengthened in slice 047-01 (plugin-release-contract-validator).
 
-Validates that the three top-level JSON manifests in jig's repo are present,
+Validates that jig's package manifests and hook registry are present,
 well-formed, and satisfy the install contract. Designed to run in CI before
 release-please or zip packaging touches them, so a malformed manifest is
 caught at PR review time instead of breaking the release pipeline.
@@ -15,6 +15,8 @@ Files checked (slice 047-01 routes the real manifest schemas through
     .claude-plugin/marketplace.json  — name, owner.name, non-empty plugins[]
                                        (each name/source/description with a
                                        relative source path)
+    .github/plugin/marketplace.json — Copilot marketplace metadata pointing
+                                      at the committed Copilot package
     hooks/hooks.json                 — parseable JSON; command shape is
                                        validated by verify_install's
                                        hook-contract check, which needs the
@@ -63,6 +65,10 @@ _MANIFESTS: tuple[ManifestSpec, ...] = (
     ManifestSpec(
         ".claude-plugin/marketplace.json",
         validator=install_contract.validate_marketplace_manifest,
+    ),
+    ManifestSpec(
+        ".github/plugin/marketplace.json",
+        validator=install_contract.validate_copilot_marketplace_manifest,
     ),
     ManifestSpec("hooks/hooks.json"),
 )

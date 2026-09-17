@@ -205,7 +205,7 @@ scan reads as complete. It is a **two-level coverage floor** (ADR-0024 §2–§3
   - live-prose docs under the docs root (`product-vision.md`, `architecture.md`,
     `workflow.md`, `README`-style guides, roadmap, glossary)
   - `skills/*/SKILL.md`
-  - the root primer(s) (`CLAUDE.md` / `AGENTS.md`)
+  - the root primer(s) (`AGENTS.md` / `AGENTS.md`)
   - `README`
 
   L1 covers the **authority-bearing corpus** — decisions, specs, and the prose /

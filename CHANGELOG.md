@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.15.2](https://github.com/ramboz/jig/compare/v2.15.1...v2.15.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **copilot:** scaffold with Copilot host defaults ([#222](https://github.com/ramboz/jig/issues/222)) ([3e6faff](https://github.com/ramboz/jig/commit/3e6faff0612e5e58d532eb12f95230548e1acc76))
+
+## [2.15.1](https://github.com/ramboz/jig/compare/v2.15.0...v2.15.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **scaffold-init:** repair Copilot port runtime gaps ([#220](https://github.com/ramboz/jig/issues/220)) ([a51de9b](https://github.com/ramboz/jig/commit/a51de9ba865ee3c6e3047177e38539430d028639))
+
 ## [2.15.0](https://github.com/ramboz/jig/compare/v2.14.0...v2.15.0) (2026-09-16)
 
 

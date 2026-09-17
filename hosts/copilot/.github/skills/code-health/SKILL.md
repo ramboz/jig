@@ -24,7 +24,7 @@ user-invocable: true
 > gracefully" framing. Like `tdd.py`, the deterministic detection +
 > subprocess invocation live in `health.py`; this SKILL.md drives the
 > judgment layer. If another installed skill's description identifies it as
-> handling linting / static analysis / code quality, the Claude Code skill
+> handling linting / static analysis / code quality, the GitHub Copilot CLI skill
 > router prefers it — the deferral is **category-based**.
 
 ## What this skill does

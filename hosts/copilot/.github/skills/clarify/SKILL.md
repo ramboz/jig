@@ -19,7 +19,7 @@ user-invocable: true
 > is the sixth non-stub active jig skill that ships without a `.py`
 > helper — clarify is fundamentally a judgment skill, and the
 > determinism it needs (locate the target doc, find an existing
-> `## Clarifications` section if any, append new entries) Claude can
+> `## Clarifications` section if any, append new entries) Copilot can
 > run inline via Read + Edit. The skill slots between
 > `workflow.py new <slug>` (stub reservation) and the
 > `READY_FOR_REVIEW` transition (spec body ready for first review).

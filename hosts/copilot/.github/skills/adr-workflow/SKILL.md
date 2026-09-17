@@ -12,7 +12,7 @@ user-invocable: true
 ---
 
 > Spec 005 created this skill from scratch. The mechanics live in `adr.py`;
-> Claude owns the judgment (what the decision actually says).
+> Copilot owns the judgment (what the decision actually says).
 
 ## What this skill does
 
@@ -45,7 +45,7 @@ exercise. Five deterministic operations:
 - **`resolve-todo`** — strike through a `### Decision: ...` heading in
   `docs/refinement-todo.md` and append `**Resolved by:** [ADR-NNNN: ...](...)`.
 
-The script does file mutation deterministically. Claude is responsible for
+The script does file mutation deterministically. Copilot is responsible for
 the prose inside the ADR (Context, Options Considered, Recommended Decision,
 Consequences, Open questions).
 
@@ -135,7 +135,7 @@ local commit + the stranded ADR file from your working tree. Re-run
 the same `adr.py new <slug>` to pick the next free number — there
 is no auto-renumber.
 
-Then Claude fills in Context / Options Considered / Recommended Decision /
+Then Copilot fills in Context / Options Considered / Recommended Decision /
 Consequences. Keep it tight: one decision per ADR.
 
 ### 2. Accept the ADR
@@ -350,7 +350,7 @@ fits in one short clause).
 python3 .../adr.py new scaffold-stable --title "scaffold-stable trigger"
 # → docs/decisions/adr-0003-scaffold-stable.md
 
-# 3. Claude edits the file: fills Context, Options, Recommended, Consequences.
+# 3. Copilot edits the file: fills Context, Options, Recommended, Consequences.
 
 # 4. Preview the index BEFORE accept, while the ADR is still mutable.
 python3 .../adr.py index docs/decisions
@@ -415,7 +415,7 @@ which surface.
   and require a superseding ADR. Run `index` BEFORE `accept` as a preview
   pass to catch this while the ADR is still freely mutable.
 - **The helper does NOT spawn a Task or commit anything.** It only mutates
-  files. Claude is responsible for orchestration (e.g. running
+  files. Copilot is responsible for orchestration (e.g. running
   `workflow.py status-board` afterward, writing commit messages,
   invoking the reviewer subagent).
 - **Substring matching mirrors `workflow.py`.** `0001-01` does not collide

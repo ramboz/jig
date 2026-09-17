@@ -28,7 +28,7 @@ user-invocable: true
 > Like `/jig:clarify`, `/jig:pr-review`, and `/jig:arch-review`, explain is a
 > **judgment skill** — it ships **no `.py` helper**. The only determinism it
 > needs (load the merged lexicon, read the named artifact, resolve the refs it
-> links) Claude runs inline via Read + the 065-01 loader. The plain-language
+> links) Copilot runs inline via Read + the 065-01 loader. The plain-language
 > *quality* is judgment exercised by this prompt, not something a unit test can
 > assert — the same accepted shape as every judgment-only jig skill.
 

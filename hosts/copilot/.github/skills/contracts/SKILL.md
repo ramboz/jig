@@ -59,7 +59,7 @@ nudge; the dev decides whether to follow them.
   `schema-design`, `contract-first`, `api-contracts`, etc.) whose
   description claims external-interface contract artifacts, API schema
   design, or contract-first workflow will be preferred. If one is
-  present, **defer to it.** The Claude Code skill router should route
+  present, **defer to it.** The GitHub Copilot CLI skill router should route
   to the more specific skill automatically; if you want to be sure,
   explicitly invoke it.
 - **`/jig:arch-review`** — sibling jig skill that reviews the

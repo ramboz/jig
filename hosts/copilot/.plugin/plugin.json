@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "version": "2.15.0",
+  "version": "2.15.2",
   "description": "Spec-driven, review-enforced, hook-gated AI-native development workflow for GitHub Copilot CLI",
   "skills": ".github/skills",
   "agents": ".github/agents",

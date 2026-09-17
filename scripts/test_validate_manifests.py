@@ -76,6 +76,10 @@ def _seed_valid_repo(root: Path) -> None:
     (root / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps(_VALID_MARKETPLACE_JSON)
     )
+    (root / ".github" / "plugin").mkdir(parents=True)
+    (root / ".github" / "plugin" / "marketplace.json").write_text(
+        json.dumps(_VALID_MARKETPLACE_JSON)
+    )
     (root / "hooks").mkdir()
     (root / "hooks" / "hooks.json").write_text(json.dumps(_VALID_HOOKS_JSON))
 
@@ -104,7 +108,36 @@ class AllValidTests(unittest.TestCase):
             self.assertIn("plugin.json", text)
             self.assertIn(".codex-plugin/plugin.json", text)
             self.assertIn("marketplace.json", text)
+            self.assertIn(".github/plugin/marketplace.json", text)
             self.assertIn("hooks.json", text)
+
+    def test_missing_copilot_marketplace_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            (root / ".github" / "plugin" / "marketplace.json").unlink()
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertEqual(code, 1)
+            self.assertIn(".github/plugin/marketplace.json", out.getvalue())
+
+    def test_copilot_object_source_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_valid_repo(root)
+            data = dict(_VALID_MARKETPLACE_JSON)
+            data["plugins"] = [dict(_VALID_MARKETPLACE_JSON["plugins"][0])]
+            data["plugins"][0]["source"] = {
+                "source": "git-subdir",
+                "path": "hosts/copilot",
+            }
+            (root / ".github" / "plugin" / "marketplace.json").write_text(
+                json.dumps(data)
+            )
+            out = io.StringIO()
+            code = validate_manifests.run(root, out=out)
+            self.assertEqual(code, 1)
+            self.assertIn("string for Copilot", out.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +513,8 @@ class GeneratorIterableTests(unittest.TestCase):
             gen = (m for m in validate_manifests._MANIFESTS)
             code = validate_manifests.run(root, out=out, manifests=gen)
             self.assertEqual(code, 0)
-            self.assertIn("4/4", out.getvalue())
+            count = len(validate_manifests._MANIFESTS)
+            self.assertIn(f"{count}/{count}", out.getvalue())
 
 
 class CliTests(unittest.TestCase):

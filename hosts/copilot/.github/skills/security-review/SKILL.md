@@ -20,9 +20,9 @@ user-invocable: true
 > `/jig:pr-review` (spec 012), `/jig:arch-review` (spec 014), and
 > `/jig:contracts` (spec 022), it ships as SKILL.md only — no `.py`
 > helper. It is fundamentally a judgment skill; the determinism it needs
-> (detect a scanner on `PATH`, run it, read a diff) Claude runs inline.
+> (detect a scanner on `PATH`, run it, read a diff) Copilot runs inline.
 > If any other skill is installed whose description identifies it as
-> handling security review, SAST, or vulnerability analysis, the Claude
+> handling security review, SAST, or vulnerability analysis, the Copilot
 > Code skill router prefers that one over jig's baseline — the deferral
 > is **category-based, not name-specific**, so a richer skill named
 > anything (`security-review`, `adobe-security-reviewer`, `sast-scan`,
@@ -63,7 +63,7 @@ There are several things people confuse with this skill. Pick the right one:
 - **Any other installed security / SAST / vulnerability-analysis skill.**
   The deferral is **category-based, not name-based**: a skill named
   anything whose description claims security review, SAST, or
-  vulnerability analysis is preferred. The routes the Claude Code router
+  vulnerability analysis is preferred. The routes the GitHub Copilot CLI router
   may resolve to include **the user's own** skill (commonly
   `~/.claude/skills/security-review/`), **Adobe's `adobe-security-*`
   family** (depth jig deliberately does not ship), or a **built-in
@@ -265,7 +265,7 @@ does not replace them. Say so in the review when the stakes warrant it
 ## Gotchas
 
 - **The deferral hint is the routing mechanism, not a code path.** Jig's
-  description tells the Claude Code router "prefer any other installed
+  description tells the GitHub Copilot CLI router "prefer any other installed
   skill whose description identifies it as handling security review,
   SAST, or vulnerability analysis." There is no filesystem probe, no
   plugin-precedence lookup, no name-matching against `security-review`

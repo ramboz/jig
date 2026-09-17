@@ -19,7 +19,7 @@ user-invocable: true
 > auditor**. It is the seventh non-stub active jig skill that ships
 > without a `.py` helper — analyze is fundamentally a judgment skill,
 > and the determinism it needs (locate the spec, walk siblings, read
-> the principles list, sort findings by severity) Claude can run inline
+> the principles list, sort findings by severity) Copilot can run inline
 > via Read + Glob. The skill slots between `READY_FOR_REVIEW` (spec body
 > ready for first review) and `IN_PROGRESS` (slice already in flight),
 > giving the spec author one more pass to catch cross-artifact drift
