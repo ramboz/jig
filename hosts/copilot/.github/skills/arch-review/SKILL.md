@@ -23,10 +23,10 @@ user-invocable: true
 > active jig skill that ships without a `.py` helper (after
 > `/jig:pr-review`, spec 012) — arch-review is fundamentally a judgment
 > skill, and what little determinism is needed (read the doc, identify
-> the scope, classify the domain) Claude can run inline. If any other
+> the scope, classify the domain) Copilot can run inline. If any other
 > skill is installed whose description identifies it as handling
 > architecture review, design review, RFC review, or technical-design
-> review, the Claude Code skill router prefers that one over jig's
+> review, the GitHub Copilot CLI skill router prefers that one over jig's
 > baseline — the deferral is category-based, not name-specific, so a
 > richer user skill named anything (`arch-review`, `design-review`,
 > `rfc-reviewer`, etc.) wins. Jig's slim version remains the
@@ -78,7 +78,7 @@ right one:
   (`arch-review`, `design-review`, `rfc-reviewer`, `tech-spec-review`,
   etc.) whose description claims architecture review, design review,
   RFC review, or technical-design review will be preferred. If one is
-  present, **defer to it.** The Claude Code skill router should route
+  present, **defer to it.** The GitHub Copilot CLI skill router should route
   to the more specific skill automatically; if you want to be sure,
   explicitly invoke it. The one exception jig's description carves
   out is the bundled `review` skill — jig:arch-review does **not**
@@ -278,7 +278,7 @@ architecture-review skill, not the baseline.
   invocation. Config honoring on orchestrator-invoked surfaces is a tracked
   follow-up (ADR-0040 OQ1).
 - **The deferral hint is the routing mechanism, not a code path.**
-  Jig's description tells the Claude Code router "prefer any other
+  Jig's description tells the GitHub Copilot CLI router "prefer any other
   installed skill whose description identifies it as handling
   architecture review, design review, RFC review, or technical-design
   review." There is no filesystem probe, no plugin-precedence lookup,

@@ -2020,6 +2020,35 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
         )
         self.assertEqual(manifest["jig_version"], package_manifest["version"])
 
+    def test_committed_copilot_host_package_scaffold_defaults_to_copilot(self):
+        script = (
+            REPO_ROOT / "hosts" / "copilot" / ".github" / "skills"
+            / "scaffold-init" / "scaffold.py"
+        )
+        target = Path(self.tmpdir) / "copilot-project"
+        target.mkdir()
+        r = subprocess.run(
+            [sys.executable, str(script), str(target)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}\nstdout={r.stdout}")
+
+        self.assertTrue((target / "AGENTS.md").is_file())
+        self.assertFalse((target / "CLAUDE.md").exists())
+        self.assertFalse((target / ".claude").exists())
+
+        manifest = json.loads((target / "scaffold.json").read_text())
+        package_manifest = json.loads(
+            (
+                REPO_ROOT / "hosts" / "copilot" / ".plugin" / "plugin.json"
+            ).read_text()
+        )
+        self.assertEqual(manifest["jig_version"], package_manifest["version"])
+        self.assertEqual(manifest.get("host_renderer"), "copilot")
+        self.assertEqual(manifest.get("scaffold_mode"), "plugin-only")
+
     def test_codex_skills_are_rewritten_to_project_runtime_paths(self):
         r = self._run_codex_scaffold()
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")

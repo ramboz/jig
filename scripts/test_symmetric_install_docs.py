@@ -1,11 +1,10 @@
 """
 Doc guards for the symmetric install story (spec 061-05).
 
-Slice 061-05 rewrites README.md (and CONTRIBUTING.md) so the three-peer layout
-— canonical source root, committed `hosts/claude`, committed `hosts/codex` —
-reads symmetrically. The public README is intentionally terse: four install
-command sets (Claude plugin, Claude scaffold, Codex plugin, Codex scaffold),
-with the deeper package/release details kept in contributor docs.
+Slice 061-05 rewrites README.md (and CONTRIBUTING.md) so the host-package
+layout reads symmetrically. The public README is intentionally terse: five
+install command sets (Claude plugin/scaffold, Codex plugin/scaffold, and
+Copilot plugin), with deeper package/release details kept in contributor docs.
 
 These guards lock the corrections in. Positive guards assert the corrected
 prose is present (one+ per AC, plus the structural-asymmetry edge case); inverse
@@ -28,10 +27,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 ROOT_CODEX_MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
+ROOT_COPILOT_MARKETPLACE = REPO_ROOT / ".github" / "plugin" / "marketplace.json"
 
 
 def _read(p: Path) -> str:
     return p.read_text(encoding="utf-8")
+
+
+def _install_section(text: str) -> str:
+    match = re.search(
+        r"### Install\n(?P<body>.*?)\n### Project setup",
+        text,
+        re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError("README must keep a compact Install section")
+    return match.group("body")
 
 
 class RootCodexMarketplaceTests(unittest.TestCase):
@@ -48,18 +59,29 @@ class RootCodexMarketplaceTests(unittest.TestCase):
         )
 
 
+class RootCopilotMarketplaceTests(unittest.TestCase):
+    """The repo-root Copilot marketplace must route installs to Copilot."""
+
+    def test_root_copilot_marketplace_points_at_copilot_package(self) -> None:
+        data = json.loads(ROOT_COPILOT_MARKETPLACE.read_text(encoding="utf-8"))
+        plugins = data.get("plugins", [])
+        self.assertEqual(len(plugins), 1)
+        self.assertEqual(plugins[0].get("name"), "jig")
+        source = plugins[0].get("source")
+        self.assertEqual(source, "./hosts/copilot")
+        plugin_root = (REPO_ROOT / source).resolve()
+        self.assertTrue(
+            (plugin_root / ".plugin" / "plugin.json").is_file(),
+            f"Copilot marketplace source must resolve to a plugin: {plugin_root}",
+        )
+
+
 class Ac1InstallCommandMatrix(unittest.TestCase):
-    """AC1: README documents the four host/mode install command sets."""
+    """AC1: README documents the five supported host/mode command sets."""
 
     def setUp(self) -> None:
         self.text = _read(README)
-        match = re.search(
-            r"### Install\n(?P<body>.*?)\n## Extension points",
-            self.text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(match, "README must keep a compact Install section")
-        self.install = match.group("body")
+        self.install = _install_section(self.text)
 
     def test_claude_marketplace_add(self) -> None:
         self.assertIn(
@@ -100,6 +122,24 @@ class Ac1InstallCommandMatrix(unittest.TestCase):
             "README must document `codex plugin add jig@jig` (Codex)",
         )
 
+    def test_copilot_marketplace_add(self) -> None:
+        self.assertIn(
+            "copilot plugin marketplace add ramboz/jig", self.install,
+            "README must document the Copilot marketplace install path",
+        )
+
+    def test_copilot_plugin_install(self) -> None:
+        self.assertIn(
+            "copilot plugin install jig@jig", self.install,
+            "README must document `copilot plugin install jig@jig`",
+        )
+
+    def test_project_setup_is_host_neutral(self) -> None:
+        self.assertIn(
+            "open a new project directory in your host", self.text,
+            "README project setup must apply to all supported hosts",
+        )
+
     def test_codex_scaffold_from_host_package(self) -> None:
         self.assertIn(
             "python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/"
@@ -109,22 +149,23 @@ class Ac1InstallCommandMatrix(unittest.TestCase):
             "package path",
         )
 
-    def test_install_section_is_four_named_command_sets(self) -> None:
+    def test_install_section_is_five_named_command_sets(self) -> None:
         self.assertEqual(
-            re.findall(r"^\*\*(Claude|Codex) (plugin|scaffold)\*\*$",
+            re.findall(r"^\*\*(Claude|Codex|Copilot) (plugin|scaffold)\*\*$",
                        self.install, re.MULTILINE),
             [
                 ("Claude", "plugin"),
                 ("Claude", "scaffold"),
                 ("Codex", "plugin"),
                 ("Codex", "scaffold"),
+                ("Copilot", "plugin"),
             ],
-            "README install section should be the four symmetric command sets",
+            "README install section should be the five supported command sets",
         )
 
 
-class Ac2ThreePeerLayoutExplained(unittest.TestCase):
-    """AC2: the three-peer layout is explained, not implied."""
+class Ac2HostPackageLayoutExplained(unittest.TestCase):
+    """AC2: the committed host-package layout is explained, not implied."""
 
     def setUp(self) -> None:
         self.text = _read(README)
@@ -139,6 +180,12 @@ class Ac2ThreePeerLayoutExplained(unittest.TestCase):
         self.assertIn(
             "hosts/codex", self.text,
             "README must name the committed `hosts/codex` peer",
+        )
+
+    def test_names_hosts_copilot_peer(self) -> None:
+        self.assertIn(
+            "hosts/copilot", self.text,
+            "README must name the committed `hosts/copilot` peer",
         )
 
     def test_states_committed(self) -> None:
@@ -211,13 +258,7 @@ class Ac4ReadmeInstallTerseness(unittest.TestCase):
 
     def setUp(self) -> None:
         self.text = _read(README)
-        match = re.search(
-            r"### Install\n(?P<body>.*?)\n## Extension points",
-            self.text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(match, "README must keep a compact Install section")
-        self.install = match.group("body")
+        self.install = _install_section(self.text)
 
     def test_install_section_has_no_release_zip_prose(self) -> None:
         self.assertNotRegex(
@@ -294,6 +335,12 @@ class EdgeCaseStructuralAsymmetry(unittest.TestCase):
             "hosts/codex/.agents/plugins/marketplace.json", self.text,
             "README must name the Codex marketplace descriptor path so the "
             "wrapped shape is concrete",
+        )
+
+    def test_names_copilot_marketplace_descriptor_path(self) -> None:
+        self.assertIn(
+            ".github/plugin/marketplace.json", self.text,
+            "README must name the Copilot marketplace descriptor path",
         )
 
 

@@ -41,7 +41,7 @@ operations.
   its `scaffold.json` sentinel/config; supports `--dry-run`.
 - `rename-decisions` — applies ADR-0004's rename. Idempotent; refuses
   on conflict; has a `--dry-run` mode; `--host claude|codex` selects
-  whether cross-reference rewrites scan `CLAUDE.md`/`.claude/` or
+  whether cross-reference rewrites scan `AGENTS.md`/`.claude/` or
   `AGENTS.md`/`.codex/`.
 - `split-slices` — extracts embedded slice sections into sibling
   slice files.
@@ -104,7 +104,7 @@ What it does, in display order:
 1. `docs/adrs/` → `docs/decisions/` (directory rename, atomic).
 2. Per-file renames: `NNN-<slug>.md` → `adr-NNNN-<slug>.md`
    (pad 3-digit to 4-digit; add `adr-` prefix where missing).
-3. Cross-reference rewrites in text files under `docs/`, `CLAUDE.md`,
+3. Cross-reference rewrites in text files under `docs/`, `AGENTS.md`,
    and `.claude/` by default. With `--host codex`, rewrites scan
    `docs/`, `AGENTS.md`, and `.codex/` instead. The helper itself
    (`migrate.py` and its fixtures) is never rewritten.
@@ -211,7 +211,7 @@ Six sections, in fixed order:
 4. **Ambiguities** — judgment calls the user must make. Common entries:
    "flat slices reference M1–M6 milestones — map each to a parent
    spec?"; "custom skills overlap jig's stock set — replace or
-   layer?"; "CLAUDE.md is 59KB with sprint log — port subset or
+   layer?"; "AGENTS.md is 59KB with sprint log — port subset or
    leave?"; "N ADRs use a status format the `→ DONE` gate can't read"
    (a bare inline `**Status:** Accepted` line is neither frontmatter
    `status:` nor a `## Status` section, so the first ADR-dependent
@@ -281,7 +281,7 @@ python3 .../migrate.py report /path/to/existing-project
 #   | `docs/spikes/` | 4 | spike memos (inventoried only) |
 #   | `docs/workflow.md` | 1 | workflow doc present |
 #   | `docs/architecture.md` | 1 | architecture doc present |
-#   | `CLAUDE.md` | 1 | 59231 bytes (larger than baseline) |
+#   | `AGENTS.md` | 1 | 59231 bytes (larger than baseline) |
 #
 #   ## Mapping
 #
@@ -340,11 +340,11 @@ not the deciding signal.
 
 Host selection:
 
-- `--host claude` writes Claude scaffold machinery under `.claude/`
+- `--host claude` writes Copilot scaffold machinery under `.claude/`
   and is the source-checkout default.
 - `--host codex` writes Codex scaffold machinery under `.codex/`.
 - `--host auto` is the CLI default; helpers copied under `.codex/skills/`
-  infer Codex, and all other invocations infer Claude.
+  infer Codex, and all other invocations infer Copilot.
 
 How to run it:
 
@@ -359,7 +359,7 @@ What it does:
    or `.codex/skills/jig-<name>/`), rewriting helper paths in SKILL.md
    bodies to that runtime.
 2. Copies agents into the host runtime (`.claude/agents/jig-*.md` for
-   Claude, `.codex/agents/jig-*.toml` for Codex).
+   Copilot, `.codex/agents/jig-*.toml` for Codex).
 3. Copies hook scripts into the host runtime, pinning each script's mode
    to `0o755`.
 4. Copies jig's `templates/` tree into the host runtime
@@ -368,7 +368,7 @@ What it does:
    helpers seed from a template with no plugin root — `decisions.py`
    (lightweight-decisions), `adr.py new`, `migrate.py seed-decisions`,
    `workflow.py`'s slice-template render, and `memory.py`'s people.md
-   bootstrap all resolve `parents[2]/templates/`. Claude gained this in
+   bootstrap all resolve `parents[2]/templates/`. Copilot gained this in
    [slice 095-01](../../docs/specs/095-scaffold-template-copy/spec.md);
    Codex has always had it. **Re-run `copy-machinery` from a jig install to
    refresh a project scaffolded before 095-01** — it is the repair path
@@ -483,7 +483,7 @@ slices 016-03 and 099-01). Both
 end up calling the same host-aware `copy_machinery(plugin, target, *,
 force, host)` façade in `scaffold.py`, so the resulting host runtime
 shape is equivalent regardless of which adoption path produced it.
-Closing this gap for Claude was spec 021's reason for being; spec 059-01
+Closing this gap for Copilot was spec 021's reason for being; spec 059-01
 extends the same adoption path to Codex.
 
 ## Agentic slice-to-spec migration
@@ -615,9 +615,9 @@ verification report.
   above is the most common, but adapt to what the source actually
   uses (e.g., "In Review" might map to `IN_PROGRESS` or `REVIEWED`
   depending on context).
-- **CLAUDE.md references to old slice paths are NOT rewritten.**
+- **AGENTS.md references to old slice paths are NOT rewritten.**
   Cross-references like `[slice-01](docs/slices/slice-01.md)` in
-  CLAUDE.md / milestone summaries / etc. keep pointing at the
+  AGENTS.md / milestone summaries / etc. keep pointing at the
   original files. After the caller deletes originals, those refs
   must be updated by hand or via a follow-up
   `migrate.py rename-decisions`-style sweep (out of scope here).
@@ -634,7 +634,7 @@ verification report.
 - **`rename-decisions` is bounded by `<project-dir>`.** It never
   reads or writes outside the directory passed on the CLI. Within
   scope it scans shared `docs/` plus the selected host primer/runtime:
-  `CLAUDE.md` and `.claude/` for `--host claude`, or `AGENTS.md` and
+  `AGENTS.md` and `.claude/` for `--host claude`, or `AGENTS.md` and
   `.codex/` for `--host codex`. Well-known skip paths (`.git`,
   `node_modules`, `.venv`, `__pycache__`, `dist`, `build`, etc.) are
   excluded from cross-reference scanning.
@@ -667,8 +667,8 @@ verification report.
   to slice 008-04. The helper does NOT propose a concrete parent-spec
   grouping — that requires user judgment (or the milestone manifest
   008-04 will accept). For 008-01, the report just names the question.
-- **CLAUDE.md size is reported as a tripwire, not migrated.** The
-  validator's 59KB CLAUDE.md contains sprint-log content jig's Hot
+- **AGENTS.md size is reported as a tripwire, not migrated.** The
+  validator's 59KB AGENTS.md contains sprint-log content jig's Hot
   Cache doesn't model. The report's Ambiguity row flags it; the user
   decides what to port verbatim, summarize, or leave behind. No
   automation in 008-01 (or any planned 008 slice).
@@ -708,7 +708,7 @@ verification report.
   design; mutating operations land in slices 008-02 (rename-decisions),
   008-03 (jig-self-migration via 008-02's helper), 008-04
   (slice-to-spec-mapping), 008-05 (scaffold-init suggestion wiring).
-- Importing CLAUDE.md content into jig's Hot Cache template.
+- Importing AGENTS.md content into jig's Hot Cache template.
   Inventoried only; the user ports manually.
 - Cross-format ADR template conversion (MADR, Y-statements, etc.).
   ADR-0004 just covers path/filename rename.
