@@ -150,18 +150,7 @@ jig from its committed Copilot package; nothing is copied into your repo.*
 ```bash
 copilot plugin marketplace add ramboz/jig
 copilot plugin install jig@jig
-copilot skill list | grep spec-workflow
-copilot --agent missing-jig-check -p 'Reply exactly READY.' --allow-all-tools --silent 2>&1 | grep 'jig:reviewer'
 ```
-
-For a direct install without registering the marketplace, use
-`copilot plugin install ramboz/jig:hosts/copilot`.
-
-The final command intentionally asks for a missing agent, then checks Copilot's
-"available agents" list for `jig:reviewer`; plugin agents are namespaced by the
-plugin name.
-`copilot plugin list` only proves the manifest was installed, not that the
-skills, agents, or hook configuration were discovered.
 
 ### Project setup
 
