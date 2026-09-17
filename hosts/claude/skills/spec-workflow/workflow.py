@@ -2895,6 +2895,22 @@ def _stale_check(item_path: Path, last_verified_str: str,
     return False, ""
 
 
+# Bug 038: the canonical `## Status` proposal line, `Proposed (YYYY-MM-DD)`
+# (adr.py's `_PROPOSED_STATUS_LINE` shape), optionally under a `**Status:**`
+# prefix. The captured date is the ADR's *proposal* date — the honest age
+# source for a never-verified Proposed ADR (its `last_verified` is empty, and
+# `last_verified` is a freshness field, not an acceptance date; see
+# adr.py::_extract_status_and_date).
+_ADR_PROPOSED_DATE_RE = re.compile(
+    r"(?mi)^\s*(?:\**\s*Status:?\**\s*)?Proposed\s*\((\d{4}-\d{2}-\d{2})\)")
+
+
+def _adr_proposed_date(text: str) -> str:
+    """The `Proposed (YYYY-MM-DD)` date from an ADR body, or "" if absent."""
+    m = _ADR_PROPOSED_DATE_RE.search(text)
+    return m.group(1) if m else ""
+
+
 def find_stale_items(project_dir: Path, days: int = 90) -> list:
     """Walk slices and ADRs; return a list of `(display, reason, category)`
     findings. Read-only.
@@ -2948,9 +2964,38 @@ def find_stale_items(project_dir: Path, days: int = 90) -> list:
             fm, _ = parse_frontmatter(text)
             lv = fm.get("last_verified", "").strip()
             deps = fm.get("dependencies") or []
+            status = str(fm.get("status", "")).strip()
+            rel = adr_path.relative_to(project_dir)
+            # Bug 038: a never-verified Proposed ADR (empty last_verified — the
+            # adr.py scaffold default) is the decision record most likely to
+            # have drifted, yet the conjunctive last_verified+dep check below
+            # skips it (`if not lv ...`). Age it by its *proposal* date (never
+            # by last_verified, a freshness field) and flag it stale by
+            # definition once it outlives the threshold unverified.
+            if status == "Proposed" and not lv:
+                proposed = _adr_proposed_date(text) or _file_modified_iso(
+                    adr_path)
+                try:
+                    pd = (datetime.date.fromisoformat(proposed)
+                          if proposed else None)
+                except ValueError:
+                    pd = None
+                if pd is not None:
+                    age_days = (today - pd).days
+                    if age_days > days:
+                        out.append((
+                            str(rel),
+                            f"Proposed ADR, never verified (empty "
+                            f"last_verified); proposed {proposed} "
+                            f"({age_days} days ago) — the decision record most "
+                            f"likely to have drifted; verify (set "
+                            f"last_verified) or supersede.",
+                            "proposed-unverified",
+                        ))
+                # Fall through: the dep-change check below is a no-op for an
+                # empty last_verified, so the `continue` still applies.
             if not lv or not deps:
                 continue
-            rel = adr_path.relative_to(project_dir)
             is_stale, reason = _stale_check(
                 adr_path, lv, deps, days, project_dir, today,
             )

@@ -1605,6 +1605,89 @@ class StaleCheckTests(unittest.TestCase):
         self.assertIn("951-01", r2.stdout)
 
 
+class StaleProposedAdrTests(unittest.TestCase):
+    """Bug 038 / issue 218 (B) — `stale` must flag a `Proposed` ADR that was
+    scaffolded with an empty `last_verified` and left unverified past the
+    threshold. The pre-fix walk skips any ADR with empty `last_verified`
+    (`if not lv or not deps: continue`), so a never-verified decision record —
+    the one most likely to have drifted — trips nothing.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-adrstale-")
+        self.target = Path(self.tmpdir) / "demo-project"
+        self.target.mkdir()
+        scaffold(self.target)
+        self.decisions = self.target / "docs" / "decisions"
+        self.decisions.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _adr(self, num, slug, *, status, last_verified, status_line,
+             deps="[]"):
+        path = self.decisions / f"adr-{num}-{slug}.md"
+        path.write_text(
+            f"---\nstatus: {status}\ndependencies: {deps}\n"
+            f"last_verified: {last_verified}\n---\n\n"
+            f"# ADR-{num}: {slug}\n\n## Status\n\n{status_line}\n\n"
+            f"## Context\n\nBody.\n"
+        )
+        return path
+
+    def _days_ago(self, n):
+        import datetime as _dt
+        return (_dt.date.today() - _dt.timedelta(days=n)).isoformat()
+
+    def test_never_verified_old_proposed_adr_is_flagged(self):
+        old = self._days_ago(200)
+        self._adr("0100", "never-verified", status="Proposed",
+                  last_verified="", status_line=f"Proposed ({old})")
+        items = _workflow.find_stale_items(self.target, days=90)
+        hits = [it for it in items if "adr-0100" in it[0]]
+        self.assertTrue(hits, f"expected a proposed-unverified finding: {items}")
+        display, reason, category = hits[0]
+        self.assertEqual(category, "proposed-unverified")
+        self.assertIn(old, reason)
+
+    def test_flagged_adr_appears_in_cli_report_exit_zero(self):
+        old = self._days_ago(200)
+        self._adr("0101", "drifted", status="Proposed",
+                  last_verified="", status_line=f"Proposed ({old})")
+        result = run_workflow("stale", "--project-dir", str(self.target),
+                              "--days", "90")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn("adr-0101", result.stdout)
+
+    def test_recent_proposed_adr_not_flagged(self):
+        recent = self._days_ago(10)
+        self._adr("0102", "fresh-proposal", status="Proposed",
+                  last_verified="", status_line=f"Proposed ({recent})")
+        items = _workflow.find_stale_items(self.target, days=90)
+        self.assertFalse([it for it in items if "adr-0102" in it[0]])
+
+    def test_proposed_adr_with_last_verified_not_flagged_by_new_path(self):
+        # It HAS been verified once → the new never-verified path must not fire
+        # (it may still flow through the existing dep-change path, which needs a
+        # changed dep — none here, so nothing is reported).
+        self._adr("0103", "verified-once", status="Proposed",
+                  last_verified=self._days_ago(5),
+                  status_line=f"Proposed ({self._days_ago(300)})")
+        items = _workflow.find_stale_items(self.target, days=90)
+        self.assertFalse([it for it in items
+                          if "adr-0103" in it[0]
+                          and it[2] == "proposed-unverified"])
+
+    def test_accepted_adr_with_empty_last_verified_not_flagged(self):
+        # Scope guard: only Proposed ADRs get the never-verified path.
+        self._adr("0104", "accepted-no-lv", status="Accepted",
+                  last_verified="",
+                  status_line=f"Accepted ({self._days_ago(400)})")
+        items = _workflow.find_stale_items(self.target, days=90)
+        self.assertFalse([it for it in items if "adr-0104" in it[0]])
+
+
 def _git_on_path() -> bool:
     try:
         subprocess.run(["git", "--version"], capture_output=True, check=True)
