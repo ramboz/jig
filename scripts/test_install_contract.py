@@ -406,6 +406,41 @@ class MarketplaceManifestValidationTests(unittest.TestCase):
         )
 
 
+class CopilotMarketplaceManifestValidationTests(unittest.TestCase):
+    def _valid(self) -> dict:
+        return {
+            "name": "jig",
+            "owner": {"name": "ramboz"},
+            "plugins": [{
+                "name": "jig",
+                "source": "./hosts/copilot",
+                "description": "d",
+            }],
+        }
+
+    def test_relative_string_source_valid(self):
+        self.assertEqual(
+            install_contract.validate_copilot_marketplace_manifest(
+                self._valid()
+            ),
+            [],
+        )
+
+    def test_claude_object_source_rejected(self):
+        data = self._valid()
+        data["plugins"][0]["source"] = {
+            "source": "git-subdir",
+            "url": "https://github.com/ramboz/jig.git",
+            "path": "hosts/copilot",
+        }
+        problems = install_contract.validate_copilot_marketplace_manifest(data)
+        self.assertTrue(
+            any("plugins[0].source" in p and "string for Copilot" in p
+                for p in problems),
+            problems,
+        )
+
+
 # ---------------------------------------------------------------------------
 # AC #2 — hook command shape + script existence
 # ---------------------------------------------------------------------------

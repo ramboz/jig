@@ -38,6 +38,7 @@
 | 032 | review-recovery-no-retraction-sweep | low | standard | DONE | yes | skills/spec-workflow/test_spec_workflow_skill_surface.py::FailedReviewRetractionSweepTests | claude/issue-133-0edb78 |  |  |
 | 033 | frame-critique-false-positive-grounded | medium | standard | DONE | yes | skills/independent-review/test_review.py::Bug033FrameCritiqueGroundingAwareTests | claude/adversarial-review-leak-64bb2d |  |  |
 | 034 | copilot-scaffold-defaults-claude | high | standard | DONE | yes | skills/scaffold-init | literate-disco |  |  |
+| 035 | copilot-marketplace-source-schema | high | standard | DONE | yes | scripts | literate-disco |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 

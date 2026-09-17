@@ -74,8 +74,9 @@ rules jig holds *itself* to, spec by spec — see
 [product-vision § Design principles](docs/product-vision.md#design-principles)
 for the operational detail.
 
-jig now ships one development experience across Claude Code and Codex: the same
-workflow model, rendered into host-native files by the host-adapter layer
+jig now ships one development experience across Claude Code, Codex, and GitHub
+Copilot CLI: the same workflow model, rendered into host-native files by the
+host-adapter layer
 ([spec 033](docs/specs/033-host-adapter-portability/spec.md)). The next big
 horizon is **coordination across a multi-repo workspace** (a federation tier —
 [spec 034](docs/specs/034-federation-tier/spec.md)).
@@ -143,16 +144,18 @@ python3 jig/hosts/codex/plugins/jig/skills/scaffold-init/scaffold.py --host code
 
 **Copilot plugin**
 
-*Installs jig as a plugin from this repo's committed package; nothing is
-copied into your repo. No scaffold recipe — Copilot reads Claude-format
-`SKILL.md`/`CLAUDE.md` directly (ADR-0061), so the plugin path is the only
-one it needs.*
+*Recommended — registers this repository's Copilot marketplace and installs
+jig from its committed Copilot package; nothing is copied into your repo.*
 
 ```bash
-copilot plugin install ramboz/jig:hosts/copilot
+copilot plugin marketplace add ramboz/jig
+copilot plugin install jig@jig
 copilot skill list | grep spec-workflow
 copilot --agent missing-jig-check -p 'Reply exactly READY.' --allow-all-tools --silent 2>&1 | grep 'jig:reviewer'
 ```
+
+For a direct install without registering the marketplace, use
+`copilot plugin install ramboz/jig:hosts/copilot`.
 
 The final command intentionally asks for a missing agent, then checks Copilot's
 "available agents" list for `jig:reviewer`; plugin agents are namespaced by the
@@ -162,7 +165,7 @@ skills, agents, or hook configuration were discovered.
 
 ### Project setup
 
-Once installed, open a new project directory in Claude Code and say:
+Once installed, open a new project directory in your host and say:
 > "Set up this project for AI-native development"
 
 The `scaffold-init` skill will run and produce the docs/ scaffolding.
@@ -231,6 +234,7 @@ and Copilot are both **flat** plugins (`.claude-plugin/plugin.json` /
 .claude-plugin/plugin.json       # Claude plugin source manifest
 .claude-plugin/marketplace.json  # remote-install pointer → ./hosts/claude
 .agents/plugins/marketplace.json # Codex remote-install pointer → ./hosts/codex/plugins/jig
+.github/plugin/marketplace.json  # Copilot remote-install pointer → ./hosts/copilot
 .codex-plugin/plugin.json        # Codex plugin source manifest
 skills/                          # Skill definitions (SKILL.md per skill)
 agents/                          # Subagent definitions

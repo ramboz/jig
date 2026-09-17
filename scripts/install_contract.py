@@ -419,6 +419,26 @@ def validate_marketplace_manifest(data: dict) -> list[str]:
     return problems
 
 
+def validate_copilot_marketplace_manifest(data: dict) -> list[str]:
+    """Validate Copilot's marketplace schema, including its source dialect."""
+    problems = validate_marketplace_manifest(data)
+    if not isinstance(data, dict):
+        return problems
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list):
+        return problems
+    for i, entry in enumerate(plugins):
+        if not isinstance(entry, dict):
+            continue
+        source = entry.get("source")
+        if source not in (None, "") and not isinstance(source, str):
+            problems.append(
+                f"marketplace.json: plugins[{i}].source must be a relative "
+                "path string for Copilot"
+            )
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # Excluded-path predicate (release-zip contract)
 # ---------------------------------------------------------------------------
