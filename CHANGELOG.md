@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.15.4](https://github.com/ramboz/jig/compare/v2.15.3...v2.15.4) (2026-09-17)
+
+
+### Bug Fixes
+
+* **orient:** reap merged/deleted claimed_by branches on --fetch (bug 037) ([#226](https://github.com/ramboz/jig/issues/226)) ([0c5d00c](https://github.com/ramboz/jig/commit/0c5d00c83ae00a76cb5cf2ee579daad01c418d1a))
+* **stale:** flag never-verified Proposed ADRs by proposal date (bug 038) ([#227](https://github.com/ramboz/jig/issues/227)) ([3ca6a99](https://github.com/ramboz/jig/commit/3ca6a996669a63a702251ca4866c31e7c0d06c25))
+
+
+### Documentation
+
+* **inbox:** park ADR contradiction/promotion nudge (issue 218 fix [#6](https://github.com/ramboz/jig/issues/6)) ([#229](https://github.com/ramboz/jig/issues/229)) ([c9a8d00](https://github.com/ramboz/jig/commit/c9a8d005a5dc2c4cba493b9309dfb9d6e4e863f7))
+
 ## [2.15.3](https://github.com/ramboz/jig/compare/v2.15.2...v2.15.3) (2026-09-17)
 
 
