@@ -228,6 +228,14 @@ class CopilotZipShapeTests(unittest.TestCase):
         self.assertIn(".github/scripts/spec_lint.py", self.names)
         self.assertIn(".github/templates/CLAUDE.md.template", self.names)
 
+    def test_hook_scripts_preserve_executable_mode(self):
+        with zipfile.ZipFile(self.zip_path) as zf:
+            info = zf.getinfo(".github/hooks/scripts/jig-spec-gate.sh")
+        self.assertTrue(
+            (info.external_attr >> 16) & 0o111,
+            "release zips must preserve executable hook-script mode",
+        )
+
     def test_context_check_hook_has_three_event_keys_in_the_zip(self):
         # The multi-event merge fix (113-06 AC6) survives archiving.
         with zipfile.ZipFile(self.zip_path) as zf:
