@@ -256,11 +256,14 @@ def _copy_skills(source_root: Path, output_dir: Path) -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             if entry.name == "SKILL.md":
                 text = render_copilot_skill_md(entry.read_text(encoding="utf-8"))
-                # Slice 113-04 AC4: rewrite any `${CLAUDE_PLUGIN_ROOT}/…`
-                # runtime path to the plugin-root-relative Copilot spelling
-                # (closes the gap 113-02 documented and deferred). A no-op
-                # for the many skill bodies with no such reference.
-                text = scaffold_mod.CopilotScaffoldRenderer.rewrite_skill_md_paths(text)
+                # Bug 036: this package IS plugin mode, so skill bodies must
+                # name the plugin runtime root, not a project-local
+                # `.github/skills/` tree that a plugin-mode project never has.
+                # (113-04 AC4 used the in-repo rewrite here, which documented
+                # a path that cannot resolve for an agent-issued command.)
+                text = scaffold_mod.CopilotScaffoldRenderer.rewrite_doc_paths_plugin_mode(
+                    text
+                )
                 dst.write_text(text, encoding="utf-8")
             else:
                 dst.write_bytes(entry.read_bytes())
@@ -819,14 +822,21 @@ def _copy_runtime_scripts(source_root: Path, output_dir: Path) -> None:
     """Copy the host-neutral runtime-scripts subset into `.github/scripts/`
     (slice 113-06 AC5 — package completeness). Mirrors
     `build_codex_plugin._copy_runtime_scripts`: `install_contract.
-    COPILOT_INCLUDE_SCRIPT_FILES` (currently just `spec_lint.py`, matching
-    Codex's own allowlist) ships verbatim so
-    `.github/scripts/spec_lint.py` — the pre-implementation structural gate
-    the rendered `analyze`/`migrate` skill bodies invoke, rewritten to that
-    path by `CopilotScaffoldRenderer.rewrite_skill_md_paths` — actually
-    resolves in the installed Copilot package. `spec_lint.py` is host-neutral
-    Python (pure stdlib, no `${CLAUDE_PLUGIN_ROOT}`/`.claude/` assumptions),
-    so it is copied byte-for-byte with no host rewrite."""
+    COPILOT_INCLUDE_SCRIPT_FILES` ships verbatim so the scripts the rendered
+    skill bodies point at actually resolve in the installed package. The set
+    is two files:
+
+    - `spec_lint.py` — the pre-implementation structural gate the rendered
+      `analyze`/`migrate` skill bodies invoke (matching Codex's own
+      allowlist), rewritten to that path by the renderer.
+    - `jig_root.py` — bug 036's fresh-shell locator, which resolves the
+      installed package root a skill body's `$JIG_ROOT` refers to. Copilot
+      exposes no plugin-root variable, so without this the documented helper
+      commands have no fallback outside a session.
+
+    Both are host-neutral Python (pure stdlib, no
+    `${CLAUDE_PLUGIN_ROOT}`/`.claude/` assumptions), so they are copied
+    byte-for-byte with no host rewrite."""
     for rel_name in install_contract.COPILOT_INCLUDE_SCRIPT_FILES:
         src = source_root / rel_name
         if not src.is_file():
@@ -841,15 +851,19 @@ def _copy_templates(source_root: Path, output_dir: Path) -> None:
     AC5), matching how Claude/Codex ship `templates/CLAUDE.md.template`
     unrendered rather than a rendered project-instructions file (113-02
     review fix — a `/plugin` install must not impose instructions on the
-    consuming repo). Mirrors `build_codex_plugin._copy_templates`: a
-    `.md.template` file gets the SAME `${CLAUDE_PLUGIN_ROOT}/` -> Copilot
-    path rewrite `rewrite_skill_md_paths` already applies to rendered
-    SKILL.md bodies (113-04 AC4), so a template referencing e.g.
-    `${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py` resolves the
-    same `.github/`-relative way once copied verbatim into a scaffolded
-    project by the runtime helpers that read it (`decisions.py`, `adr.py`,
-    `memory.py`, `workflow.py` — see `docs/architecture.md`'s "Both scaffold
-    hosts copy templates/" note). Every other file ships byte-for-byte."""
+    consuming repo). Mirrors `build_codex_plugin._copy_templates`.
+
+    Every file ships BYTE-FOR-BYTE, `.md.template` included, so a template
+    keeps its canonical `${CLAUDE_PLUGIN_ROOT}/...` helper references. That
+    is load-bearing (bug 036): a template is consumed by `scaffold.py` at
+    scaffold time, which dispatches the host path rewrite on the target
+    project's mode. Pre-rendering here — as this builder used to do, applying
+    the in-repo `.github/`-relative transform — burns one mode's spelling in
+    and leaves that dispatch nothing to act on, so a plugin-mode project
+    inherited an in-repo path for `decisions.py` that cannot resolve (there
+    is no `.github/skills/` in a plugin-mode project). Do not reintroduce a
+    render step here; `test_templates_ship_canonical_so_scaffold_can_render_per_mode`
+    guards it."""
     templates_src = source_root / "templates"
     templates_dst = output_dir / ".github" / "templates"
     if not templates_src.is_dir():
@@ -862,15 +876,7 @@ def _copy_templates(source_root: Path, output_dir: Path) -> None:
             continue
         dst = templates_dst / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if entry.name.endswith(".md.template"):
-            dst.write_text(
-                scaffold_mod.CopilotScaffoldRenderer.rewrite_skill_md_paths(
-                    entry.read_text(encoding="utf-8")
-                ),
-                encoding="utf-8",
-            )
-        else:
-            dst.write_bytes(entry.read_bytes())
+        dst.write_bytes(entry.read_bytes())
 
 
 def _write_manifest(output_dir: Path, version: str) -> None:

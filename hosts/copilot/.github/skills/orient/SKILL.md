@@ -16,6 +16,12 @@ description: >-
   dashboards may capture stdout.
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 # Orient
 
 **One job: tell the user where the project stands and what to do next, in a shape
@@ -45,7 +51,7 @@ Do not re-derive the project's lifecycle state by hand — jig already computes 
 Run the read-only command spec 088 added and use its line as your factual base:
 
 ```bash
-python3 ".github/skills/spec-workflow/workflow.py" orient --project-dir . --fetch
+python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" orient --project-dir . --fetch
 # → jig hint: <scaffold state> · active specs: <rollup> · focus: <slice needing attention>
 #   …and, only when the checkout is ahead of its default branch:
 #   · in flight: <n> commit(s) ahead of <base> on <branch>

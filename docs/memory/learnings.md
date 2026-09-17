@@ -1376,3 +1376,46 @@ back-edge-to-DIAGNOSING trap is gone from the gate path). The full suite +
 pyright + board integrity remain the *landing* bar (slice-land / CI), so
 regenerate boards before the final full-suite run and commit, not before every
 transition.
+
+## Bug 036 — a path that resolves for the *host* need not resolve for the *agent*
+
+**The conflation.** Copilot resolves a relative path in a **hook command**
+against the plugin root, because the host executes it. Slice 113-04 AC4
+generalized that to **skill bodies** — but a skill body documents a command the
+*agent* runs, and an agent-issued bash command runs with `cwd` = the session
+repository. A plugin-mode project has no `.github/skills/`, so all 88 documented
+helper invocations across 13 Copilot skills were unrunnable. The two path
+semantics look identical in the source and diverge only at execution. When a
+rewrite serves two consumers, name the consumer per call site; "it's the same
+prefix" is not the same contract.
+
+**Absence of a variable is a design input, not a blocker.** Claude has
+`${CLAUDE_PLUGIN_ROOT}`, Codex has `${PLUGIN_ROOT}`, Copilot has neither —
+verified empirically by dumping `env` in a live session rather than inferred
+from docs. The fix had to *manufacture* the seam (publish `$JIG_ROOT` from the
+`SessionStart` hook, with a packaged locator as the fresh-shell fallback)
+instead of renaming into a variable that does not exist.
+
+**Pre-rendering defeats deferred dispatch.** The builder rewrote `.md.template`
+files at package time, so `scaffold.py`'s scaffold-time, mode-aware render had
+nothing left to act on and a plugin-mode project inherited the in-repo spelling.
+An artifact consumed by a later mode-aware stage must ship **canonical**. The
+generalization: when stage B selects a representation per context, stage A must
+not collapse it — an "optimization" at A silently turns B into a no-op. Both
+review passes caught this independently after it had been recorded, in good
+faith, as an intentional non-fix.
+
+**Test the topology, not the formula.** A test asserting
+`jig_root() == Path(__file__).parents[2]` re-derives the implementation and
+passes even when the package layout is wrong. The real invariant is the shipped
+shape: the reported root is named `.github`, contains `skills/`, and the adapter
+is reachable back down at `hooks/scripts/<name>`. Likewise an absence-only
+assertion ("no burned-in spelling") passes if the value is rewritten to a third
+unrelated path — assert identity with the canonical source instead.
+
+**A live probe beats a plausible model.** Every load-bearing fact here came
+from running the thing: the helper failing with `Errno 2`, `env` listing no
+plugin-root variable, a live agent reporting "there's no `.github/skills/` in
+this project", and the scaffolded output still carrying a bad `decisions.py`
+path *after* the fix was believed complete. Package-level reasoning would have
+declared victory three times.

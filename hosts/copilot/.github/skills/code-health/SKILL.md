@@ -18,6 +18,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 060 introduced `code-health` as the **static-analysis sibling of
 > `tdd-loop`**, under [ADR-0017](../../docs/decisions/adr-0017-scaffolded-code-health.md)'s
 > "detect the language → drive its blessed tools → normalize → degrade
@@ -98,7 +104,7 @@ Two subcommands mirror `tdd.py`: `detect` reports which linter resolves, and
 ### Detect the linter
 
 ```bash
-python3 ".github/skills/code-health/health.py" detect [target]
+python3 "$JIG_ROOT/skills/code-health/health.py" detect [target]
 ```
 
 - `target` defaults to `.` when omitted.
@@ -110,7 +116,7 @@ python3 ".github/skills/code-health/health.py" detect [target]
 ### Run the lint pass
 
 ```bash
-python3 ".github/skills/code-health/health.py" check [target]
+python3 "$JIG_ROOT/skills/code-health/health.py" check [target]
 ```
 
 - Auto-resolves the ecosystem's linter via the same logic as `detect`.

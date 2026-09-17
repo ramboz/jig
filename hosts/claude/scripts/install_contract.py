@@ -574,6 +574,11 @@ CODEX_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
 # allowlist matches Codex's today.
 COPILOT_INCLUDE_SCRIPT_FILES: tuple[str, ...] = (
     "scripts/spec_lint.py",
+    # Bug 036 — resolves `$JIG_ROOT` for skill-issued helper commands. Copilot
+    # is the only committed host with no plugin-root environment variable, so
+    # unlike `spec_lint.py` this one is load-bearing for the lifecycle itself:
+    # without it a fresh shell cannot name the runtime root at all.
+    "scripts/jig_root.py",
 )
 
 # (The directory-name exclusions live in `_EXCLUDED_DIR_NAMES` above. They are

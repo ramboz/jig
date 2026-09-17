@@ -26,6 +26,6 @@ See [docs/refinement-todo.md](docs/refinement-todo.md) for the full list of item
 
 ## Immediate next steps
 
-1. Open [AGENTS.md](AGENTS.md) and fill in the Hot Cache (project description, key terms).
+1. Open [CLAUDE.md](CLAUDE.md) and fill in the Hot Cache (project description, key terms).
 2. Write the first spec at `docs/specs/001-<feature>/spec.md`.
 3. {{NEXT_STEP_HINT}}

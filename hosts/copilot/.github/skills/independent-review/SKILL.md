@@ -11,6 +11,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > **Working posture ([ADR-0056](../../docs/decisions/adr-0056-adversarial-register-quarantine.md)).**
 > Adversarial review is a *named, bounded operation.* The skeptical,
 > flaw-hunting register this skill builds belongs *inside* the review passes —
@@ -99,12 +105,12 @@ phase, not just the subagent type.
 After the implementer has written the deliverable to disk:
 
 ```bash
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   implementation \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \
   "<deliverable-path-1>" "<deliverable-path-2>" ...)
-SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   subagent-type implementation)
 ```
 
@@ -121,12 +127,12 @@ rerun the helper + Task as needed until `pass`.
 After the compliance pass returns `pass`, run the craft pass:
 
 ```bash
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   pr-review \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \
   "<deliverable-path-1>" "<deliverable-path-2>" ...)
-SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   subagent-type pr-review)
 ```
 
@@ -150,7 +156,7 @@ before spawning:
 # Capture the helper exit code — a non-zero exit means the slice lookup
 # failed, not "no arch pass needed." Surface the error rather than
 # silently skipping the pass.
-if ! NEED_ARCH=$(python3 ".github/skills/spec-workflow/workflow.py" \
+if ! NEED_ARCH=$(python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" \
     arch-review-needed \
     "docs/specs/NNN-<slug>/spec.md" \
     "<slice-fragment>"); then
@@ -158,12 +164,12 @@ if ! NEED_ARCH=$(python3 ".github/skills/spec-workflow/workflow.py" \
   exit 2
 fi
 if [ "$NEED_ARCH" = "true" ]; then
-  PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+  PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
     arch-review \
     "docs/specs/NNN-<slug>/spec.md" \
     "<slice-fragment>" \
     "<deliverable-path-1>" "<deliverable-path-2>" ...)
-  SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+  SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
     subagent-type arch-review)
 fi
 ```
@@ -195,12 +201,12 @@ executed with discipline. It runs only when the artifact declares a truthy
 `frame_review` flag.
 
 ```bash
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   frame-critique \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \
   "<deliverable-path>" ...)
-SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   subagent-type)
 ```
 
@@ -232,7 +238,7 @@ runs only when the slice declares a truthy `design_review` flag, and gates
 REVIEWED exactly like `arch`.
 
 ```bash
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   design-review \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \
@@ -262,11 +268,11 @@ After the deviation log subsection has been added under the slice — in its
 embedded layout:
 
 ```bash
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   reconciliation \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>")
-SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   subagent-type reconciliation)
 ```
 
@@ -293,7 +299,7 @@ with no body is refused. `record-review` never reads stdin unless asked
 closed, hanging CI and agent harnesses):
 
 ```bash
-python3 ".github/skills/independent-review/review.py" \
+python3 "$JIG_ROOT/skills/independent-review/review.py" \
   record-review \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \
@@ -313,7 +319,7 @@ without a later pass" case.
 Validate the evidence set for a slice at a transition stage:
 
 ```bash
-python3 ".github/skills/independent-review/review.py" \
+python3 "$JIG_ROOT/skills/independent-review/review.py" \
   check-reviews \
   "docs/specs/NNN-<slug>/spec.md" \
   "<slice-fragment>" \

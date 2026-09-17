@@ -39,6 +39,7 @@
 | 033 | frame-critique-false-positive-grounded | medium | standard | DONE | yes | skills/independent-review/test_review.py::Bug033FrameCritiqueGroundingAwareTests | claude/adversarial-review-leak-64bb2d |  |  |
 | 034 | copilot-scaffold-defaults-claude | high | standard | DONE | yes | skills/scaffold-init | literate-disco |  |  |
 | 035 | copilot-marketplace-source-schema | high | standard | DONE | yes | scripts | literate-disco |  |  |
+| 036 | copilot-skill-helper-path | high | standard | DONE | yes | skills/scaffold-init/test_copilot_renderer.py::CopilotPluginModeHelperPathTests | copilot-plugin-audit |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 

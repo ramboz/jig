@@ -11,6 +11,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 006 promoted this skill from a dangling auto-install reference to an
 > active skill. The deterministic runner detection + subprocess invocation
 > live in `tdd.py`; this SKILL.md drives the judgment layer.
@@ -71,7 +77,7 @@ project uses, and `tdd.py run` invokes it.
 ### Detect the runner
 
 ```bash
-python3 ".github/skills/tdd-loop/tdd.py" detect [target]
+python3 "$JIG_ROOT/skills/tdd-loop/tdd.py" detect [target]
 ```
 
 - `target` defaults to `.` when omitted.
@@ -96,8 +102,8 @@ When multiple runners are detected, priority is
 ### Run the suite
 
 ```bash
-python3 ".github/skills/tdd-loop/tdd.py" run [target] [--test-path PATH]
-python3 ".github/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
+python3 "$JIG_ROOT/skills/tdd-loop/tdd.py" run [target] [--test-path PATH]
+python3 "$JIG_ROOT/skills/tdd-loop/tdd.py" run [target] [--test SELECTOR]
 ```
 
 - Auto-detects the runner via the same logic as `detect`.

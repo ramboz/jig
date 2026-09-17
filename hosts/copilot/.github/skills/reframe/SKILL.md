@@ -15,6 +15,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 067 introduces this skill; [ADR-0024](../../docs/decisions/adr-0024-reference-reframe.md)
 > decides its shape. Reframe is a **lightweight correction capability over the
 > lifecycle spine** ([ADR-0023](../../docs/decisions/adr-0023-lifecycle-family-spine.md) §4),
@@ -149,7 +155,7 @@ Reserve and scaffold the keystone ADR through the **real ADR lifecycle** so it
 inherits the frame-critique `accept` gate:
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" new reframe-onto-<slug>
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" new reframe-onto-<slug>
 ```
 
 Then author its body:
@@ -259,7 +265,7 @@ the spec lifecycle rather than left for the session to hand-author. For each
 1. **Reserve a spec** via `workflow.py new`:
 
    ```bash
-   python3 ".github/skills/spec-workflow/workflow.py" new \
+   python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" new \
      retrofit-<artifact>-onto-<reference-slug>
    ```
 

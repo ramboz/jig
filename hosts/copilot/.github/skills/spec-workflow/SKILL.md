@@ -14,6 +14,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > **Working posture ([ADR-0056](../../docs/decisions/adr-0056-adversarial-register-quarantine.md)).**
 > Adversarial review is a *named, bounded operation.* This workflow invokes
 > review passes (frame-critique / craft), whose skeptical register belongs
@@ -181,7 +187,7 @@ SKILL.md hand-off is the documented gate.
 2. **Reserve the next free number on origin/main:**
 
    ```bash
-   python3 ".github/skills/spec-workflow/workflow.py" new <slug>
+   python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" new <slug>
    ```
 
    The helper computes `max(NNN) + 1` across `docs/specs/`, writes a
@@ -344,7 +350,7 @@ SKILL.md hand-off is the documented gate.
    from `workflow.py frame-review-needed`:
 
    ```bash
-   python3 ".github/skills/spec-workflow/workflow.py" \
+   python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" \
      frame-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"
    ```
 
@@ -364,7 +370,7 @@ SKILL.md hand-off is the documented gate.
 1. Read the automatic `jig hint:` project-orientation headline injected at
    `SessionStart`, or refresh it manually before choosing work:
    ```bash
-   python3 ".github/skills/spec-workflow/workflow.py" orient \
+   python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" orient \
      --project-dir .
    ```
    The headline is computed from `scaffold.json` and lifecycle artifacts. Treat
@@ -375,7 +381,7 @@ SKILL.md hand-off is the documented gate.
    (or `DRAFT` for a slice you intend to plan now).
 3. Run:
    ```bash
-   python3 ".github/skills/spec-workflow/workflow.py" transition \
+   python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" transition \
      "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" IN_PROGRESS
    ```
    **Claim-on-working-state (spec 049-01, amended by
@@ -617,25 +623,25 @@ keeping).
 
 ```bash
 # Compliance pass (always)
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   implementation "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
   "<deliverable-path-1>" ...)
-SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   subagent-type implementation)
 # … feed "[jig:phase=compliance] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
 # … to Task with subagent_type: $SUBAGENT, wait for pass …
 
 # Craft pass (always) — spec 096-03: select the richer skill first.
 # 1. Show the tiered candidates + write the sidecar:
-python3 ".github/skills/independent-review/review.py" \
+python3 "$JIG_ROOT/skills/independent-review/review.py" \
   candidates pr_review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
   --pass craft
 # 2. Read the [high-confidence] tier, pick the single best (or `none`), then
 #    build the prompt with the REQUIRED --richer-skill (config overrides it):
-PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   pr-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
   "<deliverable-path-1>" ... --richer-skill "<name-or-none>")
-SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
   subagent-type pr-review)
 # … feed "[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
 # … to Task with subagent_type: $SUBAGENT, wait for pass …
@@ -646,20 +652,20 @@ SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
 # slice lookup failed (missing spec / unknown fragment / ambiguous),
 # not "no arch pass needed." Surface the error rather than silently
 # skipping the pass.
-if ! NEED_ARCH=$(python3 ".github/skills/spec-workflow/workflow.py" \
+if ! NEED_ARCH=$(python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" \
     arch-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"); then
   echo "arch-review-needed failed — aborting" >&2
   exit 2
 fi
 if [ "$NEED_ARCH" = "true" ]; then
   # 096-03: show candidates for arch_review, then pick (config overrides).
-  python3 ".github/skills/independent-review/review.py" \
+  python3 "$JIG_ROOT/skills/independent-review/review.py" \
     candidates arch_review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
     --pass arch
-  PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+  PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
     arch-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
     "<deliverable-path-1>" ... --richer-skill "<name-or-none>")
-  SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+  SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
     subagent-type arch-review)
   # … feed "[jig:phase=arch] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
   # … to Task with subagent_type: $SUBAGENT, wait for pass …
@@ -668,7 +674,7 @@ fi
 # Code-health pass (only when slice frontmatter has `code_health_review: true`)
 # The orchestrator runs health.py and feeds its summary IN — the read-only
 # reviewer never runs the tool (no Bash).
-if ! NEED_CH=$(python3 ".github/skills/spec-workflow/workflow.py" \
+if ! NEED_CH=$(python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" \
     code-health-review-needed "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"); then
   echo "code-health-review-needed failed — aborting" >&2
   exit 2
@@ -680,14 +686,14 @@ if [ "$NEED_CH" = "true" ]; then
   # if it isn't installed, note "summary unavailable" and judge on the
   # deliverables.)
   # 096-03: show candidates for code_health, then pick (config overrides).
-  python3 ".github/skills/independent-review/review.py" \
+  python3 "$JIG_ROOT/skills/independent-review/review.py" \
     candidates code_health "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
     --pass code-health
-  PROMPT=$(python3 ".github/skills/independent-review/review.py" \
+  PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
     code-health "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
     "<deliverable-path-1>" ... --summary-file /tmp/health-summary.txt \
     --richer-skill "<name-or-none>")
-  SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
+  SUBAGENT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
     subagent-type code-health)
   # … feed "[jig:phase=code-health] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT"
   # … to Task with subagent_type: $SUBAGENT, wait for pass …
@@ -721,7 +727,7 @@ carried across regens — so it is regenerated, never hand-edited. A merge
 conflict on it is resolved by re-running `status-board`, not by picking a side:
 
 ```bash
-python3 ".github/skills/spec-workflow/workflow.py" \
+python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" \
   check-board <project-dir>
 ```
 
@@ -949,7 +955,7 @@ status flip is allowed. Each item is a gate.
 Slice 015-03 added a read-only freshness audit:
 
 ```bash
-python3 ".github/skills/spec-workflow/workflow.py" stale \
+python3 "$JIG_ROOT/skills/spec-workflow/workflow.py" stale \
   [--project-dir DIR] [--days N]
 ```
 
