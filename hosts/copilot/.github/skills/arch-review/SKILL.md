@@ -23,10 +23,10 @@ user-invocable: true
 > active jig skill that ships without a `.py` helper (after
 > `/jig:pr-review`, spec 012) — arch-review is fundamentally a judgment
 > skill, and what little determinism is needed (read the doc, identify
-> the scope, classify the domain) Claude can run inline. If any other
+> the scope, classify the domain) Copilot can run inline. If any other
 > skill is installed whose description identifies it as handling
 > architecture review, design review, RFC review, or technical-design
-> review, the Claude Code skill router prefers that one over jig's
+> review, the GitHub Copilot CLI skill router prefers that one over jig's
 > baseline — the deferral is category-based, not name-specific, so a
 > richer user skill named anything (`arch-review`, `design-review`,
 > `rfc-reviewer`, etc.) wins. Jig's slim version remains the
@@ -73,12 +73,12 @@ There are four things people often confuse with this skill. Pick the
 right one:
 
 - **Any other user-installed architecture/design/RFC-review skill.**
-  Common location: `~/.claude/skills/arch-review/` — but the deferral
+  Common location: `~/.github/skills/arch-review/` — but the deferral
   is **category-based, not name-based**, so a skill named anything
   (`arch-review`, `design-review`, `rfc-reviewer`, `tech-spec-review`,
   etc.) whose description claims architecture review, design review,
   RFC review, or technical-design review will be preferred. If one is
-  present, **defer to it.** The Claude Code skill router should route
+  present, **defer to it.** The GitHub Copilot CLI skill router should route
   to the more specific skill automatically; if you want to be sure,
   explicitly invoke it. The one exception jig's description carves
   out is the bundled `review` skill — jig:arch-review does **not**
@@ -278,7 +278,7 @@ architecture-review skill, not the baseline.
   invocation. Config honoring on orchestrator-invoked surfaces is a tracked
   follow-up (ADR-0040 OQ1).
 - **The deferral hint is the routing mechanism, not a code path.**
-  Jig's description tells the Claude Code router "prefer any other
+  Jig's description tells the GitHub Copilot CLI router "prefer any other
   installed skill whose description identifies it as handling
   architecture review, design review, RFC review, or technical-design
   review." There is no filesystem probe, no plugin-precedence lookup,
@@ -290,7 +290,7 @@ architecture-review skill, not the baseline.
   only.** The spec-workflow **arch pass** spawns a read-only `reviewer`
   subagent with no `Skill` tool, so it cannot use the router at all —
   there `review.py` does explicit file-read dispatch (detects
-  `~/.claude/skills/arch-review/` and points the reviewer at it). See
+  `~/.github/skills/arch-review/` and points the reviewer at it). See
   [docs/workflow.md](../../docs/workflow.md) § Post-implementation review.
 - **Lightweight is a feature, not a limitation.** The baseline does
   not ship a seven-perspective matrix. It does not ship
@@ -299,7 +299,7 @@ architecture-review skill, not the baseline.
   completeness-checklist sweep. It does not produce a severity-rated
   finding list. If you find yourself wishing the baseline did more,
   you are in the target audience for installing a richer skill at
-  the user scope (commonly `~/.claude/skills/arch-review/`).
+  the user scope (commonly `~/.github/skills/arch-review/`).
 - **This skill reviews an ADR draft; `/jig:adr-workflow` creates
   one.** The direction matters. If the ADR does not exist yet, you
   want the scaffolding skill, not this one. If the ADR exists in

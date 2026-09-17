@@ -149,7 +149,7 @@ skill-router dispatch — `quality.py` is a helper, not a SKILL.
 
 `agents/implementer.md` enumerates TDD discipline as non-negotiable:
 write the failing test first, then the minimum implementation, then refactor.
-This skill is the *tooling layer* that implementer subagents (and Claude in
+This skill is the *tooling layer* that implementer subagents (and Copilot in
 the main session) use to actually run the loop. The discipline lives in
 `agents/implementer.md`; the deterministic invocation lives in `tdd.py`.
 

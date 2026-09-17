@@ -19,11 +19,11 @@ user-invocable: true
 > adversarial stance into ordinary conversation.
 
 > Spec 004 promoted this skill from stub to active. The prompt is constructed
-> by `review.py`; Claude owns the Task invocation.
+> by `review.py`; Copilot owns the Task invocation.
 
 ## What this skill does
 
-Constructs the standardized reviewer-subagent prompt and tells Claude when /
+Constructs the standardized reviewer-subagent prompt and tells Copilot when /
 how to spawn the Task. The skill has four modes, matching the review passes
 every slice may run:
 
@@ -133,7 +133,7 @@ SUBAGENT=$(python3 ".github/skills/independent-review/review.py" \
 Feed `[jig:phase=craft] [jig:spec=NNN] [jig:slice=NNN-NN]\n\n$PROMPT` to
 `Task` with `subagent_type: "$SUBAGENT"`. The prompt points the reviewer at
 the most-specific `pr-review` SKILL.md reachable in the environment —
-Claude's skill router resolves user > project > `jig:pr-review` precedence
+Copilot's skill router resolves user > project > `jig:pr-review` precedence
 via the skill description hints. The pass returns the canonical four output
 buckets (scope / blockers / nits / strengths) wrapped in the same verdict
 envelope as the compliance pass. SPECIFIC ISSUES entries are tagged
@@ -354,7 +354,7 @@ required pass now `pass`, the gate clears.
 ## Context isolation pattern
 
 Implementer writes deliverable to disk → `review.py` builds a self-contained
-prompt → Claude spawns the reviewer Task with that prompt → reviewer reads
+prompt → Copilot spawns the reviewer Task with that prompt → reviewer reads
 only what the prompt points at. This is imperfect (parent context is
 technically accessible to subagents — see GitHub issue #20304), but works
 reliably when the prompt is sharp.
@@ -362,7 +362,7 @@ reliably when the prompt is sharp.
 ## Gotchas
 
 - **`review.py` does not spawn the Task.** It only constructs the prompt
-  string. Claude is responsible for invoking the `Task` tool with the prompt
+  string. Copilot is responsible for invoking the `Task` tool with the prompt
   as the `prompt` parameter. This separation keeps `review.py` deterministic
   and testable.
 - **Reviewer agent is read-only by definition.** `agents/reviewer.md` lists

@@ -4,7 +4,7 @@ description: >
   Persist new context, terms, learnings, and settled lightweight decisions. Use when
   the user says remember this, save this for later, add to glossary, note this down,
   or at session end to consolidate what was learned — that goes to the memory layer
-  (CLAUDE.md hot cache, docs/memory/, docs/inbox.md). Also use to record a decision
+  (AGENTS.md hot cache, docs/memory/, docs/inbox.md). Also use to record a decision
   or remember this decision when the call is a lightweight one shipped outside a
   spec slice: UI strings, visual and CSS choices, copy, or translation fixes. Those
   go to docs/decisions/lightweight-decisions.md via decisions.py. Also use when
@@ -25,7 +25,7 @@ user-invocable: true
 ## What this skill does
 
 Persists session-derived context to the memory layer via a deterministic helper.
-Claude makes the *what / where* decisions; `memory.py` does the file I/O,
+Copilot makes the *what / where* decisions; `memory.py` does the file I/O,
 idempotency, and self-healing of missing memory structure.
 
 ## When to invoke
@@ -97,7 +97,7 @@ time, then persist now.
    - Niche/domain term → glossary
    - Failed approach / gotcha → learnings
    - Unresolved/unfinished thought → inbox
-   - High-frequency term → hot cache (in CLAUDE.md)
+   - High-frequency term → hot cache (in AGENTS.md)
    - Non-spec shipped decision → `docs/decisions/lightweight-decisions.md`
 3. **Invoke `memory.py` once per item** with the right command. **Always quote
    the term/definition/body arguments** — terms may contain spaces, definitions
@@ -223,7 +223,7 @@ time, then persist now.
 ## Self-healing
 
 If `docs/memory/` or `docs/inbox.md` don't exist (pre-scaffold-init project),
-the helper creates them. If `CLAUDE.md` is absent, `promote` falls back to
+the helper creates them. If `AGENTS.md` is absent, `promote` falls back to
 `add-term` (writes to glossary) and warns on stderr. The skill works on
 unscaffolded projects, though scaffold-init is the recommended setup.
 

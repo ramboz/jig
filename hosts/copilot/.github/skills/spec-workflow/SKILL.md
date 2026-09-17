@@ -35,7 +35,7 @@ user-invocable: true
 - Consults `docs/memory/glossary.md` when drafting ACs to surface unknown domain terms.
 - Surfaces skill-routing observability via `workflow.py routing-stats [--days N]` —
   a read-only histogram of which skills fired (jig baseline vs. richer/"other"
-  skill per category) from `.claude/skill-usage.jsonl` (slice 041-02).
+  skill per category) from `.github/skill-usage.jsonl` (slice 041-02).
 - Surfaces use-case coverage via `workflow.py coverage [--project-dir DIR]` — a
   read-only, **advisory** (non-blocking), project-wide **bidirectional** check
   (slice 068-03): a deterministic set-difference over the `use_cases:` trace
@@ -49,7 +49,7 @@ user-invocable: true
 - Surfaces gate-bypass telemetry via `workflow.py gate-stats [--days N]` — a
   read-only per-gate histogram of how often each gate honored its env-var
   override (an override-frequency audit trail, not a gate-value verdict) from
-  `.claude/skill-usage.jsonl` (slice 078-02).
+  `.github/skill-usage.jsonl` (slice 078-02).
 
 ## SPIDR splitting
 
@@ -197,7 +197,7 @@ SKILL.md hand-off is the documented gate.
    **Works from any branch or worktree** (ADR-0015 / spec 051). The
    helper routes on the current branch: on `main` it runs the proven
    in-place flow (clean tree required, since the commit lands on local
-   `main`); off `main` — a feature branch or a linked `.claude/worktrees/*`
+   `main`); off `main` — a feature branch or a linked `.github/worktrees/*`
    worktree — it builds the reservation commit in an *ephemeral detached
    worktree* checked out at `origin/main` and pushes it by SHA, never
    touching your branch, cwd, or working tree. You no longer need to
@@ -264,7 +264,7 @@ SKILL.md hand-off is the documented gate.
    **structural reference** — what a filled-in slice looks like — mirror the
    in-project worked example that scaffolding installs at project root:
    `docs/specs/001-adopt-jig/` (`spec.md` + `slice-01-bootstrap.md`), the first
-   spec, which your project's `CLAUDE.md` names as the worked example to
+   spec, which your project's `AGENTS.md` names as the worked example to
    imitate. Set `status: DRAFT` in the frontmatter. Legacy slices that use prose
    `**STATUS: DRAFT**` markers still work (lazy migration); no need to rewrite
    them.
@@ -453,7 +453,7 @@ The orchestrator runs the passes in this order:
    returns, build the craft-pass prompt with `review.py pr-review` and
    spawn a second `reviewer`-shaped subagent. The reviewer is read-only
    (Read/Glob/Grep, **no `Skill` tool**), so it cannot route to a skill
-   via Claude's skill router; instead `review.py` hands it a concrete
+   via Copilot's skill router; instead `review.py` hands it a concrete
    richer-skill path to read-and-apply, falling back to jig's inlined
    baseline buckets (scope / blockers / nits / strengths). The pass
    returns the same `VERDICT / REASONING / SPECIFIC ISSUES /
@@ -896,7 +896,7 @@ status flip is allowed. Each item is a gate.
 - [ ] **Primer hygiene** — if this slice closes the spec (all non-deferred
       slices DONE), apply the spec 025 compress-on-close-out rule per the slice
       template's `### Close-out (post-DONE)` section. Check every primer surface
-      present in this project: `CLAUDE.md`, `AGENTS.md`, and scaffold templates.
+      present in this project: `AGENTS.md`, `AGENTS.md`, and scaffold templates.
       Active-spec sections should only carry in-flight work; load-bearing
       per-slice invariants migrate to the status board Notes column (which
       `workflow.py status-board` preserves across regen), memory, or the

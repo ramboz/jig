@@ -24,9 +24,9 @@ user-invocable: true
 > skill that ships without a `.py` helper — vision-elicitation is
 > fundamentally a judgment skill, and the determinism it needs (find the
 > elicitation slots, transition markers, render Q&A into template bodies)
-> Claude can run inline via Read/Edit. If any other skill is installed
+> Copilot can run inline via Read/Edit. If any other skill is installed
 > whose description identifies it as handling vision elicitation, product
-> discovery, project framing, or product scope capture, the Claude Code
+> discovery, project framing, or product scope capture, the GitHub Copilot CLI
 > skill router prefers that one over jig's baseline — the deferral is
 > category-based, not name-specific, so a richer user skill named anything
 > (`vision-wizard`, `product-canvas`, `lean-pitch`, etc.) wins. Jig's slim
@@ -73,14 +73,14 @@ one:
 
 - **Any other user-installed vision-elicitation / product-discovery /
   project-framing skill.** Common locations include
-  `~/.claude/skills/vision-elicitation/`, `~/.claude/skills/product-canvas/`,
-  `~/.claude/skills/lean-pitch/`, etc. — but the deferral is
+  `~/.github/skills/vision-elicitation/`, `~/.github/skills/product-canvas/`,
+  `~/.github/skills/lean-pitch/`, etc. — but the deferral is
   **category-based, not name-based**, so a skill named anything whose
   description claims vision elicitation, product discovery, project
   framing, or product scope capture will be preferred. If one is present,
   **defer to it.** The one exception jig's description carves out is the
   bundled `init` skill — jig:vision-elicitation does **not** defer to that
-  one (it's the generic CLAUDE.md-bootstrap helper, a different surface).
+  one (it's the generic AGENTS.md-bootstrap helper, a different surface).
 - **`/jig:spec-workflow`** — sibling jig skill for **spec authoring**
   (drafting a slice, SPIDR-splitting features, transitioning state
   markers). That's about *what we'll build next*. This skill is about
@@ -104,7 +104,7 @@ Feature scope → spec-workflow. Empty repo → scaffold-init.**
 
 ## How the elicitation works
 
-The skill is **judgment-only** — no `.py` helper. Claude reads the
+The skill is **judgment-only** — no `.py` helper. Copilot reads the
 question set, conducts the Q&A inline with the user, and writes the
 rendered answers via the Edit tool. The per-section flow is:
 
@@ -145,13 +145,13 @@ treat that as a half-filled section.
 
 Three input modes, ordered by richness:
 
-1. **Full session context (preferred).** You're inside a Claude Code
+1. **Full session context (preferred).** You're inside a GitHub Copilot CLI
    session at the project root, with `docs/product-vision.md` and
    `docs/architecture.md` on disk from `scaffold-init`. The user can
    answer questions interactively; you write to disk as each section
    completes.
 2. **Pitch-document context.** The user pasted or pointed at a project
-   pitch (e.g. `/Users/ramboz/Projects/CLAUDE.md` for YarnFinder; a
+   pitch (e.g. `/Users/ramboz/Projects/AGENTS.md` for YarnFinder; a
    README; a one-pager). Use the pitch to ground the questions but
    still ask the user — the skill does not auto-fill from a pitch
    alone (the user's voice in the final doc matters).
@@ -256,7 +256,7 @@ Two annotated transcripts ship with this skill:
   is wrong.
 - [`worked-example-yarnfinder.md`](worked-example-yarnfinder.md) —
   runs the elicitation against the YarnFinder pitch described in
-  `/Users/ramboz/Projects/CLAUDE.md`. Demonstrates a different
+  `/Users/ramboz/Projects/AGENTS.md`. Demonstrates a different
   project shape (consumer product vs. dev tooling) and shows how
   YarnFinder's bespoke concepts (Data sourcing, Recommended slice
   order, prioritized backlog) map to the template's slots. Two
@@ -336,7 +336,7 @@ rule; do not vary them.
 
 - **The deferral hint is the routing mechanism, not a code path.**
   Same as pr-review and arch-review: jig's description tells the
-  Claude Code router "prefer any other installed skill whose
+  GitHub Copilot CLI router "prefer any other installed skill whose
   description identifies it as handling vision elicitation, product
   discovery, project framing, or product scope capture." There is no
   filesystem probe, no plugin-precedence lookup. The deferral is

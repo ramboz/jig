@@ -19,7 +19,7 @@ user-invocable: true
 > is the sixth non-stub active jig skill that ships without a `.py`
 > helper — clarify is fundamentally a judgment skill, and the
 > determinism it needs (locate the target doc, find an existing
-> `## Clarifications` section if any, append new entries) Claude can
+> `## Clarifications` section if any, append new entries) Copilot can
 > run inline via Read + Edit. The skill slots between
 > `workflow.py new <slug>` (stub reservation) and the
 > `READY_FOR_REVIEW` transition (spec body ready for first review).
@@ -251,7 +251,7 @@ document.
 
 Questions are concrete, single-axis, and answerable in 1-3 sentences.
 Bad: *"What about edge cases?"* (vague). Good: *"What happens if the
-target directory already contains a `.claude/` folder with no
+target directory already contains a `.github/` folder with no
 `scaffold.json` — refuse, merge, or overwrite?"* (concrete, three
 named options, answerable directly).
 
@@ -327,7 +327,7 @@ Q5 becomes Q6, etc.
 - **Verbatim-answer rule.** The skill does not paraphrase, expand, or
   "improve" the user's answers. If the user says "refuse if .claude
   already exists," that's what gets written — not "the helper SHALL
-  reject the operation when a .claude/ directory is present in the
+  reject the operation when a .github/ directory is present in the
   target." Same boundary as `/jig:vision-elicitation`: the user's
   voice in the final doc is what matters. Only two narrow exceptions:
   (a) markdown structure (rendering a list as a bullet list), (b)

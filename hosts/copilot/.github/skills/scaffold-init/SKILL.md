@@ -2,7 +2,7 @@
 name: scaffold-init
 description: >
   Initialize an AI-native development workspace with spec-driven workflow infrastructure.
-  Use when starting a new project, setting up Claude Code on a codebase for the first
+  Use when starting a new project, setting up GitHub Copilot CLI on a codebase for the first
   time, or when the user says scaffold, initialize, set up AI workflow, onboard this
   repo, or similar. Do not use for adding an individual skill or config to an already-
   scaffolded project — that is handled by the relevant tier skill directly.
@@ -33,6 +33,7 @@ is offered (not auto-installed) when LLM/agent signals are present.
 4. Invoke the wizard with the collected flags:
    ```bash
    python3 ".github/skills/scaffold-init/scaffold.py" \
+     --host copilot \
      [--runtime <name>] [--team|--solo] [--has-ci|--no-ci] \
      [--has-tests|--no-tests] [--plans-ai|--no-ai] \
      [--in-repo] \
@@ -96,9 +97,9 @@ plugin mode. Do not invent answers when the user is unsure.
 ## Output
 
 After running, the target directory contains (plugin mode — the default):
-- `CLAUDE.md` (with Hot Cache section, project name substituted)
+- `AGENTS.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
-- `.claude/hooks/` (empty — project-specific gates can go here)
+- `.github/hooks/` (empty — project-specific gates can go here)
 - a **project-scoped permissions file**, on hosts that provide one — seeded with
   the ADR-0013 destructive-command deny floor (`git push --force`,
   `git reset --hard`, `rm -rf`). Hosts with no project-scoped permission surface
@@ -131,7 +132,7 @@ Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 ## Immediate next steps to surface to the user
 
 After scaffolding succeeds, tell the user:
-1. Open `CLAUDE.md` and fill in the Hot Cache section with project-specific terms.
+1. Open `AGENTS.md` and fill in the Hot Cache section with project-specific terms.
 2. Open `docs/refinement-todo.md` to see what was deferred.
 3. The first spec to write is in `docs/specs/` — use `/jig:spec-workflow` (when implemented)
    or write `docs/specs/001-<feature>/spec.md` by hand.
@@ -141,7 +142,7 @@ After scaffolding succeeds, tell the user:
 ## Constraints
 
 - Do not invoke this skill in a directory that is already scaffolded (has `scaffold.json`).
-- Do not overwrite an existing `CLAUDE.md` without explicit user confirmation.
+- Do not overwrite an existing `AGENTS.md` without explicit user confirmation.
 - The wizard is deterministic — do not edit the generated files yourself before
   reporting back. The user should see exactly what `scaffold.py` produced.
 
@@ -149,10 +150,10 @@ After scaffolding succeeds, tell the user:
 
 - The spec-gate hook for `docs/conventions.md` activates AFTER scaffold-init completes.
   It cannot gate its own creation (bootstrap paradox — documented and intentional).
-- `templates/CLAUDE.md.template` is the source template; do NOT use the jig repo's own
-  `CLAUDE.md` as a template — the two diverge over time.
-- `${CLAUDE_PLUGIN_ROOT}` is the right env var inside the plugin. Don't confuse it with
-  `$CLAUDE_PROJECT_DIR` (which is the target project's root after install).
+- `templates/AGENTS.md.template` is the source template; do NOT use the jig repo's own
+  `AGENTS.md` as a template — the two diverge over time.
+- Copilot does not expose a plugin-root environment variable for skill-issued
+  commands; use the packaged `.github/...` relative paths shown above.
 - Signal detection (existing CI, LLM/agent files, team size) is deferred to slice 001-03.
   Until then, the wizard installs default tiers regardless of project context.
 - **scaffold-init refuses if the target looks spec-driven but lacks `scaffold.json`.**

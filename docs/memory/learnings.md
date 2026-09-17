@@ -24,6 +24,15 @@ package manager's test script and runner-native imports as first-class signals:
 place `--test-name-pattern` before the file path and normalize TAP `1..0`
 missing-pattern output to jig's exit 2 rather than a false green.
 
+## Bug 034: packaged host helpers need their own runtime topology
+
+Copilot can load Claude-shaped `SKILL.md` files from `.github/skills`, but the
+helper code those skills invoke is not host-neutral by default. Packaged helper
+entrypoints must infer or receive the host and resolve that host's package
+layout (`.plugin/plugin.json`, `.github/templates`, `.github/skills/...`) before
+writing scaffold output; otherwise plugin discovery can pass while
+`scaffold-init` still creates a Claude project.
+
 ## Hook PATH injection does not apply to hook commands
 
 `bin/` scripts are added to PATH for the **Bash tool only**, not for hook `command` fields.

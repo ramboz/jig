@@ -19,10 +19,10 @@ user-invocable: true
 > Spec 012 introduced this skill as jig's **team baseline** for PR and
 > code review. It is the first non-stub active jig skill that ships
 > without a `.py` helper — pr-review is fundamentally a judgment skill,
-> and the determinism it needs (`git diff`, file-type detection) Claude
+> and the determinism it needs (`git diff`, file-type detection) Copilot
 > can run inline. If any other skill is installed whose description
 > identifies it as handling PR review, code review, or diff review, the
-> Claude Code skill router prefers that one over jig's baseline — the
+> GitHub Copilot CLI skill router prefers that one over jig's baseline — the
 > deferral is category-based, not name-specific, so a richer user skill
 > named anything (`pr-review`, `code-reviewer`, `team-pr`, etc.) wins.
 > Jig's slim version remains the auto-trigger when no such skill is
@@ -55,11 +55,11 @@ There are three things people often confuse with this skill. Pick the right
 one:
 
 - **Any other user-installed PR/code-review skill.** Common location:
-  `~/.claude/skills/pr-review/` — but the deferral is **category-based,
+  `~/.github/skills/pr-review/` — but the deferral is **category-based,
   not name-based**, so a skill named anything (`pr-review`,
   `code-reviewer`, `team-pr`, etc.) whose description claims PR review,
   code review, or diff review will be preferred. If one is present,
-  **defer to it.** The Claude Code skill router should route to the
+  **defer to it.** The GitHub Copilot CLI skill router should route to the
   more specific skill automatically; if you want to be sure, explicitly
   invoke it. The one exception jig's description carves out is the
   bundled `review` skill — jig:pr-review does **not** defer to that one
@@ -85,7 +85,7 @@ Just a diff → this skill (or the richer user one).**
 
 Three input modes, ordered by richness:
 
-1. **Full repo context (preferred).** You're inside a Claude Code session
+1. **Full repo context (preferred).** You're inside a GitHub Copilot CLI session
    with the repo open. Run `git diff main...HEAD` (or the appropriate base)
    to get the diff. You can cross-reference the rest of the repo to check
    for duplicated logic, follow renames, examine related files, and verify
@@ -205,7 +205,7 @@ baseline.
   invocation, nor in `bug-fix`'s craft pass. Config honoring on those
   orchestrator-invoked surfaces is a tracked follow-up (ADR-0040 OQ1).
 - **The deferral hint is the routing mechanism, not a code path.** Jig's
-  description tells the Claude Code router "prefer any other installed
+  description tells the GitHub Copilot CLI router "prefer any other installed
   skill whose description identifies it as handling PR/code/diff
   review." There is no filesystem probe, no plugin-precedence lookup,
   no name-matching against `pr-review` specifically. The deferral is
@@ -216,7 +216,7 @@ baseline.
   The spec-workflow **craft pass** spawns a read-only `reviewer` subagent
   with no `Skill` tool, so it cannot use the router at all — there
   `review.py` does explicit file-read dispatch (detects
-  `~/.claude/skills/pr-review/` and points the reviewer at it). See
+  `~/.github/skills/pr-review/` and points the reviewer at it). See
   [docs/workflow.md](../../docs/workflow.md) § Post-implementation review.
 - **The bundled `review` skill is explicitly excluded from the deferral.**
   Jig's description says it does **not** defer to `review`. That's the
@@ -227,7 +227,7 @@ baseline.
   does not run multiple personas. It does not check for security issues
   beyond the obvious. If you find yourself wishing the baseline did
   more, you are in the target audience for installing a richer skill
-  at the user scope (commonly `~/.claude/skills/pr-review/`).
+  at the user scope (commonly `~/.github/skills/pr-review/`).
 - **This is a PR-shape review, not a spec-shape review.** If a slice has
   a spec.md to evaluate against, use `/jig:independent-review` (or spawn
   the `agents/reviewer.md` subagent). Mixing the two surfaces leads to

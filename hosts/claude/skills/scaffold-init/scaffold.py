@@ -168,8 +168,36 @@ def plugin_root(host: str = "claude") -> Path:
     env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
     if host == "claude" and env_root:
         return Path(env_root).resolve()
+    script = Path(__file__).resolve()
+    if (
+        host == "copilot"
+        and len(script.parents) > 3
+        and script.parents[2].name == ".github"
+        and (script.parents[3] / ".plugin" / "plugin.json").is_file()
+    ):
+        return script.parents[3]
     # Fallback: scaffold.py lives at <plugin-root>/skills/scaffold-init/scaffold.py
-    return Path(__file__).resolve().parents[2]
+    return script.parents[2]
+
+
+def default_host_for_scaffold_script(script: "Path | None" = None) -> str:
+    """Infer the host when a packaged scaffold helper is invoked directly.
+
+    Source-checkout and Claude-package invocations historically defaulted to
+    Claude. A Copilot package nests this file under
+    `<plugin-root>/.github/skills/scaffold-init/scaffold.py`; in that shape,
+    defaulting to Claude creates the wrong primer and then looks for the wrong
+    manifest. The package topology is unambiguous, so detect it before argparse
+    chooses the renderer.
+    """
+    script = (script or Path(__file__)).resolve()
+    if (
+        len(script.parents) > 3
+        and script.parents[2].name == ".github"
+        and (script.parents[3] / ".plugin" / "plugin.json").is_file()
+    ):
+        return "copilot"
+    return "claude"
 
 
 class PluginManifestError(RuntimeError):
@@ -194,6 +222,7 @@ def _read_plugin_version(plugin: Path) -> str:
     candidates = [
         plugin / ".claude-plugin" / "plugin.json",
         plugin / ".codex-plugin" / "plugin.json",
+        plugin / ".plugin" / "plugin.json",
     ]
     manifest_path = next((path for path in candidates if path.is_file()), None)
     if manifest_path is None:
@@ -1751,6 +1780,7 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
     mechanism from an env var."""
 
     name = "copilot"
+    SKILL_PATH_REPLACEMENT = r".github/skills/jig-\1/"
 
     # Spike 113-01 AC2: Copilot's skill loader rejects a description over
     # 1024 characters (the same limit bug 009 already enforces for Codex —
@@ -2210,24 +2240,34 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
-        """Rewrite every `${CLAUDE_PLUGIN_ROOT}/…` runtime path in a rendered
-        SKILL.md body to the plugin-root-relative Copilot spelling (AC4).
-        One mechanical prefix swap covers all three forms the slice names —
-        `…/skills/…`, `…/scripts/…`, and `…/hooks/scripts/…` — because
-        Copilot's package nests every rendered runtime directory one level
-        under `.github/` relative to where Claude/Codex place them at the
-        plugin root (`.github/skills/`, `.github/hooks/scripts/`, and any
-        future `.github/scripts/`). A body with no `${CLAUDE_PLUGIN_ROOT}`
-        mention (the common case) round-trips unchanged. See
-        `rewrite_hook_command`'s docstring for the same best-hypothesis
-        caveat — unverified live, and if anything LESS likely to hold here
-        than for a host-spawned hook command: an agent-issued Bash tool call
-        (how a skill's prescribed command actually runs) has its CWD set by
-        the AGENT's own session, not necessarily anything Copilot controls
-        per-plugin."""
-        return body.replace(
-            cls.PLUGIN_ROOT_PREFIX + "/", cls.COPILOT_RUNTIME_PREFIX
+        """Render skill/doc prose in Copilot-native vocabulary and paths."""
+        out = body.replace(cls.PLUGIN_ROOT_PREFIX + "/", cls.COPILOT_RUNTIME_PREFIX)
+        out = cls.SKILL_PATH_RE.sub(cls.SKILL_PATH_REPLACEMENT, out)
+        out = out.replace(
+            "- `${CLAUDE_PLUGIN_ROOT}` is the right env var inside the plugin. "
+            "Don't confuse it with\n"
+            "  `$CLAUDE_PROJECT_DIR` (which is the target project's root after "
+            "install).",
+            "- Copilot does not expose a plugin-root environment variable for "
+            "skill-issued\n"
+            "  commands; use the packaged `.github/...` relative paths shown "
+            "above.",
         )
+        out = out.replace(".claude/", ".github/")
+        out = out.replace("CLAUDE.md", "AGENTS.md")
+        out = out.replace("Claude Code", "GitHub Copilot CLI")
+        out = out.replace("Claude", "Copilot")
+        scaffold_invocation = 'python3 ".github/skills/scaffold-init/scaffold.py" \\\n'
+        if scaffold_invocation in out and "--host copilot" not in out:
+            out = out.replace(
+                scaffold_invocation,
+                scaffold_invocation + "     --host copilot \\\n",
+            )
+        return out
+
+    @classmethod
+    def rewrite_doc_paths_plugin_mode(cls, body: str) -> str:
+        return cls.rewrite_skill_md_paths(body)
 
     def phase_mode_substitutions(self) -> dict[str, str]:
         return {
@@ -2267,6 +2307,13 @@ def renderer_for_host(host: str) -> type:
     `--host` already degrades elsewhere.
     """
     return _HOST_RENDERERS.get(host, ClaudeScaffoldRenderer)
+
+
+def template_root_for_host(plugin: Path, host: str) -> Path:
+    """Return the templates directory for a source or packaged host runtime."""
+    if host == "copilot" and (plugin / ".github" / "templates").is_dir():
+        return plugin / ".github" / "templates"
+    return plugin / "templates"
 
 
 def _copy_skill_dir(src: Path, dst: Path) -> None:
@@ -3068,6 +3115,11 @@ def copy_machinery(plugin: Path, target: Path, *,
             plugin, target, force=force, installed_tiers=installed_tiers,
         )
         return
+    if host == "copilot":
+        raise ValueError(
+            "Copilot in-repo machinery copy is not implemented yet; use plugin "
+            "mode (the default) for GitHub Copilot CLI."
+        )
     if host != "claude":
         raise ValueError(f"unsupported scaffold host: {host}")
     _check_hooks_safety(target, force=force)
@@ -3591,7 +3643,7 @@ def adoption_manifest(
     dry-run behavior, and the atomic write; this function reuses scaffold's
     signal, tier, version, and manifest rules.
     """
-    if host not in {"claude", "codex"}:
+    if host not in {"claude", "codex", "copilot"}:
         raise ValueError(f"unsupported scaffold host: {host}")
     docs_root = project_layout.validate_docs_root(docs_root)
     target = target.resolve()
@@ -3603,7 +3655,7 @@ def adoption_manifest(
         "TIMESTAMP": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     return _scaffold_manifest(
-        plugin / "templates",
+        template_root_for_host(plugin, host),
         substitutions,
         signals,
         installed_tiers,
@@ -3632,7 +3684,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     opt-in; it kept `True` between slices 016-03 and 099-01. The parameter
     default and the CLI default (`_build_parser`) are deliberately kept in
     step."""
-    if host not in {"claude", "codex"}:
+    if host not in {"claude", "codex", "copilot"}:
         raise ValueError(f"unsupported scaffold host: {host}")
 
     # Slice 084-03: validate the configured docs root BEFORE any file write
@@ -3642,7 +3694,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     docs_root = project_layout.validate_docs_root(docs_root)
 
     target = target.resolve()
-    template_root = plugin / "templates"
+    template_root = template_root_for_host(plugin, host)
     renderer: HostRenderer = renderer_for_host(host)(plugin, target, force=force)
 
     if not template_root.exists():
@@ -3728,6 +3780,11 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
             CodexScaffoldRenderer.rewrite_skill_md_paths if with_machinery
             else CodexScaffoldRenderer.rewrite_doc_paths_plugin_mode
         )
+    elif host == "copilot":
+        host_rewrite = (
+            CopilotScaffoldRenderer.rewrite_skill_md_paths if with_machinery
+            else CopilotScaffoldRenderer.rewrite_doc_paths_plugin_mode
+        )
     else:
         host_rewrite = _rewrite_skill_md_paths if with_machinery else None
 
@@ -3740,7 +3797,7 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     doc_rewrite = _compose_layout_rewrite(host_rewrite, docs_root)
 
     # 1. Host primer from the top-level template.
-    if host == "codex":
+    if host in ("codex", "copilot"):
         copy_template(
             template_root / "AGENTS.md.template",
             target / "AGENTS.md",
@@ -3789,6 +3846,9 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
     # 3. Directories that should exist (even if empty for now)
     if host == "codex":
         (target / ".codex" / "hooks").mkdir(parents=True, exist_ok=True)
+    elif host == "copilot":
+        if with_machinery:
+            (target / ".github" / "hooks").mkdir(parents=True, exist_ok=True)
     else:
         (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
 
@@ -3893,8 +3953,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("target", nargs="?", help="target directory")
     p.add_argument(
-        "--host", choices=("claude", "codex"), default="claude",
-        help="host scaffold renderer to use (default: claude)",
+        "--host", choices=("claude", "codex", "copilot"),
+        default=default_host_for_scaffold_script(),
+        help="host scaffold renderer to use (default: inferred from package, "
+             "otherwise claude)",
     )
     p.add_argument(
         "--install-codex-agents", action="store_true",
@@ -4100,7 +4162,7 @@ def main(argv: list[str]) -> int:
                 "nothing is wrong. If you don't, see the mode line above."
             )
 
-    if ns.host == "codex":
+    if ns.host in ("codex", "copilot"):
         return 0
 
     # Slice 048-06: run the scaffold-completion verification as the closing

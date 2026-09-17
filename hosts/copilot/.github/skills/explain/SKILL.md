@@ -28,7 +28,7 @@ user-invocable: true
 > Like `/jig:clarify`, `/jig:pr-review`, and `/jig:arch-review`, explain is a
 > **judgment skill** — it ships **no `.py` helper**. The only determinism it
 > needs (load the merged lexicon, read the named artifact, resolve the refs it
-> links) Claude runs inline via Read + the 065-01 loader. The plain-language
+> links) Copilot runs inline via Read + the 065-01 loader. The plain-language
 > *quality* is judgment exercised by this prompt, not something a unit test can
 > assert — the same accepted shape as every judgment-only jig skill.
 
@@ -150,8 +150,8 @@ Two carve-outs sit on top of that order:
    python3 -c "
    import sys, os, json
    # Auto-resolve the loader across both layouts (copy-paste-safe):
-   #   jig repo -> skills/_common; scaffolded project -> .claude/skills/_common.
-   for d in ('skills/_common', '.claude/skills/_common'):
+   #   jig repo -> skills/_common; scaffolded project -> .github/skills/_common.
+   for d in ('skills/_common', '.github/skills/_common'):
        if os.path.isfile(os.path.join(d, 'lexicon.py')):
            sys.path.insert(0, d); break
    import lexicon
@@ -160,7 +160,7 @@ Two carve-outs sit on top of that order:
    "
    ```
 
-   (The loader lives at `.claude/skills/_common/lexicon.py` in a scaffolded
+   (The loader lives at `.github/skills/_common/lexicon.py` in a scaffolded
    project and `skills/_common/lexicon.py` in the jig repo itself — the snippet
    above probes both. The project glossary overlay **wins** on a collision — a
    project that redefines a term gets its own definition, per ADR-0021.)
