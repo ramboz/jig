@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.3](https://github.com/ramboz/jig/compare/v2.15.2...v2.15.3) (2026-09-17)
+
+
+### Bug Fixes
+
+* **copilot:** make documented helper paths resolvable in plugin mode (bug 036) ([#224](https://github.com/ramboz/jig/issues/224)) ([3412c4d](https://github.com/ramboz/jig/commit/3412c4d56aacdab6686fa7edabf5aa6f8d30e2c9))
+
 ## [2.15.2](https://github.com/ramboz/jig/compare/v2.15.1...v2.15.2) (2026-09-17)
 
 
