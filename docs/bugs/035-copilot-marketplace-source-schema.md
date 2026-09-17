@@ -184,6 +184,9 @@ contains one `jig` entry with source `./hosts/copilot`, and README carries
 - Isolated live Copilot probe against the working tree:
   marketplace add succeeded, browse returned `jig`, install enabled `jig@jig`,
   and plugin list showed v2.15.1 loaded live from `hosts/copilot`.
+- Clean-home probe against remote branch commit
+  `8d2bcdf88f78f66997385252ea6b2eb7d86e19f7` repeated marketplace add,
+  browse, install, and list successfully from a fresh clone.
 
 ## Learning
 
