@@ -17,6 +17,8 @@ Covers:
 """
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1049,3 +1051,125 @@ class RenderPermissionsFloorHookTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CopilotPluginModeHelperPathTests(unittest.TestCase):
+    """Bug 036 — plugin-mode skill bodies must not document a
+    project-relative helper path.
+
+    In plugin mode the project has no `.github/skills/`; the machinery lives
+    in the installed plugin. Copilot exposes no plugin-root variable and an
+    agent-issued bash command runs with cwd = the project, so a
+    `python3 ".github/skills/…"` invocation cannot resolve. Only *hook*
+    commands (executed by the host) resolve against the plugin root.
+    """
+
+    SOURCE = 'python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" new <slug>\n'
+
+    def test_plugin_mode_does_not_emit_project_relative_helper_path(self):
+        out = scaffold.CopilotScaffoldRenderer.rewrite_doc_paths_plugin_mode(
+            self.SOURCE
+        )
+        self.assertNotIn(
+            'python3 ".github/skills/',
+            out,
+            "plugin-mode body documents a path that does not exist in the project",
+        )
+
+    def test_plugin_mode_emits_resolvable_runtime_root(self):
+        out = scaffold.CopilotScaffoldRenderer.rewrite_doc_paths_plugin_mode(
+            self.SOURCE
+        )
+        self.assertIn(scaffold.CopilotScaffoldRenderer.PLUGIN_ROOT_VAR, out)
+        self.assertIn("skills/spec-workflow/workflow.py", out)
+
+    def test_in_repo_mode_still_uses_project_relative_path(self):
+        out = scaffold.CopilotScaffoldRenderer.rewrite_skill_md_paths(self.SOURCE)
+        self.assertIn('python3 ".github/skills/spec-workflow/workflow.py"', out)
+
+    def test_generated_package_has_no_unresolvable_helper_paths(self):
+        pkg = (
+            Path(__file__).resolve().parents[2]
+            / "hosts"
+            / "copilot"
+            / ".github"
+            / "skills"
+        )
+        if not pkg.is_dir():
+            self.skipTest("copilot package not generated")
+        offenders = [
+            str(p.relative_to(pkg))
+            for p in pkg.rglob("SKILL.md")
+            if 'python3 ".github/skills/' in p.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(
+            [], offenders, "shipped skills document an unresolvable helper path"
+        )
+
+
+    def test_every_skill_using_the_root_var_explains_how_to_resolve_it(self):
+        """Bug 036 — a skill referencing `$JIG_ROOT` must define it."""
+        pkg = (
+            Path(__file__).resolve().parents[2]
+            / "hosts" / "copilot" / ".github" / "skills"
+        )
+        if not pkg.is_dir():
+            self.skipTest("copilot package not generated")
+        undefined = []
+        for skill_md in pkg.rglob("SKILL.md"):
+            text = skill_md.read_text(encoding="utf-8")
+            if "$JIG_ROOT" in text and "jig_root.py" not in text:
+                undefined.append(str(skill_md.relative_to(pkg)))
+        self.assertEqual([], undefined, "skills use $JIG_ROOT without defining it")
+
+    def test_note_is_not_duplicated_on_repeated_render(self):
+        once = scaffold.CopilotScaffoldRenderer.rewrite_doc_paths_plugin_mode(
+            self.SOURCE
+        )
+        twice = scaffold.CopilotScaffoldRenderer.rewrite_doc_paths_plugin_mode(once)
+        self.assertEqual(once.count("jig_root.py"), twice.count("jig_root.py"))
+
+
+class JigRootBootstrapCommandTests(unittest.TestCase):
+    """Bug 036 — the documented fresh-shell bootstrap must be portable."""
+
+    def test_bootstrap_honours_copilot_home_and_is_space_safe(self):
+        cmd = scaffold.CopilotScaffoldRenderer.JIG_ROOT_VAR_ASSIGNMENT
+        self.assertIn("${COPILOT_HOME:-$HOME/.copilot}", cmd)
+        self.assertNotIn("ls -d", cmd)
+        self.assertIn('[ -f "$f" ]', cmd)
+
+    def test_bootstrap_resolves_a_root_under_a_spaced_custom_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "my copilot home"
+            install = home / "installed-plugins" / "my market" / "jig"
+            (install / ".plugin").mkdir(parents=True)
+            (install / ".plugin" / "plugin.json").write_text(
+                json.dumps({"name": "jig", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+            helper = install / ".github" / "skills" / "spec-workflow"
+            helper.mkdir(parents=True)
+            (helper / "workflow.py").write_text("", encoding="utf-8")
+            locator = install / ".github" / "scripts" / "jig_root.py"
+            locator.parent.mkdir(parents=True)
+            locator.write_bytes(
+                (
+                    Path(__file__).resolve().parents[2]
+                    / "scripts"
+                    / "jig_root.py"
+                ).read_bytes()
+            )
+
+            env = dict(os.environ, COPILOT_HOME=str(home))
+            cmd = scaffold.CopilotScaffoldRenderer.JIG_ROOT_VAR_ASSIGNMENT
+            out = subprocess.run(
+                ["bash", "-c", cmd + '; printf "%s" "$JIG_ROOT"'],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                str(install / ".github"), out.stdout.strip(), out.stderr
+            )

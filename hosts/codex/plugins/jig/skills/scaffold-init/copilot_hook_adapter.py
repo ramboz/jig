@@ -138,7 +138,52 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Optional
+
+# Bug 036 — the SessionStart hook that also publishes jig's runtime root.
+# Exactly one publisher, so the announcement is not repeated once per
+# SessionStart hook. `jig-project-orient` is the natural carrier: it already
+# exists to tell the session where it is.
+ROOT_PUBLISHER_SCRIPT = "jig-project-orient.sh"
+
+
+def jig_root() -> str:
+    """Absolute path of jig's runtime root, derived from this adapter's own
+    location: the adapter ships at `<root>/hooks/scripts/copilot_hook_adapter.py`,
+    so the root is two parents up. Self-locating on purpose — Copilot exposes
+    no plugin-root environment variable, and the hook runner is the one place
+    that reliably executes plugin-resident code, so this is where the value
+    can be learned without a filesystem search."""
+    return str(Path(__file__).resolve().parents[2])
+
+
+def merge_root_context(stdout: bytes) -> bytes:
+    """Fold the runtime-root announcement into a SessionStart hook body.
+
+    Merges rather than replaces so the carrier hook's own `additionalContext`
+    (the "jig hint: ..." orientation line) still reaches the session. Any
+    unparseable or non-object child output is treated as empty — fail-open,
+    matching the advisory contract everywhere else in this adapter."""
+    note = (
+        "jig runtime root: JIG_ROOT=" + jig_root() + " — jig skills document "
+        'helper commands as `python3 "$JIG_ROOT/skills/<skill>/<helper>.py"`. '
+        "Substitute this value (or export JIG_ROOT) when running them; "
+        "Copilot exposes no plugin-root environment variable."
+    )
+    data = None
+    if stdout and stdout.strip():
+        try:
+            data = json.loads(stdout.decode("utf-8", errors="replace"))
+        except ValueError:
+            data = None
+    if not isinstance(data, dict):
+        data = {}
+    existing = data.get("additionalContext")
+    existing = existing if isinstance(existing, str) and existing else ""
+    data["additionalContext"] = (existing + "\n" if existing else "") + note
+    data.setdefault("continue", True)
+    return json.dumps(data).encode("utf-8")
 
 # Slice 113-03's CLAUDE_TO_COPILOT_TOOLS (scaffold.py) is the forward
 # (Claude -> Copilot) direction, used to RENDER agent tool lists and hook
@@ -260,19 +305,40 @@ def main(argv: list) -> int:
         env["CLAUDE_PROJECT_DIR"] = working_dir
 
     if not enforcing:
+        publishes_root = (
+            claude_event == "SessionStart"
+            and Path(script_path).name == ROOT_PUBLISHER_SCRIPT
+        )
         try:
-            subprocess.run(
-                [_interpreter_for(script_path), script_path],
-                input=translated, env=env,
-            )
+            if publishes_root:
+                # Capture so the root announcement can be merged into the
+                # carrier's own body; a single JSON object must reach Copilot.
+                result = subprocess.run(
+                    [_interpreter_for(script_path), script_path],
+                    input=translated, env=env, capture_output=True,
+                )
+                sys.stdout.buffer.write(merge_root_context(result.stdout))
+                if result.stderr:
+                    sys.stderr.buffer.write(result.stderr)
+            else:
+                subprocess.run(
+                    [_interpreter_for(script_path), script_path],
+                    input=translated, env=env,
+                )
         except Exception:
             # Fail-open: an adapter-side spawn failure (e.g. the script
             # path does not resolve — the still-unverified
             # plugin-root-relative residual) must never look like a
             # blocking error to Copilot. Scoped to ADVISORY mode only —
             # see the enforcing branch below for the opposite (fail-closed)
-            # posture.
-            pass
+            # posture. The root announcement is best-effort for the same
+            # reason: still emitted below so a failed carrier does not cost
+            # the session its only route to `$JIG_ROOT`.
+            if publishes_root:
+                try:
+                    sys.stdout.buffer.write(merge_root_context(b""))
+                except Exception:
+                    pass
         # Always 0, regardless of the child's own exit code. Each of the 3
         # advisory hooks (session git-freshness, boundary-change-warn,
         # entry-gate-nudge) already ends with an unconditional `exit 0` of

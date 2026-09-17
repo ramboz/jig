@@ -15,6 +15,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 024 introduces this skill as jig's **cross-artifact consistency
 > auditor**. It is the seventh non-stub active jig skill that ships
 > without a `.py` helper — analyze is fundamentally a judgment skill,
@@ -68,7 +74,7 @@ the right one:
   **semantic**. Lint catches "slice file missing `status:` frontmatter";
   this skill catches "slice contradicts ADR-0003" or "spec proposes a
   fourth subagent type". The two layers are complementary — run
-  `python3 ".github/scripts/spec_lint.py"` first to fix
+  `python3 "$JIG_ROOT/scripts/spec_lint.py"` first to fix
   structural issues, then run this skill to find semantic drift.
 - **`/jig:independent-review`** — sibling skill for **spec-vs-implementation
   reviews**. Independent-review reads a finished slice's deliverables

@@ -15,6 +15,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 008 created this skill from scratch. The deterministic filesystem
 > walk + verdict logic + report rendering live in `migrate.py`; this
 > SKILL.md drives the judgment layer (when to invoke, how to interpret
@@ -57,7 +63,7 @@ operations.
 ### Run the migration report
 
 ```bash
-python3 ".github/skills/migrate/migrate.py" report \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" report \
   <project-dir> [--docs-root <relative-root>]
 ```
 
@@ -72,9 +78,9 @@ python3 ".github/skills/migrate/migrate.py" report \
 Preview first, then apply:
 
 ```bash
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   adopt-layout <subproject-dir> --docs-root . --dry-run
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   adopt-layout <subproject-dir> --docs-root .
 ```
 
@@ -91,11 +97,11 @@ recommended sequence is:
 
 ```bash
 # 1. Preview the plan (no writes).
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   rename-decisions <project-dir> --dry-run
 
 # 2. After reviewing the planned operations, apply them.
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   rename-decisions <project-dir>
 ```
 
@@ -135,11 +141,11 @@ obtain it (bug 012 / [#109](https://github.com/ramboz/jig/issues/109)).
 
 ```bash
 # preview
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   seed-decisions <project-dir> --dry-run
 
 # apply
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   seed-decisions <project-dir>
 ```
 
@@ -165,7 +171,7 @@ below for the full description.
 Quick reference:
 
 ```bash
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   copy-machinery <project-dir>
 ```
 
@@ -349,7 +355,7 @@ Host selection:
 How to run it:
 
 ```bash
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   copy-machinery <project-dir>
 ```
 
@@ -399,7 +405,7 @@ like a jig-generated hook config. This matches the same safety stance
 The documented escape is `--force`:
 
 ```bash
-python3 ".github/skills/migrate/migrate.py" \
+python3 "$JIG_ROOT/skills/migrate/migrate.py" \
   copy-machinery <project-dir> --force
 ```
 
@@ -569,7 +575,7 @@ For each migration, in order:
      [print(l.label) for l in iter_slices('docs/specs/NNN-mM-slug/spec.md')]"
 
    # Lint walks all slices, no AC contradictions
-   python3 ".github/scripts/spec_lint.py" docs/specs/NNN-mM-slug/spec.md
+   python3 "$JIG_ROOT/scripts/spec_lint.py" docs/specs/NNN-mM-slug/spec.md
 
    # Status board generates the table
    python3 skills/spec-workflow/workflow.py status-board <project-dir>
@@ -656,7 +662,7 @@ verification report.
   into their own project at e.g. `<project>/tools/migrate.py`, the
   copy is NOT covered by the self-protection — it would be rewritten
   like any other text file in scope. Invoke `migrate.py` from the
-  installed plugin path (`.github/skills/migrate/migrate.py`),
+  installed plugin path (`$JIG_ROOT/skills/migrate/migrate.py`),
   never a copied-in-tree version, to keep the guarantee.
 - **The verdict counts trigger directories, not files.** A project
   with 100 ADR files but no workflow.md or architecture.md still

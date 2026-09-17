@@ -9,6 +9,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 001 is fully implemented: greenfield-scaffold, doc-content, signal-detection,
 > deferred-decisions, and Q&A wizard.
 > See [docs/specs/001-scaffold-init/spec.md](../../docs/specs/001-scaffold-init/spec.md).
@@ -16,7 +22,7 @@ user-invocable: true
 ## What this skill does
 
 Generates an AI-native development workspace by copying templates from
-`.github/templates/` into a target directory. Detects project
+`$JIG_ROOT/templates/` into a target directory. Detects project
 signals from the filesystem (LLM/agent files, CI, tests, team), runs an optional
 Q&A flow to let the user override those signals, and selects tiers accordingly.
 Tier 0 always installs; Tier 1 installs when test signals are present; Tier 2
@@ -32,7 +38,7 @@ is offered (not auto-installed) when LLM/agent signals are present.
 3. **Run the Q&A flow** (see next section). Collect answers as flag values.
 4. Invoke the wizard with the collected flags:
    ```bash
-   python3 ".github/skills/scaffold-init/scaffold.py" \
+   python3 "$JIG_ROOT/skills/scaffold-init/scaffold.py" \
      --host copilot \
      [--runtime <name>] [--team|--solo] [--has-ci|--no-ci] \
      [--has-tests|--no-tests] [--plans-ai|--no-ai] \
@@ -52,7 +58,7 @@ TOML under `.codex/agents/`. For Codex plugin users who want jig's role agents
 globally available, run the explicit post-install helper:
 
 ```bash
-python3 ".github/skills/scaffold-init/scaffold.py" --install-codex-agents
+python3 "$JIG_ROOT/skills/scaffold-init/scaffold.py" --install-codex-agents
 ```
 
 The default destination is `~/.codex/agents`. Use
@@ -152,8 +158,10 @@ After scaffolding succeeds, tell the user:
   It cannot gate its own creation (bootstrap paradox — documented and intentional).
 - `templates/AGENTS.md.template` is the source template; do NOT use the jig repo's own
   `AGENTS.md` as a template — the two diverge over time.
-- Copilot does not expose a plugin-root environment variable for skill-issued
-  commands; use the packaged `.github/...` relative paths shown above.
+- Copilot exposes no plugin-root environment variable, so jig's runtime
+  root travels in `$JIG_ROOT`, published into session context by
+  jig's `SessionStart` hook. In a fresh shell, resolve it with the locator:
+  `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
 - Signal detection (existing CI, LLM/agent files, team size) is deferred to slice 001-03.
   Until then, the wizard installs default tiers regardless of project context.
 - **scaffold-init refuses if the target looks spec-driven but lacks `scaffold.json`.**

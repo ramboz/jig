@@ -1570,7 +1570,9 @@ class PackageCompletenessTests(unittest.TestCase):
     def test_spec_lint_reference_resolves_explicitly(self):
         analyze_skill = self.out_dir / ".github" / "skills" / "analyze" / "SKILL.md"
         text = analyze_skill.read_text(encoding="utf-8")
-        self.assertIn(".github/scripts/spec_lint.py", text)
+        # Bug 036: plugin mode names the runtime root, which maps to the
+        # package's own `.github/` directory.
+        self.assertIn("$JIG_ROOT/scripts/spec_lint.py", text)
         self.assertTrue(
             (self.out_dir / ".github" / "scripts" / "spec_lint.py").is_file()
         )
@@ -1578,7 +1580,7 @@ class PackageCompletenessTests(unittest.TestCase):
     def test_migrate_skill_references_still_resolve(self):
         migrate_skill = self.out_dir / ".github" / "skills" / "migrate" / "SKILL.md"
         text = migrate_skill.read_text(encoding="utf-8")
-        self.assertIn(".github/skills/migrate/migrate.py", text)
+        self.assertIn("$JIG_ROOT/skills/migrate/migrate.py", text)
         self.assertTrue(
             (self.out_dir / ".github" / "skills" / "migrate" / "migrate.py").is_file()
         )
@@ -1588,8 +1590,69 @@ class PackageCompletenessTests(unittest.TestCase):
             self.out_dir / ".github" / "skills" / "scaffold-init" / "SKILL.md"
         )
         text = scaffold_skill.read_text(encoding="utf-8")
-        self.assertIn(".github/templates/", text)
+        self.assertIn("$JIG_ROOT/templates/", text)
         self.assertTrue((self.out_dir / ".github" / "templates").is_dir())
+
+    def test_every_documented_runtime_path_resolves_in_the_package(self):
+        """Bug 036 — the general form of the three checks above.
+
+        `$JIG_ROOT` resolves to the package's `.github/` directory, so every
+        `$JIG_ROOT/...` path a shipped skill tells the agent to run must name
+        a file that is actually in the package. This is the invariant the
+        old project-relative spelling silently violated for all 88 sites."""
+        root = self.out_dir / ".github"
+        pattern = re.compile(r"\$JIG_ROOT/([A-Za-z0-9_./-]+\.py)")
+        missing = []
+        for skill_md in (root / "skills").rglob("SKILL.md"):
+            for rel in pattern.findall(skill_md.read_text(encoding="utf-8")):
+                if not (root / rel).is_file():
+                    missing.append(f"{skill_md.relative_to(root)} -> $JIG_ROOT/{rel}")
+        self.assertEqual([], missing, "documented helper paths do not resolve")
+
+    def test_jig_root_locator_is_packaged(self):
+        """Bug 036 — the fresh-shell fallback for resolving `$JIG_ROOT`."""
+        self.assertTrue(
+            (self.out_dir / ".github" / "scripts" / "jig_root.py").is_file()
+        )
+
+    def test_templates_ship_canonical_so_scaffold_can_render_per_mode(self):
+        """Bug 036 — a `.md.template` must ship byte-for-byte from source.
+
+        Templates are rendered by `scaffold.py` at scaffold time, which picks
+        the transform from the target project's mode. Pre-rendering here makes
+        that dispatch a no-op and burns one mode's spelling into both, which is
+        how a plugin-mode project ended up documenting an in-repo path.
+
+        Asserts the positive invariant (identity with the canonical source),
+        not merely the absence of two known-bad spellings — a rewrite to some
+        third, unrelated path would pass an absence-only check."""
+        src_root = REPO_ROOT / "templates"
+        packaged_root = self.out_dir / ".github" / "templates"
+        if not packaged_root.is_dir():
+            self.skipTest("templates not packaged")
+
+        checked = 0
+        for packaged in sorted(packaged_root.rglob("*.md.template")):
+            src = src_root / packaged.relative_to(packaged_root)
+            self.assertTrue(src.is_file(), f"no source for {packaged}")
+            self.assertEqual(
+                src.read_bytes(),
+                packaged.read_bytes(),
+                f"{packaged.name} was rendered at package time",
+            )
+            checked += 1
+        self.assertGreater(checked, 0, "no .md.template files were checked")
+
+        # And at least one really does carry a canonical helper reference,
+        # so the identity assertion above is guarding something real.
+        canonical = [
+            p
+            for p in packaged_root.rglob("*.md.template")
+            if "${CLAUDE_PLUGIN_ROOT}" in p.read_text(encoding="utf-8")
+        ]
+        self.assertTrue(
+            canonical, "no packaged template retains ${CLAUDE_PLUGIN_ROOT}"
+        )
 
     # AC3 — the actually-built package satisfies the static Copilot
     # install-contract validator.

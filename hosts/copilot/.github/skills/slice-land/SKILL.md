@@ -12,6 +12,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 007 created this skill from scratch. The deterministic readiness
 > checks + report generation live in `land.py`; this SKILL.md drives the
 > judgment layer (when to invoke, how to interpret blockers, what mode to
@@ -48,7 +54,7 @@ stay user-driven post-landing suggestions.
 ### Run the readiness check
 
 ```bash
-python3 ".github/skills/slice-land/land.py" prepare \
+python3 "$JIG_ROOT/skills/slice-land/land.py" prepare \
   <path-to-spec.md> <slice-fragment> [--mode {direct,pr}]
 ```
 
@@ -70,7 +76,7 @@ After `prepare` confirms the slice is ready, `execute --mode direct`
 runs the direct landing sequence:
 
 ```bash
-python3 ".github/skills/slice-land/land.py" execute \
+python3 "$JIG_ROOT/skills/slice-land/land.py" execute \
   --mode direct <path-to-spec.md> <slice-fragment> [--dry-run]
 ```
 
@@ -98,7 +104,7 @@ For PR-shaped flows, `execute --mode pr` pushes the branch and opens
 the PR via the GitHub CLI:
 
 ```bash
-python3 ".github/skills/slice-land/land.py" execute \
+python3 "$JIG_ROOT/skills/slice-land/land.py" execute \
   --mode pr <path-to-spec.md> <slice-fragment> [--dry-run]
 ```
 

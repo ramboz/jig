@@ -2111,6 +2111,40 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
     COPILOT_RUNTIME_PREFIX = ".github/"
     COPILOT_HOOK_SCRIPT_PREFIX = COPILOT_RUNTIME_PREFIX + "hooks/scripts/"
 
+    # Bug 036 — the PLUGIN-MODE runtime root, which is NOT the hook prefix
+    # above. The plugin-root-relative `.github/...` spelling is correct only
+    # for *hook* commands, because the host executes those itself. A command
+    # a SKILL.md tells the agent to run is issued as ordinary bash with
+    # cwd = the session repository, and a plugin-mode project has no
+    # `.github/skills/` — so the same spelling resolves to nothing there.
+    #
+    # Copilot exposes no plugin-root environment variable (verified by the
+    # `COPILOT_*PLUGIN*` audit noted above, and re-confirmed live: `env` in a
+    # session lists none), so the root is carried in a shell variable that
+    # jig's own `SessionStart` hook publishes into session context, with
+    # `.github/scripts/jig_root.py` as the fresh-shell fallback. Quoting is
+    # load-bearing: the canonical source spells the invocation
+    # `python3 "${CLAUDE_PLUGIN_ROOT}/skills/…"`, so substituting the prefix
+    # alone yields `python3 "$JIG_ROOT/skills/…"` — already inside the
+    # original double quotes, hence still space-safe.
+    PLUGIN_ROOT_VAR = "JIG_ROOT"
+    PLUGIN_RUNTIME_PREFIX = "$" + PLUGIN_ROOT_VAR + "/"
+    PLUGIN_SKILL_PATH_REPLACEMENT = "$" + PLUGIN_ROOT_VAR + r"/skills/\1/"
+    PLUGIN_TEMPLATES_ROOT = "$" + PLUGIN_ROOT_VAR + "/templates/"
+    JIG_ROOT_LOCATOR = COPILOT_RUNTIME_PREFIX + "scripts/jig_root.py"
+    # Fresh-shell bootstrap. Any installed copy of the locator can resolve the
+    # canonical root (the selection logic lives inside it), so stopping at the
+    # first hit is safe even when several jig installs are present. The glob is
+    # quoted and iterated rather than `ls`-parsed so an install path containing
+    # spaces still works, and it honours `COPILOT_HOME` — the same override the
+    # locator itself reads — so the two agree on where installs live.
+    JIG_ROOT_VAR_ASSIGNMENT = (
+        PLUGIN_ROOT_VAR
+        + '="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/'
+        + JIG_ROOT_LOCATOR
+        + '; do [ -f "$f" ] && python3 "$f" && break; done)"'
+    )
+
     # The INPUT half of the hook-protocol translation layer (AC1: "adapts
     # the payload/field access the hook scripts read" — completing what
     # `translate_hook_protocol` intentionally left to a companion: that
@@ -2240,33 +2274,105 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
 
     @classmethod
     def rewrite_skill_md_paths(cls, body: str) -> str:
-        """Render skill/doc prose in Copilot-native vocabulary and paths."""
-        out = body.replace(cls.PLUGIN_ROOT_PREFIX + "/", cls.COPILOT_RUNTIME_PREFIX)
-        out = cls.SKILL_PATH_RE.sub(cls.SKILL_PATH_REPLACEMENT, out)
+        """In-repo rendering: point at the machinery copied under `.github/`.
+
+        Unchanged by bug 036 — this is still the transform applied during the
+        machinery copy and under `--in-repo`, where the project really does
+        own a `.github/skills/` tree."""
+        return cls._rewrite_host_paths(body, plugin_mode=False)
+
+    @classmethod
+    def rewrite_doc_paths_plugin_mode(cls, body: str) -> str:
+        """Plugin-mode rendering (bug 036).
+
+        Identical host-vocabulary translation; only the runtime-root targets
+        differ, naming the installed plugin instead of a project-local
+        `.github/skills/` tree that plugin mode never creates. Mirrors
+        `CodexScaffoldRenderer.rewrite_doc_paths_plugin_mode` so the two
+        hosts' mode handling cannot drift."""
+        return cls._rewrite_host_paths(body, plugin_mode=True)
+
+    @classmethod
+    def _rewrite_host_paths(cls, body: str, *, plugin_mode: bool) -> str:
+        """Shared Claude -> Copilot translation, parameterized on where the
+        jig runtime lives. One body means the host-vocabulary rules cannot
+        drift between the modes — only the root targets are mode-specific."""
+        if plugin_mode:
+            runtime_prefix = cls.PLUGIN_RUNTIME_PREFIX
+            skill_repl = cls.PLUGIN_SKILL_PATH_REPLACEMENT
+            root_note = (
+                "- Copilot exposes no plugin-root environment variable, so "
+                "jig's runtime\n"
+                "  root travels in `$" + cls.PLUGIN_ROOT_VAR + "`, published "
+                "into session context by\n"
+                "  jig's `SessionStart` hook. In a fresh shell, resolve it "
+                "with the locator:\n"
+                "  `" + cls.JIG_ROOT_VAR_ASSIGNMENT + "`"
+            )
+        else:
+            runtime_prefix = cls.COPILOT_RUNTIME_PREFIX
+            skill_repl = cls.SKILL_PATH_REPLACEMENT
+            root_note = (
+                "- The jig machinery is copied into this project, so the "
+                "packaged\n"
+                "  `.github/...` relative paths shown above resolve from the "
+                "project root."
+            )
+        out = body.replace(cls.PLUGIN_ROOT_PREFIX + "/", runtime_prefix)
+        out = cls.SKILL_PATH_RE.sub(skill_repl, out)
         out = out.replace(
             "- `${CLAUDE_PLUGIN_ROOT}` is the right env var inside the plugin. "
             "Don't confuse it with\n"
             "  `$CLAUDE_PROJECT_DIR` (which is the target project's root after "
             "install).",
-            "- Copilot does not expose a plugin-root environment variable for "
-            "skill-issued\n"
-            "  commands; use the packaged `.github/...` relative paths shown "
-            "above.",
+            root_note,
         )
         out = out.replace("CLAUDE.md", "AGENTS.md")
         out = out.replace("Claude Code", "GitHub Copilot CLI")
         out = out.replace("Claude", "Copilot")
-        scaffold_invocation = 'python3 ".github/skills/scaffold-init/scaffold.py" \\\n'
+        scaffold_invocation = (
+            "python3 \"" + runtime_prefix + "skills/scaffold-init/scaffold.py\" \\\n"
+        )
         if scaffold_invocation in out and "--host copilot" not in out:
             out = out.replace(
                 scaffold_invocation,
                 scaffold_invocation + "     --host copilot \\\n",
             )
+        if plugin_mode:
+            out = cls._ensure_root_note(out)
         return out
 
     @classmethod
-    def rewrite_doc_paths_plugin_mode(cls, body: str) -> str:
-        return cls.rewrite_skill_md_paths(body)
+    def _ensure_root_note(cls, body: str) -> str:
+        """Bug 036 — a skill that *uses* `$JIG_ROOT` must also say how to
+        resolve it.
+
+        The prose substitution above only fires on the one canonical sentence
+        about `${CLAUDE_PLUGIN_ROOT}`, which few skills carry, so on its own it
+        would leave most skills referencing a variable they never define. The
+        `SessionStart` hook publishes the value for the common path; this note
+        is what makes a skill self-contained when read in isolation."""
+        token = "$" + cls.PLUGIN_ROOT_VAR
+        if token not in body or cls._ROOT_NOTE_MARKER in body:
+            return body
+        note = (
+            "> **`" + token + "`** — jig's runtime root (this plugin's own "
+            "directory).\n"
+            "> Copilot exposes no plugin-root environment variable, so jig's "
+            "`SessionStart`\n"
+            "> hook publishes the value into session context. In a fresh "
+            "shell, resolve it\n"
+            "> with the locator:\n"
+            "> `" + cls.JIG_ROOT_VAR_ASSIGNMENT + "`\n"
+        )
+        if body.startswith("---\n"):
+            end = body.find("\n---\n", 4)
+            if end != -1:
+                cut = end + len("\n---\n")
+                return body[:cut] + "\n" + note + body[cut:]
+        return note + "\n" + body
+
+    _ROOT_NOTE_MARKER = "jig's runtime root (this plugin's own directory)"
 
     def phase_mode_substitutions(self) -> dict[str, str]:
         return {

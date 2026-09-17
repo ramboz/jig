@@ -814,3 +814,178 @@ class EnforcingModeSpawnFailureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JigRootPublicationTests(unittest.TestCase):
+    """Bug 036 — the SessionStart adapter publishes jig's runtime root.
+
+    Copilot exposes no plugin-root environment variable, so this hook is the
+    session's primary route to `$JIG_ROOT`; the locator is the fresh-shell
+    fallback.
+    """
+
+    def test_root_is_derived_from_the_adapters_own_location(self):
+        """Asserts the packaged topology, not the formula.
+
+        Comparing `jig_root()` against the same `parents[2]` expression the
+        implementation uses would pass even if the adapter shipped at the
+        wrong depth. Instead, check the invariant that depth encodes: the
+        returned root must be the directory the adapter is reachable from at
+        `hooks/scripts/<adapter>`, and in the shipped package that root is
+        the plugin's `.github` runtime directory.
+        """
+        root = Path(copilot_hook_adapter.jig_root())
+        adapter = Path(copilot_hook_adapter.__file__).resolve()
+        self.assertEqual(root, adapter.parents[2])
+
+        packaged = (
+            Path(__file__).resolve().parents[2]
+            / "hosts"
+            / "copilot"
+            / ".github"
+            / "hooks"
+            / "scripts"
+            / adapter.name
+        )
+        if not packaged.is_file():
+            self.skipTest("copilot package not built")
+        # The real invariant: in the SHIPPED layout the depth the adapter
+        # ships at must land on the plugin's `.github` runtime directory,
+        # reachable back down at `hooks/scripts/<adapter>`.
+        reported = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import importlib.util,sys;"
+                "s=importlib.util.spec_from_file_location('a',sys.argv[1]);"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                "print(m.jig_root())",
+                str(packaged),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        packaged_root = Path(reported)
+        self.assertEqual(".github", packaged_root.name)
+        self.assertTrue((packaged_root / "skills").is_dir())
+        self.assertEqual(
+            packaged.resolve(),
+            (packaged_root / "hooks" / "scripts" / adapter.name).resolve(),
+        )
+
+    def test_merge_preserves_the_carrier_hooks_own_context(self):
+        body = json.dumps(
+            {"continue": True, "additionalContext": "jig hint: orientation"}
+        ).encode("utf-8")
+        merged = json.loads(copilot_hook_adapter.merge_root_context(body))
+        self.assertTrue(merged["continue"])
+        self.assertIn("jig hint: orientation", merged["additionalContext"])
+        self.assertIn("JIG_ROOT=", merged["additionalContext"])
+
+    def test_merge_is_fail_open_on_unusable_child_output(self):
+        for raw in (b"", b"   ", b"not json", b"[1, 2]"):
+            with self.subTest(raw=raw):
+                merged = json.loads(copilot_hook_adapter.merge_root_context(raw))
+                self.assertTrue(merged["continue"])
+                self.assertIn("JIG_ROOT=", merged["additionalContext"])
+
+    def test_emits_exactly_one_json_object(self):
+        merged = copilot_hook_adapter.merge_root_context(
+            b'{"continue": true, "additionalContext": "x"}'
+        )
+        json.loads(merged)  # raises if two objects were concatenated
+
+
+class JigRootLocatorTests(unittest.TestCase):
+    """Bug 036 — `scripts/jig_root.py` resolution order."""
+
+    def setUp(self):
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[2] / "scripts")
+        )
+        import jig_root  # noqa: E402
+
+        self.jig_root = jig_root
+
+    def _make_install(self, home, marketplace, name, version):
+        root = home / "installed-plugins" / marketplace / name
+        (root / ".plugin").mkdir(parents=True)
+        (root / ".plugin" / "plugin.json").write_text(
+            json.dumps({"name": "jig", "version": version}), encoding="utf-8"
+        )
+        helper = root / ".github" / "skills" / "spec-workflow" / "workflow.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("", encoding="utf-8")
+        return root / ".github"
+
+    def test_in_repo_machinery_wins_over_an_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "home"
+            self._make_install(home, "jig", "jig", "9.9.9")
+            project = tmp / "proj"
+            vendored = project / ".github" / "skills" / "spec-workflow"
+            vendored.mkdir(parents=True)
+            (vendored / "workflow.py").write_text("", encoding="utf-8")
+            os.environ["COPILOT_HOME"] = str(home)
+            try:
+                self.assertEqual(
+                    (project / ".github").resolve(),
+                    self.jig_root.resolve(project),
+                )
+            finally:
+                del os.environ["COPILOT_HOME"]
+
+    def test_highest_version_wins_across_marketplaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "home"
+            self._make_install(home, "_direct", "ramboz--jig--hosts-copilot", "2.9.0")
+            newer = self._make_install(home, "jig", "jig", "2.10.0")
+            os.environ["COPILOT_HOME"] = str(home)
+            try:
+                self.assertEqual(newer, self.jig_root.resolve(tmp / "empty"))
+            finally:
+                del os.environ["COPILOT_HOME"]
+
+    def test_non_jig_plugins_are_ignored_and_absence_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "home"
+            other = home / "installed-plugins" / "m" / "other" / ".plugin"
+            other.mkdir(parents=True)
+            (other / "plugin.json").write_text(
+                json.dumps({"name": "other", "version": "1.0.0"}), encoding="utf-8"
+            )
+            os.environ["COPILOT_HOME"] = str(home)
+            try:
+                self.assertIsNone(self.jig_root.resolve(tmp / "empty"))
+            finally:
+                del os.environ["COPILOT_HOME"]
+
+    def test_a_manifest_that_is_valid_json_but_not_an_object_is_ignored(self):
+        """A JSON array/scalar manifest must be skipped, not raise."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "home"
+            good = self._make_install(home, "jig", "jig", "1.0.0")
+            bad = home / "installed-plugins" / "m" / "weird" / ".plugin"
+            bad.mkdir(parents=True)
+            (bad / "plugin.json").write_text('["jig"]', encoding="utf-8")
+            os.environ["COPILOT_HOME"] = str(home)
+            try:
+                self.assertEqual(good, self.jig_root.resolve(tmp / "empty"))
+            finally:
+                del os.environ["COPILOT_HOME"]
+
+    def test_an_install_path_containing_spaces_still_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            home = tmp / "my copilot home"
+            root = self._make_install(home, "my market", "jig", "1.0.0")
+            os.environ["COPILOT_HOME"] = str(home)
+            try:
+                self.assertEqual(root, self.jig_root.resolve(tmp / "empty"))
+            finally:
+                del os.environ["COPILOT_HOME"]

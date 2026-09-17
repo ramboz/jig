@@ -11,6 +11,12 @@ description: >
 user-invocable: true
 ---
 
+> **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
+> Copilot exposes no plugin-root environment variable, so jig's `SessionStart`
+> hook publishes the value into session context. In a fresh shell, resolve it
+> with the locator:
+> `JIG_ROOT="$(for f in "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/*/.github/scripts/jig_root.py; do [ -f "$f" ] && python3 "$f" && break; done)"`
+
 > Spec 005 created this skill from scratch. The mechanics live in `adr.py`;
 > Copilot owns the judgment (what the decision actually says).
 
@@ -90,7 +96,7 @@ that then needs migrating — the ADR-side of the reported failure. When in
 doubt, route to setup first; never invent the structure by hand.
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" new <slug> \
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" new <slug> \
   [--title "<Title>"] [--project-dir DIR] [--no-push | --pr]
 ```
 
@@ -143,7 +149,7 @@ Consequences. Keep it tight: one decision per ADR.
 Once the prose is settled and the human (or the workflow gate) approves:
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" accept <NNNN>
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" accept <NNNN>
 ```
 
 This stamps the canonical `status: Accepted` frontmatter field and flips the
@@ -189,7 +195,7 @@ When a previously-Accepted decision is replaced by a newer one, **don't edit
 the old ADR's prose** — write a new ADR (per `new` above), accept it, then run:
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" \
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" \
   supersede <old-NNNN> <new-NNNN>
 ```
 
@@ -229,7 +235,7 @@ commit — use that rather than the metadata. Reconciling the prose when
 ### 4. Regenerate the index
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" index docs/decisions
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" index docs/decisions
 ```
 
 Reads every `adr-NNNN-*.md` (skipping `README.md`) and rewrites only the
@@ -275,7 +281,7 @@ emits one, so an ellipsis in a summary is the author's own writing.
 `index`:
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" \
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" \
   check-index docs/decisions
 ```
 
@@ -293,7 +299,7 @@ If the new ADR resolves a `### Decision: ...` entry in
 `docs/refinement-todo.md`:
 
 ```bash
-python3 ".github/skills/adr-workflow/adr.py" \
+python3 "$JIG_ROOT/skills/adr-workflow/adr.py" \
   resolve-todo <NNNN> "<heading fragment>"
 ```
 
