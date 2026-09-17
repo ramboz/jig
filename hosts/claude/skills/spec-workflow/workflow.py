@@ -1896,7 +1896,14 @@ def _active_spec_summary(project_dir: Path, rows: list[tuple]) -> str:
     return summary
 
 
-def _focus_summary(rows: list[tuple]) -> str:
+def _focus_candidate(rows: list[tuple]) -> tuple[str, str, str] | None:
+    """The slice that wins the `focus:` headline, as
+    ``(slice_id, status, claimed_by)``, or ``None`` when nothing ranks.
+
+    Extracted from `_focus_summary` (bug 037) so the rendered string and the
+    fetch-path claim-liveness reaper share one selection — the reaper needs the
+    winning slice's `claimed_by` branch, not just the formatted line.
+    """
     best = None
     # `*_rest` tolerates rows longer than the 7-tuple this unpack names
     # (e.g. slice 111-01's blocked_by/blocked_line additions) as well as
@@ -1913,15 +1920,35 @@ def _focus_summary(rows: list[tuple]) -> str:
         if best is None or candidate[:2] < best[:2]:
             best = candidate
     if best is None:
-        return "none"
-
+        return None
     _rank, _order, slice_id, status, claimed_by = best
+    return (slice_id, status, claimed_by)
+
+
+def _render_focus_segment(
+    candidate: tuple[str, str, str] | None, claim_status: str = "",
+) -> str:
+    """Render the `focus:` segment. `claim_status` (bug 037) is "" on the hot
+    path (byte-identical to pre-037) and "merged"/"gone" only when the
+    fetch-path reaper has judged the focus slice's claim stale — in which case
+    the live `(claimed by X)` suffix is replaced by a stale label so a
+    finished/abandoned branch is not narrated as an active session."""
+    if candidate is None:
+        return "none"
+    slice_id, status, claimed_by = candidate
     focus = f"{slice_id} {status}"
-    if claimed_by:
-        safe_claim = _sanitize_orient_claim(claimed_by)
-        if safe_claim:
-            focus += f" (claimed by {safe_claim})"
+    safe_claim = _sanitize_orient_claim(claimed_by) if claimed_by else ""
+    if claim_status == "merged":
+        focus += f" (claim stale — {safe_claim} merged; run terminal transition)"
+    elif claim_status == "gone":
+        focus += f" (claim stale — {safe_claim} gone from origin; verify)"
+    elif safe_claim:
+        focus += f" (claimed by {safe_claim})"
     return focus
+
+
+def _focus_summary(rows: list[tuple]) -> str:
+    return _render_focus_segment(_focus_candidate(rows))
 
 
 def _in_flight_git(
@@ -2077,39 +2104,15 @@ def _orient_fetch_origin(project_dir: Path) -> bool:
     return result.returncode == 0
 
 
-def _freshness_summary(project_dir: Path) -> str:
+def _freshness_from_refs(project_dir: Path, fetch_ok: bool) -> str:
     """`2 commits behind origin/main`, `could not reach origin`, or "".
 
-    Bug 031. Orient builds its whole picture from local artifacts (boards,
-    slice STATUS, ADRs) that are only as current as the last fetch; a checkout
-    whose base has drifted behind trunk otherwise renders stale state as
-    current. This runs ONLY on the interactive `--fetch` path (the `/jig:orient`
-    skill), never the 4 s SessionStart hook, so a bounded network fetch is
-    affordable.
-
-    Fail-soft in orient's tradition — not a git repo, no `origin` remote, an
-    unresolvable trunk, or unexpected git output all return "" (silence). The
-    one case surfaced rather than silenced is a configured-but-unreachable
-    origin: reporting "not behind" against refs we failed to refresh is exactly
-    the false-fresh signal this bug is about.
+    Bug 031's post-fetch tail, split out (bug 037) so the single `--fetch`
+    fetch is performed once by `_orient_verify` and its `fetch_ok` boolean is
+    shared with the claim reaper. `fetch_ok` distinguishes "in sync against
+    refs we actually refreshed" (silence) from "cannot vouch — fetch failed"
+    (surface unreachability), so a stale local view is never reported as fresh.
     """
-    # Local ref probing shares the same bounded budget as `_in_flight_summary`;
-    # resolved fresh *after* the fetch so the fetch's own timeout does not eat
-    # into it.
-    probe_deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
-    if _in_flight_git(
-            project_dir, "rev-parse", "--is-inside-work-tree",
-            deadline=probe_deadline) != "true":
-        return ""
-    origin_url = _in_flight_git(
-        project_dir, "config", "--get", "remote.origin.url",
-        deadline=probe_deadline)
-    if not origin_url:
-        # Local-only repo: nothing to be stale against.
-        return ""
-
-    fetch_ok = _orient_fetch_origin(project_dir)
-
     deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
     base = _in_flight_base(project_dir, deadline=deadline)
     if base:
@@ -2131,6 +2134,99 @@ def _freshness_summary(project_dir: Path) -> str:
     # No resolvable base, unexpected output, or a zero count we can't vouch
     # for: surface unreachability, stay silent when the fetch actually worked.
     return "" if fetch_ok else "could not reach origin"
+
+
+def _focus_claim_liveness(
+    project_dir: Path,
+    candidate: tuple[str, str, str] | None,
+    *,
+    fetch_ok: bool,
+) -> str:
+    """Bug 037: resolve the focus slice's `claimed_by` branch against origin
+    and return "merged", "gone", or "" (silence). Fetch-path only.
+
+    **Fail-safe by design.** Claims are local by default (only `--push`/`--pr`
+    publish the branch), and `claimed_by` is a branch name that may be a live
+    local-only branch, a custom `JIG_CLAIM_ID`, or `"detached"`. A false
+    "stale" on live work erodes trust exactly like the bug, so every ambiguity
+    returns "":
+
+      - fetch failed                         → "" (cannot vouch for origin refs)
+      - no resolvable default base           → "" (cannot judge containment)
+      - claim == the default branch itself   → "" (degenerate, contained)
+      - `"detached"` claim (no branch)       → "" (nothing to resolve)
+      - on origin AND contained in base      → "merged"
+      - on origin AND ahead of base          → "" (genuinely live)
+      - absent on origin AND a local ref     → "" (live local-only claim;
+                                                  worktrees share refs)
+      - absent on origin AND absent locally  → "gone"
+
+    Residual, documented false-positives (all rare/opt-in): a custom
+    `JIG_CLAIM_ID` with no matching ref, or a claim held only in another clone,
+    read as "gone"; a **squash-merged** branch still present on origin reads as
+    "live/ahead" (its commits are not ancestors of base). The rendered label
+    says "verify" and mutates nothing.
+    """
+    if candidate is None:
+        return ""
+    claimed_by = (candidate[2] or "").strip()
+    if not claimed_by or not fetch_ok or claimed_by == "detached":
+        return ""
+    deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    base = _in_flight_base(project_dir, deadline=deadline)
+    if not base:
+        return ""
+    base_short = base.split("/", 1)[1] if "/" in base else base
+    if claimed_by == base_short:
+        return ""
+    origin_ref = f"origin/{claimed_by}"
+    on_origin = _in_flight_git(
+        project_dir, "rev-parse", "--verify", "--quiet", origin_ref,
+        deadline=deadline) is not None
+    if on_origin:
+        ahead = _in_flight_git(
+            project_dir, "rev-list", "--count", f"{base}..{origin_ref}",
+            deadline=deadline)
+        if ahead is not None and ahead.isdecimal() and int(ahead) == 0:
+            return "merged"
+        return ""
+    # Absent from origin: a live local-only claim keeps its local branch (all
+    # worktrees of this repo share refs), so only an absent-everywhere branch
+    # is genuinely gone.
+    local_ref = _in_flight_git(
+        project_dir, "rev-parse", "--verify", "--quiet",
+        f"refs/heads/{claimed_by}", deadline=deadline)
+    if local_ref is not None:
+        return ""
+    return "gone"
+
+
+def _orient_verify(
+    project_dir: Path, candidate: tuple[str, str, str] | None,
+) -> tuple[str, str]:
+    """Interactive `--fetch` verification: fetch origin ONCE and return
+    ``(freshness, claim_status)``. Both fail-soft ("" = silence).
+
+    Consolidates the single bounded fetch (bug 037) so the freshness check
+    (bug 031) and the focus-claim reaper share it rather than each fetching.
+    Not a git repo / no `origin` remote → ("", "").
+    """
+    probe_deadline = time.monotonic() + _ORIENT_IN_FLIGHT_TOTAL_BUDGET
+    if _in_flight_git(
+            project_dir, "rev-parse", "--is-inside-work-tree",
+            deadline=probe_deadline) != "true":
+        return "", ""
+    origin_url = _in_flight_git(
+        project_dir, "config", "--get", "remote.origin.url",
+        deadline=probe_deadline)
+    if not origin_url:
+        # Local-only repo: nothing to be stale against.
+        return "", ""
+    fetch_ok = _orient_fetch_origin(project_dir)
+    freshness = _freshness_from_refs(project_dir, fetch_ok)
+    claim_status = _focus_claim_liveness(
+        project_dir, candidate, fetch_ok=fetch_ok)
+    return freshness, claim_status
 
 
 def orient(project_dir: Path, *, fetch: bool = False) -> str:
@@ -2162,7 +2258,16 @@ def orient(project_dir: Path, *, fetch: bool = False) -> str:
         state, f"{state.title()} jig project")
     rows = collect_slices(project_dir)
     active_specs = _active_spec_summary(project_dir, rows)
-    focus = _focus_summary(rows)
+    focus_candidate = _focus_candidate(rows)
+    # Bug 031/037: only on the interactive path; the SessionStart hook passes
+    # no `fetch`, so its headline stays byte-identical. `_orient_verify` does
+    # the single bounded fetch and returns both the freshness segment and the
+    # focus-claim liveness verdict.
+    freshness = ""
+    claim_status = ""
+    if fetch:
+        freshness, claim_status = _orient_verify(project_dir, focus_candidate)
+    focus = _render_focus_segment(focus_candidate, claim_status)
     headline = (
         f"jig hint: {classification} · active specs: {active_specs} · "
         f"focus: {focus}"
@@ -2172,12 +2277,8 @@ def orient(project_dir: Path, *, fetch: bool = False) -> str:
     in_flight = _in_flight_summary(project_dir)
     if in_flight:
         headline += f" · in flight: {in_flight}"
-    # Bug 031: only on the interactive path; the SessionStart hook passes no
-    # `fetch`, so its headline stays byte-identical.
-    if fetch:
-        freshness = _freshness_summary(project_dir)
-        if freshness:
-            headline += f" · freshness: {freshness}"
+    if freshness:
+        headline += f" · freshness: {freshness}"
     return headline + "\n"
 
 

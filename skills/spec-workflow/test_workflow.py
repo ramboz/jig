@@ -9825,6 +9825,158 @@ class OrientOriginFreshnessTests(unittest.TestCase):
         self.assertIn("· freshness: 1 commit behind origin/main", result.stdout)
 
 
+class OrientClaimReapingTests(unittest.TestCase):
+    """Bug 037 / issue 218 (A) — orient --fetch must reap a focus slice's
+    ``claimed_by`` branch that has merged into the default branch or vanished,
+    instead of narrating dead work as a live session that must not be collided
+    with. Fail-safe: a live local-only claim (claims are local by default) and
+    an unreachable origin are never flagged stale, and the SessionStart hot
+    path (no ``--fetch``) never reaps.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-wf-reap-"))
+        (self.tmpdir / "docs" / "specs").mkdir(parents=True)
+        (self.tmpdir / "scaffold.json").write_text("{}\n")
+        self.origin = Path(tempfile.mkdtemp(prefix="jig-wf-reap-origin-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        shutil.rmtree(self.origin, ignore_errors=True)
+
+    def _git(self, *args, cwd=None):
+        env = os.environ.copy()
+        env.update({
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com",
+        })
+        return subprocess.run(
+            ["git", "-C", str(cwd or self.tmpdir), *args],
+            capture_output=True, text=True, env=env, check=True,
+        )
+
+    def _commit(self, name):
+        (self.tmpdir / name).write_text(name)
+        self._git("add", name)
+        self._git("commit", "-q", "-m", name)
+
+    def _init_with_origin(self):
+        self._git("init", "-q", "--bare", cwd=self.origin)
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+        self._git("remote", "add", "origin", str(self.origin))
+        self._git("push", "-q", "origin", "main")
+        self._git("fetch", "-q", "origin")
+
+    def _slice(self, spec_dir, slice_id, status, *, claimed_by=""):
+        root = self.tmpdir / "docs" / "specs" / spec_dir
+        root.mkdir(parents=True, exist_ok=True)
+        spec = root / "spec.md"
+        if not spec.exists():
+            spec.write_text("---\nstatus: DRAFT\n---\n\n# Spec\n")
+        claim = f"claimed_by: {claimed_by}\n" if claimed_by else ""
+        (root / f"slice-{slice_id.split('-')[1]}-work.md").write_text(
+            "---\n"
+            f"status: {status}\n"
+            "dependencies: []\n"
+            f"{claim}"
+            "---\n\n"
+            f"## Slice {slice_id} — work\n\n"
+            "**Goal:** fixture.\n"
+        )
+
+    # -- the two stale cases the reaper must catch ------------------------
+
+    def test_merged_claim_flagged_stale_on_fetch(self):
+        self._init_with_origin()
+        # A claim branch pushed AND fully (ff) merged into origin/main.
+        self._git("checkout", "-q", "-b", "feat-merged")
+        self._commit("feat.txt")
+        self._git("push", "-q", "origin", "feat-merged")
+        self._git("checkout", "-q", "main")
+        self._git("merge", "-q", "--ff-only", "feat-merged")
+        self._git("push", "-q", "origin", "main")
+        self._slice("002-x", "002-01", "IN_PROGRESS", claimed_by="feat-merged")
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("002-01 IN_PROGRESS (claim stale", headline)
+        self.assertIn("merged", headline)
+        self.assertNotIn("(claimed by feat-merged)", headline)
+
+    def test_absent_claim_branch_flagged_gone_on_fetch(self):
+        self._init_with_origin()
+        # ghost-branch is neither on origin nor a local ref → truly gone.
+        self._slice("002-x", "002-01", "IN_PROGRESS", claimed_by="ghost-branch")
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("002-01 IN_PROGRESS (claim stale", headline)
+        self.assertIn("gone", headline)
+
+    # -- fail-safe: live claims must never be flagged ---------------------
+
+    def test_live_local_only_claim_is_not_flagged(self):
+        self._init_with_origin()
+        # A local-only claim branch (never pushed) — the common case, since
+        # claims are local by default. Must stay "(claimed by ...)".
+        self._git("branch", "local-live")
+        self._slice("002-x", "002-01", "IN_PROGRESS", claimed_by="local-live")
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("(claimed by local-live)", headline)
+        self.assertNotIn("claim stale", headline)
+
+    def test_live_pushed_claim_ahead_of_base_is_not_flagged(self):
+        self._init_with_origin()
+        self._git("checkout", "-q", "-b", "feat-ahead")
+        self._commit("ahead.txt")
+        self._git("push", "-q", "origin", "feat-ahead")
+        self._git("checkout", "-q", "main")  # base stays behind feat-ahead
+        self._slice("002-x", "002-01", "IN_PROGRESS", claimed_by="feat-ahead")
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertIn("(claimed by feat-ahead)", headline)
+        self.assertNotIn("claim stale", headline)
+
+    # -- the hot path and fetch-failure both stay fail-safe ---------------
+
+    def test_default_hot_path_never_reaps(self):
+        self._init_with_origin()
+        self._git("checkout", "-q", "-b", "feat-merged")
+        self._commit("feat.txt")
+        self._git("push", "-q", "origin", "feat-merged")
+        self._git("checkout", "-q", "main")
+        self._git("merge", "-q", "--ff-only", "feat-merged")
+        self._git("push", "-q", "origin", "main")
+        self._slice("002-x", "002-01", "IN_PROGRESS", claimed_by="feat-merged")
+
+        # No --fetch => byte-identical hot path => no reaping, no network.
+        headline = _workflow.orient(self.tmpdir)
+
+        self.assertIn("(claimed by feat-merged)", headline)
+        self.assertNotIn("claim stale", headline)
+
+    def test_unreachable_origin_does_not_flag_claim_gone(self):
+        # A configured-but-unreachable origin must not turn a claim into a
+        # false "gone": the fetch failed, so origin refs cannot be vouched for.
+        self._git("init", "-q")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
+        self._commit("seed.txt")
+        self._git("remote", "add", "origin",
+                  str(self.tmpdir / "does-not-exist.git"))
+        self._slice("002-x", "002-01", "IN_PROGRESS", claimed_by="ghost-branch")
+
+        headline = _workflow.orient(self.tmpdir, fetch=True)
+
+        self.assertNotIn("claim stale", headline)
+        self.assertIn("(claimed by ghost-branch)", headline)
+
+
 class ReconciliationGroundingRequirementTests(unittest.TestCase):
     """Bug 024 / issue #131 — the reconciliation checklist's "Architecture
     impact" item must carry ADR-0020 §1's grounding requirement (a load-bearing

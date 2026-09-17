@@ -1419,3 +1419,18 @@ plugin-root variable, a live agent reporting "there's no `.github/skills/` in
 this project", and the scaffolded output still carrying a bad `decisions.py`
 path *after* the fix was believed complete. Package-level reasoning would have
 declared victory three times.
+
+**A liveness reaper on local-by-default state must be fail-safe or it inverts
+the bug (bug 037 / issue 218).** jig slice claims (`claimed_by`) are *local by
+default* — only `--push`/`--pr` publish the branch — so the obvious reaper the
+issue proposed, `git rev-parse origin/<claimed_by>`, would flag every live
+local-only claim as "deleted": a trust-eroding false positive strictly worse
+than the stale-claim bug it set out to fix. When "the record went stale" is the
+complaint, the fix's first duty is to never mislabel a *live* record. Only two
+branch states are unambiguous enough to assert — present-on-origin-and-
+contained-in-base ("merged") and absent-from-origin-**and**-absent-locally
+("gone"); every other state (a lingering local ref, a custom claim id, a
+squash-merge) shares its signature with genuinely live work, so it must stay
+silent. Reaping earns trust by making a false "stale" impossible on the common
+path, bought with narrower coverage — not the reverse. Both review passes
+signed off on the narrower, silent-on-ambiguity design.
