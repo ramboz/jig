@@ -421,7 +421,27 @@ taking a predicate at the THIRD scan consumer.
 **Resolution trigger:** Considered in slice 113-04 alongside the path-variable rewrite (a single "normalize rendered bodies for Copilot" pass), OR consciously left as a **documented cosmetic residual** if a prose rewrite proves fragile / low-value. Not a functional blocker; do not regex-mangle prose speculatively.
 **Origin:** 2026-09-15 reconciliation review of slice 113-03 correctly separated this from the path-variable gap (slice 113-02's deviation log had conflated the two). This entry is its explicit, distinct home.
 
-### Decision: Copilot conversational-input parity (input-consuming hooks)
-**Deferred:** jig's three `messages`-reading Stop hooks (`jig-task-capture`, `jig-claim-check`, `jig-decision-capture`) read `data['messages']` (a conversation array), and `jig-context-check`'s transcript-tail nudge reads `data['transcript_path']` on `sessionStart`. Copilot's SDK (CLI 1.0.86: `AgentStopHookInput`, `SessionStartHookInput`, `UserPromptSubmittedHookInput`) supplies **no inline `messages`** on `agentStop` (it gives `transcriptPath`, which no jig hook consumes on that event) and **no `transcriptPath`** on `sessionStart`/`preToolUse`. `copilot_hook_adapter.translate_payload` forwards `prompt` (userPromptSubmitted) — the one conversational field Copilot supplies that a jig hook reads on its event — so `jig-memory-scan` and `jig-decision-inflight` fire fully under Copilot. But the three `messages`-reading Stop hooks + context-check's `sessionStart` transcript-tail degrade to their designed fail-open **no-op** (registered + fire, but act on empty input); of those, only `jig-decision-capture`'s in-flight decision STUBS still land, because they are surfaced by the now-working `jig-decision-inflight`. This is a host input-capability gap, not a jig defect, and it degrades **visibly** (documented here + in the `_JIG_HOOK_INVENTORY` notes + slice-06 AC6), never silently. The adapter deliberately does NOT forward `transcriptPath` today (dead code — no agentStop consumer); that mapping is re-added by fix (b) below.
-**Resolution trigger:** either (a) Copilot begins supplying a `messages` equivalent on `agentStop` (re-probe the SDK types on a CLI bump), or (b) rework the three `messages`-reading Stop hooks to read the transcript via `transcriptPath` (which Copilot DOES supply on agentStop) instead of an inline `messages` array, AND re-add the `transcriptPath`→`transcript_path` adapter forwarding so it becomes live. (b) closes it host-agnostically and is the better fix, but it edits canonical hook logic (affecting Claude too), so it is out of 113-06's render-layer-translation scope.
-**Origin:** 2026-09-16 craft review of slice 113-06 — the inventory flipped these hooks to `SHIPPED` (rendered), but tracing the runtime input path showed 6 hooks read fields the 113-04 adapter didn't forward. The adapter was extended to forward `prompt` (fixing memory-scan + decision-inflight); a first correction wrongly claimed decision-capture was fixed via `transcriptPath`, but the craft re-review caught that decision-capture reads `messages` — so it belongs here with the host-gated remainder.
+### Decision: Copilot conversational-input parity (input-consuming hooks) — RESOLVED (113-09)
+**Resolved:** Copilot `agentStop.transcriptPath` is now translated to the canonical
+`transcript_path` input. The shared task-capture, claim-check, and
+decision-capture hooks accept either their existing inline `messages` array or
+a bounded JSONL transcript containing explicit `user`/`assistant` records.
+Transcript files are capped at 2 MiB/4,000 lines, limited to the consuming
+workspace by default, and unknown or malformed records are ignored. This
+preserves Claude/Codex inline behavior while giving Copilot a supported Stop
+input path when the runtime dispatches `agentStop` with a readable JSONL
+transcript.
+
+**Remaining residual:** Copilot CLI 1.0.86-1 interactive debug logs from
+2026-09-16 fired session-start, prompt, pre-tool, and post-tool plugin hooks
+but logged no `agentStop`, no `transcriptPath`, and no Stop-hook advisory
+outputs. The transcript-backed implementation is therefore host-ready, not
+runtime-proven for current Copilot. Copilot `sessionStart` also does not provide
+a `transcriptPath`, so the context-check session-start transcript-tail branch
+still has no source on that event and remains a documented fail-open no-op; its
+`userPromptSubmitted` and `preToolUse/view` branches remain supported.
+
+**Origin:** 2026-09-16 craft review of slice 113-06. The previously
+rendered-only status was an input-capability claim, not runtime parity; 113-09
+closes the three Stop-hook paths without guessing an undocumented transcript
+schema.

@@ -68,6 +68,19 @@ class DecisionCaptureHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "")
 
+    def test_bounded_transcript_input_surfaces_decision(self):
+        transcript = self.project / "session.jsonl"
+        transcript.write_text(json.dumps({
+            "type": "user",
+            "message": {"role": "user",
+                        "content": "English should not be the default language."},
+        }) + "\n")
+        result = run_hook(self.project, {
+            "session_id": "sess-1", "hook_event_name": "Stop",
+            "transcript_path": str(transcript),
+        })
+        self.assertIn("should not be the default", additional_context(result))
+
     def test_recorded_decision_is_flagged_not_silenced(self):
         # Bug 011 / issue #109: an already-recorded decision used to be silenced.
         # It is now surfaced and flagged, because the containment rule that drove

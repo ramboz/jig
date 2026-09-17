@@ -335,6 +335,7 @@ _COPILOT_HOOK_LIB_FILES: tuple[str, ...] = (
     "lib/decision_scratch.py",
     "lib/decision_scan.py",
     "lib/claim_check.py",
+    "lib/transcript.py",
 )
 
 # Slice 113-05 (enforcing-hooks-and-permissions) — the 2 ENFORCING hooks
@@ -715,11 +716,10 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
         "event": "SessionStart", "matcher": None, "script": "jig-context-check.sh",
         "status": "SHIPPED",
         "notes": (
-            "advisory; 113-06 — INPUT-DEGRADED for THIS event on Copilot: the "
-            "transcript-tail nudge reads `transcript_path`, which Copilot's "
-            "sessionStart does not supply; fires but fail-open no-ops. (This "
-            "script's preToolUse/Read + userPromptSubmitted registrations work.) "
-            "See refinement-todo 'Copilot conversational-input parity'."
+            "advisory; 113-09 — residual for THIS event: Copilot sessionStart "
+            "does not supply transcriptPath, so the transcript-tail branch "
+            "has no source and remains a documented fail-open no-op. "
+            "The other context-check registrations are supported."
         ),
     },
     {
@@ -770,10 +770,9 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
         "event": "Stop", "matcher": None, "script": "jig-task-capture.sh",
         "status": "SHIPPED",
         "notes": (
-            "advisory; 113-06 — INPUT-DEGRADED on Copilot: reads `messages`, "
-            "which Copilot's agentStop does not supply (it gives transcriptPath); "
-            "registered + fires but fail-open no-ops. See refinement-todo "
-            "'Copilot conversational-input parity'."
+            "advisory; 113-09 — when Copilot dispatches agentStop with "
+            "transcriptPath, it is translated and read through the bounded "
+            "shared transcript adapter; inline messages behavior is preserved."
         ),
     },
     {
@@ -781,12 +780,10 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
         "event": "Stop", "matcher": None, "script": "jig-decision-capture.sh",
         "status": "SHIPPED",
         "notes": (
-            "advisory; 113-06 — INPUT-DEGRADED on Copilot: its scan reads "
-            "`messages` (like task-capture/claim-check), which Copilot's agentStop "
-            "does not supply, so that path fail-open no-ops. Its in-flight decision "
-            "STUBS — surfaced by jig-decision-inflight, which IS fixed via `prompt` "
-            "— still work. See refinement-todo 'Copilot conversational-input "
-            "parity'."
+            "advisory; 113-09 — when Copilot dispatches agentStop with "
+            "transcriptPath, it is translated and read through the bounded "
+            "shared transcript adapter; in-flight decision stubs remain "
+            "supported separately."
         ),
     },
     {
@@ -794,10 +791,9 @@ _JIG_HOOK_INVENTORY: tuple[dict, ...] = (
         "event": "Stop", "matcher": None, "script": "jig-claim-check.sh",
         "status": "SHIPPED",
         "notes": (
-            "advisory; 113-06 — INPUT-DEGRADED on Copilot: reads `messages`, "
-            "which Copilot's agentStop does not supply; registered + fires but "
-            "fail-open no-ops. See refinement-todo 'Copilot conversational-input "
-            "parity'."
+            "advisory; 113-09 — when Copilot dispatches agentStop with "
+            "transcriptPath, it is translated and read through the bounded "
+            "shared transcript adapter."
         ),
     },
     {

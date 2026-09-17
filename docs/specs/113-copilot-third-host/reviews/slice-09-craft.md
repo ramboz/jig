@@ -1,0 +1,24 @@
+---
+slice: 113-09 — conversational-hook-parity
+pass: craft
+verdict: pass
+reviewer: jig:reviewer
+reviewed_at: 2026-09-17T00:11:20Z
+prompt_source: review.py pr-review docs/specs/113-copilot-third-host/spec.md 113-09 <deliverables> --richer-skill pr-review
+substrate: shown
+applied_skill: unknown
+shown_candidates: [arch-review:high-confidence, independent-review:high-confidence, pr-review:high-confidence, scout-pr-review:high-confidence, servo:agent-loop:high-confidence, servo:autonomy-readiness:high-confidence, servo:quality-gate:high-confidence, access:speculative, adobe-security-antipatterns:speculative, adobe-security-audit:speculative, adobe-security-client:speculative, adobe-security-cloud:speculative, adobe-security-foundations:speculative, adobe-security-lang:speculative, adobe-security-services:speculative, adr-workflow:speculative, agent-development:speculative, analyze:speculative, audit-migrator:speculative, block-kit:speculative, bug-fix:speculative, build-mcp-app:speculative, build-mcp-server:speculative, build-mcpb:speculative, cardputer-buddy:speculative, clarify:speculative, claude-automation-recommender:speculative, claude-md-improver:speculative, claude-security:speculative, code-health:speculative, command-development:speculative, configure:speculative, content-fidelity:speculative, contracts:speculative, create-slack-app:speculative, cutline:speculative, debug-workflow:speculative, design-eval:speculative, eval-authoring:speculative, example-command:speculative, example-skill:speculative, explain:speculative, frontend-design:speculative, get-content-scrape:speculative, hook-development:speculative, investigate-alert:speculative, local-dev:speculative, m5-onboard:speculative, math-olympiad:speculative, mcp-integration:speculative, memory-sync:speculative, migrate:speculative, morning-ai-radar:speculative, morning-assistant:speculative, morning-confluence:speculative, morning-github:speculative, morning-jira:speculative, morning-outlook:speculative, morning-slack:speculative, morning-spike:speculative, mysticat-debug:speculative, orient:speculative, playground:speculative, plugin-settings:speculative, plugin-structure:speculative, project-artifact:speculative, query-audits:speculative, query-opportunities:speculative, query-scrapes:speculative, query-sites:speculative, receipts:speculative, reframe:speculative, release-check:speculative, release-slate:speculative, run-preflight:speculative, scaffold-init:speculative, scope-audit:speculative, scout-autotune:speculative, scout-bench-create:speculative, scout-memory-init:speculative, scout-scrum-master:speculative, security-review:speculative, servo:edd-suitability:speculative, servo:execution-planner:speculative, servo:heartbeat:speculative, servo:oracle-hook:speculative, servo:scaffold-init:speculative, servo:spec-oracle:speculative, session-report:speculative, shape-release:speculative, silence-alert:speculative, skill-creator:speculative, skill-development:speculative, slack-api:speculative, slack-cli:speculative, slack-docs:speculative, slack-messaging:speculative, slack-search:speculative, slice-land:speculative, spacecat-configuration:speculative, spec-workflow:speculative, steward:speculative, tdd-loop:speculative, test-pr-in-dev:speculative, vision-elicitation:speculative, webpage-replica:speculative, writing-hookify-rules:speculative]
+---
+
+VERDICT: pass
+
+REASONING:
+The deliverable is well-scoped and maintainable: transcript support is centralized, bounded, workspace-confined by default, and forwarded only through the Copilot adapter. Generated host copies, focused regression coverage, package checks, and the live no-`agentStop` evidence align with the revised outcome without over-claiming runtime parity. Existing advisory fail-open behavior is preserved, while enforcing behavior remains outside this transcript path.
+
+SPECIFIC ISSUES:
+- [strength][impl] — `hooks/scripts/lib/transcript.py` provides a small host-neutral boundary with byte/line limits, explicit role/content filtering, realpath-based workspace containment, and safe handling of malformed or missing input.
+- [strength][impl] — The Copilot adapter forwards `transcriptPath` to the canonical `transcript_path` field without changing Claude/Codex inline-message behavior, and generated host copies include the shared helper and updated consumers.
+- [strength][spec] — The slice, refinement entry, inventory, and evidence artifact consistently distinguish supported Stop-input handling from the observed Copilot CLI residual where `agentStop` was not dispatched.
+
+RECONCILIATION NOTES:
+UNINDEXED degraded review fallback: Scout tools were unavailable, so the specified repository paths were reviewed with native read/search tools. No reconciliation deviation was identified beyond the already documented no-`agentStop` Copilot runtime residual.

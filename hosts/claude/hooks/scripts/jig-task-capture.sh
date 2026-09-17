@@ -22,7 +22,9 @@ PATTERNS = [
 
 try:
     data = json.load(sys.stdin)
-    messages = data.get('messages', [])
+    from lib.transcript import messages_from_payload
+    messages = messages_from_payload(
+        data, os.environ.get('CLAUDE_PROJECT_DIR', '.'))
     parts = []
     for m in messages:
         content = m.get('content', '')

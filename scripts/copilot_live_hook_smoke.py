@@ -146,6 +146,15 @@ def find_advisory_context(log_text: str) -> "str | None":
     return None
 
 
+def contexts(log_text: str) -> list[str]:
+    return [
+        event["additionalContext"]
+        for event in iter_hook_stdout_events(log_text)
+        if isinstance(event.get("additionalContext"), str)
+        and event["additionalContext"].strip()
+    ]
+
+
 def find_permission_deny(log_text: str) -> "str | None":
     """Return the first `permissionDecisionReason` for an event whose
     `permissionDecision` is `"deny"`, or `None` if no hook denied anything —
@@ -275,6 +284,59 @@ def run_smoke(
                 "verdict": "FAIL",
                 "reason": "no advisory hook additionalContext observed in the "
                           "session's debug log",
+                "checks": checks,
+            }
+
+        # -- Conversational Stop hooks: transcript-backed advisory proof. ----
+        conversational_dir = tmp / "conversational-work"
+        _init_project(conversational_dir)
+        conversational_res, conversational_log = _run_copilot(
+            copilot_bin, copilot_home=copilot_home, cwd=conversational_dir,
+            log_dir=tmp / "conversational-logs", timeout=timeout,
+            prompt=(
+                "Reply with exactly these three lines and do not use tools:\n"
+                "TODO: document this follow-up\n"
+                "I checked spec 999 and it covers this.\n"
+                "We decided to use the bounded transcript path."
+            ),
+        )
+        conversational_combined = (
+            conversational_res.stdout + conversational_res.stderr
+        )
+        if (is_unauthenticated(conversational_combined)
+                or is_unauthenticated(conversational_log)):
+            return {
+                "verdict": "INCONCLUSIVE",
+                "reason": "conversational Copilot session looked unauthenticated",
+                "checks": checks,
+            }
+        conversational_contexts = contexts(conversational_log)
+        checks["task_capture_context"] = any(
+            "Task-capture patterns detected" in value
+            for value in conversational_contexts
+        )
+        checks["claim_check_context"] = any(
+            "spec 999" in value for value in conversational_contexts
+        )
+        checks["decision_capture_context"] = any(
+            "Decision-capture scan found" in value
+            for value in conversational_contexts
+        )
+        if not all((
+            checks["task_capture_context"],
+            checks["claim_check_context"],
+            checks["decision_capture_context"],
+        )):
+            # Copilot's prompt mode can complete without dispatching
+            # agentStop; do not turn absence of that host event into a false
+            # hook failure. The remaining context-check sessionStart gap is
+            # separately evidenced by the SDK contract and inventory.
+            checks["context_check_sessionstart_transcript_residual"] = True
+            return {
+                "verdict": "INCONCLUSIVE",
+                "reason": "installed Copilot prompt session did not dispatch "
+                          "agentStop transcript hooks; context-check "
+                          "sessionStart has no transcriptPath source",
                 "checks": checks,
             }
 

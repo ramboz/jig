@@ -29,7 +29,9 @@ try:
 
     data = json.load(sys.stdin)
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
-    messages = data.get('messages', [])
+    from lib.transcript import messages_from_payload
+    messages = messages_from_payload(
+        data, os.environ.get('CLAUDE_PROJECT_DIR', '.'))
 
     text = last_assistant_text(messages)
     claims = scan_claims(project_dir, text)
