@@ -35,9 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "skills" / "scaffold-init"))
 
 import install_contract  # noqa: E402
-import verify_install  # noqa: E402
 import scaffold as scaffold_mod  # noqa: E402
-
+import verify_install  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Consistency: the restated contract sets must match their sources of truth
