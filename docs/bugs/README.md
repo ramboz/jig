@@ -40,6 +40,7 @@
 | 034 | copilot-scaffold-defaults-claude | high | standard | DONE | yes | skills/scaffold-init | literate-disco |  |  |
 | 035 | copilot-marketplace-source-schema | high | standard | DONE | yes | scripts | literate-disco |  |  |
 | 036 | copilot-skill-helper-path | high | standard | DONE | yes | skills/scaffold-init/test_copilot_renderer.py::CopilotPluginModeHelperPathTests | copilot-plugin-audit |  |  |
+| 038 | stale-blind-to-proposed-adr | low | standard | DONE | yes | skills/spec-workflow/test_workflow.py::StaleProposedAdrTests | claude/bug-stale-proposed-adr |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 

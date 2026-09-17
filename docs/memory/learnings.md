@@ -1419,3 +1419,15 @@ plugin-root variable, a live agent reporting "there's no `.github/skills/` in
 this project", and the scaffolded output still carrying a bad `decisions.py`
 path *after* the fix was believed complete. Package-level reasoning would have
 declared victory three times.
+
+**An "empty field ⇒ skip" guard exempts the highest-risk record (bug 038 /
+issue 218).** `workflow.py stale` gated ADR checks on `if not last_verified or
+not deps: continue`, so a `Proposed` ADR scaffolded with an empty
+`last_verified` — a decision that was never verified or reconciled, i.e. the one
+most likely to have silently drifted from the code — was structurally invisible
+to the one tool meant to catch drift. When a checker's precondition is "the
+field is populated," it quietly carves out the never-touched case; audit guards
+for the state they refuse to look at. The fix ages a never-verified Proposed ADR
+by its *proposal date* (the `Proposed (YYYY-MM-DD)` status line), never by
+`last_verified` — a freshness field whose reuse as an acceptance date would
+publish a plausible-but-wrong age (ADR-0024/0046).
