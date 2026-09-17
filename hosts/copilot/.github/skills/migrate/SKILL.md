@@ -41,7 +41,7 @@ operations.
   its `scaffold.json` sentinel/config; supports `--dry-run`.
 - `rename-decisions` — applies ADR-0004's rename. Idempotent; refuses
   on conflict; has a `--dry-run` mode; `--host claude|codex` selects
-  whether cross-reference rewrites scan `AGENTS.md`/`.github/` or
+  whether cross-reference rewrites scan `AGENTS.md`/`.claude/` or
   `AGENTS.md`/`.codex/`.
 - `split-slices` — extracts embedded slice sections into sibling
   slice files.
@@ -49,7 +49,7 @@ operations.
   jig's template. Idempotent; supports `--dry-run` and `--docs-root`; never
   overwrites an existing file.
 - `copy-machinery` — copies jig runtime machinery into the target's
-  host-local scaffold runtime; `--host claude` writes `.github/`, and
+  host-local scaffold runtime; `--host claude` writes `.claude/`, and
   `--host codex` writes `.codex/`.
 
 ## How to use
@@ -105,7 +105,7 @@ What it does, in display order:
 2. Per-file renames: `NNN-<slug>.md` → `adr-NNNN-<slug>.md`
    (pad 3-digit to 4-digit; add `adr-` prefix where missing).
 3. Cross-reference rewrites in text files under `docs/`, `AGENTS.md`,
-   and `.github/` by default. With `--host codex`, rewrites scan
+   and `.claude/` by default. With `--host codex`, rewrites scan
    `docs/`, `AGENTS.md`, and `.codex/` instead. The helper itself
    (`migrate.py` and its fixtures) is never rewritten.
 
@@ -340,7 +340,7 @@ not the deciding signal.
 
 Host selection:
 
-- `--host claude` writes Copilot scaffold machinery under `.github/`
+- `--host claude` writes Copilot scaffold machinery under `.claude/`
   and is the source-checkout default.
 - `--host codex` writes Codex scaffold machinery under `.codex/`.
 - `--host auto` is the CLI default; helpers copied under `.codex/skills/`
@@ -355,15 +355,15 @@ python3 ".github/skills/migrate/migrate.py" \
 
 What it does:
 
-1. Copies skills into the host runtime (`.github/skills/jig-<name>/`
+1. Copies skills into the host runtime (`.claude/skills/jig-<name>/`
    or `.codex/skills/jig-<name>/`), rewriting helper paths in SKILL.md
    bodies to that runtime.
-2. Copies agents into the host runtime (`.github/agents/jig-*.md` for
+2. Copies agents into the host runtime (`.claude/agents/jig-*.md` for
    Copilot, `.codex/agents/jig-*.toml` for Codex).
 3. Copies hook scripts into the host runtime, pinning each script's mode
    to `0o755`.
 4. Copies jig's `templates/` tree into the host runtime
-   (`.github/templates/` or `.codex/templates/`), rewriting helper paths in
+   (`.claude/templates/` or `.codex/templates/`), rewriting helper paths in
    `*.md.template` bodies to that runtime. This is what lets the copied
    helpers seed from a template with no plugin root — `decisions.py`
    (lightweight-decisions), `adr.py new`, `migrate.py seed-decisions`,
@@ -374,13 +374,13 @@ What it does:
    refresh a project scaffolded before 095-01** — it is the repair path
    `decisions.py` names when a template is unreachable.
 5. Generates or merges host hook registration. `--host claude` uses
-   `.github/settings.json`, with per-entry `metadata.managed_by_jig:
+   `.claude/settings.json`, with per-entry `metadata.managed_by_jig:
    true` markers. `--host codex` uses `.codex/hooks.json`, with a
    schema-clean top-level `hooks` object.
 
 Subsequent runs are idempotent: re-running `copy-machinery` overwrites
 the copied files in place and updates jig-managed hook registration. On
-`--host claude`, non-jig hooks in `.github/settings.json` survive
+`--host claude`, non-jig hooks in `.claude/settings.json` survive
 untouched. On `--host codex`, jig-managed `.codex/hooks.json` is
 regenerated as a whole because Codex hook registration is a single file
 and jig ownership is detected from generated jig hook command paths.
@@ -390,7 +390,7 @@ and jig ownership is detected from generated jig hook command paths.
 If the host hook configuration already exists and is not jig-managed,
 `copy-machinery` exits non-zero (exit code 3) and emits the
 `UnmanagedHooksError` refuse-message to stderr — no filesystem writes
-occur. For `--host claude`, this means `.github/settings.json` has
+occur. For `--host claude`, this means `.claude/settings.json` has
 hooks under `hooks.<event>` but none carry the `managed_by_jig` marker.
 For `--host codex`, this means `.codex/hooks.json` exists and does not look
 like a jig-generated hook config. This matches the same safety stance
@@ -634,7 +634,7 @@ verification report.
 - **`rename-decisions` is bounded by `<project-dir>`.** It never
   reads or writes outside the directory passed on the CLI. Within
   scope it scans shared `docs/` plus the selected host primer/runtime:
-  `AGENTS.md` and `.github/` for `--host claude`, or `AGENTS.md` and
+  `AGENTS.md` and `.claude/` for `--host claude`, or `AGENTS.md` and
   `.codex/` for `--host codex`. Well-known skip paths (`.git`,
   `node_modules`, `.venv`, `__pycache__`, `dist`, `build`, etc.) are
   excluded from cross-reference scanning.

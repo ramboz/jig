@@ -35,7 +35,7 @@ user-invocable: true
 - Consults `docs/memory/glossary.md` when drafting ACs to surface unknown domain terms.
 - Surfaces skill-routing observability via `workflow.py routing-stats [--days N]` —
   a read-only histogram of which skills fired (jig baseline vs. richer/"other"
-  skill per category) from `.github/skill-usage.jsonl` (slice 041-02).
+  skill per category) from `.claude/skill-usage.jsonl` (slice 041-02).
 - Surfaces use-case coverage via `workflow.py coverage [--project-dir DIR]` — a
   read-only, **advisory** (non-blocking), project-wide **bidirectional** check
   (slice 068-03): a deterministic set-difference over the `use_cases:` trace
@@ -49,7 +49,7 @@ user-invocable: true
 - Surfaces gate-bypass telemetry via `workflow.py gate-stats [--days N]` — a
   read-only per-gate histogram of how often each gate honored its env-var
   override (an override-frequency audit trail, not a gate-value verdict) from
-  `.github/skill-usage.jsonl` (slice 078-02).
+  `.claude/skill-usage.jsonl` (slice 078-02).
 
 ## SPIDR splitting
 
@@ -197,7 +197,7 @@ SKILL.md hand-off is the documented gate.
    **Works from any branch or worktree** (ADR-0015 / spec 051). The
    helper routes on the current branch: on `main` it runs the proven
    in-place flow (clean tree required, since the commit lands on local
-   `main`); off `main` — a feature branch or a linked `.github/worktrees/*`
+   `main`); off `main` — a feature branch or a linked `.claude/worktrees/*`
    worktree — it builds the reservation commit in an *ephemeral detached
    worktree* checked out at `origin/main` and pushes it by SHA, never
    touching your branch, cwd, or working tree. You no longer need to

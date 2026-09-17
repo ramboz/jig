@@ -73,7 +73,7 @@ There are four things people often confuse with this skill. Pick the
 right one:
 
 - **Any other user-installed architecture/design/RFC-review skill.**
-  Common location: `~/.github/skills/arch-review/` — but the deferral
+  Common location: `~/.claude/skills/arch-review/` — but the deferral
   is **category-based, not name-based**, so a skill named anything
   (`arch-review`, `design-review`, `rfc-reviewer`, `tech-spec-review`,
   etc.) whose description claims architecture review, design review,
@@ -290,7 +290,7 @@ architecture-review skill, not the baseline.
   only.** The spec-workflow **arch pass** spawns a read-only `reviewer`
   subagent with no `Skill` tool, so it cannot use the router at all —
   there `review.py` does explicit file-read dispatch (detects
-  `~/.github/skills/arch-review/` and points the reviewer at it). See
+  `~/.claude/skills/arch-review/` and points the reviewer at it). See
   [docs/workflow.md](../../docs/workflow.md) § Post-implementation review.
 - **Lightweight is a feature, not a limitation.** The baseline does
   not ship a seven-perspective matrix. It does not ship
@@ -299,7 +299,7 @@ architecture-review skill, not the baseline.
   completeness-checklist sweep. It does not produce a severity-rated
   finding list. If you find yourself wishing the baseline did more,
   you are in the target audience for installing a richer skill at
-  the user scope (commonly `~/.github/skills/arch-review/`).
+  the user scope (commonly `~/.claude/skills/arch-review/`).
 - **This skill reviews an ADR draft; `/jig:adr-workflow` creates
   one.** The direction matters. If the ADR does not exist yet, you
   want the scaffolding skill, not this one. If the ADR exists in

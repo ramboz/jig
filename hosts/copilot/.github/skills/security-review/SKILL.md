@@ -65,7 +65,7 @@ There are several things people confuse with this skill. Pick the right one:
   anything whose description claims security review, SAST, or
   vulnerability analysis is preferred. The routes the GitHub Copilot CLI router
   may resolve to include **the user's own** skill (commonly
-  `~/.github/skills/security-review/`), **Adobe's `adobe-security-*`
+  `~/.claude/skills/security-review/`), **Adobe's `adobe-security-*`
   family** (depth jig deliberately does not ship), or a **built-in
   `security-review`**. If one is present, **defer to it** — explicitly
   invoke it if you want to be sure. The deferral is a router hint, not a
@@ -279,7 +279,7 @@ does not replace them. Say so in the review when the stakes warrant it
   falls back to eight heuristic categories. If you find yourself wishing
   the baseline did more, you are in the target audience for installing a
   richer security skill at the user scope (commonly
-  `~/.github/skills/security-review/`) or Adobe's `adobe-security-*`.
+  `~/.claude/skills/security-review/`) or Adobe's `adobe-security-*`.
 - **Heuristic ≠ SAST engine.** The eight categories are pattern-level
   cues a careful reviewer would check, not a sound static analysis. False
   negatives are expected; that is exactly why the [Honest framing](#honest-framing)

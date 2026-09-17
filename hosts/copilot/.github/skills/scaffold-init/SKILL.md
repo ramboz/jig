@@ -99,7 +99,7 @@ plugin mode. Do not invent answers when the user is unsure.
 After running, the target directory contains (plugin mode — the default):
 - `AGENTS.md` (with Hot Cache section, project name substituted)
 - `docs/` (architecture, workflow, conventions, refinement-todo, inbox, memory/, specs/, decisions/)
-- `.github/hooks/` (empty — project-specific gates can go here)
+- `.claude/hooks/` (empty — project-specific gates can go here)
 - a **project-scoped permissions file**, on hosts that provide one — seeded with
   the ADR-0013 destructive-command deny floor (`git push --force`,
   `git reset --hard`, `rm -rf`). Hosts with no project-scoped permission surface

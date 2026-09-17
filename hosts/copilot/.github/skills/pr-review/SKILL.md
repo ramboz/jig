@@ -55,7 +55,7 @@ There are three things people often confuse with this skill. Pick the right
 one:
 
 - **Any other user-installed PR/code-review skill.** Common location:
-  `~/.github/skills/pr-review/` — but the deferral is **category-based,
+  `~/.claude/skills/pr-review/` — but the deferral is **category-based,
   not name-based**, so a skill named anything (`pr-review`,
   `code-reviewer`, `team-pr`, etc.) whose description claims PR review,
   code review, or diff review will be preferred. If one is present,
@@ -216,7 +216,7 @@ baseline.
   The spec-workflow **craft pass** spawns a read-only `reviewer` subagent
   with no `Skill` tool, so it cannot use the router at all — there
   `review.py` does explicit file-read dispatch (detects
-  `~/.github/skills/pr-review/` and points the reviewer at it). See
+  `~/.claude/skills/pr-review/` and points the reviewer at it). See
   [docs/workflow.md](../../docs/workflow.md) § Post-implementation review.
 - **The bundled `review` skill is explicitly excluded from the deferral.**
   Jig's description says it does **not** defer to `review`. That's the
@@ -227,7 +227,7 @@ baseline.
   does not run multiple personas. It does not check for security issues
   beyond the obvious. If you find yourself wishing the baseline did
   more, you are in the target audience for installing a richer skill
-  at the user scope (commonly `~/.github/skills/pr-review/`).
+  at the user scope (commonly `~/.claude/skills/pr-review/`).
 - **This is a PR-shape review, not a spec-shape review.** If a slice has
   a spec.md to evaluate against, use `/jig:independent-review` (or spawn
   the `agents/reviewer.md` subagent). Mixing the two surfaces leads to

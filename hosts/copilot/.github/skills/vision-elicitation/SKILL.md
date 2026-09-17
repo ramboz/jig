@@ -73,8 +73,8 @@ one:
 
 - **Any other user-installed vision-elicitation / product-discovery /
   project-framing skill.** Common locations include
-  `~/.github/skills/vision-elicitation/`, `~/.github/skills/product-canvas/`,
-  `~/.github/skills/lean-pitch/`, etc. — but the deferral is
+  `~/.claude/skills/vision-elicitation/`, `~/.claude/skills/product-canvas/`,
+  `~/.claude/skills/lean-pitch/`, etc. — but the deferral is
   **category-based, not name-based**, so a skill named anything whose
   description claims vision elicitation, product discovery, project
   framing, or product scope capture will be preferred. If one is present,

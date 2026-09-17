@@ -150,8 +150,8 @@ Two carve-outs sit on top of that order:
    python3 -c "
    import sys, os, json
    # Auto-resolve the loader across both layouts (copy-paste-safe):
-   #   jig repo -> skills/_common; scaffolded project -> .github/skills/_common.
-   for d in ('skills/_common', '.github/skills/_common'):
+   #   jig repo -> skills/_common; scaffolded project -> .claude/skills/_common.
+   for d in ('skills/_common', '.claude/skills/_common'):
        if os.path.isfile(os.path.join(d, 'lexicon.py')):
            sys.path.insert(0, d); break
    import lexicon
@@ -160,7 +160,7 @@ Two carve-outs sit on top of that order:
    "
    ```
 
-   (The loader lives at `.github/skills/_common/lexicon.py` in a scaffolded
+   (The loader lives at `.claude/skills/_common/lexicon.py` in a scaffolded
    project and `skills/_common/lexicon.py` in the jig repo itself — the snippet
    above probes both. The project glossary overlay **wins** on a collision — a
    project that redefines a term gets its own definition, per ADR-0021.)

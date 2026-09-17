@@ -54,7 +54,7 @@ nudge; the dev decides whether to follow them.
 ## When to use vs. when to defer
 
 - **Any other installed contracts skill.** Common location:
-  `~/.github/skills/contracts/` — but the deferral is **category-based,
+  `~/.claude/skills/contracts/` — but the deferral is **category-based,
   not name-based**, so a skill named anything (`contracts`,
   `schema-design`, `contract-first`, `api-contracts`, etc.) whose
   description claims external-interface contract artifacts, API schema

@@ -113,7 +113,7 @@ spec 028.
 **Works from any branch or worktree** (ADR-0015 / spec 051, mirroring
 `workflow.py new`). The helper routes on the current branch: on `main`
 it runs the proven in-place flow (clean tree required); off `main` — a
-feature branch or a linked `.github/worktrees/*` worktree — it reserves
+feature branch or a linked `.claude/worktrees/*` worktree — it reserves
 via an *ephemeral detached worktree* at `origin/main`, never touching
 your branch, cwd, or working tree. No need to switch to `main` (a linked
 worktree can't, anyway).

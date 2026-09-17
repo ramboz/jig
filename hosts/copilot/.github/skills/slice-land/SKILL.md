@@ -227,7 +227,7 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
 #       git push origin claude/eager-zhukovsky-34ebb0:main
 #       git fetch origin main
 #       git merge --ff-only origin/main
-#       git worktree remove .github/worktrees/eager-zhukovsky-34ebb0
+#       git worktree remove .claude/worktrees/eager-zhukovsky-34ebb0
 ```
 
 ## Gotchas

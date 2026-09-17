@@ -1780,7 +1780,7 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
     mechanism from an env var."""
 
     name = "copilot"
-    SKILL_PATH_REPLACEMENT = r".github/skills/jig-\1/"
+    SKILL_PATH_REPLACEMENT = r".github/skills/\1/"
 
     # Spike 113-01 AC2: Copilot's skill loader rejects a description over
     # 1024 characters (the same limit bug 009 already enforces for Codex —
@@ -2253,7 +2253,6 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
             "  commands; use the packaged `.github/...` relative paths shown "
             "above.",
         )
-        out = out.replace(".claude/", ".github/")
         out = out.replace("CLAUDE.md", "AGENTS.md")
         out = out.replace("Claude Code", "GitHub Copilot CLI")
         out = out.replace("Claude", "Copilot")
