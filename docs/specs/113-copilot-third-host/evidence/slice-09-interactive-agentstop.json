@@ -1,0 +1,35 @@
+{
+  "slice": "113-09",
+  "captured_at": "2026-09-16T16:59:02-07:00",
+  "source": "manual interactive Copilot CLI debug logs under /tmp/jig-copilot-live-check",
+  "copilot_cli_versions_observed": [
+    "1.0.86-1"
+  ],
+  "evidence_files": [
+    {
+      "path": "/tmp/jig-copilot-live-check/process-1789600531904-54072.log",
+      "bytes": 259829
+    },
+    {
+      "path": "/tmp/jig-copilot-live-check/process-1789600605628-56318.log",
+      "bytes": 1144553
+    }
+  ],
+  "grep_patterns": [
+    "agent_stop",
+    "transcript_path",
+    "decision_capture",
+    "task_capture",
+    "claim_check",
+    "hook_stdout"
+  ],
+  "counts": {
+    "agent_stop": 0,
+    "transcript_path": 0,
+    "decision_capture": 0,
+    "task_capture": 0,
+    "claim_check": 0,
+    "hook_stdout": 8
+  },
+  "conclusion": "Copilot CLI interactive session fired other plugin hooks but did not log agentStop, transcriptPath, or the Stop-hook advisory outputs required for live conversational parity."
+}

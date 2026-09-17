@@ -130,16 +130,10 @@ class TranslatePayloadTests(unittest.TestCase):
         out = json.loads(copilot_hook_adapter.translate_payload(raw, "UserPromptSubmit"))
         self.assertEqual(out["prompt"], "explain spec 042")
 
-    def test_transcript_path_is_not_forwarded_no_consumer_on_agent_stop(self):
-        # Copilot's agentStop supplies `transcriptPath`, but no jig hook consumes
-        # `transcript_path` on agentStop (the Stop hooks read an inline `messages`
-        # array Copilot does not supply), so the adapter deliberately does NOT
-        # forward it — forwarding would be dead code. Pins that decision so it is
-        # not silently re-added without the Stop-hook rework that would make it
-        # live. See docs/refinement-todo.md "Copilot conversational-input parity".
+    def test_transcript_path_is_forwarded_for_agent_stop(self):
         raw = json.dumps({"transcriptPath": "/tmp/sess/transcript.jsonl"}).encode()
         out = json.loads(copilot_hook_adapter.translate_payload(raw, "Stop"))
-        self.assertNotIn("transcript_path", out)
+        self.assertEqual(out["transcript_path"], "/tmp/sess/transcript.jsonl")
 
     def test_a_full_post_tool_use_payload_translates_completely(self):
         raw = json.dumps({
@@ -237,6 +231,30 @@ class MainInvocationTests(unittest.TestCase):
             timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class AgentStopTranscriptAdapterTests(unittest.TestCase):
+    def test_agent_stop_transcript_reaches_shared_task_hook(self):
+        with tempfile.TemporaryDirectory(prefix="jig-copilot-stop-") as tmp:
+            project = Path(tmp)
+            transcript = project / "session.jsonl"
+            transcript.write_text(json.dumps({
+                "type": "assistant",
+                "message": {"role": "assistant",
+                            "content": "TODO: capture this follow-up"},
+            }) + "\n")
+            env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
+            result = subprocess.run(
+                [sys.executable, str(ADAPTER_PATH), "Stop",
+                 str(HOOK_SCRIPTS_DIR / "jig-task-capture.sh")],
+                input=json.dumps({
+                    "sessionId": "s", "workingDirectory": str(project),
+                    "transcriptPath": str(transcript),
+                }),
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Task-capture patterns detected", result.stdout)
 
 
 class MainClaudeProjectDirDerivationTests(unittest.TestCase):

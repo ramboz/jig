@@ -115,10 +115,16 @@ class CopilotPackageContentsTests(unittest.TestCase):
         manifest = self.out_dir / ".plugin" / "plugin.json"
         self.assertTrue(manifest.is_file())
         data = json.loads(manifest.read_text())
-        self.assertEqual(set(data.keys()), {"name", "version", "description"})
+        self.assertEqual(
+            set(data.keys()),
+            {"name", "version", "description", "skills", "agents", "hooks"},
+        )
         self.assertEqual(data["name"], "jig")
         self.assertTrue(data["version"])
         self.assertIn("Copilot", data["description"])
+        self.assertEqual(data["skills"], ".github/skills")
+        self.assertEqual(data["agents"], ".github/agents")
+        self.assertEqual(data["hooks"], ".github/hooks/hooks.json")
 
     def test_manifest_version_matches_claude_manifest(self):
         claude_version = json.loads(
@@ -174,6 +180,23 @@ class CopilotPackageContentsTests(unittest.TestCase):
         self.assertEqual(
             top_level, {"skills", "agents", "hooks", "scripts", "templates"}
         )
+
+    def test_manifest_declared_component_paths_resolve_to_expected_types(self):
+        manifest = json.loads((self.out_dir / ".plugin" / "plugin.json").read_text())
+        self.assertTrue((self.out_dir / manifest["skills"]).is_dir())
+        self.assertTrue(
+            (self.out_dir / manifest["skills"] / "spec-workflow" / "SKILL.md").is_file()
+        )
+        self.assertTrue((self.out_dir / manifest["agents"]).is_dir())
+        self.assertTrue(
+            (self.out_dir / manifest["agents"] / "reviewer.agent.md").is_file()
+        )
+        hooks_path = self.out_dir / manifest["hooks"]
+        self.assertTrue(hooks_path.is_file())
+        hooks = json.loads(hooks_path.read_text())
+        self.assertEqual(hooks["version"], 1)
+        self.assertIn("sessionStart", hooks["hooks"])
+        self.assertIn("preToolUse", hooks["hooks"])
 
     def test_excludes_tests_and_caches(self):
         leaks = [
@@ -394,12 +417,22 @@ class CopilotAdvisoryHookPackagingTests(unittest.TestCase):
     `.github/hooks/*.json` and ship their scripts under
     `.github/hooks/scripts/`.
 
+    NOT E2E (slice 113-08 honesty label): every test in this class invokes
+    the rendered `bash` command directly with a constructed stdin payload
+    and a manually-chosen `cwd`/`CLAUDE_PROJECT_DIR` — a STATIC PACKAGE
+    CHECK proving the command, once spawned, behaves correctly. It does
+    NOT prove Copilot itself discovers, resolves, and spawns that command
+    from an installed plugin cache with Copilot's own real working
+    directory and stdin payload — that is
+    `scripts/test_copilot_live_hook_smoke.py`'s `LiveHookRuntimeE2ETests`
+    (opt-in, real `copilot` CLI) and `scripts/copilot_live_hook_smoke.py`
+    (the documented, repeatable, authenticated/manual command — AC5).
+
     AC1: event-name + response-schema translation (exercised via the
     rendered JSON's shape). AC2: the 3 hooks are rendered + their scripts
-    shipped. AC3: fail-open — verified via a deterministic substitute
-    (direct script invocation), since a real Copilot session is not
-    available in this build/test environment. AC4: hook-command paths are
-    plugin-root-relative, not the raw `${CLAUDE_PLUGIN_ROOT}` literal.
+    shipped. AC3: fail-open — verified via the deterministic substitute
+    described above. AC4: hook-command paths are plugin-root-relative, not
+    the raw `${CLAUDE_PLUGIN_ROOT}` literal.
     """
 
     def setUp(self):
@@ -665,7 +698,16 @@ class CopilotEnforcingHookPackagingTests(unittest.TestCase):
     into `.github/hooks/*.json` (AUTHORITATIVE flat schema) and ship their
     scripts under `.github/hooks/scripts/`, exactly like
     `CopilotAdvisoryHookPackagingTests` for the advisory 3, plus the
-    `--enforce` adapter flag and end-to-end exit-code-preserved firing."""
+    `--enforce` adapter flag and end-to-end exit-code-preserved firing.
+
+    NOT E2E (slice 113-08 honesty label — see
+    `CopilotAdvisoryHookPackagingTests`'s own docstring for the full
+    rationale): the `_run_rendered_command` tests below spawn the rendered
+    command directly with a constructed payload, not through a real
+    Copilot session. Live, Copilot-driven enforcement proof is
+    `scripts/test_copilot_live_hook_smoke.py`'s `LiveHookRuntimeE2ETests`
+    (opt-in) / `scripts/copilot_live_hook_smoke.py` (AC5's documented
+    manual command)."""
 
     # Built by concatenation so this file's own source text never contains
     # the contiguous AWS-key-shaped substring — see
@@ -1145,7 +1187,23 @@ class RemainingAdvisoryHookPackagingTests(unittest.TestCase):
             )
         }
         expected_stems.add("jig-permissions-floor")
+        expected_stems.add("hooks")
         self.assertEqual(rendered_stems, expected_stems)
+
+    def test_aggregate_hooks_file_contains_every_per_hook_registration(self):
+        aggregate = json.loads((self._hooks_dir() / "hooks.json").read_text())
+        self.assertEqual(aggregate["version"], 1)
+        per_hook_entries = 0
+        for hook_file in self._hooks_dir().glob("*.json"):
+            if hook_file.name == "hooks.json":
+                continue
+            payload = json.loads(hook_file.read_text())
+            for event, entries in payload["hooks"].items():
+                per_hook_entries += len(entries)
+                for entry in entries:
+                    self.assertIn(entry, aggregate["hooks"][event])
+        aggregate_entries = sum(len(entries) for entries in aggregate["hooks"].values())
+        self.assertEqual(aggregate_entries, per_hook_entries)
 
     # AC2/AC6 — every hook file for the 9 remaining scripts renders.
     def test_post_edit_verify_renders_under_post_tool_use(self):
@@ -1538,6 +1596,65 @@ class PackageCompletenessTests(unittest.TestCase):
     def test_actually_built_package_validates_clean(self):
         problems = install_contract.validate_copilot_package(self.out_dir)
         self.assertEqual(problems, [])
+
+
+class CopilotLivePluginDiscoverySmokeTests(unittest.TestCase):
+    """Slice 113-07 AC2 — install the committed package into an isolated
+    Copilot home and prove a clean working directory discovers jig's declared
+    components. The agent assertion uses Copilot's own "available agents" error
+    path so it does not require an authenticated model call."""
+
+    @unittest.skipUnless(shutil.which("copilot"), "copilot CLI is not installed")
+    def test_installed_committed_package_discovers_skill_agent_and_hooks(self):
+        copilot_home = Path(tempfile.mkdtemp(prefix="jig-copilot-home-"))
+        work_dir = Path(tempfile.mkdtemp(prefix="jig-copilot-work-"))
+        try:
+            env = {**os.environ, "COPILOT_HOME": str(copilot_home)}
+            install = subprocess.run(
+                ["copilot", "plugin", "install", str(REPO_ROOT / "hosts" / "copilot")],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(install.returncode, 0, install.stderr + install.stdout)
+            self.assertIn("Installed", install.stdout)
+
+            skills = subprocess.run(
+                ["copilot", "-C", str(work_dir), "skill", "list"],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(skills.returncode, 0, skills.stderr)
+            self.assertIn("spec-workflow", skills.stdout)
+
+            agent = subprocess.run(
+                [
+                    "copilot",
+                    "-C",
+                    str(work_dir),
+                    "--agent",
+                    "definitely-not-a-real-agent",
+                    "-p",
+                    "Reply exactly READY.",
+                    "--allow-all-tools",
+                    "--silent",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertNotEqual(agent.returncode, 0)
+            agent_output = agent.stdout + agent.stderr
+            self.assertIn("jig:reviewer", agent_output)
+            self.assertNotIn("failed to load hook", agent_output.lower())
+            self.assertNotIn("invalid hook", agent_output.lower())
+        finally:
+            shutil.rmtree(copilot_home, ignore_errors=True)
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 class CopilotPackageBuildSafetyTests(unittest.TestCase):

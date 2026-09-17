@@ -150,7 +150,15 @@ one it needs.*
 
 ```bash
 copilot plugin install ramboz/jig:hosts/copilot
+copilot skill list | grep spec-workflow
+copilot --agent missing-jig-check -p 'Reply exactly READY.' --allow-all-tools --silent 2>&1 | grep 'jig:reviewer'
 ```
+
+The final command intentionally asks for a missing agent, then checks Copilot's
+"available agents" list for `jig:reviewer`; plugin agents are namespaced by the
+plugin name.
+`copilot plugin list` only proves the manifest was installed, not that the
+skills, agents, or hook configuration were discovered.
 
 ### Project setup
 
@@ -191,13 +199,15 @@ prove the other installs and runs:
   owns the full Codex install-verification slice.
 - **Copilot:** `install_contract.validate_copilot_package` — wired into
   `python3 scripts/build_release_zip.py --host copilot --smoke-test <zip>` —
-  validates the committed `hosts/copilot` package's manifest, skills, agents,
-  hooks, and scripts/templates trees. This is a **static, deterministic**
-  check rather than a live-CLI probe: a headless `copilot -p` session does not
-  reliably fire repo hooks (folder-trust/mode limits — see
-  `scripts/build_copilot_plugin.py`'s module docstring for the evidence
-  trail), so the static check is the trustworthy signal here. Spec 113-06
-  owns the full Copilot install-verification slice.
+  validates the committed `hosts/copilot` package's manifest-declared legacy
+  component paths (`skills`, `agents`, `hooks`) and the skills, agents, hook
+  config, scripts, and templates those paths resolve to. For a live discovery
+  check, install into an isolated `COPILOT_HOME`, run `copilot -C <empty-dir>
+  skill list`, and confirm `spec-workflow` appears; then run a deliberately
+  missing agent and confirm the "available agents" list includes
+  `jig:reviewer`. A headless `copilot -p` session does not reliably prove hook
+  firing (folder-trust/mode limits), so hook verification is the declared-path
+  validator plus release-zip smoke rather than `copilot plugin list`.
 
 ### From source (contributors)
 

@@ -475,14 +475,10 @@ interactive `/agent` dogfood prompt and the noninteractive review fallback.
 ### Verifying the Copilot plugin package locally
 
 GitHub Copilot CLI gets a separate generated package (`hosts/copilot/`) and a
-**static, deterministic** install-contract validator —
-`install_contract.validate_copilot_package` — rather than a live-CLI smoke
-harness like Codex's: a headless `copilot -p` session does not reliably fire
-repo hooks (folder-trust/mode limits, observed probing this during
-113-04/113-05 — see `scripts/build_copilot_plugin.py`'s module docstring for
-the full evidence trail), so a live probe would not be a trustworthy signal
-here. Exercise the validator against the committed package via the release
-zip's `--smoke-test` flag (same command shown above):
+legacy manifest that must declare its non-default component roots:
+`.github/skills`, `.github/agents`, and `.github/hooks/hooks.json`. Exercise
+the static, deterministic package validator against the committed package via
+the release zip's `--smoke-test` flag (same command shown above):
 
 ```bash
 python3 scripts/build_release_zip.py --host copilot --version 1.0.0
@@ -490,10 +486,57 @@ python3 scripts/build_release_zip.py --host copilot --smoke-test dist/jig-copilo
 ```
 
 This checks `.plugin/plugin.json`, every expected skill/agent under
-`.github/{skills,agents}`, every rendered `.github/hooks/*.json` file's schema,
-`.github/scripts/spec_lint.py`, and the `.github/templates/` tree. Any
-regression here is a hard failure — there is no `UNAVAILABLE` row to fall back
-on, since nothing here depends on a live CLI being present.
+the manifest-declared `.github/{skills,agents}` paths, the aggregate hook
+configuration declared by the manifest, every rendered `.github/hooks/*.json`
+file's schema, `.github/scripts/spec_lint.py`, and the `.github/templates/`
+tree. Any regression here is a hard failure — there is no `UNAVAILABLE` row to
+fall back on, since nothing here depends on a live CLI being present.
+
+When the Copilot CLI is installed, also run a real discovery smoke in an
+isolated home; `copilot plugin list` alone is not proof that components loaded:
+
+```bash
+export COPILOT_HOME=$(mktemp -d)
+WORK=$(mktemp -d)
+copilot plugin install ./hosts/copilot
+copilot -C "$WORK" skill list | grep spec-workflow
+copilot -C "$WORK" --agent missing-jig-check -p 'Reply exactly READY.' --allow-all-tools --silent 2>&1 | grep 'jig:reviewer'
+rm -rf "$COPILOT_HOME" "$WORK"
+```
+
+The final command intentionally asks for a missing agent and checks Copilot's
+"available agents" list; plugin agents are namespaced by plugin name.
+
+For actual hook-firing proof (not just discovery), use the slice 113-08 live
+smoke command with a real authenticated `copilot` CLI session:
+
+```bash
+python3 scripts/copilot_live_hook_smoke.py
+```
+
+This installs the committed `hosts/copilot/` package into an isolated
+`COPILOT_HOME`, runs three real `copilot -p ... --log-level debug` sessions
+(an advisory SessionStart check, an enforcing-hook denial against a protected
+path, and a safe-edit-allowed control), and parses the debug log's real
+`[hook stdout] {...}` JSON lines for advisory `additionalContext` and
+`permissionDecision: "deny"` evidence. It prints a machine-checkable JSON
+summary and exits `0` (PASS), `1` (FAIL), or `2` (INCONCLUSIVE — e.g. `copilot`
+missing or not authenticated); it makes real, quota-consuming model calls, so
+it is a manual/opt-in command, not something CI runs by default. Its automated
+test wrapper, `scripts/test_copilot_live_hook_smoke.py`, keeps its log-parsing
+and CLI-wiring checks in the normal suite but gates the real E2E case
+(`LiveHookRuntimeE2ETests`) behind `JIG_COPILOT_LIVE_HOOK_E2E=1`:
+
+```bash
+JIG_COPILOT_LIVE_HOOK_E2E=1 python3 -m unittest scripts.test_copilot_live_hook_smoke -v
+```
+
+By contrast, `scripts/test_build_copilot_plugin.py`'s
+`CopilotAdvisoryHookPackagingTests` / `CopilotEnforcingHookPackagingTests`
+spawn each rendered hook command directly with a constructed payload — a
+useful, always-on STATIC package check, but not proof Copilot itself
+discovers and fires the hook; see those classes' docstrings for the same
+distinction.
 
 ## Spec workflow (short version)
 

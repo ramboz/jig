@@ -343,6 +343,9 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-04 — advisory-hooks | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-05 — enforcing-hooks-and-permissions | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-06 — committed-package-and-release | **DONE** | Tri-host Copilot (ADR-0061): 3rd committed host `hosts/copilot/`, plugin-only, full **package** parity (single builder + drift + release-please). Open residuals (refinement-todo): (a) `.github/…` command-path spelling unverified live under a `/plugin` cache install; (b) input-parity — the `messages`-reading Stop hooks + context-check/sessionStart fail-open no-op (Copilot supplies no inline `messages`/no `transcriptPath` there). |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-07 — plugin-component-discovery | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-08 — live-hook-runtime-contract | **DONE** |  |
+| [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-09 — conversational-hook-parity | **DONE** |  |
 
 ## Deferred slices
 
@@ -386,7 +389,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **7** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **11** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -394,3 +397,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `113-copilot-third-host/slice-03-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-04-arch.md` — applied `none`; declined: arch-review
   - `113-copilot-third-host/slice-04-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
+  - `113-copilot-third-host/slice-07-craft.md` — applied `scout-pr-review`; declined: arch-review, independent-review, pr-review
+  - `113-copilot-third-host/slice-08-craft.md` — applied `scout-pr-review`; declined: arch-review, independent-review, pr-review
+  - `113-copilot-third-host/slice-09-arch.md` — applied `unknown`; declined: arch-review
+  - `113-copilot-third-host/slice-09-craft.md` — applied `unknown`; declined: arch-review, independent-review, pr-review, scout-pr-review

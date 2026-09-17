@@ -33,6 +33,8 @@ deliberately NOT modeled here.
 from __future__ import annotations
 
 import json
+import re
+import shlex
 from pathlib import Path
 from typing import Iterable
 
@@ -801,11 +803,159 @@ def validate_claude_package(plugin_root: Path) -> list[str]:
 # agents,hooks,scripts,templates}`) rather than exercising a live CLI.
 
 
-def _validate_copilot_hook_file(name: str, payload: object) -> list[str]:
+# Copilot's own camelCase `HookType` values a rendered hook file's top-level
+# `hooks` object key may use (slice 113-08 AC4 — "rejects invalid event
+# names"). Restated (not imported) from
+# `scaffold.CopilotScaffoldRenderer.CLAUDE_TO_COPILOT_EVENTS.values()` — this
+# module stays stdlib-only (see the module docstring) — and pinned equal to
+# it by `test_install_contract.py`'s
+# `CopilotEventVocabularyConsistencyTests`, the same restate-plus-
+# consistency-test idiom `EXPECTED_SKILLS`/`REQUIRED_AGENTS` already use.
+COPILOT_HOOK_EVENT_NAMES: frozenset[str] = frozenset({
+    "preToolUse", "postToolUse", "postToolUseFailure", "userPromptSubmitted",
+    "sessionStart", "sessionEnd", "agentStop", "subagentStop", "preCompact",
+    "notification",
+})
+
+# The Claude PascalCase event name jig's rendered command passes as the
+# adapter's own `<claude_event>` argv (see
+# `scaffold.CopilotScaffoldRenderer.build_hook_command`) — a DIFFERENT
+# vocabulary from `COPILOT_HOOK_EVENT_NAMES` above (that one gates the JSON
+# file's own top-level key; this one gates the argv token the *adapter*
+# receives). Restated from `CLAUDE_TO_COPILOT_EVENTS.keys()`, same
+# consistency-test pinning.
+COPILOT_HOOK_ADAPTER_CLAUDE_EVENT_NAMES: frozenset[str] = frozenset({
+    "PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit",
+    "SessionStart", "SessionEnd", "Stop", "SubagentStop", "PreCompact",
+    "Notification",
+})
+
+# The adapter script every rendered Copilot hook command routes through
+# (`scaffold.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_FILENAME`) and its
+# enforcing-mode flag
+# (`scaffold.CopilotScaffoldRenderer.COPILOT_HOOK_ADAPTER_ENFORCE_FLAG`).
+COPILOT_HOOK_ADAPTER_FILENAME = "copilot_hook_adapter.py"
+COPILOT_HOOK_ADAPTER_ENFORCE_FLAG = "--enforce"
+
+# A single hook-matcher token's shape (e.g. one side of `"edit|create"`).
+# Deliberately a FORMAT check, not a fixed vocabulary: `copilot_hook_matcher`
+# intentionally lets an unmapped token pass through unchanged (a future tool
+# name jig's own map has not caught up to yet is not a rendering bug) — see
+# that method's docstring — so this only rejects a token that could not be a
+# real tool name at all (empty, whitespace, punctuation), not one absent
+# from today's known set.
+_MATCHER_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+
+
+def _parse_copilot_hook_command(bash: str) -> tuple[dict | None, list[str]]:
+    """Parse one rendered `bash` command string into its adapter-invocation
+    fields, or return diagnostics if it does not match the shape EVERY
+    `scaffold.CopilotScaffoldRenderer.build_hook_command`-rendered command
+    takes: `python3 <adapter-path> [--enforce] <ClaudeEvent> "<script-path>"`.
+
+    Returns `(fields, [])` on success — `fields` has keys `adapter_path`,
+    `enforcing`, `claude_event`, `script_path` (all raw strings, not yet
+    resolved against a package root) — or `(None, [diagnostic, ...])` on a
+    malformed command. Uses `shlex.split` so the quoted script path (added
+    to tolerate a space in a script name) parses as one token."""
+    try:
+        parts = shlex.split(bash)
+    except ValueError as exc:
+        return None, [f"command is not valid shell syntax ({exc}): {bash!r}"]
+    if len(parts) < 3 or parts[0] != "python3":
+        return None, [
+            "command must invoke the hook adapter as "
+            f"'python3 <adapter-path> ...', got: {bash!r}"
+        ]
+    idx = 1
+    adapter_path = parts[idx]
+    idx += 1
+    enforcing = False
+    if idx < len(parts) and parts[idx] == COPILOT_HOOK_ADAPTER_ENFORCE_FLAG:
+        enforcing = True
+        idx += 1
+    if idx >= len(parts):
+        return None, [f"command is missing its hook-event argument: {bash!r}"]
+    claude_event = parts[idx]
+    idx += 1
+    if idx >= len(parts):
+        return None, [f"command is missing its target-script argument: {bash!r}"]
+    script_path = parts[idx]
+    idx += 1
+    if idx != len(parts):
+        return None, [f"command has unexpected trailing argument(s): {bash!r}"]
+    return (
+        {
+            "adapter_path": adapter_path,
+            "enforcing": enforcing,
+            "claude_event": claude_event,
+            "script_path": script_path,
+        },
+        [],
+    )
+
+
+def _resolve_command_dependency(
+    plugin_root: Path, where: str, label: str, rel_path: str, *,
+    require_executable: bool = False,
+) -> list[str]:
+    """Resolve one command-referenced path (`rel_path`, as it appears in a
+    rendered `bash` string) against `plugin_root`. Returns diagnostics
+    (empty == resolves) — covers AC4's "missing executability" /
+    "missing command dependencies": absolute paths, paths escaping the
+    package root, missing files, and (when `require_executable`) a `.sh`
+    script shipped without its executable bit all fail here."""
+    problems: list[str] = []
+    path = Path(rel_path)
+    if path.is_absolute():
+        return [f"{where}.bash: {label} {rel_path!r} must be relative to the "
+                "plugin root"]
+    if ".." in path.parts:
+        return [f"{where}.bash: {label} {rel_path!r} must stay inside the "
+                "plugin root (no '..')"]
+    resolved = plugin_root / path
+    if not resolved.is_file():
+        problems.append(
+            f"{where}.bash: {label} {rel_path!r} does not resolve to a file "
+            f"under the installed package ({resolved})"
+        )
+        return problems
+    if require_executable and resolved.suffix == ".sh":
+        if not (resolved.stat().st_mode & 0o111):
+            problems.append(
+                f"{where}.bash: {label} {rel_path!r} is shipped but not "
+                "executable"
+            )
+    return problems
+
+
+def _validate_copilot_hook_file(
+    name: str, payload: object, *, plugin_root: Path | None = None,
+) -> list[str]:
     """Validate one parsed `.github/hooks/<name>.json` payload against the
     AUTHORITATIVE flat schema `scaffold.render_copilot_hook_file` emits:
     `{"version": 1, "hooks": {"<camelCaseEvent>": [<flat entry>, ...]}}`,
     entries carrying `type: "command"` and a non-empty `bash` string.
+
+    Slice 113-08 (AC4) strengthens this beyond shape-only checking: every
+    top-level event key must be one of `COPILOT_HOOK_EVENT_NAMES` (an
+    invalid event name — a typo, or a Claude event never translated — is
+    now rejected rather than silently shipped as dead configuration a real
+    Copilot loader would ignore or reject); a present `matcher` must be a
+    well-formed `|`-joined tool-name list (empty, blank, or punctuation-
+    bearing tokens are rejected); and, when `plugin_root` is supplied (the
+    package's own install layout is available to resolve against — the
+    manifest-declared-path call site and `validate_copilot_package`'s own
+    hook-file loop both have one), each entry's `bash` command is parsed via
+    `_parse_copilot_hook_command` and its adapter script + target script
+    dependencies are resolved against the ACTUAL installed layout, not just
+    checked for a non-empty string. `plugin_root=None` (the historical
+    default) skips this deeper, install-layout-dependent pass — every real
+    caller in this module now passes it; the parameter stays optional so a
+    caller validating a payload with no package root to resolve against
+    (a bare schema check) still gets the shape-only behavior this function
+    has always provided.
+
     Returns diagnostics (empty == valid), each naming the file and the
     offending path within it."""
     if not isinstance(payload, dict):
@@ -818,6 +968,11 @@ def _validate_copilot_hook_file(name: str, payload: object) -> list[str]:
         problems.append(f"{name}: 'hooks' must be a non-empty object")
         return problems
     for event, entries in hooks.items():
+        if event not in COPILOT_HOOK_EVENT_NAMES:
+            problems.append(
+                f"{name}: hooks key {event!r} is not a known Copilot hook "
+                f"event (expected one of {sorted(COPILOT_HOOK_EVENT_NAMES)})"
+            )
         if not isinstance(entries, list) or not entries:
             problems.append(f"{name}: hooks.{event} must be a non-empty array")
             continue
@@ -828,22 +983,180 @@ def _validate_copilot_hook_file(name: str, payload: object) -> list[str]:
                 continue
             if entry.get("type") != "command":
                 problems.append(f"{where}.type must be 'command'")
+            matcher = entry.get("matcher")
+            if matcher is not None:
+                if not isinstance(matcher, str) or not matcher:
+                    problems.append(f"{where}.matcher must be a non-empty string")
+                else:
+                    tokens = matcher.split("|")
+                    if any(not _MATCHER_TOKEN_RE.match(t) for t in tokens):
+                        problems.append(
+                            f"{where}.matcher is malformed: {matcher!r} (expected "
+                            "'|'-joined tool-name tokens)"
+                        )
             bash = entry.get("bash")
             if not isinstance(bash, str) or not bash.strip():
                 problems.append(f"{where}.bash must be a non-empty string")
+                continue
+            if plugin_root is None:
+                continue
+            fields, parse_problems = _parse_copilot_hook_command(bash)
+            problems.extend(f"{where}.bash: {p}" for p in parse_problems)
+            if fields is None:
+                continue
+            if fields["claude_event"] not in COPILOT_HOOK_ADAPTER_CLAUDE_EVENT_NAMES:
+                problems.append(
+                    f"{where}.bash: adapter event argument "
+                    f"{fields['claude_event']!r} is not a known jig hook event "
+                    f"(expected one of {sorted(COPILOT_HOOK_ADAPTER_CLAUDE_EVENT_NAMES)})"
+                )
+            problems.extend(
+                _resolve_command_dependency(
+                    plugin_root, where, "adapter script", fields["adapter_path"],
+                )
+            )
+            if Path(fields["adapter_path"]).name != COPILOT_HOOK_ADAPTER_FILENAME:
+                problems.append(
+                    f"{where}.bash: adapter script "
+                    f"{fields['adapter_path']!r} is not "
+                    f"{COPILOT_HOOK_ADAPTER_FILENAME!r}"
+                )
+            problems.extend(
+                _resolve_command_dependency(
+                    plugin_root, where, "target script", fields["script_path"],
+                    require_executable=True,
+                )
+            )
     return problems
+
+
+COPILOT_COMPONENT_PATHS: dict[str, str] = {
+    "skills": ".github/skills",
+    "agents": ".github/agents",
+    "hooks": ".github/hooks/hooks.json",
+}
+
+
+def _relative_manifest_path(where: str, value: object) -> tuple[Path | None, list[str]]:
+    """Return one relative manifest path, or diagnostics for a malformed one.
+
+    jig's Copilot package deliberately uses one path per component field. The
+    legacy reference allows arrays for skills/agents, but the release contract
+    stays exact so a future renderer cannot silently move or split component
+    roots without updating the manifest and tests.
+    """
+    if not isinstance(value, str) or not value:
+        return None, [f".plugin/plugin.json: {where!r} must be a non-empty string path"]
+    path = Path(value)
+    if path.is_absolute() or value.startswith("/"):
+        return None, [
+            f".plugin/plugin.json: {where!r} path {value!r} must be relative to "
+            "the plugin root"
+        ]
+    if ".." in path.parts:
+        return None, [
+            f".plugin/plugin.json: {where!r} path {value!r} must stay inside the "
+            "plugin root (no '..')"
+        ]
+    return path, []
+
+
+def _validate_copilot_manifest_component_paths(
+    plugin_root: Path, data: dict
+) -> tuple[dict[str, Path], list[str]]:
+    """Validate jig's legacy Copilot component path declarations.
+
+    Returns the resolved relative paths for fields that are well-formed so the
+    caller can validate component contents at the declared location, not at a
+    hard-coded fallback.
+    """
+    paths: dict[str, Path] = {}
+    problems: list[str] = []
+    for field, expected in COPILOT_COMPONENT_PATHS.items():
+        if field not in data:
+            problems.append(
+                f".plugin/plugin.json: missing {field!r} component path; jig "
+                f"renders this component under {expected!r}, outside Copilot's "
+                "legacy default location"
+            )
+            continue
+        rel_path, path_problems = _relative_manifest_path(field, data[field])
+        problems.extend(path_problems)
+        if rel_path is None:
+            continue
+        if rel_path.as_posix() != expected:
+            problems.append(
+                f".plugin/plugin.json: {field!r} must be {expected!r} for the "
+                f"generated package, got {data[field]!r}"
+            )
+        paths[field] = rel_path
+
+    skills_path = paths.get("skills")
+    if skills_path is not None:
+        skills_dir = plugin_root / skills_path
+        if not skills_dir.is_dir():
+            problems.append(
+                f".plugin/plugin.json: 'skills' points to {skills_path.as_posix()!r}, "
+                "but that directory does not exist"
+            )
+        elif not any(skills_dir.glob("*/SKILL.md")):
+            problems.append(
+                f".plugin/plugin.json: 'skills' points to {skills_path.as_posix()!r}, "
+                "but it contains no skill directories with SKILL.md"
+            )
+
+    agents_path = paths.get("agents")
+    if agents_path is not None:
+        agents_dir = plugin_root / agents_path
+        if not agents_dir.is_dir():
+            problems.append(
+                f".plugin/plugin.json: 'agents' points to {agents_path.as_posix()!r}, "
+                "but that directory does not exist"
+            )
+        elif not any(agents_dir.glob("*.agent.md")):
+            problems.append(
+                f".plugin/plugin.json: 'agents' points to {agents_path.as_posix()!r}, "
+                "but it contains no .agent.md files"
+            )
+
+    hooks_path = paths.get("hooks")
+    if hooks_path is not None:
+        hook_file = plugin_root / hooks_path
+        if not hook_file.is_file():
+            problems.append(
+                f".plugin/plugin.json: 'hooks' points to {hooks_path.as_posix()!r}, "
+                "but that hook configuration file does not exist"
+            )
+        else:
+            try:
+                payload = json.loads(hook_file.read_text())
+            except (ValueError, OSError) as exc:
+                problems.append(
+                    f".plugin/plugin.json: 'hooks' configuration file "
+                    f"{hooks_path.as_posix()!r} is invalid JSON ({exc})"
+                )
+            else:
+                problems.extend(
+                    _validate_copilot_hook_file(
+                        f".plugin/plugin.json hooks -> {hooks_path.as_posix()}",
+                        payload,
+                        plugin_root=plugin_root,
+                    )
+                )
+    return paths, problems
 
 
 def validate_copilot_package(plugin_root: Path) -> list[str]:
     """Validate `plugin_root` as a committed Copilot install tree (spec
     113-06 AC3). Requires:
 
-      - `.plugin/plugin.json` present, valid JSON, and satisfying the
-        plugin manifest contract (name/version/description);
-      - the public skill set exactly matches EXPECTED_SKILLS under
-        `.github/skills/` (reuses `skill_contract_problems`, which already
-        operates relative to a `skills/` dir — pointed at `.github/` here);
-      - every REQUIRED agent present as `.github/agents/<name>.agent.md`;
+      - `.plugin/plugin.json` present, valid JSON, satisfying the manifest
+        metadata contract, and declaring the legacy component paths
+        `.github/skills`, `.github/agents`, and `.github/hooks/hooks.json`;
+      - the public skill set exactly matches EXPECTED_SKILLS under the
+        declared skills path;
+      - every REQUIRED agent present under the declared agents path as
+        `<name>.agent.md`;
       - `.github/hooks/*.json` present and every file parses as the
         AUTHORITATIVE flat `{version, hooks}` schema;
       - `.github/scripts/spec_lint.py` present (AC5 — the rewritten
@@ -857,6 +1170,7 @@ def validate_copilot_package(plugin_root: Path) -> list[str]:
     problems: list[str] = []
 
     manifest_path = plugin_root / ".plugin" / "plugin.json"
+    component_paths: dict[str, Path] = {}
     if not manifest_path.is_file():
         problems.append(f".plugin/plugin.json: missing at {manifest_path}")
     else:
@@ -866,10 +1180,24 @@ def validate_copilot_package(plugin_root: Path) -> list[str]:
             problems.append(f".plugin/plugin.json: unreadable/invalid JSON ({exc})")
         else:
             problems.extend(validate_plugin_manifest(data))
+            if isinstance(data, dict):
+                component_paths, component_problems = (
+                    _validate_copilot_manifest_component_paths(plugin_root, data)
+                )
+                problems.extend(component_problems)
 
-    problems.extend(skill_contract_problems(plugin_root / ".github"))
+    skills_root = (
+        (plugin_root / component_paths["skills"]).parent
+        if "skills" in component_paths
+        else plugin_root / ".github"
+    )
+    problems.extend(skill_contract_problems(skills_root))
 
-    agents_dir = plugin_root / ".github" / "agents"
+    agents_dir = (
+        plugin_root / component_paths["agents"]
+        if "agents" in component_paths
+        else plugin_root / ".github" / "agents"
+    )
     for agent in REQUIRED_AGENTS:
         if not (agents_dir / f"{agent}.agent.md").is_file():
             problems.append(
@@ -889,7 +1217,10 @@ def validate_copilot_package(plugin_root: Path) -> list[str]:
                 problems.append(f".github/hooks/{hook_file.name}: invalid JSON ({exc})")
                 continue
             problems.extend(
-                _validate_copilot_hook_file(f".github/hooks/{hook_file.name}", payload)
+                _validate_copilot_hook_file(
+                    f".github/hooks/{hook_file.name}", payload,
+                    plugin_root=plugin_root,
+                )
             )
 
     scripts_marker = plugin_root / ".github" / "scripts" / "spec_lint.py"

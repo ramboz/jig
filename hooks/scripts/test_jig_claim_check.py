@@ -103,6 +103,18 @@ class ClaimCheckHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
         self.assertIsNone(additional_context(result))
 
+    def test_bounded_transcript_input_flags_claim(self):
+        transcript = self.project / "session.jsonl"
+        transcript.write_text(json.dumps({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": "spec 999 is relevant"},
+        }) + "\n")
+        result = run_hook(self.project, {
+            "session_id": "s", "hook_event_name": "Stop",
+            "transcript_path": str(transcript),
+        })
+        self.assertIn("spec 999", additional_context(result))
+
     def test_malformed_json_never_crashes(self):
         result = run_hook(self.project, None, raw="{not valid json")
         self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")

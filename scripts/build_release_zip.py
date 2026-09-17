@@ -118,11 +118,15 @@ def _iter_files(package_root: Path) -> Iterable[Path]:
 _DETERMINISTIC_MTIME = (2026, 1, 1, 0, 0, 0)
 
 
-def _add_entry(zf: zipfile.ZipFile, arcname: str, data: bytes) -> None:
+def _add_entry(
+    zf: zipfile.ZipFile, arcname: str, data: bytes, mode: int = 0o644
+) -> None:
     info = zipfile.ZipInfo(filename=arcname, date_time=_DETERMINISTIC_MTIME)
     info.compress_type = zipfile.ZIP_DEFLATED
-    # 0o644 for files. The high two bytes of external_attr encode unix mode.
-    info.external_attr = (0o644 & 0xFFFF) << 16
+    # The high two bytes of external_attr encode the Unix mode. Preserve
+    # executable hook scripts: smoke extraction must exercise the same
+    # install-tree contract as a real release archive.
+    info.external_attr = (mode & 0xFFFF) << 16
     # Pin create_system to 3 (Unix) so macOS and Linux CI agree byte-for-byte.
     info.create_system = 3
     zf.writestr(info, data)
@@ -194,7 +198,8 @@ def build(
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for rel in entries:
             data = (package_root / rel).read_bytes()
-            _add_entry(zf, rel.as_posix(), data)
+            mode = (package_root / rel).stat().st_mode & 0o777
+            _add_entry(zf, rel.as_posix(), data, mode)
 
     if host == "claude":
         out.write(
@@ -334,6 +339,12 @@ def smoke_test(host: str, zip_path: Path, out=None) -> int:
         tmp_path = Path(tmp)
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(tmp_path)
+            for entry in zf.infolist():
+                if entry.is_dir():
+                    continue
+                mode = entry.external_attr >> 16
+                if mode:
+                    (tmp_path / entry.filename).chmod(mode)
         if host == "claude":
             return _smoke_claude(tmp_path, out)
         if host == "codex":

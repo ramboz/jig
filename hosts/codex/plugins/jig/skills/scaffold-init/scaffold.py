@@ -2066,42 +2066,18 @@ class CopilotScaffoldRenderer(ClaudeScaffoldRenderer):
     # rewrite, owning the gap 113-02 honestly deferred (see the class
     # docstring: no confirmed Copilot plugin-root env var).
     #
-    # BEST-HYPOTHESIS, NOT VERIFIED LIVE. Re-probed this slice (113-04):
+    # VERIFIED LIVE BY 113-08:
     #   - No `COPILOT_*PLUGIN*` environment variable exists in the shipped
     #     CLI (grep of the bundled `app.js` and the native binary's string
     #     table; `copilot --help`'s own `environment` topic lists none).
-    #   - The closest confirmed relative-path convention is `copilot --help`
-    #     itself: `--plugin-dir <directory>` and `--add-dir <directory>`
-    #     both document "a relative path resolves against the session
-    #     working directory" — but that describes a CLI FLAG ARGUMENT typed
-    #     by the invoking user, a different code path from how an
-    #     ALREADY-INSTALLED plugin's OWN hook `command` string resolves a
-    #     relative path at spawn time.
-    #   - The one concrete plugin-relative precedent is the manifest itself:
-    #     `.plugin/plugin.json`'s `"mcpServers": "./.mcp.json"` (spike 113-01
-    #     AC1) is a path relative to the PLUGIN ROOT. This constant follows
-    #     that precedent for hook commands and skill bodies alike.
-    #   - Residual TENSION worth flagging explicitly: jig's shared hook
-    #     scripts locate the user's PROJECT directory via
-    #     `os.environ.get('CLAUDE_PROJECT_DIR', '.')` (falling back to the
-    #     subprocess's CWD). If Copilot spawns a plugin-origin hook command
-    #     with CWD = the plugin root (this rewrite's own assumption), that
-    #     fallback would resolve to the WRONG directory (the plugin's
-    #     install location, not the user's repository) — whereas if CWD =
-    #     the session/repository working directory (as the `--plugin-dir`/
-    #     `--add-dir` help text's phrasing suggests more generally for this
-    #     CLI), a bare plugin-relative COMMAND path would instead fail to
-    #     resolve the script at all. These two needs (a resolvable command
-    #     path vs. a correct working directory for the script's own
-    #     operation) are not simultaneously satisfiable by a single CWD
-    #     value unless Copilot resolves a declared hook's `command` path
-    #     relative to the discovered `.github/hooks/*.json` FILE's own
-    #     location rather than via shell CWD semantics (plausible, common
-    #     for declarative config, and NOT excluded by anything read this
-    #     slice) while spawning the process itself with CWD = the session
-    #     working directory. Unresolved without a live installed-plugin
-    #     probe; recorded here for 113-05/06 to verify once the package is
-    #     pushed, per this slice's brief.
+    #   - `scripts/copilot_live_hook_smoke.py` installs the committed package
+    #     in an isolated COPILOT_HOME, then invokes real Copilot sessions in
+    #     fresh repositories. The advisory, deny, and safe-edit probes prove
+    #     that a declared hook command resolves `.github/...` relative to the
+    #     installed plugin root while `workingDirectory` remains the session
+    #     repository passed to the adapter as `CLAUDE_PROJECT_DIR`.
+    #   - This is deliberately distinct from CLI option paths such as
+    #     `--plugin-dir`, which users resolve relative to their shell CWD.
     COPILOT_RUNTIME_PREFIX = ".github/"
     COPILOT_HOOK_SCRIPT_PREFIX = COPILOT_RUNTIME_PREFIX + "hooks/scripts/"
 

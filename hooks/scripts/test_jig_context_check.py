@@ -81,6 +81,30 @@ def write_transcript(path: Path, cache_read_values) -> Path:
     return path
 
 
+class TranscriptInputSafetyTests(unittest.TestCase):
+    def test_out_of_workspace_transcript_is_silent(self):
+        project = Path(tempfile.mkdtemp(prefix="jig-context-project-"))
+        outside = project.parent / "jig-context-outside.jsonl"
+        try:
+            outside.write_text(json.dumps({"type": "assistant", "message": {}}) + "\n")
+            env = os.environ.copy()
+            env["CLAUDE_PROJECT_DIR"] = str(project)
+            result = subprocess.run(
+                ["bash", str(HOOK)],
+                input=json.dumps({
+                    "session_id": "s", "hook_event_name": "UserPromptSubmit",
+                    "transcript_path": str(outside),
+                }),
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), "")
+        finally:
+            import shutil
+            shutil.rmtree(project, ignore_errors=True)
+            outside.unlink(missing_ok=True)
+
+
 def parse_or_none(result: subprocess.CompletedProcess):
     """The hook may exit 0 with empty stdout (no warning) or stdout JSON
     (a warning)."""

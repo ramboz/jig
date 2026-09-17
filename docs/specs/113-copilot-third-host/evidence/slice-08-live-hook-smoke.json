@@ -1,0 +1,10 @@
+{
+  "verdict": "PASS",
+  "checks": {
+    "install": "ok",
+    "advisory_additional_context": "Unrecognized references in prompt: READY. If these are project-specific terms, ask the user once and persist the answer to CLAUDE.md (if high-frequency) or docs/memory/glossary.md (if niche).",
+    "enforcing_permission_deny_reason": "Blocked: docs/conventions.md changes require deliberate approval.\nThis gate catches accidental side-effect edits; it is not a human-only guarantee.\nIf this change is intentional, set JIG_CONVENTIONS_APPROVED=1 in your shell session and retry.",
+    "safe_operation_denied": false,
+    "safe_operation_file_changed": true
+  }
+}

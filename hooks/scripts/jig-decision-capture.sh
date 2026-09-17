@@ -33,7 +33,9 @@ try:
     data = json.load(sys.stdin)
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '.')
     session_id = data.get('session_id') or 'default'
-    messages = data.get('messages', [])
+    from lib.transcript import messages_from_payload
+    messages = messages_from_payload(
+        data, os.environ.get('CLAUDE_PROJECT_DIR', '.'))
 
     # Already-recorded decisions corpus, split into per-entry blocks so a large
     # file does not over-flag (a candidate is flagged only when its tokens are

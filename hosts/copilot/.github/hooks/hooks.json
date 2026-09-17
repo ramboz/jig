@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py PostToolUse \".github/hooks/scripts/jig-boundary-change-warn.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py PostToolUse \".github/hooks/scripts/jig-entry-gate.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py PostToolUse \".github/hooks/scripts/jig-post-edit-verify.sh\"",
+        "timeoutSec": 5
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py Stop \".github/hooks/scripts/jig-claim-check.sh\"",
+        "timeoutSec": 10
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py Stop \".github/hooks/scripts/jig-decision-capture.sh\"",
+        "timeoutSec": 10
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py Stop \".github/hooks/scripts/jig-task-capture.sh\"",
+        "timeoutSec": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "view",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py PreToolUse \".github/hooks/scripts/jig-context-check.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "matcher": "bash",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py --enforce PreToolUse \".github/hooks/scripts/copilot_permissions_floor.py\"",
+        "timeoutSec": 5
+      },
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py --enforce PreToolUse \".github/hooks/scripts/jig-secret-scan.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "matcher": "edit|create",
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py --enforce PreToolUse \".github/hooks/scripts/jig-spec-gate.sh\"",
+        "timeoutSec": 5
+      }
+    ],
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py SessionStart \".github/hooks/scripts/jig-context-check.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py SessionStart \".github/hooks/scripts/jig-git-freshness.sh\"",
+        "timeoutSec": 10
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py SessionStart \".github/hooks/scripts/jig-project-orient.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py SessionStart \".github/hooks/scripts/jig-semantic-index.sh\"",
+        "timeoutSec": 25
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py UserPromptSubmit \".github/hooks/scripts/jig-context-check.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py UserPromptSubmit \".github/hooks/scripts/jig-decision-inflight.sh\"",
+        "timeoutSec": 5
+      },
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/copilot_hook_adapter.py UserPromptSubmit \".github/hooks/scripts/jig-memory-scan.sh\"",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}
