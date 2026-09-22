@@ -22,40 +22,51 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 115-01 — tbd
+## Slice 114-01 — severity-tags-and-review-rendering
 
-**Goal:** _TODO: one-sentence statement of what this slice delivers.
-End-to-end value in a single vertical slice (anti-horizontal-phasing
-check below)._
+**Goal:** Every rule in `docs/conventions.md` carries an id, a severity and a
+promotion state, and the review passes render them so a verdict cites the rule
+it found against and withholds `pass` only for an unmet enforced MUST.
 
 **DoR:**
-- ✅ _TODO: list the prerequisites that must hold before this slice
-  becomes `READY_FOR_IMPLEMENTATION` — upstream slices done, helpers
-  in place, fixtures/data available, etc._
+- ✅ [ADR-0062](../../decisions/adr-0062-convention-rule-severity-and-promotion.md) Accepted.
+- ✅ Owner has approved the initial severity/state assignment for the existing
+  rules (a `JIG_CONVENTIONS_APPROVED=1` edit under spec 102) — the slice
+  renders that assignment, it does not choose it.
+- ✅ Probed the reviewer-prompt block composition in `review.py` and the
+  verdict frontmatter the evidence gate reads, so the rendering slots in
+  beside `_principles_check_block` without a new gate.
 
 **Acceptance Criteria:**
 
-1. **_TODO: first AC._** Sharp, testable, observable from outside the
-   helper (CLI output, file mutation, exit code, log line). Avoid
-   "code is clean" / "tests pass" framings — those belong in the DoD.
-2. _TODO: second AC._
-3. _TODO: third AC._
+1. **Tagged rule shape.** Each `**Rule:**` block in `docs/conventions.md` and
+   in `templates/docs/conventions.md.template` carries `**Id:**` (a stable
+   `<section>.<slug>`), `**Severity:** MUST|SHOULD`, and
+   `**State:** advisory|enforced`. Observable: a parser in `_common/` returns
+   the rule list with those fields for both files; a block missing any field
+   is reported by id/section.
+2. **Review passes render by state.** The compliance and craft prompts built by
+   `review.py` include the enforced rules as blocking checks and the advisory
+   rules as report-only checks, each with its id. Observable: prompt fixture
+   text contains both groups, correctly partitioned, within the per-block size
+   hygiene precedent (or the slice records the measured size and why it is
+   acceptable).
+3. **Verdict semantics.** A recorded review verdict lists the rule ids found
+   against; `verdict: pass` is withheld only when an `enforced` + `MUST` id is
+   among them. Observable: a verdict fixture with an advisory finding still
+   passes the evidence gate; one with an enforced-MUST finding is refused by
+   `transition` with the rule id named.
+4. **Id-citation fixture.** A reviewer given a synthetic breach of a known rule
+   cites that rule's id (the load-bearing assumption in ADR-0062). Observable: a
+   fixture in the test suite; if it cannot be made deterministic, the slice
+   records the manual dogfood result in its deviation log.
+5. **Principles untouched.** `_principles_check_block` and
+   `docs/product-vision.md` are unchanged. Observable: existing tests pass
+   without edits.
 
-**DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
-      fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Each new test has been shown to fail when its feature is removed —
-      the test is capable of failing, not vacuously green (mutate the
-      feature, watch the test go red, restore).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
-      `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+**Anti-horizontal-phasing check:** After this slice a reviewer verdict says
+which convention was breached and whether that blocks; a `pass` with advisory
+findings is legible and a `needs-changes` is auditable to a rule.
 
 ### For `kind: spike` slices
 

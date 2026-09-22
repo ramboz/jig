@@ -22,40 +22,46 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 114-01 — tbd
+## Slice 115-02 — fix-evidence-separation-rule
 
-**Goal:** _TODO: one-sentence statement of what this slice delivers.
-End-to-end value in a single vertical slice (anti-horizontal-phasing
-check below)._
+**Goal:** The ADR-0063 invariant — separate fix ref, failure stays red until
+a human merges, green is new evidence on the fix revision, evidence-modifying
+fixes are flagged — is stated where adopters and the bug-fix skill read it.
 
 **DoR:**
-- ✅ _TODO: list the prerequisites that must hold before this slice
-  becomes `READY_FOR_IMPLEMENTATION` — upstream slices done, helpers
-  in place, fixtures/data available, etc._
+- ✅ [ADR-0063](../../decisions/adr-0063-agent-fix-evidence-separation.md) Accepted.
+- ✅ Probed `skills/bug-fix/SKILL.md`'s FIXING / REVIEWED / VERIFIED wording
+  and `bug.py`'s evidence-pointer check, so the new wording lands in the
+  existing sections rather than a parallel one.
+- ✅ Probed whether an evidence-modifying diff is detectable (regression-test
+  path from the bug record + skip/xfail/disable markers) — result recorded in
+  this slice's DoR before AC 4 is committed to as a nudge vs guidance.
 
 **Acceptance Criteria:**
 
-1. **_TODO: first AC._** Sharp, testable, observable from outside the
-   helper (CLI output, file mutation, exit code, log line). Avoid
-   "code is clean" / "tests pass" framings — those belong in the DoD.
-2. _TODO: second AC._
-3. _TODO: third AC._
+1. **Governance rule stated.** `render_governance_doc` emits a
+   `## Agent-proposed fixes` section with the four clauses of ADR-0063 in
+   adopter-facing language. Observable: governance scaffold test asserts the
+   section and the four clauses.
+2. **bug-fix wording.** `skills/bug-fix/SKILL.md` names the fix ref
+   (`fix/<bug-id>`), the append-only rule for attempt evidence, and that a
+   re-run of the failing revision that passes is recorded as a flake signal,
+   not a fix. Observable: the skill-surface test covers the new phrases; host
+   packages regenerated (`build_host_packages.py`) and drift guard green.
+3. **Spec 105 cross-link.** Spec 105's freeze-on-quarantine semantics cite
+   ADR-0063 clause 1 as the same append-only rule, via an `## Amendments`-free
+   inline link (spec 105 is still DRAFT, so live-prose correction is allowed).
+   Observable: the link exists and `spec_lint.py --all` is green.
+4. **Evidence-modifying flag.** If the DoR probe found detection reliable, the
+   bug-fix `→ REVIEWED` transition emits a `jig hint:` naming the regression
+   test path when the fix diff touches it or adds a skip marker, pointing at
+   the owner-review path; otherwise the rule ships as reviewer guidance in the
+   `bug-review` prompt and the deviation log records why. Observable: a
+   fixture per branch of that choice.
 
-**DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
-      fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Each new test has been shown to fail when its feature is removed —
-      the test is capable of failing, not vacuously green (mutate the
-      feature, watch the test go red, restore).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
-      `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
-      deferred during implementation.
+**Anti-horizontal-phasing check:** After this slice the next bug fix, attended
+or not, is judged against an intact failure record, and a test-edit "fix" is
+named as such before it lands.
 
 ### For `kind: spike` slices
 
