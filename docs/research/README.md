@@ -41,7 +41,7 @@ you create a note; update its status/promotion when it resolves.
 
 | ID | Topic | Status | Related / Promoted to |
 |----|-------|--------|------------------------|
-| _(none yet)_ | | | |
+| [R-001](R-001-cloudflare-adlc-assessment.md) | Cloudflare's Agent Development Lifecycle read against jig | CONCLUDED | [ADR-0062](../decisions/adr-0062-convention-rule-severity-and-promotion.md), [ADR-0063](../decisions/adr-0063-agent-fix-evidence-separation.md), [spec 114](../specs/114-convention-rule-severity/spec.md), [spec 115](../specs/115-autonomy-readiness-checklist/spec.md), refinement-todo "context-filtered convention rules", inbox `autonomy/event-triggered-bug-intake` |
 
 ## Hand-offs
 

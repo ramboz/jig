@@ -346,6 +346,10 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-07 — plugin-component-discovery | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-08 — live-hook-runtime-contract | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-09 — conversational-hook-parity | **DONE** |  |
+| [114-convention-rule-severity](114-convention-rule-severity/spec.md) | 114-01 — severity-tags-and-review-rendering | DRAFT |  |
+| [114-convention-rule-severity](114-convention-rule-severity/spec.md) | 114-02 — promotion-record-and-rule-telemetry | DRAFT |  |
+| [115-autonomy-readiness-checklist](115-autonomy-readiness-checklist/spec.md) | 115-01 — seven-conditions-checklist | DRAFT |  |
+| [115-autonomy-readiness-checklist](115-autonomy-readiness-checklist/spec.md) | 115-02 — fix-evidence-separation-rule | DRAFT |  |
 
 ## Deferred slices
 
