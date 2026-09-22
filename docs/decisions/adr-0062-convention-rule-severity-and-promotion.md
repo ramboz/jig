@@ -37,17 +37,23 @@ this gap: a count of zero cannot distinguish a golden rule from one that never
 fires.
 
 The trigger for deciding now is external prior art recorded in
-[R-001](../research/R-001-cloudflare-adlc-assessment.md): Cloudflare's
-engineering-standards "Codex" structures each standard as an RFC item with a
-MUST or SHOULD keyword, explicit ownership, and a **lifecycle state** — a rule
-starts as a non-blocking recommendation the moment it is approved, and someone
-must *explicitly promote* it to "enforced" before an unmet MUST withholds
-approval. Their reported ratio (roughly 230,000 deviations surfaced, roughly
-16,000 approvals withheld) shows most of the value is in the *reporting*, with
-blocking reserved for a promoted minority. That is ADR-0011's deliberateness
-principle applied per rule rather than per file, and it supplies the missing
-denominator for free: a finding keyed to a rule is a fire; an override is a
-bypass.
+[R-001](../research/R-001-cloudflare-adlc-assessment.md) and verified against
+the primary post: Cloudflare's engineering-standards "Codex" writes each
+standard as an RFC with RFC 2119 SHOULD/MUST keywords, a domain owner, and a
+**lifecycle state**. "Approved RFCs can be consumed by Codex clients and
+agents, which may then start to flag Codex violations … immediately. However,
+they block based on Codex statements only after an RFC moves from the approved
+to the enforced lifecycle state. This separate promotion step gives teams time
+to absorb new requirements and accommodates cases where enforcement needs
+additional work." Each statement carries a **stable slug identifier** that
+survives RFC edits, which they call "essential for monitoring, analysis, and
+exception handling." Their ratio (nearly 230,000 violations flagged, almost
+16,000 withholding approval — MUST statements on enforced RFCs) shows most of
+the value is in the *reporting*, with blocking reserved for a promoted
+minority; mechanically checkable requirements are split out to linters rather
+than left to the reviewer. That is ADR-0011's deliberateness principle
+applied per rule rather than per file, and it supplies the missing denominator
+for free: a finding keyed to a rule is a fire; an override is a bypass.
 
 Two constraints frame the decision. The leanness lens
 ([ADR-0055](./adr-0055-leanness-lens-folds-into-existing-passes.md)) says fold
@@ -66,9 +72,9 @@ deterministic block.
 - **Pros:** Keeps `conventions.md` as the single prose source (no parallel registry); reuses the existing spec-gate for promotion (a promotion is an edit to the protected file, already deliberate); reuses the existing review passes and verdict envelope (no new gate, per ADR-0055); new rules default to advisory so adding a convention never silently adds a blocker; findings keyed to a rule id give `gate-stats` a per-rule fire count.
 - **Cons:** A one-time owner-approved migration to tag the ~20 existing rules; the reviewer prompt grows by the rendered rule list (context cost — see the refinement-todo entry on context-filtered rules); severity of a judgment rule is still applied by a model, so "enforced MUST" is a strong verdict instruction, not a deterministic guarantee.
 
-### Option C: Structured rule registry (JSON/YAML) rendered to `conventions.md`
-- **Pros:** Machine-filterable — a consumer can load only the rules relevant to the artifact under review (Cloudflare's shape; directly serves spec 055 context discipline).
-- **Cons:** Two sources of truth, or a generated prose file that the spec-gate then protects for no reason; premature — no consumer needs filtering today and the rule count is small. Parked as the mitigation in the refinement-todo entry "context-filtered convention rules"; its trigger is a measured prompt-size cost or a second consumer.
+### Option C: A derived, filterable rule index with per-rule applies-to metadata
+- **Pros:** Machine-filterable — a consumer loads only the rules relevant to the artifact under review (Cloudflare's shape: the prose RFC stays the source and an extraction step derives a JSON index of statements with stable ids and scoping metadata; their spec reviewer filters by domain before reviewing). Directly serves spec 055 context discipline.
+- **Cons:** Premature — no jig consumer needs filtering today and the rule count is small; the applies-to field is one more thing to keep honest. Note the direction: index derived *from* the prose (which 114-01's parser already does deterministically), never a registry that generates the prose — that would make the spec-gate protect a generated file. Parked as the mitigation in the refinement-todo entry "context-filtered convention rules"; its trigger is a measured prompt-size cost or a second consumer. Not an alternative to B but an extension of it.
 
 ### Option D: A standalone conventions-check hook that scans diffs against rules
 - **Pros:** Deterministic where a rule is mechanically checkable.
@@ -134,11 +140,12 @@ Adopt **Option B**.
   a rule *id* when the rules are rendered inline rather than hallucinating an
   id — slice 114-01 must include a fixture where the reviewer is given a
   breach and the expected id is checked.
-- **Second-hand, non-load-bearing:** the Codex promotion-state description
-  and its figures come from the engineering-standards *sibling* post as
-  rendered by InfoQ, not read directly (the ADLC post itself was verified
-  from its full text on 2026-09-22 and does not carry those details); the
-  decision depends on them only for "reporting dominates blocking".
+- **Verified 2026-09-22:** the Codex lifecycle (approved → enforced by an
+  explicit promotion step), the stable per-statement id, the prose → derived
+  index direction, and the flagged/withheld figures are all read from the
+  full text of Cloudflare's engineering-standards post (supplied by the
+  owner). The decision depends on the figures only for "reporting dominates
+  blocking".
 
 ## Kill criteria
 

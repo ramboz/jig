@@ -40,12 +40,18 @@ source run still fails** (`CiRunFailedWithFix`) "because its original revision
 remains broken"; a human merges the fix. The ADLC post itself frames the bar
 the same way: "why haven't you yet just let your agent auto-approve and merge
 its own PRs to your production services? The higher the stakes … the longer
-your list of reasons almost surely is." Their Astro issue factory (sibling
-post, second-hand) adds a second human-in-the-loop check: the *reporter*
-verifies the patch against their own project before a pull request opens.
-Both keep the failure record and the proposed fix as separate artifacts with
-separate provenance, and both make a human merge the only way the failure
-turns green.
+your list of reasons almost surely is." Their Astro issue factory (verified
+from the post's full text) runs each of its four stages — reproduce,
+diagnose, verify-it-is-a-bug, fix — in an *isolated* subagent "to prevent the
+frequent LLM bias toward forcing a solution when a bug might not actually
+exist," and its fix stage converts the reproduction into failing unit tests
+first. A landed fix ships as a *preview release* posted back to the issue with
+full logs; only when "the original reporter can then try the patch against
+their own project, and if they confirm it works" does "the automation open[]
+a pull request linked to the issue," which a maintainer merges. Both keep
+the failure record and the proposed fix as separate artifacts with separate
+provenance, and both make a human merge the only way the failure turns green;
+Astro adds a reporter checkpoint before the maintainer's.
 
 This ADR fixes that invariant for jig. It is distinct from ADR-0050 (which
 bounds *how many times* a fix is attempted) and ADR-0060 (which gates *where an
@@ -66,9 +72,9 @@ is judged against, in attended and unattended runs alike.
 - **Pros:** Fastest loop; no human wait.
 - **Cons:** Collapses the two principals ADR-0051 separates — the agent's own green run would be the approval; a flaky or tampered check becomes a merge. Cloudflare's own example deliberately does *not* do this. Rejected.
 
-### Option D: Reporter-verifies-patch as the only gate
-- **Pros:** Strong human-in-the-loop signal where a reporter exists (Astro's flow).
-- **Cons:** Not every bug has an external reporter; it is a confirmation step, not an evidence rule. Folded into B as a use of the existing VERIFIED state, not adopted as the mechanism.
+### Option D: Reporter-verifies-patch as the primary gate
+- **Pros:** Strong human-in-the-loop signal where a reporter exists (Astro's flow: preview release → reporter confirms → PR opens → maintainer merges).
+- **Cons:** Not every bug has an external reporter; it is a confirmation step, not an evidence rule, and Astro itself still has a maintainer merge behind it. Folded into B as a use of the existing VERIFIED state, not adopted as the mechanism.
 
 ## Recommended Decision
 
@@ -132,8 +138,9 @@ carries the build.
   are read from the cloudflare/ci repository README and example (the primary
   source for them); the ADLC post's own text (verified 2026-09-22) confirms
   `@cloudflare/ci` "can self-heal" and supplies the auto-merge framing quoted
-  above. **Second-hand:** the Astro reporter-verifies step comes from
-  coverage of the sibling post.
+  above. The Astro flow (isolated per-stage subagents, failing-test-first
+  fix, preview release, reporter confirmation before the PR opens) is read
+  from that post's full text (supplied by the owner 2026-09-22).
 - **Unverified, load-bearing for clause 4:** that "evidence-modifying" can be
   detected mechanically enough to flag (a diff touching the regression test
   path or a skip marker) — slice 115-02 must probe the detection surface
