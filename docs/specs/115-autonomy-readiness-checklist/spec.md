@@ -20,14 +20,16 @@ Two additions to the scaffolded governance plane, both doc-shaped with a thin
 skill-wording change:
 
 1. **A readiness checklist for running a repo unattended.** The seven
-   conditions Cloudflare names for handing a process to agents (API-operable,
-   a preview per agent, reproducible, event-triggered, handles changes
-   independently, can escalate privileges when needed, learns from experience)
-   become a checklist in the scaffolded `<docs>/governance.md` beside the
-   branch-protection arming steps, with jig's own coverage marked honestly
-   (identity separation and memory covered; preview and event-trigger are the
-   executor's, not jig's). jig's own `docs/adoption-readiness.md` gets the same
-   section for this repo.
+   properties Cloudflare says every formerly-manual step must have before
+   "you hand over the keys" (the post's own names: Programmatic, Horizontally
+   scalable, Reproducible, Real-time push-based, Atomic, Permissioned,
+   Self-improving) become a checklist in the scaffolded `<docs>/governance.md`
+   beside the branch-protection arming steps, with jig's own coverage marked
+   honestly: Atomic (the vertical slice) and Self-improving (the memory layer)
+   covered; Permissioned partial (identity separation, no escalation path);
+   Programmatic, Horizontally scalable, Reproducible, and Real-time push-based
+   are the executor's, not jig's. jig's own `docs/adoption-readiness.md` gets
+   the same section for this repo.
 2. **The agent-fix evidence-separation invariant** (ADR-0063): a proposed fix
    lands on its own ref, the failure record stays red until a human merges,
    green is new evidence on the fix revision, evidence-modifying fixes are
@@ -49,9 +51,10 @@ invariant is a rule the existing lifecycle and reviewer enforce.
   "inert until armed", the arming checklist, and identity separation; jig's own
   repo has no `docs/governance.md` (it predates spec 106's scaffold), so the
   self-hosted copy of the checklist goes to `docs/adoption-readiness.md`.
-- **Second-hand:** the seven-conditions wording comes from coverage of the
-  Cloudflare post, not the post itself (unreachable at authoring time); 115-01
-  must re-check the wording against the primary source before quoting it.
+- **Verified 2026-09-22:** the seven-properties wording is taken from the
+  post's full text (supplied by the owner after the authoring environment could
+  not reach it) and recorded verbatim in [R-001](../../research/R-001-cloudflare-adlc-assessment.md);
+  115-01 quotes from R-001, not from coverage.
 - **Unverified, load-bearing for 115-02 AC 4:** whether an evidence-modifying
   fix can be detected mechanically (diff touching the regression-test path or a
   skip marker) reliably enough for a nudge; the slice probes before promising.

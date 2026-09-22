@@ -134,9 +134,11 @@ Adopt **Option B**.
   a rule *id* when the rules are rendered inline rather than hallucinating an
   id — slice 114-01 must include a fixture where the reviewer is given a
   breach and the expected id is checked.
-- **Point-in-time:** the Cloudflare figures in R-001 are second-hand (the
-  primary post was unreachable from the authoring environment); the decision
-  does not depend on them beyond "reporting dominates blocking".
+- **Second-hand, non-load-bearing:** the Codex promotion-state description
+  and its figures come from the engineering-standards *sibling* post as
+  rendered by InfoQ, not read directly (the ADLC post itself was verified
+  from its full text on 2026-09-22 and does not carry those details); the
+  decision depends on them only for "reporting dominates blocking".
 
 ## Kill criteria
 

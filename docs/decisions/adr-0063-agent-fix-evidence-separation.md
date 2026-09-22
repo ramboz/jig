@@ -37,11 +37,15 @@ checks that evidence *exists*; it does not check that the evidence was not
 art that names the invariant cleanly. Cloudflare's self-healing CI example
 pushes a verified fix to a separate `ci-autofix/<run-id>` branch and **the
 source run still fails** (`CiRunFailedWithFix`) "because its original revision
-remains broken"; a human merges the fix. Their Astro issue factory adds a
-second human-in-the-loop check: the *reporter* verifies the patch against
-their own project before a pull request opens. Both keep the failure record
-and the proposed fix as separate artifacts with separate provenance, and both
-make a human merge the only way the failure turns green.
+remains broken"; a human merges the fix. The ADLC post itself frames the bar
+the same way: "why haven't you yet just let your agent auto-approve and merge
+its own PRs to your production services? The higher the stakes … the longer
+your list of reasons almost surely is." Their Astro issue factory (sibling
+post, second-hand) adds a second human-in-the-loop check: the *reporter*
+verifies the patch against their own project before a pull request opens.
+Both keep the failure record and the proposed fix as separate artifacts with
+separate provenance, and both make a human merge the only way the failure
+turns green.
 
 This ADR fixes that invariant for jig. It is distinct from ADR-0050 (which
 bounds *how many times* a fix is attempted) and ADR-0060 (which gates *where an
@@ -124,10 +128,12 @@ carries the build.
   branch and the evidence gate checks for the presence of evidence pointers;
   spec 105 / ADR-0050 already specify freezing the evidence sections on
   quarantine, so clause 1's append-only semantics have a precedent to reuse.
-- **Second-hand:** the Cloudflare mechanics (`ci-autofix/<run-id>`,
-  `CiRunFailedWithFix`) are read from the cloudflare/ci repository README and
-  example, not from the blog post, which was unreachable from the authoring
-  environment.
+- **Verified:** the `ci-autofix/<run-id>` / `CiRunFailedWithFix` mechanics
+  are read from the cloudflare/ci repository README and example (the primary
+  source for them); the ADLC post's own text (verified 2026-09-22) confirms
+  `@cloudflare/ci` "can self-heal" and supplies the auto-merge framing quoted
+  above. **Second-hand:** the Astro reporter-verifies step comes from
+  coverage of the sibling post.
 - **Unverified, load-bearing for clause 4:** that "evidence-modifying" can be
   detected mechanically enough to flag (a diff touching the regression test
   path or a skip marker) — slice 115-02 must probe the detection surface

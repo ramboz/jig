@@ -30,9 +30,9 @@ names the seven autonomy conditions and says, per condition, what jig covers,
 what the executor must supply, and what is nobody's yet.
 
 **DoR:**
-- ✅ Seven-conditions wording re-checked against the primary Cloudflare post
-  (R-001 flags it as second-hand); the checklist quotes or paraphrases with a
-  citation.
+- ✅ Seven-properties wording verified against the primary Cloudflare post
+  (R-001, corrected 2026-09-22 from the post's full text); the checklist
+  quotes R-001's verbatim lines with a citation.
 - ✅ Probed `render_governance_doc` (`skills/scaffold-init/governance.py`) and
   the governance scaffold tests, so the new section slots in beside the arming
   checklist without changing the protected-paths or identity sections.
@@ -40,17 +40,23 @@ what the executor must supply, and what is nobody's yet.
 **Acceptance Criteria:**
 
 1. **Checklist rendered.** `render_governance_doc` emits a
-   `## Autonomy-readiness checklist` section listing the seven conditions as
-   checkboxes, each with a one-line "who supplies it" note (jig / executor /
-   unassigned). Observable: the scaffold governance test asserts the section
+   `## Autonomy-readiness checklist` section listing the seven properties by
+   the post's own names (Programmatic, Horizontally scalable, Reproducible,
+   Real-time push-based, Atomic, Permissioned, Self-improving) as checkboxes,
+   each with a one-line "who supplies it" note (jig / executor / unassigned). Observable: the scaffold governance test asserts the section
    and all seven items on a fresh scaffold.
-2. **Honest coverage.** The note for each condition matches jig's shipped
-   surface: identity/capability separation → `governance.py identity-check`;
-   learns from experience → the memory layer; reproducible → the
-   witnessed red→green test and evidence artifacts; API-operable,
-   preview-per-agent, event-triggered, privilege escalation → executor
-   (servo or the ADR-0060 orchestrator), marked as not jig's. Observable: a
-   reviewer can trace each note to a spec or ADR link in the rendered text.
+2. **Honest coverage.** The note for each property matches jig's shipped
+   surface: **Atomic** → the vertical slice (ACs + red→green, `slice-land`,
+   ADR-0014 evidence artifacts; covered); **Self-improving** → the memory
+   layer, learnings, lightweight decisions (covered); **Permissioned** →
+   `governance.py identity-check` + ADR-0060 for what the agent must *not*
+   hold, escalation path not built (partial); **Programmatic** → jig's helpers
+   are CLIs an in-repo executor can call, not a service API (partial);
+   **Horizontally scalable** (preview per agent), **Reproducible**
+   (environment reproduction), **Real-time push-based** (repo-level event
+   triggers; jig's hooks are in-session only) → executor (servo or the
+   ADR-0060 orchestrator), marked as not jig's. Observable: a reviewer can
+   trace each note to a spec or ADR link in the rendered text.
 3. **Self-hosted copy.** `docs/adoption-readiness.md` gains a "Running
    unattended" section with the same checklist and coverage notes, linking
    ADR-0051 / ADR-0060 / ADR-0063. Observable: the section exists; the
