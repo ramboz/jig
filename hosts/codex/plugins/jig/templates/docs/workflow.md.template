@@ -136,6 +136,19 @@ project has not opted in—or none is installed—the host gets at most one comp
 actionable suggestion. Explicit provider choices never silently fall through.
 The hook never installs providers, downloads models, or blocks a workflow.
 
+**Persisting the opt-in across ephemeral worktrees.** `.jig/semantic-index.json`
+and the hook's one-shot suggestion state live under the working tree's `.jig/`.
+Hosts that create a fresh, untracked worktree per session (for example the
+GitHub Copilot CLI) do not carry that state between sessions, so an *uncommitted*
+opt-in is re-discovered every session — and when a pinned provider is not
+installed on the host, its one-time install suggestion is re-shown each time.
+Commit `.jig/semantic-index.json` to the branch those worktrees are cut from so
+every worktree inherits the same choice: `auto_attach: true` to opt in, or
+`auto_attach: false` to opt out and silence the suggestion. (Sandboxed hosts
+that block package installation cannot install a missing provider from inside a
+session; commit `auto_attach: false`, or install the provider on the host, from
+your own shell.)
+
 ## Hook Strictness Profiles
 
 jig hooks support three enforcement levels via the `SCAFFOLD_HOOK_PROFILE` env var:
