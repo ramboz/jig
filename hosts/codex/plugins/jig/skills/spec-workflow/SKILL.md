@@ -42,6 +42,12 @@ user-invocable: true
   links that reports use cases with no implementing spec (coverage gap) and
   specs citing no parent use case (scope creep). No-op when the project has no
   `## Use cases` section.
+- Surfaces use-case progress via `workflow.py progress [--project-dir DIR]` — a
+  read-only, **advisory** rollup (slice 116-01, [ADR-0064](../../docs/decisions/adr-0064-use-case-progress-rollup-in-jig.md)):
+  per use case, the specs citing it with their status and done/known slice
+  **counts** (never percentages), then an **Unanchored** bucket for specs citing
+  no resolvable use case. Derived on every run, stores nothing; a progress view,
+  not a drift check. No-op when the project has no `## Use cases` section.
 - Guards the status board via `workflow.py check-board <project-dir>` — a
   read-only audit that exits non-zero when `docs/specs/README.md` no longer
   matches the spec records, or when two spec directories claim one number.
@@ -248,7 +254,7 @@ SKILL.md hand-off is the documented gate.
 
    **CRITICAL — the no-section no-op.** When `classify_spec` returns `no_section`
    (the project has **no** `## Use cases` section — the breadth layer is **not
-   adopted**, e.g. jig's own repo), **the prompt is suppressed entirely**:
+   adopted**, e.g. a library or single-flow CLI), **the prompt is suppressed entirely**:
    nothing prompts and nothing errors. A project with specs but no use-case
    layer is wholly unaffected. The trigger fires **only** on `empty` /
    `unresolvable`, which presuppose the section exists.

@@ -146,7 +146,13 @@ for the live status board.
 ### Out of scope (deliberately)
 
 - **Project management surface.** No backlog rendering, no estimation,
-  no roadmap visualization. Specs are the only project state.
+  no roadmap visualization. Specs are the only project state. One bounded
+  exception: `workflow.py progress`, a read-only use-case progress rollup
+  (use case → specs → done/known slice counts, plus the specs that serve
+  no use case), recomputed from the spec records on every run and storing
+  nothing ([ADR-0064](decisions/adr-0064-use-case-progress-rollup-in-jig.md)).
+  Anything deeper — backlog, estimation, roadmaps — belongs in a separate
+  project, not in jig.
 - **Auto-coding from the elicited spec.** Elicitation produces *docs*
   (vision, architecture, draft ADRs). Implementation is still
   `/jig:spec-workflow` + `implementer` subagent.

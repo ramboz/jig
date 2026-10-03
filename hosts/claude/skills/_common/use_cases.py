@@ -18,7 +18,8 @@ This module is the deterministic core of that trace surface — a sibling of
   - ``classify_spec(spec_use_cases, vision_text)`` — the AC5 **mechanical
     trigger** predicate: one of ``no_section`` / ``empty`` / ``resolved`` /
     ``unresolvable`` for a single spec. ``no_section`` (the layer is not
-    adopted — e.g. jig's own repo) is the **no-op** state: nothing prompts.
+    adopted — e.g. a library or single-flow CLI) is the **no-op** state:
+    nothing prompts.
   - ``next_use_case_id(vision_text)`` — AC5(b) additive allocation: the next
     free ``UC-N`` (``max(existing) + 1``; **never reuses a retired number**).
   - ``is_near_duplicate(text, existing)`` — AC5(b)(ii) grow-quality guard: a
@@ -198,9 +199,10 @@ def classify_spec(spec_use_cases, vision_text: str) -> str:
 
     Returns exactly one of:
       - ``NO_SECTION`` — the vision has **no** `## Use cases` section: the
-        breadth layer is not adopted (e.g. jig's own repo). **No-op state** —
-        AC5's prompt must stay silent and nothing errors. Checked **first**, so
-        a stray cited id on a layer-less project still classifies as no_section.
+        breadth layer is not adopted (e.g. a library or single-flow CLI).
+        **No-op state** — AC5's prompt must stay silent and nothing errors.
+        Checked **first**, so a stray cited id on a layer-less project still
+        classifies as no_section.
       - ``EMPTY`` — section present, but the spec cites **nothing**
         (``use_cases:`` empty or absent). This is the state a gap-creating
         author most naturally produces, and AC4 blesses it as non-erroring —

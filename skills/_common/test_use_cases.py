@@ -65,7 +65,8 @@ VISION_MIXED = """\
 ## Stack
 """
 
-# No `## Use cases` section at all — the layer is not adopted (e.g. jig itself).
+# No `## Use cases` section at all — the layer is not adopted (e.g. a library
+# or single-flow CLI).
 VISION_NO_SECTION = """\
 # Product vision
 
@@ -175,8 +176,9 @@ class ClassifySpecTests(unittest.TestCase):
     """
 
     def test_no_section_is_the_no_op_dogfood_case(self):
-        # CRITICAL: a project with specs but no use-case layer (jig itself)
-        # must classify as no_section so NOTHING prompts or errors (AC5).
+        # CRITICAL: a project with specs but no use-case layer (a library or
+        # single-flow CLI) must classify as no_section so NOTHING prompts or
+        # errors (AC5).
         self.assertEqual(
             use_cases.classify_spec(["UC-1"], VISION_NO_SECTION),
             "no_section",

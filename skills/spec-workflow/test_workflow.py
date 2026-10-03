@@ -9227,7 +9227,7 @@ class CoverageTests(unittest.TestCase):
 
     def test_no_use_cases_section_is_noop(self):
         """A vision with NO `## Use cases` section → no-op note, ZERO
-        findings, exit 0. This is exactly jig's own repo and opted-out
+        findings, exit 0. This is the not-adopted state of opted-out
         project classes (libraries / single-flow CLIs)."""
         self._vision("## Some other section\n\nNot use cases.\n")
         self._spec("100-x", "use_cases: []")  # would be creep IF adopted
@@ -9239,6 +9239,15 @@ class CoverageTests(unittest.TestCase):
         self.assertNotIn("100-x", report)
         r = run_workflow("coverage", "--project-dir", str(self.proj))
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def test_noop_message_does_not_present_jig_as_unadopted(self):
+        """Slice 116-01 AC10: jig adopted the use-case layer (2026-10-03), so
+        the no-op note must not cite jig's own repo as an example of a project
+        that has not."""
+        self._vision("## Some other section\n\nNot use cases.\n")
+        note = _workflow.coverage(self.proj)
+        self.assertIn("no-op", note)
+        self.assertNotIn("jig's own repo", note)
 
     def test_absent_vision_file_is_skipped(self):
         """No docs/product-vision.md at all → advisory 'skipped' note, no
@@ -9262,6 +9271,318 @@ class CoverageTests(unittest.TestCase):
         # A clean report still exits 0 via the CLI.
         r = run_workflow("coverage", "--project-dir", str(self.proj))
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+
+# ---------------------------------------------------------------------------
+# Slice 116-01 — progress-rollup (use case -> specs -> done/known slices)
+# ---------------------------------------------------------------------------
+
+
+class ProgressRollupTests(unittest.TestCase):
+    """Slice 116-01: `workflow.py progress` is a read-only, advisory join of
+    the `use_cases:` trace links with slice state — use case -> specs ->
+    done/known slice COUNTS (never percentages), plus an Unanchored bucket.
+    Derived on every run, stores nothing, always exits 0 (ADR-0064)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-wf-progress-")
+        self.proj = Path(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write(self, rel: str, text: str) -> None:
+        p = self.proj / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    def _vision(self, ucs: list) -> None:
+        body = "".join(f"- UC-{n}: {goal}\n" for n, goal in ucs)
+        self._write("docs/product-vision.md",
+                    "# Vision\n\nIntro prose.\n\n## Use cases\n\n" + body)
+
+    def _spec(self, dirname: str, use_cases_line: str, statuses: list) -> None:
+        """File-per-slice layout: spec.md + one slice-NN-x.md per status."""
+        self._write(
+            f"docs/specs/{dirname}/spec.md",
+            f"---\nstatus: DRAFT\n{use_cases_line}\n---\n\n# {dirname}\n",
+        )
+        num = dirname.split("-", 1)[0]
+        for i, status in enumerate(statuses, 1):
+            self._write(
+                f"docs/specs/{dirname}/slice-{i:02d}-x.md",
+                f"---\nstatus: {status}\ndependencies: []\n---\n\n"
+                f"## Slice {num}-{i:02d} — x\n\n**Goal:** fixture.\n",
+            )
+
+    def _legacy_spec(self, dirname: str, use_cases_line: str,
+                     statuses: list) -> None:
+        """Legacy layout: embedded `## Slice` sections inside spec.md."""
+        num = dirname.split("-", 1)[0]
+        parts = [f"---\nstatus: DRAFT\n{use_cases_line}\n---\n\n"
+                 f"# {dirname}\n"]
+        for i, status in enumerate(statuses, 1):
+            parts.append(f"\n## Slice {num}-{i:02d} — x\n\n"
+                         f"**STATUS: {status}**\n\n**Goal:** fixture.\n")
+        self._write(f"docs/specs/{dirname}/spec.md", "".join(parts))
+
+    def _two_uc_fixture(self) -> None:
+        self._vision([(1, "A crafter can search for a yarn"),
+                      (2, "A crafter can save a project")])
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE", "DONE", "DRAFT"])
+        self._spec("101-b", "use_cases: [UC-1]", ["DONE"])
+        self._spec("102-c", "use_cases: [UC-2]", ["DRAFT", "DRAFT"])
+
+    def _section(self, report: str, start: str, *stops: str) -> str:
+        """Slice of `report` from the first `start` to the first later stop."""
+        i = report.index(start)
+        rest = report[i:]
+        cut = len(rest)
+        for stop in stops:
+            j = rest.find(stop, len(start))
+            if j != -1:
+                cut = min(cut, j)
+        return rest[:cut]
+
+    # ---- AC1: rollup by use case --------------------------------------------
+
+    def test_ac1_rollup_lists_use_cases_in_order_with_spec_counts(self):
+        self._two_uc_fixture()
+        report = _workflow.progress(self.proj)
+        # Use-case lines: id, goal text, D/K slices done (vision order).
+        self.assertRegex(
+            report, r"UC-1\s+A crafter can search for a yarn\W+3/4 slices done")
+        self.assertRegex(
+            report, r"UC-2\s+A crafter can save a project\W+0/2 slices done")
+        self.assertLess(report.index("UC-1"), report.index("UC-2"))
+        uc1 = self._section(report, "UC-1", "UC-2")
+        uc2 = self._section(report, "UC-2", "Unanchored", "Summary")
+        # Spec lines: dirname, computed spec status, d/k — under the right UC.
+        self.assertRegex(uc1, r"100-a\s+IN_PROGRESS\s+2/3")
+        self.assertRegex(uc1, r"101-b\s+DONE\s+1/1")
+        self.assertNotIn("102-c", uc1)
+        self.assertRegex(uc2, r"102-c\s+DRAFT\s+0/2")
+        self.assertNotIn("100-a", uc2)
+
+    # ---- AC2: counting rule mirrors the spec rollup --------------------------
+
+    def test_ac2_deferred_and_abandoned_excluded_from_known(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-a", "use_cases: [UC-1]",
+                   ["DONE", "DONE", "DRAFT", "DEFERRED", "ABANDONED"])
+        report = _workflow.progress(self.proj)
+        self.assertRegex(report, r"100-a\s+IN_PROGRESS\s+2/3 \(\+1 deferred\)")
+        # K excludes DEFERRED and ABANDONED at the use-case total too.
+        self.assertRegex(report, r"UC-1\s+.*2/3 slices done")
+
+    def test_ac2_legacy_embedded_layout_counted_the_same_way(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._legacy_spec("100-a", "use_cases: [UC-1]",
+                          ["DONE", "DONE", "DRAFT", "DEFERRED", "ABANDONED"])
+        report = _workflow.progress(self.proj)
+        self.assertRegex(report, r"100-a\s+IN_PROGRESS\s+2/3 \(\+1 deferred\)")
+
+    def test_ac2_no_deferred_suffix_when_nothing_deferred(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE", "DONE"])
+        report = _workflow.progress(self.proj)
+        self.assertRegex(report, r"100-a\s+DONE\s+2/2")
+        self.assertNotIn("(+", report)
+
+    # ---- AC3: Unanchored bucket ---------------------------------------------
+
+    def test_ac3_unanchored_bucket_holds_orphan_and_unknown_only(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE"])
+        self._spec("101-orphan", "use_cases: []", ["DONE", "DRAFT"])
+        self._spec("102-typo", "use_cases: [UC-99]", ["DONE"])
+        self._spec("103-bare", "use_cases:", ["DRAFT"])
+        report = _workflow.progress(self.proj)
+        bucket = self._section(report, "Unanchored", "Summary")
+        # Heading is last of the use-case groups, with a bucket total.
+        self.assertGreater(report.index("Unanchored"), report.index("100-a"))
+        self.assertIn("Unanchored (cites no resolvable use case)", bucket)
+        self.assertRegex(bucket, r"Unanchored.*2/4 slices done")
+        self.assertRegex(bucket, r"101-orphan\s+IN_PROGRESS\s+1/2")
+        self.assertRegex(bucket, r"103-bare\s+DRAFT\s+0/1")
+        # The unknown-id spec is kept, with the id named on its line.
+        typo_line = next(ln for ln in bucket.splitlines() if "102-typo" in ln)
+        self.assertIn("UC-99", typo_line)
+        # Anchored spec is not in the bucket.
+        self.assertNotIn("100-a", bucket)
+
+    def test_ac3_mixed_valid_and_unknown_listed_under_valid_naming_unknown(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-mix", "use_cases: [UC-1, UC-99]", ["DONE"])
+        report = _workflow.progress(self.proj)
+        uc1 = self._section(report, "UC-1", "Unanchored", "Summary")
+        line = next(ln for ln in uc1.splitlines() if "100-mix" in ln)
+        self.assertIn("UC-99", line)
+        bucket = self._section(report, "Unanchored", "Summary")
+        self.assertNotIn("100-mix", bucket)
+
+    # ---- AC4: a use case with no spec is still listed ------------------------
+
+    def test_ac4_use_case_with_no_spec_listed_in_vision_order(self):
+        self._vision([(1, "A crafter can search for a yarn"),
+                      (2, "A crafter can save a project"),
+                      (3, "A crafter can share a pattern")])
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE"])
+        self._spec("101-b", "use_cases: [UC-3]", ["DONE"])
+        report = _workflow.progress(self.proj)
+        uc2_line = next(ln for ln in report.splitlines()
+                        if ln.startswith("UC-2"))
+        self.assertIn("no spec yet", uc2_line)
+        self.assertLess(report.index("UC-1"), report.index("UC-2"))
+        self.assertLess(report.index("UC-2"), report.index("UC-3"))
+        # Cited use cases are not marked.
+        self.assertNotIn("no spec yet", report.replace(uc2_line, ""))
+
+    # ---- AC5: multi-cited specs ---------------------------------------------
+
+    def test_ac5_multi_cited_spec_under_both_counted_once_in_summary(self):
+        self._vision([(1, "A crafter can search for a yarn"),
+                      (2, "A crafter can save a project")])
+        self._spec("100-both", "use_cases: [UC-1, UC-2]", ["DONE", "DONE"])
+        self._spec("101-one", "use_cases: [UC-1]", ["DONE"])
+        report = _workflow.progress(self.proj)
+        self.assertEqual(report.count("100-both"), 2)  # under both
+        self.assertRegex(report, r"UC-1\s+.*3/3 slices done")
+        self.assertRegex(report, r"UC-2\s+.*2/2 slices done")
+        summary = next(ln for ln in report.splitlines()
+                       if ln.startswith("Summary"))
+        # Once-counted: 3/3 slices over 2 specs, smaller than 3+2 / 2+1.
+        self.assertIn("3/3 slices done", summary)
+        self.assertIn("2 spec(s)", summary)
+        self.assertIn("2 use case(s)", summary)
+        self.assertIn("0 unanchored", summary)
+        self.assertRegex(summary.lower(), r"counted once")
+
+    # ---- AC6: counts, not percentages ---------------------------------------
+
+    def test_ac6_no_percent_sign_anywhere(self):
+        self._two_uc_fixture()
+        self._vision([(1, "A crafter can search for a yarn"),
+                      (2, "A crafter can save a project"),
+                      (3, "Nothing cites this")])
+        self._spec("103-orphan", "use_cases: []", ["DONE"])
+        self._spec("104-typo", "use_cases: [UC-99]", ["DONE", "DEFERRED"])
+        report = _workflow.progress(self.proj)
+        self.assertNotIn("%", report)
+        self.assertNotIn("percent", report.lower())
+
+    # ---- AC7: read-only, advisory, silent when not adopted -------------------
+
+    def test_ac7_no_vision_prints_one_line_skipped_note(self):
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE"])
+        report = _workflow.progress(self.proj)
+        self.assertEqual(len(report.strip().splitlines()), 1, report)
+        self.assertIn("skipped", report)
+        self.assertNotIn("100-a", report)
+        r = run_workflow("progress", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def test_ac7_vision_without_use_cases_section_is_one_line_noop(self):
+        self._write("docs/product-vision.md",
+                    "# Vision\n\n## Some other section\n\nNot use cases.\n")
+        self._spec("100-a", "use_cases: []", ["DONE"])
+        report = _workflow.progress(self.proj)
+        self.assertEqual(len(report.strip().splitlines()), 1, report)
+        self.assertIn("no-op", report)
+        self.assertNotIn("100-a", report)
+        self.assertNotIn("Unanchored", report)
+        r = run_workflow("progress", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertEqual(r.stdout, report)
+
+    def test_ac7_notes_match_coverage_two_states(self):
+        """progress and coverage agree on which projects are 'skipped' vs
+        'no-op' (same two not-adopted states): the keyword is present in BOTH
+        outputs, and the other state's keyword is absent from both."""
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE"])
+        for out in (_workflow.progress(self.proj), _workflow.coverage(self.proj)):
+            self.assertIn("skipped", out)
+            self.assertNotIn("no-op", out)
+        self._write("docs/product-vision.md", "# Vision\n\nNo section.\n")
+        for out in (_workflow.progress(self.proj), _workflow.coverage(self.proj)):
+            self.assertIn("no-op", out)
+            self.assertNotIn("skipped", out)
+
+    def test_ac7_adopted_run_exits_zero_and_writes_nothing(self):
+        self._two_uc_fixture()
+        self._spec("103-orphan", "use_cases: []", ["DONE"])
+
+        def snapshot():
+            return {
+                str(p.relative_to(self.proj)): p.read_bytes()
+                for p in sorted(self.proj.rglob("*")) if p.is_file()
+            }
+
+        before = snapshot()
+        r = run_workflow("progress", "--project-dir", str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("UC-1", r.stdout)
+        self.assertIn("103-orphan", r.stdout)
+        _workflow.progress(self.proj)  # in-process path too
+        self.assertEqual(snapshot(), before, "progress must write nothing")
+
+    def test_ac7_default_project_dir_is_cwd(self):
+        self._two_uc_fixture()
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        r = subprocess.run([sys.executable, str(WORKFLOW), "progress"],
+                           capture_output=True, text=True, env=env,
+                           cwd=str(self.proj))
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("100-a", r.stdout)
+
+    # ---- edge cases: duplicate citations, empty bucket, zero-slice spec -----
+
+    def test_duplicate_and_case_variant_citations_list_spec_once(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-dup", "use_cases: [UC-1, uc-1, UC-1]", ["DONE", "DRAFT"])
+        report = _workflow.progress(self.proj)
+        self.assertEqual(report.count("100-dup"), 1, report)
+        # Slices counted once: 1/2, not 3/6.
+        self.assertRegex(report, r"UC-1\s+.*1/2 slices done")
+        self.assertRegex(report, r"100-dup\s+IN_PROGRESS\s+1/2")
+        self.assertIn("1/2 slices done (each spec", report)
+
+    def test_duplicate_unknown_citations_named_once(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-typo", "use_cases: [UC-99, uc-99]", ["DONE"])
+        report = _workflow.progress(self.proj)
+        line = next(ln for ln in report.splitlines() if "100-typo" in ln)
+        self.assertEqual(line.count("UC-99"), 1, line)
+
+    def test_empty_unanchored_bucket_renders_heading_with_none(self):
+        self._vision([(1, "A crafter can search for a yarn")])
+        self._spec("100-a", "use_cases: [UC-1]", ["DONE"])
+        report = _workflow.progress(self.proj)
+        self.assertRegex(
+            report,
+            r"(?m)^Unanchored \(cites no resolvable use case\)\s+\W+\s+none$")
+        self.assertIn("0 unanchored", report)
+
+    def test_zero_slice_spec_renders_zero_of_zero_and_keeps_totals(self):
+        self._vision([(1, "A crafter can search for a yarn"),
+                      (2, "A crafter can save a project")])
+        self._spec("100-empty", "use_cases: [UC-1]", [])
+        self._spec("101-done", "use_cases: [UC-1]", ["DONE", "DONE"])
+        self._spec("102-only-empty", "use_cases: [UC-2]", [])
+        report = _workflow.progress(self.proj)
+        self.assertRegex(report, r"100-empty\s+DRAFT\s+0/0")
+        self.assertRegex(report, r"UC-1\s+.*2/2 slices done")
+        # A use case whose only spec has no slices is 0/0, not 'no spec yet'.
+        uc2_line = next(ln for ln in report.splitlines()
+                        if ln.startswith("UC-2"))
+        self.assertIn("0/0 slices done", uc2_line)
+        self.assertNotIn("no spec yet", uc2_line)
+        summary = next(ln for ln in report.splitlines()
+                       if ln.startswith("Summary"))
+        self.assertIn("3 spec(s)", summary)
+        self.assertIn("2/2 slices done", summary)
 
 
 class ProjectOrientationTests(unittest.TestCase):
