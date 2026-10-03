@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: spec-workflow
+use_cases: [UC-12]
 ---
 
 # Spec 064: Spec/ADR frame-hardening

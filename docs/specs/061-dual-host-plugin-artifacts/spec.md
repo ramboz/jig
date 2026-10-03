@@ -4,6 +4,7 @@ skill: release-pipeline, scaffold-init
 tier: host-adapter
 adr_required: true
 adr: ../../decisions/adr-0018-dual-host-generated-plugin-artifacts.md
+use_cases: [UC-15]
 ---
 
 # Spec 061: Dual-host plugin packages

@@ -2,6 +2,7 @@
 status: DONE
 skill: clarify
 tier: 1
+use_cases: [UC-4]
 ---
 
 # Spec 023: clarify skill (judgment-style, pre-spec ambiguity scan)

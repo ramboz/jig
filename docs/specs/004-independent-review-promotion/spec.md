@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: independent-review
+use_cases: [UC-7]
 ---
 
 # Spec 004: independent-review promotion

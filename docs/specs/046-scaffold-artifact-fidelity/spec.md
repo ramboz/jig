@@ -3,6 +3,7 @@ status: DONE
 skill: scaffold-init
 tier: scaffold mode
 adr_required: false
+use_cases: [UC-1, UC-3]
 ---
 
 # Spec 046: Scaffold artifact fidelity

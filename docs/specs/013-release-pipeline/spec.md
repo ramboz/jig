@@ -2,6 +2,7 @@
 status: DONE
 skill: (none — dev infrastructure)
 tier: N/A
+use_cases: [UC-19]
 ---
 
 # Spec 013: release-pipeline

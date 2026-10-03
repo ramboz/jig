@@ -2,6 +2,7 @@
 status: DONE
 skill: (none — doc sweep)
 tier: (none — dev infrastructure)
+use_cases: [UC-7]
 ---
 
 # Spec 040: Align README isolation claims with SKILL.md caveat

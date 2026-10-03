@@ -2,6 +2,7 @@
 status: DONE
 skill: migrate
 tier: 0
+use_cases: [UC-2]
 ---
 
 # Spec 008: migrate

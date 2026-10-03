@@ -2,6 +2,7 @@
 status: DONE
 skill: (none — agent definition cleanup)
 tier: (none — dev infrastructure)
+use_cases: [UC-7]
 ---
 
 # Spec 039: Drop the dead `.claude/review-queue.json` contract

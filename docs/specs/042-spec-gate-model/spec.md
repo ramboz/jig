@@ -3,6 +3,7 @@ status: DONE
 skill: (none — hook + docs)
 tier: (none — dev infrastructure)
 adr_required: true
+use_cases: [UC-17]
 ---
 
 # Spec 042: Spec-gate authentication model — env var vs. file marker

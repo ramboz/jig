@@ -1,5 +1,6 @@
 ---
 status: DRAFT
+use_cases: [UC-22]
 ---
 
 # Spec 034: Federation tier (multi-repo orgs)

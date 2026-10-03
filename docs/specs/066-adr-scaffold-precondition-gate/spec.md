@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: adr-workflow
+use_cases: [UC-1, UC-9]
 ---
 
 # Spec 066: Scaffold-precondition gate (ADR creation)

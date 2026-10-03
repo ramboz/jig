@@ -1,5 +1,6 @@
 ---
 status: DONE
+use_cases: [UC-14]
 ---
 
 # Spec 044: RTK integration spike

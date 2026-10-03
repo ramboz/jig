@@ -2,6 +2,7 @@
 status: DONE
 skill: analyze
 tier: 1
+use_cases: [UC-4]
 ---
 
 # Spec 024: analyze skill (cross-artifact consistency report + constitution-gate)

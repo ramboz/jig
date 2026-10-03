@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: code-health
+use_cases: [UC-5]
 ---
 
 # Spec 060: Code-health capability

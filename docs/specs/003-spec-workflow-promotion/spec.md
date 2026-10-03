@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: spec-workflow
+use_cases: [UC-4]
 ---
 
 # Spec 003: spec-workflow promotion

@@ -2,6 +2,7 @@
 status: DONE
 skill: vision-elicitation
 tier: 0
+use_cases: [UC-1]
 ---
 
 # Spec 017: vision-elicitation

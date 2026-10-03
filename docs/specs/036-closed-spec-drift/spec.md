@@ -3,6 +3,7 @@ status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
 adr_required: true
+use_cases: [UC-4]
 ---
 
 # Spec 036: Closed-spec drift policy + one-time sweep

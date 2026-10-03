@@ -2,6 +2,7 @@
 status: DONE
 skill: migrate
 tier: 0
+use_cases: [UC-2, UC-3]
 ---
 
 # Spec 021: migrate copies machinery into target's `.claude/`

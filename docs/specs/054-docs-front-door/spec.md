@@ -3,6 +3,7 @@ status: DONE
 skill: scaffold-init, spec-workflow, slice-land
 tier: product/docs
 adr_required: false
+use_cases: [UC-18]
 ---
 
 # Spec 054: Docs front door

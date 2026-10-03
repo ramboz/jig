@@ -2,6 +2,7 @@
 status: DONE
 skill: (none — dev infrastructure)
 tier: N/A
+use_cases: [UC-3]
 ---
 
 # Spec 011: plugin-self-install

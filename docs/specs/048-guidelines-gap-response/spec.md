@@ -3,6 +3,7 @@ status: DONE
 skill: scaffold-init, spec-workflow, analyze
 tier: product/docs
 adr_required: false
+use_cases: [UC-18]
 ---
 
 # Spec 048: Guidelines gap response

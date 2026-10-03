@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: 1
+use_cases: [UC-4]
 ---
 
 # Spec 018: slice-per-file

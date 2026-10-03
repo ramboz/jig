@@ -1,7 +1,7 @@
 ---
 status: DONE
 skill:
-use_cases: []
+use_cases: [UC-13]
 ---
 
 # Spec 112: Cross-ref lifecycle checks & claim-based work reservation

@@ -2,6 +2,7 @@
 status: DONE
 skill: pr-review
 tier: 1
+use_cases: [UC-7]
 ---
 
 # Spec 012: pr-review (Tier 1)

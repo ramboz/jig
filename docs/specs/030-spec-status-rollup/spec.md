@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-11]
 ---
 
 # Spec 030: spec.md status rollup

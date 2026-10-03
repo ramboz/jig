@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-13]
 ---
 
 # Spec 037: Compare against origin, not local refs (land.py + workflow.py)

@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: spec-workflow
+use_cases: [UC-14]
 ---
 
 # Spec 057: Thin-orchestrator discipline (delegation-first sessions + active compaction)

@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: explain
+use_cases: [UC-18]
 ---
 
 # Spec 065: Lower the vocabulary barrier (shipped lexicon + on-demand explainers)

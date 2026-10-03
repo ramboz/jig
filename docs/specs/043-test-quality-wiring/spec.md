@@ -1,5 +1,6 @@
 ---
 status: DONE
+use_cases: [UC-5, UC-7]
 ---
 
 # Spec 043: Test-quality preflight wiring

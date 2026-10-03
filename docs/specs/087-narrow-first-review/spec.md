@@ -1,7 +1,7 @@
 ---
 status: DONE
 skill:
-use_cases: []
+use_cases: [UC-7]
 ---
 
 # Spec 087: Narrow-first review

@@ -2,7 +2,7 @@
 status: DONE
 dependencies: [adr-0033]
 last_verified: 2026-06-29
-use_cases: []
+use_cases: [UC-2]
 frame_review: true  # introduces a new config premise (layout.docs_root) + a
 #                   # validation/write boundary — frame-critique before READY_FOR_REVIEW (ADR-0020).
 ---

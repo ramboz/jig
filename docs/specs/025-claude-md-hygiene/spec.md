@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-10, UC-14]
 ---
 
 # Spec 025: CLAUDE.md hygiene (compress-on-close-out)

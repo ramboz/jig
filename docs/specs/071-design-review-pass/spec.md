@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: spec-workflow
+use_cases: [UC-7]
 ---
 
 # Spec 071: Design-review pass (attest-only EDD eval gate)

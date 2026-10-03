@@ -2,6 +2,7 @@
 status: DONE
 skill: scaffold-init
 tier: (none — dev infrastructure)
+use_cases: [UC-19]
 ---
 
 # Spec 035: Exclude test fixtures from scaffold and release artifacts

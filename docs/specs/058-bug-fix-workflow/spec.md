@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: jig:bug-fix
+use_cases: [UC-8]
 ---
 
 # Spec 058: Bug-fix workflow

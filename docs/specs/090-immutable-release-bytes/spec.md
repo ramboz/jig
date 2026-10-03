@@ -1,7 +1,7 @@
 ---
 status: DRAFT
 skill: release-pipeline
-use_cases: []
+use_cases: [UC-19]
 adr_required: true
 adr: ../../decisions/adr-0036-immutable-release-identity.md
 ---

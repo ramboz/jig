@@ -1,6 +1,7 @@
 ---
 status: DONE
 last_verified: 2026-06-20
+use_cases: [UC-15]
 ---
 
 # Spec 033: Host adapter portability

@@ -2,6 +2,7 @@
 status: DONE
 skill: adr-workflow
 tier: 1
+use_cases: [UC-9]
 ---
 
 # Spec 005: adr-workflow (Tier 1)

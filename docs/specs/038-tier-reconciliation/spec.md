@@ -3,6 +3,7 @@ status: DONE
 skill: scaffold-init
 tier: (none — dev infrastructure)
 adr_required: true
+use_cases: [UC-1]
 ---
 
 # Spec 038: Tier system reconciliation — scaffold reality vs. manifest claims

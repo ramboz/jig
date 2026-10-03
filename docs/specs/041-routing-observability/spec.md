@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-16]
 ---
 
 # Spec 041: Skill-routing observability — trace which skill actually fired

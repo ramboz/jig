@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-13]
 ---
 
 # Spec 049: slice claim on IN_PROGRESS

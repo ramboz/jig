@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-7]
 ---
 
 # Spec 031: multi-perspective review in the spec-workflow

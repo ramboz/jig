@@ -3,6 +3,7 @@ status: DONE
 skill: scaffold-init, migrate
 tier: scaffold machinery
 adr_required: true
+use_cases: [UC-17]
 ---
 
 # Spec 052: Security-scaffold floor

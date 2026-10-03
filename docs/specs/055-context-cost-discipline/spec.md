@@ -3,6 +3,7 @@ status: DONE
 skill: spec-workflow
 tier: workflow
 adr_required: false
+use_cases: [UC-14]
 ---
 
 # Spec 055: Context-cost discipline

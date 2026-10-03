@@ -1,7 +1,7 @@
 ---
 status: DONE
 skill: spec-workflow
-use_cases: []
+use_cases: [UC-4, UC-11]
 ---
 
 # Spec 111: First-class blockers

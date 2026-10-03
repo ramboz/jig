@@ -3,6 +3,7 @@ status: DONE
 skill: spec-workflow, independent-review
 tier: dev infrastructure
 adr_required: true
+use_cases: [UC-7]
 ---
 
 # Spec 045: Review lifecycle evidence and gates

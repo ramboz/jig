@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: (none — dev infrastructure)
+use_cases: [UC-1]
 ---
 
 # Spec 063: Scaffold-precondition gate (spec creation)

@@ -2,6 +2,7 @@
 status: DONE
 skill: independent-review
 tier: (none — dev infrastructure)
+use_cases: [UC-7, UC-16]
 ---
 
 # Spec 053: craft/arch-pass skill dispatch — file-read, not router

@@ -2,6 +2,7 @@
 status: DONE
 skill: memory-sync
 tier: (none — dev infrastructure)
+use_cases: [UC-10, UC-13]
 ---
 
 # Spec 050: solo-to-team re-detection

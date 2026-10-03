@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: memory-sync
+use_cases: [UC-10]
 ---
 
 # Spec 002: memory-layer

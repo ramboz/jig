@@ -2,6 +2,7 @@
 status: DONE
 skill: tdd-loop
 tier: 1
+use_cases: [UC-5]
 ---
 
 # Spec 006: tdd-loop (Tier 1)

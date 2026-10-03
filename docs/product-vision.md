@@ -155,6 +155,38 @@ for the live status board.
 - **A web UI, dashboard, or external service.** Jig is a pair of host-native
   plugins plus scaffolded project files. That's the whole product.
 
+## Use cases
+
+<!-- elicited: 2026-10-03 / status: filled -->
+
+- UC-1: A developer can set up jig's workflow in a new project
+- UC-2: A developer can adopt jig on a project that already has specs
+- UC-3: A developer can install jig as a plugin or own its machinery in-repo
+- UC-4: A developer can take a work item from draft to done as tracked vertical slices
+- UC-5: A developer can implement a slice test-first with deterministic checks
+- UC-6: A developer can land a finished slice on main safely
+- UC-7: A developer can get an independent review of finished work before it lands
+- UC-8: A developer can diagnose and fix a reported defect with a proven regression test
+- UC-9: A developer can record a decision and keep it in force as the project changes
+- UC-10: A developer can resume in a new session without re-explaining the project
+- UC-11: A developer can see where the project stands and what to pick up next
+- UC-12: A developer can keep specs anchored to the product's intended behaviors
+- UC-13: Several sessions or teammates can work the same repo without colliding or duplicating work
+- UC-14: A developer can keep sessions within context and cost limits
+- UC-15: A developer can use jig from Claude Code, Codex, or GitHub Copilot CLI
+- UC-16: A team can extend or replace jig's baseline skills with their own
+- UC-17: A team can rely on a baseline security and governance floor
+- UC-18: A newcomer can learn jig's vocabulary and workflow
+- UC-19: A core developer can cut a new jig release with minimal effort and maximum automation and QA
+
+### Upcoming
+
+_Directions that are parked or only partly built; the specs citing each one carry the actual state._
+
+- UC-20: A developer can hand work to unattended agent loops (servo) without weakening jig's gates
+- UC-21: A developer can refactor code through a gated lifecycle that proves behavior is preserved
+- UC-22: A team can run jig's workflow across several repositories
+
 ## Design principles
 
 These are load-bearing — every spec is judged against them at

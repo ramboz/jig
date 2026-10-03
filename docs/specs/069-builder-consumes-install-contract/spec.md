@@ -3,6 +3,7 @@ status: DONE
 skill: release-pipeline
 tier: release infrastructure
 adr_required: false
+use_cases: [UC-19]
 ---
 
 # Spec 069: Builder consumes the install contract

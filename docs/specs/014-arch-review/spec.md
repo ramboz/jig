@@ -2,6 +2,7 @@
 status: DONE
 skill: arch-review
 tier: 1
+use_cases: [UC-7]
 ---
 
 # Spec 014: arch-review (Tier 1)

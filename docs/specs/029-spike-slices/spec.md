@@ -2,6 +2,7 @@
 status: DONE
 skill: spec-workflow
 tier: 0
+use_cases: [UC-4]
 ---
 
 # Spec 029: Spike slices (typed `kind: spike` + body shape + status-board marker)

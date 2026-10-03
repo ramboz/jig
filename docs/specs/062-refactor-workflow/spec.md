@@ -1,6 +1,7 @@
 ---
 status: DRAFT
 skill: jig:refactor
+use_cases: [UC-21]
 ---
 
 # Spec 062: Refactor / migration workflow

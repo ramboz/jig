@@ -2,6 +2,7 @@
 status: DONE
 skill: slice-land
 tier: 1
+use_cases: [UC-6]
 ---
 
 # Spec 009: dod-close-out-separation

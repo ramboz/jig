@@ -4,7 +4,7 @@ status: IN_PROGRESS  # 083-08 (Codex host-validation handoff) remains DRAFT —
 #                    # for the Claude-side build).
 dependencies: []
 last_verified: 2026-06-25
-use_cases: []
+use_cases: [UC-9]
 frame_review: true  # Phase 2 widens the load-bearing premise (recall vs scan) —
 #                   # frame-critique the new premise before READY_FOR_REVIEW (ADR-0020).
 ---

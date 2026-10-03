@@ -1,6 +1,7 @@
 ---
 status: DONE
 skill: scaffold-init
+use_cases: [UC-1]
 ---
 
 # Spec 001: scaffold-init

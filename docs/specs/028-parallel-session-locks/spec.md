@@ -2,6 +2,7 @@
 status: DONE
 skill: (none — dev infrastructure)
 tier: (none — dev infrastructure)
+use_cases: [UC-13]
 ---
 
 # Spec 028: parallel-session locks for shared mutable artifacts

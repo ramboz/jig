@@ -1,7 +1,7 @@
 ---
 status: DONE
 skill: memory-sync
-use_cases: []
+use_cases: [UC-9]
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on first use and link the term to docs/memory/glossary.md (or jig's lexicon). See docs/workflow.md "Self-defining vocabulary". -->

@@ -3,6 +3,7 @@ status: DONE
 skill: release-pipeline, scaffold-init
 tier: release infrastructure
 adr_required: false
+use_cases: [UC-3, UC-19]
 ---
 
 # Spec 047: Install contract verification

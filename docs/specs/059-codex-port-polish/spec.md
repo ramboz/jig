@@ -3,6 +3,7 @@ status: DONE
 skill: scaffold-init, migrate, release-pipeline
 tier: host-adapter
 adr_required: false
+use_cases: [UC-15]
 ---
 
 # Spec 059: Codex port polish

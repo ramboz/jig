@@ -1,7 +1,7 @@
 ---
 status: DONE
 skill: spec-workflow
-use_cases: []
+use_cases: [UC-4]
 frame_review: true
 ---
 

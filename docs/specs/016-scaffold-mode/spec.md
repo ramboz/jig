@@ -2,6 +2,7 @@
 status: DONE
 skill: scaffold-init
 tier: 0
+use_cases: [UC-3]
 ---
 
 # Spec 016: scaffold-mode
