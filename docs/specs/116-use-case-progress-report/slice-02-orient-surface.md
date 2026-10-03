@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: READY_FOR_IMPLEMENTATION
 dependencies: [116-01]
 last_verified:
 frame_review: true
@@ -27,38 +27,57 @@ frame_review: true
 
 **Goal:** The `/jig:orient` project briefing carries a short use-case progress
 section whenever the project has adopted the use-case layer, so a returning
-owner sees goal-level progress without knowing `workflow.py progress` exists.
+owner sees the project-wide done/known totals, the goals with nothing done yet,
+and the untraced work — with a pointer to the full per-use-case listing —
+without knowing `workflow.py progress` exists.
+The section is printed by a deterministic `progress --summary` mode, so orient
+copies it rather than filtering the full tree by hand.
 
 **DoR:**
 - ⬜ 116-01 DONE — `workflow.py progress` exists and is the single source the
-  briefing reads.
+  summary is computed from.
 - ✅ The briefing's structure is known:
   [skills/orient/SKILL.md](../../../skills/orient/SKILL.md) has a "What it reads
   (the survey)" section and a fixed, numbered output layout whose sections are
-  each marked always / usually / "when they exist".
+  each marked always / usually / "when they exist". Its headline section tells
+  the model not to re-derive by hand what a deterministic command already
+  computes — the reason the selection below lives in code.
 
 **Acceptance Criteria:**
 
-1. **A named survey source.** The "What it reads (the survey)" section of the
-   orient `SKILL.md` names `workflow.py progress` as a source, read only when
-   the project's vision has a `## Use cases` section. Observable: the skill text
-   names the command and the condition.
-2. **One conditional section in the fixed layout.** The output layout gains a
+1. **A deterministic summary mode.** `workflow.py progress --summary` prints
+   exactly three things, computed with slice 01's counting rule: the summary
+   totals line; the use cases with no done slice or no spec (id, goal text, and
+   which of the two); and the Unanchored count with its spec names. Each of
+   the two name lists is capped at 10 entries, followed by an `… and N more`
+   line when longer — a project that adopts the use-case layer late starts with
+   every spec unanchored. It prints no per-spec tree and no percentage, and in the two not-adopted states it
+   prints the same one-line `skipped` / `no-op` notes as the full mode. It
+   always exits 0 and writes nothing. Observable: fixture tests over the same
+   kinds of fixtures as slice 01, each shown to fail when its feature is
+   removed.
+2. **A named survey source.** The "What it reads (the survey)" section of the
+   orient `SKILL.md` names `workflow.py progress --summary` as a read-only
+   source, read only when the project's vision has a `## Use cases` section.
+   Observable: the skill text names the command and the condition.
+3. **One conditional section in the fixed layout.** The output layout gains a
    "Use-case progress" section marked "when the use-case layer is adopted". It
-   carries three things and no more: the done/known totals line; the use cases
-   with no done slice or no spec; and the Unanchored count with its spec names.
-   It never reproduces the full tree and never states a percentage. Observable:
-   the skill text specifies exactly those three contents and both exclusions.
-3. **Silent when not adopted.** For a project with no `## Use cases` section the
+   carries the `--summary` output's three things and no more, copied rather
+   than re-derived, plus one line naming `workflow.py progress` for the full
+   per-use-case listing. It never reproduces the full tree and never states a
+   percentage. Observable: the skill text specifies exactly those contents and
+   both exclusions.
+4. **Silent when not adopted.** For a project with no `## Use cases` section the
    briefing is unchanged — no section and no mention of use cases. Observable:
    the skill text states the omission rule.
-4. **Orient still writes nothing.** The "Orient writes nothing" contract is
+5. **Orient still writes nothing.** The "Orient writes nothing" contract is
    unchanged; the new source is a read-only command. Observable: that section
    of the skill is untouched and the new source is described as read-only.
-5. **Pinned and shipped to every host.**
+6. **Pinned and shipped to every host.**
    `skills/orient/test_orient_skill_surface.py` pins the new survey source and
-   the new section, and the host packages are regenerated. Observable: the test
-   fails when either is removed, and `scripts/build_host_packages.py --check`
+   the new section, the spec-workflow `SKILL.md` bullet for `progress` names
+   `--summary`, and the host packages are regenerated. Observable: the pins
+   fail when either is removed, and `scripts/build_host_packages.py --check`
    exits 0.
 
 **DoD:**
@@ -98,8 +117,9 @@ from the count.
       update its row in the Skills table.
 
 **Anti-horizontal-phasing check:** After this slice, a user who asks jig where
-the project stands gets goal-level progress and the unanchored work in the same
-briefing — no extra command, no new knowledge required.
+the project stands gets the done/known totals, the untouched goals, and the
+unanchored work in the same briefing — no extra command, no new knowledge
+required.
 
 ### Deviation log (after reconciliation)
 

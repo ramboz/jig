@@ -346,8 +346,8 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-07 — plugin-component-discovery | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-08 — live-hook-runtime-contract | **DONE** |  |
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-09 — conversational-hook-parity | **DONE** |  |
-| [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-01 — progress-rollup | DRAFT |  |
-| [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | DRAFT |  |
+| [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-01 — progress-rollup | READY_FOR_IMPLEMENTATION |  |
+| [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | READY_FOR_IMPLEMENTATION |  |
 
 ## Deferred slices
 

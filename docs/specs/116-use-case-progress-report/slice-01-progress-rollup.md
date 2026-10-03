@@ -1,6 +1,6 @@
 ---
-status: DRAFT
-dependencies: [adr-0025, 068-03]
+status: READY_FOR_IMPLEMENTATION
+dependencies: [adr-0025, adr-0064, 068-03]
 last_verified:
 frame_review: true
 # arch_review: true  # set to true when this slice changes module
@@ -27,8 +27,9 @@ frame_review: true
 
 **Goal:** `workflow.py progress [--project-dir DIR]` prints, for each use case
 in the vision, the specs that cite it and how many of their slices are done,
-followed by the specs that cite no use case — so the owner sees on one screen
-which intended behaviors are advancing and how much work serves none.
+followed by the specs that cite no use case — so the owner sees in one report
+how far along each intended behavior's known work is, which specs are still
+open under it, and which work cites no behavior at all.
 
 **DoR:**
 - ✅ 068-03 DONE — `coverage`, the spec-level `use_cases:` trace links, and
@@ -36,8 +37,9 @@ which intended behaviors are advancing and how much work serves none.
   ([skills/_common/use_cases.py](../../../skills/_common/use_cases.py)).
 - ✅ jig's own repo carries a `## Use cases` section and backfilled trace links
   (commit `4cdbf6f1`) — the dogfood corpus.
-- ⬜ The owner ruling that places this report in jig is recorded as a decision
-  record (spec OQ1).
+- ✅ The owner ruling that places this report in jig is recorded as a decision
+  record (spec OQ1) —
+  [ADR-0064](../../decisions/adr-0064-use-case-progress-rollup-in-jig.md).
 
 **Acceptance Criteria:**
 
