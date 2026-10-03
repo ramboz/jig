@@ -1,7 +1,8 @@
 ---
 status: DRAFT
-dependencies: []
+dependencies: [116-01]
 last_verified:
+frame_review: true
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -22,24 +23,43 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 116-01 — tbd
+## Slice 116-02 — orient-surface
 
-**Goal:** _TODO: one-sentence statement of what this slice delivers.
-End-to-end value in a single vertical slice (anti-horizontal-phasing
-check below)._
+**Goal:** The `/jig:orient` project briefing carries a short use-case progress
+section whenever the project has adopted the use-case layer, so a returning
+owner sees goal-level progress without knowing `workflow.py progress` exists.
 
 **DoR:**
-- ✅ _TODO: list the prerequisites that must hold before this slice
-  becomes `READY_FOR_IMPLEMENTATION` — upstream slices done, helpers
-  in place, fixtures/data available, etc._
+- ⬜ 116-01 DONE — `workflow.py progress` exists and is the single source the
+  briefing reads.
+- ✅ The briefing's structure is known:
+  [skills/orient/SKILL.md](../../../skills/orient/SKILL.md) has a "What it reads
+  (the survey)" section and a fixed, numbered output layout whose sections are
+  each marked always / usually / "when they exist".
 
 **Acceptance Criteria:**
 
-1. **_TODO: first AC._** Sharp, testable, observable from outside the
-   helper (CLI output, file mutation, exit code, log line). Avoid
-   "code is clean" / "tests pass" framings — those belong in the DoD.
-2. _TODO: second AC._
-3. _TODO: third AC._
+1. **A named survey source.** The "What it reads (the survey)" section of the
+   orient `SKILL.md` names `workflow.py progress` as a source, read only when
+   the project's vision has a `## Use cases` section. Observable: the skill text
+   names the command and the condition.
+2. **One conditional section in the fixed layout.** The output layout gains a
+   "Use-case progress" section marked "when the use-case layer is adopted". It
+   carries three things and no more: the done/known totals line; the use cases
+   with no done slice or no spec; and the Unanchored count with its spec names.
+   It never reproduces the full tree and never states a percentage. Observable:
+   the skill text specifies exactly those three contents and both exclusions.
+3. **Silent when not adopted.** For a project with no `## Use cases` section the
+   briefing is unchanged — no section and no mention of use cases. Observable:
+   the skill text states the omission rule.
+4. **Orient still writes nothing.** The "Orient writes nothing" contract is
+   unchanged; the new source is a read-only command. Observable: that section
+   of the skill is untouched and the new source is described as read-only.
+5. **Pinned and shipped to every host.**
+   `skills/orient/test_orient_skill_surface.py` pins the new survey source and
+   the new section, and the host packages are regenerated. Observable: the test
+   fails when either is removed, and `scripts/build_host_packages.py --check`
+   exits 0.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
@@ -56,36 +76,6 @@ check below)._
 - [ ] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
-
-### For `kind: spike` slices
-
-When the slice's frontmatter has `kind: spike`, the body carries four
-extra labelled blocks alongside the standard Goal / DoR / AC / DoD
-scaffolding. Spike slices are timeboxed investigation, not feature
-work — they reduce an unknown before committing to a design.
-
-```markdown
-**Question:** _One sentence stating the open question. Set at DRAFT._
-
-**Time-box:** _Explicit budget — e.g., "1 day", "4 hours". Set at DRAFT._
-
-**Findings:** _Bullet evidence collected during the spike. Filled
-during IN_PROGRESS._
-
-**Outcome:** _One of: `ADR-NNNN created` / `spec NNN-NN unblocked` /
-`abandoned (reason)`. Multiple outcomes separated by `;`
-(e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE._
-```
-
-`spec_lint.py` validates the `kind:` enum (allowed values: `spike`,
-`feature`) and soft-warns when a `kind: spike` slice is missing any of
-the four labels. Mid-flight spikes legitimately have empty Findings /
-Outcome, so this is a warning, not a hard error.
-
-See `skills/spec-workflow/SKILL.md` (Spike slices subsection) and
-`docs/spec-workflow/spidr-primer.md` for the always-nested rule (spike
-slices live inside a real spec, never as standalone `docs/spikes/`
-artifacts) and the abandoned-outcome manual-reshape failure mode.
 
 ### Close-out (post-DONE)
 
@@ -107,10 +97,9 @@ from the count.
       the entry. If this slice introduces a new skill, add or
       update its row in the Skills table.
 
-**Anti-horizontal-phasing check:** _TODO: in one sentence, describe
-the end-to-end observable value a user gets after this slice lands.
-If the answer is "intermediate state for the next slice," the slice
-is mis-shaped — re-split._
+**Anti-horizontal-phasing check:** After this slice, a user who asks jig where
+the project stands gets goal-level progress and the unanchored work in the same
+briefing — no extra command, no new knowledge required.
 
 ### Deviation log (after reconciliation)
 
