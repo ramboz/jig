@@ -130,7 +130,11 @@ Each forward transition is a checkpoint; each back-edge is a reasoning loop
 (spec review, implementation review, reconciliation review, TDD). The
 review-driven checkpoints are not honour-system prose: `workflow.py
 transition` **refuses** the `REVIEWED` / `RECONCILED` / `DONE` moves unless
-the required review evidence exists and passes (see
+the required review evidence exists and passes — and after a review
+back-edge (any exit from `REVIEWED`/`RECONCILED`/`DONE` to a non-review
+state — e.g. `→ IN_PROGRESS` — which stamps `review_reopened_at` on the
+slice) only verdicts recorded *after* that
+stamp count, so the previous round cannot re-clear changed work (see
 [Post-implementation review](#post-implementation-review) and
 [Reconciliation rules](#reconciliation-rules) below). No `Stop` hook is
 involved — the task-capture `Stop` hook is a nudge that blocks nothing; the

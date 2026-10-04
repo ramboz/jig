@@ -320,7 +320,9 @@ class BugCoreTests(unittest.TestCase):
         self.assertIn("wt-other", text)
 
 
-class BugTransitionTests(unittest.TestCase):
+class _BugTransitionFixture(unittest.TestCase):
+    """Temp-project helpers shared by the bug transition test classes."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -379,7 +381,8 @@ class BugTransitionTests(unittest.TestCase):
         )
         return script
 
-    def _write_review(self, pass_name: str, verdict: str = "pass") -> Path:
+    def _write_review(self, pass_name: str, verdict: str = "pass",
+                      reviewed_at: str = "2026-06-23T00:00:00Z") -> Path:
         return write(
             self.root / "docs" / "bugs" / "reviews" / f"bug-001-{pass_name}.md",
             "---\n"
@@ -387,7 +390,7 @@ class BugTransitionTests(unittest.TestCase):
             f"pass: {pass_name}\n"
             f"verdict: {verdict}\n"
             "reviewer: reviewer\n"
-            "reviewed_at: 2026-06-23T00:00:00Z\n"
+            f"reviewed_at: {reviewed_at}\n"
             "prompt_source: test\n"
             "---\n\n"
             "VERDICT body\n",
@@ -399,6 +402,8 @@ class BugTransitionTests(unittest.TestCase):
         for pass_name in extra_passes:
             self._write_review(pass_name)
 
+
+class BugTransitionTests(_BugTransitionFixture):
     def test_transition_reported_to_diagnosing_sets_status(self):
         self._write_bug(status="REPORTED")
         r = run_bug(
@@ -2030,6 +2035,90 @@ class Bug021GateSurfacesTargetingRefusalTests(unittest.TestCase):
         # The failed attempt is carried forward as evidence, with the report.
         self.assertEqual(self._fm()["status"], "DIAGNOSING")
         self.assertIn("unresolved selector", self._bug().read_text())
+
+
+class Bug039ReviewBackEdgeTests(_BugTransitionFixture):
+    """Bug 039 / issue 235: the documented `REVIEWED → FIXING` back-edge
+    (ADR-0016 §1) is allowed and ungated; every review back-edge stamps
+    `review_reopened_at`, and re-entering REVIEWED/DONE then requires
+    verdicts recorded strictly after that stamp."""
+
+    def _reviews(self, reviewed_at: str) -> None:
+        self._write_review("bug-review", reviewed_at=reviewed_at)
+        self._write_review("craft", reviewed_at=reviewed_at)
+
+    def _reopened(self, status: str, reopened_at: str) -> None:
+        self._write_bug(status=status, fix_class="local_patch")
+        path = self._bug()
+        path.write_text(path.read_text().replace(
+            "escalated_to:\n", f"escalated_to:\nreview_reopened_at: {reopened_at}\n", 1))
+
+    def test_back_edge_allowed_and_skips_fixing_entry_gates(self):
+        # Test is GREEN (fix already in) and no fresh-main recheck is on
+        # record: both FIXING entry gates would refuse a forward entry.
+        self._write_bug(status="REVIEWED", fix_class="local_patch",
+                        main_repro_result="")
+        path = self._bug()
+        path.write_text(path.read_text().replace(
+            "red_confirmed_at:\n", "red_confirmed_at: 2026-06-29\n", 1))
+        r = run_bug("transition", "001", "FIXING", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(0))})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        fields = self._fm()
+        self.assertEqual(fields["status"], "FIXING")
+        self.assertEqual(fields["red_confirmed_at"], "2026-06-29")
+        self.assertRegex(fields["review_reopened_at"],
+                         r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_reentry_refuses_verdicts_not_newer_than_reopen(self):
+        self._reopened("FIXING", "2026-07-01T00:00:00Z")
+        self._reviews("2026-07-01T00:00:00Z")  # equal is not newer
+        r = run_bug("transition", "001", "REVIEWED", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(0))})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("review_reopened_at", r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+
+    def test_reentry_clears_with_verdicts_newer_than_reopen(self):
+        self._reopened("FIXING", "2026-07-01T00:00:00Z")
+        self._reviews("2026-07-01T00:00:01Z")
+        r = run_bug("transition", "001", "REVIEWED", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(0))})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "REVIEWED")
+
+    def test_done_refuses_stale_verdicts_after_reopen(self):
+        self._reopened("REVIEWED", "2026-07-01T00:00:00Z")
+        self._reviews("2026-06-23T00:00:00Z")
+        r = run_bug("transition", "001", "DONE", "--project-dir", str(self.root))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("review_reopened_at", r.stderr)
+
+    def test_never_reopened_record_unaffected(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        self._reviews("2020-01-01T00:00:00Z")
+        r = run_bug("transition", "001", "REVIEWED", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(0))})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_diagnosing_back_edges_stamp_reopen(self):
+        for source in ("FIXING", "REVIEWED", "VERIFIED"):
+            with self.subTest(source=source):
+                self._write_bug(status=source, fix_class="local_patch")
+                r = run_bug("transition", "001", "DIAGNOSING",
+                            "--project-dir", str(self.root))
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertTrue(self._fm().get("review_reopened_at"))
+
+    def test_failed_green_check_stamps_reopen(self):
+        self._write_bug(status="FIXING", fix_class="local_patch")
+        self._reviews("2026-06-23T00:00:00Z")
+        r = run_bug("transition", "001", "REVIEWED", "--project-dir", str(self.root),
+                    env={"JIG_TDD_HELPER": str(self._fake_tdd(1))})
+        self.assertNotEqual(r.returncode, 0)
+        fields = self._fm()
+        self.assertEqual(fields["status"], "DIAGNOSING")
+        self.assertTrue(fields.get("review_reopened_at"))
 
 
 if __name__ == "__main__":

@@ -385,3 +385,23 @@ rewriting the broader spec lifecycle.
 - **Does the recorder need to enforce that `reviewed_at` post-dates the
   slice's last change** at write time? Folded into the deferred
   code-staleness item rather than blocking this ADR.
+
+## Amendments
+
+### 2026-10-04 — Back-edge staleness is gated (deferred code-staleness item, partial)
+
+Scope deferred all *stale-but-passing* gating: a `pass` verdict that predates
+a later change to the deliverable. Owner-approved partial resolution ([bug
+039](../bugs/039-reviewed-fixing-back-edge-rejected.md), GitHub issue 235):
+the *back-edge* case is now enforced. Any exit from `REVIEWED` / `RECONCILED`
+/ `DONE` to a non-review state (e.g. the `→ IN_PROGRESS` needs-changes and
+reconciliation-fails back-edges, a `--reopen` of a `DONE` slice) stamps
+`review_reopened_at` on the slice. While that stamp is set, §3's rule gains
+one condition: a verdict clears only if its `reviewed_at` is strictly later.
+The one-time `READY_FOR_REVIEW` frame-critique pass is exempt, and moves within
+the review family (e.g. `RECONCILED → REVIEWED`) don't stamp. This is
+event-keyed, with no deliverable mtime or git-log comparison. The general case
+(the deliverable changed after a pass with no back-edge taken) stays deferred
+under the original trigger. Original prose preserved above.
+
+- Link: [bug 039](../bugs/039-reviewed-fixing-back-edge-rejected.md)

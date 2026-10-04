@@ -1630,13 +1630,9 @@ def detect_subagent_type() -> str:
 
 def _now_iso8601() -> str:
     """UTC timestamp in ISO-8601 with a trailing `Z` (provenance field).
-    `reviewed_at` records when the verdict was written, per ADR-0014 §2."""
-    import datetime
-    return (
-        datetime.datetime.now(datetime.timezone.utc)
-        .replace(microsecond=0)
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
+    `reviewed_at` records when the verdict was written, per ADR-0014 §2.
+    Shared with the back-edge stamp (bug 039) so the two compare directly."""
+    return _evidence.now_iso8601()
 
 
 # `--summary-file -` is the explicit "read the body from stdin" request, the

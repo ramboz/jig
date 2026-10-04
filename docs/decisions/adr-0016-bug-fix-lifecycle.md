@@ -374,3 +374,22 @@ evidence.
 - **Where does a security-surfaced bug's evidence overlap the security
   floor** (spec 052)? Lean: the conditional security pass is sufficient;
   no new plumbing. Revisit if the floor's scanners want a hook here.
+
+## Amendments
+
+### 2026-10-04 — `REVIEWED → FIXING` back-edge built; re-entry needs fresh verdicts
+
+§1 named `REVIEWED → FIXING` as an ungated back-edge, but `bug.py` never
+allowed it, and §2's `→ FIXING` gates (fresh-main recheck, `fix_class`,
+closure inventory, red witness) fired on any entry to `FIXING` — the red
+witness cannot pass once the fix is in. Owner-approved correction ([bug
+039](../bugs/039-reviewed-fixing-back-edge-rejected.md), GitHub issue 235):
+the edge is allowed and ungated — §2's `→ FIXING` gates bind to the forward
+`ROOT_CAUSED → FIXING` edge only. Every review back-edge (`REVIEWED →
+FIXING`, `FIXING`/`REVIEWED`/`VERIFIED → DIAGNOSING`, the failed-green-check
+route to `DIAGNOSING`) stamps `review_reopened_at`. §2's `→ REVIEWED` / `→
+DONE` evidence gates gain one rule: while that stamp is set, a verdict
+clears only if its `reviewed_at` is strictly later. Original prose preserved
+above.
+
+- Link: [bug 039](../bugs/039-reviewed-fixing-back-edge-rejected.md)

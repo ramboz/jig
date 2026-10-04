@@ -1446,3 +1446,18 @@ for the state they refuse to look at. The fix ages a never-verified Proposed ADR
 by its *proposal date* (the `Proposed (YYYY-MM-DD)` status line), never by
 `last_verified` — a freshness field whose reuse as an acceptance date would
 publish a plausible-but-wrong age (ADR-0024/0046).
+
+**Bind a gate to the edge, not the target state (bug 039 / issue 235).**
+`bug.py` ran its `→ FIXING` gates (fresh-main recheck, closure inventory, red
+witness) on *every* entry to `FIXING`, though they are properties of the
+forward `ROOT_CAUSED → FIXING` edge. That made ADR-0016's documented ungated
+`REVIEWED → FIXING` back-edge unbuildable: the red witness can never pass once
+the fix is in. So the edge was quietly left out of the transition table, and
+the docs and code disagreed from the first commit. The same target-only
+framing left the review-evidence gate blind to *when* a verdict was written, so
+a back-edge followed by re-entry was cleared by the previous round's passes. It
+hit spec-workflow's `REVIEWED`/`RECONCILED → IN_PROGRESS` too. The fix keys
+gates on `(current, new)` and stamps `review_reopened_at` on every back-edge.
+Re-entry then needs strictly-newer verdicts: event-keyed, with no mtime or git
+inspection. When a lifecycle doc names a back-edge, test that it is reachable
+*and* that the forward gates do not fire on it.

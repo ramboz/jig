@@ -30,11 +30,14 @@ to the deliverable (stale-but-passing). This module does NOT compare
 deliverable mtime/git-log against `reviewed_at`. The *superseded-only*
 case (a `fail`/`needs-changes` not yet overwritten by a later `pass`) IS
 enforced here — it reduces to `verdict != pass`, which `verdict_clears`
-already rejects.
+already rejects. Bug 039 narrowed the deferral: after a review
+*back-edge* (which stamps `review_reopened_at`), a verdict not newer than the
+stamp no longer clears — see `stale_after_reopen_problem`.
 """
 
 from __future__ import annotations
 
+import datetime
 import re
 from pathlib import Path
 
@@ -102,6 +105,53 @@ BUG_REQUIRED_FIELDS = (
 # (ADR-0014 Consequences: "the gate names the missing artifact and the
 # command to produce it"). Kept as a constant so writer + gate agree.
 RECORD_CMD = "review.py record-review"
+
+# Bug 039: a review back-edge stamps this frontmatter field on the
+# record/slice (sites: `bug.py` `_BUG_REOPEN_TARGETS`, `workflow.py`
+# `_REVIEW_STATES`). While it is set, a verdict clears only if its `reviewed_at`
+# is STRICTLY later — the previous round's passes judged code that has since
+# changed. Event-keyed, so it needs no deliverable mtime/git inspection (the
+# general code-staleness gate stays deferred, ADR-0014 Scope).
+REOPENED_FIELD = "review_reopened_at"
+
+
+def now_iso8601() -> str:
+    """UTC timestamp, second precision, trailing `Z` — the `reviewed_at`
+    shape `review.py record-review` writes, so the two compare directly."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_iso8601(value) -> "datetime.datetime | None":
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
+def stale_after_reopen_problem(verdict_fields: dict, reopened_at) -> str:
+    """Return a problem string when a review back-edge (`reopened_at`) makes
+    this verdict stale, else "". No reopen stamp → never stale. A malformed
+    stamp or `reviewed_at` fails closed (it cannot be shown to be newer)."""
+    if not str(reopened_at or "").strip():
+        return ""
+    reopened = _parse_iso8601(reopened_at)
+    if reopened is None:
+        return (f"malformed {REOPENED_FIELD}: {reopened_at!r} "
+                "(expected ISO-8601, e.g. 2026-07-01T00:00:00Z)")
+    reviewed_raw = verdict_fields.get("reviewed_at", "")
+    reviewed = _parse_iso8601(reviewed_raw)
+    if reviewed is None or reviewed <= reopened:
+        return (f"verdict reviewed_at {reviewed_raw or '(empty)'} is not newer "
+                f"than {REOPENED_FIELD} {reopened_at} — the review was "
+                "reopened after this verdict; re-run the pass and re-record it")
+    return ""
 
 def evidence_gate_enabled() -> bool:
     """The review-evidence gate is enabled unless `JIG_REVIEW_EVIDENCE_GATE`
@@ -429,14 +479,18 @@ def _review_flag(spec_path, slice_fragment: str, field: str) -> bool:
     resolved (the caller wants that surfaced as an invalid-target
     diagnostic).
     """
-    spec_path = Path(spec_path)
+    return frontmatter_flag_truthy(_slice_field(spec_path, slice_fragment, field))
+
+
+def _slice_field(spec_path, slice_fragment: str, field: str) -> str:
+    """Raw `<field>:` frontmatter value of a resolved slice ("" when absent).
+    Raises `EvidenceError` when the slice itself can't be resolved."""
     try:
-        loc = load_slice(spec_path, slice_fragment)
+        loc = load_slice(Path(spec_path), slice_fragment)
     except SliceLookupError as exc:
         raise EvidenceError(str(exc)) from exc
-    body = loc.text[loc.start:loc.end]
-    fields, _ = parse_frontmatter(body)
-    return frontmatter_flag_truthy(fields.get(field, ""))
+    fields, _ = parse_frontmatter(loc.text[loc.start:loc.end])
+    return str(fields.get(field, "") or "").strip()
 
 
 def _arch_review_flag(spec_path, slice_fragment: str) -> bool:
@@ -498,6 +552,7 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     except EvidenceError as exc:
         return [str(exc)]
 
+    reopened_at = _slice_field(spec_path, slice_fragment, REOPENED_FIELD)
     diagnostics: list = []
     for pass_name in needed:
         try:
@@ -508,13 +563,19 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
             diagnostics.append(str(exc))
             continue
         rec = parse_verdict_file(path)
-        if not rec.clears:
-            for problem in rec.problems:
-                diagnostics.append(
-                    f"[{pass_name}] {problem} "
-                    f"(produce with: {RECORD_CMD} <spec> {slice_fragment} "
-                    f"--pass {pass_name} --verdict pass ...)"
-                )
+        problems = list(rec.problems) if not rec.clears else []
+        if rec.clears and stage != "READY_FOR_REVIEW":
+            # Bug 039: frame-critique (READY_FOR_REVIEW) is a one-time
+            # pre-implementation pass a back-edge does not invalidate.
+            stale = stale_after_reopen_problem(rec.fields, reopened_at)
+            if stale:
+                problems.append(stale)
+        for problem in problems:
+            diagnostics.append(
+                f"[{pass_name}] {problem} "
+                f"(produce with: {RECORD_CMD} <spec> {slice_fragment} "
+                f"--pass {pass_name} --verdict pass ...)"
+            )
     return diagnostics
 
 
@@ -636,11 +697,16 @@ def validate_bug_evidence(bug_path, stage: str) -> list:
             diagnostics.append(str(exc))
             continue
         rec = parse_verdict_file(path, required_fields=BUG_REQUIRED_FIELDS)
-        if not rec.clears:
-            for problem in rec.problems:
-                diagnostics.append(
-                    f"[{pass_name}] {problem} "
-                    f"(produce with: {RECORD_CMD} --bug {bug_num} "
-                    f"--pass {pass_name} --verdict pass ...)"
-                )
+        problems = list(rec.problems) if not rec.clears else []
+        if rec.clears:
+            stale = stale_after_reopen_problem(
+                rec.fields, fields.get(REOPENED_FIELD, ""))
+            if stale:
+                problems.append(stale)
+        for problem in problems:
+            diagnostics.append(
+                f"[{pass_name}] {problem} "
+                f"(produce with: {RECORD_CMD} --bug {bug_num} "
+                f"--pass {pass_name} --verdict pass ...)"
+            )
     return diagnostics

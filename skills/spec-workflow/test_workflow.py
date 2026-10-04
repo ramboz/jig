@@ -18,6 +18,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from skills._common.parsing import parse_frontmatter  # noqa: E402
 from skills._common.test_reservation import (  # noqa: E402
     CAPTURED_GH006,
     CAPTURED_GH013,
@@ -7879,6 +7880,99 @@ class TransitionUngatedStatesTests(_GateFixture):
         self.write_slice("RECONCILED")
         r = run_workflow("transition", str(self.spec_md), "045-01",
                          "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+
+class ReviewBackEdgeFreshnessTests(_GateFixture):
+    """Bug 039: any exit from a review state to a non-review state stamps
+    `review_reopened_at`; re-entering a review-gated state then requires
+    verdicts recorded strictly after it, so the previous round's passes
+    cannot re-clear changed work."""
+
+    def _slice_path(self) -> Path:
+        return self.spec_dir / "slice-01-thing.md"
+
+    def _fm(self) -> dict:
+        fields, _ = parse_frontmatter(self._slice_path().read_text())
+        return fields
+
+    def _stamp_reopened(self, reopened_at: str) -> None:
+        p = self._slice_path()
+        p.write_text(p.read_text().replace(
+            "last_verified:\n", f"last_verified:\nreview_reopened_at: {reopened_at}\n", 1))
+
+    def test_reviewed_back_edge_stamps_review_reopened_at(self):
+        self.write_slice("REVIEWED")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertRegex(self._fm().get("review_reopened_at", ""),
+                         r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_reconciled_back_edge_stamps_review_reopened_at(self):
+        self.write_slice("RECONCILED")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertTrue(self._fm().get("review_reopened_at"))
+
+    def test_forward_entry_to_in_progress_does_not_stamp(self):
+        self.write_slice("READY_FOR_IMPLEMENTATION")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "IN_PROGRESS", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertNotIn("review_reopened_at", self._fm())
+
+    def test_reentry_refuses_verdicts_not_newer_than_reopen(self):
+        self.write_slice("IN_PROGRESS")
+        self._stamp_reopened("2026-07-01T00:00:00Z")
+        self.write_evidence("compliance", reviewed_at="2026-07-02T00:00:00Z")
+        self.write_evidence("craft", reviewed_at="2026-06-02T14:30:00Z")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("craft", r.stderr)
+        self.assertIn("review_reopened_at", r.stderr)
+        self.assertEqual(self._fm()["status"], "IN_PROGRESS")
+
+    def test_indirect_and_done_exits_stamp_reopen(self):
+        for source, target in (("REVIEWED", "READY_FOR_IMPLEMENTATION"),
+                               ("DONE", "IN_PROGRESS")):
+            with self.subTest(source=source, target=target):
+                self.write_slice(source)
+                r = run_workflow("transition", str(self.spec_md), "045-01",
+                                 target, "--reopen", gate=True)
+                self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+                self.assertTrue(self._fm().get("review_reopened_at"))
+
+    def test_reconciled_reentry_refuses_stale_reconciliation_verdict(self):
+        self.write_slice("REVIEWED", deviation_log=True,
+                         reconciliation_sweep=True)
+        self._stamp_reopened("2026-07-01T00:00:00Z")
+        self.write_evidence("compliance", reviewed_at="2026-07-02T00:00:00Z")
+        self.write_evidence("craft", reviewed_at="2026-07-02T00:00:00Z")
+        self.write_evidence("reconciliation", reviewed_at="2026-06-02T14:30:00Z")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "RECONCILED", gate=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reconciliation", r.stderr)
+        self.assertIn("review_reopened_at", r.stderr)
+
+    def test_frame_critique_exempt_from_reopen_freshness(self):
+        self.write_slice("DRAFT", frame_review=True)
+        self._stamp_reopened("2026-07-01T00:00:00Z")
+        self.write_evidence("frame-critique", reviewed_at="2026-06-02T14:30:00Z")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_REVIEW", gate=True)
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+
+    def test_reentry_clears_with_verdicts_newer_than_reopen(self):
+        self.write_slice("IN_PROGRESS")
+        self._stamp_reopened("2026-07-01T00:00:00Z")
+        self.write_evidence("compliance", reviewed_at="2026-07-02T00:00:00Z")
+        self.write_evidence("craft", reviewed_at="2026-07-02T00:00:00Z")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "REVIEWED", gate=True)
         self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
 
 
