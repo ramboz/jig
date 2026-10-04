@@ -48,12 +48,15 @@ user-invocable: true
   links that reports use cases with no implementing spec (coverage gap) and
   specs citing no parent use case (scope creep). No-op when the project has no
   `## Use cases` section.
-- Surfaces use-case progress via `workflow.py progress [--project-dir DIR]` — a
+- Surfaces use-case progress via `workflow.py progress [--summary] [--project-dir DIR]` — a
   read-only, **advisory** rollup (slice 116-01, [ADR-0064](../../docs/decisions/adr-0064-use-case-progress-rollup-in-jig.md)):
   per use case, the specs citing it with their status and done/known slice
   **counts** (never percentages), then an **Unanchored** bucket for specs citing
   no resolvable use case. Derived on every run, stores nothing; a progress view,
-  not a drift check. No-op when the project has no `## Use cases` section.
+  not a drift check. `--summary` prints the compact view `/jig:orient` copies
+  (totals, use cases with no done slice or no spec, Unanchored specs; slice
+  116-02). No-op when the project has no `## Use cases` section or its marker
+  says `status: unfilled` / `skipped` (not elicited yet).
 - Guards the status board via `workflow.py check-board <project-dir>` — a
   read-only audit that exits non-zero when `docs/specs/README.md` no longer
   matches the spec records, or when two spec directories claim one number.

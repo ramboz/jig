@@ -4,7 +4,7 @@ Half of this skill ships prose, not code. These tests pin the *load-bearing
 phrases* — the ones whose absence would reproduce a reported failure or drop
 a core acceptance criterion — rather than re-reviewing wording.
 
-Two provenances live here:
+Three provenances live here:
   - Slice 101-01 (AC5–AC8): the collaboration-survey + freshness additions.
     The failure they guard against — orientation surveys only local files,
     never the collaboration layer, and so reports a project as unblocked
@@ -13,6 +13,11 @@ Two provenances live here:
     (writes no file) and the correct `jig:spec-workflow` handoff. Added at
     088-02 close-out to pin the two ACs the compliance pass found unguarded
     (a future edit deleting either would otherwise fail no test).
+  - Slice 116-02 (AC2–AC5): the use-case progress survey source and the one
+    conditional layout section, both fed by `workflow.py progress --summary`.
+    The failure they guard against — the briefing silently dropping the
+    section, or growing it into a full tree / percentage / on-goal verdict
+    that ADR-0064 rules out.
 
 Run from the repo root:
     python3 skills/orient/test_orient_skill_surface.py
@@ -246,6 +251,156 @@ class Orient088CoreContractTests(unittest.TestCase):
             body, r"no directly invocable\s+`?jig:implementer",
             "the handoff must warn there is no invocable jig:implementer skill",
         )
+
+
+class OrientUseCaseProgressTests(unittest.TestCase):
+    """Slice 116-02 AC2-AC5: a named survey source plus one conditional layout
+    section that copies `workflow.py progress --summary` (ADR-0064).
+
+    Section assertions are scoped to the new section's body (not the whole
+    file): 'percentage', 'unanchored' and 'workflow.py progress' would
+    otherwise be satisfiable by prose elsewhere, or by the heading alone.
+    """
+
+    HEADING = r"^### \d+\. Use-case progress"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SKILL.read_text()
+
+    def _survey(self) -> str:
+        start = self.text.index("## What it reads (the survey)")
+        end = self.text.index("## The output shape", start)
+        return self.text[start:end]
+
+    def _survey_bullet(self) -> str:
+        """The survey bullet that names the progress command, lowercased."""
+        chunks = re.split(r"\n(?=- \*\*)", self._survey())
+        hits = [c for c in chunks if "progress --summary" in c]
+        self.assertEqual(len(hits), 1, "exactly one survey bullet owns it")
+        return re.sub(r"\s+", " ", hits[0]).lower()
+
+    def _section(self) -> str:
+        return re.sub(r"\s+", " ", section_body(self.text, self.HEADING))
+
+    # ---- AC2: the named survey source ---------------------------------------
+
+    def test_survey_names_the_summary_command(self):
+        self.assertRegex(
+            self._survey(),
+            r"workflow\.py\"?\s+progress\s+--summary",
+            "the survey must name the command orient reads",
+        )
+
+    def test_survey_reads_it_only_when_the_vision_has_a_use_cases_section(self):
+        bullet = self._survey_bullet()
+        self.assertIn("## use cases", bullet)
+        self.assertIn("product-vision.md", bullet)
+        self.assertRegex(bullet, r"\bonly when\b")
+
+    # ---- AC5: the new source is described as read-only ----------------------
+
+    def test_survey_describes_the_new_source_as_read_only(self):
+        bullet = self._survey_bullet()
+        self.assertIn("read-only", bullet)
+        self.assertIn("writes nothing", bullet)
+
+    # ---- AC3: one conditional section in the fixed layout -------------------
+
+    def test_layout_has_a_use_case_progress_section_marked_conditional(self):
+        self.assertRegex(
+            self.text,
+            re.compile(
+                self.HEADING
+                + r".*\(when the use-case layer is adopted\)\s*$",
+                re.MULTILINE),
+            "the section heading must carry the adoption condition",
+        )
+
+    def test_section_sits_in_the_fixed_order_before_the_recommendation(self):
+        heading = re.search(self.HEADING, self.text, re.MULTILINE)
+        self.assertTrue(heading)
+        self.assertLess(
+            heading.start(), self.text.index("My recommendation (always)"))
+        self.assertLess(
+            self.text.index("The one decision blocking the most (when"),
+            heading.start(),
+            "waiting-on-a-human items outrank the progress block",
+        )
+
+    def test_section_copies_the_summary_instead_of_rederiving_it(self):
+        body = self._section()
+        self.assertIn("progress --summary", body)
+        self.assertRegex(body, r"\bcopy\b")
+        self.assertRegex(body, r"re-?deriv|recount")
+
+    def test_section_carries_exactly_the_three_summary_things(self):
+        body = self._section()
+        self.assertRegex(body, r"done/known")  # the totals line
+        self.assertIn("no done slice or no spec", body)  # the untouched goals
+        self.assertIn("unanchored", body)  # the untraced work, by name
+        self.assertRegex(body, r"\bno more\b|\bnothing else\b")
+
+    def test_section_points_at_the_full_listing_command(self):
+        body = self._section()
+        self.assertRegex(
+            body, r"`workflow\.py progress`[^.]*full",
+            "one line must name `workflow.py progress` for the full listing",
+        )
+
+    def test_section_never_reproduces_the_tree_or_states_a_percentage(self):
+        body = self._section()
+        self.assertRegex(body, r"never[^.]*full tree")
+        self.assertRegex(body, r"never[^.]*percentage")
+
+    def test_section_is_not_a_drift_or_on_goal_verdict(self):
+        """ADR-0064 bound 5: a progress view, not a drift detector."""
+        body = self._section()
+        self.assertRegex(body, r"not a (verdict|check)[^.]*(on-goal|drift)")
+
+    # ---- AC4: silent when not adopted ---------------------------------------
+
+    def test_section_states_the_omission_rule(self):
+        body = self._section()
+        self.assertIn("## use cases", body)
+        self.assertRegex(body, r"omit[^.]*(section|it)")
+        self.assertRegex(
+            body, r"no mention of use cases|nothing about use cases",
+            "a non-adopting project's briefing must not mention use cases",
+        )
+
+    def test_section_renders_the_content_as_bullets(self):
+        """The fixed layout's formatting rules (one bullet per item, no inline
+        lists) apply to this section too — the output is copied as content,
+        not pasted as a block."""
+        self.assertRegex(self._section(), r"\bas bullets\b")
+
+    # ---- AC7: an unelicited vision is omitted like an absent section --------
+
+    def test_omission_covers_any_one_line_skipped_or_noop_note(self):
+        """The survey bullet and the section both drop the section on the
+        command's one-line `skipped` / `no-op` note — which now includes a
+        `## Use cases` section that is present but not elicited yet."""
+        for where, text in (("survey bullet", self._survey_bullet()),
+                            ("section", self._section())):
+            with self.subTest(where=where):
+                self.assertIn("`skipped`", text)
+                self.assertIn("`no-op`", text)
+                self.assertIn("elicited", text)
+                self.assertRegex(text, r"one-line")
+
+    # ---- AC5: the write contract is untouched -------------------------------
+
+    def test_zero_write_section_does_not_gain_a_progress_exception(self):
+        start = self.text.index("## Orient writes nothing")
+        end = self.text.index("\n## ", start + 1)
+        body = self.text[start:end].lower()
+        # Specific tokens, not a bare "progress": an unrelated IN_PROGRESS
+        # mention added to this section later must not trip the guard.
+        self.assertNotIn("use-case progress", body)
+        self.assertNotIn("progress --summary", body)
+        self.assertNotIn("workflow.py progress", body)
+        self.assertNotIn("use case", body)
 
 
 if __name__ == "__main__":

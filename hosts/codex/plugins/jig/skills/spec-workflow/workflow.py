@@ -73,6 +73,7 @@ from _common.use_cases import (
     has_use_cases_section,
     parse_use_cases,
     resolve_use_cases,
+    use_cases_unelicited,
 )
 
 VALID_STATUSES = (
@@ -3529,11 +3530,14 @@ def coverage(project_dir: Path) -> str:
 # A derived, read-only, ADVISORY join of the spec-level `use_cases:` trace
 # links with slice state: use case -> specs -> done/known slice COUNTS, plus
 # an Unanchored bucket for specs citing no resolvable use case. Sibling of
-# `coverage` (same `--project-dir`, stdout, always exit 0, same two
-# not-adopted states). Bounded by ADR-0064: stores nothing, no percentages,
-# no weighting/estimation/dates, spec-level links only, and a PROGRESS view —
-# not a drift detector (the links are written by the agents whose direction
-# is in question).
+# `coverage` (same `--project-dir`, stdout, always exit 0). Three not-adopted
+# cases, each a one-line note and no rollup: no vision ('skipped'), no
+# `## Use cases` section ('no-op'), and a section marked `status: unfilled` /
+# `skipped` ('no-op', slice 116-02 AC7); `coverage` keeps only the first two.
+# Bounded by ADR-0064: stores nothing, no percentages, no weighting/
+# estimation/dates, spec-level links only, and a PROGRESS view — not a drift
+# detector (the links are written by the agents whose direction is in
+# question).
 #
 # Counting rule = the spec rollup's: both read slice statuses through
 # `_spec_slice_statuses` and filter them through `_known_slice_statuses`; a
@@ -3586,13 +3590,32 @@ def _progress_data(project_dir: Path, vision_text: str) -> dict:
     }
 
 
-def progress(project_dir: Path) -> str:
+def _progress_totals(rows: list) -> str:
+    """`D/K slices done` over `rows` (the one place the figure is formatted)."""
+    return (f"{sum(r['done'] for r in rows)}/"
+            f"{sum(r['known'] for r in rows)} slices done")
+
+
+def _progress_summary_line(data: dict) -> str:
+    """The once-counted closing line — shared by the full report and
+    `--summary` so the two cannot disagree."""
+    return (
+        f"Summary: {len(data['ucs'])} use case(s) · {len(data['rows'])} "
+        f"spec(s) · {len(data['unanchored'])} unanchored · "
+        f"{_progress_totals(data['rows'])} (each spec and slice counted once)"
+    )
+
+
+def progress(project_dir: Path, summary: bool = False) -> str:
     """Render the use-case progress rollup to a string.
 
     Read-only and ADVISORY (the caller always exits 0). Not adopted →
-    one-line note, no rollup: no `product-vision.md` is 'skipped', a vision
-    without a `## Use cases` section is a 'no-op' — the same two states
-    `coverage` has.
+    one-line note, no rollup, in three cases: no `product-vision.md` is
+    'skipped'; a vision without a `## Use cases` section is a 'no-op'; so is a
+    section whose elicited marker says `status: unfilled` / `skipped` (slice
+    116-02 AC7). `coverage` keeps only the first two. `summary=True` (slice
+    116-02) renders the compact `--summary` view of the SAME computed data
+    instead of the full tree.
     """
     vision = project_layout.docs_base(project_dir) / "product-vision.md"
     if not vision.is_file():
@@ -3609,14 +3632,20 @@ def progress(project_dir: Path) -> str:
             "use-case breadth layer is not adopted (no `## Use cases` "
             "section in docs/product-vision.md). ADR-0064 / spec 116.\n"
         )
+    if use_cases_unelicited(vision_text):
+        # Slice 116-02 AC7: the scaffold template's placeholder section is
+        # present but not elicited — not adopted either. `progress`-only.
+        return (
+            "Use-case progress (advisory, non-blocking) — no-op: the "
+            "`## Use cases` section is not elicited yet (its marker says "
+            "`status: unfilled` or `skipped`). ADR-0064 / spec 116.\n"
+        )
 
     data = _progress_data(project_dir, vision_text)
+    if summary:
+        return _render_progress_summary(data)
     name_w = max((len(r["name"]) for r in data["rows"]), default=0)
     status_w = max((len(r["status"]) for r in data["rows"]), default=0)
-
-    def totals(rows: list) -> str:
-        return (f"{sum(r['done'] for r in rows)}/"
-                f"{sum(r['known'] for r in rows)} slices done")
 
     def spec_line(r: dict) -> str:
         counts = f"{r['done']}/{r['known']}"
@@ -3637,18 +3666,55 @@ def progress(project_dir: Path) -> str:
     ]
     for uc, goal, specs in data["ucs"]:
         lines.append(f"{uc}  {goal}  —  "
-                     f"{totals(specs) if specs else 'no spec yet'}")
+                     f"{_progress_totals(specs) if specs else 'no spec yet'}")
         lines.extend(spec_line(r) for r in specs)
     lines.append("")
-    lines.append("Unanchored (cites no resolvable use case)  —  "
-                 f"{totals(data['unanchored']) if data['unanchored'] else 'none'}")
+    lines.append(
+        "Unanchored (cites no resolvable use case)  —  "
+        f"{_progress_totals(data['unanchored']) if data['unanchored'] else 'none'}"
+    )
     lines.extend(spec_line(r) for r in data["unanchored"])
     lines.append("")
-    lines.append(
-        f"Summary: {len(data['ucs'])} use case(s) · {len(data['rows'])} "
-        f"spec(s) · {len(data['unanchored'])} unanchored · "
-        f"{totals(data['rows'])} (each spec and slice counted once)"
-    )
+    lines.append(_progress_summary_line(data))
+    return "\n".join(lines) + "\n"
+
+
+# Slice 116-02: `progress --summary` — the compact view /jig:orient copies.
+# Name lists are capped so a project that adopts the use-case layer late
+# (every spec unanchored) still prints a screenful, not hundreds of lines.
+_PROGRESS_SUMMARY_CAP = 10
+
+
+def _capped(entries: list) -> list:
+    """`entries` cut to `_PROGRESS_SUMMARY_CAP`, plus an `… and N more` line."""
+    shown = entries[:_PROGRESS_SUMMARY_CAP]
+    extra = len(entries) - len(shown)
+    return shown + ([f"  … and {extra} more"] if extra else [])
+
+
+def _render_progress_summary(data: dict) -> str:
+    """Exactly three things from `_progress_data`: the once-counted totals
+    line; the use cases with no spec or no done slice; the Unanchored count
+    with its spec names. No per-spec tree, no percentage."""
+    untouched = []
+    for uc, goal, specs in data["ucs"]:
+        if not specs:
+            untouched.append(f"  {uc}  {goal}  —  no spec yet")
+        elif not any(r["done"] for r in specs):
+            untouched.append(f"  {uc}  {goal}  —  no done slice")
+    names = [f"  {r['name']}" for r in data["unanchored"]]
+
+    lines = [_progress_summary_line(data)]
+    if untouched:
+        lines.append(f"No done slice or no spec ({len(untouched)}):")
+        lines.extend(_capped(untouched))
+    else:
+        lines.append("No done slice or no spec: none")
+    if names:
+        lines.append(f"Unanchored ({len(names)}):")
+        lines.extend(_capped(names))
+    else:
+        lines.append("Unanchored: none")
     return "\n".join(lines) + "\n"
 
 
@@ -5770,6 +5836,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ppr.add_argument("--project-dir", default=".",
                      help="project root directory (default: cwd)")
+    # Slice 116-02: the compact view the /jig:orient briefing copies.
+    ppr.add_argument("--summary", action="store_true",
+                     help="compact view: the totals line, the use cases "
+                          "with no done slice or no spec, and the "
+                          "Unanchored specs (slice 116-02)")
     return p
 
 
@@ -5842,7 +5913,9 @@ def main(argv: list) -> int:
             sys.stdout.write(coverage(Path(ns.project_dir)))
         elif ns.command == "progress":
             # Advisory (slice 116-01): same always-exit-0 contract as coverage.
-            sys.stdout.write(progress(Path(ns.project_dir)))
+            sys.stdout.write(
+                progress(Path(ns.project_dir), summary=ns.summary)
+            )
     except StatusBoardRaceError as exc:
         # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
         # Must be caught before the generic `WorkflowError → 2` handler so

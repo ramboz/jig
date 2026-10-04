@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: spec-workflow
 use_cases: [UC-11, UC-12]
 ---
@@ -10,7 +10,7 @@ use_cases: [UC-11, UC-12]
 
 > Builds on [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md)
 > (Architecture Decision Record) and [spec 068](../068-use-cases-breadth-layer/spec.md).
-> **DRAFT.** A read-only `workflow.py progress` query that joins the
+> A read-only `workflow.py progress` query that joins the
 > `use_cases:` trace links with slice state and prints **use case → specs → done
 > slices**, plus an explicit **Unanchored** bucket for specs that cite no stated
 > use case. Stdout only, advisory, no new artifact; then surfaced in the

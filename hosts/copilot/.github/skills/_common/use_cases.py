@@ -118,6 +118,37 @@ def has_use_cases_section(vision_text: str) -> bool:
     return _USE_CASES_HEADING_RE.search(vision_text) is not None
 
 
+# The elicited marker `/jig:vision-elicitation` and the scaffold template write
+# under a section heading: `<!-- elicited: PENDING / status: unfilled -->`, or
+# `<!-- elicited: DATE / status: filled / hash: sha256:<12hex> -->` once filled.
+# The FIRST such comment is the section's own; its `status:` field is read and
+# any trailing ` / key: value` fields are tolerated.
+_ELICITED_MARKER_RE = re.compile(r"(?is)<!--\s*elicited:(.*?)-->")
+_STATUS_FIELD_RE = re.compile(r"(?i)\bstatus:\s*(\w+)")
+_UNELICITED_STATUSES = ("unfilled", "skipped")
+
+
+def use_cases_unelicited(vision_text: str) -> bool:
+    """True iff the `## Use cases` section's OWN elicited marker says
+    ``status: unfilled`` or ``status: skipped`` (slice 116-02 AC7). The first
+    elicited marker in the section decides — a later one (e.g. under an H3) is
+    ignored.
+
+    The scaffold template ships the section with placeholder bullets under an
+    ``unfilled`` marker, so "section present" alone cannot tell an elicited
+    layer from the template's placeholders. A ``filled`` marker, no marker, or
+    no section is **not** unelicited. Scoped to the section body — other
+    sections carry their own markers. Only `progress` consults this; the
+    section-presence predicates above are unchanged.
+    """
+    body = _use_cases_section_body(vision_text)
+    if not body:
+        return False
+    marker = _ELICITED_MARKER_RE.search(body)
+    status = _STATUS_FIELD_RE.search(marker.group(1)) if marker else None
+    return bool(status) and status.group(1).lower() in _UNELICITED_STATUSES
+
+
 def has_entries(vision_text: str) -> bool:
     """True iff the `## Use cases` section contains at least one list bullet
     (id-bearing OR id-less legacy). Distinguishes a populated-but-id-less

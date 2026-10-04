@@ -390,6 +390,14 @@ class ProgressDocumentedBesideCoverageTests(unittest.TestCase):
         self.assertIn("use case", bullet)
         self.assertIn("count", bullet)
 
+    def test_116_02_progress_bullet_names_the_summary_flag(self):
+        """Slice 116-02 AC6 — the bullet names `--summary` and who consumes
+        it (the /jig:orient briefing), so the compact mode is discoverable
+        from the sibling skill, not only from orient's own text."""
+        bullet = self._bullet("workflow.py progress").lower()
+        self.assertIn("--summary", bullet)
+        self.assertIn("orient", bullet)
+
     def test_ac10_no_skill_prose_names_jig_as_unadopted(self):
         self.assertNotIn("e.g. jig's own repo", self.text)
         use_cases_py = (SKILL_DIR.parent / "_common" / "use_cases.py").read_text()

@@ -224,3 +224,17 @@ The original spec is preserved above. Implementation notes:
 | `slice-02-orient-surface.md` frame-review edits | `deferred` | Changed pre-implementation in `5564906d` (deterministic `--summary` mode, 10-entry name-list caps, Goal and anti-horizontal rewrite, orient checkpoint). To be written up in 116-02's own deviation log; trigger: 116-02 reconciliation. |
 | `docs/specs/README.md` Notes column | `updated` | 068-02 / 068-03 Notes no longer cite jig's own repo as not adopted (AC10 spirit; live text). |
 | Additional live prose / generated templates touched by this slice | `updated` | `skills/spec-workflow/SKILL.md` (`progress` bullet + AC10), `skills/_common/use_cases.py` docstrings, and the regenerated `hosts/{claude,codex,copilot}` mirrors (`build_host_packages.py --check` exit 0). |
+
+## Amendments
+
+- **2026-10-03 — AC7's not-adopted states extended by slice 116-02 AC7
+  (owner-approved).** AC7 above says `progress` has "the same two states
+  `coverage` has" (no vision file; vision without `## Use cases`). The 116-02
+  craft review found that the scaffold template ships the section with
+  placeholder bullets under a `status: unfilled` marker, so an unelicited
+  project would show placeholder goals in every `/jig:orient` briefing. The
+  owner chose to fix it in `progress` only: a section whose elicited marker says
+  `status: unfilled` or `status: skipped` now also gets the one-line `no-op`
+  note. From 116-02 on, `progress` has three not-adopted cases and `coverage`
+  keeps two; aligning `coverage` and the step-2a prompt is parked in
+  `docs/refinement-todo.md`. The AC text above is preserved as written.

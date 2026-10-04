@@ -293,5 +293,80 @@ class NearDuplicateTests(unittest.TestCase):
         )
 
 
+class UseCasesUnelicitedTests(unittest.TestCase):
+    """Slice 116-02 AC7: `use_cases_unelicited` reads the `## Use cases`
+    section's own elicited marker — `status: unfilled` / `status: skipped` is
+    unelicited; `status: filled` or no marker is adopted. Scoped to that
+    section: other sections carry their own markers."""
+
+    @staticmethod
+    def _vision(marker, *, before="", after=""):
+        return (
+            f"# Vision\n\n{before}## Use cases\n\n{marker}\n\n"
+            "- UC-1: A crafter can search for a yarn\n\n"
+            f"{after}## Stack\n\n- python\n"
+        )
+
+    def test_unfilled_marker_is_unelicited(self):
+        v = self._vision("<!-- elicited: PENDING / status: unfilled -->")
+        self.assertTrue(use_cases.use_cases_unelicited(v))
+
+    def test_skipped_marker_is_unelicited(self):
+        v = self._vision("<!-- elicited: 2026-05-15 / status: skipped -->")
+        self.assertTrue(use_cases.use_cases_unelicited(v))
+
+    def test_filled_marker_is_elicited(self):
+        v = self._vision("<!-- elicited: 2026-05-15 / status: filled -->")
+        self.assertFalse(use_cases.use_cases_unelicited(v))
+
+    def test_no_marker_is_elicited(self):
+        self.assertFalse(use_cases.use_cases_unelicited(self._vision("")))
+
+    def test_no_section_is_not_unelicited(self):
+        self.assertFalse(use_cases.use_cases_unelicited(VISION_NO_SECTION))
+
+    def test_marker_is_case_and_spacing_tolerant(self):
+        v = self._vision("<!--elicited:PENDING/Status:  Unfilled-->")
+        self.assertTrue(use_cases.use_cases_unelicited(v))
+
+    HASHED = "<!-- elicited: 2026-05-15 / status: {} / hash: sha256:0123456789ab -->"
+
+    def test_hashed_filled_marker_is_elicited(self):
+        """`/jig:vision-elicitation` writes `status: filled / hash: sha256:…`."""
+        v = self._vision(self.HASHED.format("filled"))
+        self.assertFalse(use_cases.use_cases_unelicited(v))
+
+    def test_hashed_unfilled_and_skipped_markers_are_unelicited(self):
+        for status in ("unfilled", "skipped"):
+            with self.subTest(status=status):
+                v = self._vision(self.HASHED.format(status))
+                self.assertTrue(use_cases.use_cases_unelicited(v))
+
+    def test_the_first_marker_decides_not_a_later_one_in_the_section(self):
+        """A hashed filled section marker followed by an H3 carrying its own
+        `unfilled` marker is still elicited — the section's own (first)
+        marker decides, wherever a later marker sits inside the body."""
+        h3 = ("### Notes\n\n<!-- elicited: PENDING / status: unfilled -->\n\n")
+        v = self._vision(self.HASHED.format("filled"), after=h3)
+        self.assertFalse(use_cases.use_cases_unelicited(v))
+        # And the mirror: an unfilled first marker beats a later filled one.
+        h3f = "### Notes\n\n" + self.HASHED.format("filled") + "\n\n"
+        v = self._vision("<!-- elicited: PENDING / status: unfilled -->",
+                         after=h3f)
+        self.assertTrue(use_cases.use_cases_unelicited(v))
+
+    def test_only_the_use_cases_sections_own_marker_counts(self):
+        other = "## Constraints\n\n<!-- elicited: PENDING / status: unfilled -->\n\n"
+        filled = "<!-- elicited: 2026-05-15 / status: filled -->"
+        # An unfilled marker in a section BEFORE and AFTER does not leak in.
+        v = self._vision(filled, before=other, after=other)
+        self.assertFalse(use_cases.use_cases_unelicited(v))
+        # And a filled marker elsewhere does not rescue an unfilled section.
+        filled_other = "## Constraints\n\n" + filled + "\n\n"
+        v = self._vision("<!-- elicited: PENDING / status: unfilled -->",
+                         before=filled_other, after=filled_other)
+        self.assertTrue(use_cases.use_cases_unelicited(v))
+
+
 if __name__ == "__main__":
     unittest.main()
