@@ -1,5 +1,5 @@
 ---
-status: REVIEWED
+status: DONE
 tier: standard
 severity: medium
 claimed_by: claude/github-issue-235-review-b2cf03

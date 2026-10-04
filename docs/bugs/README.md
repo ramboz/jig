@@ -42,7 +42,7 @@
 | 036 | copilot-skill-helper-path | high | standard | DONE | yes | skills/scaffold-init/test_copilot_renderer.py::CopilotPluginModeHelperPathTests | copilot-plugin-audit |  |  |
 | 037 | orient-stale-claim-not-reaped | medium | standard | DONE | yes | skills/spec-workflow/test_workflow.py::OrientClaimReapingTests | claude/bug-orient-stale-claim |  |  |
 | 038 | stale-blind-to-proposed-adr | low | standard | DONE | yes | skills/spec-workflow/test_workflow.py::StaleProposedAdrTests | claude/bug-stale-proposed-adr |  |  |
-| 039 | reviewed-fixing-back-edge-rejected | medium | standard | REVIEWED | yes | skills/bug-fix/test_bug.py::Bug039ReviewBackEdgeTests | claude/github-issue-235-review-b2cf03 |  |  |
+| 039 | reviewed-fixing-back-edge-rejected | medium | standard | DONE | yes | skills/bug-fix/test_bug.py::Bug039ReviewBackEdgeTests | claude/github-issue-235-review-b2cf03 |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 
