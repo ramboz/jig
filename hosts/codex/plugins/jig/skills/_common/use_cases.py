@@ -18,7 +18,8 @@ This module is the deterministic core of that trace surface — a sibling of
   - ``classify_spec(spec_use_cases, vision_text)`` — the AC5 **mechanical
     trigger** predicate: one of ``no_section`` / ``empty`` / ``resolved`` /
     ``unresolvable`` for a single spec. ``no_section`` (the layer is not
-    adopted — e.g. jig's own repo) is the **no-op** state: nothing prompts.
+    adopted — e.g. a library or single-flow CLI) is the **no-op** state:
+    nothing prompts.
   - ``next_use_case_id(vision_text)`` — AC5(b) additive allocation: the next
     free ``UC-N`` (``max(existing) + 1``; **never reuses a retired number**).
   - ``is_near_duplicate(text, existing)`` — AC5(b)(ii) grow-quality guard: a
@@ -117,6 +118,37 @@ def has_use_cases_section(vision_text: str) -> bool:
     return _USE_CASES_HEADING_RE.search(vision_text) is not None
 
 
+# The elicited marker `/jig:vision-elicitation` and the scaffold template write
+# under a section heading: `<!-- elicited: PENDING / status: unfilled -->`, or
+# `<!-- elicited: DATE / status: filled / hash: sha256:<12hex> -->` once filled.
+# The FIRST such comment is the section's own; its `status:` field is read and
+# any trailing ` / key: value` fields are tolerated.
+_ELICITED_MARKER_RE = re.compile(r"(?is)<!--\s*elicited:(.*?)-->")
+_STATUS_FIELD_RE = re.compile(r"(?i)\bstatus:\s*(\w+)")
+_UNELICITED_STATUSES = ("unfilled", "skipped")
+
+
+def use_cases_unelicited(vision_text: str) -> bool:
+    """True iff the `## Use cases` section's OWN elicited marker says
+    ``status: unfilled`` or ``status: skipped`` (slice 116-02 AC7). The first
+    elicited marker in the section decides — a later one (e.g. under an H3) is
+    ignored.
+
+    The scaffold template ships the section with placeholder bullets under an
+    ``unfilled`` marker, so "section present" alone cannot tell an elicited
+    layer from the template's placeholders. A ``filled`` marker, no marker, or
+    no section is **not** unelicited. Scoped to the section body — other
+    sections carry their own markers. Only `progress` consults this; the
+    section-presence predicates above are unchanged.
+    """
+    body = _use_cases_section_body(vision_text)
+    if not body:
+        return False
+    marker = _ELICITED_MARKER_RE.search(body)
+    status = _STATUS_FIELD_RE.search(marker.group(1)) if marker else None
+    return bool(status) and status.group(1).lower() in _UNELICITED_STATUSES
+
+
 def has_entries(vision_text: str) -> bool:
     """True iff the `## Use cases` section contains at least one list bullet
     (id-bearing OR id-less legacy). Distinguishes a populated-but-id-less
@@ -198,9 +230,10 @@ def classify_spec(spec_use_cases, vision_text: str) -> str:
 
     Returns exactly one of:
       - ``NO_SECTION`` — the vision has **no** `## Use cases` section: the
-        breadth layer is not adopted (e.g. jig's own repo). **No-op state** —
-        AC5's prompt must stay silent and nothing errors. Checked **first**, so
-        a stray cited id on a layer-less project still classifies as no_section.
+        breadth layer is not adopted (e.g. a library or single-flow CLI).
+        **No-op state** — AC5's prompt must stay silent and nothing errors.
+        Checked **first**, so a stray cited id on a layer-less project still
+        classifies as no_section.
       - ``EMPTY`` — section present, but the spec cites **nothing**
         (``use_cases:`` empty or absent). This is the state a gap-creating
         author most naturally produces, and AC4 blesses it as non-erroring —

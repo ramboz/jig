@@ -73,6 +73,7 @@ from _common.use_cases import (
     has_use_cases_section,
     parse_use_cases,
     resolve_use_cases,
+    use_cases_unelicited,
 )
 
 VALID_STATUSES = (
@@ -1713,6 +1714,35 @@ def _extract_blocked(section: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def _spec_slice_statuses(spec_path: Path) -> list:
+    """Every slice's status string for a spec, in `_iter_slices_common` order
+    (both layouts). Shared by `compute_spec_status` and `progress` (slice
+    116-01) so the rollup and the per-use-case counts read statuses one way.
+    A slice with no readable status is skipped."""
+    statuses = []
+    for loc in _iter_slices_common(spec_path):
+        section = loc.text[loc.start:loc.end]
+        fm_fields, _ = _slice_frontmatter(section)
+        if fm_fields.get("status"):
+            statuses.append(fm_fields["status"])
+            continue
+        m = _STATUS_MARKER_RE.search(section)
+        if m:
+            statuses.append(m.group(2))
+    return statuses
+
+
+# Slice states that are not "known work": a slice in one of these counts
+# toward neither a spec's rollup nor `progress`'s done/known totals.
+# Single-sourced here for `_rollup_status` and `_progress_data` (slice 116-01).
+_UNCOUNTED_SLICE_STATES = ("DEFERRED", "ABANDONED")
+
+
+def _known_slice_statuses(statuses: list) -> list:
+    """The statuses that count as known work (see `_UNCOUNTED_SLICE_STATES`)."""
+    return [st for st in statuses if st not in _UNCOUNTED_SLICE_STATES]
+
+
 def compute_spec_status(spec_path: Path) -> str:
     """Slice 030-01: derive the spec-level rollup from slice states.
     Widened by slice 085-01 (AC4) to a 4th return value, `"ABANDONED"`.
@@ -1735,17 +1765,13 @@ def compute_spec_status(spec_path: Path) -> str:
     (handled by callers `transition` / `status-board`) is what's skipped
     on missing frontmatter, not the compute.
     """
-    statuses = []
-    for loc in _iter_slices_common(spec_path):
-        section = loc.text[loc.start:loc.end]
-        fm_fields, _ = _slice_frontmatter(section)
-        if fm_fields.get("status"):
-            statuses.append(fm_fields["status"])
-            continue
-        m = _STATUS_MARKER_RE.search(section)
-        if m:
-            statuses.append(m.group(2))
+    return _rollup_status(_spec_slice_statuses(spec_path))
 
+
+def _rollup_status(statuses: list) -> str:
+    """Pure core of `compute_spec_status`: slice statuses -> spec rollup.
+    Split out (slice 116-01) so `progress` rolls up the statuses it has
+    already read instead of re-parsing the spec's slices."""
     # No slices at all → DRAFT
     if not statuses:
         return "DRAFT"
@@ -1755,28 +1781,21 @@ def compute_spec_status(spec_path: Path) -> str:
     if all(s == "ABANDONED" for s in statuses):
         return "ABANDONED"
 
-    non_deferred = [s for s in statuses if s != "DEFERRED"]
+    known = _known_slice_statuses(statuses)
 
-    # Every slice is DEFERRED → DRAFT (no live work)
-    if not non_deferred:
+    # No known work left (all DEFERRED, or a mix of DEFERRED + ABANDONED with
+    # no DONE/live slice) → DRAFT: same human action (reopen the resumable
+    # part, or close it out entirely); see spec 085 Assumptions #4.
+    if not known:
         return "DRAFT"
 
-    non_deferred_or_abandoned = [s for s in non_deferred if s != "ABANDONED"]
-
-    # Every non-DEFERRED slice is ABANDONED (mix of DEFERRED + ABANDONED
-    # only, no DONE/live work) → DRAFT — same human action (reopen the
-    # resumable part, or close it out entirely) as all-DEFERRED today; see
-    # spec 085 Assumptions #4.
-    if not non_deferred_or_abandoned:
-        return "DRAFT"
-
-    # Every non-DEFERRED/non-ABANDONED slice is DONE → DONE (a mix of
-    # DONE + ABANDONED rolls up the same as DONE + DEFERRED today).
-    if all(s == "DONE" for s in non_deferred_or_abandoned):
+    # Every known slice is DONE → DONE (a mix of DONE + ABANDONED rolls up
+    # the same as DONE + DEFERRED today).
+    if all(s == "DONE" for s in known):
         return "DONE"
 
-    # Every non-DEFERRED/non-ABANDONED slice is DRAFT → DRAFT (no work begun)
-    if all(s == "DRAFT" for s in non_deferred_or_abandoned):
+    # Every known slice is DRAFT → DRAFT (no work begun)
+    if all(s == "DRAFT" for s in known):
         return "DRAFT"
 
     # Mix of DONE + DRAFT, or any active state → IN_PROGRESS
@@ -3371,9 +3390,9 @@ def amendment_digest(project_dir: Path) -> str:
 # hands these over; dropping them silently would hide a data error.
 #
 # NO-OP STATE (load-bearing): a project whose vision has no `## Use cases`
-# section has not adopted the breadth layer (jig's own repo; opted-out
-# libraries / single-flow CLIs). It must emit a no-op note with ZERO
-# findings and exit 0 — never a finding, never non-zero.
+# section has not adopted the breadth layer (e.g. an opted-out library or
+# single-flow CLI). It must emit a no-op note with ZERO findings and exit 0
+# — never a finding, never non-zero.
 #
 # Computed from frontmatter `use_cases:` METADATA, not spec prose (AC2).
 
@@ -3389,8 +3408,8 @@ def coverage(project_dir: Path) -> str:
     Algorithm:
       1. No `docs/product-vision.md` → advisory 'skipped' note (no crash).
       2. Vision has no `## Use cases` section → NO-OP note, zero findings.
-         (The breadth layer is not adopted — jig's own repo / opted-out
-         project classes. Load-bearing: must never emit findings.)
+         (The breadth layer is not adopted — e.g. an opted-out library or
+         single-flow CLI. Load-bearing: must never emit findings.)
       3. For each `docs/specs/*/spec.md`, read its `use_cases:` frontmatter
          (a list; a bare or `[]` value means 'no citations'), resolve the
          cited ids against the vision, and accumulate:
@@ -3415,7 +3434,7 @@ def coverage(project_dir: Path) -> str:
             "Use-case coverage (advisory, non-blocking) — no-op: the "
             "use-case breadth layer is not adopted (no `## Use cases` "
             "section in docs/product-vision.md). Coverage is a no-op here "
-            "(e.g. a library, a single-flow CLI, or jig's own repo). "
+            "(e.g. a library or a single-flow CLI). "
             "ADR-0025 / spec 068-03.\n"
         )
 
@@ -3503,6 +3522,199 @@ def coverage(project_dir: Path) -> str:
         f"{len(gaps)} gap(s) / {len(scope_creep)} orphan(s) / "
         f"{len(unresolvable)} dangling."
     )
+    return "\n".join(lines) + "\n"
+
+
+# ---------- Slice 116-01: use-case progress rollup ----------
+#
+# A derived, read-only, ADVISORY join of the spec-level `use_cases:` trace
+# links with slice state: use case -> specs -> done/known slice COUNTS, plus
+# an Unanchored bucket for specs citing no resolvable use case. Sibling of
+# `coverage` (same `--project-dir`, stdout, always exit 0). Three not-adopted
+# cases, each a one-line note and no rollup: no vision ('skipped'), no
+# `## Use cases` section ('no-op'), and a section marked `status: unfilled` /
+# `skipped` ('no-op', slice 116-02 AC7); `coverage` keeps only the first two.
+# Bounded by ADR-0064: stores nothing, no percentages, no weighting/
+# estimation/dates, spec-level links only, and a PROGRESS view — not a drift
+# detector (the links are written by the agents whose direction is in
+# question).
+#
+# Counting rule = the spec rollup's: both read slice statuses through
+# `_spec_slice_statuses` and filter them through `_known_slice_statuses`; a
+# slice counts toward K unless DEFERRED/ABANDONED, toward D only when DONE;
+# deferred slices are shown separately. The spec status column is
+# `_rollup_status` over the same statuses (the pure core of
+# `compute_spec_status`), so the counts and the status cannot drift.
+
+
+def _progress_data(project_dir: Path, vision_text: str) -> dict:
+    """Compute the rollup: per-use-case spec rows, the Unanchored bucket, and
+    every spec row once (for the once-counted summary). Rendering-free so a
+    compact renderer (slice 116-02) can reuse it.
+
+    A spec row is ``{name, status, done, known, deferred, unknown}``; a spec
+    citing several use cases appears in each of their lists (same row).
+    """
+    vision_ucs = parse_use_cases(vision_text)  # ordered {UC-id: goal}
+    by_uc: dict = {uc: [] for uc in vision_ucs}
+    unanchored: list = []
+    rows: list = []
+
+    spec_paths = sorted(project_layout.specs_dir(project_dir).glob("*/spec.md"))
+    for spec_md in spec_paths:
+        fields, _ = parse_frontmatter(spec_md.read_text(encoding="utf-8"))
+        raw = fields.get("use_cases")
+        cited = raw if isinstance(raw, list) else []
+        result = resolve_use_cases(cited, vision_text)
+        statuses = _spec_slice_statuses(spec_md)
+        known = _known_slice_statuses(statuses)
+        row = {
+            "name": spec_md.parent.name,
+            "status": _rollup_status(statuses),
+            "done": known.count("DONE"),
+            "known": len(known),
+            "deferred": statuses.count("DEFERRED"),
+            "unknown": list(dict.fromkeys(result.unresolvable)),
+        }
+        rows.append(row)
+        resolved = list(dict.fromkeys(result.resolved))
+        if not resolved:
+            unanchored.append(row)
+        for uc in resolved:
+            by_uc[uc].append(row)
+
+    return {
+        "ucs": [(uc, goal, by_uc[uc]) for uc, goal in vision_ucs.items()],
+        "unanchored": unanchored,
+        "rows": rows,
+    }
+
+
+def _progress_totals(rows: list) -> str:
+    """`D/K slices done` over `rows` (the one place the figure is formatted)."""
+    return (f"{sum(r['done'] for r in rows)}/"
+            f"{sum(r['known'] for r in rows)} slices done")
+
+
+def _progress_summary_line(data: dict) -> str:
+    """The once-counted closing line — shared by the full report and
+    `--summary` so the two cannot disagree."""
+    return (
+        f"Summary: {len(data['ucs'])} use case(s) · {len(data['rows'])} "
+        f"spec(s) · {len(data['unanchored'])} unanchored · "
+        f"{_progress_totals(data['rows'])} (each spec and slice counted once)"
+    )
+
+
+def progress(project_dir: Path, summary: bool = False) -> str:
+    """Render the use-case progress rollup to a string.
+
+    Read-only and ADVISORY (the caller always exits 0). Not adopted →
+    one-line note, no rollup, in three cases: no `product-vision.md` is
+    'skipped'; a vision without a `## Use cases` section is a 'no-op'; so is a
+    section whose elicited marker says `status: unfilled` / `skipped` (slice
+    116-02 AC7). `coverage` keeps only the first two. `summary=True` (slice
+    116-02) renders the compact `--summary` view of the SAME computed data
+    instead of the full tree.
+    """
+    vision = project_layout.docs_base(project_dir) / "product-vision.md"
+    if not vision.is_file():
+        return (
+            "Use-case progress (advisory, non-blocking) — skipped: "
+            f"{vision.as_posix()} not found. The rollup needs a project "
+            "vision with a `## Use cases` section (ADR-0064 / spec 116).\n"
+        )
+
+    vision_text = vision.read_text(encoding="utf-8")
+    if not has_use_cases_section(vision_text):
+        return (
+            "Use-case progress (advisory, non-blocking) — no-op: the "
+            "use-case breadth layer is not adopted (no `## Use cases` "
+            "section in docs/product-vision.md). ADR-0064 / spec 116.\n"
+        )
+    if use_cases_unelicited(vision_text):
+        # Slice 116-02 AC7: the scaffold template's placeholder section is
+        # present but not elicited — not adopted either. `progress`-only.
+        return (
+            "Use-case progress (advisory, non-blocking) — no-op: the "
+            "`## Use cases` section is not elicited yet (its marker says "
+            "`status: unfilled` or `skipped`). ADR-0064 / spec 116.\n"
+        )
+
+    data = _progress_data(project_dir, vision_text)
+    if summary:
+        return _render_progress_summary(data)
+    name_w = max((len(r["name"]) for r in data["rows"]), default=0)
+    status_w = max((len(r["status"]) for r in data["rows"]), default=0)
+
+    def spec_line(r: dict) -> str:
+        counts = f"{r['done']}/{r['known']}"
+        if r["deferred"]:
+            counts += f" (+{r['deferred']} deferred)"
+        line = f"  {r['name']:<{name_w}}  {r['status']:<{status_w}}  {counts}"
+        if r["unknown"]:
+            line += f"  [cites unknown: {', '.join(r['unknown'])}]"
+        return line
+
+    lines = [
+        "# Use-case progress",
+        "",
+        "Advisory, read-only. Counts are done/known slices (deferred and "
+        "abandoned slices are not known work). A progress view, not a "
+        "check that the work is on-goal.",
+        "",
+    ]
+    for uc, goal, specs in data["ucs"]:
+        lines.append(f"{uc}  {goal}  —  "
+                     f"{_progress_totals(specs) if specs else 'no spec yet'}")
+        lines.extend(spec_line(r) for r in specs)
+    lines.append("")
+    lines.append(
+        "Unanchored (cites no resolvable use case)  —  "
+        f"{_progress_totals(data['unanchored']) if data['unanchored'] else 'none'}"
+    )
+    lines.extend(spec_line(r) for r in data["unanchored"])
+    lines.append("")
+    lines.append(_progress_summary_line(data))
+    return "\n".join(lines) + "\n"
+
+
+# Slice 116-02: `progress --summary` — the compact view /jig:orient copies.
+# Name lists are capped so a project that adopts the use-case layer late
+# (every spec unanchored) still prints a screenful, not hundreds of lines.
+_PROGRESS_SUMMARY_CAP = 10
+
+
+def _capped(entries: list) -> list:
+    """`entries` cut to `_PROGRESS_SUMMARY_CAP`, plus an `… and N more` line."""
+    shown = entries[:_PROGRESS_SUMMARY_CAP]
+    extra = len(entries) - len(shown)
+    return shown + ([f"  … and {extra} more"] if extra else [])
+
+
+def _render_progress_summary(data: dict) -> str:
+    """Exactly three things from `_progress_data`: the once-counted totals
+    line; the use cases with no spec or no done slice; the Unanchored count
+    with its spec names. No per-spec tree, no percentage."""
+    untouched = []
+    for uc, goal, specs in data["ucs"]:
+        if not specs:
+            untouched.append(f"  {uc}  {goal}  —  no spec yet")
+        elif not any(r["done"] for r in specs):
+            untouched.append(f"  {uc}  {goal}  —  no done slice")
+    names = [f"  {r['name']}" for r in data["unanchored"]]
+
+    lines = [_progress_summary_line(data)]
+    if untouched:
+        lines.append(f"No done slice or no spec ({len(untouched)}):")
+        lines.extend(_capped(untouched))
+    else:
+        lines.append("No done slice or no spec: none")
+    if names:
+        lines.append(f"Unanchored ({len(names)}):")
+        lines.extend(_capped(names))
+    else:
+        lines.append("Unanchored: none")
     return "\n".join(lines) + "\n"
 
 
@@ -5612,6 +5824,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pcov.add_argument("--project-dir", default=".",
                       help="project root directory (default: cwd)")
+
+    # Slice 116-01: read-only, ADVISORY use-case progress rollup — the
+    # `use_cases:` trace links joined with slice state (ADR-0064). Counts
+    # only, derived on every run, never gates (exits 0).
+    ppr = sub.add_parser(
+        "progress",
+        help="read-only, advisory use-case progress rollup: per use case, "
+             "the specs citing it and their done/known slice counts, plus "
+             "specs citing no use case (slice 116-01)",
+    )
+    ppr.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+    # Slice 116-02: the compact view the /jig:orient briefing copies.
+    ppr.add_argument("--summary", action="store_true",
+                     help="compact view: the totals line, the use cases "
+                          "with no done slice or no spec, and the "
+                          "Unanchored specs (slice 116-02)")
     return p
 
 
@@ -5682,6 +5911,11 @@ def main(argv: list) -> int:
             # WorkflowError for a finding. Only a genuine error (e.g. an
             # unreadable tree) falls through to the generic handler.
             sys.stdout.write(coverage(Path(ns.project_dir)))
+        elif ns.command == "progress":
+            # Advisory (slice 116-01): same always-exit-0 contract as coverage.
+            sys.stdout.write(
+                progress(Path(ns.project_dir), summary=ns.summary)
+            )
     except StatusBoardRaceError as exc:
         # Slice 028-03 AC #3: dedicated exit code 4 for status-board race.
         # Must be caught before the generic `WorkflowError → 2` handler so

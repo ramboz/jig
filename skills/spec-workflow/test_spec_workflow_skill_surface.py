@@ -16,7 +16,8 @@ Slice 068-02 adds two pieces of spec-author contract prose to SKILL.md
               route-to-cite),
           (c) decline (no-op).
         CRITICAL: when there is NO `## Use cases` section (layer not adopted —
-        e.g. jig's own repo) the trigger is silent — nothing prompts or errors.
+        e.g. a library or single-flow CLI) the trigger is silent — nothing
+        prompts or errors.
 
 These are pure-file inspections (no subprocess, no runner), run under the same
 `python3 scripts/run_tests.py` invocation as every other jig skill surface test.
@@ -353,6 +354,55 @@ class ReconciliationChecklistLeannessSweepTests(unittest.TestCase):
             "the leanness sweep must be anchored to the spec's needs "
             "(added-beyond-need), not stripping required behavior (109-02)",
         )
+
+
+class ProgressDocumentedBesideCoverageTests(unittest.TestCase):
+    """Slice 116-01 AC8 — the "What this skill does" list documents
+    `workflow.py progress` next to its sibling `coverage`. AC10 — live text
+    no longer presents jig's own repo as a project that has NOT adopted the
+    use-case layer (jig adopted it 2026-10-03)."""
+
+    @classmethod
+    def setUpClass(cls):
+        text = SKILL_MD.read_text()
+        start = text.index("## What this skill does")
+        end = text.index("\n## ", start + 3)
+        cls.section = text[start:end]
+        cls.text = text
+
+    def _bullet(self, needle):
+        for chunk in re.split(r"\n(?=- )", self.section):
+            if needle in chunk:
+                return chunk
+        return ""
+
+    def test_ac8_progress_bullet_sits_right_after_coverage_bullet(self):
+        cov = self.section.index("workflow.py coverage")
+        prog = self.section.index("workflow.py progress")
+        self.assertGreater(prog, cov, "progress bullet must follow coverage")
+        between = self.section[cov:prog]
+        # Exactly one bullet boundary between them: adjacent bullets.
+        self.assertEqual(between.count("\n- "), 1, between)
+
+    def test_ac8_progress_bullet_states_read_only_counts(self):
+        bullet = self._bullet("workflow.py progress").lower()
+        self.assertIn("read-only", bullet)
+        self.assertIn("use case", bullet)
+        self.assertIn("count", bullet)
+
+    def test_116_02_progress_bullet_names_the_summary_flag(self):
+        """Slice 116-02 AC6 — the bullet names `--summary` and who consumes
+        it (the /jig:orient briefing), so the compact mode is discoverable
+        from the sibling skill, not only from orient's own text."""
+        bullet = self._bullet("workflow.py progress").lower()
+        self.assertIn("--summary", bullet)
+        self.assertIn("orient", bullet)
+
+    def test_ac10_no_skill_prose_names_jig_as_unadopted(self):
+        self.assertNotIn("e.g. jig's own repo", self.text)
+        use_cases_py = (SKILL_DIR.parent / "_common" / "use_cases.py").read_text()
+        self.assertNotIn("e.g. jig's own repo", use_cases_py)
+        self.assertNotIn("jig's own repo)", use_cases_py)
 
 
 if __name__ == "__main__":

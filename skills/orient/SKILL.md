@@ -128,6 +128,14 @@ Projects vary, so look for these, use what exists, don't assume they all exist:
   `DONE`, `DEFERRED`, `ABANDONED`. This is the spine of "what's shipped vs. open."
   (`workflow.py orient` already summarizes the active rollup — use it rather than
   recounting from scratch.)
+- **Use-case progress** — only when `<docs_root>/product-vision.md` has a `## Use cases`
+  section: run the read-only
+  `python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" progress --summary --project-dir .`
+  and use its output for the briefing's Use-case progress section. It writes nothing,
+  and it is a progress view, not a check that the work is on-goal. If it prints a
+  one-line `skipped` or `no-op` note (no vision file, no section, or one not elicited
+  yet), drop it and
+  say nothing about use cases.
 - **DEFERRED slices + their triggers** — a DEFERRED slice carries a *resolution trigger*
   ("revisit once X"). Check whether that trigger is now met — a met trigger is often the
   best "obvious next step."
@@ -212,34 +220,47 @@ genuinely exists. **Cross-check it against the open PRs first** — a question t
 already been asked in a PR body is not a fresh decision to re-derive and re-frame, it is
 an outstanding one to point at.
 
-### 5. Larger deferred bets / packs (when they exist)
+### 5. Use-case progress (when the use-case layer is adopted)
+
+Copy the content of `workflow.py progress --summary` as bullets — not recounted, not
+re-derived. It carries three things and no more: the done/known totals line; the use cases
+with no done slice or no spec (id, goal, which of the two); and the Unanchored count with
+its spec names. Keep any `… and N more` line. Add one line naming `workflow.py progress`
+for the full per-use-case listing. Never reproduce the full tree and never state a
+percentage. This is a progress view, not a verdict that the work is on-goal or drifting.
+
+Omit this section, with no mention of use cases, whenever `--summary` prints a one-line
+`skipped` or `no-op` note: no vision file, no `## Use cases` section in it, or one not
+yet elicited.
+
+### 6. Larger deferred bets / packs (when they exist)
 
 The bigger parked items that need a **trigger or a decision** before they're actionable.
 One titled bullet each: title — one-line what — the trigger or what's blocking it. Group
 tightly; this is a menu, not an essay.
 
-### 6. The DRAFT queue / ready to build (when specs are DRAFT)
+### 7. The DRAFT queue / ready to build (when specs are DRAFT)
 
 Specs or slices sitting in DRAFT/READY awaiting a go-ahead. One bullet each with the spec
 id and a one-line scope. Note if any is beta/release-blocking, and flag any board row that
 looks stale against a very recent commit.
 
-### 7. Polish follow-ups (when they exist)
+### 8. Polish follow-ups (when they exist)
 
 The small, satisfying parked items — extractions, autocompletes, test-depth, a deferred
 AC. Terse bullets; these are the "if you have an hour" pile.
 
-### 8. Standalone fixes — no spec ceremony (when they exist)
+### 9. Standalone fixes — no spec ceremony (when they exist)
 
 Real bugs or contained correctness issues worth doing without a spec. One bullet each:
 the symptom, and the contained root-cause/fix if known.
 
-### 9. My recommendation (always)
+### 10. My recommendation (always)
 
 **One** clear pick, with a two-to-three-sentence why. Name the single dependency or first
 decision it needs. Don't re-list the menu — commit to a direction.
 
-### 10. The offer (always)
+### 11. The offer (always)
 
 End with a concrete either/or that hands off to the real work:
 > *Want me to draft the 002-07 spec slice, or would you rather tackle backup restore — the

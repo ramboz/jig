@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: DONE
 skill: spec-workflow
 use_cases: [UC-11, UC-12]
 ---
@@ -10,9 +10,9 @@ use_cases: [UC-11, UC-12]
 
 > Builds on [ADR-0025](../../decisions/adr-0025-use-cases-breadth-layer.md)
 > (Architecture Decision Record) and [spec 068](../068-use-cases-breadth-layer/spec.md).
-> **DRAFT.** A read-only `workflow.py progress` query that joins the
+> A read-only `workflow.py progress` query that joins the
 > `use_cases:` trace links with slice state and prints **use case → specs → done
-> slices**, plus an explicit **Unanchored** bucket for specs that serve no stated
+> slices**, plus an explicit **Unanchored** bucket for specs that cite no stated
 > use case. Stdout only, advisory, no new artifact; then surfaced in the
 > `/jig:orient` briefing.
 
@@ -31,12 +31,20 @@ project is still progressing toward its goals rather than straying.
 **What this spec adds.** The missing join — trace links × slice state:
 
 1. **`workflow.py progress`** (slice 01) — for each use case in the vision, the
-   specs citing it and their done/known slice counts; then the specs that cite
-   no use case (**Unanchored** — the rabbit-hole signal). Deterministic,
-   read-only, always exit 0.
-2. **`/jig:orient` surfacing** (slice 02) — the project briefing carries a short
-   use-case progress section, so a returning owner sees it without knowing the
-   command exists.
+   specs citing it with their status and done/known slice counts; then the
+   specs that cite no use case (**Unanchored**). Deterministic, read-only,
+   always exit 0.
+2. **`/jig:orient` surfacing** (slice 02) — a deterministic `progress --summary`
+   mode, and a short use-case progress section in the project briefing built
+   from it, so a returning owner sees it without knowing the command exists.
+
+**What it is not.** A progress view, not a drift detector
+([ADR-0064](../../decisions/adr-0064-use-case-progress-rollup-in-jig.md) bound
+5). The trace links are assigned by the agents whose direction is in question,
+so an off-goal spec usually appears under some plausible use case rather than
+in Unanchored (see Assumptions). What the report does give the owner is every
+spec, with its status, under the use case it claims to serve — the place to
+audit a claim, not a verdict on it.
 
 **Illustrative output.** Shape only — the slice acceptance criteria are the
 contract, and every count below is invented:
@@ -102,7 +110,7 @@ state" true — it is a derived view that stores nothing.
 **Goals**
 
 - One command answers: per intended behavior, how much of the known work is
-  done — and how much work serves no stated behavior.
+  done — and which specs cite no stated behavior.
 - **Derived, not stored.** No new artifact and no new state; the report is
   computed from the vision and the spec records on every run.
 - **Advisory** ([ADR-0011](../../decisions/adr-0011-spec-gate-model.md)): never
@@ -126,22 +134,21 @@ state" true — it is a derived view that stores nothing.
 
 ## Assumptions
 
-> Risk-gated (ADR-0020). Both entries are real and unverified, so they are the
-> frame-critique trigger for this spec.
+> Risk-gated (ADR-0020). Each entry is real and unverified, so together they
+> are the frame-critique trigger for this spec.
 
-- **Load-bearing (thin evidence):** a done/known slice count per use case is a useful drift signal for the owner — one owner request (2026-10-03), not measured. ADR-0025 §A2 already warns that goal-level use cases can read "complete" while specs still diverge, and a count inherits that: every slice `DONE` does not prove the behavior works end to end. Mitigated by showing counts rather than percentages and by the Unanchored bucket. Kill signal: the report reads all-done while the owner still feels drift, or the owner stops consulting it.
-- **Load-bearing (unverified data):** the trace links backfilled on jig's own specs on 2026-10-03 were assigned from each spec's title and first paragraph, not a full read, so some are probably wrong — and the report is only as truthful as the links. Mitigated by the report itself: every spec is listed under the use case it cites, so a mis-mapped spec is visible and is corrected on sight.
+- **Load-bearing (thin evidence):** a done/known slice count per use case, with each spec listed under the use case it cites, is a useful progress view for the owner — one owner request (2026-10-03), not measured. ADR-0025 §A2 already warns that goal-level use cases can read "complete" while specs still diverge, and a count inherits that: every slice `DONE` does not prove the behavior works end to end. Not mitigated: counts rather than percentages only keep partial progress from looking more precise than it is (`31/31` still reads as complete). Kill signal: the owner stops consulting the report or its orient section. Since orient writes nothing, that is only observable when the owner says so — checkpoint: the owner confirms or rejects the orient section's value at the first `/jig:orient` run after this spec lands.
+- **Load-bearing (unverified data):** the trace links backfilled on jig's own specs on 2026-10-03 were assigned from each spec's title and first paragraph, not a full read, so some are probably wrong — and the report is only as truthful as the links. Partly mitigated: the full listing puts every spec under the use case it cites (the owner kept the full tree on 2026-10-03 for this reason), so a mis-mapped spec can be spotted by a reader who knows it. It is not self-correcting.
+- **Known limit (false anchoring):** the links are written by the same agents whose direction is in question, against goal-level use cases broad enough to fit almost any work, and spec-workflow step 2a prompts every new spec to cite or add a use case — 110 of 112 specs were anchored on adoption day. So Unanchored mostly holds deliberate declines, and an off-goal spec usually reads as ordinary progress. Hence "a progress view, not a drift detector" (ADR-0064 bound 5). Escalation trigger (not a kill signal — this limit predicts it): a spec the owner later judges off-goal turns out to have been listed as ordinary progress; then build one of the signals the drafting agent does not author, parked in `docs/refinement-todo.md`.
 
 ## Open questions
 
-- **OQ1 — where the owner ruling is recorded.** It is a choice with rejected
-  alternatives that a future agent would otherwise undo by citing the
-  out-of-scope line, which is the ADR trigger
-  ([ADR-0031](../../decisions/adr-0031-load-bearing-decision-adr-trigger.md),
-  routed per [ADR-0042](../../decisions/adr-0042-decision-routing-gate.md)). Recommended:
-  an ADR, written before slice 01 starts. The owner may instead route it as a
-  lightweight decision. Slice 01's Definition of Ready (DoR) carries it either
-  way.
+- ~~**OQ1 — where the owner ruling is recorded.**~~ **Resolved 2026-10-03:**
+  the owner chose an ADR —
+  [ADR-0064](../../decisions/adr-0064-use-case-progress-rollup-in-jig.md),
+  which records the ruling, the rejected alternatives (shaper, a new project
+  now, `coverage` only), and the bounds of the exception. Slice 01 depends on
+  it.
 
 ## Decomposition
 
@@ -152,7 +159,8 @@ SPIDR (Spike / Paths / Interfaces / Data / Rules) analysis:
   weighting.
 - **Data** — spec-level trace links only; use cases in vision order, flat.
 - **Interfaces** — the split axis. Command-line output first (slice 01), then
-  the `/jig:orient` briefing (slice 02). No persisted board.
+  a compact `--summary` mode and the `/jig:orient` briefing built from it
+  (slice 02). No persisted board.
 - **Paths** — the adopted-project path and the two not-adopted paths (no vision
   file; vision with no `## Use cases` section) ship together in slice 01: the
   silent no-op is what keeps non-adopting projects unaffected, so it cannot
