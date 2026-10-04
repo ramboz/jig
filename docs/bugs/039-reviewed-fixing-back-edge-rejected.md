@@ -162,8 +162,9 @@ itself gated. Legacy prose-only slices have no frontmatter to
 carry the stamp — unenforced. Second precision means a verdict recorded in the
 same second as the reopen is refused (fails closed; re-record). The stamp is
 never cleared after a successful re-review — harmless, later verdicts are
-newer. ADR-0014 (Accepted) is not amended; the partial resolution of its
-deferred code-staleness item is noted in `docs/refinement-todo.md`.
+newer. ADR-0014 (Accepted) gained an owner-approved `## Amendments` entry
+for the partial resolution of its deferred code-staleness item (also noted in
+`docs/refinement-todo.md`).
 
 ## Call-site closure
 
@@ -182,7 +183,7 @@ deferred code-staleness item is noted in `docs/refinement-todo.md`.
 - `workflow.py` transition back-edges (convergent spec site) — changed; tested (stamp on REVIEWED/RECONCILED back-edge, indirect exit, DONE `--reopen`; no stamp on forward entry; RECONCILED re-entry refusal; frame-critique exemption); existing `TransitionUngatedStatesTests` still green.
 - `review.py` `_now_iso8601` — changed (delegates to the shared helper); pure-function tests in `skills/_common/test_review_evidence.py::StaleAfterReopenTests`.
 - `adr.py accept` frame-critique (`ADR_REQUIRED_FIELDS`) — intentionally left alone: ADRs have no review back-edge.
-- ADR-0016 + SKILL.md + workflow.md — changed. ADR-0014 (Accepted) — intentionally left alone pending owner approval to amend; the partial resolution is recorded in `docs/refinement-todo.md`.
+- ADR-0016 + SKILL.md + workflow.md — changed. ADR-0014 (Accepted) — amended (owner-approved 2026-10-04, after DONE); partial resolution also recorded in `docs/refinement-todo.md`.
 - `hosts/{claude,codex,copilot}` — regenerated.
 
 ## Already tried
