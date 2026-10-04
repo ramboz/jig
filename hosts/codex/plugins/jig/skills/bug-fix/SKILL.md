@@ -122,10 +122,13 @@ REPORTED → DIAGNOSING → ROOT_CAUSED → FIXING → REVIEWED → (VERIFIED) �
 
 `(VERIFIED)` is gnarly/security-tier only — trivial/standard collapse
 `REVIEWED → DONE`. Back-edges relax status and are ungated: `REVIEWED →
-FIXING` (review needs changes), and a failed green-check or a
+FIXING` (review needs changes — skips the `→ FIXING` entry gates, which
+belong to the forward `ROOT_CAUSED → FIXING` edge), and a failed green-check or a
 "symptom-not-cause" verdict routes back to `DIAGNOSING`, carrying the failed
 attempt forward as new evidence (append it to `## Already tried` — it flows
-into `learnings.md` at close).
+into `learnings.md` at close). Every review back-edge stamps
+`review_reopened_at`; re-entering `REVIEWED`/`DONE` then needs verdicts
+recorded *after* that stamp, so re-run and re-record the passes.
 
 `RESOLVED_ON_MAIN` is terminal: after the root cause is understood, the
 session checks fresh `origin/main` before starting the fix. If the original
@@ -144,7 +147,7 @@ silently relaxing the others.
 |---|---|---|
 | `→ ROOT_CAUSED` | ≥2 candidate hypotheses + a leading one + an evidence pointer | `JIG_BUG_DIAGNOSE_GATE=0` |
 | `ROOT_CAUSED → FIXING` | fresh-main recheck recorded as `main_repro_result: reproduces`; `fix_class` declared; `regression_test` runs **red** (shells to `tdd.py`, expects exit 1; stamps `red_confirmed_at`); **repository-closure inventory** present for new standard/gnarly records | `JIG_BUG_MAIN_CHECK_GATE=0` (main recheck), `JIG_BUG_TEST_GATE=0` (test), `JIG_BUG_CLOSURE_GATE=0` (closure) |
-| `→ REVIEWED` | the same `regression_test` now runs **green** (shells to `tdd.py`, expects exit 0; stamps `green_confirmed_at`); **call-site closure** recorded for new records; **and** the required review verdicts pass | `JIG_BUG_TEST_GATE=0` (test), `JIG_BUG_CLOSURE_GATE=0` (closure), `JIG_REVIEW_EVIDENCE_GATE=0` (verdicts) |
+| `→ REVIEWED` | the same `regression_test` now runs **green** (shells to `tdd.py`, expects exit 0; stamps `green_confirmed_at`); **call-site closure** recorded for new records; **and** the required review verdicts pass (after a review back-edge, each verdict's `reviewed_at` must be newer than `review_reopened_at`) | `JIG_BUG_TEST_GATE=0` (test), `JIG_BUG_CLOSURE_GATE=0` (closure), `JIG_REVIEW_EVIDENCE_GATE=0` (verdicts) |
 | `→ VERIFIED` | original reported repro re-run clean (gnarly/security only), attested in the record | — |
 | `→ DONE` | required review verdicts pass + a learning recorded in `docs/memory/learnings.md` | `JIG_REVIEW_EVIDENCE_GATE=0` |
 

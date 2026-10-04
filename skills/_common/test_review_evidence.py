@@ -975,5 +975,33 @@ class SubstrateAnomalyTest(unittest.TestCase):
              "shown_candidates": "solo:high-confidence"}), ["solo"])
 
 
+class StaleAfterReopenTests(unittest.TestCase):
+    """Bug 039: verdict freshness against a review back-edge stamp."""
+
+    def test_no_stamp_is_never_stale(self):
+        self.assertEqual(ev.stale_after_reopen_problem({"reviewed_at": ""}, ""), "")
+
+    def test_strictly_newer_clears(self):
+        self.assertEqual(ev.stale_after_reopen_problem(
+            {"reviewed_at": "2026-07-01T00:00:01Z"}, "2026-07-01T00:00:00Z"), "")
+
+    def test_equal_or_older_is_stale(self):
+        for reviewed in ("2026-07-01T00:00:00Z", "2026-06-30T23:59:59Z"):
+            with self.subTest(reviewed=reviewed):
+                self.assertIn("not newer", ev.stale_after_reopen_problem(
+                    {"reviewed_at": reviewed}, "2026-07-01T00:00:00Z"))
+
+    def test_malformed_values_fail_closed(self):
+        self.assertIn("malformed", ev.stale_after_reopen_problem(
+            {"reviewed_at": "2026-07-02T00:00:00Z"}, "yesterday"))
+        for reviewed in ("", "soon"):
+            with self.subTest(reviewed=reviewed):
+                self.assertIn("not newer", ev.stale_after_reopen_problem(
+                    {"reviewed_at": reviewed}, "2026-07-01T00:00:00Z"))
+
+    def test_now_iso8601_shape(self):
+        self.assertRegex(ev.now_iso8601(), r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
 if __name__ == "__main__":
     unittest.main()

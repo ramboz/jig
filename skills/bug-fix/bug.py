@@ -81,9 +81,17 @@ _ORDERED_TRANSITIONS = {
     "DIAGNOSING": {"ROOT_CAUSED"},
     "ROOT_CAUSED": {"FIXING"},
     "FIXING": {"REVIEWED", "DIAGNOSING"},
-    "REVIEWED": {"VERIFIED", "DONE", "DIAGNOSING"},
+    # Bug 039: `REVIEWED → FIXING` is ADR-0016's ungated "review needs
+    # changes" back-edge — see `transition_bug`.
+    "REVIEWED": {"VERIFIED", "DONE", "DIAGNOSING", "FIXING"},
     "VERIFIED": {"DONE", "DIAGNOSING"},
 }
+# Bug 039: moving from one of these sources back to one of these targets is a
+# review back-edge — it stamps `review_reopened_at`, invalidating verdicts
+# recorded before it (FIXING counts: a manual "symptom-not-cause" exit
+# abandons that attempt's verdicts too).
+_BUG_REVIEWED_STATUSES = frozenset({"FIXING", "REVIEWED", "VERIFIED"})
+_BUG_REOPEN_TARGETS = frozenset({"FIXING", "DIAGNOSING"})
 _DISABLE_VALUES = {"0", "false", "off", "no"}
 # Push-failure classification is shared across bug.py / adr.py / workflow.py
 # (spec 107 / ADR-0053). The signal tuples and the classifier live once in
@@ -894,7 +902,18 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
                 file=sys.stderr,
             )
 
-    if new_status == "FIXING":
+    if (current in _BUG_REVIEWED_STATUSES and new_status in _BUG_REOPEN_TARGETS
+            and current != new_status):
+        # Bug 039: a review back-edge stamps the reopen, so re-entering
+        # REVIEWED/DONE needs verdicts recorded after it.
+        text = set_frontmatter_field(
+            text, _evidence.REOPENED_FIELD, _evidence.now_iso8601())
+
+    # Bug 039: the FIXING entry gates belong to the forward
+    # `ROOT_CAUSED → FIXING` edge — diagnosis-time checks, and the red witness
+    # cannot pass once the fix is in. The `REVIEWED → FIXING` back-edge is
+    # ungated (ADR-0016 §1); the first round's `red_confirmed_at` stands.
+    if new_status == "FIXING" and current != "REVIEWED":
         if _gate_enabled("JIG_BUG_MAIN_CHECK_GATE"):
             gaps = _main_recheck_gaps(fields)
             if gaps:
@@ -972,6 +991,9 @@ def transition_bug(project_dir: Path, ident: str, new_status: str) -> Path:
             if result.returncode != 0:
                 detail = _tdd_failure_detail(result)
                 text = set_frontmatter_field(text, "status", "DIAGNOSING")
+                # Bug 039: verdicts recorded for this failed attempt are stale.
+                text = set_frontmatter_field(
+                    text, _evidence.REOPENED_FIELD, _evidence.now_iso8601())
                 text = _append_already_tried(
                     text,
                     f"green check failed for `{selector}` "

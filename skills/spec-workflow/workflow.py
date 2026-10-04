@@ -994,6 +994,12 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
 # local on purpose: it reflects what THIS tree is working on and must not
 # travel across branches as a tracked file.
 IN_PROGRESS_STATUS = "IN_PROGRESS"
+# Bug 039: leaving REVIEWED/RECONCILED/DONE for a non-review state (incl. a
+# `--reopen` of a DONE slice) is a review back-edge — it stamps
+# `review_reopened_at`. Moves within the review family (e.g. RECONCILED →
+# REVIEWED) are exempt: no implementation work happens on them and the target
+# is itself evidence-gated.
+_REVIEW_STATES = ("REVIEWED", "RECONCILED", "DONE")
 
 
 def _spec_number_from_label(label: str) -> str:
@@ -1512,6 +1518,15 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         if new_status == "RECONCILED":
             new_section = _set_slice_frontmatter_field(
                 new_section, "last_verified", _today(),
+            )
+        if (current_status in _REVIEW_STATES
+                and new_status not in _REVIEW_STATES):
+            # Bug 039: a review back-edge stays ungated, but stamps the
+            # reopen so re-entering REVIEWED/RECONCILED/DONE needs verdicts
+            # recorded after it (`review_evidence.stale_after_reopen_problem`).
+            # Legacy prose-only slices have nowhere to carry it — unenforced.
+            new_section = _set_slice_frontmatter_field(
+                new_section, _evidence.REOPENED_FIELD, _evidence.now_iso8601(),
             )
     if old_status is None:
         raise WorkflowError(
