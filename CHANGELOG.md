@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.16.2](https://github.com/ramboz/jig/compare/v2.16.1...v2.16.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* **semantic-index:** show the suggestion once per repo, honor an explicit opt-out (bug 040) ([#239](https://github.com/ramboz/jig/issues/239)) ([7d9c9ad](https://github.com/ramboz/jig/commit/7d9c9adb430c39729dd234bf20293cd0c317c70d))
+
+
+### Documentation
+
+* **refinement-todo:** defer repo-scoping the servo-hint breadcrumb (bug 040 sibling) ([41ba269](https://github.com/ramboz/jig/commit/41ba26985ac1f6ba5d36de7b48e520f6a743ef1f))
+
 ## [2.16.1](https://github.com/ramboz/jig/compare/v2.16.0...v2.16.1) (2026-10-04)
 
 
