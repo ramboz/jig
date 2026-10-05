@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.16.1](https://github.com/ramboz/jig/compare/v2.16.0...v2.16.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **bug-fix:** state REVIEWED → FIXING back-edge + fresh verdicts after review back-edges (bug 039) ([#236](https://github.com/ramboz/jig/issues/236)) ([a06c215](https://github.com/ramboz/jig/commit/a06c21540cddfb6a2f2df082d416635f95b52f22))
+
 ## [2.16.0](https://github.com/ramboz/jig/compare/v2.15.3...v2.16.0) (2026-10-04)
 
 
