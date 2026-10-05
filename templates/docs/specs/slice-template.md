@@ -41,6 +41,43 @@ check below)._
 2. _TODO: second AC._
 3. _TODO: third AC._
 
+### Behavioral rules (optional)
+
+For stateful or role-dependent behavior, make the implicit outcomes checkable.
+Omit this section when it adds no value, or link an existing contract instead of
+restating it. Rule IDs do not encode precedence: surface conflicting rules/ACs
+for explicit resolution. A demo does not override the owning ACs. When using an
+external reference, name its authority and revision.
+
+| Rule | Operation/control | Actor | State/precondition | Outcome | Rationale | AC |
+|------|-------------------|-------|--------------------|---------|-----------|----|
+| BR-1 | _TODO_ | _TODO_ | _TODO_ | _Allowed/blocked/hidden or concrete response_ | _Why_ | _Owning AC_ |
+
+### Verification scenario (optional)
+
+Use when a runtime journey helps verify the ACs; omit when existing tests already
+give adequate evidence. Reuse existing test/browser/service tools, not a new
+runner. CLI, service, and UI scenarios use the same evidence shape.
+
+**Preconditions:** _Environment, fixtures, access, and safe test accounts; no secrets._
+
+**Invocation:** _Reproducible command or tool steps._
+
+**Preserved behavior:** _Existing journeys or negative paths that must not regress._
+
+**Code revision / dirty-change identity:** _Revision tested; identify any uncommitted
+changes, for example with a saved diff and its digest. Evidence references are
+durable paths, not ephemeral chat claims._
+
+| Step | AC | Expected | Observed | Outcome | Evidence |
+|------|----|----------|----------|---------|----------|
+| 1 | _AC_ | _Observable result_ | _Actual observation after execution_ | _not-run_ | _Log/assertion/screenshot reference_ |
+
+Outcomes: `pass`, `fail`, `not-run`, or `environment-error`. Not-run or an
+environment-error is not a pass. If a required AC needs runtime verification,
+missing evidence leaves it unverified; do not declare completion from a build,
+a proposed script, or an unavailable environment.
+
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
 - [ ] Implementer test coverage exercises each AC with at least one

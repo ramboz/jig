@@ -141,6 +141,8 @@ What to check:
   external surfaces; this spec is internal-only."
 - For multi-slice specs: does each slice's scope fit on its own without
   the parent overview?
+- If external references are used, are their authority and revision named?
+  Surface contradictions with the owning ACs; recency alone is not precedence.
 
 ### Acceptance Criteria Testability
 
@@ -159,6 +161,12 @@ What to check:
   problem.
 - Are ACs phrased imperatively ("the helper exits 0 on success")
   rather than aspirationally ("the helper should work well")?
+- For role/state-dependent work, do behavioral rules make actor/state outcomes
+  explicit? An optional table or existing contract link can help; do not demand
+  a table from every spec.
+- If a verification scenario is supplied or needed for a required AC, are its
+  invocation, expected and observed results, and preserved behavior checkable?
+  Existing tests may suffice; optional-section absence alone is not a gap.
 
 ### Dependencies & Blockers
 
@@ -173,6 +181,8 @@ What to check:
 - Are external services / fixtures / sample data available?
 - Are reviewer-side prerequisites named (e.g. "reviewer needs access
   to spec-kit reference text")?
+- For an applicable verification scenario, are the environment, fixtures, and
+  safe access available? Unavailable execution is not verified, not a pass.
 
 ### Non-functional Requirements
 
@@ -204,6 +214,8 @@ What to check:
   written but commit refused)?
 - Is the empty-input case named (no slices yet, no ADRs yet, empty
   spec directory)?
+- Are negative and preservation paths explicit where relevant -- what existing
+  user journeys must remain unchanged, not just what the new path achieves?
 
 ### Terminology Consistency
 

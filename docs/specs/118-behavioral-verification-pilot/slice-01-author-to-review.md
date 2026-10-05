@@ -113,8 +113,47 @@ contract-to-runtime-evidence-to-independent-review path in one slice.
 
 ### Deviation log (after reconciliation)
 
-Pending implementation and independent review.
+Implementation notes so far; reconciliation is not complete:
+
+1. **Execution ownership.** The implementer agent refused the initial
+   IN_PROGRESS handoff because its contract requires READY_FOR_IMPLEMENTATION.
+   The parent returned the untouched slice to readiness, confirmed it, then
+   performed the implementation with witnessed red/green tests. The sync agent
+   could not accept a follow-up message; no duplicate implementer was launched.
+2. **Validation so far.** The first rules loop witnessed three failures and
+   then three passes. The scenario loop witnessed seven failures (after fixing
+   an invalid reconciliation-test invocation) and then a combined 346-test
+   pass. The latest permitted source/prompt-only selection also passed 346
+   tests, explicitly excluding scenario execution. All three packages were
+   regenerated; their drift check, this spec's lint, and whitespace checks
+   passed. These are partial checks, not a full-suite result.
+3. **Review refinements.** The worked example now fingerprints `_common`
+   runtime sources as well as `workflow.py`, rather than missing dirty
+   dependency edits. The example explicitly requires the Git executable (not
+   a Git checkout), and its executable test independently recomputes the
+   expected manifest and digest. The latest scenario test has not been run:
+   its execution remains blocked.
+4. **Permission boundary.** Remote fetching, a manual readiness-review file,
+   direct scenario execution/evidence, and a Git file-protocol override were
+   denied. No override was applied. Local lifecycle transitions ran with all
+   Git transports blocked, reporting unavailable remote freshness honestly.
+   The number is provisional; no push, PR, merge, or remote reservation occurred.
+5. **Closure remains blocked.** The full suite was stopped to honor the denied
+   scenario execution. Per-step observations above remain not-run and no
+   gated review verdicts are recorded. The existing evidence gates stay armed;
+   IN_PROGRESS is intentional until authorized verification and reconciliation.
 
 ### Reconciliation sweep
 
-Pending implementation; record updated/no-op/deferred dispositions before review.
+Provisional sweep; not a reconciliation verdict:
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| Source template and authoring/clarify/compliance surfaces | updated | Optional rule/scenario guidance and compliance-only review nudge; no new gate or schema. |
+| `docs/workflow.md` and workflow template | updated | Proportional usage documented; source package guidance names all three hosts. |
+| `hosts/` | updated | Generated from canonical source, never hand-edited. |
+| `docs/specs/README.md` | updated | Regenerated for this open local slice; must be checked again before integration. |
+| Vision, architecture, conventions, accepted ADRs, closed specs | no-op | No product/module-boundary change or record amendment; conventions were not edited. |
+| Primer surfaces | no-op | No new skill or active-spec entry introduced; closure has no new primer residue to remove. |
+| Memory, inbox, refinement queue | no-op | No settled new decision or unrelated follow-up recorded; memory status checks were outside the requested scope. |
+| Runtime evidence and gated review records | deferred | Owner authorization is required after the denied writes/execution; no pass is inferred. |
