@@ -348,6 +348,8 @@
 | [113-copilot-third-host](113-copilot-third-host/spec.md) | 113-09 — conversational-hook-parity | **DONE** |  |
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-01 — progress-rollup | **DONE** |  |
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | **DONE** |  |
+| [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
+| [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | IN_PROGRESS (sdd-adoption-review) |  |
 
 ## Deferred slices
 
